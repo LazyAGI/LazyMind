@@ -42,6 +42,8 @@ _FRAMEWORK_TOOLS: List[str] = [
     'read_user_attachment',
     'find_user_attachment',
     'find_artifact',
+    'patch_artifact',
+    'discard_draft',
 ]
 
 
@@ -869,6 +871,10 @@ def resolve_plugin_injection(
     Called once per request from handle_chat.  Encapsulates all plugin-context
     branching so chat_service stays free of plugin-internal details.
 
+    Note: schedule tools and SubAgent task context are intentionally NOT injected
+    here — they are handled independently in chat_service.py so that schedule
+    availability and task context visibility are not affected by enable_plugin.
+
     Returns:
         (plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context)
 
@@ -887,12 +893,10 @@ def resolve_plugin_injection(
     # Honour enable_plugin=false: skip all plugin tooling and fall back to pure QA.
     cfg = _agentic_config()
     if not cfg.get('enable_plugin', True):
-        plugin_system_prompt = _build_chat_agent_task_context(conversation_id)
         return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
 
     if not plugin_loader._registry:
-        # No plugins registered — inject SubAgent task context for pure SubAgent conversations.
-        plugin_system_prompt = _build_chat_agent_task_context(conversation_id)
+        # No plugins registered — return empty; task context is injected by chat_service.
         return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
 
     # Resolve plugin_mode from plugin_context (injected by Go).
@@ -961,9 +965,6 @@ def resolve_plugin_injection(
             # Read-only query tools (active session required).
             plugin_tools.extend(build_query_tools())
 
-            # Schedule management tools.
-            plugin_tools.extend(build_schedule_tools())
-
             # find_artifact lets ChatAgent look up plugin step outputs by key.
             from lazymind.chat.engine.subagent.tools import find_artifact
             plugin_tools.append(find_artifact)
@@ -1008,8 +1009,6 @@ def resolve_plugin_injection(
             ask_tool = build_ask_user_tool()
             plugin_tools.append(ask_tool)
             plugin_stop_tools.append('ask_user')
-            # Schedule tools available regardless of session state.
-            plugin_tools.extend(build_schedule_tools())
             if plugin_tools:
                 scenarios = [
                     plugin_loader.get_scenario(spec.plugin_id)
@@ -1023,16 +1022,12 @@ def resolve_plugin_injection(
         ask_tool = build_ask_user_tool()
         plugin_tools.append(ask_tool)
         plugin_stop_tools.append('ask_user')
-        plugin_tools.extend(build_schedule_tools())
         if plugin_tools:
             scenarios = [
                 plugin_loader.get_scenario(spec.plugin_id)
                 for spec in (plugin_loader._registry or {}).values()
             ]
             plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
-        task_context = _build_chat_agent_task_context(conversation_id)
-        if task_context:
-            plugin_system_prompt = (plugin_system_prompt + '\n\n' + task_context).strip()
 
     return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
 

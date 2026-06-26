@@ -244,9 +244,21 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
-	// Override with explicit body value if present (body takes highest priority).
+	// resolvePluginModeWithFallback determines the effective plugin_mode for this request.
+	// It is injected into plugin_context (below) so Python can use it; it is not sent
+	// as a top-level reqBody field because Python reads it exclusively from plugin_context.
 	pluginMode := resolvePluginModeWithFallback(raw, reqBody)
-	reqBody["plugin_mode"] = pluginMode
+
+	// Promote enable_plugin and enable_subagent from agentic_config to top-level
+	// so Python chat_routes can receive them as explicit parameters.
+	if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
+		if v, ok := ac["enable_plugin"]; ok {
+			reqBody["enable_plugin"] = v
+		}
+		if v, ok := ac["enable_subagent"]; ok {
+			reqBody["enable_subagent"] = v
+		}
+	}
 
 	if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {
 		existing, hasPC := reqBody["plugin_context"].(map[string]any)
@@ -903,6 +915,9 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 			"create_time":           c.CreatedAt.UTC().Format(time.RFC3339),
 			"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
 			"models":                models,
+			"enable_plugin":         c.EnablePlugin,
+			"plugin_mode":           c.PluginMode,
+			"enable_subagent":       c.EnableSubagent,
 		},
 	})
 }

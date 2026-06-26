@@ -133,6 +133,16 @@ async def chat(
         Body(description='The seq number of the current conversation turn, provided by Go core. '
                          'Used to correctly label the current-turn attachments.'),
     ] = None,
+    enable_plugin: Annotated[
+        Optional[bool],
+        Body(description='Whether plugin tooling is enabled for this conversation. '
+                         'Resolved by Go from conversations.enable_plugin.'),
+    ] = None,
+    enable_subagent: Annotated[
+        Optional[bool],
+        Body(description='Whether SubAgent task creation is enabled for this conversation. '
+                         'Resolved by Go from conversations.enable_subagent.'),
+    ] = None,
 ):
     return await handle_chat(
         query=query,
@@ -159,4 +169,6 @@ async def chat(
         plugin_context=plugin_context,
         ask_response=ask_response,
         current_turn_seq=current_turn_seq,
+        enable_plugin=enable_plugin,
+        enable_subagent=enable_subagent,
     )

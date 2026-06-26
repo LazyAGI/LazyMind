@@ -171,6 +171,16 @@ def _build_user_attachment_tools(has_files: bool) -> list:
     return [find_user_attachment, read_user_attachment]
 
 
+def _build_schedule_tools() -> list:
+    """Return schedule management tools (create/list/cancel).
+
+    These are independent of plugin and subagent flags — scheduling is a
+    standalone capability available whenever the chat service is running.
+    """
+    from lazymind.chat.plugin.plugin_manager import build_schedule_tools
+    return build_schedule_tools()
+
+
 def _collect_active_tool_names(configs: list) -> set[str]:
     # Build a per-request callable allowlist from filtered tool configs.
     # This is consumed by tool_runtime guard to prevent accidental execution
@@ -333,6 +343,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       plugin_context: Optional[Dict[str, Any]] = None,
                       ask_response: Optional[Dict[str, Any]] = None,
                       current_turn_seq: Optional[int] = None,
+                      enable_plugin: Optional[bool] = None,
+                      enable_subagent: Optional[bool] = None,
                       ) -> Union[Dict[str, Any], StreamingResponse]:
     LOG.info(
         f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={session_id}] [user_id={user_id or ""}] '
@@ -403,6 +415,17 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'memory': memory or '',
         'user_preference': user_preference or '',
     }
+    # Inject per-conversation plugin flags from Go (resolved from conversations table).
+    # enable_plugin=None means "not set"; default to True so behaviour is unchanged
+    # for callers that do not yet pass the field.
+    if enable_plugin is not None:
+        agentic_config['enable_plugin'] = bool(enable_plugin)
+    if enable_subagent is not None:
+        agentic_config['enable_subagent'] = bool(enable_subagent)
+    # plugin_mode is consumed directly from plugin_context by resolve_plugin_injection
+    # (where it is only meaningful when enable_plugin=true); no need to store it in
+    # agentic_config separately.
+
     display_files: list[str] = []
     # Use the authoritative current_turn_seq from Go; fall back to max(keys) only as a
     # last resort (handles callers that do not yet pass the field).
@@ -425,11 +448,24 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         else:
             display_files.append(name)
 
-    from lazymind.chat.plugin.plugin_manager import resolve_plugin_injection
+    from lazymind.chat.plugin.plugin_manager import (
+        resolve_plugin_injection,
+        _build_chat_agent_task_context,
+    )
     plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context = \
         resolve_plugin_injection(plugin_context, conversation_id=(conversation_id or '').strip(),
                                  ask_response=ask_response)
     agentic_config.update(agentic_config_patch)
+
+    # Inject SubAgent task context into the system prompt independently of plugin state.
+    # Injected when either plugin or subagent is enabled so the model knows about ongoing tasks.
+    # When both are disabled, the task context is suppressed (pure QA mode).
+    _enable_plugin = agentic_config.get('enable_plugin', True)
+    _enable_subagent = agentic_config.get('enable_subagent', True)
+    if _enable_plugin or _enable_subagent:
+        task_ctx = _build_chat_agent_task_context((conversation_id or '').strip())
+        if task_ctx:
+            plugin_system_prompt = (plugin_system_prompt + '\n\n' + task_ctx).strip()
 
     # Build user attachment context from files_map and inject before plugin context.
     user_attachment_context = _build_user_attachment_context(files_map, _eff_current_seq)
@@ -490,7 +526,13 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     lazyllm.globals['active_tool_names'] |= {
         getattr(fn, '__name__', '') for fn in attachment_tools if callable(fn)
     }
-    all_tools = agent_tools + subagent_tools + attachment_tools + plugin_tools + mcp_tools
+    # Schedule tools (create_schedule / list_schedules / cancel_schedule) are independent
+    # of plugin and subagent flags — always inject them.
+    schedule_tools = _build_schedule_tools()
+    lazyllm.globals['active_tool_names'] |= {
+        getattr(fn, '__name__', '') for fn in schedule_tools if callable(fn)
+    }
+    all_tools = agent_tools + subagent_tools + attachment_tools + schedule_tools + plugin_tools + mcp_tools
     set_trace_context({
         'enabled': bool(trace),
         'trace_id': session_id if trace else None,

@@ -75,6 +75,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   );
   // Pending plugin settings from the chat config popover before a conversation is created.
   const pendingPluginSettingsRef = useRef<ConversationPluginSettings | null>(null);
+  // Plugin settings loaded from conversation detail (for existing conversations).
+  const [conversationPluginSettings, setConversationPluginSettings] = useState<ConversationPluginSettings | undefined>(undefined);
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
@@ -427,6 +429,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setChatConfigFn(tempData);
         setKnowledgeRefreshKey((key) => key + 1);
 
+        // Restore plugin settings from the conversation record.
+        const pluginSettings: ConversationPluginSettings = {};
+        if (conversation?.enable_plugin != null) pluginSettings.enable_plugin = conversation.enable_plugin;
+        const rawMode = conversation?.plugin_mode;
+        if (rawMode === 'dynamic' || rawMode === 'auto') pluginSettings.plugin_mode = rawMode;
+        if (conversation?.enable_subagent != null) pluginSettings.enable_subagent = conversation.enable_subagent;
+        setConversationPluginSettings(Object.keys(pluginSettings).length > 0 ? pluginSettings : undefined);
+
         setConversationId(resolvedId);
 
         const history = historyRes.data.history;
@@ -451,6 +461,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       const conversationId = detail.conversationId || "";
       if (!conversationId) {
         setIsRestoringConversation(false);
+        setConversationPluginSettings(undefined);
         chatRef.current?.createNewChat();
         return;
       }
@@ -594,6 +605,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             pendingPluginSettingsRef.current = settings;
           }
         }}
+        initialPluginSettings={conversationPluginSettings}
         hasPluginSession={hasPluginSession}
         knowledgeRefreshKey={knowledgeRefreshKey}
         embeddingReady={embeddingReady}
