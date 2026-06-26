@@ -118,6 +118,16 @@ async def chat(
             )
         ),
     ] = None,
+    local_fs_sources: Annotated[
+        Optional[List[Dict[str, Any]]],
+        Body(
+            description=(
+                'Per-request local filesystem source scopes. Each item: '
+                '{source_id, paths, file_extensions}. file_extensions must be lowercase suffixes '
+                'without dot and limited to pdf, doc, docx, csv, xls, xlsx.'
+            )
+        ),
+    ] = None,
     current_turn_seq: Annotated[
         Optional[int],
         Body(description='The seq number of the current conversation turn, provided by Go core. '
@@ -147,5 +157,6 @@ async def chat(
         mcp_config=mcp_config,
         trace=trace,
         plugin_context=plugin_context,
+        local_fs_sources=local_fs_sources,
         current_turn_seq=current_turn_seq,
     )
