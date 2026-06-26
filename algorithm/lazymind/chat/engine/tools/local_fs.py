@@ -221,7 +221,8 @@ class LocalFSToolGroup:
 
         Args:
             pattern: Glob pattern, e.g. ``**/*.pdf`` or ``*.csv``.
-            path: Directory to search. When omitted, searches all available local directories.
+            path: Optional directory returned by ls. Omit path to search all
+                available local directories; do not pass a shared parent directory.
 
         Returns:
             A list of matching local file paths.
@@ -260,7 +261,8 @@ class LocalFSToolGroup:
 
         Args:
             pattern: Regex search pattern.
-            path: Directory to search. When omitted, searches all available local directories.
+            path: Optional directory returned by ls. Omit path to search all
+                available local directories; do not pass a shared parent directory.
             glob: Filename filter (only search matching files), default ``*``.
             max_results: Maximum results to return, default 50.
 
