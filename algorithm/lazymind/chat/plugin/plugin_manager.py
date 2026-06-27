@@ -717,7 +717,7 @@ def build_schedule_tools() -> List[Any]:
         for s in items:
             lines.append(
                 f"- id={s.get('id')} | cron={s.get('cron_expr')} "
-                f"| next={s.get('next_run_at')} | {s.get('prompt_template','')[:60]}"
+                f"| next={s.get('next_run_at')} | {s.get('prompt_template', '')[:60]}"
             )
         return '\n'.join(lines)
 

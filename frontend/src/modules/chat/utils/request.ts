@@ -599,6 +599,30 @@ export interface ConversationPluginSettings {
   enable_plugin?: boolean;
 }
 
+export function parseConversationPluginSettings(
+  conversation?: {
+    enable_plugin?: boolean | null;
+    plugin_mode?: string | null;
+    enable_subagent?: boolean | null;
+  } | null,
+): ConversationPluginSettings | undefined {
+  if (!conversation) {
+    return undefined;
+  }
+  const settings: ConversationPluginSettings = {};
+  if (conversation.enable_plugin != null) {
+    settings.enable_plugin = conversation.enable_plugin;
+  }
+  const rawMode = conversation.plugin_mode;
+  if (rawMode === 'dynamic' || rawMode === 'auto') {
+    settings.plugin_mode = rawMode;
+  }
+  if (conversation.enable_subagent != null) {
+    settings.enable_subagent = conversation.enable_subagent;
+  }
+  return Object.keys(settings).length > 0 ? settings : undefined;
+}
+
 export function ConversationSettingsApi() {
   return {
     getChatSettings(options?: RawAxiosRequestConfig) {

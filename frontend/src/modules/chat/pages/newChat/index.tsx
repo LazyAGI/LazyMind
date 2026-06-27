@@ -89,8 +89,9 @@ const NewChatPage = () => {
     }
     if (!value) {
       setWelcomeKnowledgeRefreshKey((key) => key + 1);
-      // Reset pending settings so a fresh new conversation starts clean.
+      // Reset pending settings and KB config so a fresh new conversation starts clean.
       setPendingPluginSettings(null);
+      setChatConfig({});
     }
     setIsChatContent(value);
   };
@@ -113,6 +114,8 @@ const NewChatPage = () => {
       if (!conversationId) {
         setWelcomeKnowledgeRefreshKey((key) => key + 1);
         setIsChatContent(false);
+        setChatConfig({});
+        setPendingPluginSettings(null);
         return;
       }
       setChatLayoutMounted(true);
@@ -275,6 +278,7 @@ const NewChatPage = () => {
                     showHistoryList={false}
                     showHistoryButton={false}
                     knowledgeRefreshKey={welcomeKnowledgeRefreshKey}
+                    configResetKey={welcomeKnowledgeRefreshKey}
                     setIsChatContent={(value) => {
                       if (value) {
                         setInputValue("");

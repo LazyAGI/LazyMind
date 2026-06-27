@@ -3,7 +3,9 @@ import { Popover, Radio, Switch, Tooltip, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { SettingOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import {
+  ChatServiceApi,
   ConversationSettingsApi,
+  parseConversationPluginSettings,
   type ConversationPluginSettings,
 } from '../../utils/request';
 import './ChatConfigModal.scss';
@@ -33,19 +35,39 @@ export default function ChatConfigPopover({
   // Track whether we've already fetched defaults to avoid repeated requests.
   const fetchedRef = useRef(false);
 
-  // Sync external initialSettings into local state.
+  // Sync external initialSettings into local state; reset fetch cache on conversation change.
   useEffect(() => {
+    fetchedRef.current = Boolean(
+      initialSettings && Object.keys(initialSettings).length > 0,
+    );
     if (initialSettings && Object.keys(initialSettings).length > 0) {
-      setSettings((s) => ({ ...s, ...initialSettings }));
-      fetchedRef.current = true;
+      setSettings(initialSettings);
+    } else if (!conversationId || conversationId.startsWith('temp_')) {
+      setSettings(null);
+      fetchedRef.current = false;
     }
-  }, [initialSettings]);
+  }, [conversationId, initialSettings]);
 
-  // Fetch user-level defaults from server the first time the popover opens.
+  // Fetch settings from server the first time the popover opens.
   async function ensureSettings() {
-    if (fetchedRef.current) return;
+    if (fetchedRef.current) {
+      return;
+    }
     fetchedRef.current = true;
     try {
+      if (conversationId && !conversationId.startsWith('temp_')) {
+        const detailRes =
+          await ChatServiceApi().conversationServiceGetConversationDetail({
+            conversation: conversationId,
+          });
+        const convSettings = parseConversationPluginSettings(
+          detailRes.data.conversation,
+        );
+        if (convSettings) {
+          setSettings(convSettings);
+          return;
+        }
+      }
       const res = await ConversationSettingsApi().getChatSettings();
       // Go wraps responses as {code, message, data: {...}}; extract the inner data.
       const payload = (res.data as any)?.data ?? res.data;
@@ -57,7 +79,9 @@ export default function ChatConfigPopover({
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
-    if (next) ensureSettings();
+    if (next) {
+      ensureSettings();
+    }
   }
 
   async function handleChange(patch: Partial<ConversationPluginSettings>) {

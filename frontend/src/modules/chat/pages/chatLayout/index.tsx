@@ -19,6 +19,7 @@ import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
   ChatServiceApi,
+  parseConversationPluginSettings,
   type ConversationPluginSettings,
 } from "@/modules/chat/utils/request";
 import { draftStore } from "@/modules/chat/store/pluginPanel";
@@ -87,13 +88,37 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
 
-  // Keep pendingPluginSettingsRef in sync with initPendingPluginSettings coming from the welcome screen.
-  // Only update when sessionId is empty (no conversation started yet) to avoid overwriting in-flight state.
+  // Keep pendingPluginSettingsRef in sync with the welcome screen while no conversation is active.
   useEffect(() => {
-    if (!sessionId && initPendingPluginSettings != null) {
-      pendingPluginSettingsRef.current = initPendingPluginSettings;
+    if (!sessionId) {
+      pendingPluginSettingsRef.current = initPendingPluginSettings ?? null;
     }
   }, [initPendingPluginSettings, sessionId]);
+
+  // Load persisted plugin settings once a real conversation id is available.
+  useEffect(() => {
+    if (!sessionId || sessionId.startsWith('temp_')) {
+      if (!sessionId) {
+        setConversationPluginSettings(undefined);
+      }
+      return;
+    }
+    let cancelled = false;
+    ChatServiceApi()
+      .conversationServiceGetConversationDetail({ conversation: sessionId })
+      .then((detailRes) => {
+        if (cancelled) {
+          return;
+        }
+        setConversationPluginSettings(
+          parseConversationPluginSettings(detailRes.data.conversation),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
   const panelDragRef = useRef<{ startX: number; startW: number } | null>(null);
 
   const onPanelResizeStart = useCallback((e: React.MouseEvent) => {
@@ -450,13 +475,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setChatConfigFn(tempData);
         setKnowledgeRefreshKey((key) => key + 1);
 
-        // Restore plugin settings from the conversation record.
-        const pluginSettings: ConversationPluginSettings = {};
-        if (conversation?.enable_plugin != null) pluginSettings.enable_plugin = conversation.enable_plugin;
-        const rawMode = conversation?.plugin_mode;
-        if (rawMode === 'dynamic' || rawMode === 'auto') pluginSettings.plugin_mode = rawMode;
-        if (conversation?.enable_subagent != null) pluginSettings.enable_subagent = conversation.enable_subagent;
-        setConversationPluginSettings(Object.keys(pluginSettings).length > 0 ? pluginSettings : undefined);
+        setConversationPluginSettings(
+          parseConversationPluginSettings(conversation),
+        );
 
         setConversationId(resolvedId);
 
@@ -483,6 +504,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       if (!conversationId) {
         setIsRestoringConversation(false);
         setConversationPluginSettings(undefined);
+        setChatConfig({});
+        setChatConfigFn({});
         chatRef.current?.createNewChat();
         return;
       }
@@ -622,6 +645,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         onPluginSettingsChange={(settings) => {
           if (!sessionId) {
             pendingPluginSettingsRef.current = settings;
+          } else {
+            setConversationPluginSettings(settings);
           }
         }}
         initialPluginSettings={conversationPluginSettings}

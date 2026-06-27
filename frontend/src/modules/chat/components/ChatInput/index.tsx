@@ -169,6 +169,8 @@ interface ChatInputProps {
   setChatConfig?: (chatConfig: ChatConfig) => void;
   setChatConfigFn?: (chatConfig: ChatConfig) => void;
   knowledgeRefreshKey?: number | string;
+  /** Bump to remount the chat config popover (e.g. when starting a fresh welcome-screen chat). */
+  configResetKey?: number | string;
   sessionId?: string;
   isStreaming?: boolean;
   embeddingReady?: boolean | null;
@@ -245,6 +247,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setChatConfig,
       setChatConfigFn,
       knowledgeRefreshKey,
+      configResetKey,
       sessionId,
       isStreaming = false,
       embeddingReady,
@@ -830,6 +833,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     {t("chat.promptTemplate")}
                   </div>
                   <ChatConfigModal
+                    key={
+                      configResetKey != null
+                        ? `config-reset-${configResetKey}`
+                        : undefined
+                    }
                     conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
                     initialSettings={initialPluginSettings}
                     hasPluginSession={hasPluginSession}
