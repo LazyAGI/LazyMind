@@ -75,6 +75,50 @@ def _init_driver_sid(session_id: Optional[str], plugin_id: str, step_id: str) ->
     return sid
 
 
+def _init_driver_artifact_context(
+    session_id: Optional[str],
+    plugin_id: str,
+    step_id: str,
+) -> Any:
+    """Set agentic_config and a minimal SubAgentContext so artifact tools can read from DB."""
+    lazyllm.globals['agentic_config'] = {
+        'plugin_id': plugin_id,
+        'plugin_session_id': session_id or '',
+        'plugin_step': step_id,
+    }
+    if not session_id:
+        return None
+
+    try:
+        from lazymind.config import config as _cfg
+        from lazymind.chat.engine.subagent.context import SubAgentContext, set_context
+        from lazymind.chat.engine.subagent.db import SubAgentDB
+
+        dsn = str(_cfg['acl_db_dsn'] or '').strip()
+        if not dsn:
+            return None
+
+        import tempfile
+        db = SubAgentDB(dsn)
+        ctx = SubAgentContext(
+            task_id=f'driver_{session_id}_{step_id}',
+            conversation_id='',
+            agent_type='driver',
+            objective='',
+            params={'session_id': session_id, 'plugin_id': plugin_id, 'step_id': step_id},
+            workspace_path=tempfile.mkdtemp(prefix='driver_'),
+            input_artifact_keys=[],
+            output_artifact_keys=[],
+            db=db,
+            emit=lambda _ev: None,
+        )
+        set_context(ctx)
+        return db
+    except Exception as exc:
+        LOG.warning('[DriverAgent] failed to init artifact context: %s', exc)
+        return None
+
+
 def _build_llm(llm_config: Optional[Dict[str, Any]]) -> Any:
     """Build an LLM instance after injecting per-request model config (same as ChatAgent/SubAgent)."""
     inject_model_config(llm_config)
@@ -140,13 +184,15 @@ def evaluate_step(
     # Inject artifact read tools so DriverAgent can inspect produced artifacts.
     tools = []
     try:
-        from lazymind.chat.engine.subagent.tools import find_artifact, read_artifact
-        tools = [find_artifact, read_artifact]
+        from lazymind.chat.engine.subagent.tools import find_artifact, get_artifact
+        tools = [find_artifact, get_artifact]
     except Exception:
         pass
 
+    driver_db = None
     try:
         _init_driver_sid(session_id, plugin_id, step_id)
+        driver_db = _init_driver_artifact_context(session_id, plugin_id, step_id)
         llm = _build_llm(llm_config)
         if tools:
             response = llm(user_msg, system_prompt=driver_prompt, tools=tools)
@@ -165,6 +211,12 @@ def evaluate_step(
         raise DriverEvaluationError(
             f'DriverAgent LLM call failed for plugin={plugin_id!r} step={step_id!r}: {exc}',
         ) from exc
+    finally:
+        if driver_db is not None:
+            try:
+                driver_db.dispose()
+            except Exception:
+                pass
 
 
 def _clean_message(text: str) -> str:

@@ -590,23 +590,43 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		conv, _ := raw["conversation"].(map[string]any)
 		if conv != nil {
 			if sc, _ := conv["search_config"].(map[string]any); sc != nil {
-				filters := map[string]any{}
-				if kbIDs := datasetIDsFromSearchConfig(sc); len(kbIDs) > 0 {
-					filters["kb_id"] = kbIDs
-				}
-				if creators := stringSliceFromAny(sc["creators"]); len(creators) > 0 {
-					filters["creator"] = creators
-				}
-				if tags := stringSliceFromAny(sc["tags"]); len(tags) > 0 {
-					filters["tags"] = tags
-				}
-				if len(filters) > 0 {
-					body["filters"] = filters
-				}
+				body["filters"] = filtersFromSearchConfig(sc)
+			}
+		}
+	}
+	// Internal/auto-advance requests omit conversation.search_config; fall back to the
+	// persisted conversation row so kb_id scope matches the user's original selection.
+	if body["filters"] == nil && db != nil && convID != "" {
+		var c orm.Conversation
+		if err := db.WithContext(ctx).Select("search_config").Where("id = ?", convID).First(&c).Error; err == nil && len(c.SearchConfig) > 0 {
+			var sc map[string]any
+			if json.Unmarshal(c.SearchConfig, &sc) == nil {
+				body["filters"] = filtersFromSearchConfig(sc)
 			}
 		}
 	}
 	return body
+}
+
+// filtersFromSearchConfig builds upstream dataset filters from a search_config dict.
+func filtersFromSearchConfig(sc map[string]any) map[string]any {
+	if sc == nil {
+		return nil
+	}
+	filters := map[string]any{}
+	if kbIDs := datasetIDsFromSearchConfig(sc); len(kbIDs) > 0 {
+		filters["kb_id"] = kbIDs
+	}
+	if creators := stringSliceFromAny(sc["creators"]); len(creators) > 0 {
+		filters["creator"] = creators
+	}
+	if tags := stringSliceFromAny(sc["tags"]); len(tags) > 0 {
+		filters["tags"] = tags
+	}
+	if len(filters) == 0 {
+		return nil
+	}
+	return filters
 }
 
 // resolvePluginMode determines the effective plugin_mode for this request.

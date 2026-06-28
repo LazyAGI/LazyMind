@@ -163,6 +163,20 @@ def test_evaluate_step_llm_returns_none_raises(loaded_plugin):
             )
 
 
+def test_init_driver_artifact_context_sets_agentic_config():
+    import lazyllm
+    from lazymind.chat.plugin import driver_agent
+
+    with patch('lazymind.config.config', {'acl_db_dsn': ''}):
+        result = driver_agent._init_driver_artifact_context('ps-1', 'test-plugin', 'step_a')
+
+    assert result is None
+    cfg = lazyllm.globals.get('agentic_config') or {}
+    assert cfg.get('plugin_session_id') == 'ps-1'
+    assert cfg.get('plugin_id') == 'test-plugin'
+    assert cfg.get('plugin_step') == 'step_a'
+
+
 # ---------------------------------------------------------------------------
 # _build_driver_prompt
 # ---------------------------------------------------------------------------

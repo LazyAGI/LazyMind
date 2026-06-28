@@ -385,14 +385,15 @@ func advanceAutoMode(
 			"attempt":    attempt,
 		})
 		// Treat as PASS — forward summary directly to ChatAgent without DriverAgent evaluation.
-		onSSE("auto_chat_started", map[string]any{
-			"session_id":      pctx.SessionID,
-			"conversation_id": pctx.ConvID,
-		})
 		pctxCopy := *pctx
 		go func() {
 			triggerNextChatTurn(pctxCopy.ConvID, pctxCopy.SessionID, pctxCopy.PluginID, pctxCopy.StepID,
-				pctxCopy.UserID, summary)
+				pctxCopy.UserID, summary, func() {
+					onSSE("auto_chat_started", map[string]any{
+						"session_id":      pctxCopy.SessionID,
+						"conversation_id": pctxCopy.ConvID,
+					})
+				})
 			checkAndFallbackIfStuck(ctx, db, stateStore, onSSE, &pctxCopy)
 		}()
 		return
@@ -440,15 +441,17 @@ func advanceAutoMode(
 		"step_id":    pctx.StepID,
 		"message":    driverMsg,
 	})
-	// Notify frontend to open a resume SSE for the next chat turn.
-	onSSE("auto_chat_started", map[string]any{
-		"session_id":      pctx.SessionID,
-		"conversation_id": pctx.ConvID,
-	})
 	pctxCopy := *pctx
 	go func() {
 		triggerNextChatTurn(pctxCopy.ConvID, pctxCopy.SessionID, pctxCopy.PluginID, pctxCopy.StepID,
-			pctxCopy.UserID, driverMsg)
+			pctxCopy.UserID, driverMsg, func() {
+				// Emit after core has accepted the request and set Redis generating status,
+				// so the frontend resume SSE does not race with stream setup.
+				onSSE("auto_chat_started", map[string]any{
+					"session_id":      pctxCopy.SessionID,
+					"conversation_id": pctxCopy.ConvID,
+				})
+			})
 		checkAndFallbackIfStuck(ctx, db, stateStore, onSSE, &pctxCopy)
 	}()
 }
@@ -458,6 +461,7 @@ func advanceAutoMode(
 // and all other Go-side pipeline steps run exactly as in a real user turn.
 func triggerNextChatTurn(
 	convID, sessionID, pluginID, currentStep, userID, syntheticMsg string,
+	onReady func(),
 ) {
 	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
 	reqBody := map[string]any{
@@ -473,7 +477,6 @@ func triggerNextChatTurn(
 			"session_id":   sessionID,
 			"plugin_id":    pluginID,
 			"current_step": currentStep,
-			"advance":      false,
 		},
 	}
 	body, _ := json.Marshal(reqBody)
@@ -493,6 +496,13 @@ func triggerNextChatTurn(
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("[Plugin] triggerNextChatTurn: core returned %d\n", resp.StatusCode)
+		return
+	}
+	if onReady != nil {
+		onReady()
+	}
 	// Drain the SSE response body. We do not relay the stream anywhere; Go core
 	// writes all events (including task_created) directly to Redis. Draining is
 	// required to keep the connection alive until the upstream finishes.
