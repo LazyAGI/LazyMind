@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import docstring_parser
+import lazyllm
 from lazyllm.tools.fs.supplier.feishu import FeishuFS
 from lazyllm.tools.fs.supplier.notion import NotionFS
 from lazyllm.tools.tools.search import (
@@ -20,10 +21,10 @@ from lazyllm.tools.tools.search import (
 from lazymind.chat.engine.tools import (
     KBToolGroup,
     LocalFSToolGroup,
-    TempKBToolGroup,
     calculator,
     image_editor,
     image_generator,
+    kb_tmp_search,
     memory_editor,
     read_memory,
     skill_editor,
@@ -41,6 +42,15 @@ class ToolGroupConfig:
     description: str
     instance: Any
     model_role: str | None = None
+    key_source: Callable[[], Any] | None = None
+    pick_first_valid: bool = False
+
+    def __post_init__(self) -> None:
+        if self.pick_first_valid and not isinstance(self.instance, (list, tuple)):
+            raise TypeError(
+                'instance must be a list or tuple when pick_first_valid is True, '
+                f'got {type(self.instance).__name__}'
+            )
 
 
 _WEB_SEARCH_ENGINE_INSTANCES: list = [
@@ -55,10 +65,11 @@ _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [
     ArxivSearch(skip_auth=True),
 ]
 
-_PICK_FIRST_VALID_GROUPS = {
-    'web_search': ('Search the web for current information', _WEB_SEARCH_ENGINE_INSTANCES),
-    'academic_search': ('Search academic papers and scientific literature', _ACADEMIC_SEARCH_ENGINE_INSTANCES),
-}
+
+def _temp_kb_key_source() -> Any:
+    agentic_config = lazyllm.globals.get('agentic_config') or {}
+    return agentic_config.get('files')
+
 
 SKILL_TOOL_GROUP = ToolGroupConfig(
     name='skill',
@@ -78,7 +89,8 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         name='temp_kb',
         label='临时文件检索',
         description='从用户上传的临时文件中搜索相关内容',
-        instance=TempKBToolGroup(),
+        instance=kb_tmp_search,
+        key_source=_temp_kb_key_source,
     ),
     ToolGroupConfig(
         name='calculator',
@@ -96,13 +108,15 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         name='web_search',
         label='网页搜索',
         description='使用搜索引擎检索互联网内容，自动选择可用的搜索服务',
-        instance=None,
+        instance=_WEB_SEARCH_ENGINE_INSTANCES,
+        pick_first_valid=True,
     ),
     ToolGroupConfig(
         name='academic_search',
         label='学术搜索',
         description='搜索学术论文和科学文献，自动选择可用的学术搜索服务',
-        instance=None,
+        instance=_ACADEMIC_SEARCH_ENGINE_INSTANCES,
+        pick_first_valid=True,
     ),
     ToolGroupConfig(
         name='url_fetch',
@@ -240,6 +254,10 @@ def _instance_is_active(instance: Any) -> bool:
     key_source = getattr(instance, '__key_source__', None)
     if key_source is None:
         return True
+    return _key_source_is_active(key_source)
+
+
+def _key_source_is_active(key_source: Callable[[], Any]) -> bool:
     try:
         return bool(key_source())
     except Exception:
@@ -249,6 +267,10 @@ def _instance_is_active(instance: Any) -> bool:
 def group_is_active(cfg: ToolGroupConfig) -> bool:
     if cfg.model_role and not is_model_role_available(cfg.model_role):
         return False
+    if cfg.key_source and not _key_source_is_active(cfg.key_source):
+        return False
+    if cfg.pick_first_valid:
+        return any(_instance_is_active(inst) for inst in cfg.instance)
     if cfg.instance is None:
         return True
     result = _instance_is_active(cfg.instance)
@@ -261,10 +283,8 @@ def group_is_active(cfg: ToolGroupConfig) -> bool:
 def get_all_tool_groups() -> list[dict]:
     result = []
     for cfg in DEFAULT_TOOLS:
-        if cfg.name == 'web_search':
-            methods = _extract_group_methods(_WEB_SEARCH_ENGINE_INSTANCES)
-        elif cfg.name == 'academic_search':
-            methods = _extract_group_methods(_ACADEMIC_SEARCH_ENGINE_INSTANCES)
+        if cfg.pick_first_valid:
+            methods = _extract_group_methods(cfg.instance)
         else:
             methods = _extract_methods(cfg.instance)
         result.append({
@@ -303,14 +323,18 @@ def filter_tools(
 def build_agent_tools(configs: list[ToolGroupConfig]) -> list:
     result = []
     for cfg in configs:
-        if cfg.name in _PICK_FIRST_VALID_GROUPS:
-            desc, instances = _PICK_FIRST_VALID_GROUPS[cfg.name]
-            result.append(dict(
+        if cfg.pick_first_valid:
+            group = dict(
                 name=cfg.name,
-                desc=desc,
+                desc=cfg.description,
                 pick_first_valid=True,
-                tools=list(instances),
-            ))
+                tools=list(cfg.instance),
+            )
+            if cfg.key_source:
+                group['key_source'] = cfg.key_source
+            result.append(group)
+        elif cfg.key_source:
+            result.append((cfg.instance, cfg.key_source))
         else:
             result.append(cfg.instance)
     return result

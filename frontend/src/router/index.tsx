@@ -37,6 +37,7 @@ import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServices
 import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPage";
 import { SelfEvolutionHomePage, SelfEvolutionDetailPage, SelfEvolutionObservationPage } from "@/modules/selfEvolution";
 import { getAntdLocale } from "@/i18n/antdLocale";
+import { runtimeFeatures } from "@/runtime/features";
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
@@ -47,9 +48,13 @@ export default function AppRouter() {
         <Route path="/login" element={<SigninDashboard />}>
           <Route index element={<SigninLogin />} />
         </Route>
-        <Route path="/register" element={<SigninDashboard />}>
-          <Route index element={<SigninRegister />} />
-        </Route>
+        {runtimeFeatures.hideRegister ? (
+          <Route path="/register" element={<Navigate to="/login" replace />} />
+        ) : (
+          <Route path="/register" element={<SigninDashboard />}>
+            <Route index element={<SigninRegister />} />
+          </Route>
+        )}
         <Route
           path="/oauth/feishu/callback"
           element={<DataSourceFeishuCallback />}
@@ -116,18 +121,28 @@ export default function AppRouter() {
               element={<MemoryReviewPage />}
             />
           </Route>
-          <Route path="self-evolution" element={<SelfEvolutionHomePage />} />
-          <Route path="self-evolution/detail/:threadId/observation/:kind" element={<SelfEvolutionObservationPage />} />
-          <Route path="self-evolution/detail/:threadId" element={<SelfEvolutionDetailPage />} />
-          <Route path="self-evolution/:threadId/observation/:kind" element={<SelfEvolutionObservationPage />} />
-          <Route path="self-evolution/:threadId" element={<SelfEvolutionDetailPage />} />
+          {runtimeFeatures.hideEvo ? (
+            <Route path="self-evolution/*" element={<Navigate to="/agent/chat" replace />} />
+          ) : (
+            <>
+              <Route path="self-evolution" element={<SelfEvolutionHomePage />} />
+              <Route path="self-evolution/detail/:threadId/observation/:kind" element={<SelfEvolutionObservationPage />} />
+              <Route path="self-evolution/detail/:threadId" element={<SelfEvolutionDetailPage />} />
+              <Route path="self-evolution/:threadId/observation/:kind" element={<SelfEvolutionObservationPage />} />
+              <Route path="self-evolution/:threadId" element={<SelfEvolutionDetailPage />} />
+            </>
+          )}
         </Route>
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<Navigate to="groups" replace />} />
-          <Route path="users" element={<UserManagement />} />
-          <Route path="groups" element={<GroupManagement />} />
-          <Route path="groups/:id" element={<GroupDetail />} />
-        </Route>
+        {runtimeFeatures.hideCloudAdmin ? (
+          <Route path="/admin/*" element={<Navigate to="/agent/chat" replace />} />
+        ) : (
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route index element={<Navigate to="groups" replace />} />
+            <Route path="users" element={<UserManagement />} />
+            <Route path="groups" element={<GroupManagement />} />
+            <Route path="groups/:id" element={<GroupDetail />} />
+          </Route>
+        )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ConfigProvider>

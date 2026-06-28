@@ -1652,7 +1652,7 @@ func TestSourceDocumentQueryMarksUnparsedUpdatesPendingParse(t *testing.T) {
 
 	repo := newTreeReadRepo()
 	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
-	repo.bindings["source-1"] = []store.Binding{{BindingID: "binding-1", SourceID: "source-1"}}
+	repo.bindings["source-1"] = []store.Binding{{BindingID: "binding-1", SourceID: "source-1", ConnectorType: "feishu"}}
 	object := indexedObject("source-1", "binding-1", "tree-root", "doc-1", "", "Welcome", true, false).Object
 	repo.documents = []DocumentWithState{{
 		Object: object,
@@ -1678,6 +1678,9 @@ func TestSourceDocumentQueryMarksUnparsedUpdatesPendingParse(t *testing.T) {
 	}
 	if resp.Items[0].ParseQueueState != "PENDING_PARSE" || resp.Items[0].ParseState != "PENDING_PARSE" {
 		t.Fatalf("unparsed update should be marked pending parse: %+v", resp.Items[0])
+	}
+	if resp.Items[0].EffectiveParseStatus != parseStatePendingParse {
+		t.Fatalf("unparsed update should not be marked downloading: %+v", resp.Items[0])
 	}
 }
 

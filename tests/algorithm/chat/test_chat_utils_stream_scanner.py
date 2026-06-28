@@ -57,3 +57,30 @@ def test_incremental_scanner_handles_partial_think_tags_and_plugins():
         ('text', '[1](#source-1.1 "Source.md")'),
     ]
     assert tail == []
+
+
+def test_citation_plugin_display_numbers_start_from_first_streamed_source():
+    config = {
+        CITATION_REFS_KEY: {
+            '3.1': {'file_name': 'Third.md', 'index': '3.1'},
+            '3.2': {'file_name': 'Third.md', 'index': '3.2'},
+            '5.1': {'file_name': 'Fifth.md', 'index': '5.1'},
+        },
+    }
+    plugin = ConfigCitationPlugin(config)
+    scanner = IncrementalScanner([plugin], initial_state='BODY')
+
+    segments = scanner.feed('cite [[3.1]] then [[3.2]] and [5](#source-5.1 "Fifth.md")')
+
+    assert segments == [
+        ('text', 'cite '),
+        ('text', '[1](#source-3.1 "Third.md")'),
+        ('text', ' then '),
+        ('text', '[1](#source-3.2 "Third.md")'),
+        ('text', ' and '),
+        ('text', '[2](#source-5.1 "Fifth.md")'),
+    ]
+    assert plugin.collect()[0]['index'] == '3.1'
+    assert plugin.collect()[0]['display_index'] == 1
+    assert plugin.collect()[2]['index'] == '5.1'
+    assert plugin.collect()[2]['display_index'] == 2

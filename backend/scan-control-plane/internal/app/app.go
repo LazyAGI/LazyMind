@@ -628,7 +628,13 @@ func buildCrawlWorker(built Components, cfg config.Config) (*crawl.RunOnceWorker
 		return nil, err
 	}
 	reducer := stateengine.NewDBStateReducer(built.Repository)
-	crawler := crawl.NewDefaultCrawlEngine(built.Repository, registry, built.Repository, reducer)
+	crawler := crawl.NewDefaultCrawlEngine(
+		built.Repository,
+		registry,
+		built.Repository,
+		reducer,
+		crawl.WithListRequestInterval(cfg.CrawlListRequestInterval),
+	)
 	scheduler := built.Scheduler
 	if scheduler == nil {
 		scheduler = buildScheduleEngine(built, cfg)

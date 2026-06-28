@@ -250,7 +250,7 @@ func supportsDocumentDownloadStatus(binding store.Binding) bool {
 
 func documentDownloadInProgressState(parseState string) bool {
 	switch parseState {
-	case parseStateQueued, parseStatePendingParse, store.ParseTaskStatusPending, store.ParseTaskStatusRunning:
+	case parseStateQueued, store.ParseTaskStatusPending, store.ParseTaskStatusRunning:
 		return true
 	default:
 		return false

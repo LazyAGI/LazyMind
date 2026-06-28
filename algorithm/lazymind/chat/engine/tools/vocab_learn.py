@@ -38,9 +38,14 @@ def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     terms should be treated as the same concept in their domain. Do not use it for vague paraphrases,
     general world-knowledge synonyms, temporary nicknames, or one-off wording choices.
 
+    Prefer this tool over memory when the user asks to remember a mapping in a vocabulary,
+    glossary, domain terminology, or synonym list, or says that one term means, equals,
+    or is another term in a specific domain.
+
     The tool automatically resolves the current session user and updates only that user's vocabulary.
     Pass a small batch of concrete synonym suggestions. Each item must contain exactly one `word`, one
-    `synonym`, and a short `reason` grounded in the conversation.
+    `synonym`, a short `description` for the domain context when useful, and a short `reason`
+    grounded in the conversation.
 
     Args:
         suggestions (List[Dict[str, Any]]): A small batch of stable, user-specific term mappings for

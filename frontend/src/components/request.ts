@@ -3,12 +3,9 @@ import type { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from "axio
 import { message } from "antd";
 import { AgentAppsAuth } from "@/components/auth";
 import i18n from "@/i18n";
+import { getApiBaseUrl } from "@/runtime/apiBase";
 
-export const BASE_URL =
-  (typeof import.meta !== "undefined" &&
-    (import.meta as any).env?.VITE_API_BASE_URL) ||
-  (typeof window !== "undefined" && window.location.origin) ||
-  "";
+export const BASE_URL = getApiBaseUrl();
 
 const axiosInstance: AxiosInstance = axios.create({
   timeout: 30000,

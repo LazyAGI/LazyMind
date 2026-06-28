@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	appLog "lazymind/core/log"
 )
 
 type jsonRPCRequest struct {
@@ -156,7 +157,13 @@ func doRPC(ctx context.Context, client *http.Client, endpoint string, headers ma
 		return nil, resp.Header, err
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, resp.Header, fmt.Errorf("mcp rpc returned %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		appLog.Logger.Warn().
+			Int("status", resp.StatusCode).
+			Str("endpoint", endpoint).
+			Str("method", payload.Method).
+			Str("body", strings.TrimSpace(string(raw))).
+			Msg("mcp rpc returned non-2xx response")
+		return nil, resp.Header, fmt.Errorf("mcp rpc returned %d", resp.StatusCode)
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, resp.Header, nil

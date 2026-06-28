@@ -1415,11 +1415,14 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 }
 
 func updateChildSkill(ctx context.Context, db *gorm.DB, userID string, row *orm.SkillResource, req updateSkillRequest) error {
-	if req.Category != nil && strings.TrimSpace(*req.Category) != strings.TrimSpace(row.Category) {
-		return errors.New("child skill category is immutable")
-	}
-	if req.Category != nil || req.IsEnabled != nil {
-		return errors.New("child skill only supports name/description/tags/content/file_ext/auto_evo/parent_skill_id updates")
+	hasParentReference := req.ParentSkillID != nil || req.ParentSkillName != nil
+	if !hasParentReference {
+		if req.Category != nil && strings.TrimSpace(*req.Category) != strings.TrimSpace(row.Category) {
+			return errors.New("child skill category is immutable")
+		}
+		if req.Category != nil || req.IsEnabled != nil {
+			return errors.New("child skill only supports name/description/tags/content/file_ext/auto_evo/parent_skill_id updates")
+		}
 	}
 	currentContent, err := storedSkillContent(*row)
 	if err != nil {

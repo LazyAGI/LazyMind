@@ -681,6 +681,43 @@ class TaskQueryDB:
         rows = self.load_plugin_session_slot_summary(session_id)
         return _rows_to_artifact_summary(rows) if rows else []
 
+    def load_artifacts_for_tasks(self, task_ids: List[str]) -> List[Dict[str, Any]]:
+        """Return non-hidden artifacts for a list of task_ids, ordered by task_id / key / seq ASC.
+
+        Returns empty list on any error or if task_ids is empty.
+        """
+        if not task_ids:
+            return []
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    text(
+                        'SELECT task_id, artifact_key, content_type, value, seq '
+                        'FROM sub_agent_artifacts '
+                        'WHERE task_id IN :ids AND hidden = FALSE '
+                        'ORDER BY task_id, artifact_key, seq ASC'
+                    ).bindparams(bindparam('ids', expanding=True)),
+                    {'ids': task_ids},
+                ).mappings().all()
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                value = r['value']
+                if isinstance(value, str):
+                    try:
+                        value = json.loads(value)
+                    except ValueError:
+                        value = {}
+                out.append({
+                    'task_id': r['task_id'],
+                    'artifact_key': r['artifact_key'],
+                    'content_type': r['content_type'],
+                    'value': value,
+                    'seq': r['seq'],
+                })
+            return out
+        except Exception:
+            return []
+
     def format_task_artifacts(self, task_ids: List[str]) -> List[str]:
         rows = self.load_artifacts_for_tasks(task_ids)
         return _rows_to_artifact_summary(rows, order_field='seq', is_human_field=None) if rows else []

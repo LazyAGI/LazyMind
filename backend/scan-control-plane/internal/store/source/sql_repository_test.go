@@ -239,7 +239,16 @@ func TestGetSourceSummaryComputesDocumentCounts(t *testing.T) {
 		{columns: []string{"count"}, rows: [][]driver.Value{{int64(5)}}},
 		{columns: []string{"count"}, rows: [][]driver.Value{{int64(3)}}},
 		{columns: []string{"count"}, rows: [][]driver.Value{{int64(2)}}},
-		{columns: []string{"storage_bytes"}, rows: [][]driver.Value{{int64(42)}}},
+		{
+			columns: []string{"storage_bytes"},
+			rows:    [][]driver.Value{{int64(42)}},
+			wantSQL: []string{
+				"FROM source_document_states AS s",
+				"JOIN source_object_index o",
+				"s.document_list_visible = true",
+				"SUM(o.size_bytes)",
+			},
+		},
 		{columns: []string{"count"}, rows: [][]driver.Value{{int64(7)}}},
 		{columns: []string{"source_state", "count"}, rows: [][]driver.Value{}},
 		{columns: []string{"status", "count"}, rows: [][]driver.Value{}},
@@ -324,6 +333,7 @@ func TestSourceObjectUpsertAssignmentsPreserveExistingSizeOnZero(t *testing.T) {
 type storeFakeQuery struct {
 	columns []string
 	rows    [][]driver.Value
+	wantSQL []string
 }
 
 type storeFakeDriver struct{}
@@ -382,7 +392,7 @@ func (storeFakeConn) Begin() (driver.Tx, error) {
 	return nil, errors.New("transactions are not supported by storeFakeConn")
 }
 
-func (c storeFakeConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+func (c storeFakeConn) QueryContext(_ context.Context, sql string, _ []driver.NamedValue) (driver.Rows, error) {
 	storeFakeMu.Lock()
 	defer storeFakeMu.Unlock()
 	queries := storeFakeQueries[c.dsn]
@@ -391,6 +401,11 @@ func (c storeFakeConn) QueryContext(context.Context, string, []driver.NamedValue
 	}
 	query := queries[0]
 	storeFakeQueries[c.dsn] = queries[1:]
+	for _, want := range query.wantSQL {
+		if !strings.Contains(sql, want) {
+			return nil, fmt.Errorf("query %q missing %q", sql, want)
+		}
+	}
 	return &storeFakeRows{columns: query.columns, rows: query.rows}, nil
 }
 

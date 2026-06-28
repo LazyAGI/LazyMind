@@ -39,6 +39,53 @@ func TestCrawlEngineFullUsesListChildrenBFSFallback(t *testing.T) {
 	assertCrawlState(t, repo.reducer, "doc-1", "NEW", "CREATE")
 }
 
+func TestCrawlEngineListChildrenIntervalOnlyAppliesBetweenCrawlListRequests(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := crawlTestTime()
+	repo := newCrawlTestRepo(now)
+	conn := newCrawlTreeConnector(false, false, nil)
+	registry, err := connector.NewDefaultConnectorRegistry(conn)
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	sleeps := []time.Duration{}
+	engine := NewDefaultCrawlEngine(
+		repo,
+		registry,
+		repo,
+		repo.reducer,
+		WithClock(func() time.Time { return now }),
+		WithPageSize(2),
+		WithListRequestInterval(time.Second),
+		withSleep(func(ctx context.Context, delay time.Duration) error {
+			sleeps = append(sleeps, delay)
+			return ctx.Err()
+		}),
+	)
+
+	result, err := engine.Run(ctx, BindingRunClaim{
+		RunID:             "run-full-throttled",
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		ScopeType:         connector.ScopeTypeFull,
+	})
+	if err != nil {
+		t.Fatalf("run full crawl: %v", err)
+	}
+	if result.Status != RunStatusSucceeded {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if !slices.Equal(conn.listNodes, []string{"", "folder-1"}) {
+		t.Fatalf("expected two crawl list calls, got %v", conn.listNodes)
+	}
+	if !slices.Equal(sleeps, []time.Duration{time.Second}) {
+		t.Fatalf("expected one interval before second crawl list call, got %v", sleeps)
+	}
+}
+
 func TestCrawlEngineDeltaUnsupportedFallsBackToFull(t *testing.T) {
 	t.Parallel()
 

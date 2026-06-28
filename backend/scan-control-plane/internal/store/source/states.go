@@ -272,9 +272,8 @@ func (r *SQLRepository) bindingSummary(ctx context.Context, sourceID, bindingID 
 	var storage struct {
 		StorageBytes int64
 	}
-	_ = r.ormDB(ctx).Model(&ormSourceObject{}).
-		Where("source_id = ? AND binding_id = ? AND is_document", sourceID, bindingID).
-		Select("COALESCE(SUM(size_bytes), 0) AS storage_bytes").
+	_ = documentListBaseQuery(r.ormDB(ctx), SourceDocumentListRequest{SourceID: sourceID, BindingID: bindingID}).
+		Select("COALESCE(SUM(o.size_bytes), 0) AS storage_bytes").
 		Scan(&storage).Error
 	summary.StorageBytes = storage.StorageBytes
 	_ = r.ormDB(ctx).Model(&ormDocument{}).
