@@ -38,6 +38,8 @@ export interface DatasetItem {
   reference_chunk_ids?: string[];
   reference_doc_from_knowledge_base?: boolean;
   reference_chunk_selected?: boolean;
+  reference_doc_invalid?: boolean;
+  reference_chunk_invalid?: boolean;
   generate_reason?: string;
   is_deleted?: boolean;
   source: DatasetItemSource;

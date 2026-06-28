@@ -1563,6 +1563,14 @@ function getEventArtifactId(payload: Record<string, unknown> | undefined) {
     getStringField(payload, ["artifact_id", "writes_artifact_id"]);
 }
 
+function getEventRuntimeArtifactId(payload: Record<string, unknown> | undefined) {
+  const data = getEventPayloadData(payload);
+  const detail = getNestedRecordField(data, ["detail"]) || getStructuredRecordField(data, ["detail"]);
+  return getStringField(data, ["runtime_artifact_id", "source_artifact_id"]) ||
+    getStringField(detail, ["runtime_artifact_id", "source_artifact_id"]) ||
+    getStringField(payload, ["runtime_artifact_id", "source_artifact_id"]);
+}
+
 function getEventDetailField(payload: Record<string, unknown> | undefined, keys: string[]) {
   const data = getEventPayloadData(payload);
   const detail = getNestedRecordField(data, ["detail"]) || getStructuredRecordField(data, ["detail"]);
@@ -3704,6 +3712,24 @@ function getOperationCaseId(payload: Record<string, unknown> | undefined) {
   return getEventCaseId(payload) || getStringField(getEventPayloadData(payload), ["current_item"]);
 }
 
+function resolveAnalysisCaseStep(flowKind: string | undefined, operationRunId: string | undefined): "coarse" | "fine" | undefined {
+  if (
+    flowKind === "analysis.trace_summary" ||
+    flowKind === "analysis.coarse_classify" ||
+    operationRunId === "analysis.trace_summary"
+  ) {
+    return "coarse";
+  }
+  if (
+    flowKind === "analysis.fine_classify" ||
+    flowKind === "analysis.classification" ||
+    operationRunId === "analysis.classify_case"
+  ) {
+    return "fine";
+  }
+  return undefined;
+}
+
 function applyGlobalDatasetStep(cases: Map<string, CaseProgressState>, step: string, status: StepStatus | undefined, updatedAt?: string, artifactId?: string) {
   cases.forEach((item) => updateCaseStep(cases, item.caseId, step, status, updatedAt, artifactId));
 }
@@ -3736,7 +3762,7 @@ function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCaseProgre
   events.forEach((event) => {
     const operationRunId = getOperationRunId(event.payload);
     const flowKind = getEventFlowKind(event.payload);
-    const artifactId = getEventArtifactId(event.payload);
+    const artifactId = getEventRuntimeArtifactId(event.payload) || getEventArtifactId(event.payload);
     const status = getCaseProgressActionStatus(event);
     if (!operationRunId || !status) {
       return;
@@ -3763,10 +3789,11 @@ function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCaseProgre
       updateCaseStep(abtestCases, caseId, "rag", status, event.timestamp, artifactId);
     } else if (caseId && flowKind === "abtest.candidate_judge") {
       updateCaseStep(abtestCases, caseId, "judge", status, event.timestamp, artifactId);
-    } else if (caseId && flowKind === "analysis.coarse_classify") {
-      updateCaseStep(analysisCases, caseId, "coarse", status, event.timestamp, artifactId);
-    } else if (caseId && flowKind === "analysis.fine_classify") {
-      updateCaseStep(analysisCases, caseId, "fine", status, event.timestamp, artifactId);
+    } else if (caseId) {
+      const analysisStep = resolveAnalysisCaseStep(flowKind, operationRunId);
+      if (analysisStep) {
+        updateCaseStep(analysisCases, caseId, analysisStep, status, event.timestamp, artifactId);
+      }
     }
   });
   const groups: EvoCaseProgressGroup[] = [

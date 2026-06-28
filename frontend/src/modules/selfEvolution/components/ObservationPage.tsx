@@ -21,7 +21,10 @@ import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import {
   AGENT_API_BASE,
   EVO_API_BASE,
+  buildAbSummaryReports,
   createCoreAgentGeneratedApiClient,
+  formatMaybePValue,
+  getAbtestResultRecords,
   getNestedRecordField,
   getNumberField,
   getResultItems,
@@ -32,6 +35,7 @@ import {
   isEmptyResultPayload,
   isRecord,
   stringifyResultPayload,
+  type AbSummaryReport,
   type WorkflowResultKind,
 } from "../shared";
 import {
@@ -102,6 +106,31 @@ type EvalBadcaseListState = {
   loaded: boolean;
   data?: unknown;
   error?: string;
+};
+
+type AbCaseListState = {
+  abtestId?: string;
+  loading: boolean;
+  loaded: boolean;
+  data?: unknown;
+  error?: string;
+  totalSize?: number;
+};
+
+type AbTraceCompareState = {
+  caseId?: string;
+  loading: boolean;
+  loaded: boolean;
+  data?: unknown;
+  error?: string;
+  aTraceId?: string;
+  bTraceId?: string;
+};
+
+type EvalReportsTraceState = {
+  loading: boolean;
+  loaded: boolean;
+  data?: unknown;
 };
 
 type CsvBadcaseRow = {
@@ -179,6 +208,8 @@ const fallbackObservationData: Partial<Record<ObservationResultKind, unknown>> =
   abtests: traceCompareFixture,
 };
 const EVAL_BADCASE_PAGE_SIZE = 10;
+const AB_CASE_DETAIL_PAGE_SIZE = 10;
+const syntheticAbtestIdPattern = /^abtest-\d+$/;
 
 function getFallbackAbCaseRows(t: TFunction): AbCaseRow[] {
   return [
@@ -485,28 +516,170 @@ function normalizeBadcaseRows(t: TFunction, value: unknown): CsvBadcaseRow[] {
   return rows;
 }
 
-function normalizeAbCaseRows(t: TFunction, value: unknown): AbCaseRow[] {
-  const candidateRows = isRecord(value)
-    ? (["cases", "case_list", "rows", "records", "items", "badcases"] as const)
-      .flatMap((key) => Array.isArray(value[key]) ? value[key] : [])
-    : Array.isArray(value)
-      ? value
-      : [];
-  const rows = candidateRows.filter(isRecord).map((item, index): AbCaseRow => {
-    const aScore = getNumberField(item, ["a_score", "score_a", "baseline_score", "mean_a"]) ?? 0;
-    const bScore = getNumberField(item, ["b_score", "score_b", "candidate_score", "mean_b"]) ?? 0;
-    const delta = getNumberField(item, ["delta", "change", "score_delta"]) ?? bScore - aScore;
-    return {
-      caseId: getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${String(index + 1).padStart(3, "0")}`,
-      query: getStringField(item, ["query", "question", "prompt"]) || "-",
-      aScore,
-      bScore,
-      delta,
-      conclusion: getStringField(item, ["conclusion", "judgement", "result"]) || (delta > 0 ? t("selfEvolutionRun.observation.bImprove") : delta < 0 ? t("selfEvolutionRun.observation.bDegrade") : t("selfEvolutionRun.observation.flat")),
-      tone: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
-    };
+function getAbCaseSourceRecords(value: unknown): unknown[] {
+  if (isRecord(value)) {
+    const items = getStructuredArrayField(value, ["items"]);
+    if (items?.length) {
+      return items;
+    }
+    return (["cases", "case_list", "rows", "records", "items", "badcases", "case_details", "case_deltas"] as const)
+      .flatMap((key) => Array.isArray(value[key]) ? value[key] : []);
+  }
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeAbCaseRowFromRecord(t: TFunction, item: Record<string, unknown>, index: number): AbCaseRow {
+  const before = getNestedRecordField(item, ["before"]) || getStructuredRecordField(item, ["baseline"]);
+  const after = getNestedRecordField(item, ["after"]) || getStructuredRecordField(item, ["candidate"]);
+  const deltaRecord = getNestedRecordField(item, ["delta"]) || getStructuredRecordField(item, ["delta"]);
+  const aScore =
+    getNumberField(before, ["answer_correctness", "score", "a_score", "baseline_score", "mean_a"]) ??
+    getNumberField(item, ["a_score", "score_a", "baseline_score", "mean_a"]) ??
+    0;
+  const bScore =
+    getNumberField(after, ["answer_correctness", "score", "b_score", "candidate_score", "mean_b"]) ??
+    getNumberField(item, ["b_score", "score_b", "candidate_score", "mean_b"]) ??
+    0;
+  const delta =
+    getNumberField(deltaRecord, ["answer_correctness", "change", "score_delta"]) ??
+    getNumberField(item, ["delta", "change", "score_delta"]) ??
+    bScore - aScore;
+  const outcome = getStringField(item, ["outcome", "Outcome"]);
+  let conclusion = getStringField(item, ["conclusion", "judgement", "result"]);
+  if (!conclusion && outcome) {
+    conclusion =
+      outcome === "improved"
+        ? t("selfEvolutionRun.observation.bImprove")
+        : outcome === "regressed"
+          ? t("selfEvolutionRun.observation.bDegrade")
+          : outcome === "unchanged"
+            ? t("selfEvolutionRun.observation.flat")
+            : outcome;
+  }
+  if (!conclusion) {
+    conclusion =
+      delta > 0
+        ? t("selfEvolutionRun.observation.bImprove")
+        : delta < 0
+          ? t("selfEvolutionRun.observation.bDegrade")
+          : t("selfEvolutionRun.observation.flat");
+  }
+  const tone: AbCaseRow["tone"] =
+    outcome === "improved" || delta > 0
+      ? "up"
+      : outcome === "regressed" || delta < 0
+        ? "down"
+        : "flat";
+
+  return {
+    caseId: getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${String(index + 1).padStart(3, "0")}`,
+    query: getStringField(item, ["query", "question", "prompt"]) || "-",
+    aScore,
+    bScore,
+    delta,
+    conclusion,
+    tone,
+  };
+}
+
+function normalizeAbCaseRows(t: TFunction, value: unknown, options?: { useFallback?: boolean }): AbCaseRow[] {
+  const rows = getAbCaseSourceRecords(value)
+    .filter(isRecord)
+    .map((item, index) => normalizeAbCaseRowFromRecord(t, item, index));
+  if (rows.length) {
+    return rows;
+  }
+  return options?.useFallback ? getFallbackAbCaseRows(t) : [];
+}
+
+function toAbMetricRows(summary: AbSummaryReport | undefined, t: TFunction): AbMetricRow[] {
+  if (summary?.metricRows.length) {
+    return summary.metricRows.map((row) => ({
+      key: row.metric,
+      label: row.metricLabel,
+      meanA: row.meanA,
+      meanB: row.meanB,
+      winRate: row.winRateB ?? 0,
+      signP: formatMaybePValue(row.signP),
+    }));
+  }
+  return getFallbackAbMetricRows(t);
+}
+
+function resolveAbtestIdFromPayload(value: unknown): string | undefined {
+  const summary = buildAbSummaryReports(value)[0];
+  if (!summary?.id || syntheticAbtestIdPattern.test(summary.id)) {
+    return undefined;
+  }
+  return summary.id;
+}
+
+function getAbtestVerdictColor(verdict?: string) {
+  const normalized = (verdict || "").toLowerCase();
+  if (["pass", "accept", "improved"].some((item) => normalized.includes(item))) {
+    return "success";
+  }
+  if (["fail", "reject", "regressed"].some((item) => normalized.includes(item))) {
+    return "error";
+  }
+  return "orange";
+}
+
+function findAbCaseDetailItem(data: unknown, caseId: string): Record<string, unknown> | undefined {
+  if (!isRecord(data)) {
+    return undefined;
+  }
+  const items = getStructuredArrayField(data, ["items"]);
+  return items?.find((item) => isRecord(item) && getStringField(item, ["case_id", "caseId", "case", "id"]) === caseId);
+}
+
+function buildAbCaseTraceIdMap(evalReportsData: unknown): Map<string, { a?: string; b?: string }> {
+  const map = new Map<string, { a?: string; b?: string }>();
+  getAbtestResultRecords(evalReportsData).forEach((record) => {
+    const artifactId =
+      getStringField(record, ["artifact_id", "runtime_artifact_id", "source_artifact_id"]) ||
+      getStringField(getStructuredRecordField(record, ["data"]), ["id"]);
+    const data = getStructuredRecordField(record, ["data"]) || record;
+    const rows = getStructuredArrayField(data, ["rows"]) || getStructuredArrayField(data, ["case_details"]) || [];
+    const isCandidate =
+      artifactId.includes("candidate") ||
+      getStringField(data, ["id"]) === "abtest.candidate_eval_summary";
+    const side: "a" | "b" = isCandidate ? "b" : "a";
+    rows.filter(isRecord).forEach((row) => {
+      const caseId = getStringField(row, ["case_id", "caseId", "case", "id"]);
+      const traceId = getStringField(row, ["trace_id", "traceId"]);
+      if (!caseId || !traceId || traceId === "-") {
+        return;
+      }
+      const entry = map.get(caseId) || {};
+      entry[side] = traceId;
+      map.set(caseId, entry);
+    });
   });
-  return rows.length ? rows : getFallbackAbCaseRows(t);
+  return map;
+}
+
+function resolveCaseTraceIds(
+  caseItem: Record<string, unknown> | undefined,
+  caseId: string,
+  traceMap: Map<string, { a?: string; b?: string }>,
+): { a?: string; b?: string } {
+  const mapped = traceMap.get(caseId) || {};
+  if (!caseItem) {
+    return mapped;
+  }
+  const before = getNestedRecordField(caseItem, ["before"]) || getStructuredRecordField(caseItem, ["baseline"]);
+  const after = getNestedRecordField(caseItem, ["after"]) || getStructuredRecordField(caseItem, ["candidate"]);
+  return {
+    a:
+      getStringField(caseItem, ["baseline_trace_id", "a_trace_id", "trace_id_a"]) ||
+      getStringField(before, ["trace_id", "traceId"]) ||
+      mapped.a,
+    b:
+      getStringField(caseItem, ["candidate_trace_id", "b_trace_id", "trace_id_b"]) ||
+      getStringField(after, ["trace_id", "traceId"]) ||
+      mapped.b,
+  };
 }
 
 function formatPercent(value: number) {
@@ -1170,15 +1343,30 @@ function AbMetricChart({ metrics }: { metrics: AbMetricRow[] }) {
 }
 
 function AbReportPanel({
+  summary,
   rows,
+  rowsError,
+  rowsLoading,
+  totalSize,
+  isFallback,
   selectedCaseId,
   onSelectCase,
+  onReloadRows,
 }: {
+  summary?: AbSummaryReport;
   rows: AbCaseRow[];
+  rowsError?: string;
+  rowsLoading?: boolean;
+  totalSize?: number;
+  isFallback?: boolean;
   selectedCaseId: string;
   onSelectCase: (caseId: string) => void;
+  onReloadRows: () => void;
 }) {
   const { t } = useTranslation();
+  const metrics = useMemo(() => toAbMetricRows(summary, t), [summary, t]);
+  const abtestId = summary?.id || "abtest_20260507_112323_3dec8237";
+  const verdict = summary?.verdict || "inconclusive";
   const columns: ColumnsType<AbCaseRow> = [
     {
       title: "Case",
@@ -1236,12 +1424,12 @@ function AbReportPanel({
           <Text>{t("selfEvolutionRun.observation.abStageTitle")}</Text>
           <Text>{t("selfEvolutionRun.observation.abMetricDesc")}</Text>
         </div>
-        <Tag color="orange">inconclusive</Tag>
+        <Tag color={getAbtestVerdictColor(verdict)}>{verdict}</Tag>
       </div>
       <div className="self-evolution-abtest-report-id">
-        <strong>abtest_20260507_112323_3dec8237</strong>
+        <strong>{abtestId}</strong>
       </div>
-      <AbMetricChart metrics={getFallbackAbMetricRows(t)} />
+      <AbMetricChart metrics={metrics} />
       <div className="self-evolution-abtest-metric-table" aria-label={t("selfEvolutionRun.observation.abMetricTableAria")}>
         <div className="self-evolution-abtest-table-row is-head">
           <span>{t("selfEvolutionRun.observation.abMetricColMetric")}</span>
@@ -1251,7 +1439,7 @@ function AbReportPanel({
           <span>{t("selfEvolutionRun.observation.abMetricColWinRate")}</span>
           <span>sign p</span>
         </div>
-        {getFallbackAbMetricRows(t).map((metric) => (
+        {metrics.map((metric) => (
           <div key={metric.key} className="self-evolution-abtest-table-row">
             <span>{metric.label}</span>
             <span>{formatPercent(metric.meanA)}</span>
@@ -1265,21 +1453,35 @@ function AbReportPanel({
       <div className="self-evolution-abtest-case-panel">
         <div className="self-evolution-eval-section-title">
           <Text strong>{t("selfEvolutionRun.observation.changedCaseList")}</Text>
-          <span>{t("selfEvolutionRun.observation.sampleDataNote")}</span>
+          <span>
+            {isFallback
+              ? t("selfEvolutionRun.observation.sampleDataNote")
+              : t("selfEvolutionRun.observation.abCaseDetailSource", { abtestId, total: totalSize ?? rows.length })}
+          </span>
         </div>
-        <Table<AbCaseRow>
-          className="self-evolution-abtest-case-table"
-          size="small"
-          rowKey="caseId"
-          columns={columns}
-          dataSource={rows}
-          pagination={{ pageSize: 3, size: "small", showSizeChanger: false }}
-          rowClassName={(row) => row.caseId === selectedCaseId ? "is-selected" : ""}
-          scroll={{ x: 820 }}
-          onRow={(row) => ({
-            onClick: () => onSelectCase(row.caseId),
-          })}
-        />
+        {rowsError ? (
+          <Alert
+            type="error"
+            showIcon
+            message={rowsError}
+            action={<Button size="small" onClick={onReloadRows}>{t("selfEvolutionRun.observation.retry")}</Button>}
+          />
+        ) : (
+          <Table<AbCaseRow>
+            className="self-evolution-abtest-case-table"
+            size="small"
+            rowKey="caseId"
+            columns={columns}
+            dataSource={rows}
+            loading={rowsLoading}
+            pagination={{ pageSize: 10, size: "small", showSizeChanger: false, total: totalSize ?? rows.length }}
+            rowClassName={(row) => row.caseId === selectedCaseId ? "is-selected" : ""}
+            scroll={{ x: 820 }}
+            onRow={(row) => ({
+              onClick: () => onSelectCase(row.caseId),
+            })}
+          />
+        )}
       </div>
     </section>
   );
@@ -1430,18 +1632,51 @@ function AbDiffPanel({
 function AbTraceComparePanel({
   observation,
   selectedCase,
+  abtestId,
+  loading,
+  error,
+  onRetry,
 }: {
-  observation: AbCompareObservation;
+  observation?: AbCompareObservation;
   selectedCase: AbCaseRow;
+  abtestId?: string;
+  loading?: boolean;
+  error?: string;
+  onRetry?: () => void;
 }) {
   const { t } = useTranslation();
+  const reportIdLabel = abtestId && abtestId.length > 16 ? `${abtestId.slice(0, 8)}...${abtestId.slice(-4)}` : abtestId || "abtest";
+
+  if (loading) {
+    return (
+      <section className="self-evolution-abtest-compare-card" aria-label={t("selfEvolutionRun.observation.abComparePanelAria")}>
+        <div className="self-evolution-observation-page-loading">
+          <Spin />
+          <Text>{t("selfEvolutionRun.observation.loadingAbTrace")}</Text>
+        </div>
+      </section>
+    );
+  }
+
+  if (error || !observation) {
+    return (
+      <section className="self-evolution-abtest-compare-card" aria-label={t("selfEvolutionRun.observation.abComparePanelAria")}>
+        <Empty
+          description={error || t("selfEvolutionRun.observation.emptyObservation")}
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
+        {onRetry ? <Button onClick={onRetry}>{t("selfEvolutionRun.observation.retry")}</Button> : null}
+      </section>
+    );
+  }
+
   return (
     <section className="self-evolution-abtest-compare-card" aria-label={t("selfEvolutionRun.observation.abComparePanelAria")}>
       <div className="self-evolution-abtest-compare-head">
         <Title level={3}>{t("selfEvolutionRun.observation.abComparePanelTitle", { caseId: selectedCase.caseId })}</Title>
         <div>
           <Tag>{`Query: ${selectedCase.query}`}</Tag>
-          <Tag>{`Report ID: abtest_...8237`}</Tag>
+          <Tag>{`Report ID: ${reportIdLabel}`}</Tag>
           <Tag color="orange">{t("selfEvolutionRun.observation.abStatusNeedsAnalysis")}</Tag>
         </div>
       </div>
@@ -1481,11 +1716,227 @@ function AbtestObservationDashboard({
   toggleMenu?: () => void;
 }) {
   const { t } = useTranslation();
-  const rows = useMemo(() => normalizeAbCaseRows(t, data), [data, t]);
-  const observation = useMemo(() => normalizeTraceObservation(data) || normalizeTraceObservation(traceCompareFixture), [data]);
-  const compareObservation = observation?.kind === "compare" ? observation : undefined;
+  const abSummary = useMemo(() => buildAbSummaryReports(data)[0], [data]);
+  const abtestId = useMemo(() => resolveAbtestIdFromPayload(data), [data]);
+  const [caseReloadToken, setCaseReloadToken] = useState(0);
+  const [traceReloadToken, setTraceReloadToken] = useState(0);
+  const [caseState, setCaseState] = useState<AbCaseListState>({
+    loading: false,
+    loaded: false,
+  });
+  const [traceCompareState, setTraceCompareState] = useState<AbTraceCompareState>({
+    loading: false,
+    loaded: false,
+  });
+  const [evalReportsState, setEvalReportsState] = useState<EvalReportsTraceState>({
+    loading: false,
+    loaded: false,
+  });
+  const traceIdMap = useMemo(() => buildAbCaseTraceIdMap(evalReportsState.data), [evalReportsState.data]);
+  const rows = useMemo(() => {
+    if (isFallback) {
+      return normalizeAbCaseRows(t, data, { useFallback: true });
+    }
+    if (caseState.loaded && caseState.data) {
+      return normalizeAbCaseRows(t, caseState.data);
+    }
+    const inlineRows = normalizeAbCaseRows(t, data);
+    return inlineRows.length ? inlineRows : [];
+  }, [caseState.data, caseState.loaded, data, isFallback, t]);
+  const fallbackObservation = useMemo(
+    () => normalizeTraceObservation(traceCompareFixture),
+    [],
+  );
+  const selectedCaseObservation = useMemo(() => {
+    if (isFallback) {
+      return fallbackObservation?.kind === "compare" ? fallbackObservation : undefined;
+    }
+    return normalizeTraceObservation(traceCompareState.data);
+  }, [fallbackObservation, isFallback, traceCompareState.data]);
   const [selectedCaseId, setSelectedCaseId] = useState(rows[0]?.caseId || "");
   const selectedCase = rows.find((row) => row.caseId === selectedCaseId) || rows[0];
+  const selectedCaseItem = useMemo(
+    () => (selectedCase ? findAbCaseDetailItem(caseState.data, selectedCase.caseId) : undefined),
+    [caseState.data, selectedCase],
+  );
+
+  useEffect(() => {
+    if (isFallback || !threadId) {
+      setEvalReportsState({ loading: false, loaded: false });
+      return;
+    }
+
+    const controller = new AbortController();
+    setEvalReportsState((prev) => ({ ...prev, loading: true }));
+
+    axiosInstance
+      .get(`${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/eval-reports`, {
+        signal: controller.signal,
+      })
+      .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setEvalReportsState({ loading: false, loaded: true, data: response.data });
+      })
+      .catch((error) => {
+        if (isCanceledRequest(error) || controller.signal.aborted) {
+          return;
+        }
+        setEvalReportsState({ loading: false, loaded: true, data: undefined });
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [isFallback, threadId]);
+
+  useEffect(() => {
+    if (isFallback || !threadId || !abtestId) {
+      setCaseState({ loading: false, loaded: false });
+      return;
+    }
+
+    const controller = new AbortController();
+    setCaseState((prev) => ({
+      abtestId,
+      loading: true,
+      loaded: prev.abtestId === abtestId ? prev.loaded : false,
+      data: prev.abtestId === abtestId ? prev.data : undefined,
+      error: undefined,
+    }));
+
+    createCoreAgentGeneratedApiClient()
+      .apiCoreAgentThreadsThreadIdResultsAbtestsAbtestIdCaseDetailsGet(
+        {
+          threadId,
+          abtestId,
+          pageSize: AB_CASE_DETAIL_PAGE_SIZE,
+        },
+        { signal: controller.signal },
+      )
+      .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setCaseState({
+          abtestId,
+          loading: false,
+          loaded: true,
+          data: response.data,
+          totalSize: response.data.total_size,
+        });
+      })
+      .catch((error) => {
+        if (isCanceledRequest(error) || controller.signal.aborted) {
+          return;
+        }
+        setCaseState((prev) => ({
+          ...prev,
+          abtestId,
+          loading: false,
+          loaded: true,
+          error: getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.abCaseDetailLoadFailed")),
+        }));
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [abtestId, caseReloadToken, isFallback, threadId, t]);
+
+  useEffect(() => {
+    if (isFallback) {
+      setTraceCompareState({ loading: false, loaded: false });
+      return;
+    }
+    if (!threadId || !selectedCase?.caseId) {
+      setTraceCompareState({ loading: false, loaded: false, error: t("selfEvolutionRun.observation.noTraceId") });
+      return;
+    }
+    if (evalReportsState.loading || !evalReportsState.loaded) {
+      setTraceCompareState({
+        caseId: selectedCase.caseId,
+        loading: true,
+        loaded: false,
+      });
+      return;
+    }
+
+    const { a: aTraceId, b: bTraceId } = resolveCaseTraceIds(selectedCaseItem, selectedCase.caseId, traceIdMap);
+    if (!aTraceId || !bTraceId || aTraceId === "-" || bTraceId === "-") {
+      setTraceCompareState({
+        caseId: selectedCase.caseId,
+        loading: false,
+        loaded: true,
+        error: t("selfEvolutionRun.observation.abTraceIdsMissing"),
+        aTraceId,
+        bTraceId,
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    setTraceCompareState({
+      caseId: selectedCase.caseId,
+      loading: true,
+      loaded: false,
+      data: undefined,
+      error: undefined,
+      aTraceId,
+      bTraceId,
+    });
+
+    createCoreAgentGeneratedApiClient()
+      .apiCoreAgentThreadsThreadIdResultsTracesCompareGet(
+        {
+          threadId,
+          a: aTraceId,
+          b: bTraceId,
+        },
+        { signal: controller.signal },
+      )
+      .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setTraceCompareState({
+          caseId: selectedCase.caseId,
+          loading: false,
+          loaded: true,
+          data: response.data,
+          aTraceId,
+          bTraceId,
+        });
+      })
+      .catch((error) => {
+        if (isCanceledRequest(error) || controller.signal.aborted) {
+          return;
+        }
+        setTraceCompareState({
+          caseId: selectedCase.caseId,
+          loading: false,
+          loaded: true,
+          error: getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.abTraceCompareLoadFailed")),
+          aTraceId,
+          bTraceId,
+        });
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    evalReportsState.loaded,
+    evalReportsState.loading,
+    isFallback,
+    selectedCase?.caseId,
+    selectedCaseItem,
+    threadId,
+    traceIdMap,
+    traceReloadToken,
+    t,
+  ]);
 
   useEffect(() => {
     if (!rows.some((row) => row.caseId === selectedCaseId)) {
@@ -1509,10 +1960,27 @@ function AbtestObservationDashboard({
           <Spin />
           <Text>{t("selfEvolutionRun.observation.loadingAbData")}</Text>
         </div>
-      ) : compareObservation && selectedCase ? (
+      ) : selectedCase ? (
         <div className="self-evolution-abtest-dashboard-grid">
-          <AbReportPanel rows={rows} selectedCaseId={selectedCase.caseId} onSelectCase={setSelectedCaseId} />
-          <AbTraceComparePanel observation={compareObservation} selectedCase={selectedCase} />
+          <AbReportPanel
+            summary={abSummary}
+            rows={rows}
+            rowsError={caseState.error}
+            rowsLoading={caseState.loading}
+            totalSize={caseState.totalSize}
+            isFallback={isFallback}
+            selectedCaseId={selectedCase.caseId}
+            onSelectCase={setSelectedCaseId}
+            onReloadRows={() => setCaseReloadToken((prev) => prev + 1)}
+          />
+          <AbTraceComparePanel
+            observation={selectedCaseObservation}
+            selectedCase={selectedCase}
+            abtestId={abtestId || abSummary?.id}
+            loading={!isFallback && traceCompareState.loading}
+            error={!isFallback ? traceCompareState.error : undefined}
+            onRetry={() => setTraceReloadToken((prev) => prev + 1)}
+          />
         </div>
       ) : (
         <section className="self-evolution-observation-json-card" aria-label={t("selfEvolutionRun.observation.rawAbDataAria")}>

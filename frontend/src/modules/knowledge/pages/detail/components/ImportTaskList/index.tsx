@@ -48,6 +48,10 @@ const ImportTaskList = (props: IProps) => {
   // pageTokens[i] is the token to fetch page i+1 (index 0 = first page, no token needed).
   const [pageTokens, setPageTokens] = useState<(string | undefined)[]>([undefined]);
   const pollingRef = useRef(new Polling());
+  const suspendingTaskIdsRef = useRef(new Set<string>());
+  const [suspendingTaskIds, setSuspendingTaskIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const { datasetId, onClose, onSuspendSuccess } = props;
   const hasOnlyReadPermission = useDatasetPermissionStore((state) =>
     state.hasOnlyReadPermission(),
@@ -129,13 +133,29 @@ const ImportTaskList = (props: IProps) => {
     getTableData({ currentTab: v, page: 1, tokens: freshTokens });
   };
 
-  function suspendTaskFn(cvm: any) {
+  function updateSuspendingTaskIds() {
+    setSuspendingTaskIds(new Set(suspendingTaskIdsRef.current));
+  }
+
+  function suspendTaskFn(record: any) {
+    const taskId = record?.task_id;
+    if (!taskId || suspendingTaskIdsRef.current.has(taskId)) {
+      return;
+    }
+
+    suspendingTaskIdsRef.current.add(taskId);
+    updateSuspendingTaskIds();
+
     TaskServiceApi()
-      .suspendTask(datasetId, cvm?.task_id)
+      .suspendTask(datasetId, taskId)
       .then(() => {
         message.success(t("knowledge.taskSuspendSuccess"));
         onSuspendSuccess?.();
         getTableData({ currentTab: tab });
+      })
+      .finally(() => {
+        suspendingTaskIdsRef.current.delete(taskId);
+        updateSuspendingTaskIds();
       });
   }
 
@@ -247,10 +267,17 @@ const ImportTaskList = (props: IProps) => {
       key: "action",
       width: 140,
       render: (record: any) => {
+        const isSuspending = suspendingTaskIds.has(record?.task_id);
+
         return (
           <>
             {tab === TaskTab.Running && !isOnlyRead && (
-              <a onClick={() => suspendTaskFn(record)}>{t("knowledge.suspend")}</a>
+              <a
+                className={isSuspending ? "import-task-action-disabled" : undefined}
+                onClick={() => suspendTaskFn(record)}
+              >
+                {t("knowledge.suspend")}
+              </a>
             )}
             {tab === TaskTab.Failed && !isOnlyRead && (
               <a

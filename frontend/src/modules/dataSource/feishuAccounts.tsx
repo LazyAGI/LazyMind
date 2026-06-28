@@ -718,13 +718,25 @@ export default function FeishuAccountPage() {
     updateFeishuConnection(connectionId, {
       chat_enabled: checked,
       chatEnabled: checked,
-    }).catch((error: any) => {
-      persistAccounts(previousAccounts);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-          t("common.requestFailed"),
-      );
-    });
+    })
+      .then(() => {
+        message.success(
+          checked
+            ? t("admin.dataSourceFeishuAccountChatEnabledSuccess", {
+                name: account.name,
+              })
+            : t("admin.dataSourceFeishuAccountChatDisabledSuccess", {
+                name: account.name,
+              }),
+        );
+      })
+      .catch((error: any) => {
+        persistAccounts(previousAccounts);
+        message.error(
+          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+            t("common.requestFailed"),
+        );
+      });
   };
 
   const handleSubmitManualOauthCallback = async () => {

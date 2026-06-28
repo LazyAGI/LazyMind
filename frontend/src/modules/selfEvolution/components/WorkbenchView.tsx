@@ -72,6 +72,7 @@ export type SelfEvolutionWorkbenchViewProps = {
   isSendingMessage: boolean;
   displayedCheckpointWaitPrompt?: CheckpointWaitPrompt;
   prompt: string;
+  selectedViewStage?: string;
   isHistorySessionModalOpen: boolean;
   threadHistoryListError: string;
   isLoadingThreadHistoryList: boolean;
@@ -103,7 +104,7 @@ export type SelfEvolutionWorkbenchViewProps = {
   onContinueCheckpoint: (command?: string) => void;
   onOpenArtifact: (kind: WorkflowResultKind) => void;
   onOpenObservation: (kind: SelfEvolutionObservationKind) => void;
-  onOpenCaseArtifact: (kind: WorkflowResultKind, artifactId: string, title: string) => void;
+  onOpenCaseArtifact: (kind: WorkflowResultKind, artifactId: string, title: string, caseId?: string) => void;
   onWorkbenchTabChange: (tab?: SelfEvolutionWorkbenchTab) => void;
   onCloseArtifactPanel: () => void;
   onCloseHistorySessionModal: () => void;
@@ -136,6 +137,7 @@ export function SelfEvolutionWorkbenchView({
   isSendingMessage,
   displayedCheckpointWaitPrompt,
   prompt,
+  selectedViewStage,
   isHistorySessionModalOpen,
   threadHistoryListError,
   isLoadingThreadHistoryList,
@@ -175,7 +177,6 @@ export function SelfEvolutionWorkbenchView({
   const { t } = useTranslation();
   const [isEndedChatOpen, setIsEndedChatOpen] = useState(false);
   const [isInteractionChatOpen, setIsInteractionChatOpen] = useState(false);
-  const [selectedStage, setSelectedStage] = useState<string>();
   const [caseProgressPageByStage, setCaseProgressPageByStage] = useState<Record<string, number>>({});
 
   const activeStageTitles: Record<string, string> = {
@@ -186,7 +187,7 @@ export function SelfEvolutionWorkbenchView({
     abtest: t("selfEvolutionRun.stageTitle.abtest"),
   };
 
-  const displayStage = selectedStage || processDashboard.activeStage;
+  const displayStage = selectedViewStage || processDashboard.activeStage;
   const activeStageOverview = displayStage ? processDashboard.overview.find((item) => item.stage === displayStage) : undefined;
   const activeStageLabel =
     displayStage
@@ -250,9 +251,6 @@ export function SelfEvolutionWorkbenchView({
     setIsInteractionChatOpen(false);
     setIsEndedChatOpen(false);
   }, [activeSession.id]);
-  useEffect(() => {
-    setSelectedStage(undefined);
-  }, [activeSession.id]);
   const handleActivityListWheel = (event: WheelEvent<HTMLDivElement>) => {
     const maxScrollTop = event.currentTarget.scrollHeight - event.currentTarget.clientHeight;
     if (maxScrollTop <= 0 || event.deltaY === 0) return;
@@ -269,6 +267,8 @@ export function SelfEvolutionWorkbenchView({
   const selectedStageActivities = displayStage ? processDashboard.recentActivities.filter((item) => item.stage === displayStage).slice(0, 16) : visibleKeyActivities;
   const activeCaseProgressGroup = processDashboard.caseProgressGroups.find((group) => group.stage === displayStage);
   const isReadOnlyEnded = Boolean(!checkpointDecisionPrompt && processDashboard.overview.every((item) => item.step.status === "done"));
+  const shouldShowFinalResultCard = isReadOnlyEnded && !selectedViewStage;
+  const shouldShowStageDetail = !isReadOnlyEnded || Boolean(selectedViewStage);
   const renderFinalResultCard = () => finalResultSummary ? (
     <section className={`self-evolution-final-result is-${finalResultSummary.verdict}`} aria-label={t("selfEvolutionRun.finalResultAria")}>
       <div className="self-evolution-final-result-main">
@@ -398,7 +398,7 @@ export function SelfEvolutionWorkbenchView({
         onClick={(event) => {
           event.stopPropagation();
           if (item.artifactId) {
-            onOpenCaseArtifact(item.artifactKind, item.artifactId, `${item.title} · ${item.artifactLabel}`);
+            onOpenCaseArtifact(item.artifactKind, item.artifactId, `${item.title} · ${item.artifactLabel}`, item.caseId);
           }
         }}
       >
@@ -623,7 +623,7 @@ export function SelfEvolutionWorkbenchView({
               <div className="self-evolution-process-board" aria-label={t("selfEvolutionRun.evoFlowProgressAria")}>
                 <div className="self-evolution-process-live">
                   <div className="self-evolution-process-live-main">
-                    <Text className="self-evolution-process-live-kicker">{selectedStage ? t("selfEvolutionRun.viewingStage") : t("selfEvolutionRun.currentStage")}</Text>
+                    <Text className="self-evolution-process-live-kicker">{selectedViewStage ? t("selfEvolutionRun.viewingStage") : t("selfEvolutionRun.currentStage")}</Text>
                     <div className="self-evolution-process-live-title">
                       <Title level={4}>{activeStageLabel}</Title>
                       <span className={`self-evolution-process-live-status is-${activeStageStatusKey}`}>
@@ -749,9 +749,9 @@ export function SelfEvolutionWorkbenchView({
                   </div>
                 )}
 
-                {isReadOnlyEnded && renderFinalResultCard()}
+                {shouldShowFinalResultCard && renderFinalResultCard()}
 
-                {!isReadOnlyEnded && (
+                {shouldShowStageDetail && (
                   <div className="self-evolution-process-activity">
                     <div className="self-evolution-process-activity-head">
                       <Text>{activeCaseProgressGroup ? t("selfEvolutionRun.caseProgressSectionTitle") : t("selfEvolutionRun.keyEventsSectionTitle")}</Text>

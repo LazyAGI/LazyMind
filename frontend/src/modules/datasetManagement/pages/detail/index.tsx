@@ -477,6 +477,12 @@ function removeReferenceContextPart(raw: string | undefined, partIndex: number) 
   });
 }
 
+function removeReferenceContextChunks(raw: string | undefined) {
+  return serializeReferenceContextValue({
+    parts: referenceContextEditorValue(raw).parts.filter((part) => part.type !== "chunk"),
+  });
+}
+
 function renderReferenceContextParts(
   raw: string | undefined,
   placeholder: string,
@@ -1685,11 +1691,15 @@ export default function DatasetDetailPage() {
     setDirtyItemIds((current) => current.filter((id) => id !== item.id));
   };
 
-  const handleSaveItem = async (itemId: string, values: DatasetItemFormValues) => {
+  const handleSaveItem = async (
+    itemId: string,
+    values: DatasetItemFormValues,
+    successMessage?: string,
+  ) => {
     const validationErrors = validateRequiredDatasetItem(values, requiredItemMessages);
     if (validationErrors.length > 0) {
       message.warning(validationErrors[0]);
-      return;
+      return false;
     }
     setSaving(true);
     try {
@@ -1705,7 +1715,7 @@ export default function DatasetDetailPage() {
           itemId,
           currentItem ? mergeHiddenItemFields(currentItem, values) : values,
         );
-        message.success(t("datasetManagement.detail.sampleSaved"));
+        message.success(successMessage || t("datasetManagement.detail.sampleSaved"));
       }
       if (activeCell?.itemId === itemId) {
         setActiveCell(null);
@@ -1713,8 +1723,10 @@ export default function DatasetDetailPage() {
       clearItemRuntimeState(itemId);
       setDirtyItemIds((current) => current.filter((id) => id !== itemId));
       await loadDetail();
+      return true;
     } catch (error: any) {
       message.error(error?.message || t("datasetManagement.detail.saveFailed"));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -1754,6 +1766,50 @@ export default function DatasetDetailPage() {
       return;
     }
     await handleSaveItem(item.id, draft);
+  };
+
+  const handleClearInvalidReferenceDoc = async (item: DatasetItem) => {
+    const currentDraft = drafts[item.id] || createItemDraft(item);
+    const referenceContext =
+      referenceContextEditingValueRef.current[item.id] ??
+      currentDraft.reference_context ??
+      "";
+    const nextValues: DatasetItemFormValues = {
+      ...currentDraft,
+      reference_doc: "",
+      reference_doc_ids: "",
+      reference_context: referenceContext,
+      reference_chunk_ids: referenceContextChunkIDs(referenceContext).join(", "),
+    };
+
+    clearReferenceDocumentRuntimeState(item.id);
+    await handleSaveItem(
+      item.id,
+      nextValues,
+      t("datasetManagement.detail.reference.invalidDocCleared"),
+    );
+  };
+
+  const handleClearInvalidReferenceContext = async (item: DatasetItem) => {
+    const currentDraft = drafts[item.id] || createItemDraft(item);
+    const referenceContext =
+      referenceContextEditingValueRef.current[item.id] ??
+      currentDraft.reference_context ??
+      "";
+    const nextReferenceContext = removeReferenceContextChunks(referenceContext);
+    const nextValues: DatasetItemFormValues = {
+      ...currentDraft,
+      reference_context: nextReferenceContext,
+      reference_chunk_ids: "",
+    };
+
+    referenceContextEditingValueRef.current[item.id] = nextReferenceContext;
+    referenceContextEditingDirtyRef.current[item.id] = true;
+    await handleSaveItem(
+      item.id,
+      nextValues,
+      t("datasetManagement.detail.reference.invalidContextCleared"),
+    );
   };
 
   const handleDeleteItem = (item: DatasetItem) => {
@@ -1842,8 +1898,22 @@ export default function DatasetDetailPage() {
         : draft?.[field] || "";
     const shouldShowReferenceChunkSelector =
       field === "reference_context" && canSelectReferenceChunks(record);
+    const shouldShowInvalidReferenceDocClear =
+      field === "reference_doc" &&
+      record.id !== NEW_ITEM_ID &&
+      Boolean(record.reference_doc_invalid);
+    const shouldShowInvalidReferenceContextClear =
+      field === "reference_context" &&
+      record.id !== NEW_ITEM_ID &&
+      Boolean(record.reference_chunk_invalid);
     return (
-      <div className="dataset-inline-display-wrapper">
+      <div
+        className={`dataset-inline-display-wrapper${
+          shouldShowInvalidReferenceDocClear || shouldShowInvalidReferenceContextClear
+            ? " is-reference-invalid"
+            : ""
+        }`}
+      >
         <button
           type="button"
           className={`dataset-inline-display${field === "reference_context" ? " dataset-reference-context-display" : ""}`}
@@ -1884,6 +1954,48 @@ export default function DatasetDetailPage() {
             {hasSelectedReferenceChunks(record)
               ? t("datasetManagement.detail.reference.selectedChunks")
               : t("datasetManagement.detail.reference.selectChunks")}
+          </Button>
+        ) : null}
+        {shouldShowInvalidReferenceDocClear ? (
+          <Button
+            size="small"
+            type="link"
+            danger
+            disabled={saving}
+            className="dataset-reference-invalid-clear"
+            title={t("datasetManagement.detail.reference.invalidDocHint")}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void handleClearInvalidReferenceDoc(record);
+            }}
+          >
+            {t("datasetManagement.detail.reference.clearInvalidDoc")}
+          </Button>
+        ) : null}
+        {shouldShowInvalidReferenceContextClear ? (
+          <Button
+            size="small"
+            type="link"
+            danger
+            disabled={saving}
+            className="dataset-reference-invalid-clear"
+            title={t("datasetManagement.detail.reference.invalidContextHint")}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void handleClearInvalidReferenceContext(record);
+            }}
+          >
+            {t("datasetManagement.detail.reference.clearInvalidContext")}
           </Button>
         ) : null}
       </div>
