@@ -200,3 +200,13 @@ export function buildChatMessageListFromHistory(
 
   return list;
 }
+
+/** Prefer the longer list when switching back to a conversation with an active stream. */
+export function mergeChatMessageLists(apiList: any[] = [], cachedList?: any[] | null) {
+  const api = Array.isArray(apiList) ? apiList : [];
+  const cached = Array.isArray(cachedList) ? cachedList : [];
+  if (cached.length > api.length) {
+    return cached;
+  }
+  return api;
+}

@@ -28,7 +28,6 @@ import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
-  CHAT_AUTO_ADVANCE_EVENT,
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
@@ -450,19 +449,32 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const loadConversation = useCallback((conversationId: string) => {
     setIsRestoringConversation(true);
     ChatServiceApi()
-      .conversationServiceGetConversationDetail({
-        conversation: conversationId,
-      })
-      .then((detailRes) =>
+      .conversationServiceGetChatStatus({ conversationId })
+      .then((res) => ({
+        resolvedId: conversationId,
+        isGenerating: !!res.data?.is_generating,
+      }))
+      .catch(() => ({ resolvedId: conversationId, isGenerating: false }))
+      .then(({ resolvedId, isGenerating }) =>
         ChatServiceApi()
-          .conversationServiceGetConversationHistory({
-            name: conversationId,
+          .conversationServiceGetConversationDetail({
+            conversation: resolvedId,
           })
-          .then((historyRes) => ({ detailRes, historyRes })),
+          .then((detailRes) =>
+            ChatServiceApi()
+              .conversationServiceGetConversationHistory({
+                name: resolvedId,
+              })
+              .then((historyRes) => ({
+                detailRes,
+                historyRes,
+                resolvedId,
+                isGenerating,
+              })),
+          ),
       )
-      .then(({ detailRes, historyRes }) => {
+      .then(({ detailRes, historyRes, resolvedId, isGenerating }) => {
         const conversation = detailRes.data.conversation;
-        const resolvedId = conversation?.conversation_id || conversationId;
         const tempData = {
           knowledgeBaseId: conversation?.search_config?.dataset_list
             ?.map((dataset: any) => dataset.id)
@@ -484,8 +496,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         const history = historyRes.data.history;
         const list = buildChatMessageListFromHistory(history, {
           fallbackCreateTime: "xxx-xxx-xxx",
+          isGenerating,
         });
         chatRef.current?.replaceMessageList(resolvedId, list);
+        if (isGenerating) {
+          chatRef.current?.openResumeSSE?.(resolvedId);
+        }
       })
       .finally(() => {
         setIsRestoringConversation(false);
@@ -527,19 +543,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       );
     };
   }, [sessionId, setIsChatContent, loadConversation]);
-
-  // Auto-advance: when driver agent triggers a new chat turn, open resume SSE.
-  useEffect(() => {
-    const handleAutoAdvance = (event: Event) => {
-      const { conversationId } = (event as CustomEvent<{ conversationId: string }>).detail || {};
-      if (!conversationId || conversationId !== sessionId) return;
-      chatRef.current?.openResumeSSE?.(conversationId);
-    };
-    window.addEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
-    return () => {
-      window.removeEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
-    };
-  }, [sessionId]);
 
   function parseErrorData(data: string) {
     const dataObject = UIUtils.jsonParser(data) || {};

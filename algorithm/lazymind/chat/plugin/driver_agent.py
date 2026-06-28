@@ -31,6 +31,7 @@ _THINK_BLOCK_RE = re.compile(
 class DriverEvaluationError(Exception):
     """Raised when DriverAgent cannot produce a usable assessment for auto-mode advance."""
 
+
 _DEFAULT_DRIVER_PROMPT = (
     'You are a quality evaluator for a plugin workflow step.\n\n'
     'Your task: assess whether the step result is complete and acceptable.\n\n'

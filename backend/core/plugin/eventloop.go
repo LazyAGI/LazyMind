@@ -392,6 +392,7 @@ func advanceAutoMode(
 					onSSE("auto_chat_started", map[string]any{
 						"session_id":      pctxCopy.SessionID,
 						"conversation_id": pctxCopy.ConvID,
+						"driver_message":  summary,
 					})
 				})
 			checkAndFallbackIfStuck(ctx, db, stateStore, onSSE, &pctxCopy)
@@ -450,6 +451,7 @@ func advanceAutoMode(
 				onSSE("auto_chat_started", map[string]any{
 					"session_id":      pctxCopy.SessionID,
 					"conversation_id": pctxCopy.ConvID,
+					"driver_message":  driverMsg,
 				})
 			})
 		checkAndFallbackIfStuck(ctx, db, stateStore, onSSE, &pctxCopy)
@@ -533,6 +535,13 @@ func checkAndFallbackIfStuck(
 	}
 	if session.Status != SessionStatusActive {
 		// Session was already advanced or completed — nothing to do.
+		return
+	}
+	// A plugin_step SubAgent may still be running (advance_step succeeded); keep session active.
+	var runningCount int64
+	if err := db.WithContext(ctx).Model(&orm.PluginSessionStep{}).
+		Where("session_id = ? AND status = ?", pctx.SessionID, StepStatusRunning).
+		Count(&runningCount).Error; err == nil && runningCount > 0 {
 		return
 	}
 	// Session is still active but no SubAgent is running: ChatAgent did not push a new step.

@@ -38,7 +38,8 @@ def loaded_plugin(tmp_path):
     # <think> block removed
     ('<think>Some internal reasoning.</think>No artifact found.', 'No artifact'),
     # think block removed (mismatched close tag variant)
-    (chr(60) + 'think' + chr(62) + 'Some internal reasoning.' + chr(60) + '/think' + chr(62) + 'Prompt saved.', 'Prompt saved'),
+    (chr(60) + 'think' + chr(62) + 'Some internal reasoning.' + chr(
+        60) + '/think' + chr(62) + 'Prompt saved.', 'Prompt saved'),
     # Stray XML tags removed
     ('<foo>bar</foo>Prompt saved.', 'Prompt saved'),
     # Truncate at second sentence

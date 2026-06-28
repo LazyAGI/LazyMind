@@ -671,6 +671,9 @@ export function PluginPanel({
 }: PluginPanelProps) {
   const { t } = useTranslation();
   const { session, loading, refresh } = usePluginSession(conversationId);
+  const autoRunning = usePluginStore((s) =>
+    conversationId ? (s.autoRunningByConversation[conversationId] ?? false) : false,
+  );
   const [activeTabIdx, setActiveTabIdx] = React.useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const fetchPluginUI = usePluginStore((s) => s.fetchPluginUI);
@@ -742,9 +745,10 @@ export function PluginPanel({
     session.status === 'waiting' ||
     session.status === 'active' ||
     session.status === 'completed';
-  const buttonsDisabled = session.status === 'active' || anySlotEditing;
+  const displayStatus = autoRunning ? 'active' : session.status;
+  const buttonsDisabled = displayStatus === 'active' || anySlotEditing || autoRunning;
   // "继续" is only shown in waiting/active; completed shows rollback step picker instead.
-  const showContinue = session.status === 'waiting' || session.status === 'active';
+  const showContinue = displayStatus === 'waiting' || displayStatus === 'active';
 
   function handleContinue() {
     if (buttonsDisabled) return;
@@ -764,7 +768,7 @@ export function PluginPanel({
   return (
     <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange }}>
     <div
-      className={`plugin-panel plugin-panel--${session.status}${collapsed ? ' plugin-panel--collapsed' : ''}`}
+      className={`plugin-panel plugin-panel--${displayStatus}${collapsed ? ' plugin-panel--collapsed' : ''}`}
       data-session-id={session.session_id}
       aria-label='Plugin Panel'
     >
@@ -773,10 +777,10 @@ export function PluginPanel({
         <div className='plugin-panel__header-left'>
           <span className='plugin-panel__title'>{session.plugin_id}</span>
           <span
-            className={`plugin-panel__status plugin-panel__status--${session.status}`}
-            aria-label={`Status: ${t(STATUS_KEY[session.status] ?? session.status)}`}
+            className={`plugin-panel__status plugin-panel__status--${displayStatus}`}
+            aria-label={`Status: ${t(STATUS_KEY[displayStatus] ?? displayStatus)}`}
           >
-            {t(STATUS_KEY[session.status] ?? session.status)}
+            {t(STATUS_KEY[displayStatus] ?? displayStatus)}
           </span>
         </div>
         <div className='plugin-panel__header-right'>

@@ -44,9 +44,11 @@ func onTerminalStatus(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 		return
 	}
 	// Build an onSSE that pushes events to the conversation-level events channel.
+	// Use a detached context: ctx originates from the SubAgent Run loop and is
+	// cancelled as soon as Run returns, before advanceAutoMode emits driver events.
 	onSSE := func(eventType string, payload map[string]any) {
 		if subagent.EventHooks != nil {
-			subagent.EventHooks.CallConversationEvent(ctx, stateStore, pctx.ConvID, "", eventType, payload)
+			subagent.EventHooks.CallConversationEvent(context.Background(), stateStore, pctx.ConvID, "", eventType, payload)
 		}
 	}
 	OnSubAgentDone(ctx, db, stateStore, taskID, status, message, onSSE, pctx)

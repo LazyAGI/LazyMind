@@ -239,6 +239,78 @@ func TestCallDriverAgent_DefaultsToFallbackOnEmptyMessage(t *testing.T) {
 	}
 }
 
+func TestCheckAndFallbackIfStuck_SkipsWhenSubAgentRunning(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "ps-stuck-1", ConversationID: "conv-stuck-1", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := UpdateSessionStatus(ctx, db.DB, "ps-stuck-1", SessionStatusActive); err != nil {
+		t.Fatalf("UpdateSessionStatus: %v", err)
+	}
+	if _, err := CreateSessionStep(ctx, db.DB, "ps-stuck-1", "generate_image", "task-stuck-1", 1); err != nil {
+		t.Fatalf("CreateSessionStep: %v", err)
+	}
+	if err := UpdateStepStatus(ctx, db.DB, "task-stuck-1", StepStatusRunning); err != nil {
+		t.Fatalf("UpdateStepStatus: %v", err)
+	}
+
+	checkAndFallbackIfStuck(ctx, db.DB, nil, func(string, map[string]any) {}, &PluginChatContext{
+		SessionID: "ps-stuck-1",
+		StepID:    "optimize_prompt",
+	})
+
+	s, err := GetSession(ctx, db.DB, "ps-stuck-1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if s.Status != SessionStatusActive {
+		t.Fatalf("expected active while subagent running, got %q", s.Status)
+	}
+}
+
+func TestCheckAndFallbackIfStuck_DemotesWhenIdle(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "ps-stuck-2", ConversationID: "conv-stuck-2", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := UpdateSessionStatus(ctx, db.DB, "ps-stuck-2", SessionStatusActive); err != nil {
+		t.Fatalf("UpdateSessionStatus: %v", err)
+	}
+	if _, err := CreateSessionStep(ctx, db.DB, "ps-stuck-2", "optimize_prompt", "task-stuck-2", 1); err != nil {
+		t.Fatalf("CreateSessionStep: %v", err)
+	}
+	if err := UpdateStepStatus(ctx, db.DB, "task-stuck-2", StepStatusSucceeded); err != nil {
+		t.Fatalf("UpdateStepStatus: %v", err)
+	}
+
+	var gotEvent string
+	checkAndFallbackIfStuck(ctx, db.DB, nil, func(eventType string, _ map[string]any) {
+		gotEvent = eventType
+	}, &PluginChatContext{
+		SessionID: "ps-stuck-2",
+		StepID:    "optimize_prompt",
+	})
+
+	s, err := GetSession(ctx, db.DB, "ps-stuck-2")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if s.Status != SessionStatusWaiting {
+		t.Fatalf("expected waiting when idle, got %q", s.Status)
+	}
+	if gotEvent != "step_waiting" {
+		t.Fatalf("expected step_waiting event, got %q", gotEvent)
+	}
+}
+
 // ──────────────────────────────────────────────
 // resolveSlotBinding — mock Python API
 // ──────────────────────────────────────────────
