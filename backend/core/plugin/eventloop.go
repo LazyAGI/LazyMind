@@ -346,7 +346,9 @@ func OnSubAgentDone(
 	}
 
 	if mode == "auto" {
-		go advanceAutoMode(ctx, db, stateStore, summary, onSSE, pctx)
+		// Use a detached context: ctx originates from the SubAgent Run loop and is
+		// cancelled as soon as Run returns, before this goroutine loads LLM config.
+		go advanceAutoMode(context.Background(), db, stateStore, summary, onSSE, pctx)
 	} else {
 		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
 		onSSE("step_waiting", map[string]any{
@@ -401,7 +403,13 @@ func advanceAutoMode(
 	if db != nil {
 		if cfg, err := loadDriverLLMConfig(ctx, db, pctx.UserID); err == nil {
 			llmCfg = cfg
+		} else {
+			fmt.Printf("[Plugin] loadDriverLLMConfig failed user=%s err=%v\n", pctx.UserID, err)
 		}
+	}
+	if len(llmCfg) == 0 {
+		fmt.Printf("[Plugin] driver LLM config empty for user=%s session=%s step=%s\n",
+			pctx.UserID, pctx.SessionID, pctx.StepID)
 	}
 
 	// Build plugin artifacts summary for DriverAgent evaluation.
@@ -798,7 +806,7 @@ func callDriverAgent(
 			return "", true
 		}
 		if strings.TrimSpace(result.Message) == "" {
-			return fmt.Sprintf("Step %q completed.", stepID), false
+			return "", true
 		}
 		return result.Message, false
 	}

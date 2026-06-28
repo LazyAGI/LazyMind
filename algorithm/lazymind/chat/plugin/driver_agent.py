@@ -14,9 +14,22 @@ import re
 from typing import Any, Dict, List, Optional
 
 import lazyllm
-from lazyllm import LOG
+from lazyllm import AutoModel, LOG
 
 from lazymind.chat.plugin import plugin_loader
+from lazymind.model_config import inject_model_config
+
+# Matches thinking blocks emitted by reasoning models (open/close tag variants).
+_LT, _GT = chr(60), chr(62)
+_THINK_BLOCK_RE = re.compile(
+    rf'{_LT}(?:redacted_thinking|think){_GT}.*?'
+    rf'(?:{_LT}/(?:redacted_thinking|think)\s*{_GT}|{_LT}/think{_GT})',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+class DriverEvaluationError(Exception):
+    """Raised when DriverAgent cannot produce a usable assessment for auto-mode advance."""
 
 _DEFAULT_DRIVER_PROMPT = (
     'You are a quality evaluator for a plugin workflow step.\n\n'
@@ -41,7 +54,8 @@ _DEFAULT_DRIVER_PROMPT = (
 # Appended after the plugin-supplied or default prompt to enforce concise output.
 _OUTPUT_CONSTRAINT = (
     '\n\n## Output format constraint (MANDATORY)\n\n'
-    'Your entire response must be 1-2 plain sentences (max 60 words).\n'
+    'Your entire response is injected verbatim as the next simulated user message in the chat.\n'
+    'Write 1-2 plain sentences only (max 60 words).\n'
     'No verdict codes (PASS/RETRY/DONE/FAIL), no tags, no preamble, no thinking.\n'
     'Just describe what happened and, if something is wrong, why.'
 )
@@ -53,15 +67,18 @@ def _build_driver_prompt(plugin_id: str) -> str:
     return base + _OUTPUT_CONSTRAINT
 
 
+def _init_driver_sid(session_id: Optional[str], plugin_id: str, step_id: str) -> str:
+    """Isolate DriverAgent globals per evaluation request."""
+    sid = session_id or f'driver_{plugin_id}_{step_id}'
+    lazyllm.globals._init_sid(sid=sid)
+    lazyllm.locals._init_sid(sid=sid)
+    return sid
+
+
 def _build_llm(llm_config: Optional[Dict[str, Any]]) -> Any:
-    """Build an LLM instance from the provided config, or fall back to the default model."""
-    if llm_config and isinstance(llm_config, dict):
-        try:
-            # lazyllm supports dict-based LLM construction for API-backed models.
-            return lazyllm.AutoModel(model='llm', llm_config=llm_config)
-        except Exception:
-            pass
-    return lazyllm.AutoModel(model='llm')
+    """Build an LLM instance after injecting per-request model config (same as ChatAgent/SubAgent)."""
+    inject_model_config(llm_config)
+    return AutoModel(model='llm')
 
 
 def evaluate_step(
@@ -88,12 +105,15 @@ def evaluate_step(
 
     Returns:
         dict with key: message (str) — a concise natural-language assessment.
+
+    Raises:
+        DriverEvaluationError: when the plugin is missing or the LLM cannot produce output.
     """
     import os as _os
 
     spec = plugin_loader.get_plugin(plugin_id)
     if spec is None:
-        return {'message': f'Plugin {plugin_id!r} not found; cannot evaluate step.'}
+        raise DriverEvaluationError(f'Plugin {plugin_id!r} not found; cannot evaluate step.')
 
     step_config = spec.get_step_config(step_id)
     acceptance = step_config.get('acceptance_criteria', '')
@@ -126,6 +146,7 @@ def evaluate_step(
         pass
 
     try:
+        _init_driver_sid(session_id, plugin_id, step_id)
         llm = _build_llm(llm_config)
         if tools:
             response = llm(user_msg, system_prompt=driver_prompt, tools=tools)
@@ -134,16 +155,21 @@ def evaluate_step(
         cleaned = _clean_message(str(response or ''))
         if cleaned:
             return {'message': cleaned}
-        return {'message': f"Step '{step_id}' completed (evaluation unavailable)."}
+        raise DriverEvaluationError(
+            f'DriverAgent returned empty assessment for plugin={plugin_id!r} step={step_id!r}.',
+        )
+    except DriverEvaluationError:
+        raise
     except Exception as exc:
         LOG.warning('[DriverAgent] LLM call failed for plugin=%s step=%s: %s', plugin_id, step_id, exc)
-        return {'message': f"Step '{step_id}' completed (evaluation unavailable)."}
+        raise DriverEvaluationError(
+            f'DriverAgent LLM call failed for plugin={plugin_id!r} step={step_id!r}: {exc}',
+        ) from exc
 
 
 def _clean_message(text: str) -> str:
     """Strip thinking tokens, tags, and excess whitespace from the LLM output."""
-    # Remove <think>...</think> blocks
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = _THINK_BLOCK_RE.sub('', text)
     # Remove any stray XML-style tags
     text = re.sub(r'<[^>]+>', '', text)
     text = text.strip()

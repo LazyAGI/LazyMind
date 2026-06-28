@@ -37,6 +37,8 @@ def loaded_plugin(tmp_path):
     ('  optimized_prompt saved.  ', 'optimized_prompt'),
     # <think> block removed
     ('<think>Some internal reasoning.</think>No artifact found.', 'No artifact'),
+    # think block removed (mismatched close tag variant)
+    (chr(60) + 'think' + chr(62) + 'Some internal reasoning.' + chr(60) + '/think' + chr(62) + 'Prompt saved.', 'Prompt saved'),
     # Stray XML tags removed
     ('<foo>bar</foo>Prompt saved.', 'Prompt saved'),
     # Truncate at second sentence
@@ -65,8 +67,8 @@ def test_evaluate_step_returns_message(loaded_plugin):
     mock_llm = MagicMock()
     mock_llm.return_value = 'subject_analysis artifact saved with 80 words.'
 
-    with patch('lazymind.chat.plugin.driver_agent.lazyllm') as mock_lazyllm:
-        mock_lazyllm.AutoModel.return_value = mock_llm
+    with patch('lazymind.chat.plugin.driver_agent.inject_model_config'), \
+         patch('lazymind.chat.plugin.driver_agent.AutoModel', return_value=mock_llm):
         result = driver_agent.evaluate_step(
             plugin_id='test-plugin',
             step_id='step_a',
@@ -83,8 +85,8 @@ def test_evaluate_step_pipeline_complete_message(loaded_plugin):
     mock_llm = MagicMock()
     mock_llm.return_value = 'enhanced_image_url saved. The pipeline is complete.'
 
-    with patch('lazymind.chat.plugin.driver_agent.lazyllm') as mock_lazyllm:
-        mock_lazyllm.AutoModel.return_value = mock_llm
+    with patch('lazymind.chat.plugin.driver_agent.inject_model_config'), \
+         patch('lazymind.chat.plugin.driver_agent.AutoModel', return_value=mock_llm):
         result = driver_agent.evaluate_step(
             plugin_id='test-plugin',
             step_id='step_d',
@@ -101,8 +103,8 @@ def test_evaluate_step_incomplete_message(loaded_plugin):
     mock_llm = MagicMock()
     mock_llm.return_value = 'No artifact found; prompt generation may have failed.'
 
-    with patch('lazymind.chat.plugin.driver_agent.lazyllm') as mock_lazyllm:
-        mock_lazyllm.AutoModel.return_value = mock_llm
+    with patch('lazymind.chat.plugin.driver_agent.inject_model_config'), \
+         patch('lazymind.chat.plugin.driver_agent.AutoModel', return_value=mock_llm):
         result = driver_agent.evaluate_step(
             plugin_id='test-plugin',
             step_id='step_b',
@@ -119,50 +121,46 @@ def test_evaluate_step_incomplete_message(loaded_plugin):
 
 def test_evaluate_step_unknown_plugin():
     from lazymind.chat.plugin import driver_agent
-    result = driver_agent.evaluate_step(
-        plugin_id='no-such-plugin',
-        step_id='step_a',
-        step_result='anything',
-    )
-    assert 'message' in result
-    assert 'not found' in result['message'].lower() or 'no-such-plugin' in result['message']
 
-
-# ---------------------------------------------------------------------------
-# evaluate_step — LLM call raises → fallback message
-# ---------------------------------------------------------------------------
-
-def test_evaluate_step_llm_error_returns_fallback(loaded_plugin):
-    from lazymind.chat.plugin import driver_agent
-
-    with patch('lazymind.chat.plugin.driver_agent.lazyllm') as mock_lazyllm:
-        mock_lazyllm.AutoModel.side_effect = RuntimeError('model unavailable')
-        result = driver_agent.evaluate_step(
-            plugin_id='test-plugin',
-            step_id='step_c',
-            step_result='Image generated.',
+    with pytest.raises(driver_agent.DriverEvaluationError, match='not found'):
+        driver_agent.evaluate_step(
+            plugin_id='no-such-plugin',
+            step_id='step_a',
+            step_result='anything',
         )
 
-    assert 'message' in result
-    assert result['message']  # non-empty fallback
+
+# ---------------------------------------------------------------------------
+# evaluate_step — LLM failure → raise (Go auto-mode falls back to user)
+# ---------------------------------------------------------------------------
+
+def test_evaluate_step_llm_error_raises(loaded_plugin):
+    from lazymind.chat.plugin import driver_agent
+
+    with patch('lazymind.chat.plugin.driver_agent.inject_model_config'), \
+         patch('lazymind.chat.plugin.driver_agent.AutoModel', side_effect=RuntimeError('model unavailable')):
+        with pytest.raises(driver_agent.DriverEvaluationError, match='LLM call failed'):
+            driver_agent.evaluate_step(
+                plugin_id='test-plugin',
+                step_id='step_c',
+                step_result='Image generated.',
+            )
 
 
-def test_evaluate_step_llm_returns_none_returns_fallback(loaded_plugin):
+def test_evaluate_step_llm_returns_none_raises(loaded_plugin):
     from lazymind.chat.plugin import driver_agent
 
     mock_llm = MagicMock()
     mock_llm.return_value = None
 
-    with patch('lazymind.chat.plugin.driver_agent.lazyllm') as mock_lazyllm:
-        mock_lazyllm.AutoModel.return_value = mock_llm
-        result = driver_agent.evaluate_step(
-            plugin_id='test-plugin',
-            step_id='step_a',
-            step_result='some output',
-        )
-
-    assert 'message' in result
-    assert result['message']  # non-empty fallback
+    with patch('lazymind.chat.plugin.driver_agent.inject_model_config'), \
+         patch('lazymind.chat.plugin.driver_agent.AutoModel', return_value=mock_llm):
+        with pytest.raises(driver_agent.DriverEvaluationError, match='empty assessment'):
+            driver_agent.evaluate_step(
+                plugin_id='test-plugin',
+                step_id='step_a',
+                step_result='some output',
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +213,8 @@ def test_evaluate_step_includes_acceptance_criteria_in_llm_call(loaded_plugin):
 
     mock_llm_instance = MagicMock(side_effect=fake_llm)
 
-    with patch('lazymind.chat.plugin.driver_agent.lazyllm') as mock_lazyllm:
-        mock_lazyllm.AutoModel.return_value = mock_llm_instance
+    with patch('lazymind.chat.plugin.driver_agent.inject_model_config'), \
+         patch('lazymind.chat.plugin.driver_agent.AutoModel', return_value=mock_llm_instance):
         driver_agent.evaluate_step(
             plugin_id='test-plugin',
             step_id='step_b',

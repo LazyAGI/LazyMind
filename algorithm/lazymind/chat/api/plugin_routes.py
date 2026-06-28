@@ -15,7 +15,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from lazymind.chat.plugin import plugin_loader
-from lazymind.chat.plugin.driver_agent import evaluate_step
+from lazymind.chat.plugin.driver_agent import DriverEvaluationError, evaluate_step
 
 router = APIRouter()
 
@@ -60,15 +60,18 @@ async def plugin_driver(req: DriverRequest) -> DriverResponse:
     the ChatAgent as a synthetic user turn.  The ChatAgent then decides autonomously
     whether to advance, retry, rewind, or complete the plugin.
     """
-    result = evaluate_step(
-        plugin_id=req.plugin_id,
-        step_id=req.step_id,
-        step_result=req.step_result,
-        session_id=req.session_id,
-        user_files=[p for paths in (req.history_files_per_turn or {}).values() for p in paths] or None,
-        llm_config=req.llm_config,
-        plugin_artifacts_summary=req.plugin_artifacts_summary,
-    )
+    try:
+        result = evaluate_step(
+            plugin_id=req.plugin_id,
+            step_id=req.step_id,
+            step_result=req.step_result,
+            session_id=req.session_id,
+            user_files=[p for paths in (req.history_files_per_turn or {}).values() for p in paths] or None,
+            llm_config=req.llm_config,
+            plugin_artifacts_summary=req.plugin_artifacts_summary,
+        )
+    except DriverEvaluationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return DriverResponse(message=result.get('message', ''))
 
 

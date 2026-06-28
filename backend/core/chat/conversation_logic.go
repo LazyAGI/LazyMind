@@ -636,7 +636,21 @@ func resolvePluginModeWithFallback(raw map[string]any, reqBody map[string]any) s
 			return v
 		}
 	}
-	// Second priority: DB-resolved value injected by applyChatRuntimeConfigs into agentic_config.
+	return pluginModeFromReqBody(reqBody)
+}
+
+// pluginModeFromReqBody reads the resolved plugin_mode from a fully-built chat request body.
+// Priority: plugin_context > agentic_config > "dynamic".
+// Used when persisting plugin_step task params so OnSubAgentDone can branch on auto vs dynamic.
+func pluginModeFromReqBody(reqBody map[string]any) string {
+	if pc, ok := reqBody["plugin_context"].(map[string]any); ok {
+		if v, ok := pc["plugin_mode"].(string); ok {
+			v = strings.TrimSpace(v)
+			if v == "auto" || v == "dynamic" {
+				return v
+			}
+		}
+	}
 	if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
 		if v, ok := ac["plugin_mode"].(string); ok {
 			v = strings.TrimSpace(v)
@@ -943,7 +957,7 @@ func streamSingleAnswer(
 	for d := range ch {
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
-			pluginModeForTask, _ := reqBody["plugin_mode"].(string)
+			pluginModeForTask := pluginModeFromReqBody(reqBody)
 			notice := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), pluginModeForTask)
 			if notice != nil {
 				taskChunk := &ChatChunkResponse{

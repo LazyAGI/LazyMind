@@ -615,3 +615,59 @@ func TestFeedBackChatHistoryCancelsFeedback(t *testing.T) {
 		t.Fatalf("expected feedback detail to be cleared, got reason=%q expected_answer=%q", history.Reason, history.ExpectedAnswer)
 	}
 }
+
+func TestPluginModeFromReqBody(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]any
+		want string
+	}{
+		{
+			name: "plugin_context auto wins",
+			body: map[string]any{
+				"plugin_context": map[string]any{"plugin_mode": "auto"},
+				"agentic_config": map[string]any{"plugin_mode": "dynamic"},
+			},
+			want: "auto",
+		},
+		{
+			name: "agentic_config fallback",
+			body: map[string]any{
+				"agentic_config": map[string]any{"plugin_mode": "auto"},
+			},
+			want: "auto",
+		},
+		{
+			name: "missing defaults to dynamic",
+			body: map[string]any{},
+			want: "dynamic",
+		},
+		{
+			name: "invalid value defaults to dynamic",
+			body: map[string]any{
+				"plugin_context": map[string]any{"plugin_mode": "invalid"},
+			},
+			want: "dynamic",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pluginModeFromReqBody(tc.body); got != tc.want {
+				t.Fatalf("pluginModeFromReqBody() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolvePluginModeWithFallback(t *testing.T) {
+	raw := map[string]any{"plugin_mode": "auto"}
+	reqBody := map[string]any{
+		"agentic_config": map[string]any{"plugin_mode": "dynamic"},
+	}
+	if got := resolvePluginModeWithFallback(raw, reqBody); got != "auto" {
+		t.Fatalf("expected raw body to win, got %q", got)
+	}
+	if got := resolvePluginModeWithFallback(map[string]any{}, reqBody); got != "dynamic" {
+		t.Fatalf("expected agentic_config fallback, got %q", got)
+	}
+}
