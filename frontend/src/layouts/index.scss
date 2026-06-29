@@ -219,6 +219,11 @@
       outline: none;
     }
 
+    &.is-active {
+      color: #2563eb;
+      background: #eff6ff;
+    }
+
     .sider-module-icon {
       width: 22px;
       height: 22px;

@@ -19,6 +19,8 @@ import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
   ChatServiceApi,
+  parseConversationPluginSettings,
+  type ConversationPluginSettings,
 } from "@/modules/chat/utils/request";
 import { draftStore } from "@/modules/chat/store/pluginPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
@@ -26,7 +28,6 @@ import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
-  CHAT_AUTO_ADVANCE_EVENT,
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
@@ -52,6 +53,8 @@ interface IChatLayoutProps {
   chatDisabledReason?: string;
   chatDisabledDescription?: string;
   chatDisabledAction?: ReactNode;
+  /** Plugin settings selected on the welcome screen before the first message is sent. */
+  initPendingPluginSettings?: ConversationPluginSettings | null;
 }
 
 const ChatLayout: FC<IChatLayoutProps> = (props) => {
@@ -67,14 +70,54 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     chatDisabledReason,
     chatDisabledDescription,
     chatDisabledAction,
+    initPendingPluginSettings,
   } = props;
   const [sessionId, setSessionId] = useState("");
   const [chatConfig, setChatConfig] = useState<ChatConfig>(
     initchatConfig || {},
   );
+  // Pending plugin settings from the chat config popover before a conversation is created.
+  // Initialised from the welcome-screen selection (initPendingPluginSettings) when provided.
+  const pendingPluginSettingsRef = useRef<ConversationPluginSettings | null>(
+    initPendingPluginSettings ?? null,
+  );
+  // Plugin settings loaded from conversation detail (for existing conversations).
+  const [conversationPluginSettings, setConversationPluginSettings] = useState<ConversationPluginSettings | undefined>(undefined);
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
+
+  // Keep pendingPluginSettingsRef in sync with the welcome screen while no conversation is active.
+  useEffect(() => {
+    if (!sessionId) {
+      pendingPluginSettingsRef.current = initPendingPluginSettings ?? null;
+    }
+  }, [initPendingPluginSettings, sessionId]);
+
+  // Load persisted plugin settings once a real conversation id is available.
+  useEffect(() => {
+    if (!sessionId || sessionId.startsWith('temp_')) {
+      if (!sessionId) {
+        setConversationPluginSettings(undefined);
+      }
+      return;
+    }
+    let cancelled = false;
+    ChatServiceApi()
+      .conversationServiceGetConversationDetail({ conversation: sessionId })
+      .then((detailRes) => {
+        if (cancelled) {
+          return;
+        }
+        setConversationPluginSettings(
+          parseConversationPluginSettings(detailRes.data.conversation),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
   const panelDragRef = useRef<{ startX: number; startW: number } | null>(null);
 
   const onPanelResizeStart = useCallback((e: React.MouseEvent) => {
@@ -273,6 +316,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     input: Query[],
     action: ChatConversationsRequestActionEnum,
     callbacks: Record<string, (e: CustomEvent) => void>,
+    extras?: Record<string, unknown>,
   ) {
     // Flush any pending slot drafts before sending so the AI sees the latest content.
     // Draft keys use the plugin session_id (not the conversation_id), so pass the
@@ -351,6 +395,22 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(pluginContext ? { plugin_context: pluginContext } : {}),
         ...(pluginUIState ? { plugin_ui_state: pluginUIState } : {}),
         ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
+        ...(extras?.run_in_background ? { run_in_background: true } : {}),
+        // If the user changed plugin settings before a conversation was created,
+        // carry them in the first request so Go can persist them on ensureConversation.
+        // Only send the three known fields to avoid polluting the payload with API response leftovers.
+        ...(() => {
+          const pending = pendingPluginSettingsRef.current;
+          if (!sessionId && pending) {
+            pendingPluginSettingsRef.current = null;
+            const clean: Record<string, unknown> = {};
+            if (pending.enable_plugin != null) clean.enable_plugin = pending.enable_plugin;
+            if (pending.enable_subagent != null) clean.enable_subagent = pending.enable_subagent;
+            if (pending.plugin_mode != null) clean.plugin_mode = pending.plugin_mode;
+            return { initial_plugin_settings: clean };
+          }
+          return {};
+        })(),
       }),
       callbacks,
     });
@@ -389,19 +449,32 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const loadConversation = useCallback((conversationId: string) => {
     setIsRestoringConversation(true);
     ChatServiceApi()
-      .conversationServiceGetConversationDetail({
-        conversation: conversationId,
-      })
-      .then((detailRes) =>
+      .conversationServiceGetChatStatus({ conversationId })
+      .then((res) => ({
+        resolvedId: conversationId,
+        isGenerating: !!res.data?.is_generating,
+      }))
+      .catch(() => ({ resolvedId: conversationId, isGenerating: false }))
+      .then(({ resolvedId, isGenerating }) =>
         ChatServiceApi()
-          .conversationServiceGetConversationHistory({
-            name: conversationId,
+          .conversationServiceGetConversationDetail({
+            conversation: resolvedId,
           })
-          .then((historyRes) => ({ detailRes, historyRes })),
+          .then((detailRes) =>
+            ChatServiceApi()
+              .conversationServiceGetConversationHistory({
+                name: resolvedId,
+              })
+              .then((historyRes) => ({
+                detailRes,
+                historyRes,
+                resolvedId,
+                isGenerating,
+              })),
+          ),
       )
-      .then(({ detailRes, historyRes }) => {
+      .then(({ detailRes, historyRes, resolvedId, isGenerating }) => {
         const conversation = detailRes.data.conversation;
-        const resolvedId = conversation?.conversation_id || conversationId;
         const tempData = {
           knowledgeBaseId: conversation?.search_config?.dataset_list
             ?.map((dataset: any) => dataset.id)
@@ -414,13 +487,21 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setChatConfigFn(tempData);
         setKnowledgeRefreshKey((key) => key + 1);
 
+        setConversationPluginSettings(
+          parseConversationPluginSettings(conversation),
+        );
+
         setConversationId(resolvedId);
 
         const history = historyRes.data.history;
         const list = buildChatMessageListFromHistory(history, {
           fallbackCreateTime: "xxx-xxx-xxx",
+          isGenerating,
         });
         chatRef.current?.replaceMessageList(resolvedId, list);
+        if (isGenerating) {
+          chatRef.current?.openResumeSSE?.(resolvedId);
+        }
       })
       .finally(() => {
         setIsRestoringConversation(false);
@@ -438,6 +519,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       const conversationId = detail.conversationId || "";
       if (!conversationId) {
         setIsRestoringConversation(false);
+        setConversationPluginSettings(undefined);
+        setChatConfig({});
+        setChatConfigFn({});
         chatRef.current?.createNewChat();
         return;
       }
@@ -459,19 +543,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       );
     };
   }, [sessionId, setIsChatContent, loadConversation]);
-
-  // Auto-advance: when driver agent triggers a new chat turn, open resume SSE.
-  useEffect(() => {
-    const handleAutoAdvance = (event: Event) => {
-      const { conversationId } = (event as CustomEvent<{ conversationId: string }>).detail || {};
-      if (!conversationId || conversationId !== sessionId) return;
-      chatRef.current?.openResumeSSE?.(conversationId);
-    };
-    window.addEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
-    return () => {
-      window.removeEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
-    };
-  }, [sessionId]);
 
   function parseErrorData(data: string) {
     const dataObject = UIUtils.jsonParser(data) || {};
@@ -574,6 +645,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         chatConfig={chatConfig}
         setChatConfig={setChatConfig}
         setChatConfigFn={setChatConfigFn}
+        onPluginSettingsChange={(settings) => {
+          if (!sessionId) {
+            pendingPluginSettingsRef.current = settings;
+          } else {
+            setConversationPluginSettings(settings);
+          }
+        }}
+        initialPluginSettings={conversationPluginSettings}
+        hasPluginSession={hasPluginSession}
         knowledgeRefreshKey={knowledgeRefreshKey}
         embeddingReady={embeddingReady}
         multimodalEmbeddingReady={multimodalEmbeddingReady}

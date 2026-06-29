@@ -1,7 +1,7 @@
 """Mock tools for the image-plugin demo.
 
 These stubs return plausible-looking fake data so the full pipeline
-(analyze_subject → collect_materials → optimize_prompt → generate_image)
+(analyze_subject → collect_materials → optimize_prompt → generate_image → enhance_image)
 can be exercised end-to-end without real API keys.
 """
 from __future__ import annotations
@@ -78,3 +78,21 @@ def generate_image_tool(prompt: str) -> str:
     """
     time.sleep(0.3)
     return _placeholder(random.randint(2, 3))
+
+
+def enhance_image_tool(image_url: str) -> str:
+    """Enhance a generated image (style refinement / upscaling mock).
+
+    IMPORTANT: This tool returns the real URL of the enhanced image.
+    You MUST use this URL exactly as-is when calling save_artifact.
+
+    Args:
+        image_url (str): The raw generated image URL to enhance.
+
+    Returns:
+        The URL of the enhanced image. Use it as the value when calling
+        save_artifact(key='enhanced_image_url', content_type='image', value=<url>).
+    """
+    time.sleep(0.3)
+    label = '+'.join(random.sample(_WORDS, random.randint(2, 3)))
+    return f'https://placehold.co/800x600?text=enhanced+{label}'

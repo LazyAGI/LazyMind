@@ -660,7 +660,6 @@ function TabSlotGrid({
 const STATUS_KEY: Record<string, string> = {
   active: 'chat.pluginStatusRunning',
   completed: 'chat.pluginStatusDone',
-  failed: 'chat.pluginStatusFailed',
   waiting: 'chat.pluginStatusWaiting',
 };
 
@@ -672,6 +671,9 @@ export function PluginPanel({
 }: PluginPanelProps) {
   const { t } = useTranslation();
   const { session, loading, refresh } = usePluginSession(conversationId);
+  const autoRunning = usePluginStore((s) =>
+    conversationId ? (s.autoRunningByConversation[conversationId] ?? false) : false,
+  );
   const [activeTabIdx, setActiveTabIdx] = React.useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const fetchPluginUI = usePluginStore((s) => s.fetchPluginUI);
@@ -698,6 +700,14 @@ export function PluginPanel({
     if (cached) { setUI(cached); return; }
     fetchPluginUI(session.plugin_id).then(setUI);
   }, [session?.plugin_id, fetchPluginUI, pluginUIByPlugin]);
+
+  // Restore the previously focused tab when UI loads or session changes.
+  useEffect(() => {
+    const tabs: TabDef[] = ui.tabs ?? [];
+    if (!tabs.length || !session?.focusedTab) return;
+    const idx = tabs.findIndex((t) => t.id === session.focusedTab);
+    if (idx !== -1) setActiveTabIdx(idx);
+  }, [ui.tabs, session?.focusedTab]);
 
   useEffect(() => {
     if (!session || session.status !== 'active') return;
@@ -734,11 +744,11 @@ export function PluginPanel({
   const showActions =
     session.status === 'waiting' ||
     session.status === 'active' ||
-    session.status === 'completed' ||
-    session.status === 'failed';
-  const buttonsDisabled = session.status === 'active' || anySlotEditing;
-  const showContinue =
-    session.status === 'waiting' || session.status === 'active';
+    session.status === 'completed';
+  const displayStatus = autoRunning ? 'active' : session.status;
+  const buttonsDisabled = displayStatus === 'active' || anySlotEditing || autoRunning;
+  // "继续" is only shown in waiting/active; completed shows rollback step picker instead.
+  const showContinue = displayStatus === 'waiting' || displayStatus === 'active';
 
   function handleContinue() {
     if (buttonsDisabled) return;
@@ -750,40 +760,49 @@ export function PluginPanel({
     onSendMessage?.(t('chat.pluginRetry'));
   }
 
+  function handleRollback(stepId: string) {
+    if (buttonsDisabled) return;
+    onSendMessage?.(`${t('chat.pluginRollbackPrefix')}${stepId}`);
+  }
+
   return (
     <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange }}>
     <div
-      className={`plugin-panel plugin-panel--${session.status}${collapsed ? ' plugin-panel--collapsed' : ''}`}
+      className={`plugin-panel plugin-panel--${displayStatus}${collapsed ? ' plugin-panel--collapsed' : ''}`}
       data-session-id={session.session_id}
       aria-label='Plugin Panel'
     >
       {/* Header */}
       <div className='plugin-panel__header'>
-        <span className='plugin-panel__title'>{session.plugin_id}</span>
-        <span
-          className={`plugin-panel__status plugin-panel__status--${session.status}`}
-          aria-label={`Status: ${t(STATUS_KEY[session.status] ?? session.status)}`}
-        >
-          {t(STATUS_KEY[session.status] ?? session.status)}
-        </span>
-        <button
-          type='button'
-          className='plugin-panel__collapse-btn'
-          onClick={() => setCollapsed((c) => !c)}
-          aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
-          title={collapsed ? 'Expand' : 'Collapse'}
-        >
-          <svg
-            width='12'
-            height='12'
-            viewBox='0 0 12 12'
-            fill='none'
-            xmlns='http://www.w3.org/2000/svg'
-            className={`plugin-panel__collapse-icon${collapsed ? ' plugin-panel__collapse-icon--up' : ''}`}
+        <div className='plugin-panel__header-left'>
+          <span className='plugin-panel__title'>{session.plugin_id}</span>
+          <span
+            className={`plugin-panel__status plugin-panel__status--${displayStatus}`}
+            aria-label={`Status: ${t(STATUS_KEY[displayStatus] ?? displayStatus)}`}
           >
-            <path d='M2 4L6 8L10 4' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
-          </svg>
-        </button>
+            {t(STATUS_KEY[displayStatus] ?? displayStatus)}
+          </span>
+        </div>
+        <div className='plugin-panel__header-right'>
+          <button
+            type='button'
+            className='plugin-panel__collapse-btn'
+            onClick={() => setCollapsed((c) => !c)}
+            aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
+            title={collapsed ? 'Expand' : 'Collapse'}
+          >
+            <svg
+              width='12'
+              height='12'
+              viewBox='0 0 12 12'
+              fill='none'
+              xmlns='http://www.w3.org/2000/svg'
+              className={`plugin-panel__collapse-icon${collapsed ? ' plugin-panel__collapse-icon--up' : ''}`}
+            >
+              <path d='M2 4L6 8L10 4' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Tabs — step navigator style */}
@@ -864,6 +883,24 @@ export function PluginPanel({
             >
               {t('chat.pluginContinue')}
             </button>
+          )}
+          {session.status === 'completed' && session.steps && session.steps.length > 0 && (
+            <div className='plugin-panel__rollback'>
+              <span className='plugin-panel__rollback-label'>{t('chat.pluginRollbackLabel')}</span>
+              <div className='plugin-panel__rollback-steps'>
+                {session.steps.map((step) => (
+                  <button
+                    key={`${step.step_id}-${step.attempt}`}
+                    type='button'
+                    className='plugin-panel__rollback-step-btn'
+                    onClick={() => handleRollback(step.step_id)}
+                    title={`${t('chat.pluginRollbackPrefix')}${step.step_id}`}
+                  >
+                    {step.step_id}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}

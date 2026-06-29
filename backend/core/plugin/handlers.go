@@ -435,7 +435,51 @@ func GetSessionSlots(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"slots": out})
 }
 
-// PatchSessionSlot handles PATCH /plugin-sessions/{session_id}/slots/{slot_id}.
+// GetSessionSteps handles GET /plugin-sessions/{session_id}/steps.
+// Returns all step execution records for the session, ordered by created_at ASC.
+// The frontend uses this in completed state to render the rollback step selector.
+func GetSessionSteps(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	steps, err := ListSteps(r.Context(), db, sessionID)
+	if err != nil {
+		common.ReplyErr(w, "query steps failed", http.StatusInternalServerError)
+		return
+	}
+	type stepDTO struct {
+		ID        string `json:"id"`
+		SessionID string `json:"session_id"`
+		StepID    string `json:"step_id"`
+		Attempt   int    `json:"attempt"`
+		TaskID    string `json:"task_id"`
+		Status    string `json:"status"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	out := make([]stepDTO, 0, len(steps))
+	for _, s := range steps {
+		out = append(out, stepDTO{
+			ID:        s.ID,
+			SessionID: s.SessionID,
+			StepID:    s.StepID,
+			Attempt:   s.Attempt,
+			TaskID:    s.TaskID,
+			Status:    s.Status,
+			CreatedAt: s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			UpdatedAt: s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		})
+	}
+	common.ReplyOK(w, map[string]any{"steps": out})
+}
+
 // Accepts body: {"selected_revision": int} to switch which revision is displayed.
 func PatchSessionSlot(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
@@ -672,6 +716,8 @@ func AdvanceSession(w http.ResponseWriter, r *http.Request) {
 		}
 		session.Status = SessionStatusActive
 	} else if session.Status != SessionStatusWaiting && session.Status != SessionStatusActive {
+		// Under the current state machine only active/waiting/completed are valid states,
+		// so this branch should never be reached. Guard retained for safety.
 		common.ReplyErr(w, "session is not in a resumable state", http.StatusConflict)
 		return
 	}
@@ -686,10 +732,6 @@ func AdvanceSession(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 
 	switch step.Status {
-	case StepStatusRunning:
-		// Step is still running (heartbeat not timed out); nothing to do.
-		common.ReplyOK(w, map[string]any{"action": "waiting", "message": "step is still running"})
-
 	case StepStatusInterrupted:
 		// Resume the interrupted SubAgent directly, bypassing ChatAgent.
 		_ = UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive)
@@ -725,7 +767,7 @@ func AdvanceSession(w http.ResponseWriter, r *http.Request) {
 		}
 		go triggerNextChatTurn(
 			session.ConversationID, sessionID, session.PluginID,
-			session.CurrentStepID, userID, syntheticMsg,
+			session.CurrentStepID, userID, syntheticMsg, nil,
 		)
 		common.ReplyOK(w, map[string]any{"action": body.Action, "message": syntheticMsg})
 

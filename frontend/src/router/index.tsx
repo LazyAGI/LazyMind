@@ -14,6 +14,7 @@ import KnowledgeAuth from "@/modules/knowledge/pages/auth";
 import KnowledgeDetail from "@/modules/knowledge/pages/detail";
 import Knowledge from "@/modules/knowledge/pages/knowledge";
 import AdminLayout from "@/modules/admin/AdminLayout";
+import TaskCenterPage from "@/modules/taskCenter";
 import UserManagement from "@/modules/admin/pages/user";
 import GroupManagement from "@/modules/admin/pages/group";
 import GroupDetail from "@/modules/admin/pages/group/detail.tsx";
@@ -132,6 +133,7 @@ export default function AppRouter() {
               <Route path="self-evolution/:threadId" element={<SelfEvolutionDetailPage />} />
             </>
           )}
+          <Route path="task-center" element={<TaskCenterPage />} />
         </Route>
         {runtimeFeatures.hideCloudAdmin ? (
           <Route path="/admin/*" element={<Navigate to="/agent/chat" replace />} />

@@ -9,20 +9,18 @@ export function usePluginSession(conversationId: string) {
   const session = usePluginStore((s) => s.sessionByConversation[conversationId] ?? null);
   const loading = usePluginStore((s) => s.loadingByConversation[conversationId] ?? false);
   const loadActiveSession = usePluginStore((s) => s.loadActiveSession);
-  const refreshSlots = usePluginStore((s) => s.refreshSlots);
   const patchSlot = usePluginStore((s) => s.patchSlot);
-  const advanceSession = usePluginStore((s) => s.advanceSession);
-  const retrySession = usePluginStore((s) => s.retrySession);
 
   useEffect(() => {
     loadActiveSession(conversationId);
   }, [conversationId, loadActiveSession]);
 
+  // Use loadActiveSession so we always get the latest session status (not just slots).
+  // This is important for detecting when the session transitions from 'active' to
+  // 'waiting'/'completed' even if the SSE push event was missed.
   const refresh = useCallback(() => {
-    if (session?.session_id) {
-      refreshSlots(conversationId, session.session_id);
-    }
-  }, [conversationId, session?.session_id, refreshSlots]);
+    loadActiveSession(conversationId);
+  }, [conversationId, loadActiveSession]);
 
   const selectRevision = useCallback(
     (slotId: string, revision: number) => {
@@ -33,19 +31,7 @@ export function usePluginSession(conversationId: string) {
     [conversationId, session?.session_id, patchSlot],
   );
 
-  const advance = useCallback(() => {
-    if (session?.session_id) {
-      advanceSession(conversationId, session.session_id);
-    }
-  }, [conversationId, session?.session_id, advanceSession]);
-
-  const retry = useCallback(() => {
-    if (session?.session_id) {
-      retrySession(conversationId, session.session_id);
-    }
-  }, [conversationId, session?.session_id, retrySession]);
-
-  return { session, loading, refresh, selectRevision, advance, retry };
+  return { session, loading, refresh, selectRevision };
 }
 
 /**

@@ -160,15 +160,29 @@ export interface PluginSession {
   session_id: string;
   conversation_id: string;
   plugin_id: string;
-  status: "active" | "completed" | "failed" | "waiting";
+  status: "active" | "waiting" | "completed";
   current_step_id: string;
   created_at: string;
   updated_at: string;
   slots?: SlotRevision[];
+  /** Steps for this session, used in completed state to render rollback step list. */
+  steps?: PluginSessionStep[];
   /** The tab currently focused by the user — forwarded to the AI in plugin_context. */
   focusedTab?: string;
   /** The sort_order item currently focused by the user — forwarded to the AI. */
   focusedSortOrder?: number;
+}
+
+/** A single step execution record from plugin_session_steps. */
+export interface PluginSessionStep {
+  id: string;
+  session_id: string;
+  step_id: string;
+  attempt: number;
+  task_id: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Slot value resolved from a TaskArtifact's value field.
@@ -256,8 +270,6 @@ interface PluginStore {
   loadActiveSession: (conversationId: string) => Promise<void>;
   refreshSlots: (conversationId: string, sessionId: string) => Promise<void>;
   patchSlot: (conversationId: string, sessionId: string, slotId: string, revision: number) => Promise<void>;
-  advanceSession: (conversationId: string, sessionId: string) => Promise<void>;
-  retrySession: (conversationId: string, sessionId: string) => Promise<void>;
   clearSession: (conversationId: string) => void;
   setAutoRunning: (conversationId: string, running: boolean) => void;
   fetchPluginUI: (pluginId: string) => Promise<PluginUI>;
@@ -323,6 +335,17 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     try {
       const res = await PluginSessionApi().getLatestSession(conversationId);
       const session: PluginSession | null = res?.data?.data?.session ?? null;
+      // For completed sessions, load step records so the Panel can render the rollback list.
+      if (session && session.status === 'completed' && session.session_id) {
+        try {
+          const stepsRes = await PluginSessionApi().getSteps(session.session_id);
+          const rawSteps = stepsRes?.data?.data?.steps ?? [];
+          // Exclude the __end__ sentinel — only expose real steps to the UI.
+          session.steps = rawSteps.filter((s: any) => s.step_id !== '__end__');
+        } catch {
+          session.steps = [];
+        }
+      }
       get().setSession(conversationId, session);
     } catch {
       // ignore
@@ -364,24 +387,6 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     try {
       await PluginSessionApi().patchSlot(sessionId, slotId, revision);
       get().refreshSlots(conversationId, sessionId);
-    } catch {
-      // ignore
-    }
-  },
-
-  advanceSession: async (conversationId, sessionId) => {
-    try {
-      await PluginSessionApi().advanceSession(sessionId, 'continue');
-      get().loadActiveSession(conversationId);
-    } catch {
-      // ignore
-    }
-  },
-
-  retrySession: async (conversationId, sessionId) => {
-    try {
-      await PluginSessionApi().advanceSession(sessionId, 'retry');
-      get().loadActiveSession(conversationId);
     } catch {
       // ignore
     }

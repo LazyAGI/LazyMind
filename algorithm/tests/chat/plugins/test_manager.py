@@ -604,3 +604,39 @@ def test_build_advance_step_tool_rewind_step_is_accepted(
     result = advance(step_id='step_a', user_input='redo analysis')
     assert 'error' not in result.lower(), f'Expected rewind to be accepted but got: {result}'
     assert mock_write_agent_data.called
+
+
+# ---------------------------------------------------------------------------
+# 必修D — _build_intent_section no longer injects step-level intent
+# ---------------------------------------------------------------------------
+
+def test_build_intent_section_no_step_intent(loaded_plugin):
+    """Step-level intent must NOT appear in ChatAgent's prompt context."""
+    from lazymind.chat.plugin import plugin_manager
+
+    mock_db_instance = MagicMock()
+    mock_db_instance.get_session_intent.return_value = 'Global constraint A'
+    mock_db_instance.get_step_intent.return_value = 'Step constraint X'
+    mock_db_class = MagicMock(return_value=mock_db_instance)
+
+    with patch('lazymind.chat.engine.subagent.db.TaskQueryDB', mock_db_class):
+        result = plugin_manager._build_intent_section('sess-1', step_id='step_a')
+
+    # Global intent should be present.
+    assert 'Global constraint A' in result
+    # Step intent must NOT be injected by this function.
+    assert 'Step constraint X' not in result
+
+
+def test_build_intent_section_global_only(loaded_plugin):
+    """When only session intent exists, it is still injected."""
+    from lazymind.chat.plugin import plugin_manager
+
+    mock_db_instance = MagicMock()
+    mock_db_instance.get_session_intent.return_value = 'Only global rule'
+    mock_db_class = MagicMock(return_value=mock_db_instance)
+
+    with patch('lazymind.chat.engine.subagent.db.TaskQueryDB', mock_db_class):
+        result = plugin_manager._build_intent_section('sess-2')
+
+    assert 'Only global rule' in result

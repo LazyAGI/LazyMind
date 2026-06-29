@@ -7,6 +7,7 @@ x-mirror-args: &mirror-args
   APT_MIRROR: ${APT_MIRROR:-http://mirrors.aliyun.com/debian}
   APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-http://mirrors.aliyun.com/debian-security}
   APT_UBUNTU_MIRROR: ${APT_UBUNTU_MIRROR:-http://mirrors.aliyun.com/ubuntu}
+  APT_UBUNTU_PORTS_MIRROR: ${APT_UBUNTU_PORTS_MIRROR:-http://mirrors.aliyun.com/ubuntu-ports}
   ALPINE_MIRROR: ${ALPINE_MIRROR:-https://mirrors.aliyun.com/alpine}
   NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
   GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
