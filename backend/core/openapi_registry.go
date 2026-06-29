@@ -484,10 +484,6 @@ type agentThreadListQueryParams struct {
 	PageToken string `query:"page_token"`
 }
 
-type agentThreadPathParams struct {
-	ThreadID string `path:"thread_id"`
-}
-
 type agentThreadOpenAPIResponse struct {
 	ThreadID      string         `json:"thread_id"`
 	CurrentTaskID string         `json:"current_task_id,omitempty"`

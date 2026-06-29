@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	appLog "lazymind/core/log"
 )
 
 func newTestDB(t *testing.T) *orm.DB {
@@ -23,6 +24,30 @@ func newTestDB(t *testing.T) *orm.DB {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	return db
+}
+
+func TestDoRPCNon2xxHidesResponseBodyFromError(t *testing.T) {
+	appLog.InitNop()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"trace_id":"trace-1","error":{"code":"bad_request","message":"model is required"}}`))
+	}))
+	defer server.Close()
+
+	_, _, err := doRPC(context.Background(), server.Client(), server.URL, nil, jsonRPCRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "initialize",
+	})
+	if err == nil {
+		t.Fatalf("expected rpc error")
+	}
+	if got, want := err.Error(), "mcp rpc returned 400"; got != want {
+		t.Fatalf("unexpected error: got %q want %q", got, want)
+	}
+	if strings.Contains(err.Error(), "model is required") || strings.Contains(err.Error(), "trace-1") {
+		t.Fatalf("error leaked response body: %q", err.Error())
+	}
 }
 
 func TestCreateServerMasksAndEncryptsAPIKey(t *testing.T) {
