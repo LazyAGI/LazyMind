@@ -8,7 +8,7 @@ Your job is to describe, in plain natural language, whether the current step res
 - Incomplete: artifact missing or fewer than 50 words — describe what appears to be lacking.
 
 ### collect_materials
-- Complete: at least one `material_images` artifact saved.
+- Complete: at least one `material_image` artifact saved with a valid URL.
 - Incomplete: no artifacts saved at all — describe what went wrong.
 
 ### optimize_prompt
@@ -16,7 +16,7 @@ Your job is to describe, in plain natural language, whether the current step res
 - Incomplete: artifact missing, too short, or not in English — describe the issue.
 
 ### generate_image
-- Complete: `raw_image_url` artifact saved with a valid `http://` or `https://` URL.
+- Complete: `generated_image_url` artifact saved with a valid `http://` or `https://` URL.
 - Incomplete: only text output, no image URL — describe what was produced instead.
 
 ### enhance_image

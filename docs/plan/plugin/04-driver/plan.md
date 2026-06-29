@@ -20,7 +20,7 @@
 
 ## 一、核心概念与设计原则
 
-### 1.1 驱动模式层级
+### 1.1 驱动模式层级 ✅
 
 **不再使用**环境变量 `LAZYMIND_PLUGIN_MODE`。改为三个**正交**的用户配置字段，每个用户独立；支持**全局默认**与**对话级临时覆盖**，以对话配置为准。
 
@@ -42,7 +42,7 @@ SubAgent 开关（`enable_subagent`）与插件步骤无关，控制 ChatAgent �
 - `enable_subagent=true`：ChatAgent 可自主创建 SubAgent 推进发散目标，由 ChatAgent 直接驱动，不经过 DriverAgent。
 - `enable_subagent=false`：禁用大模型自主 SubAgent，不影响插件步骤的 SubAgent 执行。
 
-### 1.2 配置层级与持久化
+### 1.2 配置层级与持久化✅
 
 ```
 用户全局默认（设置页）
@@ -61,7 +61,7 @@ Go / Python 运行时
 
 前端：设置页维护全局默认；进入对话时从全局默认初始化对话配置（若对话尚无覆盖）；对话顶栏 / PluginPanel 提供模式切换。
 
-### 1.3 前端交互按钮语义
+### 1.3 前端交互按钮语义✅
 
 `dynamic` 模式每步完成后默认暂停等用户，`auto` 模式由 DriverAgent 裁决。两者共用相同的按钮语义：
 
@@ -83,7 +83,7 @@ Go / Python 运行时
 | `auto` | ChatAgent 流式输出中、SubStep 执行中 | 全程显示「停止」 |
 | `dynamic` | SubStep 执行中 | SubStep running 时显示「停止」；步骤完成后显示「继续」「重试」 |
 
-### 1.4 设计原则：Go 依然是唯一 Orchestrator
+### 1.4 设计原则：Go 依然是唯一 Orchestrator✅
 
 并行执行、停止中断、DriverAgent 裁决、定时触发，均由 Go 侧 `eventloop.go` / TaskCenter 控制。Python 的 `_trigger_plugin_step` / `advance_step` 只负责发射信号；多路并行由 Go 并发启动多个 `go subagent.Run(...)`。
 
@@ -103,7 +103,7 @@ Session 只维护三种语义状态：`active`（有任务在跑）、`waiting`�
 
 ## 二、用户配置体系
 
-### 2.1 数据表
+### 2.1 数据表✅
 
 ```sql
 CREATE TABLE user_chat_settings (
@@ -120,7 +120,7 @@ ALTER TABLE conversations
   ADD COLUMN enable_subagent BOOLEAN;
 ```
 
-### 2.2 加载顺序（Go `ChatConversations`）
+### 2.2 加载顺序（Go `ChatConversations`）✅
 
 1. 读 `conversations.enable_plugin` / `plugin_mode` / `enable_subagent`；非空则用对话值。
 2. 否则读 `user_chat_settings`；无记录则 `enable_plugin=true`、`plugin_mode=dynamic`、`enable_subagent=true`。
@@ -129,7 +129,7 @@ ALTER TABLE conversations
 
 > 代码示例见 [`code.md` · C1](./code.md#c1)。
 
-### 2.3 前端
+### 2.3 前端✅
 
 前端配置流转路径：
 
@@ -142,7 +142,7 @@ ALTER TABLE conversations
 
 ## 三、驱动模式控制
 
-### 3.1 模式判断（Go `OnSubAgentDone`）
+### 3.1 模式判断（Go `OnSubAgentDone`）✅
 
 步骤 SubAgent 完成时，先看 `enable_plugin`，再按 `plugin_mode` 决策：
 
@@ -154,7 +154,7 @@ SubAgent 以任何终态（`succeeded` / `failed` / `interrupted`）结束时，
 
 > 代码示例见 [`code.md` · C2](./code.md#c2)。
 
-### 3.2 DriverAgent 输出格式与失败降级
+### 3.2 DriverAgent 输出格式与失败降级✅
 
 **DriverAgent 输出自然语言评估（非 verdict codes）**：DriverAgent 输出 1-2 句纯自然语言，描述步骤结果是否合格及原因，**不输出** PASS/RETRY/FAIL/DONE 等结构化指令码。该评估作为 synthetic user turn 注入下一轮 ChatAgent，由 ChatAgent 自主决策（调用 `advance_step_and_exit` 推进下一步、传 `retry_hint` 重试当前步、或传 `__end__` 完成插件）。
 
@@ -162,7 +162,7 @@ SubAgent 以任何终态（`succeeded` / `failed` / `interrupted`）结束时，
 1. HTTP 超时或 500 → 降级：推送 `driver_fallback` + `step_waiting`，不自动推进（即 fallback 到 `dynamic` 让用户介入，而非静默 PASS）。
 2. `callDriverAgent` 重试 1 次（退避 5s），仍失败才降级。
 
-### 3.3 `advance_step` / `advance_step_and_exit` 与 ChatAgent 退出
+### 3.3 `advance_step` / `advance_step_and_exit` 与 ChatAgent 退出✅
 
 ChatAgent 有**两个**步骤推进工具，语义不同：
 
@@ -183,13 +183,15 @@ ChatAgent 有**两个**步骤推进工具，语义不同：
 - 默认使用 `advance_step_and_exit`：每步完成后让用户查看结果并决策下一步。
 - 仅当用户明确要求连续执行多个步骤（如「重跑 1-3」「全部跑完」）时，对前 N-1 步使用 `advance_step` 同步等结果，最后一步使用 `advance_step_and_exit` 退出。
 
+⚠️ TODO：仅在工具返回成功（无 Error: 前缀 / success: true）时才触发 stop-tool 退出，失败时把 Error 作为 tool result 继续 ReAct 循环。需要的话我可以帮你改这一块。
+
 `advance_step`（同步）等待实现：工具调用后通过 FileSystemQueue 轮询 step done 事件（Go 在 SubAgent 完成时 enqueue 结果摘要）；超时后返回 partial 摘要，ReAct 可选择继续或 ask。
 
 ---
 
 ## 四、步骤级执行控制
 
-### 4.1 停止（确定性后端）
+### 4.1 停止（确定性后端）⚠️ 待调试
 
 **接口**：`POST /api/core/conversations/{id}:stop`（扩展现有 `stopChatGeneration`，新增 plugin 语义分支）。
 
@@ -218,7 +220,7 @@ SubAgent 同步执行中：runner 同样轮询同一 `cancel_flag` 或 queue con
 
 > 代码示例见 [`code.md` · C4](./code.md#c4)。
 
-### 4.2 继续 / 重试（模拟用户消息）
+### 4.2 继续 / 重试（模拟用户消息）✅
 
 前端**不**调用 Go 推进 API，而是构造标准 chat 消息：
 
@@ -243,7 +245,7 @@ ChatAgent 在 `resolve_plugin_injection` 看到 `session.status=waiting` 且有 
 
 ---
 
-## 五、并行执行
+## 五、并行执行 ⚠️ 待调试
 
 ### 5.1 并行决策者：ChatAgent
 
@@ -308,7 +310,7 @@ if self._stop_tools:
 
 ---
 
-## 六、意图与约束（框架级，插件无感知）
+## 六、意图与约束（框架级，插件无感知） ⚠️ 待调试
 
 全局约束与步骤约束是**平台机制**，插件 `plugin.yaml` / `scenario.md` **不需要**声明字段，也**不需要**插件作者实现工具。
 
@@ -363,7 +365,7 @@ PluginPanel 步骤卡片旁展示当前步骤 `intent_context` 摘要；全局�
 
 ---
 
-## 七、范围重跑与自然语言触发
+## 七、范围重跑与自然语言触发 ⚠️ 待调试
 
 ### 7.1 问题：从 `stop_tools` 到 LLM 决策
 
@@ -405,7 +407,7 @@ PluginPanel 步骤卡片旁展示当前步骤 `intent_context` 摘要；全局�
 
 ---
 
-## 八、Ask 机制（仅 ChatAgent）
+## 八、Ask 机制（仅 ChatAgent）⚠️ 待调试
 
 ### 8.1 形态
 
@@ -474,7 +476,7 @@ Go 将 `ask_response` 透传 Python；`resolve_plugin_injection` 将回答注入
 
 ---
 
-## 九、TaskCenter：对话级异步任务
+## 九、TaskCenter：对话级异步任务✅
 
 ### 9.1 不复用 `asyncjob`
 
@@ -563,7 +565,7 @@ Worker：Task 进入 `running` 后，本质仍是标准 chat/plugin 管道；Tas
 
 ---
 
-## 十、定时任务（用户行为，与 plugin 无关）
+## 十、定时任务（用户行为，与 plugin 无关） ⚠️ 待调试
 
 ### 10.1 原则
 
@@ -607,7 +609,7 @@ CREATE TABLE user_schedules (
 
 ---
 
-## 十一、DriverAgent 能力补全
+## 十一、DriverAgent 能力补全 ✅
 
 ### 11.1 配置注入
 
@@ -694,7 +696,7 @@ task_status_changed  → TaskCenter 状态变更
 
 ---
 
-## 十四、步骤中断恢复（Checkpoint-Resume）
+## 十四、步骤中断恢复（Checkpoint-Resume）⚠️ 待调试
 
 ### 14.1 问题
 

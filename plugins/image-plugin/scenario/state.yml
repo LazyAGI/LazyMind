@@ -15,18 +15,36 @@ transitions:
   analyze_subject:
     - to: collect_materials
       condition: "Subject analysis complete — collect reference materials."
+    - to: analyze_subject
+      condition: "Analysis unsatisfactory — re-run subject analysis (full retry)."
 
   collect_materials:
     - to: optimize_prompt
       condition: "All materials collected — proceed to prompt optimization."
+    - to: collect_materials
+      condition: "Materials unsatisfactory — re-collect (full retry)."
 
   optimize_prompt:
     - to: generate_image
       condition: "Prompt ready — proceed to image generation."
+    - to: optimize_prompt
+      condition: "Prompt unsatisfactory — re-optimize (full retry)."
 
   generate_image:
+    - to: enhance_image
+      condition: "Raw image generated — proceed to enhancement."
+    - to: generate_image
+      condition: "Re-generate image with the same prompt (full retry)."
+    - to: optimize_prompt
+      condition: "User unhappy with image — rewind to prompt optimization."
+
+  enhance_image:
     - to: __end__
-      condition: "User is satisfied with the image — pipeline complete."
+      condition: "User satisfied — pipeline complete."
+    - to: enhance_image
+      condition: "Enhancement unsatisfactory — re-enhance (full retry)."
+    - to: generate_image
+      condition: "User unhappy with enhancement — re-generate raw image."
 
 steps:
   analyze_subject:
@@ -167,3 +185,34 @@ steps:
         slot_id: image_output
     acceptance_criteria: |
       generated_image_url artifact must be saved and contain a valid URL starting with http(s)://.
+
+  enhance_image:
+    label: Enhance Image
+    # List-cardinality slot (enhanced_image_output). Each save_artifact call appends
+    # a new enhanced version unless runtime_instruction / partial retry specifies
+    # sort_order to overwrite a specific display position.
+    prompt: |
+      You are an image enhancement agent.
+
+      Raw generated image URL:
+      {{generated_image_url}}
+
+      {{runtime_instruction}}
+
+      Steps:
+      1. Call enhance_image_tool(image_url=<generated_image_url>) to produce an enhanced version.
+      2. Save the EXACT URL returned by enhance_image_tool — do not fabricate or
+         substitute any URL:
+           save_artifact(key='enhanced_image_url', content_type='image', value=<url>)
+      3. Stop after saving.
+    tools:
+      - enhance_image_tool
+    inputs:
+      - artifact_id: generated_image_url
+        required: true
+    outputs:
+      - artifact_id: enhanced_image_url
+        content_type: image
+        slot_id: enhanced_image_output
+    acceptance_criteria: |
+      enhanced_image_url artifact must be saved and contain a valid URL starting with http(s)://.
