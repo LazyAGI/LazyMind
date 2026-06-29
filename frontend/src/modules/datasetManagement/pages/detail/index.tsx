@@ -1073,7 +1073,7 @@ export default function DatasetDetailPage() {
     setActiveCell(null);
   }, [clearAllItemRuntimeState, datasetId]);
 
-  const loadDetail = async () => {
+  const loadDetail = useCallback(async () => {
     if (!datasetId) {
       return;
     }
@@ -1099,12 +1099,11 @@ export default function DatasetDetailPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [datasetId, keyword, pagination.current, pagination.pageSize, questionType, source, t]);
 
   useEffect(() => {
     void loadDetail();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetId, pagination.current, pagination.pageSize]);
+  }, [loadDetail]);
 
   useEffect(() => {
     setDrafts((current) => {
@@ -1229,73 +1228,79 @@ export default function DatasetDetailPage() {
     [datasetId, items, newItemVisible, t],
   );
 
-  const handleSaveItem = async (
-    itemId: string,
-    values: DatasetItemFormValues,
-    successMessage?: string,
-  ) => {
-    const validationErrors = validateRequiredDatasetItem(values, requiredItemMessages);
-    if (validationErrors.length > 0) {
-      message.warning(validationErrors[0]);
-      return false;
-    }
-    setSaving(true);
-    try {
-      if (itemId === NEW_ITEM_ID) {
-        await createDatasetItem(datasetId, values);
-        message.success(t("datasetManagement.detail.sampleAdded"));
-        setNewItemVisible(false);
-        setActiveCell(null);
-      } else {
-        const currentItem = items.find((item) => item.id === itemId);
-        await updateDatasetItem(
-          datasetId,
-          itemId,
-          currentItem ? mergeHiddenItemFields(currentItem, values) : values,
-        );
-        message.success(successMessage || t("datasetManagement.detail.sampleSaved"));
+  const handleSaveItem = useCallback(
+    async (
+      itemId: string,
+      values: DatasetItemFormValues,
+      successMessage?: string,
+    ) => {
+      const validationErrors = validateRequiredDatasetItem(values, requiredItemMessages);
+      if (validationErrors.length > 0) {
+        message.warning(validationErrors[0]);
+        return false;
       }
-      if (activeCell?.itemId === itemId) {
-        setActiveCell(null);
+      setSaving(true);
+      try {
+        if (itemId === NEW_ITEM_ID) {
+          await createDatasetItem(datasetId, values);
+          message.success(t("datasetManagement.detail.sampleAdded"));
+          setNewItemVisible(false);
+          setActiveCell(null);
+        } else {
+          const currentItem = items.find((item) => item.id === itemId);
+          await updateDatasetItem(
+            datasetId,
+            itemId,
+            currentItem ? mergeHiddenItemFields(currentItem, values) : values,
+          );
+          message.success(successMessage || t("datasetManagement.detail.sampleSaved"));
+        }
+        if (activeCell?.itemId === itemId) {
+          setActiveCell(null);
+        }
+        clearItemRuntimeState(itemId);
+        setDirtyItemIds((current) => current.filter((id) => id !== itemId));
+        await loadDetail();
+        return true;
+      } catch (error: any) {
+        message.error(error?.message || t("datasetManagement.detail.saveFailed"));
+        return false;
+      } finally {
+        setSaving(false);
       }
-      clearItemRuntimeState(itemId);
-      setDirtyItemIds((current) => current.filter((id) => id !== itemId));
-      await loadDetail();
-      return true;
-    } catch (error: any) {
-      message.error(error?.message || t("datasetManagement.detail.saveFailed"));
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  };
+    },
+    [activeCell, clearItemRuntimeState, datasetId, items, loadDetail, requiredItemMessages, t],
+  );
 
-  const handleAutoSaveItem = async (item: DatasetItem) => {
-    const pendingNewItemCellActivation = pendingNewItemCellActivationRef.current;
-    if (
-      item.id === NEW_ITEM_ID &&
-      pendingNewItemCellActivation?.itemId === NEW_ITEM_ID
-    ) {
-      pendingNewItemCellActivationRef.current = null;
-      return;
-    }
+  const handleAutoSaveItem = useCallback(
+    async (item: DatasetItem) => {
+      const pendingNewItemCellActivation = pendingNewItemCellActivationRef.current;
+      if (
+        item.id === NEW_ITEM_ID &&
+        pendingNewItemCellActivation?.itemId === NEW_ITEM_ID
+      ) {
+        pendingNewItemCellActivationRef.current = null;
+        return;
+      }
 
-    const draft = buildItemDraftForSave(item);
-    const referenceContextEditingDirty = Boolean(referenceContextEditingDirtyRef.current[item.id]);
-    if (
-      item.id !== NEW_ITEM_ID &&
-      !dirtyItemIds.includes(item.id) &&
-      !referenceContextEditingDirty
-    ) {
-      setActiveCell(null);
-      return;
-    }
-    if (item.id === NEW_ITEM_ID && validateRequiredDatasetItem(draft, requiredItemMessages).length > 0) {
-      setActiveCell(null);
-      return;
-    }
-    await handleSaveItem(item.id, draft);
-  };
+      const draft = buildItemDraftForSave(item);
+      const referenceContextEditingDirty = Boolean(referenceContextEditingDirtyRef.current[item.id]);
+      if (
+        item.id !== NEW_ITEM_ID &&
+        !dirtyItemIds.includes(item.id) &&
+        !referenceContextEditingDirty
+      ) {
+        setActiveCell(null);
+        return;
+      }
+      if (item.id === NEW_ITEM_ID && validateRequiredDatasetItem(draft, requiredItemMessages).length > 0) {
+        setActiveCell(null);
+        return;
+      }
+      await handleSaveItem(item.id, draft);
+    },
+    [buildItemDraftForSave, dirtyItemIds, handleSaveItem, requiredItemMessages],
+  );
 
   const activateEditableCell = useCallback(
     async (record: DatasetItem, field: EditableDatasetItemField) => {
@@ -1315,7 +1320,7 @@ export default function DatasetDetailPage() {
         }, 0);
       }
     },
-    [activeCell, findDatasetItemForSave],
+    [activeCell, findDatasetItemForSave, handleAutoSaveItem],
   );
 
   const updateDocumentSearchState = (
