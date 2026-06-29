@@ -3246,7 +3246,7 @@ func TestUpdateChildSkillChangesParentSkill(t *testing.T) {
 		httptest.NewRequest(
 			http.MethodPatch,
 			"/api/core/skills/"+child.ID,
-			strings.NewReader(fmt.Sprintf(`{"parent_skill_id":%q}`, targetParent.ID)),
+			strings.NewReader(fmt.Sprintf(`{"name":"rules","description":"Branching rules","category":"coding","content":"1. Create a feature branch.","file_ext":"md","is_enabled":true,"parent_skill_id":%q,"parent_skill_name":"release-check","tags":[]}`, targetParent.ID)),
 		),
 		map[string]string{"skill_id": child.ID},
 	)
