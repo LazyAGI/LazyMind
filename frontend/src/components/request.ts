@@ -181,7 +181,8 @@ function isRefreshEndpoint(url?: string): boolean {
 export const handleError = async (error: AxiosError) => {
   if (isCanceledError(error)) return Promise.reject(error);
   
-  const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+  const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; silentError?: boolean };
+  const silentError = Boolean(originalRequest?.silentError);
   
   if (error.response) {
     if (error.response.status === 403) {
@@ -200,7 +201,9 @@ export const handleError = async (error: AxiosError) => {
         );
         return Promise.reject(error);
       }
-      message.error(errMsg || i18n.t("common.accessDenied"));
+      if (!silentError) {
+        message.error(errMsg || i18n.t("common.accessDenied"));
+      }
     } else if (error.response.status === 401) {
       if (isRefreshEndpoint(originalRequest?.url)) {
         if (AgentAppsAuth.isLoggedIn()) {
@@ -258,18 +261,24 @@ export const handleError = async (error: AxiosError) => {
         isRefreshing = false;
       }
     } else {
-      message.error(
-        getLocalizedErrorMessage(error, i18n.t("common.requestFailed")) ||
-          i18n.t("common.requestFailed"),
-      );
+      if (!silentError) {
+        message.error(
+          getLocalizedErrorMessage(error, i18n.t("common.requestFailed")) ||
+            i18n.t("common.requestFailed"),
+        );
+      }
     }
   } else if (error.request) {
-    message.error(i18n.t("common.serverNoResponse"));
+    if (!silentError) {
+      message.error(i18n.t("common.serverNoResponse"));
+    }
   } else {
-    message.error(
-      getLocalizedErrorMessage(error, i18n.t("common.requestError")) ||
-        i18n.t("common.requestError"),
-    );
+    if (!silentError) {
+      message.error(
+        getLocalizedErrorMessage(error, i18n.t("common.requestError")) ||
+          i18n.t("common.requestError"),
+      );
+    }
   }
   return Promise.reject(error);
 };

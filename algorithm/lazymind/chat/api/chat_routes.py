@@ -118,6 +118,16 @@ async def chat(
             )
         ),
     ] = None,
+    local_fs_sources: Annotated[
+        Optional[List[Dict[str, Any]]],
+        Body(
+            description=(
+                'Per-request local filesystem source scopes. Each item: '
+                '{source_id, paths, file_extensions}. file_extensions must be lowercase suffixes '
+                'without dot and limited to pdf, doc, docx, csv, xls, xlsx.'
+            )
+        ),
+    ] = None,
     ask_response: Annotated[
         Optional[Dict[str, Any]],
         Body(
@@ -167,6 +177,7 @@ async def chat(
         mcp_config=mcp_config,
         trace=trace,
         plugin_context=plugin_context,
+        local_fs_sources=local_fs_sources,
         ask_response=ask_response,
         current_turn_seq=current_turn_seq,
         enable_plugin=enable_plugin,

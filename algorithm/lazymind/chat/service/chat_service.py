@@ -1,7 +1,6 @@
 from __future__ import annotations
 import asyncio
 import json
-import os
 import re
 import time
 from typing import Any, Dict, List, Optional, Union
@@ -85,22 +84,6 @@ def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
         cleaned = [item.strip() for item in raw_kb_id if isinstance(item, str) and item.strip()]
         return cleaned[0] if len(cleaned) == 1 else (cleaned or None)
     return None
-
-
-def _normalize_localfs_paths(raw_paths: Any) -> list[str]:
-    if raw_paths is None:
-        return []
-    if isinstance(raw_paths, str):
-        items = [raw_paths]
-    elif isinstance(raw_paths, list):
-        items = [item for item in raw_paths if isinstance(item, str)]
-    else:
-        return []
-    return [
-        os.path.realpath(path)
-        for item in items
-        if (path := str(item).strip())
-    ]
 
 
 def check_sensitive_content(
@@ -341,6 +324,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       mcp_config: Optional[List[Dict[str, Any]]] = None,
                       trace: Optional[bool] = False,
                       plugin_context: Optional[Dict[str, Any]] = None,
+                      local_fs_sources: Optional[List[Dict[str, Any]]] = None,
                       ask_response: Optional[Dict[str, Any]] = None,
                       current_turn_seq: Optional[int] = None,
                       enable_plugin: Optional[bool] = None,
@@ -392,18 +376,12 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     agent_history = normalize_history_for_agent(raw_history)
     translator = AgentEventFrameTranslator(query=query)
 
-    # localfs_paths is a path whitelist, not a credential. Keep it request-scoped
-    # in agentic_config and remove it before dynamic credential injection.
-    localfs_paths: list[str] = []
-    if tool_config and isinstance(tool_config, dict):
-        localfs_paths = _normalize_localfs_paths(tool_config.pop('localfs_paths', None))
-
     agentic_config = {
         'session_id': session_id,
         'filters': filters if RAG_MODE and filters else {},
         'files': resolved_files,
         'history_files_per_turn': files_map,
-        'localfs_paths': localfs_paths,
+        'local_fs_sources': local_fs_sources or [],
         'priority': priority,
         'user_id': user_id or '',
         'use_memory': use_memory,

@@ -38,25 +38,11 @@ type SelfEvolutionSessionSummary = {
   title: string;
 };
 
-const activeStageTitles: Record<string, string> = {
-  dataset: "数据集生成",
-  eval: "执行评测",
-  analysis: "错误分析",
-  repair: "代码优化",
-  abtest: "ABTest 和切流",
-};
-
-type FinalResultMetric = {
-  label: string;
-  value: string;
-  tone: "good" | "bad" | "neutral";
-};
-
 export type SelfEvolutionFinalResultSummary = {
   verdict: "accept" | "reject" | "done";
   title: string;
   desc: string;
-  metrics: FinalResultMetric[];
+  metrics: { label: string; value: string; tone: "good" | "bad" | "neutral" }[];
   reasons: string[];
 };
 
@@ -86,6 +72,7 @@ export type SelfEvolutionWorkbenchViewProps = {
   isSendingMessage: boolean;
   displayedCheckpointWaitPrompt?: CheckpointWaitPrompt;
   prompt: string;
+  selectedViewStage?: string;
   isHistorySessionModalOpen: boolean;
   threadHistoryListError: string;
   isLoadingThreadHistoryList: boolean;
@@ -117,7 +104,7 @@ export type SelfEvolutionWorkbenchViewProps = {
   onContinueCheckpoint: (command?: string) => void;
   onOpenArtifact: (kind: WorkflowResultKind) => void;
   onOpenObservation: (kind: SelfEvolutionObservationKind) => void;
-  onOpenCaseArtifact: (kind: WorkflowResultKind, artifactId: string, title: string) => void;
+  onOpenCaseArtifact: (kind: WorkflowResultKind, artifactId: string, title: string, caseId?: string) => void;
   onWorkbenchTabChange: (tab?: SelfEvolutionWorkbenchTab) => void;
   onCloseArtifactPanel: () => void;
   onCloseHistorySessionModal: () => void;
@@ -150,6 +137,7 @@ export function SelfEvolutionWorkbenchView({
   isSendingMessage,
   displayedCheckpointWaitPrompt,
   prompt,
+  selectedViewStage,
   isHistorySessionModalOpen,
   threadHistoryListError,
   isLoadingThreadHistoryList,
@@ -189,9 +177,17 @@ export function SelfEvolutionWorkbenchView({
   const { t } = useTranslation();
   const [isEndedChatOpen, setIsEndedChatOpen] = useState(false);
   const [isInteractionChatOpen, setIsInteractionChatOpen] = useState(false);
-  const [selectedStage, setSelectedStage] = useState<string>();
   const [caseProgressPageByStage, setCaseProgressPageByStage] = useState<Record<string, number>>({});
-  const displayStage = selectedStage || processDashboard.activeStage;
+
+  const activeStageTitles: Record<string, string> = {
+    dataset: t("selfEvolutionRun.stageTitle.dataset"),
+    eval: t("selfEvolutionRun.stageTitle.eval"),
+    analysis: t("selfEvolutionRun.stageTitle.analysis"),
+    repair: t("selfEvolutionRun.stageTitle.repair"),
+    abtest: t("selfEvolutionRun.stageTitle.abtest"),
+  };
+
+  const displayStage = selectedViewStage || processDashboard.activeStage;
   const activeStageOverview = displayStage ? processDashboard.overview.find((item) => item.stage === displayStage) : undefined;
   const activeStageLabel =
     displayStage
@@ -205,27 +201,38 @@ export function SelfEvolutionWorkbenchView({
   const shouldShowCutoverCard = displayStage === "abtest" && (isCutoverDecision || processDashboard.cutoverCompleted);
   const checkpointDecisionDesc =
     checkpointDecisionPrompt?.nextOperationLabel
-      ? `下一步：${checkpointDecisionPrompt.nextOperationLabel}`
-      : checkpointDecisionPrompt?.message || "确认后继续推进当前流程。";
+      ? t("selfEvolutionRun.checkpointNextStep", { label: checkpointDecisionPrompt.nextOperationLabel })
+      : checkpointDecisionPrompt?.message || t("selfEvolutionRun.checkpointContinueDefault");
   const cutoverDecisionEvidence = processDashboard.cutoverActivities.filter((item) => item.tone !== "auto").slice(0, 2).map((item) => ({
     ...item,
-    title: item.title === "abtest · compare" ? "切流门槛" : item.title,
+    title: item.title === "abtest · compare" ? t("selfEvolutionRun.cutoverThreshold") : item.title,
   }));
   const activeStageStatusKey = activeStageOverview?.step.status || processDashboard.activeStep?.status || "pending";
   const activeStageStatus = displayStage === "abtest" && processDashboard.cutoverCompleted
-    ? "已切流"
+    ? t("selfEvolutionRun.cutoverDone")
     : displayStage === "abtest" && isCutoverDecision
-    ? "待切流"
+    ? t("selfEvolutionRun.cutoverPending")
     : activeStageStatusKey === "running"
-    ? "执行中"
+    ? t("selfEvolutionRun.statusRunning")
     : getStepStatusLabel(activeStageStatusKey);
+  const hasThreadRestoreError = Boolean(threadRestoreError && routeThreadId);
+  const normalizedThreadRestoreError = threadRestoreError.trim().toLowerCase();
+  const isThreadRestoreNotFound =
+    normalizedThreadRestoreError.includes("thread not found") ||
+    threadRestoreError.includes(t("selfEvolutionRun.threadNotFoundTitle"));
+  const threadRestoreNoticeTitle = isThreadRestoreNotFound
+    ? t("selfEvolutionRun.threadNotFoundTitle")
+    : t("selfEvolutionRun.threadLoadFailedTitle");
+  const threadRestoreNoticeDesc = isThreadRestoreNotFound
+    ? t("selfEvolutionRun.threadNotFoundDesc", { id: routeThreadId })
+    : threadRestoreError;
   const userMessageAnchors = displayedMessages
     .map((item, index) => ({ ...item, index }))
     .filter((item) => item.role === "user");
   const latestUserMessageIndex = displayedMessages.reduce((latestIndex, item, index) => item.role === "user" ? index : latestIndex, -1);
   const latestDialogueMessages = latestUserMessageIndex >= 0 ? displayedMessages.slice(latestUserMessageIndex) : displayedMessages.slice(-1);
   const visibleInteractionMessages = isInteractionChatOpen ? displayedMessages : latestDialogueMessages;
-  const getMessageNavTitle = (content: string) => content.replace(/\s+/g, " ").trim() || "空消息";
+  const getMessageNavTitle = (content: string) => content.replace(/\s+/g, " ").trim() || t("selfEvolutionRun.emptyMessage");
   const scrollToMessage = (messageId: string) => {
     const target = Array.from(chatStreamRef.current?.querySelectorAll<HTMLElement>("[data-self-evolution-message-id]") || [])
       .find((item) => item.dataset.selfEvolutionMessageId === messageId);
@@ -244,9 +251,6 @@ export function SelfEvolutionWorkbenchView({
     setIsInteractionChatOpen(false);
     setIsEndedChatOpen(false);
   }, [activeSession.id]);
-  useEffect(() => {
-    setSelectedStage(undefined);
-  }, [activeSession.id]);
   const handleActivityListWheel = (event: WheelEvent<HTMLDivElement>) => {
     const maxScrollTop = event.currentTarget.scrollHeight - event.currentTarget.clientHeight;
     if (maxScrollTop <= 0 || event.deltaY === 0) return;
@@ -263,14 +267,16 @@ export function SelfEvolutionWorkbenchView({
   const selectedStageActivities = displayStage ? processDashboard.recentActivities.filter((item) => item.stage === displayStage).slice(0, 16) : visibleKeyActivities;
   const activeCaseProgressGroup = processDashboard.caseProgressGroups.find((group) => group.stage === displayStage);
   const isReadOnlyEnded = Boolean(!checkpointDecisionPrompt && processDashboard.overview.every((item) => item.step.status === "done"));
+  const shouldShowFinalResultCard = isReadOnlyEnded && !selectedViewStage;
+  const shouldShowStageDetail = !isReadOnlyEnded || Boolean(selectedViewStage);
   const renderFinalResultCard = () => finalResultSummary ? (
-    <section className={`self-evolution-final-result is-${finalResultSummary.verdict}`} aria-label="最终结果">
+    <section className={`self-evolution-final-result is-${finalResultSummary.verdict}`} aria-label={t("selfEvolutionRun.finalResultAria")}>
       <div className="self-evolution-final-result-main">
         <span className="self-evolution-final-result-icon">
           {finalResultSummary.verdict === "reject" ? <CloseOutlined /> : <CheckCircleFilled />}
         </span>
         <div>
-          <Text>最终结果</Text>
+          <Text>{t("selfEvolutionRun.finalResultTitle")}</Text>
           <Title level={4}>{finalResultSummary.title}</Title>
           <Paragraph>{finalResultSummary.desc}</Paragraph>
         </div>
@@ -298,19 +304,19 @@ export function SelfEvolutionWorkbenchView({
           onOpenArtifact("abtests");
         }}
       >
-        查看 ABTest 详情
+        {t("selfEvolutionRun.viewABTestDetail")}
       </button>
     </section>
   ) : (
-    <section className="self-evolution-final-result is-loading" aria-label="最终结果">
+    <section className="self-evolution-final-result is-loading" aria-label={t("selfEvolutionRun.finalResultAria")}>
       <div className="self-evolution-final-result-main">
         <span className="self-evolution-final-result-icon">
           <ClockCircleFilled />
         </span>
         <div>
-          <Text>最终结果</Text>
-          <Title level={4}>正在加载最终结果</Title>
-          <Paragraph>五步流程已完成，正在读取 ABTest 结论与切流建议。</Paragraph>
+          <Text>{t("selfEvolutionRun.finalResultTitle")}</Text>
+          <Title level={4}>{t("selfEvolutionRun.finalResultLoading")}</Title>
+          <Paragraph>{t("selfEvolutionRun.finalResultLoadingDesc")}</Paragraph>
         </div>
       </div>
     </section>
@@ -318,6 +324,24 @@ export function SelfEvolutionWorkbenchView({
   const renderStageNavigationPanel = () => (
     <div className="self-evolution-artifact-sidebar is-navigation">
       {artifactNavigationPanel}
+    </div>
+  );
+  const renderThreadRestoreNotice = () => (
+    <div className="self-evolution-restore-notice" role="alert">
+      <span className="self-evolution-restore-notice-icon">
+        <CloseOutlined />
+      </span>
+      <Text>{t("selfEvolutionRun.selfEvolutionDetail")}</Text>
+      <Title level={4}>{threadRestoreNoticeTitle}</Title>
+      <Paragraph>{threadRestoreNoticeDesc}</Paragraph>
+      <div className="self-evolution-restore-notice-actions">
+        <button type="button" onClick={onRetryRestoreThread}>
+          {t("selfEvolutionRun.retry")}
+        </button>
+        <button type="button" onClick={onOpenHistorySessionModal}>
+          {t("selfEvolutionRun.viewHistory")}
+        </button>
+      </div>
     </div>
   );
   const renderActivityRows = (activities: EvoProcessDashboard["recentActivities"], emptyText: string) => (
@@ -347,7 +371,7 @@ export function SelfEvolutionWorkbenchView({
                   onOpenArtifact(item.artifactKind!);
                 }}
               >
-                {item.artifactLabel || "查看"}
+                {item.artifactLabel || t("selfEvolutionRun.viewActivity")}
               </button>
             )}
           </div>
@@ -358,7 +382,7 @@ export function SelfEvolutionWorkbenchView({
   const renderCaseProgressRow = (item: EvoCaseProgressItem) => (
     <div key={item.caseId} className={`self-evolution-case-row is-${item.status}`}>
       <strong className="self-evolution-case-title">{item.title}</strong>
-      <div className="self-evolution-case-step-list" aria-label={`${item.caseId} 进度`}>
+      <div className="self-evolution-case-step-list" aria-label={t("selfEvolutionRun.caseProgressAria", { caseId: item.caseId })}>
         {item.steps.map((step) => (
           <span key={step.key} className={`self-evolution-case-step is-${step.status}`} title={`${step.label} · ${getStepStatusLabel(step.status)}`}>
             {step.label}
@@ -374,17 +398,17 @@ export function SelfEvolutionWorkbenchView({
         onClick={(event) => {
           event.stopPropagation();
           if (item.artifactId) {
-            onOpenCaseArtifact(item.artifactKind, item.artifactId, `${item.title} · ${item.artifactLabel}`);
+            onOpenCaseArtifact(item.artifactKind, item.artifactId, `${item.title} · ${item.artifactLabel}`, item.caseId);
           }
         }}
       >
-        查看详情
+        {t("selfEvolutionRun.viewDetail")}
       </button>
     </div>
   );
   const renderCaseProgressPanel = () => {
     if (!activeCaseProgressGroup) {
-      return renderActivityRows(selectedStageActivities.length ? selectedStageActivities : visibleKeyActivities, "启动后会在这里按阶段展示进度。");
+      return renderActivityRows(selectedStageActivities.length ? selectedStageActivities : visibleKeyActivities, t("selfEvolutionRun.activityEmptyDefault"));
     }
     const pageSize = activeCaseProgressGroup.pageSize;
     const totalPages = Math.max(1, Math.ceil(activeCaseProgressGroup.cases.length / pageSize));
@@ -395,11 +419,11 @@ export function SelfEvolutionWorkbenchView({
     return (
       <div className="self-evolution-case-progress">
         <div className="self-evolution-case-progress-summary">
-          <span>{`${activeCaseProgressGroup.title} · ${completedCases}/${activeCaseProgressGroup.cases.length} case 完成`}</span>
+          <span>{t("selfEvolutionRun.caseCompletedSummary", { title: activeCaseProgressGroup.title, completed: completedCases, total: activeCaseProgressGroup.cases.length })}</span>
           <div className="self-evolution-case-progress-pager">
-            <button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>上一页</button>
+            <button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>{t("selfEvolutionRun.prevPage")}</button>
             <span>{`${currentPage}/${totalPages}`}</span>
-            <button type="button" disabled={currentPage >= totalPages} onClick={() => setPage(currentPage + 1)}>下一页</button>
+            <button type="button" disabled={currentPage >= totalPages} onClick={() => setPage(currentPage + 1)}>{t("selfEvolutionRun.nextPage")}</button>
           </div>
         </div>
         <div className="self-evolution-case-list">
@@ -437,28 +461,28 @@ export function SelfEvolutionWorkbenchView({
     <div className="self-evolution-message-nav-card">
       <div className="self-evolution-message-nav-summary">
         <strong>{activeSession.title}</strong>
-        <span>{routeThreadId ? `线程 ${routeThreadId}` : "本地会话"}</span>
-        <span>{displayedMessages.length ? `${displayedMessages.length} 条消息` : "等待消息"}</span>
+        <span>{routeThreadId ? t("selfEvolutionRun.threadLabelShort", { id: routeThreadId }) : t("selfEvolutionRun.localSession")}</span>
+        <span>{displayedMessages.length ? t("selfEvolutionRun.messageCountLabel", { count: displayedMessages.length }) : t("selfEvolutionRun.waitingMessages")}</span>
       </div>
       <div className="self-evolution-message-nav-list">
         {userMessageAnchors.length ? (
           userMessageAnchors.map((item, index) => (
             <button key={item.id} type="button" onClick={() => handleMessageAnchorClick(item.id)}>
-              <strong>{`用户消息 ${index + 1}`}</strong>
+              <strong>{t("selfEvolutionRun.userMessageLabel", { index: index + 1 })}</strong>
               <span>{getMessageNavTitle(item.content)}</span>
               <em>{item.time}</em>
             </button>
           ))
         ) : (
-          <span className="self-evolution-message-nav-empty">暂无用户消息</span>
+          <span className="self-evolution-message-nav-empty">{t("selfEvolutionRun.noUserMessages")}</span>
         )}
       </div>
     </div>
   );
   const renderWorkbenchNavigationPanel = () => (
     <div className="self-evolution-workbench-accordion">
-      {renderSidebarSection("messages", "交互处理", "当前会话与消息入口", renderMessagesNavigationPanel())}
-      {renderSidebarSection("processes", "阶段概览", activeStageLabel, renderStageNavigationPanel())}
+      {renderSidebarSection("messages", t("selfEvolutionRun.navInteractionTitle"), t("selfEvolutionRun.navInteractionDesc"), renderMessagesNavigationPanel())}
+      {renderSidebarSection("processes", t("selfEvolutionRun.navStageOverviewTitle"), activeStageLabel, renderStageNavigationPanel())}
     </div>
   );
   const renderInteractionFeed = () => isReadOnlyEnded ? (
@@ -469,9 +493,9 @@ export function SelfEvolutionWorkbenchView({
     >
       <summary>
         <span>
-          <Text>交互记录</Text>
+          <Text>{t("selfEvolutionRun.interactionHistory")}</Text>
         </span>
-        <strong>{displayedMessages.length ? `${displayedMessages.length} 条消息` : "暂无消息"}</strong>
+        <strong>{displayedMessages.length ? t("selfEvolutionRun.messageCountLabel", { count: displayedMessages.length }) : t("selfEvolutionRun.noMessages")}</strong>
         <DownOutlined />
       </summary>
       {isEndedChatOpen && (
@@ -493,11 +517,11 @@ export function SelfEvolutionWorkbenchView({
         aria-expanded={isInteractionChatOpen}
       >
         <span>
-          <Text>交互处理</Text>
+          <Text>{t("selfEvolutionRun.navInteractionTitle")}</Text>
         </span>
-        {isPlanningNextStep && <em className="self-evolution-planning-pulse">正在计划下一步</em>}
-        <strong>{displayedMessages.length ? `${displayedMessages.length} 条消息` : "等待消息"}</strong>
-        <em>{isInteractionChatOpen ? "收起" : "查看详情"}</em>
+        {isPlanningNextStep && <em className="self-evolution-planning-pulse">{t("selfEvolutionRun.planningNextStep")}</em>}
+        <strong>{displayedMessages.length ? t("selfEvolutionRun.messageCountLabel", { count: displayedMessages.length }) : t("selfEvolutionRun.waitingMessages")}</strong>
+        <em>{isInteractionChatOpen ? t("selfEvolutionRun.collapse") : t("selfEvolutionRun.viewDetail")}</em>
         <DownOutlined />
       </button>
       <div className="self-evolution-workbench-tab-body">
@@ -528,7 +552,7 @@ export function SelfEvolutionWorkbenchView({
               }
             }}
           >
-            {checkpointDecisionPrompt.command || "继续执行"}
+            {checkpointDecisionPrompt.command || t("selfEvolutionRun.continueExecution")}
           </button>
         </div>
       )}
@@ -551,7 +575,7 @@ export function SelfEvolutionWorkbenchView({
       <div className="self-evolution-workbench">
         <aside
           className="self-evolution-workbench-nav"
-          aria-label="自进化导航面板"
+          aria-label={t("selfEvolutionRun.workbenchNavAria")}
           onClick={isArtifactPanelOpen ? onCloseArtifactPanel : undefined}
         >
           <div className="self-evolution-workbench-nav-head">
@@ -574,17 +598,17 @@ export function SelfEvolutionWorkbenchView({
           {renderWorkbenchNavigationPanel()}
           <div className="self-evolution-workbench-sidebar-actions">
             {chatSessionsCount > 1 && (
-              <button type="button" onClick={() => onCloseSession(activeSession.id)} title="关闭当前会话">
+              <button type="button" onClick={() => onCloseSession(activeSession.id)} title={t("selfEvolutionRun.closeCurrentSession")}>
                 <CloseOutlined />
               </button>
             )}
             <button type="button" onClick={onCreateSession} title={t("selfEvolutionRun.newSession")}>
               <PlusOutlined />
-              <span>新建</span>
+              <span>{t("selfEvolutionRun.new")}</span>
             </button>
             <button type="button" onClick={onOpenHistorySessionModal} title={t("selfEvolutionRun.openHistoryAria")}>
               <HistoryOutlined />
-              <span>历史</span>
+              <span>{t("selfEvolutionRun.history")}</span>
             </button>
           </div>
         </aside>
@@ -595,10 +619,11 @@ export function SelfEvolutionWorkbenchView({
           onClick={isArtifactPanelOpen ? onCloseArtifactPanel : undefined}
         >
           <div className="self-evolution-workbench-main-scroll">
-            <div className="self-evolution-process-board" aria-label="evo 全流程进度">
+            {hasThreadRestoreError ? renderThreadRestoreNotice() : (
+              <div className="self-evolution-process-board" aria-label={t("selfEvolutionRun.evoFlowProgressAria")}>
                 <div className="self-evolution-process-live">
                   <div className="self-evolution-process-live-main">
-                    <Text className="self-evolution-process-live-kicker">{selectedStage ? "查看阶段" : "当前阶段"}</Text>
+                    <Text className="self-evolution-process-live-kicker">{selectedViewStage ? t("selfEvolutionRun.viewingStage") : t("selfEvolutionRun.currentStage")}</Text>
                     <div className="self-evolution-process-live-title">
                       <Title level={4}>{activeStageLabel}</Title>
                       <span className={`self-evolution-process-live-status is-${activeStageStatusKey}`}>
@@ -607,27 +632,27 @@ export function SelfEvolutionWorkbenchView({
                     </div>
                   </div>
                   {(displayStage === "eval" || displayStage === "abtest") && (
-                    <div className="self-evolution-process-observation-actions" aria-label="观测查看入口">
+                    <div className="self-evolution-process-observation-actions" aria-label={t("selfEvolutionRun.observationEntryAria")}>
                       <button
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
                           onOpenObservation(displayStage === "abtest" ? "abtest" : "eval");
                         }}
-                        aria-label={displayStage === "abtest" ? "进入 Step 5 A/B 观测" : "进入 Step 2 观测"}
+                        aria-label={displayStage === "abtest" ? t("selfEvolutionRun.enterStep5ABObservation") : t("selfEvolutionRun.enterStep2Observation")}
                       >
                         <EyeOutlined />
-                        {displayStage === "abtest" ? "Step 5 A/B" : "Step 2 观测"}
+                        {displayStage === "abtest" ? t("selfEvolutionRun.step5AB") : t("selfEvolutionRun.step2Observation")}
                       </button>
                     </div>
                   )}
                   {shouldShowCutoverCard && (
-                    <div className="self-evolution-cutover-decision" aria-label="ABTest 切流确认">
+                    <div className="self-evolution-cutover-decision" aria-label={t("selfEvolutionRun.abtestCutoverAria")}>
                       <div className="self-evolution-cutover-decision-head">
                         <CheckCircleFilled />
                         <span>
-                          <strong>{processDashboard.cutoverCompleted ? "候选算法已切流" : "ABTest 已通过"}</strong>
-                          <small>{processDashboard.cutoverCompleted ? "线上 chat 服务已使用候选算法" : "当前线上仍使用原版本"}</small>
+                          <strong>{processDashboard.cutoverCompleted ? t("selfEvolutionRun.candidateCutoverDone") : t("selfEvolutionRun.abtestPassed")}</strong>
+                          <small>{processDashboard.cutoverCompleted ? t("selfEvolutionRun.chatServiceUsingCandidate") : t("selfEvolutionRun.chatServiceUsingOriginal")}</small>
                         </span>
                       </div>
                       <div className="self-evolution-cutover-decision-evidence">
@@ -640,29 +665,29 @@ export function SelfEvolutionWorkbenchView({
                           ))
                         ) : (
                           <p>
-                            <strong>候选满足条件</strong>
-                            <span>{checkpointDecisionPrompt?.message || "确认后才会切换 chat 服务。"}</span>
+                            <strong>{t("selfEvolutionRun.candidateMeetsCriteria")}</strong>
+                            <span>{checkpointDecisionPrompt?.message || t("selfEvolutionRun.confirmWillSwitch")}</span>
                           </p>
                         )}
                         {processDashboard.cutoverCompleted ? (
                           <p>
-                            <strong>切换已完成</strong>
-                            <span>候选算法已注册并切换到线上 chat 服务。</span>
+                            <strong>{t("selfEvolutionRun.switchCompleted")}</strong>
+                            <span>{t("selfEvolutionRun.candidateRegisteredAndSwitched")}</span>
                           </p>
                         ) : (
                           <p>
-                            <strong>尚未执行切换</strong>
-                            <span>点击确认后才会注册候选算法并切换 chat 服务。</span>
+                            <strong>{t("selfEvolutionRun.notSwitchedYet")}</strong>
+                            <span>{t("selfEvolutionRun.switchAfterConfirm")}</span>
                           </p>
                         )}
                       </div>
                       {!processDashboard.cutoverCompleted && (
                         <div className="self-evolution-cutover-decision-actions">
                           <Popconfirm
-                            title="确认切换 chat 服务？"
-                            description="确认后会注册候选算法并切换线上 chat 服务。"
-                            okText="确认切流"
-                            cancelText="取消"
+                            title={t("selfEvolutionRun.confirmSwitchChatServiceTitle")}
+                            description={t("selfEvolutionRun.confirmSwitchChatServiceDesc")}
+                            okText={t("selfEvolutionRun.confirmCutover")}
+                            cancelText={t("selfEvolutionRun.cancel")}
                             onConfirm={(event) => {
                               event?.stopPropagation();
                               if (checkpointDecisionPrompt?.command) {
@@ -677,7 +702,7 @@ export function SelfEvolutionWorkbenchView({
                               disabled={!checkpointDecisionPrompt?.command || isSendingMessage}
                               onClick={(event) => event.stopPropagation()}
                             >
-                              {checkpointDecisionPrompt?.command || "确认切流"}
+                              {checkpointDecisionPrompt?.command || t("selfEvolutionRun.confirmCutover")}
                             </button>
                           </Popconfirm>
                           <button
@@ -688,17 +713,17 @@ export function SelfEvolutionWorkbenchView({
                               onOpenArtifact("abtests");
                             }}
                           >
-                            查看 ABTest 详情
+                            {t("selfEvolutionRun.viewABTestDetail")}
                           </button>
                           <button
                             type="button"
                             className="self-evolution-cutover-decision-neutral"
                             onClick={(event) => {
                               event.stopPropagation();
-                              void message.info("已保持当前版本；需要切流时再确认。", 1.6);
+                              void message.info(t("selfEvolutionRun.keptCurrentVersionMsg"), 1.6);
                             }}
                           >
-                            保持当前版本
+                            {t("selfEvolutionRun.keepCurrentVersion")}
                           </button>
                         </div>
                       )}
@@ -711,7 +736,7 @@ export function SelfEvolutionWorkbenchView({
                             onOpenArtifact("abtests");
                           }}
                         >
-                          查看 ABTest 详情
+                          {t("selfEvolutionRun.viewABTestDetail")}
                         </button>
                       )}
                     </div>
@@ -724,33 +749,34 @@ export function SelfEvolutionWorkbenchView({
                   </div>
                 )}
 
-                {isReadOnlyEnded && renderFinalResultCard()}
+                {shouldShowFinalResultCard && renderFinalResultCard()}
 
-                {!isReadOnlyEnded && (
+                {shouldShowStageDetail && (
                   <div className="self-evolution-process-activity">
                     <div className="self-evolution-process-activity-head">
-                      <Text>{activeCaseProgressGroup ? "Case 进度" : "关键事件"}</Text>
-                      <span>{activeCaseProgressGroup ? "按 case 分页展示" : activeStageLabel}</span>
+                      <Text>{activeCaseProgressGroup ? t("selfEvolutionRun.caseProgressSectionTitle") : t("selfEvolutionRun.keyEventsSectionTitle")}</Text>
+                      <span>{activeCaseProgressGroup ? t("selfEvolutionRun.displayByCasePaged") : activeStageLabel}</span>
                     </div>
                     <div className="self-evolution-process-activity-list is-key" onWheel={handleActivityListWheel}>
                       {renderCaseProgressPanel()}
                     </div>
                     <details className="self-evolution-process-debug-log">
-                      <summary>调试日志 · 共 {processDashboard.recentActivityTotal} 条</summary>
+                      <summary>{t("selfEvolutionRun.debugLogTitle", { count: processDashboard.recentActivityTotal })}</summary>
                       <div className="self-evolution-process-activity-list is-debug" onWheel={handleActivityListWheel}>
-                        {renderActivityRows(processDashboard.recentActivities, "启动后会在这里显示 dataset、eval、analysis、repair、abtest 的实时事件。")}
+                        {renderActivityRows(processDashboard.recentActivities, t("selfEvolutionRun.debugLogEmptyHint"))}
                       </div>
                     </details>
                   </div>
                 )}
 
               </div>
+            )}
           </div>
         </main>
 
         <aside
           className="self-evolution-interaction-column"
-          aria-label="问答和交互处理"
+          aria-label={t("selfEvolutionRun.qnaInteractionAria")}
           onClick={isArtifactPanelOpen ? onCloseArtifactPanel : undefined}
         >
           {renderInteractionFeed()}
@@ -758,10 +784,10 @@ export function SelfEvolutionWorkbenchView({
         </aside>
 
         {isArtifactPanelOpen && (
-          <section className="self-evolution-artifact-drawer" aria-label="产物详情抽屉">
+          <section className="self-evolution-artifact-drawer" aria-label={t("selfEvolutionRun.artifactDrawerAria")}>
             <div className="self-evolution-artifact-drawer-head">
-              <Text strong>产物详情</Text>
-              <button type="button" onClick={onCloseArtifactPanel} aria-label="关闭产物详情">
+              <Text strong>{t("selfEvolutionRun.artifactDetail")}</Text>
+              <button type="button" onClick={onCloseArtifactPanel} aria-label={t("selfEvolutionRun.closeArtifactDetail")}>
                 <CloseOutlined />
               </button>
             </div>
