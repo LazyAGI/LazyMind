@@ -162,6 +162,8 @@ export interface PluginSession {
   plugin_id: string;
   status: "active" | "waiting" | "completed";
   current_step_id: string;
+  /** Global intent/constraint for this session, JSON string e.g. {"text":"..."} */
+  intent_context?: string;
   created_at: string;
   updated_at: string;
   slots?: SlotRevision[];
@@ -181,6 +183,8 @@ export interface PluginSessionStep {
   attempt: number;
   task_id: string;
   status: string;
+  /** Step-level intent/constraint, JSON string e.g. {"text":"..."} */
+  intent_context?: string;
   created_at: string;
   updated_at: string;
 }

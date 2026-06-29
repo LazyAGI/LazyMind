@@ -696,7 +696,7 @@ task_status_changed  → TaskCenter 状态变更
 
 ---
 
-## 十四、步骤中断恢复（Checkpoint-Resume）⚠️ 待调试
+## 十四、步骤中断恢复（Checkpoint-Resume）
 
 ### 14.1 问题
 

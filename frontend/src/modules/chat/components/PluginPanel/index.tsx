@@ -16,6 +16,81 @@ import type {
 import { SlotRenderer, SlotEditingContext } from './SlotComponents';
 import './PluginPanel.scss';
 
+/** Parse a JSON intent_context string and return the text field, or '' if empty/invalid. */
+function parseIntentText(raw?: string): string {
+  if (!raw || raw === '{}') return '';
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return (parsed as Record<string, unknown>).text as string ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** IntentPopover shows global intent + per-step intent inside a floating popover. */
+function IntentPopover({
+  session,
+  tabs,
+  onClose,
+}: {
+  session: PluginSession;
+  tabs: TabDef[];
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const globalText = parseIntentText(session.intent_context);
+  const stepIntents = (session.steps ?? [])
+    .filter((s) => !!parseIntentText(s.intent_context))
+    .map((s, idx) => ({
+      idx: idx + 1,
+      stepId: s.step_id,
+      text: parseIntentText(s.intent_context),
+      tabLabel: tabs.find((t) => t.id === s.step_id)?.label ?? s.step_id,
+    }));
+
+  useEffect(() => {
+    function handleMouseDown(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [onClose]);
+
+  return (
+    <div className='plugin-panel__intent-popover' ref={wrapRef} role='dialog' aria-label={t('chat.pluginIntentBtn')}>
+      <div className='plugin-panel__intent-popover-title'>{t('chat.pluginIntentBtn')}</div>
+      {globalText && (
+        <div className='plugin-panel__intent-section'>
+          <div className='plugin-panel__intent-section-title'>{t('chat.pluginIntentGlobalTitle')}</div>
+          <div className='plugin-panel__intent-section-text'>{globalText}</div>
+        </div>
+      )}
+      {stepIntents.length > 0 && (
+        <div className='plugin-panel__intent-section'>
+          <div className='plugin-panel__intent-section-title'>{t('chat.pluginIntentStepTitle')}</div>
+          <div className='plugin-panel__intent-step-list'>
+            {stepIntents.map((si) => (
+              <div key={si.stepId} className='plugin-panel__intent-step-row'>
+                <span className='plugin-panel__intent-step-badge'>{si.idx}</span>
+                <span className='plugin-panel__intent-step-text'>{si.text}</span>
+                <span className='plugin-panel__intent-step-arrow'>→</span>
+                <span className='plugin-panel__intent-step-tab'>{si.tabLabel}</span>
+              </div>
+            ))}
+          </div>
+          <div className='plugin-panel__intent-step-note'>{t('chat.pluginIntentStepMapNote')}</div>
+        </div>
+      )}
+      {!globalText && stepIntents.length === 0 && (
+        <div className='plugin-panel__intent-empty'>{t('chat.pluginIntentEmpty')}</div>
+      )}
+    </div>
+  );
+}
+
 interface PluginPanelProps {
   conversationId: string;
   pollIntervalMs?: number;
@@ -687,6 +762,7 @@ export function PluginPanel({
   // Track which text slots are currently being edited; disable footer buttons while any are.
   const editingSlots = useRef<Set<string>>(new Set());
   const [anySlotEditing, setAnySlotEditing] = useState(false);
+  const [intentOpen, setIntentOpen] = useState(false);
 
   const handleSlotEditingChange = useCallback((key: string, editing: boolean) => {
     if (editing) {
@@ -744,6 +820,10 @@ export function PluginPanel({
   const tabs: TabDef[] = ui.tabs ?? [];
   const hasTabs = tabs.length > 0;
 
+  // Always show the intent button when a session exists.
+  // When no intent has been recorded yet the popover shows empty sections.
+  const hasIntent = true;
+
   const showActions =
     session.status === 'waiting' ||
     session.status === 'active' ||
@@ -795,6 +875,31 @@ export function PluginPanel({
           </span>
         </div>
         <div className='plugin-panel__header-right'>
+          {hasIntent && (
+            <div className='plugin-panel__intent-btn-wrap'>
+              <button
+                type='button'
+                className='plugin-panel__intent-btn'
+                onClick={() => setIntentOpen((v) => !v)}
+                aria-label={t('chat.pluginIntentBtn')}
+                aria-expanded={intentOpen}
+              >
+                <svg width='13' height='13' viewBox='0 0 13 13' fill='none' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>
+                  <circle cx='6.5' cy='6.5' r='5.75' stroke='currentColor' strokeWidth='1.5' />
+                  <path d='M6.5 5.5v4' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
+                  <circle cx='6.5' cy='3.75' r='0.75' fill='currentColor' />
+                </svg>
+                {t('chat.pluginIntentBtn')}
+              </button>
+              {intentOpen && (
+                <IntentPopover
+                  session={session}
+                  tabs={tabs}
+                  onClose={() => setIntentOpen(false)}
+                />
+              )}
+            </div>
+          )}
           <button
             type='button'
             className='plugin-panel__collapse-btn'

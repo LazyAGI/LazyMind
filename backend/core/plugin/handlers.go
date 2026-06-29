@@ -97,6 +97,7 @@ type sessionDTO struct {
 	PluginID       string    `json:"plugin_id"`
 	Status         string    `json:"status"`
 	CurrentStepID  string    `json:"current_step_id"`
+	IntentContext  string    `json:"intent_context,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Slots          []slotDTO `json:"slots,omitempty"`
@@ -105,11 +106,12 @@ type sessionDTO struct {
 
 // stepDTO summarises one plugin_session_steps row (used for dependency validation).
 type stepDTO struct {
-	StepID    string    `json:"step_id"`
-	Attempt   int       `json:"attempt"`
-	TaskID    string    `json:"task_id"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	StepID        string    `json:"step_id"`
+	Attempt       int       `json:"attempt"`
+	TaskID        string    `json:"task_id"`
+	Status        string    `json:"status"`
+	IntentContext string    `json:"intent_context,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // slotDTO represents a currently-selected slot revision, with its artifact value inline.
@@ -143,6 +145,7 @@ func toSessionDTO(s *orm.PluginSession) sessionDTO {
 		PluginID:       s.PluginID,
 		Status:         s.Status,
 		CurrentStepID:  s.CurrentStepID,
+		IntentContext:  s.IntentContext,
 		CreatedAt:      s.CreatedAt,
 		UpdatedAt:      s.UpdatedAt,
 	}
@@ -156,6 +159,22 @@ func toStepDTO(r *orm.PluginSessionStep) stepDTO {
 		Status:    r.Status,
 		CreatedAt: r.CreatedAt,
 	}
+}
+
+// buildStepIntentMap loads all step intents for a session and returns a map[step_id]intent_context.
+// Returns an empty map on error (non-fatal).
+func buildStepIntentMap(ctx context.Context, db *gorm.DB, sessionID string) map[string]string {
+	intents, err := ListStepIntents(ctx, db, sessionID)
+	m := make(map[string]string, len(intents))
+	if err != nil {
+		return m
+	}
+	for _, si := range intents {
+		if si.IntentContext != "" && si.IntentContext != "{}" {
+			m[si.StepID] = si.IntentContext
+		}
+	}
+	return m
 }
 
 func toSlotDTO(r *orm.PluginSlotRevision) slotDTO {
@@ -403,8 +422,12 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 	enrichSlots(ctx, db, sessionID, dto.Slots)
 	// Load steps inline (used by Python Layer-2 dependency validation).
 	steps, _ := ListSteps(ctx, db, sessionID)
+	// Build step intent map for fast lookup.
+	intentMap := buildStepIntentMap(ctx, db, sessionID)
 	for i := range steps {
-		dto.Steps = append(dto.Steps, toStepDTO(&steps[i]))
+		sd := toStepDTO(&steps[i])
+		sd.IntentContext = intentMap[steps[i].StepID]
+		dto.Steps = append(dto.Steps, sd)
 	}
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
@@ -454,26 +477,29 @@ func GetSessionSteps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type stepDTO struct {
-		ID        string `json:"id"`
-		SessionID string `json:"session_id"`
-		StepID    string `json:"step_id"`
-		Attempt   int    `json:"attempt"`
-		TaskID    string `json:"task_id"`
-		Status    string `json:"status"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
+		ID            string `json:"id"`
+		SessionID     string `json:"session_id"`
+		StepID        string `json:"step_id"`
+		Attempt       int    `json:"attempt"`
+		TaskID        string `json:"task_id"`
+		Status        string `json:"status"`
+		IntentContext string `json:"intent_context,omitempty"`
+		CreatedAt     string `json:"created_at"`
+		UpdatedAt     string `json:"updated_at"`
 	}
+	intentMap := buildStepIntentMap(r.Context(), db, sessionID)
 	out := make([]stepDTO, 0, len(steps))
 	for _, s := range steps {
 		out = append(out, stepDTO{
-			ID:        s.ID,
-			SessionID: s.SessionID,
-			StepID:    s.StepID,
-			Attempt:   s.Attempt,
-			TaskID:    s.TaskID,
-			Status:    s.Status,
-			CreatedAt: s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-			UpdatedAt: s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			ID:            s.ID,
+			SessionID:     s.SessionID,
+			StepID:        s.StepID,
+			Attempt:       s.Attempt,
+			TaskID:        s.TaskID,
+			Status:        s.Status,
+			IntentContext: intentMap[s.StepID],
+			CreatedAt:     s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:     s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	common.ReplyOK(w, map[string]any{"steps": out})

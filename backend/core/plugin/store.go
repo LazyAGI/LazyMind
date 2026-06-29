@@ -292,6 +292,17 @@ func ListSteps(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.Plugin
 	return rows, nil
 }
 
+// ListStepIntents returns all step-level intent rows for a session.
+func ListStepIntents(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.PluginStepIntent, error) {
+	var rows []orm.PluginStepIntent
+	if err := db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // IsEndStepLatest reports whether the most recently created step in the session has
 // step_id == "__end__". This is the canonical way to decide whether a session should be
 // considered completed vs. waiting: if the user rolls back by triggering a new step after

@@ -624,17 +624,26 @@ def build_update_intent_tool() -> Any:
     ) -> str:
         """Record or update an intent/constraint for this plugin session.
 
-        Scope 'session' affects the entire session (global constraint).
-        Scope 'step' affects only the specified step_id.
+        ALWAYS call this tool BEFORE advancing any step when the user expresses
+        a style preference, quality requirement, or execution constraint in their
+        message. Do not skip this even if you are about to call advance_step_and_exit.
 
-        Use this whenever the user expresses a preference or constraint that
-        should guide current and future step executions, e.g.:
-          - "全程保持清淡风格" → scope='session'
-          - "第2步只要竖版图片" → scope='step', step_id='generate_images'
+        Also call this tool when:
+        - The user repeats or emphasizes the same point across multiple turns.
+        - The user pushes back on a result and explains why (e.g. "that's wrong because...",
+          "I didn't mean X, I meant Y") — capture the clarification so future steps honour it.
+
+        Scope 'session' — applies to the entire session (global constraint):
+          e.g. "keep the tone formal throughout", "always use bullet points"
+          → update_intent(scope='session', content='keep the tone formal throughout')
+
+        Scope 'step' — applies to a specific step only:
+          e.g. "make step 2 output shorter", "use a different format for the summary step"
+          → update_intent(scope='step', step_id='<step_id>', content='output should be shorter')
 
         Args:
             scope (str): 'session' for global or 'step' for step-specific constraint.
-            content (str): The intent/constraint description.
+            content (str): The intent/constraint description, in the user's own words.
             step_id (str, optional): Required when scope='step'.
 
         Returns:
