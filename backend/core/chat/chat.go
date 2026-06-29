@@ -85,7 +85,7 @@ type ChatRetrievalOptions struct {
 type ChatRuntimeOptions struct {
 	Debug              bool           `json:"debug,omitempty"`
 	Reasoning          bool           `json:"reasoning"`
-	Priority           any            `json:"priority,omitempty"`
+	Priority           *int           `json:"priority,omitempty"`
 	Trace              bool           `json:"trace,omitempty"`
 	EnvironmentContext map[string]any `json:"environment_context,omitempty"`
 	LLMConfig          map[string]any `json:"llm_config,omitempty"`
@@ -320,6 +320,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		Runtime: ChatRuntimeOptions{
 			Reasoning: true,
 		},
+		Personalization: ChatPersonalizationOptions{
+			UseMemory: true,
+		},
 	}
 	if q, ok := body["query"].(string); ok {
 		req.Message.Query = q
@@ -370,7 +373,7 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		req.Runtime.Debug = debug
 	}
 	if priority, ok := body["priority"]; ok {
-		req.Runtime.Priority = priority
+		req.Runtime.Priority = intPointerFromAny(priority)
 	}
 	if trace, ok := body["trace"].(bool); ok {
 		req.Runtime.Trace = trace
@@ -439,6 +442,21 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		req.Agent.EnableSubagent = &v
 	}
 	return req
+}
+
+func intPointerFromAny(v any) *int {
+	switch value := v.(type) {
+	case int:
+		return &value
+	case int64:
+		converted := int(value)
+		return &converted
+	case float64:
+		converted := int(value)
+		return &converted
+	default:
+		return nil
+	}
 }
 
 func chatMessagesFromAny(v any) []ChatMessage {

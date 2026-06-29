@@ -537,7 +537,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if req.Runtime.Reasoning {
 		t.Fatalf("expected reasoning to be false")
 	}
-	if !req.Runtime.Debug || req.Runtime.Priority != 9 || !req.Runtime.Trace {
+	if !req.Runtime.Debug || req.Runtime.Priority == nil || *req.Runtime.Priority != 9 || !req.Runtime.Trace {
 		t.Fatalf("unexpected runtime flags: %#v", req.Runtime)
 	}
 	if len(req.Agent.DisabledTools) != 1 || req.Agent.DisabledTools[0] != "bing" {
