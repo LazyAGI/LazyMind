@@ -542,14 +542,12 @@ const enUS = {
     form: {
       createTitle: "New Dataset",
       editTitle: "Edit Dataset",
-      namePlaceholder: "Enter dataset name",
       descriptionPlaceholder: "Enter dataset description",
       knowledgeBasePlaceholder: "Select knowledge base",
       kbDeleted: "Deleted",
       kbDeletedWarning: "{{count}} knowledge base(s) previously linked to this dataset have been deleted. Please re-select if needed.",
       validation: {
         nameRequired: "Enter dataset name",
-        nameMax: "Dataset name cannot exceed 80 characters",
         descriptionMax: "Dataset description cannot exceed 500 characters",
         knowledgeBaseRequired: "Select linked knowledge base",
       },
@@ -1544,8 +1542,8 @@ const enUS = {
     dataSourceFileTypeHtml: "HTML (.html)",
     dataSourceFileTypeHtm: "HTM (.htm)",
     dataSourceFileTypePy: "PY (.py)",
-    dataSourceFeishuSpace: "Feishu Space / Wiki ID",
-    dataSourceFeishuSpaceRequired: "Please enter target space identifier",
+    dataSourceFeishuSpace: "File Token",
+    dataSourceFeishuSpaceRequired: "Please enter a file token",
     dataSourceFeishuSetupGuideAction: "Setup Guide",
     dataSourceNotionSetupGuideAction: "Setup Guide",
     dataSourceFeishuSetupGuide: {
@@ -1599,9 +1597,9 @@ const enUS = {
         finishDesc:
           "Return to the data source creation dialog, choose the target type, complete Feishu account authorization, then select an accessible space or folder directly. You can also enter the target ID manually, then save the configuration.",
         finishDetail:
-          "For Drive Folder access, create the target folder in Feishu Drive first. For Wiki access, make sure the current Feishu account can access the space.",
+          "For Drive Folder access, create the target folder in Feishu Drive first. For Wiki documents, make sure the current Feishu account can access the file and obtain the file token from the document link.",
         finishManualDetail:
-          "For manual entry, paste the Wiki space ID or Drive folder ID into the target path selector, for example 7354xxxxxxxxxxxx or fldxxxxxxxxxxxx, then check Use current input.",
+          "For manual entry, paste the file token or Drive folder ID into the target path selector, for example ZpsGxxxxxxxxxxxx or fldxxxxxxxxxxxx, then check Use current input.",
         finishManualAlt: "Drive folder ID in the Feishu Docs address bar",
         finishAlt: "Select or enter a Feishu target path and finish authorization in the system",
       },
@@ -1672,7 +1670,7 @@ const enUS = {
     dataSourceFeishuTargetTypeRequired: "Please select a Feishu sync target type",
     dataSourceFeishuTargetTypeWiki: "Wiki Space",
     dataSourceFeishuTargetTypeDrive: "Drive Folder",
-    dataSourceFeishuTargetPlaceholderWiki: "e.g. 7354xxxxxxxxxxxx",
+    dataSourceFeishuTargetPlaceholderWiki: "e.g. ZpsGxxxxxxxxxxxx",
     dataSourceFeishuTargetPlaceholderDrive: "e.g. fldxxxxxxxxxxxx",
     dataSourceFeishuTargetValidateFailed:
       "Feishu target validation failed. Check that the target identifier is correct and accessible to the connected account.",
@@ -1728,7 +1726,7 @@ const enUS = {
     dataSourceConnectionTestAction: "Test Connection",
     dataSourceFeishuAccountConnection: "Feishu Account Authorization",
     dataSourceFeishuAccountConnectionDesc:
-      "Connect a Feishu account, then enter the Wiki space or Drive folder to sync.",
+      "Connect a Feishu account, then enter the file token or Drive folder to sync.",
     dataSourceFeishuAccountConnectedDesc: "Connected account: {{account}}.",
     dataSourceFeishuAuthorizeAction: "Authorize Feishu",
     dataSourceFeishuReconnectAction: "Re-authorize",
@@ -1827,7 +1825,7 @@ const enUS = {
     dataSourceLocalScanChatNoSourceHint:
       "No local directories are connected yet. Create a local directory knowledge source first.",
     dataSourceUseCurrentInput: "Use current input: {{value}}",
-    dataSourceUseCurrentFeishuWikiInput: "Wiki: {{value}}",
+    dataSourceUseCurrentFeishuWikiInput: "File Token: {{value}}",
     dataSourceUseCurrentFeishuDriveInput: "Drive: {{value}}",
     dataSourceNoLocalDirectories: "No selectable directories found",
     dataSourceLocalDirectoryListFailedManual:
@@ -1838,7 +1836,7 @@ const enUS = {
       "Complete Feishu authorization first, then choose a space or folder online.",
     dataSourceNoFeishuTargets: "No selectable Feishu targets found",
     dataSourceFeishuDirectoryListFailedManual:
-      "Failed to load Feishu directory list. You can enter the target ID manually first.",
+      "Failed to load Feishu directory list. You can enter the file token manually first.",
     dataSourceCreateMissingSourceId:
       "Data source was created, but no source id was returned. Feishu binding cannot be configured.",
     dataSourceTableActions: "Actions",
@@ -3066,6 +3064,8 @@ const enUS = {
     caseDataTitle: "Case Data",
     noCaseData: "No case data to display in the current report.",
     coarseCategoryPieAria: "Coarse category proportion pie chart",
+    analysisPieTooltipCount: "Count",
+    analysisPieTooltipRatio: "Share",
     codeOptimizeDiffAria: "Code optimization diff",
     codeChangesTitle: "Code Changes",
     loadingFileContent: "Loading file content",
@@ -3251,7 +3251,6 @@ const enUS = {
       noTraceId: "This Badcase does not have a trace_id.",
       traceNoData: "No data from trace API.",
       observationDetailLoadFailed: "Failed to load observation details. Please try again.",
-      noData: "No data",
       noBadcaseObservation: "No observation available for this Badcase",
       abMetricChartAria: "A/B metric bar chart",
       aEvalLegend: "A Eval (Baseline)",
@@ -3285,7 +3284,6 @@ const enUS = {
       observationConclusion: "Observation conclusion:",
       aNoKeyDocs: "Failed to retrieve key documents; answer lacks application materials and timeliness basis.",
       bPartialEvidence: "Retrieved relevant documents, but evidence fragments are still incomplete; retrieval strategy needs further optimization.",
-      sampleData: "Sample data",
       reload: "Reload",
       loadingAbObservation: "Loading A/B observation data...",
       rawAbDataAria: "Raw A/B observation data",
@@ -3329,7 +3327,6 @@ const enUS = {
       abMetricTableAria: "A/B Metric Table",
       abMetricColMetric: "Metric",
       abMetricColWinRate: "B Win Rate",
-      sampleDataNote: "Frontend sample, pending Step 5 report API replacement",
       abDiffPanelAria: "Selected Diff Node",
       abDiffPanelTitle: "Selected Diff Node: Round 2 · kb_search",
       abDiffOutputA: "A Output (baseline-v1)",
@@ -3359,14 +3356,6 @@ const enUS = {
       emptyObservations: "No observation data for current thread",
       rawDataAria: "Raw observation data",
       rawDataNote: "Current structure is not a Trace observation; displaying as JSON",
-      metricContextRecall: "Context Recall",
-      metricFaithfulness: "Faithfulness",
-      fallbackQueryInvoice: "How to apply for invoice header change?",
-      fallbackQueryPassword: "How to reset administrator password?",
-      fallbackQueryUpload: "How to handle upload failure?",
-      fallbackConclusionSlightImprove: "Slight improvement but retrieval insufficient",
-      fallbackConclusionDegrade: "B degraded",
-      fallbackConclusionImprove: "Notable improvement",
     },
     trace: {
       controlFlow: "Control Flow",

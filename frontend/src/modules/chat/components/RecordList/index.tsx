@@ -34,6 +34,13 @@ import { addTask } from "@/modules/taskCenter/api";
 import dayjs from "dayjs";
 
 import { ChatServiceApi } from "@/modules/chat/utils/request";
+import {
+  bumpConversationToTop,
+} from "@/modules/chat/utils/conversationActivity";
+import {
+  CHAT_CONVERSATION_ACTIVITY_EVENT,
+  type ChatConversationActivityDetail,
+} from "@/modules/chat/constants/chat";
 import "./index.scss";
 import { downloadStream } from "@/modules/chat/utils/download";
 
@@ -169,6 +176,52 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         getHistory({ isFirst: true });
       }
     }, [currentSessionId]);
+
+    useEffect(() => {
+      const handleConversationActivity = (event: Event) => {
+        const detail =
+          (event as CustomEvent<ChatConversationActivityDetail>).detail || {};
+        const conversationId = detail.conversationId?.trim();
+        if (!conversationId) {
+          return;
+        }
+
+        setHistoryList((prev) => {
+          const exists = prev.some(
+            (item) => item.conversation_id === conversationId,
+          );
+          if (
+            !exists &&
+            !detail.displayName &&
+            !convTypeFilter.includes("normal")
+          ) {
+            return prev;
+          }
+
+          const next = bumpConversationToTop(prev, conversationId, {
+            displayName: detail.displayName,
+          });
+          window.requestAnimationFrame(() => {
+            document.getElementById(scrollableTargetId)?.scrollTo({
+              top: 0,
+              behavior: "smooth",
+            });
+          });
+          return next;
+        });
+      };
+
+      window.addEventListener(
+        CHAT_CONVERSATION_ACTIVITY_EVENT,
+        handleConversationActivity,
+      );
+      return () => {
+        window.removeEventListener(
+          CHAT_CONVERSATION_ACTIVITY_EVENT,
+          handleConversationActivity,
+        );
+      };
+    }, [convTypeFilter, scrollableTargetId]);
 
     useEffect(() => {
       if (searchText === undefined) {

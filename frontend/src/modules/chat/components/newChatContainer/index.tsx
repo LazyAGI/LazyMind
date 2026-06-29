@@ -41,6 +41,7 @@ import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import { CHAT_AUTO_ADVANCE_EVENT, CHAT_RESUME_CONVERSATION_KEY, type ChatAutoAdvanceDetail } from "@/modules/chat/constants/chat";
+import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
 import { useTranslation } from "react-i18next";
 import { getRegenerationInputs, mergeChatMessageLists, buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import {
@@ -403,6 +404,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       if (currentId) {
         conversationMessagesCache.current.set(currentId, newMessageList);
         streamManager.saveMessageList(currentId, newMessageList);
+        if (!currentId.startsWith("temp_")) {
+          emitConversationActivity({ conversationId: currentId });
+        }
       }
     }
 
@@ -758,6 +762,19 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             streamManager.saveMessageList(result.conversation_id, currentList);
           }
         }
+
+        const firstUserMessage = messageListRef.current.find(
+          (item) => item.role === RoleTypes.USER,
+        );
+        const initialDisplayName = (
+          firstUserMessage?.display_delta ||
+          firstUserMessage?.delta ||
+          ""
+        ).trim();
+        emitConversationActivity({
+          conversationId: result.conversation_id,
+          displayName: initialDisplayName || undefined,
+        });
       }
 
       if (
@@ -1402,6 +1419,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       isMouseScrollingRef.current = true;
       scrollToEnd();
       openSSE(rebuiltInputs, ChatConversationsRequestActionEnum.ChatActionRegeneration);
+
+      if (currentId && !currentId.startsWith("temp_")) {
+        emitConversationActivity({ conversationId: currentId });
+      }
     }
 
     function renderText(item: any, uniqueKey?: string) {
@@ -1695,6 +1716,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             rerankReady={rerankReady}
             sessionId={sessionId}
             isStreaming={IS_STREAMING}
+            onStopGeneration={stopGeneration}
             disabled={!canChat}
             disabledReason={disabledReason}
             disabledDescription={disabledDescription}

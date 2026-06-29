@@ -344,6 +344,18 @@
                 cursor: not-allowed;
               }
 
+              &.stop-mode {
+                cursor: pointer;
+
+                .stop-icon {
+                  display: block;
+                  width: 12px;
+                  height: 12px;
+                  border-radius: 2px;
+                  background: #fff;
+                }
+              }
+
               &:focus-visible {
                 outline: 2px solid rgba(70, 137, 255, 0.35);
                 outline-offset: 2px;
