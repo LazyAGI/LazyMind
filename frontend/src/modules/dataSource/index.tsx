@@ -3900,7 +3900,7 @@ export default function DataSourceManagement() {
                   },
                 }}
                 tableLayout="fixed"
-                scroll={{ x: 1480, y: "calc(100vh - 300px)" }}
+                scroll={{ x: 1480, y: "calc(100vh - 380px)" }}
                 locale={{
                   emptyText: (
                     <div className="data-source-asset-empty">

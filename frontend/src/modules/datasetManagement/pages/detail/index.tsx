@@ -864,8 +864,7 @@ function mergeHiddenItemFields(
   const referenceContextChanged = nextReferenceContext !== currentReferenceContext;
   const referenceDocChanged =
     `${values.reference_doc || ""}`.trim() !== `${item.reference_doc || ""}`.trim() ||
-    (Boolean(nextReferenceDocIDs.trim()) &&
-      nextReferenceDocIDs.trim() !== currentReferenceDocIDs.trim());
+    nextReferenceDocIDs.trim() !== currentReferenceDocIDs.trim();
 
   return {
     ...values,
@@ -1074,7 +1073,7 @@ export default function DatasetDetailPage() {
     setActiveCell(null);
   }, [clearAllItemRuntimeState, datasetId]);
 
-  const loadDetail = async () => {
+  const loadDetail = useCallback(async () => {
     if (!datasetId) {
       return;
     }
@@ -1100,12 +1099,11 @@ export default function DatasetDetailPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [datasetId, keyword, pagination.current, pagination.pageSize, questionType, source, t]);
 
   useEffect(() => {
     void loadDetail();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetId, pagination.current, pagination.pageSize]);
+  }, [loadDetail]);
 
   useEffect(() => {
     setDrafts((current) => {
@@ -1189,6 +1187,141 @@ export default function DatasetDetailPage() {
       current.includes(item.id) ? current : [...current, item.id],
     );
   };
+
+  const buildItemDraftForSave = useCallback(
+    (item: DatasetItem): DatasetItemFormValues => {
+      const editingReferenceContext = referenceContextEditingValueRef.current[item.id];
+      const baseDraft = drafts[item.id] || createItemDraft(item.id === NEW_ITEM_ID ? undefined : item);
+      if (editingReferenceContext === undefined) {
+        return baseDraft;
+      }
+      return {
+        ...baseDraft,
+        reference_context: editingReferenceContext,
+        reference_chunk_ids: referenceContextChunkIDs(editingReferenceContext).join(", "),
+      };
+    },
+    [drafts],
+  );
+
+  const findDatasetItemForSave = useCallback(
+    (itemId: string): DatasetItem | undefined => {
+      if (itemId === NEW_ITEM_ID) {
+        if (!newItemVisible) {
+          return undefined;
+        }
+        return {
+          id: NEW_ITEM_ID,
+          dataset_id: datasetId,
+          case_id: "",
+          question: t("datasetManagement.detail.newSample"),
+          question_type: "",
+          ground_truth: "",
+          source: "manual",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          created_by: t("datasetManagement.detail.currentUser"),
+        };
+      }
+      return items.find((item) => item.id === itemId);
+    },
+    [datasetId, items, newItemVisible, t],
+  );
+
+  const handleSaveItem = useCallback(
+    async (
+      itemId: string,
+      values: DatasetItemFormValues,
+      successMessage?: string,
+    ) => {
+      const validationErrors = validateRequiredDatasetItem(values, requiredItemMessages);
+      if (validationErrors.length > 0) {
+        message.warning(validationErrors[0]);
+        return false;
+      }
+      setSaving(true);
+      try {
+        if (itemId === NEW_ITEM_ID) {
+          await createDatasetItem(datasetId, values);
+          message.success(t("datasetManagement.detail.sampleAdded"));
+          setNewItemVisible(false);
+          setActiveCell(null);
+        } else {
+          const currentItem = items.find((item) => item.id === itemId);
+          await updateDatasetItem(
+            datasetId,
+            itemId,
+            currentItem ? mergeHiddenItemFields(currentItem, values) : values,
+          );
+          message.success(successMessage || t("datasetManagement.detail.sampleSaved"));
+        }
+        if (activeCell?.itemId === itemId) {
+          setActiveCell(null);
+        }
+        clearItemRuntimeState(itemId);
+        setDirtyItemIds((current) => current.filter((id) => id !== itemId));
+        await loadDetail();
+        return true;
+      } catch (error: any) {
+        message.error(error?.message || t("datasetManagement.detail.saveFailed"));
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [activeCell, clearItemRuntimeState, datasetId, items, loadDetail, requiredItemMessages, t],
+  );
+
+  const handleAutoSaveItem = useCallback(
+    async (item: DatasetItem) => {
+      const pendingNewItemCellActivation = pendingNewItemCellActivationRef.current;
+      if (
+        item.id === NEW_ITEM_ID &&
+        pendingNewItemCellActivation?.itemId === NEW_ITEM_ID
+      ) {
+        pendingNewItemCellActivationRef.current = null;
+        return;
+      }
+
+      const draft = buildItemDraftForSave(item);
+      const referenceContextEditingDirty = Boolean(referenceContextEditingDirtyRef.current[item.id]);
+      if (
+        item.id !== NEW_ITEM_ID &&
+        !dirtyItemIds.includes(item.id) &&
+        !referenceContextEditingDirty
+      ) {
+        setActiveCell(null);
+        return;
+      }
+      if (item.id === NEW_ITEM_ID && validateRequiredDatasetItem(draft, requiredItemMessages).length > 0) {
+        setActiveCell(null);
+        return;
+      }
+      await handleSaveItem(item.id, draft);
+    },
+    [buildItemDraftForSave, dirtyItemIds, handleSaveItem, requiredItemMessages],
+  );
+
+  const activateEditableCell = useCallback(
+    async (record: DatasetItem, field: EditableDatasetItemField) => {
+      if (activeCell?.itemId === record.id && activeCell.field === field) {
+        return;
+      }
+      if (activeCell) {
+        const previousItem = findDatasetItemForSave(activeCell.itemId);
+        if (previousItem) {
+          await handleAutoSaveItem(previousItem);
+        }
+      }
+      setActiveCell({ itemId: record.id, field });
+      if (record.id === NEW_ITEM_ID) {
+        window.setTimeout(() => {
+          pendingNewItemCellActivationRef.current = null;
+        }, 0);
+      }
+    },
+    [activeCell, findDatasetItemForSave, handleAutoSaveItem],
+  );
 
   const updateDocumentSearchState = (
     itemId: string,
@@ -1375,24 +1508,23 @@ export default function DatasetDetailPage() {
       };
       setReferenceDocumentCacheVersion((version) => version + 1);
     }
-    setDrafts((current) => {
-      const currentDraft =
-        current[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record);
-      const referenceContext =
-        referenceContextEditingValueRef.current[record.id] ??
-        currentDraft.reference_context ??
-        "";
-      return {
-        ...current,
-        [record.id]: {
-          ...currentDraft,
-          reference_doc: option.name,
-          reference_doc_ids: option.documentId,
-          reference_chunk_ids: referenceContextChunkIDs(referenceContext).join(", "),
-          reference_context: referenceContext,
-        },
-      };
-    });
+    const currentDraft =
+      drafts[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record);
+    const referenceContext =
+      referenceContextEditingValueRef.current[record.id] ??
+      currentDraft.reference_context ??
+      "";
+    const nextDraft: DatasetItemFormValues = {
+      ...currentDraft,
+      reference_doc: option.name,
+      reference_doc_ids: option.documentId,
+      reference_chunk_ids: referenceContextChunkIDs(referenceContext).join(", "),
+      reference_context: referenceContext,
+    };
+    setDrafts((current) => ({
+      ...current,
+      [record.id]: nextDraft,
+    }));
     setDirtyItemIds((current) =>
       current.includes(record.id) ? current : [...current, record.id],
     );
@@ -1402,6 +1534,9 @@ export default function DatasetDetailPage() {
       options: [],
     });
     delete documentSearchPaginationRequestRef.current[record.id];
+    if (record.id !== NEW_ITEM_ID) {
+      void handleSaveItem(record.id, nextDraft);
+    }
   };
 
   const resolveReferenceDocument = useCallback(
@@ -1470,6 +1605,10 @@ export default function DatasetDetailPage() {
   const handleOpenReferenceChunkSelector = useCallback(
     async (record: DatasetItem) => {
       const draft = drafts[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record);
+      const referenceContext =
+        referenceContextEditingValueRef.current[record.id] ??
+        draft.reference_context ??
+        "";
       const documentId = `${draft.reference_doc_ids || ""}`
         .split(",")
         .map((item) => item.trim())
@@ -1491,8 +1630,8 @@ export default function DatasetDetailPage() {
         documentPreviewUrl: "",
         segmentGroup: "",
         chunks: [],
-        selectedChunkIds: referenceContextChunkIDs(draft.reference_context).length > 0
-          ? referenceContextChunkIDs(draft.reference_context)
+        selectedChunkIds: referenceContextChunkIDs(referenceContext).length > 0
+          ? referenceContextChunkIDs(referenceContext)
           : `${draft.reference_chunk_ids || ""}`
             .split(",")
             .map((item) => item.trim())
@@ -1645,29 +1784,34 @@ export default function DatasetDetailPage() {
       confirming: true,
     }));
 
-    setDrafts((current) => {
-      const currentDraft = current[itemId] || createItemDraft(items.find((item) => item.id === itemId));
-      const insertIndex = referenceContextInsertIndexRef.current[itemId];
-      const nextReferenceContext = buildReferenceContextWithChunksAtTextPart(
-        referenceContextEditingValueRef.current[itemId] ?? currentDraft.reference_context,
-        selectedChunkParts,
-        insertIndex,
-      );
-      referenceContextEditingValueRef.current[itemId] = nextReferenceContext;
-      referenceContextEditingDirtyRef.current[itemId] = true;
-      return {
-        ...current,
-        [itemId]: {
-          ...currentDraft,
-          reference_context: nextReferenceContext,
-          reference_chunk_ids: referenceContextChunkIDs(nextReferenceContext).join(", "),
-        },
-      };
-    });
+    const currentItem = items.find((item) => item.id === itemId);
+    const currentDraft =
+      drafts[itemId] ||
+      createItemDraft(itemId === NEW_ITEM_ID ? undefined : currentItem);
+    const insertIndex = referenceContextInsertIndexRef.current[itemId];
+    const nextReferenceContext = buildReferenceContextWithChunksAtTextPart(
+      referenceContextEditingValueRef.current[itemId] ?? currentDraft.reference_context,
+      selectedChunkParts,
+      insertIndex,
+    );
+    referenceContextEditingValueRef.current[itemId] = nextReferenceContext;
+    referenceContextEditingDirtyRef.current[itemId] = true;
+    const nextDraft: DatasetItemFormValues = {
+      ...currentDraft,
+      reference_context: nextReferenceContext,
+      reference_chunk_ids: referenceContextChunkIDs(nextReferenceContext).join(", "),
+    };
+    setDrafts((current) => ({
+      ...current,
+      [itemId]: nextDraft,
+    }));
     setDirtyItemIds((current) => (current.includes(itemId) ? current : [...current, itemId]));
 
     resetReferenceChunkSelector();
-  }, [items, referenceChunkSelector, resetReferenceChunkSelector, t]);
+    if (itemId !== NEW_ITEM_ID) {
+      await handleSaveItem(itemId, nextDraft);
+    }
+  }, [drafts, items, referenceChunkSelector, resetReferenceChunkSelector, t]);
 
   const handleCancelItem = (item: DatasetItem) => {
     clearItemRuntimeState(item.id);
@@ -1689,83 +1833,6 @@ export default function DatasetDetailPage() {
       [item.id]: createItemDraft(item),
     }));
     setDirtyItemIds((current) => current.filter((id) => id !== item.id));
-  };
-
-  const handleSaveItem = async (
-    itemId: string,
-    values: DatasetItemFormValues,
-    successMessage?: string,
-  ) => {
-    const validationErrors = validateRequiredDatasetItem(values, requiredItemMessages);
-    if (validationErrors.length > 0) {
-      message.warning(validationErrors[0]);
-      return false;
-    }
-    setSaving(true);
-    try {
-      if (itemId === NEW_ITEM_ID) {
-        await createDatasetItem(datasetId, values);
-        message.success(t("datasetManagement.detail.sampleAdded"));
-        setNewItemVisible(false);
-        setActiveCell(null);
-      } else {
-        const currentItem = items.find((item) => item.id === itemId);
-        await updateDatasetItem(
-          datasetId,
-          itemId,
-          currentItem ? mergeHiddenItemFields(currentItem, values) : values,
-        );
-        message.success(successMessage || t("datasetManagement.detail.sampleSaved"));
-      }
-      if (activeCell?.itemId === itemId) {
-        setActiveCell(null);
-      }
-      clearItemRuntimeState(itemId);
-      setDirtyItemIds((current) => current.filter((id) => id !== itemId));
-      await loadDetail();
-      return true;
-    } catch (error: any) {
-      message.error(error?.message || t("datasetManagement.detail.saveFailed"));
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAutoSaveItem = async (item: DatasetItem) => {
-    const pendingNewItemCellActivation = pendingNewItemCellActivationRef.current;
-    if (
-      item.id === NEW_ITEM_ID &&
-      pendingNewItemCellActivation?.itemId === NEW_ITEM_ID
-    ) {
-      pendingNewItemCellActivationRef.current = null;
-      return;
-    }
-
-    const editingReferenceContext = referenceContextEditingValueRef.current[item.id];
-    const referenceContextEditingDirty = Boolean(referenceContextEditingDirtyRef.current[item.id]);
-    const baseDraft = drafts[item.id] || createItemDraft(item);
-    const draft =
-      editingReferenceContext === undefined
-        ? baseDraft
-        : {
-          ...baseDraft,
-          reference_context: editingReferenceContext,
-          reference_chunk_ids: referenceContextChunkIDs(editingReferenceContext).join(", "),
-        };
-    if (
-      item.id !== NEW_ITEM_ID &&
-      !dirtyItemIds.includes(item.id) &&
-      !referenceContextEditingDirty
-    ) {
-      setActiveCell(null);
-      return;
-    }
-    if (item.id === NEW_ITEM_ID && validateRequiredDatasetItem(draft, requiredItemMessages).length > 0) {
-      setActiveCell(null);
-      return;
-    }
-    await handleSaveItem(item.id, draft);
   };
 
   const handleClearInvalidReferenceDoc = async (item: DatasetItem) => {
@@ -1926,12 +1993,7 @@ export default function DatasetDetailPage() {
             }
           }}
           onClick={() => {
-            setActiveCell({ itemId: record.id, field });
-            if (record.id === NEW_ITEM_ID) {
-              window.setTimeout(() => {
-                pendingNewItemCellActivationRef.current = null;
-              }, 0);
-            }
+            void activateEditableCell(record, field);
           }}
         >
           {field === "reference_context"
@@ -2050,27 +2112,29 @@ export default function DatasetDetailPage() {
               className="dataset-reference-doc-tag-remove"
               aria-label={t("datasetManagement.detail.reference.deleteReferenceDocAria")}
               onClick={() => {
-                setDrafts((current) => {
-                  const currentDraft = current[record.id] || createItemDraft(record);
-                  const referenceContext =
-                    referenceContextEditingValueRef.current[record.id] ??
-                    currentDraft.reference_context ??
-                    "";
-                  return {
-                    ...current,
-                    [record.id]: {
-                      ...currentDraft,
-                      reference_doc: "",
-                      reference_doc_ids: "",
-                      reference_chunk_ids: referenceContextChunkIDs(referenceContext).join(", "),
-                      reference_context: referenceContext,
-                    },
-                  };
-                });
+                const currentDraft = drafts[record.id] || createItemDraft(record);
+                const referenceContext =
+                  referenceContextEditingValueRef.current[record.id] ??
+                  currentDraft.reference_context ??
+                  "";
+                const nextDraft: DatasetItemFormValues = {
+                  ...currentDraft,
+                  reference_doc: "",
+                  reference_doc_ids: "",
+                  reference_chunk_ids: referenceContextChunkIDs(referenceContext).join(", "),
+                  reference_context: referenceContext,
+                };
+                setDrafts((current) => ({
+                  ...current,
+                  [record.id]: nextDraft,
+                }));
                 clearReferenceDocumentRuntimeState(record.id);
                 setDirtyItemIds((current) =>
                   current.includes(record.id) ? current : [...current, record.id],
                 );
+                if (record.id !== NEW_ITEM_ID) {
+                  void handleSaveItem(record.id, nextDraft);
+                }
               }}
             >
               <CloseOutlined />
@@ -2152,6 +2216,20 @@ export default function DatasetDetailPage() {
             onChange={(nextValue) => {
               referenceContextEditingValueRef.current[record.id] = nextValue;
               referenceContextEditingDirtyRef.current[record.id] = true;
+              setDrafts((current) => {
+                const currentDraft = current[record.id] || createItemDraft(record);
+                return {
+                  ...current,
+                  [record.id]: {
+                    ...currentDraft,
+                    reference_context: nextValue,
+                    reference_chunk_ids: referenceContextChunkIDs(nextValue).join(", "),
+                  },
+                };
+              });
+              setDirtyItemIds((current) =>
+                current.includes(record.id) ? current : [...current, record.id],
+              );
             }}
             onBlur={() => void handleAutoSaveItem(record)}
             onInsertIndexChange={(index) => {

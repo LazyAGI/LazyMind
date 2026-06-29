@@ -29,9 +29,17 @@ from lazymind.config import config as _cfg
 
 
 _PENDING_CHANGE_MESSAGE = 'There is an unresolved pending change; handle it before submitting another edit.'
-_SUCCESS_RESULT = {
+_CREATE_SUCCESS_RESULT = {
+    'status': 'created',
+    'message': 'Skill was created and is now active.',
+}
+_MODIFY_SUCCESS_RESULT = {
     'status': 'pending_review',
     'message': 'Skill changes were submitted and are pending review.',
+}
+_REMOVE_SUCCESS_RESULT = {
+    'status': 'removed',
+    'message': 'Skill was removed and is no longer active.',
 }
 
 
@@ -52,11 +60,12 @@ def skill_editor(
       fixing a tricky error, or discovering a non-trivial workflow, save the
       approach as a new skill by passing the full SKILL.md body in
       content. The SKILL.md YAML frontmatter must include name, category, and
-      description.
+      description. A successful create takes effect immediately.
     - action='modify': when finding a skill outdated, incomplete, or
-      wrong, submit operations that edit the current SKILL.md content.
+      wrong, submit operations that edit the current SKILL.md content for
+      review. The edit takes effect only after review is accepted.
     - action='remove': when a skill is superseded or no longer correct,
-      request its deletion.
+      request its deletion. A successful remove takes effect immediately.
 
     Only skills with source=remote are writable. Skills with
     source=file or any other source are read-only; do not use this tool
@@ -80,10 +89,11 @@ def skill_editor(
 
     Args:
         name: Skill name.
-        action: Skill workflow to run. Use 'create' to submit a new SKILL.md
-            content row for review, 'modify' to edit an existing remote skill
-            using the 'operations' argument and submit the edited content for
-            review, or 'remove' to mark an existing remote skill for deletion.
+        action: Skill workflow to run. Use 'create' to create a new skill
+            that takes effect immediately, 'modify' to edit an existing remote
+            skill using the 'operations' argument and submit the edited content
+            for review, or 'remove' to delete an existing remote skill
+            immediately.
             For 'modify' and 'remove', a pending review row for the same
             category/name blocks the request.
         category: Skill category directory used to locate category/name/SKILL.md.
@@ -156,7 +166,7 @@ def skill_editor(
             return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
 
         create_remote_skill(content_category, content_name, content or '')
-        return tool_success('skill_editor', _SUCCESS_RESULT)
+        return tool_success('skill_editor', _CREATE_SUCCESS_RESULT)
 
     if action == 'modify':
         if content is not None:
@@ -209,7 +219,7 @@ def skill_editor(
             requestid=session_id,
             summary=reason or f'skill_editor operations: {len(operation_payload)}',
         )
-        return tool_success('skill_editor', _SUCCESS_RESULT)
+        return tool_success('skill_editor', _MODIFY_SUCCESS_RESULT)
 
     if action == 'remove':
         if content is not None or operations:
@@ -233,7 +243,7 @@ def skill_editor(
             return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
 
         remove_remote_skill(normalized_category, name)
-        return tool_success('skill_editor', _SUCCESS_RESULT)
+        return tool_success('skill_editor', _REMOVE_SUCCESS_RESULT)
 
     return tool_error(
         'skill_editor',

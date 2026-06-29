@@ -1,6 +1,7 @@
 import asyncio
 import json
 
+from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service import chat_service
 
 
@@ -30,36 +31,34 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', FakeAgent)
 
     async def drive():
-        response = await chat_service.handle_chat(
-            query='hello',
-            history=[],
-            session_id='sid-1',
-            filters={},
-            files=None,
-            databases=None,
-            priority=None,
-            disabled_tools=[
-                'kb',
-                'temp_kb',
-                'wikipedia',
-                'arxiv',
-                'sciverse',
-                'google',
-                'bing',
-                'bocha',
-                'url_fetch',
-                'multimodal',
-                'vocab_learn',
-                'memory_editor',
-                'skill_editor',
-                'feishu',
-            ],
-            available_skills=['skill-a'],
-            memory=None,
-            user_preference=None,
-            use_memory=True,
-            model_config={},
-        )
+        response = await chat_service.handle_chat(ChatRequest(
+            message={'query': 'hello', 'history': []},
+            conversation={'session_id': 'sid-1'},
+            retrieval={'filters': {}},
+            runtime={'llm_config': {}},
+            personalization={'use_memory': True},
+            agent={
+                'disabled_tools': [
+                    'kb',
+                    'temp_kb',
+                    'wikipedia',
+                    'arxiv',
+                    'sciverse',
+                    'google',
+                    'bing',
+                    'bocha',
+                    'url_fetch',
+                    'multimodal',
+                    'vocab_learn',
+                    'memory_editor',
+                    'skill_editor',
+                    'feishu',
+                ],
+                'available_skills': ['skill-a'],
+                'enable_subagent': False,
+            },
+            plugin={'enable_plugin': False},
+        ))
         return await _collect_streaming_response(response)
 
     body = asyncio.run(drive())

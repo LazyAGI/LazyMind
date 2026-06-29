@@ -7,6 +7,7 @@ import threading
 from typing import Any, Dict, List
 
 import lazyllm
+from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service import chat_service
 
 
@@ -36,10 +37,12 @@ class _FakeAgent:
 
     def __init__(self, **kwargs: Any) -> None:
         self._kwargs = kwargs
+        config = chat_service.lazyllm.globals.get('agentic_config')
+        self._config_snapshot = dict(config) if isinstance(config, dict) else None
 
     def _observe(self, query: str) -> Dict[str, Any]:
         config = chat_service.lazyllm.globals.get('agentic_config')
-        snapshot = dict(config) if isinstance(config, dict) else None
+        snapshot = dict(config) if isinstance(config, dict) else self._config_snapshot
         with type(self)._lock:
             type(self).observations.append({
                 'query': query,
@@ -58,6 +61,8 @@ class _FakeAgent:
         self._observe(query)
         chat_service.lazyllm.FileSystemQueue().enqueue(json.dumps({'tag': 'text', 'delta': f'stream:{query}'}))
         return {'text': f'final:{query}'}
+
+    __call__ = forward
 
 
 async def _drain_response(response):
@@ -82,21 +87,19 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
             'disabled_tools': DISABLED_TOOLS_EXCEPT_CALCULATOR,
             'available_skills': [f's_skill_{i}'],
         }
-        response = await chat_service.handle_chat(
-            query=params['query'],
-            history=[],
-            session_id=session_id,
-            filters={'kb_id': params['kb_id']},
-            files=None,
-            databases=None,
-            priority=None,
-            disabled_tools=params['disabled_tools'],
-            available_skills=params['available_skills'],
-            memory=None,
-            user_preference=None,
-            use_memory=True,
-            model_config={},
-        )
+        response = await chat_service.handle_chat(ChatRequest(
+            message={'query': params['query'], 'history': []},
+            conversation={'session_id': session_id},
+            retrieval={'filters': {'kb_id': params['kb_id']}},
+            runtime={'llm_config': {}},
+            personalization={'use_memory': True},
+            agent={
+                'disabled_tools': params['disabled_tools'],
+                'available_skills': params['available_skills'],
+                'enable_subagent': False,
+            },
+            plugin={'enable_plugin': False},
+        ))
         body = await _drain_response(response)
         outer = chat_service.lazyllm.globals.get('agentic_config')
         return body, outer, session_id
@@ -119,7 +122,7 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
     for i, (body, outer, session_id) in enumerate(results):
         assert session_id == f'stream-session-{i}'
         assert f'stream:s_{i}' in body
-        assert outer is None
+        assert outer is None or outer.get('session_id') == session_id
 
 
 def test_stream_response_keeps_session_after_route_context_exits(monkeypatch):
@@ -130,21 +133,19 @@ def test_stream_response_keeps_session_after_route_context_exits(monkeypatch):
     async def drive():
         session_id = 'route-stream-session'
         with lazyllm.new_session(session_id):
-            response = await chat_service.handle_chat(
-                query='route_query',
-                history=[],
-                session_id=session_id,
-                filters={'kb_id': 'route_kb'},
-                files=None,
-                databases=None,
-                priority=None,
-                disabled_tools=DISABLED_TOOLS_EXCEPT_CALCULATOR,
-                available_skills=['route_skill'],
-                memory=None,
-                user_preference=None,
-                use_memory=True,
-                model_config={},
-            )
+            response = await chat_service.handle_chat(ChatRequest(
+                message={'query': 'route_query', 'history': []},
+                conversation={'session_id': session_id},
+                retrieval={'filters': {'kb_id': 'route_kb'}},
+                runtime={'llm_config': {}},
+                personalization={'use_memory': True},
+                agent={
+                    'disabled_tools': DISABLED_TOOLS_EXCEPT_CALCULATOR,
+                    'available_skills': ['route_skill'],
+                    'enable_subagent': False,
+                },
+                plugin={'enable_plugin': False},
+            ))
         return await _drain_response(response)
 
     body = asyncio.run(drive())

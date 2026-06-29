@@ -185,6 +185,7 @@ const MessageList: React.FC<MessageListProps> = ({
   footer,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const editComposeRef = useRef(false);
 
   const contentRef = chatContentRef || scrollContainerRef;
   const lastUserIndex = useMemo(
@@ -195,6 +196,26 @@ const MessageList: React.FC<MessageListProps> = ({
       ),
     [messageList],
   );
+
+  const handleEditMessageKeyDown = (
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+    index: number,
+  ) => {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    if (
+      editComposeRef.current ||
+      event.nativeEvent.isComposing ||
+      event.nativeEvent.keyCode === 229
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    onResendEditedUserMessage?.(index, editingUserMessageText);
+  };
 
   const renderUser = (item: any, index: number) => {
     const isLastUserMessage = index === lastUserIndex;
@@ -251,6 +272,13 @@ const MessageList: React.FC<MessageListProps> = ({
                   onChange={(event) =>
                     onUserMessageEditTextChange?.(event.target.value)
                   }
+                  onCompositionStart={() => {
+                    editComposeRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    editComposeRef.current = false;
+                  }}
+                  onKeyDown={(event) => handleEditMessageKeyDown(event, index)}
                 />
                 <Space size={6} className="chat-user-edit-actions">
                   <Button
