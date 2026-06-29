@@ -13,7 +13,6 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/store"
-	"lazymind/core/subagent"
 )
 
 // resolveValuePaths normalises a human-uploaded value by ensuring it carries a stable
@@ -663,123 +662,6 @@ func ListPlugins(w http.ResponseWriter, r *http.Request) {
 		if readErr != nil {
 			break
 		}
-	}
-}
-
-// AdvanceSession handles POST /plugin-sessions/{session_id}:advance.
-// This is the §5.5 manual-mode resume path: the frontend calls this after
-// the user confirms they want to proceed or retry the current step.
-//
-// Body (optional): {"action": "continue"|"retry"}  — defaults to "continue".
-//   - "continue": proceed to the next step after the current one succeeds.
-//   - "retry":    re-run the current step from scratch (full retry via self-loop).
-func AdvanceSession(w http.ResponseWriter, r *http.Request) {
-	sessionID := common.PathVar(r, "session_id")
-	if sessionID == "" {
-		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
-		return
-	}
-
-	var body struct {
-		Action string `json:"action"` // "continue" | "retry"; default "continue"
-	}
-	// Ignore decode errors — body is optional; default action is "continue".
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	if body.Action == "" {
-		body.Action = "continue"
-	}
-	if body.Action != "continue" && body.Action != "retry" {
-		common.ReplyErr(w, `action must be "continue" or "retry"`, http.StatusBadRequest)
-		return
-	}
-
-	db := store.DB()
-	stateStore := store.State()
-	if db == nil {
-		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
-		return
-	}
-	ctx := r.Context()
-
-	session, err := GetSession(ctx, db, sessionID)
-	if err != nil {
-		if IsNotFound(err) {
-			common.ReplyErr(w, "session not found", http.StatusNotFound)
-			return
-		}
-		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
-		return
-	}
-	// completed sessions can be retried (re-run a step), but not continued.
-	if session.Status == SessionStatusCompleted {
-		if body.Action != "retry" {
-			common.ReplyErr(w, "completed sessions can only be retried, not continued", http.StatusConflict)
-			return
-		}
-		// Reset to active so the state machine can proceed.
-		if err := UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive); err != nil {
-			common.ReplyErr(w, "reset session status failed", http.StatusInternalServerError)
-			return
-		}
-		session.Status = SessionStatusActive
-	} else if session.Status != SessionStatusWaiting && session.Status != SessionStatusActive {
-		// Under the current state machine only active/waiting/completed are valid states,
-		// so this branch should never be reached. Guard retained for safety.
-		common.ReplyErr(w, "session is not in a resumable state", http.StatusConflict)
-		return
-	}
-
-	// Find the latest step for the current step_id.
-	step, err := GetLatestStep(ctx, db, sessionID, session.CurrentStepID)
-	if err != nil || step == nil {
-		common.ReplyErr(w, "no step found for current_step_id", http.StatusInternalServerError)
-		return
-	}
-
-	userID := store.UserID(r)
-
-	switch step.Status {
-	case StepStatusInterrupted:
-		// Resume the interrupted SubAgent directly, bypassing ChatAgent.
-		_ = UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive)
-		task, tErr := subagent.GetTask(ctx, db, step.TaskID)
-		if tErr != nil {
-			common.ReplyErr(w, "fetch task failed", http.StatusInternalServerError)
-			return
-		}
-		var params PluginStepParams
-		if len(task.Params) > 0 {
-			_ = json.Unmarshal(task.Params, &params)
-		}
-		// LLMConfig is not persisted on the task; subagent runner uses its default model on resume.
-		// input_artifact_keys, output_artifact_keys, and tools are read by the Python runner from DB.
-		go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
-			TaskID:        task.ID,
-			AgentType:     "plugin_step",
-			Params:        params.asMap(),
-			WorkspacePath: task.WorkspacePath,
-			Resume:        true,
-		})
-		common.ReplyOK(w, map[string]any{"action": "resumed", "task_id": task.ID})
-
-	case StepStatusSucceeded:
-		_ = UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive)
-		var syntheticMsg string
-		if body.Action == "retry" {
-			// User wants to redo the current step (full retry via state-machine self-loop).
-			syntheticMsg = fmt.Sprintf("Step %s completed but user wants to retry it. Please re-run step %s from scratch.", session.CurrentStepID, session.CurrentStepID)
-		} else {
-			// Default: user confirmed, proceed to next step.
-			syntheticMsg = fmt.Sprintf("Step %s completed. User confirmed. Please proceed.", session.CurrentStepID)
-		}
-		go triggerNextChatTurn(
-			session.ConversationID, sessionID, session.PluginID,
-			session.CurrentStepID, userID, syntheticMsg, nil,
-		)
-		common.ReplyOK(w, map[string]any{"action": body.Action, "message": syntheticMsg})
-
-	default:
-		common.ReplyErr(w, fmt.Sprintf("step status %q is not resumable", step.Status), http.StatusConflict)
 	}
 }
 

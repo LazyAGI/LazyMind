@@ -784,6 +784,7 @@ const zhCN = {
     pluginStatusDone: "已完成",
     pluginStatusWaiting: "等待确认",
     pluginBtnDisabledHint: "步骤执行中，请稍候",
+    pluginContinueDisabledFailed: '步骤已失败，请点击"重试"重新执行',
     pluginRollbackLabel: "回退到步骤：",
     pluginRollbackPrefix: "请重新执行步骤 ",
     greetingMorning: "上午好",

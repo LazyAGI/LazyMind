@@ -259,7 +259,9 @@ def _trigger_plugin_step(
         tools=merged_tools,
         resume=False,
     )
-    return f'Step {step_id!r} triggered. Stop here.'
+    step_label = step_config.get('label', '')
+    display_name = f'{step_id} ({step_label})' if step_label else step_id
+    return f'Step {display_name!r} triggered. Stop here.'
 
 
 def _trigger_plugin_end(plugin_id: str) -> str:
@@ -765,9 +767,32 @@ def build_query_tools() -> List[Any]:
             steps = resp.json().get('data', {}).get('session', {}).get('steps', [])
             if not steps:
                 return 'No steps recorded yet.'
-            lines = ['## Plugin session steps']
+            # Steps arrive ordered by created_at ASC (from ListSteps).
+            # Split into contiguous "runs": a new run starts whenever step_id changes.
+            # Within each run, if the last record is 'succeeded', collapse earlier
+            # non-succeeded records and show only that final success.
+            # Otherwise show every record so ChatAgent sees the full failure history.
+            # Example: [1,2,3, 2(fail),2(int),2(succ), 3,4] → [1,2,3, 2,3,4]
+            runs: list = []   # list of lists, each inner list is one contiguous run
             for s in steps:
-                lines.append(f'- {s.get("step_id")}: {s.get("status")} (attempt {s.get("attempt", 1)})')
+                if runs and runs[-1][-1].get('step_id') == s.get('step_id'):
+                    runs[-1].append(s)
+                else:
+                    runs.append([s])
+            lines = ['## Plugin session steps']
+            for run in runs:
+                latest = run[-1]
+                if latest.get('status') == 'succeeded':
+                    lines.append(
+                        f'- {latest.get("step_id")}: succeeded'
+                        f' (attempt {latest.get("attempt", 1)})'
+                    )
+                else:
+                    for s in run:
+                        lines.append(
+                            f'- {s.get("step_id")}: {s.get("status")}'
+                            f' (attempt {s.get("attempt", 1)})'
+                        )
             return '\n'.join(lines)
         except Exception as exc:
             return f'Error querying steps: {exc}'
@@ -855,7 +880,11 @@ def _build_session_artifact_section(session_id: str) -> str:
 
 
 def _build_chat_agent_task_context(conversation_id: str) -> str:
-    """Build the ## Tasks system-prompt section for ChatAgent."""
+    """Build the ## Tasks block injected before the current user-turn query.
+
+    Returned text is prepended to the current user-turn (not the system prompt)
+    so the LLM always sees a live snapshot and treats earlier history as outdated.
+    """
     conv_id = conversation_id.strip()
     if not conv_id:
         return ''

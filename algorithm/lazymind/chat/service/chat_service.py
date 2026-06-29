@@ -459,11 +459,6 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         f'[enable_plugin={_enable_plugin!r}] [enable_subagent={_enable_subagent!r}] '
         f'[plugin_tools={[getattr(t, "__name__", str(t)) for t in plugin_tools]!r}]'
     )
-    if _enable_plugin or _enable_subagent:
-        task_ctx = _build_chat_agent_task_context((conversation_id or '').strip())
-        if task_ctx:
-            plugin_system_prompt = (plugin_system_prompt + '\n\n' + task_ctx).strip()
-
     # Build user attachment context from files_map and inject before plugin context.
     user_attachment_context = _build_user_attachment_context(files_map, _eff_current_seq)
 
@@ -471,6 +466,13 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     parts = []
     if plugin_artifact_context:
         parts.append(plugin_artifact_context)
+    if _enable_plugin or _enable_subagent:
+        task_ctx = _build_chat_agent_task_context((conversation_id or '').strip())
+        if task_ctx:
+            # Inject as a per-turn authoritative block (same as plugin_artifact_context)
+            # rather than into the system prompt, so stale task state from history is
+            # overridden by the live snapshot queried at request time.
+            parts.append(task_ctx)
     if user_attachment_context:
         parts.append(user_attachment_context)
     # Inject the authoritative current-turn declaration so the model is never misled

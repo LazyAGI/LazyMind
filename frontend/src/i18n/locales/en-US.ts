@@ -811,6 +811,7 @@ const enUS = {
     pluginStatusDone: "Done",
     pluginStatusWaiting: "Waiting",
     pluginBtnDisabledHint: "Step is running, please wait…",
+    pluginContinueDisabledFailed: "Step failed — please click Retry to restart it",
     pluginRollbackLabel: "Rollback to step:",
     pluginRollbackPrefix: "Please re-run step ",
     // Greeting

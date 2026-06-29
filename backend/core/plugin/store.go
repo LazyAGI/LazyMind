@@ -230,13 +230,19 @@ func CreateSessionStep(ctx context.Context, db *gorm.DB, sessionID, stepID, task
 }
 
 // UpdateStepStatus mirrors sub_agent_tasks.status changes into plugin_session_steps.
+// Terminal states (succeeded, interrupted) are never downgraded: once a step has been
+// interrupted by the user, a late EOF from the SubAgent stream must not reset it to failed.
 func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) error {
-	return db.WithContext(ctx).Model(&orm.PluginSessionStep{}).
-		Where("task_id = ?", taskID).
-		Updates(map[string]any{
-			"status":     status,
-			"updated_at": time.Now().UTC(),
-		}).Error
+	q := db.WithContext(ctx).Model(&orm.PluginSessionStep{}).
+		Where("task_id = ?", taskID)
+	if status == StepStatusFailed {
+		// Only write failed if the step is not already in a terminal state.
+		q = q.Where("status NOT IN ?", []string{StepStatusSucceeded, StepStatusInterrupted})
+	}
+	return q.Updates(map[string]any{
+		"status":     status,
+		"updated_at": time.Now().UTC(),
+	}).Error
 }
 
 // GetLatestStep returns the most recent execution instance of step_id within a session.

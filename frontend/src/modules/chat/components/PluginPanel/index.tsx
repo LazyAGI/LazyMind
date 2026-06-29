@@ -753,6 +753,14 @@ export function PluginPanel({
   // "继续" is only shown in waiting/active; completed shows rollback step picker instead.
   const showContinue = displayStatus === 'waiting' || displayStatus === 'active';
 
+  // A failed step cannot be checkpoint-resumed — the SubAgent exited uncleanly and there is
+  // no valid checkpoint to restore. Only "重试" (full restart) is meaningful in this case.
+  // Note: "interrupted" steps CAN be resumed via checkpoint, so only "failed" is blocked.
+  const currentStepStatus = session.steps
+    ?.filter((s) => s.step_id === session.current_step_id)
+    ?.sort((a, b) => b.attempt - a.attempt)[0]?.status;
+  const continueDisabled = buttonsDisabled || currentStepStatus === 'failed';
+
   function handleContinue() {
     if (buttonsDisabled) return;
     onSendMessage?.(t('chat.pluginContinue'));
@@ -900,10 +908,16 @@ export function PluginPanel({
             <button
               type='button'
               className='plugin-panel__action-btn plugin-panel__action-btn--primary'
-              disabled={buttonsDisabled}
-              aria-disabled={buttonsDisabled}
+              disabled={continueDisabled}
+              aria-disabled={continueDisabled}
               onClick={handleContinue}
-              title={buttonsDisabled ? t('chat.pluginBtnDisabledHint') : t('chat.pluginContinue')}
+              title={
+                currentStepStatus === 'failed'
+                  ? t('chat.pluginContinueDisabledFailed')
+                  : buttonsDisabled
+                    ? t('chat.pluginBtnDisabledHint')
+                    : t('chat.pluginContinue')
+              }
             >
               {t('chat.pluginContinue')}
             </button>
