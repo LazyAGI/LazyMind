@@ -1,0 +1,46 @@
+.ask-card {
+  background: #f0f4ff;
+  border: 1px solid #d0d9f5;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 8px 0;
+  max-width: 480px;
+
+  &--disabled {
+    opacity: 0.7;
+  }
+
+  &__question {
+    font-size: 14px;
+    font-weight: 500;
+    color: #1a1a2e;
+    margin-bottom: 10px;
+    line-height: 1.5;
+  }
+
+  &__choices {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+
+    .ant-checkbox-group,
+    .ant-radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+  }
+
+  &__choice {
+    font-size: 13px;
+  }
+
+  &__input {
+    margin-bottom: 10px;
+  }
+
+  &__submit {
+    margin-top: 4px;
+  }
+}

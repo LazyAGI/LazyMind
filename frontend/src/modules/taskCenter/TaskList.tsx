@@ -4,7 +4,7 @@ import { Badge, Button, Input, Select, Space, Table, Tag, Tooltip, message } fro
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { debounce } from 'lodash';
-import { cancelTask, listTasks } from './api';
+import { cancelTask, listTasks, removeTask } from './api';
 import type { StepInfo, Task } from './api';
 import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
 
@@ -140,6 +140,16 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
     }
   };
 
+  const handleRemove = async (id: string) => {
+    try {
+      await removeTask(id);
+      message.success('已移出任务中心');
+      void fetchTasks(page, statusFilter, keyword);
+    } catch {
+      message.error('移出失败');
+    }
+  };
+
   const handleOpenConversation = (conversationId: string) => {
     sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
     navigate('/agent/chat/home');
@@ -148,19 +158,22 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
   const columns: ColumnsType<Task> = useMemo(
     () => [
       {
-        title: t('taskCenter.tasks'),
+        title: '任务描述',
         dataIndex: 'conversation_title',
         render: (v: string, record: Task) => {
-          const displayTitle = v || record.title || t('taskCenter.noTitle');
+          const fullTitle = v || record.title || t('taskCenter.noTitle');
+          const truncated = fullTitle.length > 50 ? `${fullTitle.slice(0, 50)}…` : fullTitle;
           return (
             <div>
-              <Button
-                type='link'
-                style={{ padding: 0, textAlign: 'left', height: 'auto', whiteSpace: 'normal' }}
-                onClick={() => handleOpenConversation(record.conversation_id)}
-              >
-                {displayTitle}
-              </Button>
+              <Tooltip title={fullTitle.length > 50 ? fullTitle : undefined}>
+                <Button
+                  type='link'
+                  style={{ padding: 0, textAlign: 'left', height: 'auto', whiteSpace: 'normal' }}
+                  onClick={() => handleOpenConversation(record.conversation_id)}
+                >
+                  {truncated}
+                </Button>
+              </Tooltip>
               {record.schedule_name && (
                 <Tag color='blue' style={{ marginLeft: 6, fontSize: 11 }}>
                   {record.schedule_name}
@@ -212,13 +225,22 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
       {
         title: '',
         key: 'actions',
-        width: 90,
-        render: (_: unknown, record: Task) =>
-          record.status === 'running' ? (
-            <Button size='small' danger onClick={() => handleCancel(record.id)}>
-              {t('taskCenter.cancel')}
-            </Button>
-          ) : null,
+        width: 120,
+        render: (_: unknown, record: Task) => {
+          const isTerminal = ['succeeded', 'failed', 'canceled'].includes(record.status);
+          return (
+            <Space>
+              {!isTerminal && (
+                <Button size='small' danger onClick={() => handleCancel(record.id)}>
+                  {t('taskCenter.cancel')}
+                </Button>
+              )}
+              <Button size='small' onClick={() => handleRemove(record.id)}>
+                移出
+              </Button>
+            </Space>
+          );
+        },
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps

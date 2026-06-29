@@ -189,6 +189,20 @@
     }
   }
 
+  &__step-status {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-left: 4px;
+    flex-shrink: 0;
+
+    &--running     { background: #2563eb; }
+    &--interrupted { background: #f59e0b; }
+    &--failed      { background: #ef4444; }
+    &--succeeded   { background: #10b981; }
+  }
+
   // Horizontal scrollable image card list
   &__image-list {
     display: flex;
@@ -330,6 +344,14 @@
       border-color: #d1d5db;
 
       &:hover:not(:disabled) { background: #f9fafb; border-color: #9ca3af; }
+    }
+
+    &--danger {
+      background: #ef4444;
+      color: #fff;
+      border-color: #ef4444;
+
+      &:hover:not(:disabled) { background: #dc2626; border-color: #dc2626; }
     }
 
     &:disabled {

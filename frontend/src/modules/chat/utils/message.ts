@@ -170,6 +170,11 @@ export function buildChatMessageListFromHistory(
       thinking_time_s: record.thinking_time_s,
     };
 
+    // Restore ask_pending from persisted ext so the AskCard is visible after page reload.
+    if ((record as any).ask_pending) {
+      assistantMessage.ask_pending = (record as any).ask_pending;
+    }
+
     list.push(assistantMessage);
   });
 

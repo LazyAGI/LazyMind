@@ -113,6 +113,62 @@ func GetLatestSession(ctx context.Context, db *gorm.DB, conversationID string) (
 	return &s, nil
 }
 
+// healStaleActiveSession repairs a session that is stuck in "active" state after a crash.
+// A step is considered orphaned (and safe to mark interrupted) only when its backing
+// sub_agent_task is already in a terminal state (succeeded/failed/interrupted/canceled) while
+// the plugin_session_step still shows "running". This avoids incorrectly interrupting steps
+// that are genuinely still executing.
+//
+// If all orphaned running steps are resolved and no real running steps remain, the session
+// is flipped from "active" to "waiting".
+//
+// A grace period (staleThreshold) is applied to the session's updated_at to avoid touching
+// sessions that just started.
+func healStaleActiveSession(ctx context.Context, db *gorm.DB, s *orm.PluginSession) {
+	const staleThreshold = 2 * time.Minute
+	if time.Since(s.UpdatedAt) < staleThreshold {
+		return
+	}
+
+	now := time.Now().UTC()
+
+	// Fix orphaned running steps: plugin_session_step is "running" but the backing
+	// sub_agent_task has already reached a terminal state. Sync the step status to
+	// match the task status exactly (succeeded/failed/interrupted/canceled).
+	result := db.WithContext(ctx).Exec(`
+		UPDATE plugin_session_steps pss
+		SET status = sat.status, updated_at = ?
+		FROM sub_agent_tasks sat
+		WHERE pss.session_id = ?
+		  AND pss.task_id = sat.id
+		  AND pss.status = 'running'
+		  AND sat.status IN ('succeeded', 'failed', 'interrupted', 'canceled')
+		`, now, s.ID)
+	orphansFixed := result.RowsAffected
+
+	// Count genuinely running steps remaining after the fix.
+	var realRunning int64
+	db.WithContext(ctx).Model(&orm.PluginSessionStep{}).
+		Where("session_id = ? AND status = ?", s.ID, StepStatusRunning).
+		Count(&realRunning)
+
+	if realRunning > 0 {
+		// Some steps are still backed by a genuinely running task — don't touch the session.
+		if orphansFixed > 0 {
+			fmt.Printf("[plugin] healStaleActiveSession: session %s fixed %d orphan step(s), %d still running\n",
+				s.ID, orphansFixed, realRunning)
+		}
+		return
+	}
+
+	// No genuinely running steps → flip session to waiting.
+	db.WithContext(ctx).Model(s).
+		Updates(map[string]any{"status": SessionStatusWaiting, "updated_at": now})
+	s.Status = SessionStatusWaiting
+	fmt.Printf("[plugin] healStaleActiveSession: session %s repaired active→waiting (orphans=%d)\n",
+		s.ID, orphansFixed)
+}
+
 // GetSession loads a session by ID.
 func GetSession(ctx context.Context, db *gorm.DB, sessionID string) (*orm.PluginSession, error) {
 	var s orm.PluginSession

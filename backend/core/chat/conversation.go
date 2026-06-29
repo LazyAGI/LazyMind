@@ -712,6 +712,9 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 		plugin.StopActivePluginSession(r.Context(), db, stateStore, convID)
 	}
 
+	// Notify Python ChatAgent to cancel any active chat session for this conversation.
+	go plugin.NotifyChatCancel(convID)
+
 	common.ReplyOK(w, nil)
 }
 
@@ -864,15 +867,18 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		}
 	}
 	var input any
+	var askPending any
 	if len(h.Ext) > 0 {
 		var ext struct {
-			Input any `json:"input"`
+			Input      any `json:"input"`
+			AskPending any `json:"ask_pending"`
 		}
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
+			askPending = ext.AskPending
 		}
 	}
-	return map[string]any{
+	item := map[string]any{
 		"seq":             h.Seq,
 		"query":           h.RawContent,
 		"result":          stripThinkTags(stripToolTags(h.Result)),
@@ -884,6 +890,10 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"expected_answer": h.ExpectedAnswer,
 		"create_time":     h.CreateTime.UTC().Format(time.RFC3339),
 	}
+	if askPending != nil {
+		item["ask_pending"] = askPending
+	}
+	return item
 }
 
 func conversationHistoryResponseItems(histories []orm.ChatHistory) []map[string]any {
@@ -1010,6 +1020,8 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	db.Where("conversation_id = ?", convID).Delete(&orm.ChatHistory{})
 	db.Where("conversation_id = ?", convID).Delete(&orm.MultiAnswersChatHistory{})
+	// Cascade-delete task center entries for this conversation.
+	db.Where("conversation_id = ?", convID).Delete(&orm.TaskCenterTask{})
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 
@@ -1070,7 +1082,10 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ChatHistory{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.MultiAnswersChatHistory{}).Error
+		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.MultiAnswersChatHistory{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.TaskCenterTask{}).Error
 	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "batch delete conversations failed", err), http.StatusInternalServerError)
 		return

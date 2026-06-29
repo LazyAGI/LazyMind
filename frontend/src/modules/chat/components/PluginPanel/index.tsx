@@ -23,6 +23,8 @@ interface PluginPanelProps {
   onSendMessage?: (text: string) => void;
   /** Called when the user clicks the reference button on a slot item. */
   onReference?: (slot: SlotRevision) => void;
+  /** Called when the user clicks the Stop button during an active session. */
+  onStop?: () => void;
 }
 
 /**
@@ -668,6 +670,7 @@ export function PluginPanel({
   pollIntervalMs = 3000,
   onSendMessage,
   onReference,
+  onStop,
 }: PluginPanelProps) {
   const { t } = useTranslation();
   const { session, loading, refresh } = usePluginSession(conversationId);
@@ -808,24 +811,35 @@ export function PluginPanel({
       {/* Tabs — step navigator style */}
       {!collapsed && hasTabs && (
         <div className='plugin-panel__tabs' role='tablist'>
-          {tabs.map((tab, idx) => (
-            <React.Fragment key={tab.id}>
-              <button
-                role='tab'
-                aria-selected={idx === activeTabIdx}
-                aria-controls={`plugin-tab-panel-${tab.id}`}
-                className={`plugin-panel__tab${idx === activeTabIdx ? ' plugin-panel__tab--active' : ''}${idx < activeTabIdx ? ' plugin-panel__tab--done' : ''}`}
-                onClick={() => handleTabChange(idx, tab.id)}
-                type='button'
-              >
-                <span className='plugin-panel__tab-badge'>{idx + 1}</span>
-                <span className='plugin-panel__tab-label'>{tab.label}</span>
-              </button>
-              {idx < tabs.length - 1 && (
-                <span className={`plugin-panel__tab-connector${idx < activeTabIdx ? ' plugin-panel__tab-connector--done' : ''}`} aria-hidden='true' />
-              )}
-            </React.Fragment>
-          ))}
+          {tabs.map((tab, idx) => {
+            const step = session.steps?.find((s) => s.step_id === tab.id);
+            const stepStatus = step?.status;
+            return (
+              <React.Fragment key={tab.id}>
+                <button
+                  role='tab'
+                  aria-selected={idx === activeTabIdx}
+                  aria-controls={`plugin-tab-panel-${tab.id}`}
+                  className={`plugin-panel__tab${idx === activeTabIdx ? ' plugin-panel__tab--active' : ''}${idx < activeTabIdx ? ' plugin-panel__tab--done' : ''}`}
+                  onClick={() => handleTabChange(idx, tab.id)}
+                  type='button'
+                >
+                  <span className='plugin-panel__tab-badge'>{idx + 1}</span>
+                  <span className='plugin-panel__tab-label'>{tab.label}</span>
+                  {stepStatus && stepStatus !== 'succeeded' && (
+                    <span
+                      className={`plugin-panel__step-status plugin-panel__step-status--${stepStatus}`}
+                      aria-label={`Step status: ${stepStatus}`}
+                      title={stepStatus}
+                    />
+                  )}
+                </button>
+                {idx < tabs.length - 1 && (
+                  <span className={`plugin-panel__tab-connector${idx < activeTabIdx ? ' plugin-panel__tab-connector--done' : ''}`} aria-hidden='true' />
+                )}
+              </React.Fragment>
+            );
+          })}
         </div>
       )}
 
@@ -862,6 +876,16 @@ export function PluginPanel({
       {/* Footer */}
       {!collapsed && showActions && (
         <div className='plugin-panel__footer' role='group' aria-label='Session controls'>
+          {displayStatus === 'active' && onStop && (
+            <button
+              type='button'
+              className='plugin-panel__action-btn plugin-panel__action-btn--danger'
+              onClick={onStop}
+              title={t('chat.pluginStop')}
+            >
+              {t('chat.pluginStop')}
+            </button>
+          )}
           <button
             type='button'
             className='plugin-panel__action-btn plugin-panel__action-btn--secondary'

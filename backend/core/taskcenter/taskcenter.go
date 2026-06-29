@@ -84,7 +84,7 @@ func CancelTask(ctx context.Context, db *gorm.DB, userID, id string) error {
 
 func isTerminal(status string) bool {
 	switch status {
-	case "completed", "failed", "canceled":
+	case "completed", "succeeded", "failed", "canceled":
 		return true
 	}
 	return false
@@ -281,7 +281,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * pageSize
 
-	query := db.WithContext(r.Context()).Where("tct.user_id = ?", userID)
+	query := db.WithContext(r.Context()).Where("tct.user_id = ? AND tct.archived_at IS NULL", userID)
 	if status != "" {
 		query = query.Where("tct.status = ?", status)
 	}
@@ -304,7 +304,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		Table("task_center_tasks tct").
 		Joins("LEFT JOIN conversations c ON c.id = tct.conversation_id").
 		Joins("LEFT JOIN user_schedules us ON us.id = tct.schedule_id").
-		Where("tct.user_id = ?", userID)
+		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID)
 	if status != "" {
 		countQ = countQ.Where("tct.status = ?", status)
 	}
@@ -323,7 +323,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		Select("tct.*, c.display_name AS conv_display_name, us.name AS schedule_name").
 		Joins("LEFT JOIN conversations c ON c.id = tct.conversation_id").
 		Joins("LEFT JOIN user_schedules us ON us.id = tct.schedule_id").
-		Where("tct.user_id = ?", userID)
+		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID)
 	if status != "" {
 		dataQ = dataQ.Where("tct.status = ?", status)
 	}
@@ -419,8 +419,44 @@ func CancelTaskByID(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
 		return
 	}
+
+	// Validate: cannot cancel a terminal task.
+	var existing orm.TaskCenterTask
+	if err := db.WithContext(r.Context()).Where("id = ? AND user_id = ?", id, userID).First(&existing).Error; err != nil {
+		common.ReplyErr(w, "task not found", http.StatusNotFound)
+		return
+	}
+	if isTerminal(existing.Status) {
+		common.ReplyErr(w, "task already in terminal state", http.StatusBadRequest)
+		return
+	}
+
 	if err := CancelTask(r.Context(), db, userID, id); err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, nil)
+}
+
+// RemoveTaskHandler handles POST /task-center/tasks/{task_id}:remove
+// Soft-archives the task so it no longer appears in the list. The conversation is unaffected.
+func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
+	userID := store.UserID(r)
+	path := strings.TrimPrefix(r.URL.Path, "/task-center/tasks/")
+	id := strings.TrimSuffix(path, ":remove")
+	id = strings.Split(id, ":")[0]
+
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
+		return
+	}
+	now := time.Now().UTC()
+	result := db.WithContext(r.Context()).Model(&orm.TaskCenterTask{}).
+		Where("id = ? AND user_id = ?", id, userID).
+		Updates(map[string]any{"archived_at": now, "updated_at": now})
+	if result.Error != nil {
+		common.ReplyErr(w, result.Error.Error(), http.StatusInternalServerError)
 		return
 	}
 	common.ReplyOK(w, nil)

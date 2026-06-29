@@ -397,7 +397,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
       isMouseScrollingRef.current = true;
       scrollToEnd();
-      openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, params.run_in_background ? { run_in_background: true } : undefined);
+      openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
+        ...(params.run_in_background ? { run_in_background: true } : {}),
+        ...(params.ask_response ? { ask_response: params.ask_response } : {}),
+      });
 
       const currentId = currentConversationIdRef.current;
       if (currentId) {

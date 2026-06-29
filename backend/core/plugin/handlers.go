@@ -570,6 +570,13 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, map[string]any{"session": nil})
 		return
 	}
+
+	// Self-healing: if the session appears active but no steps are still running
+	// (e.g. the server crashed before updating statuses), repair the state so
+	// the frontend doesn't get stuck on "executing".
+	if s.Status == SessionStatusActive {
+		healStaleActiveSession(r.Context(), db, s)
+	}
 	dto := toSessionDTO(s)
 	revisions, _ := LoadSelectedSlots(r.Context(), db, s.ID)
 	for i := range revisions {

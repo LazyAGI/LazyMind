@@ -44,7 +44,8 @@ class StepCancelResponse(BaseModel):
 
 
 class TaskCancelRequest(BaseModel):
-    task_id: str
+    task_id: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 
 class TaskCancelResponse(BaseModel):
@@ -101,12 +102,27 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
     Called by the Go EventLoop when the user stops chat generation.
     The signal is written into the FileSystemQueue(klass='cancel') scoped
     to the task's sid, causing the ReAct stop_condition to raise CancelledError.
+
+    Supports two identification modes:
+    - task_id: direct task/session ID (original SubAgent path)
+    - conversation_id: looks up the active chat session from _active_sessions
     """
     import json as _json
+    from lazymind.chat.service.chat_service import _active_sessions
     try:
         import lazyllm
         from lazyllm.common.queue import FileSystemQueue
-        lazyllm.globals._init_sid(sid=req.task_id)
+
+        sid: Optional[str] = None
+        if req.conversation_id:
+            sid = _active_sessions.get(req.conversation_id)
+        elif req.task_id:
+            sid = req.task_id
+
+        if not sid:
+            return TaskCancelResponse(ok=False)
+
+        lazyllm.globals._init_sid(sid=sid)
         FileSystemQueue(klass='cancel').enqueue(_json.dumps({'tag': 'cancel'}))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

@@ -10,6 +10,7 @@ import {
   Tag,
   TimePicker,
   Tooltip,
+  Typography,
   Upload,
   message,
 } from 'antd';
@@ -22,6 +23,51 @@ import { cancelSchedule, createSchedule, listSchedules, listScheduleTasks } from
 import type { Schedule, Task, TaskListResponse } from './api';
 import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
+import { axiosInstance, BASE_URL } from '@/components/request';
+
+/* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */
+interface KnowledgeSelectProps {
+  value?: string[];
+  onChange?: (val: string[]) => void;
+  options: { value: string; label: string }[];
+  embeddingReady: boolean | null;
+}
+
+function KnowledgeSelect({ value, onChange, options, embeddingReady }: KnowledgeSelectProps) {
+  if (embeddingReady === false) {
+    return (
+      <Typography.Text type='secondary' style={{ fontSize: 12 }}>
+        知识库功能需要配置 Embedding 模型后方可使用
+      </Typography.Text>
+    );
+  }
+
+  if (options.length === 0 && embeddingReady !== null) {
+    return (
+      <Typography.Text type='secondary' style={{ fontSize: 12 }}>
+        暂无可用知识库，
+        <Typography.Link href='/lib/knowledge/list' target='_blank'>
+          去创建
+        </Typography.Link>
+      </Typography.Text>
+    );
+  }
+
+  return (
+    <Select
+      mode='multiple'
+      allowClear
+      placeholder={embeddingReady === null ? '加载中…' : '选择知识库'}
+      options={options}
+      value={value}
+      onChange={onChange}
+      optionFilterProp='label'
+      showSearch
+      maxTagCount='responsive'
+      disabled={embeddingReady === null}
+    />
+  );
+}
 
 /* ────────────────────────────────────────────────
    Helper: build cron expression from picker state
@@ -220,7 +266,10 @@ export default function ScheduleList() {
   const [uploadedPaths, setUploadedPaths] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [kbOptions, setKbOptions] = useState<{ value: string; label: string }[]>([]);
+  const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
+  // Inline-editable schedule name in modal header (merges "新建定时任务" + "任务名称" fields)
+  const [scheduleNameInput, setScheduleNameInput] = useState('');
 
   const localTimezone = useRef(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai');
 
@@ -246,6 +295,15 @@ export default function ScheduleList() {
         setKbOptions(datasets.map((d) => ({ value: d.dataset_id ?? '', label: d.display_name ?? d.dataset_id ?? '' })));
       })
       .catch(() => {});
+
+    // Check if embedding model is configured.
+    axiosInstance
+      .get(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`)
+      .then((res: any) => {
+        const ready = res?.data?.data?.ready ?? res?.data?.ready ?? null;
+        setEmbeddingReady(ready === true);
+      })
+      .catch(() => setEmbeddingReady(false));
   }, []);
 
   const handleDisable = async (id: string) => {
@@ -263,7 +321,7 @@ export default function ScheduleList() {
       const values = await form.validateFields();
       setSubmitting(true);
       await createSchedule({
-        name: values.name ?? '',
+        name: scheduleNameInput.trim(),
         remark: values.remark ?? '',
         cron_expr: values.cron_expr || buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)),
         prompt_template: values.prompt_template,
@@ -274,6 +332,7 @@ export default function ScheduleList() {
       message.success(t('taskCenter.createSuccess'));
       setModalOpen(false);
       form.resetFields();
+      setScheduleNameInput('');
       setFileList([]);
       setUploadedPaths([]);
       void fetchSchedules();
@@ -292,6 +351,7 @@ export default function ScheduleList() {
     form.setFieldValue('cron_expr', buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)));
     setFileList([]);
     setUploadedPaths([]);
+    setScheduleNameInput('');
     setModalOpen(true);
   };
 
@@ -397,12 +457,22 @@ export default function ScheduleList() {
         }}
       />
       <Modal
-        title={t('taskCenter.newSchedule')}
+        title={
+          <Input
+            value={scheduleNameInput}
+            onChange={(e) => setScheduleNameInput(e.target.value)}
+            placeholder='新定时任务'
+            variant='borderless'
+            style={{ fontWeight: 600, fontSize: 16, padding: 0, width: '100%' }}
+            maxLength={100}
+          />
+        }
         open={modalOpen}
         onOk={handleCreate}
         onCancel={() => {
           setModalOpen(false);
           form.resetFields();
+          setScheduleNameInput('');
           setFileList([]);
           setUploadedPaths([]);
         }}
@@ -411,9 +481,6 @@ export default function ScheduleList() {
         width={600}
       >
         <Form form={form} layout='vertical' size='small'>
-          <Form.Item name='name' label='任务名称（选填）'>
-            <Input placeholder='用于列表展示和检索，留空则显示描述前20字' />
-          </Form.Item>
           <Form.Item name='prompt_template' label='任务描述' rules={[{ required: true, message: '请输入任务描述' }]}>
             <Input.TextArea rows={3} placeholder='描述你希望系统定期执行的任务' />
           </Form.Item>
@@ -457,11 +524,16 @@ export default function ScheduleList() {
               <Button size='small' icon={<UploadOutlined />}>上传文件</Button>
             </Upload>
           </Form.Item>
-          {kbOptions.length > 0 && (
-            <Form.Item name='kb_ids' label='关联知识库（选填）'>
-              <Select mode='multiple' allowClear placeholder='选择知识库' options={kbOptions} />
-            </Form.Item>
-          )}
+          <Form.Item
+            name='kb_ids'
+            label='知识库（选填）'
+            valuePropName='value'
+          >
+            <KnowledgeSelect
+              options={kbOptions}
+              embeddingReady={embeddingReady}
+            />
+          </Form.Item>
           <Form.Item name='cron_expr' label='执行时间' rules={[{ required: true }]}>
             <VisualScheduler />
           </Form.Item>

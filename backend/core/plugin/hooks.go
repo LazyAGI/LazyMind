@@ -163,3 +163,19 @@ func notifyTaskCancel(taskID string) {
 	}
 	_ = resp.Body.Close()
 }
+
+// NotifyChatCancel posts a cancel signal to the Python chat service so that
+// the active ChatAgent session for the given conversation terminates.
+// Called by StopChatGeneration in a goroutine; errors are logged and suppressed.
+func NotifyChatCancel(convID string) {
+	body, _ := json.Marshal(map[string]string{
+		"conversation_id": convID,
+	})
+	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/plugin/task-cancel")
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx
+	if err != nil {
+		fmt.Printf("[plugin] NotifyChatCancel: %v\n", err)
+		return
+	}
+	_ = resp.Body.Close()
+}

@@ -88,6 +88,10 @@ export async function cancelTask(id: string): Promise<void> {
   await axiosInstance.post(`${CORE}/task-center/tasks/${id}:cancel`);
 }
 
+export async function removeTask(id: string): Promise<void> {
+  await axiosInstance.post(`${CORE}/task-center/tasks/${id}:remove`);
+}
+
 export async function addTask(conversationId: string, title?: string): Promise<Task> {
   const resp = await axiosInstance.post<Task>(`${CORE}/task-center/tasks`, {
     conversation_id: conversationId,

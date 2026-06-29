@@ -43,6 +43,10 @@ from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
+
+# Maps conversation_id → session_id for active chat sessions.
+# Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
+_active_sessions: dict[str, str] = {}
 _CITE_MESSAGE_PATTERN = re.compile(
     r'<cite_message>([\s\S]*?)</cite_message>\s*',
     re.IGNORECASE,
@@ -430,6 +434,10 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         resolve_plugin_injection,
         _build_chat_agent_task_context,
     )
+    # Register the active session so the cancel endpoint can find it by conversation_id.
+    _conv_id_key = (conversation_id or '').strip()
+    if _conv_id_key:
+        _active_sessions[_conv_id_key] = session_id
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)
     inject_model_config(model_config)
@@ -586,6 +594,10 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                 {'status': 'FINISHED', 'tool_call_turns': translator.tool_call_turns},
                 0.0,
             )
+        finally:
+            # Unregister the active session so the cancel endpoint no longer targets it.
+            if _conv_id_key:
+                _active_sessions.pop(_conv_id_key, None)
 
         cost = round(time.time() - start_time, 3)
         final_resp['cost'] = cost

@@ -435,8 +435,10 @@ def build_advance_step_and_exit_tool(
         'When the user says "继续" and the step was interrupted (not "重试"):\n'
         '  advance_step_and_exit(step_id=..., runtime_instruction=(\n'
         '    "Previous attempt was interrupted. Check existing artifacts for this step "\n'
-        '    "and only produce missing outputs. Do not regenerate already-saved artifacts."))\n'
-        'When the user says "重试": advance_step_and_exit(step_id=..., rewind=True)\n\n'
+        '    "and only produce missing outputs (resume from checkpoint). "\n'
+        '    "Do not regenerate already-saved artifacts."))\n'
+        'When the user says "重试": advance_step_and_exit(step_id=..., rewind=True)\n'
+        '  (rewind=True discards previous partial artifacts and restarts the step from scratch)\n\n'
         '## Rewind guidance\n\n'
         'If the DriverAgent or user indicates a prior step produced bad output, rewind by\n'
         'passing its step_id. Rewind-eligible steps are listed in the "Rewind" section below.\n\n'
@@ -1096,8 +1098,9 @@ def _build_mode_guidance(
             'can review the result and decide the next action.\n\n'
             'When a step is interrupted and user says "继续": call advance_step_and_exit with '
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
-            'and only produce missing outputs."\n'
-            'When user says "重试": call advance_step_and_exit (no special runtime_instruction).'
+            'and only produce missing outputs (resume from checkpoint)."\n'
+            'When user says "重试": call advance_step_and_exit with rewind=True '
+            '(restarts the interrupted step from scratch, ignoring previous partial artifacts).'
             + terminal_hint
         )
     else:  # auto
