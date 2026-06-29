@@ -547,7 +547,6 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"debug":            raw["debug"],
 		"reasoning":        resolveReasoning(raw),
 		"priority":         raw["priority"],
-		"enable_thinking":  raw["enable_thinking"],
 		"use_memory":       useMemory,
 		"user_id":          strings.TrimSpace(userID),
 		"mode":             mode,

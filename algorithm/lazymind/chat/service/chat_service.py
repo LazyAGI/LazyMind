@@ -16,6 +16,7 @@ from lazymind.chat.config import (
     SENSITIVE_WORDS_PATH,
 )
 from lazymind.chat.engine.prompts import build_system_prompt
+from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     DEFAULT_TOOLS,
@@ -307,49 +308,38 @@ def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]],
     return '\n'.join(lines)
 
 
-async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
-                      session_id: str, filters: Optional[Dict[str, Any]],
-                      files: Optional[Dict[str, List[str]]],
-                      databases: Optional[List[Dict[str, Any]]],
-                      priority: Optional[int], disabled_tools: Optional[List[str]],
-                      available_skills: Optional[List[str]], memory: Optional[str],
-                      user_preference: Optional[str], use_memory: Optional[bool],
-                      environment_context: Optional[Dict[str, Any]] = None,
-                      user_id: Optional[str] = None,
-                      conversation_id: Optional[str] = None,
-                      mode: Optional[str] = 'auto',
-                      has_subagents: Optional[bool] = False,
-                      model_config: Optional[Dict[str, Any]] = None,
-                      tool_config: Optional[Dict[str, Union[str, List[str]]]] = None,
-                      mcp_config: Optional[List[Dict[str, Any]]] = None,
-                      trace: Optional[bool] = False,
-                      plugin_context: Optional[Dict[str, Any]] = None,
-                      local_fs_sources: Optional[List[Dict[str, Any]]] = None,
-                      ask_response: Optional[Dict[str, Any]] = None,
-                      current_turn_seq: Optional[int] = None,
-                      enable_plugin: Optional[bool] = None,
-                      enable_subagent: Optional[bool] = None,
-                      ) -> Union[Dict[str, Any], StreamingResponse]:
+async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingResponse]:
+    message = request.message
+    conversation = request.conversation
+    retrieval = request.retrieval
+    runtime = request.runtime
+    personalization = request.personalization
+    agent = request.agent
+    plugin = request.plugin
+
+    conversation_id = (conversation.conversation_id or '').strip()
+    user_id = (conversation.user_id or '').strip()
     LOG.info(
-        f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={session_id}] [user_id={user_id or ""}] '
-        f'[{summarize_model_config_for_log(model_config)}]'
+        f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={conversation.session_id}] [user_id={user_id or ""}] '
+        f'[{summarize_model_config_for_log(runtime.llm_config)}]'
     )
     LOG.info(
-        f'[ChatServer] [PLUGIN_CONTEXT] [sid={session_id}] [plugin_context={plugin_context!r}]'
+        f'[ChatServer] [PLUGIN_CONTEXT] [sid={conversation.session_id}] [plugin_context={plugin.plugin_context!r}]'
     )
     LOG.info(
-        f'[ChatServer] [TURN_SEQ] [sid={session_id}] [current_turn_seq={current_turn_seq!r}] '
-        f'[files_map_keys={sorted(files.keys()) if isinstance(files, dict) else None}]'
+        f'[ChatServer] [TURN_SEQ] [sid={conversation.session_id}] '
+        f'[current_turn_seq={message.current_turn_seq!r}] '
+        f'[files_map_keys={sorted(message.files.keys()) if isinstance(message.files, dict) else None}]'
     )
     start_time = time.time()
-    priority = priority or LAZYMIND_LLM_PRIORITY
-    query, agent_query = _normalize_cite_message_query_for_agent(query)
+    priority = runtime.priority or LAZYMIND_LLM_PRIORITY
+    query, agent_query = _normalize_cite_message_query_for_agent(message.query)
     sensitive_word = check_sensitive_content(query)
     if sensitive_word:
         cost = round(time.time() - start_time, 3)
         LOG.warning(
             f'[ChatServer] [SENSITIVE_FILTER_BLOCKED] [query={query[:50]}...] '
-            f'[sensitive_word={sensitive_word}] [session_id={session_id}]'
+            f'[sensitive_word={sensitive_word}] [session_id={conversation.session_id}]'
         )
         return single_event_stream_response(response_payload(
             200,
@@ -362,8 +352,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
             cost,
         ), final_data={'tool_call_turns': 0})
 
-    filters = dict(filters or {})
-    files_map: Dict[str, List[str]] = files if isinstance(files, dict) else {}
+    filters = dict(retrieval.filters or {})
+    files_map: Dict[str, List[str]] = message.files if isinstance(message.files, dict) else {}
     flat_files: List[str] = []
     if files_map:
         for seq_key in sorted((k for k in files_map if k.isdigit()), key=int):
@@ -372,34 +362,34 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))
     LOG.info(f'[KBToolGroup_DEBUG] filters={filters!r} kb_id={filters.get("kb_id")!r}')
 
-    raw_history = list(history) if isinstance(history, list) else []
+    raw_history = list(message.history) if isinstance(message.history, list) else []
     agent_history = normalize_history_for_agent(raw_history)
     translator = AgentEventFrameTranslator(query=query)
 
     agentic_config = {
-        'session_id': session_id,
+        'session_id': conversation.session_id,
         'filters': filters if RAG_MODE and filters else {},
         'files': resolved_files,
         'history_files_per_turn': files_map,
-        'local_fs_sources': local_fs_sources or [],
+        'local_fs_sources': retrieval.local_fs_sources or [],
         'priority': priority,
         'user_id': user_id or '',
-        'use_memory': use_memory,
+        'use_memory': personalization.use_memory,
         'citation_state': translator.citation_state,
-        'mode': mode if mode in ('auto', 'manual') else 'auto',
-        'has_subagents': bool(has_subagents),
-        'conversation_id': (conversation_id or '').strip(),
+        'mode': conversation.mode if conversation.mode in ('auto', 'manual') else 'auto',
+        'has_subagents': bool(agent.has_subagents),
+        'conversation_id': conversation_id,
         'query': query or '',
-        'memory': memory or '',
-        'user_preference': user_preference or '',
+        'memory': personalization.memory or '',
+        'user_preference': personalization.user_preference or '',
     }
     # Inject per-conversation plugin flags from Go (resolved from conversations table).
     # enable_plugin=None means "not set"; default to True so behaviour is unchanged
     # for callers that do not yet pass the field.
-    if enable_plugin is not None:
-        agentic_config['enable_plugin'] = bool(enable_plugin)
-    if enable_subagent is not None:
-        agentic_config['enable_subagent'] = bool(enable_subagent)
+    if plugin.enable_plugin is not None:
+        agentic_config['enable_plugin'] = bool(plugin.enable_plugin)
+    if agent.enable_subagent is not None:
+        agentic_config['enable_subagent'] = bool(agent.enable_subagent)
     # plugin_mode is consumed directly from plugin_context by resolve_plugin_injection
     # (where it is only meaningful when enable_plugin=true); no need to store it in
     # agentic_config separately.
@@ -407,7 +397,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     display_files: list[str] = []
     # Use the authoritative current_turn_seq from Go; fall back to max(keys) only as a
     # last resort (handles callers that do not yet pass the field).
-    _eff_current_seq: int | None = current_turn_seq
+    _eff_current_seq: int | None = message.current_turn_seq
     if _eff_current_seq is None and files_map:
         int_keys = [int(k) for k in files_map if k.isdigit() and files_map[k]]
         if int_keys:
@@ -430,15 +420,15 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         resolve_plugin_injection,
         _build_chat_agent_task_context,
     )
-    lazyllm.globals._init_sid(sid=session_id)
-    lazyllm.locals._init_sid(sid=session_id)
-    inject_model_config(model_config)
-    inject_tool_config(tool_config)
+    lazyllm.globals._init_sid(sid=conversation.session_id)
+    lazyllm.locals._init_sid(sid=conversation.session_id)
+    inject_model_config(runtime.llm_config)
+    inject_tool_config(runtime.tool_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
     plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context = \
-        resolve_plugin_injection(plugin_context, conversation_id=(conversation_id or '').strip(),
-                                 ask_response=ask_response)
+        resolve_plugin_injection(plugin.plugin_context, conversation_id=conversation_id,
+                                 ask_response=plugin.ask_response)
     agentic_config.update(agentic_config_patch)
 
     # Inject SubAgent task context into the system prompt independently of plugin state.
@@ -447,12 +437,12 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     _enable_plugin = agentic_config.get('enable_plugin', True)
     _enable_subagent = agentic_config.get('enable_subagent', True)
     LOG.info(
-        f'[ChatServer] [PLUGIN_FLAGS] [sid={session_id}] '
+        f'[ChatServer] [PLUGIN_FLAGS] [sid={conversation.session_id}] '
         f'[enable_plugin={_enable_plugin!r}] [enable_subagent={_enable_subagent!r}] '
         f'[plugin_tools={[getattr(t, "__name__", str(t)) for t in plugin_tools]!r}]'
     )
     if _enable_plugin or _enable_subagent:
-        task_ctx = _build_chat_agent_task_context((conversation_id or '').strip())
+        task_ctx = _build_chat_agent_task_context(conversation_id)
         if task_ctx:
             plugin_system_prompt = (plugin_system_prompt + '\n\n' + task_ctx).strip()
 
@@ -479,7 +469,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     if parts:
         agent_query = '\n\n---\n\n'.join(parts) + '\n\n---\n\n## User Request\n' + agent_query
 
-    disabled = set(disabled_tools or [])
+    disabled = set(agent.disabled_tools or [])
     active_configs = filter_tools(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
     )
@@ -497,13 +487,13 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     agent_tools = build_agent_tools(active_configs)
     # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
     enable_subagent = agentic_config.get('enable_subagent', True)
-    subagent_tools = _build_subagent_chat_tools(bool(has_subagents)) if enable_subagent else []
+    subagent_tools = _build_subagent_chat_tools(bool(agent.has_subagents)) if enable_subagent else []
     # SubAgent chat tools (create_subagent, list_subagents, …) are always active;
     # add their names to the allowlist so the ToolGuard does not block them.
     lazyllm.globals['active_tool_names'] |= {
         getattr(fn, '__name__', '') for fn in subagent_tools if callable(fn)
     }
-    mcp_tools = _build_mcp_tools(mcp_config) if mcp_config else []
+    mcp_tools = _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
     # User attachment tools are only meaningful when the user has uploaded files.
     # Register them (and add to allowlist) whenever files_map is non-empty.
     attachment_tools = _build_user_attachment_tools(bool(files_map))
@@ -518,19 +508,19 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     }
     all_tools = agent_tools + subagent_tools + attachment_tools + schedule_tools + plugin_tools + mcp_tools
     set_trace_context({
-        'enabled': bool(trace),
-        'trace_id': session_id if trace else None,
-        'session_id': session_id,
+        'enabled': bool(runtime.trace),
+        'trace_id': conversation.session_id if runtime.trace else None,
+        'session_id': conversation.session_id,
         'sampled': True,
         'module_trace': {'default': True},
         'request_tags': ['handle_chat'],
     })
     runtime_prompt = build_system_prompt(
         {cfg.name for cfg in active_configs},
-        environment_context=environment_context,
-        use_memory=use_memory,
-        user_preference=user_preference,
-        memory=memory,
+        environment_context=runtime.environment_context,
+        use_memory=personalization.use_memory,
+        user_preference=personalization.user_preference,
+        memory=personalization.memory,
         files=display_files,
     )
     if plugin_system_prompt:
@@ -543,7 +533,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         tools=all_tools,
         force_summarize_context=query,
         prompt=runtime_prompt,
-        skills=available_skills,
+        skills=agent.available_skills,
         workspace=_cfg['agentic_workspace'],
         keep_full_turns=_cfg['agentic_keep_full_turns'],
         fs=FS,
@@ -561,7 +551,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                     if kind == 'event':
                         for frame in translator.feed(payload):
                             cost = round(time.time() - start_time, 3)
-                            yield log_and_emit_frame(frame, cost, query, session_id, tag='FEED')
+                            yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FEED')
                     else:
                         # 'final' -- payload is already the resolved result value;
                         # if future.result() raised, drive_agent propagated it before yielding.
@@ -569,7 +559,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)
-                yield log_and_emit_frame(frame, cost, query, session_id, tag='FINISH')
+                yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FINISH')
 
         except Exception as exc:
             LOG.exception('[ChatServer] agent failed')
@@ -591,9 +581,9 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         final_resp['cost'] = cost
         yield sse_line(final_resp)
 
-        databases_str = json.dumps(databases, ensure_ascii=False) if databases else []
+        databases_str = json.dumps(retrieval.databases, ensure_ascii=False) if retrieval.databases else []
         LOG.info(
-            f'[ChatServer] [KB_CHAT_STREAM_FINISH] [query={query}] [session_id={session_id}] '
+            f'[ChatServer] [KB_CHAT_STREAM_FINISH] [query={query}] [session_id={conversation.session_id}] '
             f'[filters={filters}] [files={resolved_files}] '
             f'[databases={databases_str}] [cost={cost}] [response=None]'
         )
