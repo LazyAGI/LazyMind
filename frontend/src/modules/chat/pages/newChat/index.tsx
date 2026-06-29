@@ -18,6 +18,7 @@ import { useNavigate } from "react-router-dom";
 import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
 import { AgentAppsAuth } from "@/components/auth";
 import PreferenceConfigNotice from "@/modules/chat/components/PreferenceConfigNotice";
+import type { ConversationPluginSettings } from "@/modules/chat/utils/request";
 
 const NewChatPage = () => {
   const { t } = useTranslation();
@@ -35,6 +36,8 @@ const NewChatPage = () => {
   const [welcomeKnowledgeRefreshKey, setWelcomeKnowledgeRefreshKey] =
     useState(0);
   const newChatInputRef = useRef<ChatInputImperativeProps>(null);
+  // Stash plugin settings changed in the welcome-screen ChatInput before a conversation is created.
+  const [pendingPluginSettings, setPendingPluginSettings] = useState<ConversationPluginSettings | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
@@ -86,6 +89,9 @@ const NewChatPage = () => {
     }
     if (!value) {
       setWelcomeKnowledgeRefreshKey((key) => key + 1);
+      // Reset pending settings and KB config so a fresh new conversation starts clean.
+      setPendingPluginSettings(null);
+      setChatConfig({});
     }
     setIsChatContent(value);
   };
@@ -108,6 +114,8 @@ const NewChatPage = () => {
       if (!conversationId) {
         setWelcomeKnowledgeRefreshKey((key) => key + 1);
         setIsChatContent(false);
+        setChatConfig({});
+        setPendingPluginSettings(null);
         return;
       }
       setChatLayoutMounted(true);
@@ -204,6 +212,7 @@ const NewChatPage = () => {
             chatDisabledReason={chatDisabledReason}
             chatDisabledDescription={chatDisabledDescription}
             chatDisabledAction={chatDisabledAction}
+            initPendingPluginSettings={pendingPluginSettings}
           />
         </div>
       )}
@@ -269,6 +278,7 @@ const NewChatPage = () => {
                     showHistoryList={false}
                     showHistoryButton={false}
                     knowledgeRefreshKey={welcomeKnowledgeRefreshKey}
+                    configResetKey={welcomeKnowledgeRefreshKey}
                     setIsChatContent={(value) => {
                       if (value) {
                         setInputValue("");
@@ -284,6 +294,9 @@ const NewChatPage = () => {
                     disabledReason={chatDisabledReason}
                     disabledDescription={chatDisabledDescriptionContent}
                     disabledAction={chatDisabledAction}
+                    onPluginSettingsChange={(settings) => {
+                      setPendingPluginSettings(settings);
+                    }}
                   />
                 </div>
               </div>

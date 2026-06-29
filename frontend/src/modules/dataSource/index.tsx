@@ -57,6 +57,7 @@ import {
   type FeishuAccountFormValues,
   type FeishuAuthAccount,
 } from "./common/feishuAccounts";
+import { FeishuCredentialHintAlertFromForm } from "./common/FeishuCredentialHintAlert";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   clearFeishuDataSourceWizardDraft,
@@ -136,6 +137,8 @@ const SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
 const LOCAL_PATH_CACHE_ROOT_KEY = "__root__";
 const FEISHU_TARGET_CACHE_ROOT_KEY = "__root__";
 const FEISHU_MANUAL_TARGET_VALUE_PREFIX = "__scan-feishu-manual-target__";
+const FEISHU_DRIVE_ROOT_REF = "feishu:drive:root";
+const FEISHU_WIKI_SPACES_REF = "feishu:wiki:spaces";
 const DATA_SOURCE_LIST_DEFAULT_PAGE_SIZE = 10;
 const DEFAULT_SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
 const SCHEDULE_WEEKDAY_API_MAP: Record<string, string> = {
@@ -520,6 +523,43 @@ function buildManualFeishuTargetValue(
   return `${FEISHU_MANUAL_TARGET_VALUE_PREFIX}:${kind}:${encodeURIComponent(targetRef)}`;
 }
 
+function parseManualFeishuTargetValue(value: string) {
+  const normalizedValue = value.trim();
+  if (!normalizedValue.startsWith(`${FEISHU_MANUAL_TARGET_VALUE_PREFIX}:`)) {
+    return null;
+  }
+
+  const parts = normalizedValue.split(":");
+  const rawKind = parts[1] || "";
+  const encodedTargetRef = parts.slice(2).join(":");
+  if (!["current", "wiki", "drive"].includes(rawKind)) {
+    return null;
+  }
+
+  let targetRef = encodedTargetRef;
+  try {
+    targetRef = decodeURIComponent(encodedTargetRef);
+  } catch {
+  }
+
+  const normalizedTargetRef = targetRef.trim();
+  if (!normalizedTargetRef) {
+    return null;
+  }
+
+  const kind = rawKind as FeishuManualTargetKind;
+  return {
+    kind,
+    targetRef: normalizedTargetRef,
+    targetType:
+      kind === "wiki"
+        ? "wiki_space"
+        : kind === "drive"
+          ? "drive_folder"
+          : undefined,
+  };
+}
+
 function normalizeNotionTargetType(value?: string): NotionTargetType | undefined {
   const normalized = `${value || ""}`.trim().toLowerCase();
   if (normalized === "database" || normalized === "notion_database") {
@@ -592,7 +632,26 @@ function collectFeishuTargetRefs(
 
 function normalizeFeishuTargetRefs(value?: SourceFormValues["target"]) {
   const values = Array.isArray(value) ? value : value ? [value] : [];
-  return values.map((item) => `${item || ""}`.trim()).filter(Boolean);
+  return values
+    .map((item) => {
+      const normalizedValue = `${item || ""}`.trim();
+      return parseManualFeishuTargetValue(normalizedValue)?.targetRef || normalizedValue;
+    })
+    .filter(Boolean);
+}
+
+function collectManualFeishuTargetTypes(value?: SourceFormValues["target"]) {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  const targetTypes = new Map<string, FeishuTargetType>();
+
+  values.forEach((item) => {
+    const parsed = parseManualFeishuTargetValue(`${item || ""}`);
+    if (parsed?.targetType) {
+      targetTypes.set(parsed.targetRef, parsed.targetType);
+    }
+  });
+
+  return targetTypes;
 }
 
 function normalizeCloudTargetRefs(value?: SourceFormValues["target"]) {
@@ -779,6 +838,69 @@ function buildFeishuTargetChildrenCacheKey(params: {
 
 function isFeishuHelperNode(node: FeishuTargetTreeNode) {
   return `${node.value || ""}`.startsWith("__scan-feishu-target-helper__");
+}
+
+function isManualFeishuTargetNode(node: FeishuTargetTreeNode) {
+  return `${node.value || ""}`.startsWith(FEISHU_MANUAL_TARGET_VALUE_PREFIX);
+}
+
+function isFeishuRootTargetNode(node: FeishuTargetTreeNode) {
+  const ref = `${node.targetRef || node.value || node.key || ""}`.trim().toLowerCase();
+  return ref === FEISHU_DRIVE_ROOT_REF || ref === FEISHU_WIKI_SPACES_REF;
+}
+
+function buildFeishuRootTargetNodes(): FeishuTargetTreeNode[] {
+  return [
+    {
+      key: FEISHU_DRIVE_ROOT_REF,
+      value: FEISHU_DRIVE_ROOT_REF,
+      title: "Drive",
+      isLeaf: false,
+      targetRef: FEISHU_DRIVE_ROOT_REF,
+      targetType: "drive_folder",
+    },
+    {
+      key: FEISHU_WIKI_SPACES_REF,
+      value: FEISHU_WIKI_SPACES_REF,
+      title: "Wiki",
+      isLeaf: false,
+      targetRef: FEISHU_WIKI_SPACES_REF,
+      targetType: "wiki_space",
+    },
+  ];
+}
+
+function extractFeishuRootTargetNodes(nodes: FeishuTargetTreeNode[]): FeishuTargetTreeNode[] {
+  const roots = nodes.filter(isFeishuRootTargetNode);
+  const existingRefs = new Set(
+    roots.map((node) => `${node.targetRef || node.value || ""}`.trim().toLowerCase()),
+  );
+
+  return [
+    ...roots,
+    ...buildFeishuRootTargetNodes().filter(
+      (node) => !existingRefs.has(`${node.targetRef}`.toLowerCase()),
+    ),
+  ];
+}
+
+function mergeFeishuTargetSearchResults(
+  rootNodes: FeishuTargetTreeNode[],
+  searchNodes: FeishuTargetTreeNode[],
+): FeishuTargetTreeNode[] {
+  const rootRefs = new Set(
+    rootNodes.map((node) => `${node.targetRef || node.value || ""}`.trim().toLowerCase()),
+  );
+
+  const filteredSearchNodes = searchNodes.filter((node) => {
+    if (isFeishuRootTargetNode(node)) {
+      return false;
+    }
+    const ref = `${node.targetRef || node.value || ""}`.trim().toLowerCase();
+    return !rootRefs.has(ref);
+  });
+
+  return [...rootNodes, ...filteredSearchNodes];
 }
 
 // Shared schedule expression helpers (used by both local reconcile_schedule and
@@ -1444,6 +1566,21 @@ export default function DataSourceManagement() {
     return [...buildManualFeishuTargetNodes(normalizedTargetRef), ...nodes];
   };
 
+  const getFeishuRootTargetNodes = (): FeishuTargetTreeNode[] => {
+    const authConnectionId = getActiveFeishuAuthConnectionId();
+    const rootCacheKey = buildFeishuTargetOptionsCacheKey(authConnectionId);
+    const cachedRootNodes = feishuTargetOptionsCacheRef.current.get(rootCacheKey);
+    if (cachedRootNodes?.length) {
+      const browsableNodes = cachedRootNodes.filter(
+        (node) => !isFeishuHelperNode(node) && !isManualFeishuTargetNode(node),
+      );
+      if (browsableNodes.length > 0) {
+        return extractFeishuRootTargetNodes(browsableNodes);
+      }
+    }
+    return buildFeishuRootTargetNodes();
+  };
+
   const mapFeishuTargetNodes = (
     nodes: ScanV2TreeNode[],
     inheritedTargetType?: FeishuTargetType,
@@ -1553,13 +1690,27 @@ export default function DataSourceManagement() {
       }
 
       const nodes = mapFeishuTargetNodes(response.data.items || []);
-      const baseNodes =
-        nodes.length > 0
-          ? nodes
-          : [buildFeishuHelperNode(t("admin.dataSourceNoFeishuTargets"))];
-      const nextNodes = normalizedKeyword
-        ? prependManualFeishuTargetOption(normalizedKeyword, baseNodes)
-        : baseNodes;
+      let nextNodes: FeishuTargetTreeNode[];
+
+      if (normalizedKeyword) {
+        const rootNodes = getFeishuRootTargetNodes();
+        const mergedNodes = mergeFeishuTargetSearchResults(rootNodes, nodes);
+        const baseNodes =
+          nodes.length > 0
+            ? mergedNodes
+            : [
+                ...mergedNodes,
+                buildFeishuHelperNode(t("admin.dataSourceNoFeishuTargets")),
+              ];
+        nextNodes = prependManualFeishuTargetOption(normalizedKeyword, baseNodes);
+      } else {
+        const baseNodes =
+          nodes.length > 0
+            ? nodes
+            : [buildFeishuHelperNode(t("admin.dataSourceNoFeishuTargets"))];
+        nextNodes = baseNodes;
+      }
+
       feishuTargetOptionsCacheRef.current.set(cacheKey, nextNodes);
       setFeishuTargetTreeData(nextNodes);
     } catch (error) {
@@ -1576,7 +1727,10 @@ export default function DataSourceManagement() {
       ];
       setFeishuTargetTreeData(
         normalizedKeyword
-          ? prependManualFeishuTargetOption(normalizedKeyword, fallbackNodes)
+          ? prependManualFeishuTargetOption(normalizedKeyword, [
+              ...getFeishuRootTargetNodes(),
+              ...fallbackNodes,
+            ])
           : fallbackNodes,
       );
     } finally {
@@ -1587,11 +1741,29 @@ export default function DataSourceManagement() {
   };
 
   const handleSearchFeishuTargetOptions = (keyword: string) => {
+    const normalizedKeyword = `${keyword || ""}`.trim();
     if (feishuTargetSearchTimerRef.current) {
       clearTimeout(feishuTargetSearchTimerRef.current);
     }
+
+    if (!normalizedKeyword) {
+      const authConnectionId = getActiveFeishuAuthConnectionId();
+      const rootCacheKey = buildFeishuTargetOptionsCacheKey(authConnectionId);
+      const cachedRootNodes = feishuTargetOptionsCacheRef.current.get(rootCacheKey);
+      if (cachedRootNodes) {
+        setFeishuTargetTreeData(cachedRootNodes);
+      }
+      feishuTargetSearchTimerRef.current = setTimeout(() => {
+        void loadFeishuTargetOptions("");
+      }, 300);
+      return;
+    }
+
+    setFeishuTargetTreeData(
+      prependManualFeishuTargetOption(normalizedKeyword, getFeishuRootTargetNodes()),
+    );
     feishuTargetSearchTimerRef.current = setTimeout(() => {
-      void loadFeishuTargetOptions(keyword);
+      void loadFeishuTargetOptions(normalizedKeyword);
     }, 300);
   };
 
@@ -3228,6 +3400,7 @@ export default function DataSourceManagement() {
     );
     const treeTargetTypeMap = collectFeishuTargetTypes(feishuTargetTreeData);
     const treeTargetRefMap = collectFeishuTargetRefs(feishuTargetTreeData);
+    const manualTargetTypeMap = collectManualFeishuTargetTypes(values.target);
     const fallbackTargetTypes = normalizeFeishuTargetTypeRecord(currentFeishuSource?.targetTypes);
     const defaultTargetType =
       normalizeFeishuTargetType(currentFeishuSource?.targetType) ||
@@ -3238,6 +3411,7 @@ export default function DataSourceManagement() {
       return {
         targetRef,
         targetType:
+          manualTargetTypeMap.get(targetRef) ||
           treeTargetTypeMap.get(targetValue) ||
           treeTargetTypeMap.get(targetRef) ||
           fallbackTargetTypes?.[targetRef] ||
@@ -4115,15 +4289,15 @@ export default function DataSourceManagement() {
           >
             <Input.Password placeholder={t("admin.dataSourceAppSecretPlaceholder")} />
           </Form.Item>
-          <Alert
-            showIcon
-            type="info"
-            message={
-              cloudSetupProvider === "feishu"
-                ? t("admin.dataSourceFeishuCredentialHint")
-                : t("admin.dataSourceNotionCredentialHint")
-            }
-          />
+          {cloudSetupProvider === "feishu" ? (
+            <FeishuCredentialHintAlertFromForm form={feishuSetupForm} />
+          ) : (
+            <Alert
+              showIcon
+              type="info"
+              message={t("admin.dataSourceNotionCredentialHint")}
+            />
+          )}
           {cloudSetupProvider !== "feishu" && (
             <Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
               <a

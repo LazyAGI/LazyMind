@@ -6,6 +6,7 @@ import {
   CloseOutlined,
   FileTextOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { type SelfEvolutionWorkflowStep } from "./types";
 
 const { Paragraph, Text } = Typography;
@@ -25,6 +26,7 @@ export function WorkflowStepCard({
   runtimeSummary,
   children,
 }: WorkflowStepCardProps) {
+  const { t } = useTranslation();
   return (
     <article
       className={`self-evolution-step-card is-${step.status}`}
@@ -44,7 +46,7 @@ export function WorkflowStepCard({
         </div>
         <Paragraph className="self-evolution-step-desc">{step.desc}</Paragraph>
         {step.progressPhases && step.progressPhases.length > 0 && (
-          <div className="self-evolution-step-progress-phases" aria-label={`${step.title}分阶段进度`}>
+          <div className="self-evolution-step-progress-phases" aria-label={t("selfEvolutionRun.stepProgressPhasesAria", { title: step.title })}>
             {step.progressPhases.map((phase) => (
               <div className="self-evolution-step-progress-phase" key={phase.id}>
                 <div className="self-evolution-step-progress-phase-head">
@@ -55,7 +57,7 @@ export function WorkflowStepCard({
                   <strong>{`${phase.percent}%`}</strong>
                 </div>
                 <div className="self-evolution-step-progress-meta">
-                  <span>{`状态：${phase.statusText}`}</span>
+                  <span>{t("selfEvolutionRun.stepProgressStatusLabel", { status: phase.statusText })}</span>
                 </div>
                 <div className={`self-evolution-step-progress-track is-${phase.id}`}>
                   <span style={{ width: `${phase.percent}%` }} />
@@ -65,9 +67,9 @@ export function WorkflowStepCard({
           </div>
         )}
         {step.progress && !step.progressPhases?.length && (
-          <div className="self-evolution-step-progress" aria-label={`${step.title}进度`}>
+          <div className="self-evolution-step-progress" aria-label={t("selfEvolutionRun.stepProgressAria", { title: step.title })}>
             <div className="self-evolution-step-progress-meta">
-              <span>{`状态：${step.progress.statusText}`}</span>
+              <span>{t("selfEvolutionRun.stepProgressStatusLabel", { status: step.progress.statusText })}</span>
               <strong>{`${step.progress.percent}%`}</strong>
             </div>
             <div className="self-evolution-step-progress-track">
@@ -100,19 +102,20 @@ export function DatasetWorkflowStep({
   getDownloadFileName,
   onDownload,
 }: DatasetWorkflowStepProps) {
+  const { t } = useTranslation();
   const href = downloadUrl || fallbackDownloadUrl || undefined;
 
   return (
-    <section className="self-evolution-dataset-static-block" aria-label="数据集结果展示">
+    <section className="self-evolution-dataset-static-block" aria-label={t("selfEvolutionRun.datasetResultAria")}>
       <div className="self-evolution-dataset-static-head">
-        <span>数据集结果仅支持下载查看</span>
+        <span>{t("selfEvolutionRun.datasetResultDownloadOnly")}</span>
         <a
           className="self-evolution-dataset-download-link"
           href={href}
           download={getDownloadFileName(downloadUrl || fallbackDownloadUrl, fileName)}
           onClick={onDownload}
         >
-          下载查看
+          {t("selfEvolutionRun.downloadView")}
         </a>
       </div>
     </section>
@@ -138,6 +141,7 @@ export function PxReportWorkflowStep({
   getDownloadFileName,
   children,
 }: PxReportWorkflowStepProps) {
+  const { t } = useTranslation();
   return (
     <Collapse
       className="self-evolution-dataset-collapse self-evolution-px-collapse"
@@ -150,10 +154,10 @@ export function PxReportWorkflowStep({
             <span className="self-evolution-dataset-collapse-label">
               <span>
                 {categoryCount === 0
-                  ? "查看评测图表"
+                  ? t("selfEvolutionRun.viewEvalChart")
                   : isSingleCategory
-                    ? "查看评测图表（单分类饼图）"
-                    : "查看评测图表（多分类折线图）"}
+                    ? t("selfEvolutionRun.viewEvalChartSingle")
+                    : t("selfEvolutionRun.viewEvalChartMulti")}
               </span>
               <a
                 className="self-evolution-dataset-download-link"
@@ -161,7 +165,7 @@ export function PxReportWorkflowStep({
                 download={getDownloadFileName(downloadUrl, "eval-report.json")}
                 onClick={onDownload}
               >
-                下载查看
+                {t("selfEvolutionRun.downloadView")}
               </a>
             </span>
           ),
@@ -178,6 +182,7 @@ type AnalysisWorkflowStepProps = {
 };
 
 export function AnalysisWorkflowStep({ onCollapseChange, children }: AnalysisWorkflowStepProps) {
+  const { t } = useTranslation();
   return (
     <Collapse
       className="self-evolution-dataset-collapse self-evolution-analysis-collapse"
@@ -186,7 +191,7 @@ export function AnalysisWorkflowStep({ onCollapseChange, children }: AnalysisWor
       items={[
         {
           key: "analysis-report-preview",
-          label: "查看完整分析报告",
+          label: t("selfEvolutionRun.viewFullAnalysisReport"),
           children,
         },
       ]}
@@ -209,6 +214,7 @@ export function CodeOptimizeWorkflowStep({
   getDownloadFileName,
   children,
 }: CodeOptimizeWorkflowStepProps) {
+  const { t } = useTranslation();
   return (
     <Collapse
       className="self-evolution-dataset-collapse self-evolution-optimize-collapse"
@@ -219,14 +225,14 @@ export function CodeOptimizeWorkflowStep({
           key: "code-optimize-diff-preview",
           label: (
             <span className="self-evolution-dataset-collapse-label">
-              <span>查看代码改动详情</span>
+              <span>{t("selfEvolutionRun.viewCodeChanges")}</span>
               <a
                 className="self-evolution-dataset-download-link"
                 href={downloadUrl || undefined}
                 download={getDownloadFileName(downloadUrl, "code-diff.diff")}
                 onClick={onDownload}
               >
-                下载查看
+                {t("selfEvolutionRun.downloadView")}
               </a>
             </span>
           ),
@@ -254,6 +260,7 @@ export function AbTestWorkflowStep({
   getDownloadFileName,
   children,
 }: AbTestWorkflowStepProps) {
+  const { t } = useTranslation();
   const href = downloadUrl || fallbackDownloadUrl;
 
   return (
@@ -266,14 +273,14 @@ export function AbTestWorkflowStep({
           key: "ab-test-preview",
           label: (
             <span className="self-evolution-dataset-collapse-label">
-              <span>查看 ABTest 详情</span>
+              <span>{t("selfEvolutionRun.viewABTestDetail")}</span>
               <a
                 className="self-evolution-dataset-download-link"
                 href={href || undefined}
                 download={getDownloadFileName(href, "ab-test-comparison.json")}
                 onClick={onDownload}
               >
-                下载查看
+                {t("selfEvolutionRun.downloadView")}
               </a>
             </span>
           ),

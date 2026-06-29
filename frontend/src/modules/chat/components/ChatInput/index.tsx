@@ -38,6 +38,8 @@ import "./index.scss";
 import { ChatConfig } from "../ChatConfigs";
 import ChatSelector from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
+import ChatConfigModal from "./ChatConfigModal";
+import type { ConversationPluginSettings } from "../../utils/request";
 import BatchChatComponent, { BatchChatImperativeProps } from "../BatchChat";
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
@@ -146,6 +148,8 @@ export interface SendMessageParams {
   fileListRef?: React.RefObject<ImageUploadImperativeProps | null>;
   files?: (RcFile & { uri: string })[];
   create_time?: string;
+  /** When true, the payload will include run_in_background=true and the task center badge will increment. */
+  run_in_background?: boolean;
 }
 
 interface ChatInputProps {
@@ -165,9 +169,17 @@ interface ChatInputProps {
   setChatConfig?: (chatConfig: ChatConfig) => void;
   setChatConfigFn?: (chatConfig: ChatConfig) => void;
   knowledgeRefreshKey?: number | string;
+  /** Bump to remount the chat config popover (e.g. when starting a fresh welcome-screen chat). */
+  configResetKey?: number | string;
   sessionId?: string;
   isStreaming?: boolean;
   embeddingReady?: boolean | null;
+  /** Called when plugin settings change (e.g. from the chat config popover). */
+  onPluginSettingsChange?: (settings: ConversationPluginSettings) => void;
+  /** Initial plugin settings to pre-populate the config popover. */
+  initialPluginSettings?: ConversationPluginSettings;
+  /** When true, the allow-plugin toggle in config is locked (plugin session is active). */
+  hasPluginSession?: boolean;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabled?: boolean;
@@ -235,6 +247,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setChatConfig,
       setChatConfigFn,
       knowledgeRefreshKey,
+      configResetKey,
       sessionId,
       isStreaming = false,
       embeddingReady,
@@ -248,6 +261,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       citeMessages,
       onRemoveCiteMessage,
       onClearCiteMessage,
+      onPluginSettingsChange,
+      initialPluginSettings,
+      hasPluginSession,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
@@ -816,6 +832,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   >
                     {t("chat.promptTemplate")}
                   </div>
+                  <ChatConfigModal
+                    key={
+                      configResetKey != null
+                        ? `config-reset-${configResetKey}`
+                        : undefined
+                    }
+                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
+                    initialSettings={initialPluginSettings}
+                    hasPluginSession={hasPluginSession}
+                    onSave={onPluginSettingsChange}
+                  />
                 </div>
 
                 <div className="input-bottom-actions-right">
@@ -848,6 +875,44 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         </Badge>
                       }
                     />
+                  </div>
+                  <div className="input-bottom-actions-right-item">
+                    <Tooltip title="以异步任务方式执行，可在任务中心查看进度和结果">
+                      <Button
+                        size="small"
+                        type="text"
+                        style={{ fontSize: 12, color: '#888', padding: '0 4px' }}
+                        disabled={isSendDisabled}
+                        onClick={() => {
+                          if (isSendDisabled) return;
+                          const normalizedText = value.trim();
+                          setNewMessage(false);
+                          const sendParams: SendMessageParams = {
+                            text: normalizedText,
+                            citeMessage: normalizedCiteMessages.join("\n\n"),
+                            citeMessages: normalizedCiteMessages,
+                            fileList,
+                            fileListRef,
+                            files: fileListRef.current?.getFiles(),
+                            create_time: new Date().toISOString(),
+                            run_in_background: true,
+                          };
+                          if (!isChatContent) {
+                            setPendingMessage(sendParams);
+                            setIsChatContent?.(true);
+                          } else {
+                            onSend?.(sendParams);
+                            clearMultiData();
+                          }
+                          onChange("");
+                          setText("");
+                          onClearCiteMessage?.();
+                        }}
+                        aria-label="后台运行"
+                      >
+                        后台运行
+                      </Button>
+                    </Tooltip>
                   </div>
                   <div className="input-bottom-actions-right-item">
                     <SendButton

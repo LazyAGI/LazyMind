@@ -24,6 +24,7 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
+	"lazymind/core/scheduler"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
@@ -216,20 +217,25 @@ func main() {
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
 	subagent.EventHooks.RegisterConversationEventHook(
-		func(ctx context.Context, stateStore state.Store, convID, _ string, eventType string, payload map[string]any) {
-			_ = chat.AppendConvEvent(ctx, stateStore, convID, &chat.ConvEvent{
-				Type: eventType,
-				Payload: map[string]any{
-					"event_type": eventType,
-					"session_id": payload["session_id"],
-					"plugin_id":  payload["plugin_id"],
-					"step_id":    payload["step_id"],
-					"message":    payload["message"],
-				},
+		func(_ context.Context, stateStore state.Store, convID, _ string, eventType string, payload map[string]any) {
+			enriched := make(map[string]any, len(payload)+2)
+			for k, v := range payload {
+				enriched[k] = v
+			}
+			enriched["event_type"] = eventType
+			if _, ok := enriched["conversation_id"]; !ok {
+				enriched["conversation_id"] = convID
+			}
+			_ = chat.AppendConvEvent(context.Background(), stateStore, convID, &chat.ConvEvent{
+				Type:    eventType,
+				Payload: enriched,
 			})
 		},
 	)
 	log.Logger.Info().Msg("plugin subagent hooks registered")
+
+	// Start the schedule ticker.
+	scheduler.RunScheduler(context.Background(), store.DB(), "")
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()

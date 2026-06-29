@@ -134,7 +134,7 @@ export function ChatComposer({
         className="self-evolution-chatlike-input"
         placeholder={
           isCheckpointWaiting
-            ? t("selfEvolutionRun.checkpointInputPlaceholder", { command: pendingCheckpointWaitPrompt?.command || "继续执行" })
+            ? t("selfEvolutionRun.checkpointInputPlaceholder", { command: pendingCheckpointWaitPrompt?.command || t("selfEvolutionRun.continueExecution") })
             : t("selfEvolutionRun.inputPlaceholder")
         }
         aria-label={t("selfEvolutionRun.inputAria")}

@@ -17,6 +17,7 @@ import {
   PlusOutlined,
   RightOutlined,
   FolderOpenOutlined,
+  UnorderedListOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -165,13 +166,14 @@ export default function MainLayout() {
     },
   ];
   const hideEvo = runtimeFeatures.hideEvo;
+  const canAccessSelfEvolution = !hideEvo && developerActive && isAdminUser;
   const aiEvolutionNavItems = [
     {
       key: "/memory-management",
       label: t("layout.memoryManagement"),
       icon: <AppstoreOutlined />,
     },
-    ...(!hideEvo
+    ...(canAccessSelfEvolution
       ? [
           {
             key: "/self-evolution",
@@ -259,10 +261,10 @@ export default function MainLayout() {
   }, [developerActive, isAdminUser]);
 
   useEffect(() => {
-    if (pathname.startsWith("/self-evolution") && hideEvo) {
+    if (pathname.startsWith("/self-evolution") && !canAccessSelfEvolution) {
       navigate("/agent/chat", { replace: true });
     }
-  }, [pathname, navigate, hideEvo]);
+  }, [pathname, navigate, canAccessSelfEvolution]);
 
   useEffect(() => {
     if (!pathname.startsWith("/agent/chat")) {
@@ -690,6 +692,16 @@ export default function MainLayout() {
                     <RightOutlined className="sider-module-arrow" />
                   </button>
                 </Popover>
+                <button
+                  type="button"
+                  className={`sider-module-trigger${pathname.startsWith("/task-center") ? " is-active" : ""}`}
+                  onClick={() => handleModuleNavigate("/task-center")}
+                >
+                  <span className="sider-module-icon">
+                    <UnorderedListOutlined />
+                  </span>
+                  <span className="sider-module-text">{t("layout.taskCenter")}</span>
+                </button>
               </div>
               <div className="sider-history-search">
                 <Input

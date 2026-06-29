@@ -165,7 +165,52 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 	if len(toolConfig) > 0 {
 		body["tool_config"] = toolConfig
 	}
+	agentConfig := loadUserAgentConfig(ctx, db, userID, body)
+	if len(agentConfig) > 0 {
+		// Merge into existing agentic_config body key, or set it.
+		if existing, ok := body["agentic_config"].(map[string]any); ok {
+			for k, v := range agentConfig {
+				existing[k] = v
+			}
+		} else {
+			body["agentic_config"] = agentConfig
+		}
+	}
 	return nil
+}
+
+// loadUserAgentConfig reads per-user defaults from user_chat_settings and applies
+// conversation-level overrides from the Conversation row when conversation_id is
+// present in body. The result is a partial agentic_config dict ready to merge.
+// It never returns an error; on DB failure it returns an empty map.
+func loadUserAgentConfig(ctx context.Context, db *gorm.DB, userID string, body map[string]any) map[string]any {
+	out := map[string]any{}
+
+	// Load user-level defaults.
+	var settings orm.UserChatSettings
+	if err := db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error; err == nil {
+		out["enable_plugin"] = settings.EnablePlugin
+		out["plugin_mode"] = settings.PluginMode
+		out["enable_subagent"] = settings.EnableSubagent
+	}
+
+	// Apply conversation-level overrides when present.
+	convID, _ := body["conversation_id"].(string)
+	if convID != "" {
+		var conv orm.Conversation
+		if err := db.WithContext(ctx).Where("id = ?", convID).First(&conv).Error; err == nil {
+			if conv.EnablePlugin != nil {
+				out["enable_plugin"] = *conv.EnablePlugin
+			}
+			if conv.PluginMode != nil {
+				out["plugin_mode"] = *conv.PluginMode
+			}
+			if conv.EnableSubagent != nil {
+				out["enable_subagent"] = *conv.EnableSubagent
+			}
+		}
+	}
+	return out
 }
 
 func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID string, body map[string]any) {

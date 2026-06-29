@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+
+type TFunction = (key: string, options?: Record<string, unknown>) => string;
 import { Alert, Button, Empty, Spin, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -18,7 +21,10 @@ import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import {
   AGENT_API_BASE,
   EVO_API_BASE,
+  buildAbSummaryReports,
   createCoreAgentGeneratedApiClient,
+  formatMaybePValue,
+  getAbtestResultRecords,
   getNestedRecordField,
   getNumberField,
   getResultItems,
@@ -29,6 +35,7 @@ import {
   isEmptyResultPayload,
   isRecord,
   stringifyResultPayload,
+  type AbSummaryReport,
   type WorkflowResultKind,
 } from "../shared";
 import {
@@ -60,12 +67,21 @@ function ObservationHeaderControls({
   toggleMenu,
   onBack,
 }: ObservationHeaderControlsProps) {
+  const { t } = useTranslation();
   return (
     <div className="self-evolution-observation-head-controls">
       {isMenuCollapsed && toggleMenu ? (
-        <Button type="text" icon={<MenuUnfoldOutlined />} onClick={toggleMenu} aria-label="展开菜单" title="展开菜单" />
+        <Button
+          type="text"
+          icon={<MenuUnfoldOutlined />}
+          onClick={toggleMenu}
+          aria-label={t("selfEvolutionRun.observation.expandMenu")}
+          title={t("selfEvolutionRun.observation.expandMenu")}
+        />
       ) : null}
-      <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
+      <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>
+        {t("selfEvolutionRun.observation.back")}
+      </Button>
     </div>
   );
 }
@@ -90,6 +106,31 @@ type EvalBadcaseListState = {
   loaded: boolean;
   data?: unknown;
   error?: string;
+};
+
+type AbCaseListState = {
+  abtestId?: string;
+  loading: boolean;
+  loaded: boolean;
+  data?: unknown;
+  error?: string;
+  totalSize?: number;
+};
+
+type AbTraceCompareState = {
+  caseId?: string;
+  loading: boolean;
+  loaded: boolean;
+  data?: unknown;
+  error?: string;
+  aTraceId?: string;
+  bTraceId?: string;
+};
+
+type EvalReportsTraceState = {
+  loading: boolean;
+  loaded: boolean;
+  data?: unknown;
 };
 
 type CsvBadcaseRow = {
@@ -167,43 +208,49 @@ const fallbackObservationData: Partial<Record<ObservationResultKind, unknown>> =
   abtests: traceCompareFixture,
 };
 const EVAL_BADCASE_PAGE_SIZE = 10;
+const AB_CASE_DETAIL_PAGE_SIZE = 10;
+const syntheticAbtestIdPattern = /^abtest-\d+$/;
 
-const fallbackAbCaseRows: AbCaseRow[] = [
-  {
-    caseId: "case-083",
-    query: "如何申请发票抬头变更?",
-    aScore: 0.36,
-    bScore: 0.42,
-    delta: 0.06,
-    conclusion: "小幅提升但召回不足",
-    tone: "up",
-  },
-  {
-    caseId: "case-019",
-    query: "如何重置管理员密码?",
-    aScore: 0.58,
-    bScore: 0.46,
-    delta: -0.12,
-    conclusion: "B 退化",
-    tone: "down",
-  },
-  {
-    caseId: "case-104",
-    query: "上传失败如何处理?",
-    aScore: 0.43,
-    bScore: 0.67,
-    delta: 0.24,
-    conclusion: "明显提升",
-    tone: "up",
-  },
-];
+function getFallbackAbCaseRows(t: TFunction): AbCaseRow[] {
+  return [
+    {
+      caseId: "case-083",
+      query: t("selfEvolutionRun.observation.fallbackQueryInvoice"),
+      aScore: 0.36,
+      bScore: 0.42,
+      delta: 0.06,
+      conclusion: t("selfEvolutionRun.observation.fallbackConclusionSlightImprove"),
+      tone: "up",
+    },
+    {
+      caseId: "case-019",
+      query: t("selfEvolutionRun.observation.fallbackQueryPassword"),
+      aScore: 0.58,
+      bScore: 0.46,
+      delta: -0.12,
+      conclusion: t("selfEvolutionRun.observation.fallbackConclusionDegrade"),
+      tone: "down",
+    },
+    {
+      caseId: "case-104",
+      query: t("selfEvolutionRun.observation.fallbackQueryUpload"),
+      aScore: 0.43,
+      bScore: 0.67,
+      delta: 0.24,
+      conclusion: t("selfEvolutionRun.observation.fallbackConclusionImprove"),
+      tone: "up",
+    },
+  ];
+}
 
-const fallbackAbMetricRows: AbMetricRow[] = [
-  { key: "correctness", label: "答案正确性", meanA: 0.867, meanB: 0.891, winRate: 0.1, signP: "0.629" },
-  { key: "context", label: "上下文召回", meanA: 0.71, meanB: 0.7, winRate: 0, signP: "-" },
-  { key: "document", label: "文档召回", meanA: 0.98, meanB: 0.98, winRate: 0, signP: "-" },
-  { key: "faithfulness", label: "忠实性", meanA: 0.917, meanB: 0.943, winRate: 0.13, signP: "0.678" },
-];
+function getFallbackAbMetricRows(t: TFunction): AbMetricRow[] {
+  return [
+    { key: "correctness", label: t("selfEvolutionRun.metricAnswerCorrectness"), meanA: 0.867, meanB: 0.891, winRate: 0.1, signP: "0.629" },
+    { key: "context", label: t("selfEvolutionRun.observation.metricContextRecall"), meanA: 0.71, meanB: 0.7, winRate: 0, signP: "-" },
+    { key: "document", label: t("selfEvolutionRun.metricDocRecall"), meanA: 0.98, meanB: 0.98, winRate: 0, signP: "-" },
+    { key: "faithfulness", label: t("selfEvolutionRun.observation.metricFaithfulness"), meanA: 0.917, meanB: 0.943, winRate: 0.13, signP: "0.678" },
+  ];
+}
 
 function normalizeObservationKind(kind?: string): ObservationResultKind | undefined {
   return kind ? observationKindMap[kind] : undefined;
@@ -367,9 +414,13 @@ function getNodeTitle(node: TraceNode) {
   return node.name;
 }
 
-function renderPayloadBlock(label: string, payload?: { summary?: string; data?: unknown }) {
+function renderPayloadBlock(t: TFunction, label: string, payload?: { summary?: string; data?: unknown }) {
   if (!payload?.summary && payload?.data === undefined) {
-    return <Paragraph className="self-evolution-eval-empty">暂无{label}数据。</Paragraph>;
+    return (
+      <Paragraph className="self-evolution-eval-empty">
+        {t("selfEvolutionRun.observation.noLabelData", { label })}
+      </Paragraph>
+    );
   }
 
   return (
@@ -377,7 +428,7 @@ function renderPayloadBlock(label: string, payload?: { summary?: string; data?: 
       {payload?.summary && <Paragraph className="self-evolution-eval-payload-summary">{payload.summary}</Paragraph>}
       {payload?.data !== undefined && (
         <details className="self-evolution-eval-payload-json">
-          <summary>{`查看${label} JSON`}</summary>
+          <summary>{t("selfEvolutionRun.observation.viewLabelJson", { label })}</summary>
           <pre>{stringifyResultPayload(payload.data)}</pre>
         </details>
       )}
@@ -385,10 +436,10 @@ function renderPayloadBlock(label: string, payload?: { summary?: string; data?: 
   );
 }
 
-function renderMetadataTiles(metadata?: Record<string, unknown>) {
+function renderMetadataTiles(t: TFunction, metadata?: Record<string, unknown>) {
   const entries = Object.entries(metadata || {}).slice(0, 8);
   if (entries.length === 0) {
-    return <Paragraph className="self-evolution-eval-empty">暂无 metadata。</Paragraph>;
+    return <Paragraph className="self-evolution-eval-empty">{t("selfEvolutionRun.observation.noMetadata")}</Paragraph>;
   }
 
   return (
@@ -403,7 +454,7 @@ function renderMetadataTiles(metadata?: Record<string, unknown>) {
   );
 }
 
-function buildFlowRows(detail: TraceDetailObservation): FlowRow[] {
+function buildFlowRows(t: TFunction, detail: TraceDetailObservation): FlowRow[] {
   const rootChildren = detail.root.children.length ? detail.root.children : [detail.root];
   return rootChildren.flatMap((roundNode, roundIndex) => {
     const descendants = flattenTraceNodes(roundNode)
@@ -415,7 +466,7 @@ function buildFlowRows(detail: TraceDetailObservation): FlowRow[] {
       key: `${roundIndex}-${node.id}-${index}`,
       round: roundIndex + 1,
       title: getNodeTitle(node),
-      desc: node.output?.summary || node.input?.summary || "暂无摘要",
+      desc: node.output?.summary || node.input?.summary || t("selfEvolutionRun.observation.noSummary"),
       duration: formatDuration(node.latencyMs),
       tone: getTraceDocs(node).length > 0 || node.status === "warning" ? "warning" : node.status === "success" ? "success" : "normal",
       node,
@@ -431,7 +482,7 @@ function getBadcaseSourceRecords(value: unknown): Record<string, unknown>[] {
   });
 }
 
-function normalizeBadcaseRows(value: unknown): CsvBadcaseRow[] {
+function normalizeBadcaseRows(t: TFunction, value: unknown): CsvBadcaseRow[] {
   const candidateRows = getBadcaseSourceRecords(value)
     .flatMap((item) => [
       ...(getStructuredArrayField(item, ["bad_cases"]) || []),
@@ -444,7 +495,7 @@ function normalizeBadcaseRows(value: unknown): CsvBadcaseRow[] {
     ]);
   const rows = candidateRows.filter(isRecord).map((item, index): CsvBadcaseRow => {
     const score = getNumberField(item, ["score", "metric_score", "answer_correctness", "value"]) ?? 0;
-    const failureType = getStringField(item, ["failure_type", "failure_reason", "fail_reason", "category"]) || "待分析";
+    const failureType = getStringField(item, ["failure_type", "failure_reason", "fail_reason", "category"]) || t("selfEvolutionRun.observation.pendingAnalysis");
     return {
       caseId: getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${String(index + 1).padStart(3, "0")}`,
       query: getStringField(item, ["query", "question", "prompt"]) || "-",
@@ -457,7 +508,7 @@ function normalizeBadcaseRows(value: unknown): CsvBadcaseRow[] {
       reason: getStringField(item, ["Reason", "reason", "failure_detail"]) || failureType,
       mode: getStringField(item, ["mode", "execution_mode"]) || "Agentic RAG",
       traceId: getStringField(item, ["trace_id", "traceId"]) || "-",
-      traceStatus: getStringField(item, ["trace_status", "traceStatus"]) || "已关联",
+      traceStatus: getStringField(item, ["trace_status", "traceStatus"]) || t("selfEvolutionRun.observation.alreadyLinked"),
       failureReason: getStringField(item, ["failure_detail", "failure_reason", "fail_reason", "Reason", "reason"]) || failureType,
       tracePayload: item.trace || item.observation || item.trace_detail,
     };
@@ -465,28 +516,170 @@ function normalizeBadcaseRows(value: unknown): CsvBadcaseRow[] {
   return rows;
 }
 
-function normalizeAbCaseRows(value: unknown): AbCaseRow[] {
-  const candidateRows = isRecord(value)
-    ? (["cases", "case_list", "rows", "records", "items", "badcases"] as const)
-      .flatMap((key) => Array.isArray(value[key]) ? value[key] : [])
-    : Array.isArray(value)
-      ? value
-      : [];
-  const rows = candidateRows.filter(isRecord).map((item, index): AbCaseRow => {
-    const aScore = getNumberField(item, ["a_score", "score_a", "baseline_score", "mean_a"]) ?? 0;
-    const bScore = getNumberField(item, ["b_score", "score_b", "candidate_score", "mean_b"]) ?? 0;
-    const delta = getNumberField(item, ["delta", "change", "score_delta"]) ?? bScore - aScore;
-    return {
-      caseId: getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${String(index + 1).padStart(3, "0")}`,
-      query: getStringField(item, ["query", "question", "prompt"]) || "-",
-      aScore,
-      bScore,
-      delta,
-      conclusion: getStringField(item, ["conclusion", "judgement", "result"]) || (delta > 0 ? "B 提升" : delta < 0 ? "B 退化" : "持平"),
-      tone: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
-    };
+function getAbCaseSourceRecords(value: unknown): unknown[] {
+  if (isRecord(value)) {
+    const items = getStructuredArrayField(value, ["items"]);
+    if (items?.length) {
+      return items;
+    }
+    return (["cases", "case_list", "rows", "records", "items", "badcases", "case_details", "case_deltas"] as const)
+      .flatMap((key) => Array.isArray(value[key]) ? value[key] : []);
+  }
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeAbCaseRowFromRecord(t: TFunction, item: Record<string, unknown>, index: number): AbCaseRow {
+  const before = getNestedRecordField(item, ["before"]) || getStructuredRecordField(item, ["baseline"]);
+  const after = getNestedRecordField(item, ["after"]) || getStructuredRecordField(item, ["candidate"]);
+  const deltaRecord = getNestedRecordField(item, ["delta"]) || getStructuredRecordField(item, ["delta"]);
+  const aScore =
+    getNumberField(before, ["answer_correctness", "score", "a_score", "baseline_score", "mean_a"]) ??
+    getNumberField(item, ["a_score", "score_a", "baseline_score", "mean_a"]) ??
+    0;
+  const bScore =
+    getNumberField(after, ["answer_correctness", "score", "b_score", "candidate_score", "mean_b"]) ??
+    getNumberField(item, ["b_score", "score_b", "candidate_score", "mean_b"]) ??
+    0;
+  const delta =
+    getNumberField(deltaRecord, ["answer_correctness", "change", "score_delta"]) ??
+    getNumberField(item, ["delta", "change", "score_delta"]) ??
+    bScore - aScore;
+  const outcome = getStringField(item, ["outcome", "Outcome"]);
+  let conclusion = getStringField(item, ["conclusion", "judgement", "result"]);
+  if (!conclusion && outcome) {
+    conclusion =
+      outcome === "improved"
+        ? t("selfEvolutionRun.observation.bImprove")
+        : outcome === "regressed"
+          ? t("selfEvolutionRun.observation.bDegrade")
+          : outcome === "unchanged"
+            ? t("selfEvolutionRun.observation.flat")
+            : outcome;
+  }
+  if (!conclusion) {
+    conclusion =
+      delta > 0
+        ? t("selfEvolutionRun.observation.bImprove")
+        : delta < 0
+          ? t("selfEvolutionRun.observation.bDegrade")
+          : t("selfEvolutionRun.observation.flat");
+  }
+  const tone: AbCaseRow["tone"] =
+    outcome === "improved" || delta > 0
+      ? "up"
+      : outcome === "regressed" || delta < 0
+        ? "down"
+        : "flat";
+
+  return {
+    caseId: getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${String(index + 1).padStart(3, "0")}`,
+    query: getStringField(item, ["query", "question", "prompt"]) || "-",
+    aScore,
+    bScore,
+    delta,
+    conclusion,
+    tone,
+  };
+}
+
+function normalizeAbCaseRows(t: TFunction, value: unknown, options?: { useFallback?: boolean }): AbCaseRow[] {
+  const rows = getAbCaseSourceRecords(value)
+    .filter(isRecord)
+    .map((item, index) => normalizeAbCaseRowFromRecord(t, item, index));
+  if (rows.length) {
+    return rows;
+  }
+  return options?.useFallback ? getFallbackAbCaseRows(t) : [];
+}
+
+function toAbMetricRows(summary: AbSummaryReport | undefined, t: TFunction): AbMetricRow[] {
+  if (summary?.metricRows.length) {
+    return summary.metricRows.map((row) => ({
+      key: row.metric,
+      label: row.metricLabel,
+      meanA: row.meanA,
+      meanB: row.meanB,
+      winRate: row.winRateB ?? 0,
+      signP: formatMaybePValue(row.signP),
+    }));
+  }
+  return getFallbackAbMetricRows(t);
+}
+
+function resolveAbtestIdFromPayload(value: unknown): string | undefined {
+  const summary = buildAbSummaryReports(value)[0];
+  if (!summary?.id || syntheticAbtestIdPattern.test(summary.id)) {
+    return undefined;
+  }
+  return summary.id;
+}
+
+function getAbtestVerdictColor(verdict?: string) {
+  const normalized = (verdict || "").toLowerCase();
+  if (["pass", "accept", "improved"].some((item) => normalized.includes(item))) {
+    return "success";
+  }
+  if (["fail", "reject", "regressed"].some((item) => normalized.includes(item))) {
+    return "error";
+  }
+  return "orange";
+}
+
+function findAbCaseDetailItem(data: unknown, caseId: string): Record<string, unknown> | undefined {
+  if (!isRecord(data)) {
+    return undefined;
+  }
+  const items = getStructuredArrayField(data, ["items"]);
+  return items?.find((item) => isRecord(item) && getStringField(item, ["case_id", "caseId", "case", "id"]) === caseId);
+}
+
+function buildAbCaseTraceIdMap(evalReportsData: unknown): Map<string, { a?: string; b?: string }> {
+  const map = new Map<string, { a?: string; b?: string }>();
+  getAbtestResultRecords(evalReportsData).forEach((record) => {
+    const artifactId =
+      getStringField(record, ["artifact_id", "runtime_artifact_id", "source_artifact_id"]) ||
+      getStringField(getStructuredRecordField(record, ["data"]), ["id"]);
+    const data = getStructuredRecordField(record, ["data"]) || record;
+    const rows = getStructuredArrayField(data, ["rows"]) || getStructuredArrayField(data, ["case_details"]) || [];
+    const isCandidate =
+      artifactId.includes("candidate") ||
+      getStringField(data, ["id"]) === "abtest.candidate_eval_summary";
+    const side: "a" | "b" = isCandidate ? "b" : "a";
+    rows.filter(isRecord).forEach((row) => {
+      const caseId = getStringField(row, ["case_id", "caseId", "case", "id"]);
+      const traceId = getStringField(row, ["trace_id", "traceId"]);
+      if (!caseId || !traceId || traceId === "-") {
+        return;
+      }
+      const entry = map.get(caseId) || {};
+      entry[side] = traceId;
+      map.set(caseId, entry);
+    });
   });
-  return rows.length ? rows : fallbackAbCaseRows;
+  return map;
+}
+
+function resolveCaseTraceIds(
+  caseItem: Record<string, unknown> | undefined,
+  caseId: string,
+  traceMap: Map<string, { a?: string; b?: string }>,
+): { a?: string; b?: string } {
+  const mapped = traceMap.get(caseId) || {};
+  if (!caseItem) {
+    return mapped;
+  }
+  const before = getNestedRecordField(caseItem, ["before"]) || getStructuredRecordField(caseItem, ["baseline"]);
+  const after = getNestedRecordField(caseItem, ["after"]) || getStructuredRecordField(caseItem, ["candidate"]);
+  return {
+    a:
+      getStringField(caseItem, ["baseline_trace_id", "a_trace_id", "trace_id_a"]) ||
+      getStringField(before, ["trace_id", "traceId"]) ||
+      mapped.a,
+    b:
+      getStringField(caseItem, ["candidate_trace_id", "b_trace_id", "trace_id_b"]) ||
+      getStringField(after, ["trace_id", "traceId"]) ||
+      mapped.b,
+  };
 }
 
 function formatPercent(value: number) {
@@ -615,6 +808,7 @@ function EvalReportPanel({
   onSelectCase: (caseId: string) => void;
   onReloadRows: () => void;
 }) {
+  const { t } = useTranslation();
   const selectedRow = rows.find((item) => item.caseId === selectedCaseId) || rows[0];
   const columns: ColumnsType<CsvBadcaseRow> = [
     { title: "Case", dataIndex: "caseId", key: "caseId", width: 104 },
@@ -626,7 +820,7 @@ function EvalReportPanel({
       render: (value: number) => <span className={value < 0.5 ? "is-low-score" : ""}>{value.toFixed(2)}</span>,
     },
     {
-      title: "失败原因",
+      title: t("selfEvolutionRun.observation.failureReason"),
       dataIndex: "failureType",
       key: "failureType",
       width: 110,
@@ -656,49 +850,52 @@ function EvalReportPanel({
   ];
 
   return (
-    <section className="self-evolution-eval-report-card" aria-label="评测报告详情">
+    <section className="self-evolution-eval-report-card" aria-label={t("selfEvolutionRun.observation.evalReportAria")}>
       <div className="self-evolution-eval-report-head">
         <div>
-          <Title level={3}>评测报告详情</Title>
-          <Text>{`报告 ID：${summary.reportId}`}</Text>
-          <Text>{`数据集：${summary.dataset} · 样本数 - · Badcase ${summary.badCaseCount ?? "-"}`}</Text>
+          <Title level={3}>{t("selfEvolutionRun.observation.evalReportTitle")}</Title>
+          <Text>{t("selfEvolutionRun.observation.reportIdLabel", { id: summary.reportId })}</Text>
+          <Text>{t("selfEvolutionRun.observation.datasetInfo", { dataset: summary.dataset, badcaseCount: summary.badCaseCount ?? "-" })}</Text>
         </div>
       </div>
       <div className="self-evolution-eval-metric-grid">
-        <MetricCard icon={<AimOutlined />} label="准确率" value={formatOptionalPercent(summary.correctRate)} tone="blue" />
+        <MetricCard icon={<AimOutlined />} label={t("selfEvolutionRun.observation.accuracy")} value={formatOptionalPercent(summary.correctRate)} tone="blue" />
         <MetricCard icon={<WarningOutlined />} label="Badcase" value={String(summary.badCaseCount ?? "-")} tone="red" />
-        <MetricCard icon={<ThunderboltOutlined />} label="Trace 覆盖率" value={formatOptionalPercent(summary.traceCoverageRate)} tone="purple" />
+        <MetricCard icon={<ThunderboltOutlined />} label={t("selfEvolutionRun.observation.traceCoverage")} value={formatOptionalPercent(summary.traceCoverageRate)} tone="purple" />
       </div>
       <div className="self-evolution-eval-badcase-panel">
         <div className="self-evolution-eval-section-title">
-          <Text strong>Badcase 列表</Text>
-          <span>来自 eval-reports/{summary.reportId}/bad-cases</span>
+          <Text strong>{t("selfEvolutionRun.observation.badcaseList")}</Text>
+          <span>{t("selfEvolutionRun.observation.badcaseSource", { reportId: summary.reportId })}</span>
         </div>
         <div className="self-evolution-eval-filter-row">
           <label>
-            状态：
-            <select aria-label="Badcase 状态筛选">
-              <option>全部</option>
+            {t("selfEvolutionRun.observation.statusLabel")}
+            <select aria-label={t("selfEvolutionRun.observation.badcaseStatusFilterAria")}>
+              <option>{t("selfEvolutionRun.observation.all")}</option>
             </select>
           </label>
           <label>
-            失败类型：
-            <select aria-label="Badcase 失败类型筛选">
-              <option>全部</option>
+            {t("selfEvolutionRun.observation.failureTypeLabel")}
+            <select aria-label={t("selfEvolutionRun.observation.badcaseFailureTypeFilterAria")}>
+              <option>{t("selfEvolutionRun.observation.all")}</option>
             </select>
           </label>
           <label className="self-evolution-eval-search">
             <SearchOutlined />
-            <input aria-label="搜索 case 或 query" placeholder="搜索 case_id / query" />
+            <input
+              aria-label={t("selfEvolutionRun.observation.searchCaseAria")}
+              placeholder={t("selfEvolutionRun.observation.searchCasePlaceholder")}
+            />
           </label>
-          <Button size="small">重置</Button>
+          <Button size="small">{t("selfEvolutionRun.observation.reset")}</Button>
         </div>
         {rowsError ? (
           <Alert
             type="error"
             showIcon
             message={rowsError}
-            action={<Button size="small" onClick={onReloadRows}>重试</Button>}
+            action={<Button size="small" onClick={onReloadRows}>{t("selfEvolutionRun.observation.retry")}</Button>}
           />
         ) : (
           <Table<CsvBadcaseRow>
@@ -720,7 +917,7 @@ function EvalReportPanel({
       {selectedRow && (
         <div className="self-evolution-eval-case-result">
           <div className="self-evolution-eval-section-title">
-            <Text strong>{`${selectedRow.caseId} 执行结果`}</Text>
+            <Text strong>{t("selfEvolutionRun.observation.caseResult", { caseId: selectedRow.caseId })}</Text>
           </div>
           <dl>
             <dt>Score</dt>
@@ -728,7 +925,7 @@ function EvalReportPanel({
               <span className="is-low-score">{selectedRow.score.toFixed(2)}</span>
               <Tag className={`self-evolution-eval-reason is-${selectedRow.failureTone}`}>{selectedRow.failureType}</Tag>
             </dd>
-            <dt>失败原因</dt>
+            <dt>{t("selfEvolutionRun.observation.failureReason")}</dt>
             <dd>{selectedRow.failureReason}</dd>
             <dt>Defect</dt>
             <dd>{selectedRow.defect}</dd>
@@ -736,8 +933,8 @@ function EvalReportPanel({
             <dd>{selectedRow.reason}</dd>
           </dl>
           <div className="self-evolution-eval-case-actions">
-            <Button type="primary">查看智能链路</Button>
-            <Button icon={<FileSearchOutlined />}>查看原始 trace</Button>
+            <Button type="primary">{t("selfEvolutionRun.observation.viewAgenticTrace")}</Button>
+            <Button icon={<FileSearchOutlined />}>{t("selfEvolutionRun.observation.viewRawTrace")}</Button>
           </div>
         </div>
       )}
@@ -763,7 +960,8 @@ function TraceFlowPanel({
   selectedNodeId?: string;
   onSelectNode: (node: TraceNode) => void;
 }) {
-  const flowRows = useMemo(() => buildFlowRows(detail), [detail]);
+  const { t } = useTranslation();
+  const flowRows = useMemo(() => buildFlowRows(t, detail), [detail, t]);
   const rowsByRound = useMemo(() => {
     const grouped = new Map<number, FlowRow[]>();
     flowRows.forEach((row) => {
@@ -773,9 +971,9 @@ function TraceFlowPanel({
   }, [flowRows]);
 
   return (
-    <section className="self-evolution-eval-flow-panel" aria-label="智能执行流程">
+    <section className="self-evolution-eval-flow-panel" aria-label={t("selfEvolutionRun.observation.flowPanelAria")}>
       <div className="self-evolution-eval-panel-title">
-        <Text strong>智能执行流程</Text>
+        <Text strong>{t("selfEvolutionRun.observation.flowPanelTitle")}</Text>
       </div>
       <div className="self-evolution-eval-flow-list">
         {rowsByRound.map(([round, rows]) => (
@@ -814,34 +1012,35 @@ function TraceInspectorPanel({
   selectedRow: CsvBadcaseRow;
   node?: TraceNode;
 }) {
+  const { t } = useTranslation();
   const docs = getTraceDocs(node);
   const metadata = node?.metadata || {};
   const inputData = getNodeDataRecord(node?.input);
 
   if (!node) {
     return (
-      <section className="self-evolution-eval-inspector-panel is-empty" aria-label="节点详情">
+      <section className="self-evolution-eval-inspector-panel is-empty" aria-label={t("selfEvolutionRun.observation.inspectorPanelAria")}>
         <div className="self-evolution-eval-panel-title">
-          <Text strong>节点详情</Text>
+          <Text strong>{t("selfEvolutionRun.observation.inspectorPanelTitle")}</Text>
         </div>
         <div className="self-evolution-eval-inspector-empty">
           <FileSearchOutlined />
-          <Text strong>点击左侧流程节点查看详情</Text>
-          <Paragraph>详情会根据当前 Badcase 关联的 trace JSON 展示节点输入、输出、召回文档和 metadata。</Paragraph>
+          <Text strong>{t("selfEvolutionRun.observation.inspectorEmptyHint")}</Text>
+          <Paragraph>{t("selfEvolutionRun.observation.inspectorEmptyDesc")}</Paragraph>
         </div>
       </section>
     );
   }
 
   return (
-    <section className="self-evolution-eval-inspector-panel" aria-label="节点详情">
+    <section className="self-evolution-eval-inspector-panel" aria-label={t("selfEvolutionRun.observation.inspectorPanelAria")}>
       <div className="self-evolution-eval-panel-title">
-        <Text strong>{`节点详情：${getNodeTitle(node)}`}</Text>
+        <Text strong>{t("selfEvolutionRun.observation.inspectorNodeTitle", { title: getNodeTitle(node) })}</Text>
         <Tag color={getStatusColor(node.status)}>{node.status}</Tag>
       </div>
       <div className="self-evolution-eval-inspector-body">
         <div className="self-evolution-eval-inspector-section">
-          <h4>1. 节点信息</h4>
+          <h4>{t("selfEvolutionRun.observation.nodeInfoSection")}</h4>
           <div className="self-evolution-eval-kv-grid">
             <span><em>node_id</em><strong>{getShortTraceId(node.id)}</strong></span>
             <span><em>node_type</em><strong>{node.type}</strong></span>
@@ -852,15 +1051,15 @@ function TraceInspectorPanel({
           </div>
         </div>
         <div className="self-evolution-eval-inspector-section">
-          <h4>2. 输入</h4>
-          {renderPayloadBlock("输入", node.input?.summary || inputData !== undefined ? { summary: node.input?.summary, data: inputData } : undefined)}
+          <h4>{t("selfEvolutionRun.observation.inputSection")}</h4>
+          {renderPayloadBlock(t, t("selfEvolutionRun.observation.inputLabel"), node.input?.summary || inputData !== undefined ? { summary: node.input?.summary, data: inputData } : undefined)}
         </div>
         <div className="self-evolution-eval-inspector-section">
-          <h4>3. 输出</h4>
-          {renderPayloadBlock("输出", node.output)}
+          <h4>{t("selfEvolutionRun.observation.outputSection")}</h4>
+          {renderPayloadBlock(t, t("selfEvolutionRun.observation.outputLabel"), node.output)}
         </div>
         <div className="self-evolution-eval-inspector-section">
-          <h4>4. 召回文档</h4>
+          <h4>{t("selfEvolutionRun.observation.retrievedDocsSection")}</h4>
           {docs.length ? (
             docs.map((doc, index) => (
               <article key={doc.key} className="self-evolution-eval-doc-card">
@@ -870,19 +1069,19 @@ function TraceInspectorPanel({
                   <span>{`score: ${doc.score?.toFixed(2) || "-"} · ${doc.ref}`}</span>
                   <p>{doc.text}</p>
                 </div>
-                {doc.score !== undefined && <Tag color="blue">{`相关度: ${doc.score.toFixed(2)}`}</Tag>}
+                {doc.score !== undefined && <Tag color="blue">{t("selfEvolutionRun.observation.relevanceScore", { score: doc.score.toFixed(2) })}</Tag>}
               </article>
             ))
           ) : (
-            <Paragraph className="self-evolution-eval-empty">该节点暂无可展示召回文档。</Paragraph>
+            <Paragraph className="self-evolution-eval-empty">{t("selfEvolutionRun.observation.noRetrievedDocs")}</Paragraph>
           )}
         </div>
         <div className="self-evolution-eval-inspector-section">
-          <h4>5. Metadata</h4>
-          {renderMetadataTiles(metadata)}
+          <h4>{t("selfEvolutionRun.observation.metadataSection")}</h4>
+          {renderMetadataTiles(t, metadata)}
         </div>
         <div className="self-evolution-eval-inspector-section is-warning">
-          <h4>6. 观测判断</h4>
+          <h4>{t("selfEvolutionRun.observation.observationSection")}</h4>
           <p>{selectedRow.failureReason}</p>
         </div>
       </div>
@@ -891,29 +1090,30 @@ function TraceInspectorPanel({
 }
 
 function EvalTracePanel({ detail, selectedRow }: { detail: TraceDetailObservation; selectedRow: CsvBadcaseRow }) {
+  const { t } = useTranslation();
   const [selectedNode, setSelectedNode] = useState<TraceNode | undefined>();
   useEffect(() => {
     setSelectedNode(undefined);
   }, [detail, selectedRow.caseId]);
   const roundCount = Math.max(detail.root.children.length, detail.summary.roundCount || 0);
   return (
-    <section className="self-evolution-eval-trace-card" aria-label="Agentic RAG 观测详情">
+    <section className="self-evolution-eval-trace-card" aria-label={t("selfEvolutionRun.observation.agenticTraceCardAria")}>
       <div className="self-evolution-eval-trace-title">
-        <Title level={3}>{`Agentic RAG 观测详情 · ${selectedRow.caseId}`}</Title>
+        <Title level={3}>{t("selfEvolutionRun.observation.agenticTraceCardTitle", { caseId: selectedRow.caseId })}</Title>
       </div>
       <div className="self-evolution-eval-trace-meta-grid">
         <TraceMetaCard label="trace_id" value={getShortTraceId(detail.traceId)} />
         <TraceMetaCard label="scene" value="eval" />
         <TraceMetaCard label="execution_mode" value="agentic_rag" />
-        <TraceMetaCard label="status" value={selectedRow.score < 0.5 ? "低分" : detail.status} status />
+        <TraceMetaCard label="status" value={selectedRow.score < 0.5 ? t("selfEvolutionRun.observation.lowScore") : detail.status} status />
         <TraceMetaCard label="latency" value={formatDuration(detail.summary.latencyMs)} />
       </div>
       <div className="self-evolution-eval-trace-summary">
-        <span><strong>{roundCount || "-"}</strong><em>决策轮次</em></span>
-        <span><strong>{detail.summary.toolCallCount ?? "-"}</strong><em>工具调用</em></span>
-        <span><strong>{detail.summary.retrievalCount ?? "-"}</strong><em>知识库检索</em></span>
-        <span><strong>{detail.summary.rerankCount ?? "-"}</strong><em>重排次数</em></span>
-        <span className="is-status"><strong>{detail.status}</strong><em>完成状态</em></span>
+        <span><strong>{roundCount || "-"}</strong><em>{t("selfEvolutionRun.observation.decisionRounds")}</em></span>
+        <span><strong>{detail.summary.toolCallCount ?? "-"}</strong><em>{t("selfEvolutionRun.observation.toolCalls")}</em></span>
+        <span><strong>{detail.summary.retrievalCount ?? "-"}</strong><em>{t("selfEvolutionRun.observation.kbRetrievals")}</em></span>
+        <span><strong>{detail.summary.rerankCount ?? "-"}</strong><em>{t("selfEvolutionRun.observation.rerankCount")}</em></span>
+        <span className="is-status"><strong>{detail.status}</strong><em>{t("selfEvolutionRun.observation.completionStatus")}</em></span>
       </div>
       <div className="self-evolution-eval-trace-grid">
         <TraceFlowPanel detail={detail} selectedNodeId={selectedNode?.id} onSelectNode={setSelectedNode} />
@@ -940,13 +1140,14 @@ function EvalObservationDashboard({
   isMenuCollapsed?: boolean;
   toggleMenu?: () => void;
 }) {
+  const { t } = useTranslation();
   const summary = useMemo(() => normalizeEvalReportSummary(data), [data]);
   const [badcaseReloadToken, setBadcaseReloadToken] = useState(0);
   const [badcaseState, setBadcaseState] = useState<EvalBadcaseListState>({
     loading: false,
     loaded: false,
   });
-  const rows = useMemo(() => normalizeBadcaseRows(badcaseState.data), [badcaseState.data]);
+  const rows = useMemo(() => normalizeBadcaseRows(t, badcaseState.data), [badcaseState.data, t]);
   const [selectedCaseId, setSelectedCaseId] = useState(rows[0]?.caseId || "");
   const [traceState, setTraceState] = useState<{
     loading: boolean;
@@ -1004,7 +1205,7 @@ function EvalObservationDashboard({
           reportId: summary.reportId,
           loading: false,
           loaded: true,
-          error: getLocalizedErrorMessage(error, "Badcase 列表加载失败，请稍后重试。"),
+          error: getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.badcaseLoadFailed")),
         }));
       });
 
@@ -1022,7 +1223,7 @@ function EvalObservationDashboard({
   useEffect(() => {
     const traceId = selectedRow?.traceId;
     if (!threadId || !traceId || traceId === "-") {
-      setTraceState({ loading: false, data: undefined, error: traceId ? undefined : "当前 Badcase 未提供 trace_id。" });
+      setTraceState({ loading: false, data: undefined, error: traceId ? undefined : t("selfEvolutionRun.observation.noTraceId") });
       return;
     }
 
@@ -1041,7 +1242,7 @@ function EvalObservationDashboard({
           setTraceState({
             loading: false,
             data: undefined,
-            error: "当前 trace 接口暂无数据。",
+            error: t("selfEvolutionRun.observation.traceNoData"),
             traceId,
           });
           return;
@@ -1055,7 +1256,7 @@ function EvalObservationDashboard({
         setTraceState({
           loading: false,
           data: undefined,
-          error: getLocalizedErrorMessage(error, "观测详情加载失败，请稍后重试。"),
+          error: getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.observationDetailLoadFailed")),
           traceId,
         });
       });
@@ -1071,7 +1272,7 @@ function EvalObservationDashboard({
         <ObservationHeaderControls isMenuCollapsed={isMenuCollapsed} toggleMenu={toggleMenu} onBack={onBack} />
         <div className="self-evolution-eval-dashboard-head-right">
           {threadId && <Tag>{`thread ${threadId}`}</Tag>}
-          {isFallback && <Tag color="gold">暂无数据</Tag>}
+          {isFallback && <Tag color="gold">{t("selfEvolutionRun.observation.noData")}</Tag>}
         </div>
       </header>
       {notice && <Alert type="warning" showIcon message={notice} />}
@@ -1087,19 +1288,19 @@ function EvalObservationDashboard({
         />
         {selectedRow ? (
           traceState.loading ? (
-            <section className="self-evolution-eval-trace-card" aria-label="Agentic RAG 观测详情">
+            <section className="self-evolution-eval-trace-card" aria-label={t("selfEvolutionRun.observation.agenticTraceCardAria")}>
               <Spin />
             </section>
           ) : detail ? (
             <EvalTracePanel detail={detail} selectedRow={selectedRow} />
           ) : (
             <section className="self-evolution-eval-trace-card">
-              <Empty description={traceState.error || "当前 Badcase 暂无观测详情"} />
+              <Empty description={traceState.error || t("selfEvolutionRun.observation.emptyObservation")} />
             </section>
           )
         ) : (
           <section className="self-evolution-eval-trace-card">
-            <Empty description="当前 Badcase 暂无观测详情" />
+            <Empty description={t("selfEvolutionRun.observation.emptyObservation")} />
           </section>
         )}
       </div>
@@ -1108,8 +1309,9 @@ function EvalObservationDashboard({
 }
 
 function AbMetricChart({ metrics }: { metrics: AbMetricRow[] }) {
+  const { t } = useTranslation();
   return (
-    <div className="self-evolution-abtest-chart" aria-label="A/B 指标柱状图">
+    <div className="self-evolution-abtest-chart" aria-label={t("selfEvolutionRun.observation.abChartAria")}>
       <div className="self-evolution-abtest-chart-axis">
         <span>1.00</span>
         <span>0.75</span>
@@ -1133,22 +1335,38 @@ function AbMetricChart({ metrics }: { metrics: AbMetricRow[] }) {
         })}
       </div>
       <div className="self-evolution-abtest-chart-legend">
-        <span><i className="is-a" />A 评测（基线）</span>
-        <span><i className="is-b" />B 评测（优化后）</span>
+        <span><i className="is-a" />{t("selfEvolutionRun.observation.legendA")}</span>
+        <span><i className="is-b" />{t("selfEvolutionRun.observation.legendB")}</span>
       </div>
     </div>
   );
 }
 
 function AbReportPanel({
+  summary,
   rows,
+  rowsError,
+  rowsLoading,
+  totalSize,
+  isFallback,
   selectedCaseId,
   onSelectCase,
+  onReloadRows,
 }: {
+  summary?: AbSummaryReport;
   rows: AbCaseRow[];
+  rowsError?: string;
+  rowsLoading?: boolean;
+  totalSize?: number;
+  isFallback?: boolean;
   selectedCaseId: string;
   onSelectCase: (caseId: string) => void;
+  onReloadRows: () => void;
 }) {
+  const { t } = useTranslation();
+  const metrics = useMemo(() => toAbMetricRows(summary, t), [summary, t]);
+  const abtestId = summary?.id || "abtest_20260507_112323_3dec8237";
+  const verdict = summary?.verdict || "inconclusive";
   const columns: ColumnsType<AbCaseRow> = [
     {
       title: "Case",
@@ -1179,49 +1397,49 @@ function AbReportPanel({
       render: (value: number) => value.toFixed(2),
     },
     {
-      title: "变化",
+      title: t("selfEvolutionRun.observation.abChange"),
       dataIndex: "delta",
       key: "delta",
       width: 76,
       render: (value: number, row) => <span className={`self-evolution-abtest-delta is-${row.tone}`}>{formatDeltaScore(value)}</span>,
     },
-    { title: "结论", dataIndex: "conclusion", key: "conclusion", width: 140 },
+    { title: t("selfEvolutionRun.observation.abConclusion"), dataIndex: "conclusion", key: "conclusion", width: 140 },
     {
-      title: "操作",
+      title: t("selfEvolutionRun.observation.abAction"),
       key: "action",
       width: 112,
       render: (_, row) => (
         <Button size="small" type={row.caseId === selectedCaseId ? "primary" : "default"} onClick={() => onSelectCase(row.caseId)}>
-          查看 A/B Trace
+          {t("selfEvolutionRun.observation.viewAbTrace")}
         </Button>
       ),
     },
   ];
 
   return (
-    <section className="self-evolution-abtest-report-card" aria-label="自进化执行编排">
+    <section className="self-evolution-abtest-report-card" aria-label={t("selfEvolutionRun.observation.selfEvolutionOrchestrationAria")}>
       <div className="self-evolution-abtest-report-head">
         <div>
-          <Title level={3}>自进化执行编排</Title>
-          <Text>当前阶段：A/B 测试报告</Text>
-          <Text>对齐样本 100 · 主指标 答案正确性 · 保护指标 文档召回 / 上下文召回</Text>
+          <Title level={3}>{t("selfEvolutionRun.observation.selfEvolutionOrchestrationTitle")}</Title>
+          <Text>{t("selfEvolutionRun.observation.abStageTitle")}</Text>
+          <Text>{t("selfEvolutionRun.observation.abMetricDesc")}</Text>
         </div>
-        <Tag color="orange">inconclusive</Tag>
+        <Tag color={getAbtestVerdictColor(verdict)}>{verdict}</Tag>
       </div>
       <div className="self-evolution-abtest-report-id">
-        <strong>abtest_20260507_112323_3dec8237</strong>
+        <strong>{abtestId}</strong>
       </div>
-      <AbMetricChart metrics={fallbackAbMetricRows} />
-      <div className="self-evolution-abtest-metric-table" aria-label="A/B 指标表">
+      <AbMetricChart metrics={metrics} />
+      <div className="self-evolution-abtest-metric-table" aria-label={t("selfEvolutionRun.observation.abMetricTableAria")}>
         <div className="self-evolution-abtest-table-row is-head">
-          <span>指标</span>
+          <span>{t("selfEvolutionRun.observation.abMetricColMetric")}</span>
           <span>mean A</span>
           <span>mean B</span>
           <span>Δmean</span>
-          <span>B 胜率</span>
+          <span>{t("selfEvolutionRun.observation.abMetricColWinRate")}</span>
           <span>sign p</span>
         </div>
-        {fallbackAbMetricRows.map((metric) => (
+        {metrics.map((metric) => (
           <div key={metric.key} className="self-evolution-abtest-table-row">
             <span>{metric.label}</span>
             <span>{formatPercent(metric.meanA)}</span>
@@ -1234,45 +1452,60 @@ function AbReportPanel({
       </div>
       <div className="self-evolution-abtest-case-panel">
         <div className="self-evolution-eval-section-title">
-          <Text strong>变化 case 列表</Text>
-          <span>前端样例，等待第五步报告接口替换</span>
+          <Text strong>{t("selfEvolutionRun.observation.changedCaseList")}</Text>
+          <span>
+            {isFallback
+              ? t("selfEvolutionRun.observation.sampleDataNote")
+              : t("selfEvolutionRun.observation.abCaseDetailSource", { abtestId, total: totalSize ?? rows.length })}
+          </span>
         </div>
-        <Table<AbCaseRow>
-          className="self-evolution-abtest-case-table"
-          size="small"
-          rowKey="caseId"
-          columns={columns}
-          dataSource={rows}
-          pagination={{ pageSize: 3, size: "small", showSizeChanger: false }}
-          rowClassName={(row) => row.caseId === selectedCaseId ? "is-selected" : ""}
-          scroll={{ x: 820 }}
-          onRow={(row) => ({
-            onClick: () => onSelectCase(row.caseId),
-          })}
-        />
+        {rowsError ? (
+          <Alert
+            type="error"
+            showIcon
+            message={rowsError}
+            action={<Button size="small" onClick={onReloadRows}>{t("selfEvolutionRun.observation.retry")}</Button>}
+          />
+        ) : (
+          <Table<AbCaseRow>
+            className="self-evolution-abtest-case-table"
+            size="small"
+            rowKey="caseId"
+            columns={columns}
+            dataSource={rows}
+            loading={rowsLoading}
+            pagination={{ pageSize: 10, size: "small", showSizeChanger: false, total: totalSize ?? rows.length }}
+            rowClassName={(row) => row.caseId === selectedCaseId ? "is-selected" : ""}
+            scroll={{ x: 820 }}
+            onRow={(row) => ({
+              onClick: () => onSelectCase(row.caseId),
+            })}
+          />
+        )}
       </div>
     </section>
   );
 }
 
 function AbSummaryStrip({ observation }: { observation: AbCompareObservation }) {
+  const { t } = useTranslation();
   const a = observation.a;
   const b = observation.b;
   return (
-    <div className="self-evolution-abtest-summary-strip" aria-label="A/B Trace 汇总">
+    <div className="self-evolution-abtest-summary-strip" aria-label={t("selfEvolutionRun.observation.abTraceSummaryAria")}>
       <span className="self-evolution-abtest-summary-group">
         <span className="is-side">A</span>
-        <span><strong>{getDetailRoundCount(a)}</strong><em>轮决策</em></span>
-        <span><strong>{a.summary.toolCallCount ?? "-"}</strong><em>工具调用</em></span>
-        <span><strong>{a.summary.retrievalCount ?? "-"}</strong><em>次检索</em></span>
+        <span><strong>{getDetailRoundCount(a)}</strong><em>{t("selfEvolutionRun.observation.decisionRounds")}</em></span>
+        <span><strong>{a.summary.toolCallCount ?? "-"}</strong><em>{t("selfEvolutionRun.observation.toolCalls")}</em></span>
+        <span><strong>{a.summary.retrievalCount ?? "-"}</strong><em>{t("selfEvolutionRun.observation.kbRetrievals")}</em></span>
         <strong>{formatDuration(a.summary.latencyMs)}</strong>
       </span>
       <i>→</i>
       <span className="self-evolution-abtest-summary-group">
         <span className="is-side is-b">B</span>
-        <span><strong>{getDetailRoundCount(b)}</strong><em>轮决策</em></span>
-        <span><strong>{b.summary.toolCallCount ?? "-"}</strong><em>工具调用</em></span>
-        <span><strong>{b.summary.retrievalCount ?? "-"}</strong><em>次检索</em></span>
+        <span><strong>{getDetailRoundCount(b)}</strong><em>{t("selfEvolutionRun.observation.decisionRounds")}</em></span>
+        <span><strong>{b.summary.toolCallCount ?? "-"}</strong><em>{t("selfEvolutionRun.observation.toolCalls")}</em></span>
+        <span><strong>{b.summary.retrievalCount ?? "-"}</strong><em>{t("selfEvolutionRun.observation.kbRetrievals")}</em></span>
         <strong>{formatDuration(b.summary.latencyMs)}</strong>
       </span>
     </div>
@@ -1317,13 +1550,14 @@ function AbTraceColumn({
   detail: TraceDetailObservation;
   selectedCase: AbCaseRow;
 }) {
+  const { t } = useTranslation();
   const rowsByRound = useMemo(() => {
     const grouped = new Map<number, FlowRow[]>();
-    buildFlowRows(detail).forEach((row) => {
+    buildFlowRows(t, detail).forEach((row) => {
       grouped.set(row.round, [...(grouped.get(row.round) || []), row]);
     });
     return Array.from(grouped.entries()).slice(0, 4);
-  }, [detail]);
+  }, [detail, t]);
   const score = variant === "a" ? selectedCase.aScore : selectedCase.bScore;
 
   return (
@@ -1333,7 +1567,7 @@ function AbTraceColumn({
         <span>{getTraceMode(detail)}</span>
       </div>
       <div className="self-evolution-abtest-algo-grid">
-        <span><em>算法版本</em><strong>{variant === "a" ? "baseline-v1" : "candidate-v2"}</strong></span>
+        <span><em>{t("selfEvolutionRun.observation.algoVersion")}</em><strong>{variant === "a" ? "baseline-v1" : "candidate-v2"}</strong></span>
         <span><em>Trace ID</em><strong>{getShortTraceId(detail.traceId)}</strong></span>
         <span><em>Score</em><strong>{score.toFixed(2)}</strong></span>
         <span><em>Latency</em><strong>{formatDuration(detail.summary.latencyMs)}</strong></span>
@@ -1353,8 +1587,8 @@ function AbTraceColumn({
       </div>
       <div className={`self-evolution-abtest-column-note is-${variant === "a" ? "danger" : "warning"}`}>
         {variant === "a"
-          ? "未召回关键文档，答案缺少申请材料和时效依据。"
-          : "召回到相关文档，但证据片段仍不完整，需要继续优化检索策略。"}
+          ? t("selfEvolutionRun.observation.abColumnNoteA")
+          : t("selfEvolutionRun.observation.abColumnNoteB")}
       </div>
     </section>
   );
@@ -1365,28 +1599,29 @@ function AbDiffPanel({
 }: {
   observation: AbCompareObservation;
 }) {
+  const { t } = useTranslation();
   const aNode = getSearchNode(observation.a);
   const bNode = getSearchNode(observation.b);
   const aScore = getAbMaxScore(aNode) ?? 0.18;
   const bScore = getAbMaxScore(bNode) ?? 0.31;
   return (
-    <section className="self-evolution-abtest-diff-panel" aria-label="选中差异节点">
-      <Text strong>选中差异节点：Round 2 · kb_search</Text>
+    <section className="self-evolution-abtest-diff-panel" aria-label={t("selfEvolutionRun.observation.abDiffPanelAria")}>
+      <Text strong>{t("selfEvolutionRun.observation.abDiffPanelTitle")}</Text>
       <div className="self-evolution-abtest-diff-grid">
         <article>
-          <Text strong>A 输出（baseline-v1）</Text>
+          <Text strong>{t("selfEvolutionRun.observation.abDiffOutputA")}</Text>
           <dl>
             <dt>returned_docs</dt><dd>{getAbReturnedDocs(aNode)}</dd>
             <dt>max_score</dt><dd>{aScore.toFixed(2)}</dd>
-            <dt>判断</dt><dd className="is-bad">未命中相关流程</dd>
+            <dt>{t("selfEvolutionRun.observation.abDiffJudge")}</dt><dd className="is-bad">{t("selfEvolutionRun.observation.abDiffJudgeABad")}</dd>
           </dl>
         </article>
         <article>
-          <Text strong>B 输出（candidate-v2）</Text>
+          <Text strong>{t("selfEvolutionRun.observation.abDiffOutputB")}</Text>
           <dl>
             <dt>returned_docs</dt><dd>{Math.max(1, getAbReturnedDocs(bNode))}</dd>
             <dt>max_score</dt><dd>{bScore.toFixed(2)}</dd>
-            <dt>判断</dt><dd className="is-warn">命中相关文档但覆盖不完整</dd>
+            <dt>{t("selfEvolutionRun.observation.abDiffJudge")}</dt><dd className="is-warn">{t("selfEvolutionRun.observation.abDiffJudgeBWarn")}</dd>
           </dl>
         </article>
       </div>
@@ -1397,29 +1632,63 @@ function AbDiffPanel({
 function AbTraceComparePanel({
   observation,
   selectedCase,
+  abtestId,
+  loading,
+  error,
+  onRetry,
 }: {
-  observation: AbCompareObservation;
+  observation?: AbCompareObservation;
   selectedCase: AbCaseRow;
+  abtestId?: string;
+  loading?: boolean;
+  error?: string;
+  onRetry?: () => void;
 }) {
+  const { t } = useTranslation();
+  const reportIdLabel = abtestId && abtestId.length > 16 ? `${abtestId.slice(0, 8)}...${abtestId.slice(-4)}` : abtestId || "abtest";
+
+  if (loading) {
+    return (
+      <section className="self-evolution-abtest-compare-card" aria-label={t("selfEvolutionRun.observation.abComparePanelAria")}>
+        <div className="self-evolution-observation-page-loading">
+          <Spin />
+          <Text>{t("selfEvolutionRun.observation.loadingAbTrace")}</Text>
+        </div>
+      </section>
+    );
+  }
+
+  if (error || !observation) {
+    return (
+      <section className="self-evolution-abtest-compare-card" aria-label={t("selfEvolutionRun.observation.abComparePanelAria")}>
+        <Empty
+          description={error || t("selfEvolutionRun.observation.emptyObservation")}
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
+        {onRetry ? <Button onClick={onRetry}>{t("selfEvolutionRun.observation.retry")}</Button> : null}
+      </section>
+    );
+  }
+
   return (
-    <section className="self-evolution-abtest-compare-card" aria-label="Agentic A/B Trace 对比">
+    <section className="self-evolution-abtest-compare-card" aria-label={t("selfEvolutionRun.observation.abComparePanelAria")}>
       <div className="self-evolution-abtest-compare-head">
-        <Title level={3}>{`Agentic A/B Trace 对比 · ${selectedCase.caseId}`}</Title>
+        <Title level={3}>{t("selfEvolutionRun.observation.abComparePanelTitle", { caseId: selectedCase.caseId })}</Title>
         <div>
           <Tag>{`Query: ${selectedCase.query}`}</Tag>
-          <Tag>{`Report ID: abtest_...8237`}</Tag>
-          <Tag color="orange">状态：需继续分析</Tag>
+          <Tag>{`Report ID: ${reportIdLabel}`}</Tag>
+          <Tag color="orange">{t("selfEvolutionRun.observation.abStatusNeedsAnalysis")}</Tag>
         </div>
       </div>
       <AbSummaryStrip observation={observation} />
       <div className="self-evolution-abtest-trace-columns">
-        <AbTraceColumn title="A 基线算法" variant="a" detail={observation.a} selectedCase={selectedCase} />
-        <AbTraceColumn title="B 优化后算法" variant="b" detail={observation.b} selectedCase={selectedCase} />
+        <AbTraceColumn title={t("selfEvolutionRun.observation.abBaselineTitle")} variant="a" detail={observation.a} selectedCase={selectedCase} />
+        <AbTraceColumn title={t("selfEvolutionRun.observation.abOptimizedTitle")} variant="b" detail={observation.b} selectedCase={selectedCase} />
       </div>
       <AbDiffPanel observation={observation} />
       <div className="self-evolution-abtest-conclusion">
-        <Text strong>观测结论：</Text>
-        <span>B 版本通过补充检索 query 召回到相关文档，使答案正确性小幅提升；但上下文证据仍不足，当前 case 仍需继续分析。</span>
+        <Text strong>{t("selfEvolutionRun.observation.abConclusionLabel")}</Text>
+        <span>{t("selfEvolutionRun.observation.abConclusionText")}</span>
       </div>
     </section>
   );
@@ -1446,11 +1715,228 @@ function AbtestObservationDashboard({
   isMenuCollapsed?: boolean;
   toggleMenu?: () => void;
 }) {
-  const rows = useMemo(() => normalizeAbCaseRows(data), [data]);
-  const observation = useMemo(() => normalizeTraceObservation(data) || normalizeTraceObservation(traceCompareFixture), [data]);
-  const compareObservation = observation?.kind === "compare" ? observation : undefined;
+  const { t } = useTranslation();
+  const abSummary = useMemo(() => buildAbSummaryReports(data)[0], [data]);
+  const abtestId = useMemo(() => resolveAbtestIdFromPayload(data), [data]);
+  const [caseReloadToken, setCaseReloadToken] = useState(0);
+  const [traceReloadToken, setTraceReloadToken] = useState(0);
+  const [caseState, setCaseState] = useState<AbCaseListState>({
+    loading: false,
+    loaded: false,
+  });
+  const [traceCompareState, setTraceCompareState] = useState<AbTraceCompareState>({
+    loading: false,
+    loaded: false,
+  });
+  const [evalReportsState, setEvalReportsState] = useState<EvalReportsTraceState>({
+    loading: false,
+    loaded: false,
+  });
+  const traceIdMap = useMemo(() => buildAbCaseTraceIdMap(evalReportsState.data), [evalReportsState.data]);
+  const rows = useMemo(() => {
+    if (isFallback) {
+      return normalizeAbCaseRows(t, data, { useFallback: true });
+    }
+    if (caseState.loaded && caseState.data) {
+      return normalizeAbCaseRows(t, caseState.data);
+    }
+    const inlineRows = normalizeAbCaseRows(t, data);
+    return inlineRows.length ? inlineRows : [];
+  }, [caseState.data, caseState.loaded, data, isFallback, t]);
+  const fallbackObservation = useMemo(
+    () => normalizeTraceObservation(traceCompareFixture),
+    [],
+  );
+  const selectedCaseObservation = useMemo(() => {
+    if (isFallback) {
+      return fallbackObservation?.kind === "compare" ? fallbackObservation : undefined;
+    }
+    return normalizeTraceObservation(traceCompareState.data);
+  }, [fallbackObservation, isFallback, traceCompareState.data]);
   const [selectedCaseId, setSelectedCaseId] = useState(rows[0]?.caseId || "");
   const selectedCase = rows.find((row) => row.caseId === selectedCaseId) || rows[0];
+  const selectedCaseItem = useMemo(
+    () => (selectedCase ? findAbCaseDetailItem(caseState.data, selectedCase.caseId) : undefined),
+    [caseState.data, selectedCase],
+  );
+
+  useEffect(() => {
+    if (isFallback || !threadId) {
+      setEvalReportsState({ loading: false, loaded: false });
+      return;
+    }
+
+    const controller = new AbortController();
+    setEvalReportsState((prev) => ({ ...prev, loading: true }));
+
+    axiosInstance
+      .get(`${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/eval-reports`, {
+        signal: controller.signal,
+      })
+      .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setEvalReportsState({ loading: false, loaded: true, data: response.data });
+      })
+      .catch((error) => {
+        if (isCanceledRequest(error) || controller.signal.aborted) {
+          return;
+        }
+        setEvalReportsState({ loading: false, loaded: true, data: undefined });
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [isFallback, threadId]);
+
+  useEffect(() => {
+    if (isFallback || !threadId || !abtestId) {
+      setCaseState({ loading: false, loaded: false });
+      return;
+    }
+
+    const controller = new AbortController();
+    setCaseState((prev) => ({
+      abtestId,
+      loading: true,
+      loaded: prev.abtestId === abtestId ? prev.loaded : false,
+      data: prev.abtestId === abtestId ? prev.data : undefined,
+      error: undefined,
+    }));
+
+    createCoreAgentGeneratedApiClient()
+      .apiCoreAgentThreadsThreadIdResultsAbtestsAbtestIdCaseDetailsGet(
+        {
+          threadId,
+          abtestId,
+          pageSize: AB_CASE_DETAIL_PAGE_SIZE,
+        },
+        { signal: controller.signal },
+      )
+      .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setCaseState({
+          abtestId,
+          loading: false,
+          loaded: true,
+          data: response.data,
+          totalSize: response.data.total_size,
+        });
+      })
+      .catch((error) => {
+        if (isCanceledRequest(error) || controller.signal.aborted) {
+          return;
+        }
+        setCaseState((prev) => ({
+          ...prev,
+          abtestId,
+          loading: false,
+          loaded: true,
+          error: getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.abCaseDetailLoadFailed")),
+        }));
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [abtestId, caseReloadToken, isFallback, threadId, t]);
+
+  useEffect(() => {
+    if (isFallback) {
+      setTraceCompareState({ loading: false, loaded: false });
+      return;
+    }
+    if (!threadId || !selectedCase?.caseId) {
+      setTraceCompareState({ loading: false, loaded: false, error: t("selfEvolutionRun.observation.noTraceId") });
+      return;
+    }
+    if (evalReportsState.loading || !evalReportsState.loaded) {
+      setTraceCompareState({
+        caseId: selectedCase.caseId,
+        loading: true,
+        loaded: false,
+      });
+      return;
+    }
+
+    const { a: aTraceId, b: bTraceId } = resolveCaseTraceIds(selectedCaseItem, selectedCase.caseId, traceIdMap);
+    if (!aTraceId || !bTraceId || aTraceId === "-" || bTraceId === "-") {
+      setTraceCompareState({
+        caseId: selectedCase.caseId,
+        loading: false,
+        loaded: true,
+        error: t("selfEvolutionRun.observation.abTraceIdsMissing"),
+        aTraceId,
+        bTraceId,
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    setTraceCompareState({
+      caseId: selectedCase.caseId,
+      loading: true,
+      loaded: false,
+      data: undefined,
+      error: undefined,
+      aTraceId,
+      bTraceId,
+    });
+
+    createCoreAgentGeneratedApiClient()
+      .apiCoreAgentThreadsThreadIdResultsTracesCompareGet(
+        {
+          threadId,
+          a: aTraceId,
+          b: bTraceId,
+        },
+        { signal: controller.signal },
+      )
+      .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setTraceCompareState({
+          caseId: selectedCase.caseId,
+          loading: false,
+          loaded: true,
+          data: response.data,
+          aTraceId,
+          bTraceId,
+        });
+      })
+      .catch((error) => {
+        if (isCanceledRequest(error) || controller.signal.aborted) {
+          return;
+        }
+        setTraceCompareState({
+          caseId: selectedCase.caseId,
+          loading: false,
+          loaded: true,
+          error: getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.abTraceCompareLoadFailed")),
+          aTraceId,
+          bTraceId,
+        });
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    evalReportsState.loaded,
+    evalReportsState.loading,
+    isFallback,
+    selectedCase?.caseId,
+    selectedCaseItem,
+    threadId,
+    traceIdMap,
+    traceReloadToken,
+    t,
+  ]);
 
   useEffect(() => {
     if (!rows.some((row) => row.caseId === selectedCaseId)) {
@@ -1464,27 +1950,44 @@ function AbtestObservationDashboard({
         <ObservationHeaderControls isMenuCollapsed={isMenuCollapsed} toggleMenu={toggleMenu} onBack={onBack} />
         <div className="self-evolution-eval-dashboard-head-right">
           {threadId && <Tag>{`thread ${threadId}`}</Tag>}
-          {isFallback && <Tag color="gold">样例数据</Tag>}
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
+          {isFallback && <Tag color="gold">{t("selfEvolutionRun.observation.sampleData")}</Tag>}
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>{t("selfEvolutionRun.observation.refresh")}</Button>
         </div>
       </header>
       {notice && !loading && <Alert type="warning" showIcon message={notice} />}
       {loading && !data ? (
         <div className="self-evolution-observation-page-loading">
           <Spin />
-          <Text>正在加载 A/B 观测数据...</Text>
+          <Text>{t("selfEvolutionRun.observation.loadingAbData")}</Text>
         </div>
-      ) : compareObservation && selectedCase ? (
+      ) : selectedCase ? (
         <div className="self-evolution-abtest-dashboard-grid">
-          <AbReportPanel rows={rows} selectedCaseId={selectedCase.caseId} onSelectCase={setSelectedCaseId} />
-          <AbTraceComparePanel observation={compareObservation} selectedCase={selectedCase} />
+          <AbReportPanel
+            summary={abSummary}
+            rows={rows}
+            rowsError={caseState.error}
+            rowsLoading={caseState.loading}
+            totalSize={caseState.totalSize}
+            isFallback={isFallback}
+            selectedCaseId={selectedCase.caseId}
+            onSelectCase={setSelectedCaseId}
+            onReloadRows={() => setCaseReloadToken((prev) => prev + 1)}
+          />
+          <AbTraceComparePanel
+            observation={selectedCaseObservation}
+            selectedCase={selectedCase}
+            abtestId={abtestId || abSummary?.id}
+            loading={!isFallback && traceCompareState.loading}
+            error={!isFallback ? traceCompareState.error : undefined}
+            onRetry={() => setTraceReloadToken((prev) => prev + 1)}
+          />
         </div>
       ) : (
-        <section className="self-evolution-observation-json-card" aria-label="原始 A/B 观测数据">
+        <section className="self-evolution-observation-json-card" aria-label={t("selfEvolutionRun.observation.rawAbDataAria")}>
           <div className="self-evolution-observation-data-head">
             <div>
-              <Text strong>原始数据</Text>
-              <span>当前结构不是 A/B Trace 对比结构，先按 JSON 展示</span>
+              <Text strong>{t("selfEvolutionRun.observation.rawData")}</Text>
+              <span>{t("selfEvolutionRun.observation.rawAbDataNote")}</span>
             </div>
           </div>
           <pre>{stringifyResultPayload(data)}</pre>
@@ -1495,6 +1998,7 @@ function AbtestObservationDashboard({
 }
 
 export function SelfEvolutionObservationPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { threadId, kind } = useParams<ObservationRouteParams>();
   const { isMenuCollapsed, toggleMenu } = useOutletContext<ObservationPageLayoutContext>();
@@ -1507,7 +2011,7 @@ export function SelfEvolutionObservationPage() {
 
   useEffect(() => {
     if (!threadId || !resultKind) {
-      setState({ loading: false, loaded: true, error: "观测路由参数不完整。" });
+      setState({ loading: false, loaded: true, error: t("selfEvolutionRun.observation.routeError") });
       return;
     }
 
@@ -1526,8 +2030,8 @@ export function SelfEvolutionObservationPage() {
             loaded: true,
             data: fallbackObservationData[resultKind],
             notice: resultKind === "eval-reports"
-              ? "当前接口暂无第二步 CSV 数据。"
-              : "当前接口暂无观测数据，先展示你提供的样例数据。",
+              ? t("selfEvolutionRun.observation.noEvalCsvData")
+              : t("selfEvolutionRun.observation.noObservationData"),
             isFallback: true,
           });
           return;
@@ -1538,14 +2042,14 @@ export function SelfEvolutionObservationPage() {
         if (isCanceledRequest(error) || controller.signal.aborted) {
           return;
         }
-        const errorMessage = getLocalizedErrorMessage(error, "观测数据加载失败，请稍后重试。");
+        const errorMessage = getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.observationLoadFailed"));
         setState({
           loading: false,
           loaded: true,
           data: fallbackObservationData[resultKind],
           notice: resultKind === "eval-reports"
             ? errorMessage
-            : `观测接口暂不可用，先展示前端样例数据。${errorMessage}`,
+            : t("selfEvolutionRun.observation.observationUnavailable", { error: errorMessage }),
           isFallback: true,
         });
       });
@@ -1601,42 +2105,42 @@ export function SelfEvolutionObservationPage() {
         <div className="self-evolution-observation-page-title">
           <ObservationHeaderControls isMenuCollapsed={isMenuCollapsed} toggleMenu={toggleMenu} onBack={backToDetail} />
           <div>
-            <Title level={3}>Step 5 · A/B 观测</Title>
-            <Paragraph>Case A/B Trace 对比与结构化数据表</Paragraph>
+            <Title level={3}>{t("selfEvolutionRun.observation.pageTitle")}</Title>
+            <Paragraph>{t("selfEvolutionRun.observation.pageDesc")}</Paragraph>
           </div>
         </div>
         <div className="self-evolution-observation-page-meta">
           {threadId && <Tag>{`thread ${threadId}`}</Tag>}
           {resultKind && <Tag color="blue">{resultKind}</Tag>}
-          {state.isFallback && <Tag color="gold">样例数据</Tag>}
-          <Button icon={<ReloadOutlined />} loading={state.loading} onClick={reload}>刷新</Button>
+          {state.isFallback && <Tag color="gold">{t("selfEvolutionRun.observation.sampleData")}</Tag>}
+          <Button icon={<ReloadOutlined />} loading={state.loading} onClick={reload}>{t("selfEvolutionRun.observation.refresh")}</Button>
         </div>
       </header>
       <main className="self-evolution-observation-page-body" aria-live="polite">
         {state.notice && !state.loading && <Alert type="warning" showIcon message={state.notice} />}
         {!resultKind ? (
-          <Alert type="warning" showIcon message="未知观测类型" description={`当前路径中的 kind=${kind || "-"}，支持 eval、eval-reports、abtest、abtests。`} />
+          <Alert type="warning" showIcon message={t("selfEvolutionRun.observation.unknownObservationType")} description={t("selfEvolutionRun.observation.unknownObservationTypeDesc", { kind: kind || "-" })} />
         ) : state.loading && !state.loaded ? (
           <div className="self-evolution-observation-page-loading">
             <Spin />
-            <Text>正在加载观测数据...</Text>
+            <Text>{t("selfEvolutionRun.observation.loadingData")}</Text>
           </div>
         ) : state.error ? (
           <Alert
             type="error"
             showIcon
-            message="观测数据加载失败"
+            message={t("selfEvolutionRun.observation.observationLoadFailedTitle")}
             description={state.error}
-            action={<Button size="small" onClick={reload}>重试</Button>}
+            action={<Button size="small" onClick={reload}>{t("selfEvolutionRun.observation.retry")}</Button>}
           />
         ) : isEmpty ? (
-          <Empty description="当前线程暂无观测数据" />
+          <Empty description={t("selfEvolutionRun.observation.emptyObservations")} />
         ) : (
-          <section className="self-evolution-observation-json-card" aria-label="原始观测数据">
+          <section className="self-evolution-observation-json-card" aria-label={t("selfEvolutionRun.observation.rawDataAria")}>
             <div className="self-evolution-observation-data-head">
               <div>
-                <Text strong>原始数据</Text>
-                <span>当前结构不是 Trace 观测结构，先按 JSON 展示</span>
+                <Text strong>{t("selfEvolutionRun.observation.rawData")}</Text>
+                <span>{t("selfEvolutionRun.observation.rawDataNote")}</span>
               </div>
             </div>
             <pre>{stringifyResultPayload(state.data)}</pre>

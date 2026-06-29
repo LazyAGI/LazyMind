@@ -9,7 +9,6 @@
   transition: border-color 0.2s;
 
   &--active  { border-color: #d0e4ff; }
-  &--failed  { border-color: #ffd6d6; }
   &--completed { border-color: #d0f0e0; }
   &--waiting { border-color: #ffe8c0; }
 
@@ -18,22 +17,48 @@
     animation: pulse 1.5s ease-in-out infinite;
   }
 
+  &--disabled {
+    opacity: 0.6;
+
+    .plugin-panel__header {
+      background: #f9fafb;
+    }
+  }
+
   // Header row
   &__header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
     padding: 10px 16px;
     border-bottom: 1px solid #f0f1f3;
     background: #fafafa;
   }
 
-  &__title {
+  &__header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
     flex: 1;
+  }
+
+  &__header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  &__title {
     font-weight: 600;
     font-size: 13px;
     color: #1a1d23;
     letter-spacing: 0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &__status {
@@ -45,7 +70,6 @@
 
     &--active    { background: #e6f0ff; color: #2563eb; }
     &--completed { background: #e6f7ee; color: #16a34a; }
-    &--failed    { background: #fff0f0; color: #dc2626; }
     &--waiting   { background: #fff4e0; color: #d97706; }
   }
 

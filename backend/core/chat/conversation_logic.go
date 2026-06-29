@@ -173,7 +173,7 @@ func conversationIDFromName(name string) string {
 }
 
 // ensureConversation textCreatetextUsertextConversation，textConversation、text history text seq、error
-func ensureConversation(db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string) (*orm.Conversation, int, error) {
+func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, pluginSettings map[string]any) (*orm.Conversation, int, error) {
 	now := time.Now()
 	var c orm.Conversation
 	err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error
@@ -214,10 +214,57 @@ func ensureConversation(db *gorm.DB, convID, displayName string, searchConfig js
 			UpdatedAt:      now,
 		},
 	}
+	// Resolve plugin settings for the new conversation.
+	// Priority: caller-supplied pluginSettings > user_chat_settings defaults.
+	// All three fields are always written so conversations.enable_plugin / plugin_mode /
+	// enable_subagent are never NULL — no per-request fallback query needed.
+	resolvedPS := resolveInitialPluginSettings(ctx, db, userID, pluginSettings)
+	c.EnablePlugin = &resolvedPS.enablePlugin
+	c.PluginMode = &resolvedPS.pluginMode
+	c.EnableSubagent = &resolvedPS.enableSubagent
 	if err := db.Create(&c).Error; err != nil {
 		return nil, 0, err
 	}
 	return &c, 1, nil
+}
+
+type resolvedPluginSettings struct {
+	enablePlugin   bool
+	pluginMode     string
+	enableSubagent bool
+}
+
+// resolveInitialPluginSettings merges caller-supplied overrides with the user's
+// global defaults from user_chat_settings. Fields present in pluginSettings take
+// priority; missing fields fall back to the DB defaults (or hardcoded values if
+// the user has no row yet).
+func resolveInitialPluginSettings(ctx context.Context, db *gorm.DB, userID string, pluginSettings map[string]any) resolvedPluginSettings {
+	// Start from hardcoded fallbacks (matches user_chat_settings DB defaults).
+	out := resolvedPluginSettings{
+		enablePlugin:   true,
+		pluginMode:     "dynamic",
+		enableSubagent: true,
+	}
+	// Load user-level defaults.
+	if db != nil {
+		var s orm.UserChatSettings
+		if err := db.WithContext(ctx).Where("user_id = ?", userID).First(&s).Error; err == nil {
+			out.enablePlugin = s.EnablePlugin
+			out.pluginMode = s.PluginMode
+			out.enableSubagent = s.EnableSubagent
+		}
+	}
+	// Apply caller-supplied overrides.
+	if v, ok := pluginSettings["enable_plugin"].(bool); ok {
+		out.enablePlugin = v
+	}
+	if v, ok := pluginSettings["plugin_mode"].(string); ok && (v == "dynamic" || v == "auto") {
+		out.pluginMode = v
+	}
+	if v, ok := pluginSettings["enable_subagent"].(bool); ok {
+		out.enableSubagent = v
+	}
+	return out
 }
 
 func buildHistoryMessages(histories []orm.ChatHistory) []map[string]string {
@@ -526,6 +573,11 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		}
 		body["plugin_context"] = mergedPC
 	}
+	// Propagate ask_response so Python ChatAgent can resolve ask_pending state.
+	// Format: {"ask_id": "...", "selected": [...]}
+	if ar, ok := raw["ask_response"].(map[string]any); ok && len(ar) > 0 {
+		body["ask_response"] = ar
+	}
 	if resourceContext != nil {
 		body["disabled_tools"] = resourceContext.DisabledTools
 		body["available_skills"] = resourceContext.AvailableSkills
@@ -538,23 +590,96 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		conv, _ := raw["conversation"].(map[string]any)
 		if conv != nil {
 			if sc, _ := conv["search_config"].(map[string]any); sc != nil {
-				filters := map[string]any{}
-				if kbIDs := datasetIDsFromSearchConfig(sc); len(kbIDs) > 0 {
-					filters["kb_id"] = kbIDs
-				}
-				if creators := stringSliceFromAny(sc["creators"]); len(creators) > 0 {
-					filters["creator"] = creators
-				}
-				if tags := stringSliceFromAny(sc["tags"]); len(tags) > 0 {
-					filters["tags"] = tags
-				}
-				if len(filters) > 0 {
-					body["filters"] = filters
-				}
+				body["filters"] = filtersFromSearchConfig(sc)
+			}
+		}
+	}
+	// Internal/auto-advance requests omit conversation.search_config; fall back to the
+	// persisted conversation row so kb_id scope matches the user's original selection.
+	if body["filters"] == nil && db != nil && convID != "" {
+		var c orm.Conversation
+		if err := db.WithContext(ctx).Select("search_config").Where("id = ?", convID).First(&c).Error; err == nil && len(c.SearchConfig) > 0 {
+			var sc map[string]any
+			if json.Unmarshal(c.SearchConfig, &sc) == nil {
+				body["filters"] = filtersFromSearchConfig(sc)
 			}
 		}
 	}
 	return body
+}
+
+// filtersFromSearchConfig builds upstream dataset filters from a search_config dict.
+func filtersFromSearchConfig(sc map[string]any) map[string]any {
+	if sc == nil {
+		return nil
+	}
+	filters := map[string]any{}
+	if kbIDs := datasetIDsFromSearchConfig(sc); len(kbIDs) > 0 {
+		filters["kb_id"] = kbIDs
+	}
+	if creators := stringSliceFromAny(sc["creators"]); len(creators) > 0 {
+		filters["creator"] = creators
+	}
+	if tags := stringSliceFromAny(sc["tags"]); len(tags) > 0 {
+		filters["tags"] = tags
+	}
+	if len(filters) == 0 {
+		return nil
+	}
+	return filters
+}
+
+// resolvePluginMode determines the effective plugin_mode for this request.
+// Priority: request body > "dynamic" default.
+// Valid values: "auto", "dynamic". Anything else is normalised to "dynamic".
+func resolvePluginMode(raw map[string]any) string {
+	if v, ok := raw["plugin_mode"].(string); ok {
+		v = strings.TrimSpace(v)
+		if v == "auto" || v == "dynamic" {
+			return v
+		}
+	}
+	return "dynamic"
+}
+
+// resolvePluginModeWithFallback determines the effective plugin_mode with full priority chain:
+//
+//	request body > DB-resolved agentic_config (loaded via applyChatRuntimeConfigs) > "dynamic"
+//
+// reqBody must have already been populated by applyChatRuntimeConfigs so that
+// reqBody["agentic_config"]["plugin_mode"] reflects the DB value.
+func resolvePluginModeWithFallback(raw map[string]any, reqBody map[string]any) string {
+	// Highest priority: explicit value in the original request body.
+	if v, ok := raw["plugin_mode"].(string); ok {
+		v = strings.TrimSpace(v)
+		if v == "auto" || v == "dynamic" {
+			return v
+		}
+	}
+	return pluginModeFromReqBody(reqBody)
+}
+
+// pluginModeFromReqBody reads the resolved plugin_mode from a fully-built chat request body.
+// Priority: plugin_context > agentic_config > "dynamic".
+// Used when persisting plugin_step task params so OnSubAgentDone can branch on auto vs dynamic.
+func pluginModeFromReqBody(reqBody map[string]any) string {
+	if pc, ok := reqBody["plugin_context"].(map[string]any); ok {
+		if v, ok := pc["plugin_mode"].(string); ok {
+			v = strings.TrimSpace(v)
+			if v == "auto" || v == "dynamic" {
+				return v
+			}
+		}
+	}
+	if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
+		if v, ok := ac["plugin_mode"].(string); ok {
+			v = strings.TrimSpace(v)
+			if v == "auto" || v == "dynamic" {
+				return v
+			}
+		}
+	}
+	return "dynamic"
 }
 
 func resolveUseMemory(raw map[string]any, resourceContext *evolution.ChatResourceContext) bool {
@@ -834,6 +959,7 @@ func streamSingleAnswer(
 	var fullResult string
 	var toolCallTurns int
 	var sources []any
+	var pendingAskPending any
 	thinkStart := time.Now()
 	// text：textConversation/text，finish_reason text UNSPECIFIED
 	writeSSEChunk(w, flusher, &ChatChunkResponse{
@@ -851,7 +977,8 @@ func streamSingleAnswer(
 	for d := range ch {
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
-			notice := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody))
+			pluginModeForTask := pluginModeFromReqBody(reqBody)
+			notice := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), pluginModeForTask)
 			if notice != nil {
 				taskChunk := &ChatChunkResponse{
 					ConversationID: convID,
@@ -873,6 +1000,27 @@ func streamSingleAnswer(
 						Payload: notice,
 					})
 				}
+			}
+			continue
+		}
+		if d.AskPending != nil {
+			pendingAskPending = d.AskPending
+			askChunk := &ChatChunkResponse{
+				ConversationID: convID,
+				Seq:            int32(seq),
+				HistoryID:      historyID,
+				FinishReason:   "FINISH_REASON_UNSPECIFIED",
+				AskPending:     d.AskPending,
+			}
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, askChunk)
+			}
+			if stateStore != nil {
+				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, askChunk)
+				_ = AppendConvEvent(chatCtx, stateStore, convID, &ConvEvent{
+					Type:    "ask_pending",
+					Payload: d.AskPending,
+				})
 			}
 			continue
 		}
@@ -922,6 +1070,10 @@ func streamSingleAnswer(
 	retrievalResult := marshalRetrievalResult(sources)
 	if pendingThink != "" {
 		fullResult += "<think>" + pendingThink + "</think>"
+	}
+	// Persist ask_pending into ext so the ask card survives page reload.
+	if pendingAskPending != nil {
+		historyExt = mergeAskPendingIntoExt(historyExt, pendingAskPending)
 	}
 	persisted := false
 	if target.IsRegeneration && target.Existing != nil {
@@ -1230,6 +1382,7 @@ func handleTaskCreated(
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
 	toolConfig map[string]any,
+	pluginMode string,
 ) *TaskCreatedNotice {
 	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
 		return nil
@@ -1237,7 +1390,7 @@ func handleTaskCreated(
 
 	// Plugin Step path — handled separately.
 	if ev.AgentType == "plugin_step" {
-		return handlePluginStepCreated(chatCtx, db, stateStore, convID, historyID, userID, ev, llmConfig, toolConfig)
+		return handlePluginStepCreated(chatCtx, db, stateStore, convID, historyID, userID, ev, llmConfig, toolConfig, pluginMode)
 	}
 	mode := ev.Mode
 	if mode != "auto" && mode != "manual" {
@@ -1332,6 +1485,7 @@ func handlePluginStepCreated(
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
 	toolConfig map[string]any,
+	pluginMode string,
 ) *TaskCreatedNotice {
 	// Parse PluginStepParams from ev.Params.
 	var params plugin.PluginStepParams
@@ -1385,12 +1539,19 @@ func handlePluginStepCreated(
 			params.HistoryFilesPerTurn = parsed
 		}
 	}
+	// Carry the resolved plugin_mode into params so it is persisted with the task
+	// and available when OnSubAgentDone reconstructs PluginChatContext from DB.
+	if pluginMode == "auto" || pluginMode == "dynamic" {
+		params.PluginMode = pluginMode
+	} else {
+		params.PluginMode = "dynamic"
+	}
 	if params.PluginID == "" || params.StepID == "" {
 		fmt.Println("[Core] [PLUGIN_STEP_INVALID_PARAMS] plugin_id or step_id missing")
 		return nil
 	}
 
-	sessionID, taskID, err := plugin.HandlePluginStepCreated(
+	sessionID, taskID, pluginCompleted, err := plugin.HandlePluginStepCreated(
 		ctx, db, stateStore, convID, historyID, userID,
 		ev.TaskID, ev.Title, ev.Objective,
 		params,
@@ -1399,6 +1560,19 @@ func handlePluginStepCreated(
 	)
 	if err != nil {
 		fmt.Printf("[Core] [PLUGIN_STEP_FAILED] err=%v\n", err)
+		return nil
+	}
+
+	// When ChatAgent signals plugin completion via __end__, emit plugin_completed
+	// to the conversation event stream so the frontend can close the plugin panel.
+	if pluginCompleted {
+		_ = AppendConvEvent(ctx, stateStore, convID, &ConvEvent{
+			Type: "plugin_completed",
+			Payload: map[string]any{
+				"session_id": sessionID,
+				"plugin_id":  params.PluginID,
+			},
+		})
 		return nil
 	}
 
@@ -1417,4 +1591,19 @@ func handlePluginStepCreated(
 		SeqInConversation: task.SeqInConversation,
 		PluginSessionID:   sessionID,
 	}
+}
+
+// mergeAskPendingIntoExt merges ask_pending data into the ext JSON field so that
+// the ask card is persisted and can be restored on page reload.
+func mergeAskPendingIntoExt(ext json.RawMessage, askPending any) json.RawMessage {
+	m := make(map[string]any)
+	if len(ext) > 0 {
+		_ = json.Unmarshal(ext, &m)
+	}
+	m["ask_pending"] = askPending
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ext
+	}
+	return b
 }
