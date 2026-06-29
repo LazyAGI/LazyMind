@@ -169,16 +169,16 @@ def test_skill_editor_create_modify_remove_core_paths(monkeypatch):
     assert remove_result['success'] is True
     assert remove_result['tool'] == 'skill_editor'
     assert create_result['result'] == {
-        'status': 'pending_review',
-        'message': 'Skill changes were submitted and are pending review.',
+        'status': 'created',
+        'message': 'Skill was created and is now active.',
     }
     assert modify_result['result'] == {
         'status': 'pending_review',
         'message': 'Skill changes were submitted and are pending review.',
     }
     assert remove_result['result'] == {
-        'status': 'pending_review',
-        'message': 'Skill changes were submitted and are pending review.',
+        'status': 'removed',
+        'message': 'Skill was removed and is no longer active.',
     }
     assert create_calls == [('drafts', 'new_skill', content)]
     assert remove_calls == [('writing', 'existing')]
