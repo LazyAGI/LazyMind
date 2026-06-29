@@ -2,27 +2,26 @@
 package store
 
 import (
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
-	"lazymind/core/common"
+	"lazymind/core/state"
 )
 
 var (
 	db        *gorm.DB
 	lazyllmDB *gorm.DB
-	rdb       *redis.Client
+	stateDB   state.Store
 )
 
 // Init Initializetext DB text Redis，text main textStarttext
-func Init(database, lazyllmDatabase *gorm.DB, redisClient *redis.Client) {
+func Init(database, lazyllmDatabase *gorm.DB, stateStore state.Store) {
 	db = database
 	if lazyllmDatabase != nil {
 		lazyllmDB = lazyllmDatabase
 	} else {
 		lazyllmDB = database
 	}
-	rdb = redisClient
+	stateDB = stateStore
 }
 
 // DB text *gorm.DB
@@ -36,10 +35,10 @@ func LazyLLMDB() *gorm.DB {
 	return db
 }
 
-// Redis text *redis.Client，text nil（text）
-func Redis() *redis.Client { return rdb }
+// State returns the short-lived shared state backend.
+func State() state.Store { return stateDB }
 
-// MustRedisFromEnv textCreate Redis text Ping，Failedtext panic，text main Initializetext
-func MustRedisFromEnv() *redis.Client {
-	return common.MustRedisFromEnv()
+// MustStateFromEnv creates the configured state backend.
+func MustStateFromEnv() state.Store {
+	return state.MustFromEnv()
 }

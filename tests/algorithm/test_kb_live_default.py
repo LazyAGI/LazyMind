@@ -45,10 +45,11 @@ def test_kb_search_core_flow(monkeypatch):
         ]
 
     monkeypatch.setattr(kb, 'search_kb', fake_search_kb)
-    monkeypatch.setattr(kb.KBToolGroup, '_ensure_search_runtime', lambda self: None)
-    monkeypatch.setattr(kb.KBToolGroup, '_retrievers', ['retriever'])
-    monkeypatch.setattr(kb.KBToolGroup, '_reranker', 'reranker')
-    monkeypatch.setattr(kb.KBToolGroup, '_image_retriever', 'image-retriever')
+    monkeypatch.setattr(
+        kb,
+        '_ensure_kb_search_runtime',
+        lambda: (['retriever'], 'reranker', 'image-retriever'),
+    )
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = {
         'filters': {'kb_id': DEFAULT_AGENTIC_CONFIG['kb_id']},
@@ -93,13 +94,15 @@ def test_kb_tmp_search_core_flow(monkeypatch):
         return []
 
     monkeypatch.setattr(kb, 'search_temp_files', fake_search_temp_files)
-    monkeypatch.setattr(kb.TempKBToolGroup, '_ensure_search_runtime', lambda self: None)
-    monkeypatch.setattr(kb.TempKBToolGroup, '_tmp_retriever', 'tmp-retriever')
-    monkeypatch.setattr(kb.TempKBToolGroup, '_reranker', 'reranker')
+    monkeypatch.setattr(
+        kb,
+        '_ensure_temp_search_runtime',
+        lambda: ('tmp-retriever', 'reranker'),
+    )
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = {'user_id': 'user-007'}
     try:
-        result = kb.TempKBToolGroup().kb_tmp_search(SEED_KEYWORD, files=['tmp-a.md'])
+        result = kb.kb_tmp_search(SEED_KEYWORD, files=['tmp-a.md'])
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
@@ -134,10 +137,10 @@ def test_temp_kb_runtime_registers_block_group(monkeypatch):
     monkeypatch.setattr(kb, 'AutoModel', lambda model: f'model:{model}')
     monkeypatch.setattr(kb, 'TempDocRetriever', FakeTempDocRetriever)
     monkeypatch.setattr(kb, '_is_reranker_enabled', lambda: False)
-    monkeypatch.setattr(kb.TempKBToolGroup, '_tmp_retriever', None)
-    monkeypatch.setattr(kb.TempKBToolGroup, '_reranker', None)
+    monkeypatch.setattr(kb, '_tmp_retriever', None)
+    monkeypatch.setattr(kb, '_tmp_reranker', None)
 
-    kb.TempKBToolGroup()._ensure_search_runtime()
+    kb._ensure_temp_search_runtime()
 
     assert calls[0] == ('init', f'model:{kb.EMBED_MAIN}')
     assert calls[1][0] == 'create_node_group'

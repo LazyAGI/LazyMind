@@ -174,10 +174,28 @@
     white-space: nowrap;
   }
 
+  .chat-selector-item-actions {
+    display: flex;
+    align-items: center;
+    gap: clamp(8px, 0.6vw, 12px);
+    margin-left: clamp(6px, 0.5vw, 10px);
+    flex-shrink: 0;
+  }
+
+  .chat-selector-pin-icon {
+    color: #8c8c8c;
+    font-size: 14px;
+    flex-shrink: 0;
+
+    &:hover,
+    &.is-pinned {
+      color: #1890ff;
+    }
+  }
+
   .chat-selector-check-icon {
     color: #1890ff;
     font-size: 14px;
-    margin-left: clamp(6px, 0.5vw, 10px);
     flex-shrink: 0;
   }
 }

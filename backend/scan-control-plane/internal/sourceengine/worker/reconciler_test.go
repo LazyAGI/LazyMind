@@ -117,7 +117,7 @@ func TestCoreResultReconcilerFailedWritesFailureIntent(t *testing.T) {
 	if saved.Status != TaskStatusFailed {
 		t.Fatalf("unexpected saved task: %+v", saved)
 	}
-	if len(reducer.failures) != 1 || reducer.failures[0].ErrorCode != "PARSE_FAILED" {
+	if len(reducer.failures) != 1 || reducer.failures[0].ErrorCode != "PARSE_FAILED" || reducer.failures[0].Phase != "parse" {
 		t.Fatalf("missing failure intent: %+v", reducer.failures)
 	}
 	if len(core.Submissions) != 0 {

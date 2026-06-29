@@ -28,8 +28,11 @@ from lazymind.chat.engine.tools.infra.skill_review_store import (
 from lazymind.config import config as _cfg
 
 
-_PENDING_CHANGE_MESSAGE = '存在未处理的变更，请先处理'
-_SUCCESS_MESSAGE = '已写入变更，等待确认'
+_PENDING_CHANGE_MESSAGE = 'There is an unresolved pending change; handle it before submitting another edit.'
+_SUCCESS_RESULT = {
+    'status': 'pending_review',
+    'message': 'Skill changes were submitted and are pending review.',
+}
 
 
 @handle_tool_errors
@@ -48,16 +51,32 @@ def skill_editor(
     - action='create': after completing a complex task (5+ tool calls),
       fixing a tricky error, or discovering a non-trivial workflow, save the
       approach as a new skill by passing the full SKILL.md body in
-      content.
+      content. The SKILL.md YAML frontmatter must include name, category, and
+      description.
     - action='modify': when finding a skill outdated, incomplete, or
-      wrong, submit targeted edit proposals via suggestions
-      (natural-language, max 5 per call).
+      wrong, submit operations that edit the current SKILL.md content.
     - action='remove': when a skill is superseded or no longer correct,
       request its deletion.
 
     Only skills with source=remote are writable. Skills with
     source=file or any other source are read-only; do not use this tool
     to modify or remove them.
+
+    Both name and category are used as on-disk directory names, so they must
+    not contain whitespace or slashes. The category argument must be a single
+    path segment such as "engineering" or "coding"; do not nest categories like
+    "engineering/railway". The layout is always category/name/SKILL.md.
+
+    For modify and remove, derive category from the directory immediately above
+    the skill_name directory in the skill path. For example, in
+    ".../skills/testing/test-full-flow", name is "test-full-flow" and category
+    is "testing". Preserve or update the SKILL.md frontmatter category;
+    pending review checks use both category and name.
+
+    If this tool returns a pending-change error such as "There is an unresolved
+    pending change; handle it before submitting another edit.", do not call
+    skill_editor again for the same skill. The pending review must be handled
+    first.
 
     Args:
         name: Skill name.
@@ -137,7 +156,7 @@ def skill_editor(
             return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
 
         create_remote_skill(content_category, content_name, content or '')
-        return tool_success('skill_editor', _SUCCESS_MESSAGE)
+        return tool_success('skill_editor', _SUCCESS_RESULT)
 
     if action == 'modify':
         if content is not None:
@@ -190,7 +209,7 @@ def skill_editor(
             requestid=session_id,
             summary=reason or f'skill_editor operations: {len(operation_payload)}',
         )
-        return tool_success('skill_editor', _SUCCESS_MESSAGE)
+        return tool_success('skill_editor', _SUCCESS_RESULT)
 
     if action == 'remove':
         if content is not None or operations:
@@ -214,7 +233,7 @@ def skill_editor(
             return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
 
         remove_remote_skill(normalized_category, name)
-        return tool_success('skill_editor', _SUCCESS_MESSAGE)
+        return tool_success('skill_editor', _SUCCESS_RESULT)
 
     return tool_error(
         'skill_editor',

@@ -38,6 +38,15 @@ type ToolResponse struct {
 
 type ListServersResponse struct {
 	MCPServers []ServerResponse `json:"mcp_servers"`
+	Total      int64            `json:"total"`
+	Page       int              `json:"page"`
+	PageSize   int              `json:"page_size"`
+}
+
+type ListServersRequest struct {
+	Keyword  string
+	Page     int
+	PageSize int
 }
 
 type CreateServerRequest struct {

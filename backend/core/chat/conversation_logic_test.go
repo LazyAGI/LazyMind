@@ -17,7 +17,7 @@ import (
 )
 
 func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
-	body := buildChatRequestBody("conv-1", "", "hello", nil, map[string]any{}, nil, "")
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{}, nil, "", 1)
 	sessionID, ok := body["session_id"].(string)
 	if !ok {
 		t.Fatalf("expected session_id string, got %T", body["session_id"])
@@ -35,7 +35,7 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
-	body := buildChatRequestBody("conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
 		"conversation": map[string]any{
 			"search_config": map[string]any{
 				"dataset_list": []any{
@@ -46,7 +46,7 @@ func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
 				"tags":     []any{"tag_a", "tag_b"},
 			},
 		},
-	}, nil, "")
+	}, nil, "", 1)
 
 	filters, ok := body["filters"].(map[string]any)
 	if !ok {
@@ -78,16 +78,51 @@ func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
 	}
 }
 
+func TestBuildChatRequestBodyLoadsFiltersFromConversationDB(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-filters.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	now := time.Now()
+	searchConfig := json.RawMessage(`{"dataset_list":[{"id":"ds_db_1"},{"id":"ds_db_2"}],"creators":["u1"]}`)
+	if err := db.Create(&orm.Conversation{
+		ID:           "conv-db",
+		DisplayName:  "test",
+		ChannelID:    "default",
+		SearchConfig: searchConfig,
+		BaseModel: orm.BaseModel{
+			CreateUserID: "u1",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	body := buildChatRequestBody(t.Context(), db.DB, "conv-db", "", "hello", nil, map[string]any{}, nil, "", 2)
+	filters, ok := body["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected filters map from DB search_config, got %T", body["filters"])
+	}
+	kbIDs, ok := filters["kb_id"].([]string)
+	if !ok || len(kbIDs) != 2 || kbIDs[0] != "ds_db_1" || kbIDs[1] != "ds_db_2" {
+		t.Fatalf("unexpected kb_id from DB: %#v", filters["kb_id"])
+	}
+}
+
 func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 	existing := map[string]any{"kb_id": []string{"manual"}}
-	body := buildChatRequestBody("conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
 		"filters": existing,
 		"conversation": map[string]any{
 			"search_config": map[string]any{
 				"dataset_list": []any{map[string]any{"id": "ds_1"}},
 			},
 		},
-	}, nil, "")
+	}, nil, "", 1)
 
 	filters, ok := body["filters"].(map[string]any)
 	if !ok {
@@ -112,7 +147,7 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 		UserPreference:     "preference-content",
 		UsePersonalization: true,
 	}
-	body := buildChatRequestBody("conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1")
+	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1", 1)
 
 	if got := body["session_id"]; got != "session-1" {
 		t.Fatalf("expected session_id to be preserved, got %#v", got)
@@ -151,7 +186,7 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 		UserPreference:     "preference-content",
 		UsePersonalization: false,
 	}
-	body := buildChatRequestBody("conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "")
+	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "", 1)
 
 	if got, ok := body["use_memory"].(bool); !ok || got {
 		t.Fatalf("expected use_memory false, got %#v", body["use_memory"])
@@ -165,9 +200,9 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 }
 
 func TestBuildChatRequestBodyPreservesExplicitReasoningFalse(t *testing.T) {
-	body := buildChatRequestBody("conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
 		"reasoning": false,
-	}, nil, "")
+	}, nil, "", 1)
 
 	if got, ok := body["reasoning"].(bool); !ok || got {
 		t.Fatalf("expected reasoning false, got %#v", body["reasoning"])
@@ -366,39 +401,47 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyMergesInputURIsIntoFiles(t *testing.T) {
-	body := buildChatRequestBody("conv-1", "sid", "what animal", nil, map[string]any{
+	body := buildChatRequestBody(nil, nil, "conv-1", "sid", "what animal", nil, map[string]any{
 		"input": []any{
 			map[string]any{"input_type": "text", "text": "hello"},
 			map[string]any{"input_type": "image", "uri": "/var/lib/lazymind/uploads/tmp/u1/a.png"},
 			map[string]any{"input_type": "file", "uri": "/var/lib/lazymind/uploads/tmp/u1/b.pdf"},
 		},
-	}, nil, "")
+	}, nil, "", 1)
 
-	files, ok := body["files"].([]any)
-	if !ok || len(files) != 2 {
-		t.Fatalf("expected 2 file paths from input, got %#v", body["files"])
+	files, ok := body["files"].(map[string][]string)
+	if !ok {
+		t.Fatalf("expected files to be map[string][]string, got %#v", body["files"])
 	}
-	if files[0] != "/var/lib/lazymind/uploads/tmp/u1/a.png" || files[1] != "/var/lib/lazymind/uploads/tmp/u1/b.pdf" {
-		t.Fatalf("unexpected files order/content: %#v", files)
+	currentFiles := files["1"]
+	if len(currentFiles) != 2 {
+		t.Fatalf("expected 2 file paths from input, got %#v", currentFiles)
+	}
+	if currentFiles[0] != "/var/lib/lazymind/uploads/tmp/u1/a.png" || currentFiles[1] != "/var/lib/lazymind/uploads/tmp/u1/b.pdf" {
+		t.Fatalf("unexpected files order/content: %#v", currentFiles)
 	}
 }
 
 func TestBuildChatRequestBodyFilesMergeDedupesAndSkipsHTTP(t *testing.T) {
-	body := buildChatRequestBody("conv-1", "sid", "q", nil, map[string]any{
+	body := buildChatRequestBody(nil, nil, "conv-1", "sid", "q", nil, map[string]any{
 		"files": []any{"/data/x.jpg"},
 		"input": []any{
 			map[string]any{"input_type": "image", "uri": "https://cdn.example.com/p.png"},
 			map[string]any{"input_type": "image", "uri": "/data/x.jpg"},
 			map[string]any{"input_type": "image", "uri": "/data/y.jpeg"},
 		},
-	}, nil, "")
+	}, nil, "", 1)
 
-	files, ok := body["files"].([]any)
-	if !ok || len(files) != 2 {
-		t.Fatalf("expected 2 paths (dedupe + skip https), got %#v", body["files"])
+	files, ok := body["files"].(map[string][]string)
+	if !ok {
+		t.Fatalf("expected files to be map[string][]string, got %#v", body["files"])
 	}
-	if files[0] != "/data/x.jpg" || files[1] != "/data/y.jpeg" {
-		t.Fatalf("unexpected files: %#v", files)
+	currentFiles := files["1"]
+	if len(currentFiles) != 2 {
+		t.Fatalf("expected 2 paths (dedupe + skip https), got %#v", currentFiles)
+	}
+	if currentFiles[0] != "/data/x.jpg" || currentFiles[1] != "/data/y.jpeg" {
+		t.Fatalf("unexpected files: %#v", currentFiles)
 	}
 }
 
@@ -415,7 +458,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 			"creator": []any{"u1"},
 			"tags":    []any{"t1"},
 		},
-		"files":           []any{"f1", "f2"},
+		"files":           map[string]any{"1": []any{"f1", "f2"}},
 		"reasoning":       false,
 		"databases":       []any{map[string]any{"name": "db1"}},
 		"enable_thinking": true,
@@ -461,7 +504,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if len(req.Filters.Tags) != 1 || req.Filters.Tags[0] != "t1" {
 		t.Fatalf("unexpected tags: %#v", req.Filters.Tags)
 	}
-	if len(req.Files) != 2 || req.Files[0] != "f1" || req.Files[1] != "f2" {
+	if len(req.Files) != 1 || len(req.Files["1"]) != 2 || req.Files["1"][0] != "f1" || req.Files["1"][1] != "f2" {
 		t.Fatalf("unexpected files: %#v", req.Files)
 	}
 	if len(req.Databases) != 1 {
@@ -605,5 +648,61 @@ func TestFeedBackChatHistoryCancelsFeedback(t *testing.T) {
 	}
 	if history.Reason != "" || history.ExpectedAnswer != "" {
 		t.Fatalf("expected feedback detail to be cleared, got reason=%q expected_answer=%q", history.Reason, history.ExpectedAnswer)
+	}
+}
+
+func TestPluginModeFromReqBody(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]any
+		want string
+	}{
+		{
+			name: "plugin_context auto wins",
+			body: map[string]any{
+				"plugin_context": map[string]any{"plugin_mode": "auto"},
+				"agentic_config": map[string]any{"plugin_mode": "dynamic"},
+			},
+			want: "auto",
+		},
+		{
+			name: "agentic_config fallback",
+			body: map[string]any{
+				"agentic_config": map[string]any{"plugin_mode": "auto"},
+			},
+			want: "auto",
+		},
+		{
+			name: "missing defaults to dynamic",
+			body: map[string]any{},
+			want: "dynamic",
+		},
+		{
+			name: "invalid value defaults to dynamic",
+			body: map[string]any{
+				"plugin_context": map[string]any{"plugin_mode": "invalid"},
+			},
+			want: "dynamic",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pluginModeFromReqBody(tc.body); got != tc.want {
+				t.Fatalf("pluginModeFromReqBody() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolvePluginModeWithFallback(t *testing.T) {
+	raw := map[string]any{"plugin_mode": "auto"}
+	reqBody := map[string]any{
+		"agentic_config": map[string]any{"plugin_mode": "dynamic"},
+	}
+	if got := resolvePluginModeWithFallback(raw, reqBody); got != "auto" {
+		t.Fatalf("expected raw body to win, got %q", got)
+	}
+	if got := resolvePluginModeWithFallback(map[string]any{}, reqBody); got != "dynamic" {
+		t.Fatalf("expected agentic_config fallback, got %q", got)
 	}
 }

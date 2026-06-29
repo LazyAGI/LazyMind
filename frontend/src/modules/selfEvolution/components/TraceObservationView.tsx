@@ -1,4 +1,5 @@
 import { type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { Tag, Typography } from "antd";
 import {
   getNumberField,
@@ -6,6 +7,8 @@ import {
   isRecord,
   stringifyResultPayload,
 } from "../shared";
+
+type TFunction = (key: string, options?: Record<string, unknown>) => string;
 
 const { Paragraph, Text } = Typography;
 
@@ -93,16 +96,18 @@ const nestedObservationKeys = [
   "observability",
 ];
 
-const traceTypeLabels: Record<string, string> = {
-  flow: "Flow",
-  workflow_control: "控制流",
-  callable: "Callable",
-  llm: "LLM",
-  tool: "Tool",
-  retriever: "检索",
-  rerank: "重排",
-  module: "模块",
-};
+function getTraceTypeLabels(t: TFunction): Record<string, string> {
+  return {
+    flow: "Flow",
+    workflow_control: t("selfEvolutionRun.trace.controlFlow"),
+    callable: "Callable",
+    llm: "LLM",
+    tool: "Tool",
+    retriever: t("selfEvolutionRun.trace.retriever"),
+    rerank: t("selfEvolutionRun.trace.rerank"),
+    module: t("selfEvolutionRun.trace.module"),
+  };
+}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -365,14 +370,14 @@ function getStatusColor(status: string) {
   return "default";
 }
 
-function getMetricItems(detail: TraceDetailObservation): MetricItem[] {
+function getMetricItems(t: TFunction, detail: TraceDetailObservation): MetricItem[] {
   return [
-    { key: "latency", label: "总耗时", value: formatDuration(detail.summary.latencyMs) },
-    { key: "round", label: "轮次", value: formatCount(detail.summary.roundCount) },
-    { key: "tool", label: "工具调用", value: formatCount(detail.summary.toolCallCount) },
-    { key: "retrieval", label: "检索", value: formatCount(detail.summary.retrievalCount) },
-    { key: "rerank", label: "重排", value: formatCount(detail.summary.rerankCount) },
-    { key: "node", label: "节点", value: formatCount(detail.summary.nodeCount) },
+    { key: "latency", label: t("selfEvolutionRun.trace.totalLatency"), value: formatDuration(detail.summary.latencyMs) },
+    { key: "round", label: t("selfEvolutionRun.trace.roundCount"), value: formatCount(detail.summary.roundCount) },
+    { key: "tool", label: t("selfEvolutionRun.trace.toolCallCount"), value: formatCount(detail.summary.toolCallCount) },
+    { key: "retrieval", label: t("selfEvolutionRun.trace.retrievalCount"), value: formatCount(detail.summary.retrievalCount) },
+    { key: "rerank", label: t("selfEvolutionRun.trace.rerankCount"), value: formatCount(detail.summary.rerankCount) },
+    { key: "node", label: t("selfEvolutionRun.trace.nodeCount"), value: formatCount(detail.summary.nodeCount) },
   ];
 }
 
@@ -478,19 +483,19 @@ function getInsightNode(rows: FlatTraceNode[]) {
   );
 }
 
-function getTraceConclusion(detail: TraceDetailObservation, insightNode?: TraceNode) {
+function getTraceConclusion(t: TFunction, detail: TraceDetailObservation, insightNode?: TraceNode) {
   const normalizedStatus = detail.status.toLowerCase();
   if (["failed", "error"].includes(normalizedStatus)) {
-    return "Trace 执行失败，请优先查看失败节点的输入、输出和错误信息。";
+    return t("selfEvolutionRun.trace.conclusionFailed");
   }
   const docs = extractDocsFromNode(insightNode);
   if (detail.summary.retrievalCount && docs.length === 0) {
-    return "本次链路发生了检索，但当前节点未返回可展示文档，建议检查召回结果与筛选策略。";
+    return t("selfEvolutionRun.trace.conclusionRetrievalNoDoc");
   }
   if (detail.summary.toolCallCount && detail.summary.toolCallCount > 0) {
-    return "本次链路完成工具调用与检索编排，可展开节点查看输入、输出、召回文档和 metadata。";
+    return t("selfEvolutionRun.trace.conclusionWithTools");
   }
-  return "本次链路已完成，可结合节点耗时与输入输出摘要定位效果问题。";
+  return t("selfEvolutionRun.trace.conclusionDefault");
 }
 
 function getTypeStats(rows: FlatTraceNode[]) {
@@ -501,7 +506,7 @@ function getTypeStats(rows: FlatTraceNode[]) {
   return Object.entries(counts).sort((a, b) => b[1] - a[1]);
 }
 
-function renderMetaTiles(detail: TraceDetailObservation, rows: FlatTraceNode[]) {
+function renderMetaTiles(t: TFunction, detail: TraceDetailObservation, rows: FlatTraceNode[]) {
   const tiles = [
     { key: "trace_id", label: "trace_id", value: getShortTraceId(detail.traceId) },
     { key: "scene", label: "scene", value: "eval" },
@@ -511,7 +516,7 @@ function renderMetaTiles(detail: TraceDetailObservation, rows: FlatTraceNode[]) 
   ];
 
   return (
-    <div className="self-evolution-trace-meta-grid" aria-label="Trace 元信息">
+    <div className="self-evolution-trace-meta-grid" aria-label={t("selfEvolutionRun.trace.metaAria")}>
       {tiles.map((tile) => (
         <div key={tile.key} className={`self-evolution-trace-meta-card${tile.status ? " is-status" : ""}`}>
           <span>{tile.label}</span>
@@ -522,24 +527,24 @@ function renderMetaTiles(detail: TraceDetailObservation, rows: FlatTraceNode[]) 
   );
 }
 
-function renderSummaryStrip(detail: TraceDetailObservation) {
+function renderSummaryStrip(t: TFunction, detail: TraceDetailObservation) {
   return (
-    <div className="self-evolution-trace-summary-strip" aria-label="Trace 汇总指标">
+    <div className="self-evolution-trace-summary-strip" aria-label={t("selfEvolutionRun.trace.summaryAria")}>
       <span>
         <strong>{formatCount(detail.summary.roundCount)}</strong>
-        <em>轮决策</em>
+        <em>{t("selfEvolutionRun.trace.roundLabel")}</em>
       </span>
       <span>
         <strong>{formatCount(detail.summary.toolCallCount)}</strong>
-        <em>次工具调用</em>
+        <em>{t("selfEvolutionRun.trace.toolCallLabel")}</em>
       </span>
       <span>
         <strong>{formatCount(detail.summary.retrievalCount)}</strong>
-        <em>次知识库检索</em>
+        <em>{t("selfEvolutionRun.trace.retrievalLabel")}</em>
       </span>
       <span>
         <strong>{formatCount(detail.summary.rerankCount)}</strong>
-        <em>次重排</em>
+        <em>{t("selfEvolutionRun.trace.rerankLabel")}</em>
       </span>
       <span className="is-finish">
         <strong>{detail.status}</strong>
@@ -576,13 +581,13 @@ function renderPayloadDetails(label: string, payload?: TracePayloadPreview) {
   );
 }
 
-function renderMetadata(metadata?: Record<string, unknown>) {
+function renderMetadata(t: TFunction, metadata?: Record<string, unknown>) {
   if (!metadata || Object.keys(metadata).length === 0) {
     return null;
   }
 
   return (
-    <div className="self-evolution-trace-node-metadata" aria-label="节点元数据">
+    <div className="self-evolution-trace-node-metadata" aria-label={t("selfEvolutionRun.trace.nodeMetaAria")}>
       {Object.entries(metadata).slice(0, 8).map(([key, value]) => (
         <span key={key}>
           <strong>{key}</strong>
@@ -593,8 +598,9 @@ function renderMetadata(metadata?: Record<string, unknown>) {
   );
 }
 
-function renderNodeRow(row: FlatTraceNode, index: number, maxLatencyMs: number, compact = false) {
+function renderNodeRow(t: TFunction, row: FlatTraceNode, index: number, maxLatencyMs: number, compact = false) {
   const { node, depth } = row;
+  const traceTypeLabels = getTraceTypeLabels(t);
   const style = {
     "--trace-depth": depth,
   } as CSSProperties;
@@ -614,7 +620,7 @@ function renderNodeRow(row: FlatTraceNode, index: number, maxLatencyMs: number, 
               <Tag color={getStatusColor(node.status)}>{node.status}</Tag>
             </span>
             <span className="self-evolution-trace-node-subtitle">
-              {node.input?.summary || node.output?.summary || "暂无输入输出摘要"}
+              {node.input?.summary || node.output?.summary || t("selfEvolutionRun.trace.noIoSummary")}
             </span>
           </span>
           <span className="self-evolution-trace-node-duration">
@@ -624,36 +630,37 @@ function renderNodeRow(row: FlatTraceNode, index: number, maxLatencyMs: number, 
         </summary>
         <div className="self-evolution-trace-node-detail">
           <div className="self-evolution-trace-node-io">
-            {renderPayloadSummary("输入", node.input)}
-            {renderPayloadSummary("输出", node.output)}
+            {renderPayloadSummary(t("selfEvolutionRun.trace.ioInput"), node.input)}
+            {renderPayloadSummary(t("selfEvolutionRun.trace.ioOutput"), node.output)}
           </div>
-          {renderMetadata(node.metadata)}
-          {renderPayloadDetails("输入 JSON", node.input)}
-          {renderPayloadDetails("输出 JSON", node.output)}
+          {renderMetadata(t, node.metadata)}
+          {renderPayloadDetails(t("selfEvolutionRun.trace.ioInputJson"), node.input)}
+          {renderPayloadDetails(t("selfEvolutionRun.trace.ioOutputJson"), node.output)}
         </div>
       </details>
     </li>
   );
 }
 
-function renderFlowPanel(detail: TraceDetailObservation, rows: FlatTraceNode[], compact = false) {
+function renderFlowPanel(t: TFunction, detail: TraceDetailObservation, rows: FlatTraceNode[], compact = false) {
   const maxLatencyMs = rows.reduce((max, { node }) => Math.max(max, node.latencyMs || 0), 0);
   const visibleRows = compact ? rows.filter(({ depth }) => depth <= 3).slice(0, 12) : rows;
 
   return (
-    <section className="self-evolution-trace-flow-panel" aria-label="智能执行流程">
+    <section className="self-evolution-trace-flow-panel" aria-label={t("selfEvolutionRun.trace.flowAria")}>
       <div className="self-evolution-trace-panel-head">
-        <Text>智能执行流程</Text>
+        <Text>{t("selfEvolutionRun.trace.flowTitle")}</Text>
         <span>{formatDuration(detail.summary.latencyMs)}</span>
       </div>
       <ol className="self-evolution-trace-node-list">
-        {visibleRows.map((row, index) => renderNodeRow(row, index, maxLatencyMs, compact))}
+        {visibleRows.map((row, index) => renderNodeRow(t, row, index, maxLatencyMs, compact))}
       </ol>
     </section>
   );
 }
 
-function renderNodeInfoGrid(node: TraceNode) {
+function renderNodeInfoGrid(t: TFunction, node: TraceNode) {
+  const traceTypeLabels = getTraceTypeLabels(t);
   const inputData = getNodeDataRecord(node.input);
   const outputData = getNodeDataRecord(node.output);
   const rows = [
@@ -679,10 +686,10 @@ function renderNodeInfoGrid(node: TraceNode) {
   );
 }
 
-function renderDocList(node?: TraceNode) {
+function renderDocList(t: TFunction, node?: TraceNode) {
   const docs = extractDocsFromNode(node);
   if (docs.length === 0) {
-    return <Paragraph className="self-evolution-trace-empty">当前节点没有可展示召回文档。</Paragraph>;
+    return <Paragraph className="self-evolution-trace-empty">{t("selfEvolutionRun.trace.noRetrievedDocs")}</Paragraph>;
   }
 
   return (
@@ -692,7 +699,9 @@ function renderDocList(node?: TraceNode) {
           <div>
             <Text strong>{`Doc #${index + 1} ${doc.title}`}</Text>
             <span>{doc.ref || "chunk"}</span>
-            {isFiniteNumber(doc.score) && <Tag color="blue">{`相关度 ${doc.score.toFixed(2)}`}</Tag>}
+            {isFiniteNumber(doc.score) && (
+              <Tag color="blue">{t("selfEvolutionRun.trace.relevanceScore", { score: doc.score.toFixed(2) })}</Tag>
+            )}
           </div>
           <p>{doc.text}</p>
         </article>
@@ -701,61 +710,69 @@ function renderDocList(node?: TraceNode) {
   );
 }
 
-function renderInspectorPanel(detail: TraceDetailObservation, rows: FlatTraceNode[]) {
+function renderInspectorPanel(t: TFunction, detail: TraceDetailObservation, rows: FlatTraceNode[]) {
   const node = getInsightNode(rows);
   if (!node) {
     return (
-      <section className="self-evolution-trace-inspector" aria-label="节点详情">
+      <section className="self-evolution-trace-inspector" aria-label={t("selfEvolutionRun.trace.inspectorAria")}>
         <div className="self-evolution-trace-panel-head">
-          <Text>节点详情</Text>
+          <Text>{t("selfEvolutionRun.trace.inspectorTitle")}</Text>
         </div>
-        <Paragraph className="self-evolution-trace-empty">暂无可展示节点。</Paragraph>
+        <Paragraph className="self-evolution-trace-empty">{t("selfEvolutionRun.trace.noNodes")}</Paragraph>
       </section>
     );
   }
 
   return (
-    <section className="self-evolution-trace-inspector" aria-label="节点详情">
+    <section className="self-evolution-trace-inspector" aria-label={t("selfEvolutionRun.trace.inspectorAria")}>
       <div className="self-evolution-trace-panel-head">
-        <Text>{`节点详情：${node.name}`}</Text>
+        <Text>{t("selfEvolutionRun.trace.nodeDetailTitle", { name: node.name })}</Text>
         <Tag color={getStatusColor(node.status)}>{node.status}</Tag>
       </div>
       <div className="self-evolution-trace-inspector-section">
-        <h4>1. 节点信息</h4>
-        {renderNodeInfoGrid(node)}
+        <h4>{t("selfEvolutionRun.trace.nodeInfoSection")}</h4>
+        {renderNodeInfoGrid(t, node)}
       </div>
       <div className="self-evolution-trace-inspector-section">
-        <h4>2. 输入</h4>
-        {renderPayloadSummary("input", node.input) || <Paragraph className="self-evolution-trace-empty">暂无输入摘要。</Paragraph>}
+        <h4>{t("selfEvolutionRun.trace.inputSection")}</h4>
+        {renderPayloadSummary("input", node.input) || (
+          <Paragraph className="self-evolution-trace-empty">{t("selfEvolutionRun.trace.noInputSummary")}</Paragraph>
+        )}
       </div>
       <div className="self-evolution-trace-inspector-section">
-        <h4>3. 输出</h4>
-        {renderPayloadSummary("output", node.output) || <Paragraph className="self-evolution-trace-empty">暂无输出摘要。</Paragraph>}
+        <h4>{t("selfEvolutionRun.trace.outputSection")}</h4>
+        {renderPayloadSummary("output", node.output) || (
+          <Paragraph className="self-evolution-trace-empty">{t("selfEvolutionRun.trace.noOutputSummary")}</Paragraph>
+        )}
       </div>
       <div className="self-evolution-trace-inspector-section">
-        <h4>4. 召回文档</h4>
-        {renderDocList(node)}
+        <h4>{t("selfEvolutionRun.trace.retrievedDocsSection")}</h4>
+        {renderDocList(t, node)}
       </div>
       <div className="self-evolution-trace-inspector-section">
-        <h4>5. Metadata</h4>
-        {renderMetadata(node.metadata) || <Paragraph className="self-evolution-trace-empty">暂无 metadata。</Paragraph>}
+        <h4>{t("selfEvolutionRun.trace.metadataSection")}</h4>
+        {renderMetadata(t, node.metadata) || (
+          <Paragraph className="self-evolution-trace-empty">{t("selfEvolutionRun.trace.noMetadata")}</Paragraph>
+        )}
       </div>
       <div className="self-evolution-trace-inspector-section is-judgement">
-        <h4>6. 观测判断</h4>
-        <p>{getTraceConclusion(detail, node)}</p>
+        <h4>{t("selfEvolutionRun.trace.observationSection")}</h4>
+        <p>{getTraceConclusion(t, detail, node)}</p>
       </div>
-      {renderPayloadDetails("查看节点输入 JSON", node.input)}
-      {renderPayloadDetails("查看节点输出 JSON", node.output)}
+      {renderPayloadDetails(t("selfEvolutionRun.trace.viewInputJson"), node.input)}
+      {renderPayloadDetails(t("selfEvolutionRun.trace.viewOutputJson"), node.output)}
     </section>
   );
 }
 
 function TraceDetailPanel({ detail, label, compact = false }: { detail: TraceDetailObservation; label: string; compact?: boolean }) {
+  const { t } = useTranslation();
   const rows = flattenTraceNodes(detail.root);
   const typeStats = getTypeStats(rows);
+  const traceTypeLabels = getTraceTypeLabels(t);
 
   return (
-    <section className={`self-evolution-trace-detail-card${compact ? " is-compact" : ""}`} aria-label={`${label} Trace 详情`}>
+    <section className={`self-evolution-trace-detail-card${compact ? " is-compact" : ""}`} aria-label={t("selfEvolutionRun.trace.detailAria", { label })}>
       <div className="self-evolution-trace-detail-head">
         <div>
           <Text strong>{label}</Text>
@@ -764,78 +781,80 @@ function TraceDetailPanel({ detail, label, compact = false }: { detail: TraceDet
         <Tag color={getStatusColor(detail.status)}>{detail.status}</Tag>
       </div>
       {detail.query && <Paragraph className="self-evolution-trace-query">{detail.query}</Paragraph>}
-      <div className="self-evolution-trace-metrics" aria-label={`${label} Trace 摘要指标`}>
-        {getMetricItems(detail).map((metric) => (
+      <div className="self-evolution-trace-metrics" aria-label={t("selfEvolutionRun.trace.metricAria", { label })}>
+        {getMetricItems(t, detail).map((metric) => (
           <span key={metric.key}>
             <em>{metric.label}</em>
             <strong>{metric.value}</strong>
           </span>
         ))}
       </div>
-      <div className="self-evolution-trace-type-strip" aria-label={`${label} 节点类型统计`}>
+      <div className="self-evolution-trace-type-strip" aria-label={t("selfEvolutionRun.trace.typeStatsAria", { label })}>
         {typeStats.map(([type, count]) => (
           <span key={type}>{`${traceTypeLabels[type] || type} ${count}`}</span>
         ))}
       </div>
-      {renderFlowPanel(detail, rows, compact)}
+      {renderFlowPanel(t, detail, rows, compact)}
     </section>
   );
 }
 
 function TraceDetailWorkspace({ detail, title }: { detail: TraceDetailObservation; title: string }) {
+  const { t } = useTranslation();
   const rows = flattenTraceNodes(detail.root);
 
   return (
-    <section className="self-evolution-trace-observation" aria-label="Agentic RAG 观测详情">
+    <section className="self-evolution-trace-observation" aria-label={t("selfEvolutionRun.agenticRagObservationTitle")}>
       <div className="self-evolution-trace-observation-head">
         <div>
           <Text strong>{title}</Text>
-          <span>{`Agentic RAG 观测详情 · ${getShortTraceId(detail.traceId)}`}</span>
+          <span>{t("selfEvolutionRun.trace.agenticRagDetail", { traceId: getShortTraceId(detail.traceId) })}</span>
         </div>
       </div>
-      {renderMetaTiles(detail, rows)}
-      {renderSummaryStrip(detail)}
+      {renderMetaTiles(t, detail, rows)}
+      {renderSummaryStrip(t, detail)}
       <div className="self-evolution-trace-workspace">
-        {renderFlowPanel(detail, rows)}
-        {renderInspectorPanel(detail, rows)}
+        {renderFlowPanel(t, detail, rows)}
+        {renderInspectorPanel(t, detail, rows)}
       </div>
     </section>
   );
 }
 
 function TraceComparePanel({ observation, title }: { observation: Extract<TraceObservation, { kind: "compare" }>; title: string }) {
+  const { t } = useTranslation();
   const compareRows = [
     {
       key: "latency",
-      label: "总耗时",
+      label: t("selfEvolutionRun.trace.totalLatency"),
       a: formatDuration(observation.a.summary.latencyMs),
       b: formatDuration(observation.b.summary.latencyMs),
       delta: formatDurationDelta(observation.a.summary.latencyMs, observation.b.summary.latencyMs),
     },
     {
       key: "tool",
-      label: "工具调用",
+      label: t("selfEvolutionRun.trace.toolCallCount"),
       a: formatCount(observation.a.summary.toolCallCount),
       b: formatCount(observation.b.summary.toolCallCount),
       delta: formatNumberDelta(observation.a.summary.toolCallCount, observation.b.summary.toolCallCount),
     },
     {
       key: "retrieval",
-      label: "检索",
+      label: t("selfEvolutionRun.trace.retrievalCount"),
       a: formatCount(observation.a.summary.retrievalCount),
       b: formatCount(observation.b.summary.retrievalCount),
       delta: formatNumberDelta(observation.a.summary.retrievalCount, observation.b.summary.retrievalCount),
     },
     {
       key: "rerank",
-      label: "重排",
+      label: t("selfEvolutionRun.trace.rerankCount"),
       a: formatCount(observation.a.summary.rerankCount),
       b: formatCount(observation.b.summary.rerankCount),
       delta: formatNumberDelta(observation.a.summary.rerankCount, observation.b.summary.rerankCount),
     },
     {
       key: "node",
-      label: "节点数",
+      label: t("selfEvolutionRun.trace.nodeCount"),
       a: formatCount(observation.a.summary.nodeCount),
       b: formatCount(observation.b.summary.nodeCount),
       delta: formatNumberDelta(observation.a.summary.nodeCount, observation.b.summary.nodeCount),
@@ -843,34 +862,34 @@ function TraceComparePanel({ observation, title }: { observation: Extract<TraceO
   ];
 
   return (
-    <section className="self-evolution-trace-observation is-compare" aria-label="A/B 观测 Trace 对照">
+    <section className="self-evolution-trace-observation is-compare" aria-label={t("selfEvolutionRun.trace.compareAria")}>
       <div className="self-evolution-trace-observation-head">
         <div>
           <Text strong>{title}</Text>
-          <span>Case A/B Trace 对比</span>
+          <span>{t("selfEvolutionRun.trace.compareTitle")}</span>
         </div>
       </div>
       {observation.query && <Paragraph className="self-evolution-trace-query is-main">{observation.query}</Paragraph>}
       <div className="self-evolution-trace-ab-summary">
         <article>
-          <Text strong>A 基线算法</Text>
+          <Text strong>{t("selfEvolutionRun.trace.baselineAlgorithm")}</Text>
           <span>{`Trace ID ${getShortTraceId(observation.a.traceId)}`}</span>
           <span>{`Latency ${formatDuration(observation.a.summary.latencyMs)}`}</span>
           <Tag color={getStatusColor(observation.a.status)}>{observation.a.status}</Tag>
         </article>
         <article>
-          <Text strong>B 优化后算法</Text>
+          <Text strong>{t("selfEvolutionRun.trace.optimizedAlgorithm")}</Text>
           <span>{`Trace ID ${getShortTraceId(observation.b.traceId)}`}</span>
           <span>{`Latency ${formatDuration(observation.b.summary.latencyMs)}`}</span>
           <Tag color={getStatusColor(observation.b.status)}>{observation.b.status}</Tag>
         </article>
       </div>
-      <div className="self-evolution-trace-compare-grid" aria-label="A/B Trace 摘要对照">
+      <div className="self-evolution-trace-compare-grid" aria-label={t("selfEvolutionRun.trace.compareGridAria")}>
         <div className="self-evolution-trace-compare-row is-head">
-          <span>指标</span>
-          <span>A 基线</span>
-          <span>B 候选</span>
-          <span>变化</span>
+          <span>{t("selfEvolutionRun.trace.metricHeader")}</span>
+          <span>{t("selfEvolutionRun.trace.aBaselineHeader")}</span>
+          <span>{t("selfEvolutionRun.trace.bCandidateHeader")}</span>
+          <span>{t("selfEvolutionRun.trace.changeHeader")}</span>
         </div>
         {compareRows.map((row) => (
           <div key={row.key} className="self-evolution-trace-compare-row">
@@ -882,27 +901,30 @@ function TraceComparePanel({ observation, title }: { observation: Extract<TraceO
         ))}
       </div>
       <div className="self-evolution-trace-compare-columns">
-        <TraceDetailPanel detail={observation.a} label="A 基线 Trace" compact />
-        <TraceDetailPanel detail={observation.b} label="B 候选 Trace" compact />
+        <TraceDetailPanel detail={observation.a} label={t("selfEvolutionRun.trace.baselineTrace")} compact />
+        <TraceDetailPanel detail={observation.b} label={t("selfEvolutionRun.trace.candidateTrace")} compact />
       </div>
       <div className="self-evolution-trace-ab-docs">
         <div className="self-evolution-trace-panel-head">
-          <Text>召回文档对比</Text>
+          <Text>{t("selfEvolutionRun.trace.retrievedDocsCompare")}</Text>
         </div>
         <div className="self-evolution-trace-ab-doc-columns">
           <section>
-            <Text strong>A 基线算法</Text>
-            {renderDocList(getInsightNode(flattenTraceNodes(observation.a.root)))}
+            <Text strong>{t("selfEvolutionRun.trace.baselineAlgorithm")}</Text>
+            {renderDocList(t, getInsightNode(flattenTraceNodes(observation.a.root)))}
           </section>
           <section>
-            <Text strong>B 优化后算法</Text>
-            {renderDocList(getInsightNode(flattenTraceNodes(observation.b.root)))}
+            <Text strong>{t("selfEvolutionRun.trace.optimizedAlgorithm")}</Text>
+            {renderDocList(t, getInsightNode(flattenTraceNodes(observation.b.root)))}
           </section>
         </div>
       </div>
       <div className="self-evolution-trace-ab-conclusion">
-        <Text strong>观测结论：</Text>
-        <span>{`B 相比 A 耗时 ${formatDurationDelta(observation.a.summary.latencyMs, observation.b.summary.latencyMs)}，工具调用变化 ${formatNumberDelta(observation.a.summary.toolCallCount, observation.b.summary.toolCallCount)} 次。请结合召回文档与节点详情判断是否需要继续优化检索策略。`}</span>
+        <Text strong>{t("selfEvolutionRun.trace.observationConclusion")}</Text>
+        <span>{t("selfEvolutionRun.trace.abConclusion", {
+          latency: formatDurationDelta(observation.a.summary.latencyMs, observation.b.summary.latencyMs),
+          toolCallDelta: formatNumberDelta(observation.a.summary.toolCallCount, observation.b.summary.toolCallCount),
+        })}</span>
       </div>
     </section>
   );

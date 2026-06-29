@@ -34,14 +34,16 @@ type StateReducer interface {
 }
 
 type DefaultCrawlEngine struct {
-	bindings BindingReader
-	registry connector.ConnectorRegistry
-	objects  ObjectWriter
-	states   StateReducer
-	errors   BindingErrorRecorder
-	clock    func() time.Time
-	pageSize int
-	factory  CrawlStrategyFactory
+	bindings            BindingReader
+	registry            connector.ConnectorRegistry
+	objects             ObjectWriter
+	states              StateReducer
+	errors              BindingErrorRecorder
+	clock               func() time.Time
+	sleep               func(context.Context, time.Duration) error
+	pageSize            int
+	listRequestInterval time.Duration
+	factory             CrawlStrategyFactory
 }
 
 type runContext struct {
@@ -65,6 +67,7 @@ func NewDefaultCrawlEngine(bindings BindingReader, registry connector.ConnectorR
 		objects:  objects,
 		states:   states,
 		clock:    time.Now,
+		sleep:    sleepContext,
 		pageSize: 100,
 		factory:  defaultStrategyFactory{},
 	}
@@ -95,6 +98,22 @@ func WithPageSize(pageSize int) Option {
 	return func(e *DefaultCrawlEngine) {
 		if pageSize > 0 {
 			e.pageSize = pageSize
+		}
+	}
+}
+
+func WithListRequestInterval(interval time.Duration) Option {
+	return func(e *DefaultCrawlEngine) {
+		if interval >= 0 {
+			e.listRequestInterval = interval
+		}
+	}
+}
+
+func withSleep(sleep func(context.Context, time.Duration) error) Option {
+	return func(e *DefaultCrawlEngine) {
+		if sleep != nil {
+			e.sleep = sleep
 		}
 	}
 }
@@ -177,12 +196,13 @@ func (e *DefaultCrawlEngine) crawlWithFallback(ctx context.Context, runCtx runCo
 
 func (e *DefaultCrawlEngine) crawlLoop(ctx context.Context, runCtx runContext, strategy CrawlStrategy) (loopResult, error) {
 	result := loopResult{}
+	throttle := crawlListThrottle{interval: e.listRequestInterval, sleep: e.sleep}
 	for {
 		req, done, err := strategy.NextRequest(ctx, CrawlLoopState{})
 		if err != nil || done {
 			return result, err
 		}
-		page, err := e.fetchPage(ctx, runCtx.conn, req)
+		page, err := e.fetchPage(ctx, runCtx.conn, req, &throttle)
 		if err != nil {
 			return result, err
 		}
@@ -198,14 +218,45 @@ func (e *DefaultCrawlEngine) crawlLoop(ctx context.Context, runCtx runContext, s
 	}
 }
 
-func (e *DefaultCrawlEngine) fetchPage(ctx context.Context, conn connector.SourceConnector, req CrawlRequest) (connector.RawObjectPage, error) {
+func (e *DefaultCrawlEngine) fetchPage(ctx context.Context, conn connector.SourceConnector, req CrawlRequest, throttle *crawlListThrottle) (connector.RawObjectPage, error) {
 	switch req.Kind {
 	case CrawlRequestKindFetch:
 		return conn.FetchPage(ctx, req.Fetch)
 	case CrawlRequestKindListChildren:
+		if err := throttle.wait(ctx); err != nil {
+			return connector.RawObjectPage{}, err
+		}
 		return conn.ListChildren(ctx, req.ListChildren)
 	default:
 		return connector.RawObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "crawl request kind is unsupported")
+	}
+}
+
+type crawlListThrottle struct {
+	interval time.Duration
+	sleep    func(context.Context, time.Duration) error
+	seen     bool
+}
+
+func (t *crawlListThrottle) wait(ctx context.Context) error {
+	if t == nil || t.interval <= 0 {
+		return nil
+	}
+	if !t.seen {
+		t.seen = true
+		return nil
+	}
+	return t.sleep(ctx, t.interval)
+}
+
+func sleepContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 

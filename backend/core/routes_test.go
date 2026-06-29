@@ -32,6 +32,81 @@ func TestAgentThreadEventsRouteWinsOverGenericThreadRoute(t *testing.T) {
 	}
 }
 
+func TestAgentThreadStepEventsRouteWinsOverGenericThreadRoute(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr-306c5b7b/events/collect_material", nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatalf("expected step events route to match")
+	}
+
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/agent/threads/{thread_id}/events/{step_id}"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+	if gotID := match.Vars["thread_id"]; gotID != "thr-306c5b7b" {
+		t.Fatalf("expected thread_id %q, got %q", "thr-306c5b7b", gotID)
+	}
+	if gotStepID := match.Vars["step_id"]; gotStepID != "collect_material" {
+		t.Fatalf("expected step_id %q, got %q", "collect_material", gotStepID)
+	}
+}
+
+func TestAgentThreadStepsRouteWinsOverGenericThreadRoute(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr-306c5b7b/steps", nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatalf("expected thread steps route to match")
+	}
+
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/agent/threads/{thread_id}/steps"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+	if gotID := match.Vars["thread_id"]; gotID != "thr-306c5b7b" {
+		t.Fatalf("expected thread_id %q, got %q", "thr-306c5b7b", gotID)
+	}
+}
+
+func TestAgentThreadStepRecordsRouteWinsOverGenericThreadRoute(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr-306c5b7b/steps/collect_material/records", nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatalf("expected thread step records route to match")
+	}
+
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/agent/threads/{thread_id}/steps/{step_id}/records"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+	if gotID := match.Vars["thread_id"]; gotID != "thr-306c5b7b" {
+		t.Fatalf("expected thread_id %q, got %q", "thr-306c5b7b", gotID)
+	}
+	if gotStepID := match.Vars["step_id"]; gotStepID != "collect_material" {
+		t.Fatalf("expected step_id %q, got %q", "collect_material", gotStepID)
+	}
+}
+
 func TestAgentEvalReportBadCasesRouteRegistered(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()
@@ -55,6 +130,32 @@ func TestAgentEvalReportBadCasesRouteRegistered(t *testing.T) {
 	}
 	if got := match.Vars["report_id"]; got != "v0001" {
 		t.Fatalf("expected report_id %q, got %q", "v0001", got)
+	}
+}
+
+func TestAgentABTestCaseDetailsRouteRegistered(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr-1/results/abtests/abtest.comparison/case-details", nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatalf("expected abtest case details route to match")
+	}
+
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+	if got := match.Vars["thread_id"]; got != "thr-1" {
+		t.Fatalf("expected thread_id %q, got %q", "thr-1", got)
+	}
+	if got := match.Vars["abtest_id"]; got != "abtest.comparison" {
+		t.Fatalf("expected abtest_id %q, got %q", "abtest.comparison", got)
 	}
 }
 

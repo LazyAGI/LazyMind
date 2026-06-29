@@ -357,6 +357,7 @@ export interface SourceDocumentItem {
     'directory'?: string;
     'display_name'?: string;
     'document_id'?: string;
+    'effective_parse_status'?: string;
     'file_type'?: string;
     'has_update'?: boolean;
     'last_error'?: { [key: string]: any; };

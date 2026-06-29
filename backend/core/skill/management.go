@@ -189,6 +189,55 @@ func ListTags(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"tags": tags})
 }
 
+func ListCategories(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+
+	var rows []orm.SkillResource
+	if err := db.WithContext(r.Context()).
+		Select("category").
+		Where("owner_user_id = ? AND node_type = ?", userID, evolution.SkillNodeTypeParent).
+		Find(&rows).Error; err != nil {
+		common.ReplyErr(w, "query skills failed", http.StatusInternalServerError)
+		return
+	}
+
+	categorySet := make(map[string]struct{})
+	for _, row := range rows {
+		category := strings.TrimSpace(row.Category)
+		if category != "" {
+			categorySet[category] = struct{}{}
+		}
+	}
+
+	catalog, err := loadBuiltinCatalog()
+	if err != nil {
+		common.ReplyErr(w, "load builtin skills failed", http.StatusInternalServerError)
+		return
+	}
+	for _, builtin := range catalog {
+		category := strings.TrimSpace(builtin.Category)
+		if category != "" {
+			categorySet[category] = struct{}{}
+		}
+	}
+
+	categories := make([]string, 0, len(categorySet))
+	for category := range categorySet {
+		categories = append(categories, category)
+	}
+	sort.Strings(categories)
+	common.ReplyOK(w, map[string]any{"categories": categories})
+}
+
 func Get(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -871,21 +920,11 @@ func createParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 
 func createParentSkillWithContent(ctx context.Context, db *gorm.DB, userID, userName string, req createSkillRequest, fullContent, description string, source resourcechange.Source) error {
 	relPath := parentRelativePath(req.Category, req.Name)
-	var count int64
-	if err := db.WithContext(ctx).
-		Model(&orm.SkillResource{}).
-		Where("owner_user_id = ? AND category = ? AND node_type = ? AND skill_name = ?", userID, req.Category, evolution.SkillNodeTypeParent, req.Name).
-		Count(&count).Error; err != nil {
+	if err := ensureDBParentSkillIdentityAvailable(ctx, db, userID, req.Category, req.Name, ""); err != nil {
 		return err
 	}
-	if count > 0 {
-		return gorm.ErrDuplicatedKey
-	}
-	if err := db.WithContext(ctx).Model(&orm.SkillResource{}).Where("owner_user_id = ? AND relative_path = ?", userID, relPath).Count(&count).Error; err != nil {
+	if err := ensureNoBuiltinParentSkillConflict(req.Category, req.Name); err != nil {
 		return err
-	}
-	if count > 0 {
-		return gorm.ErrDuplicatedKey
 	}
 	for _, child := range req.Children {
 		if err := validatePathSegment(child.Name); err != nil {
@@ -1027,6 +1066,9 @@ func createChildSkill(ctx context.Context, db *gorm.DB, userID, userName string,
 	}
 	if count > 0 {
 		return orm.SkillResource{}, gorm.ErrDuplicatedKey
+	}
+	if err := ensureNoBuiltinRelativePathConflict(relPath); err != nil {
+		return orm.SkillResource{}, err
 	}
 	now := time.Now()
 	row := orm.SkillResource{
@@ -1223,9 +1265,6 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 	if pendingDraft {
 		return errors.New("parent skill has pending_confirm draft")
 	}
-	if req.ParentSkillID != nil {
-		return errors.New("parent_skill_id cannot be updated")
-	}
 	if req.ParentSkillName != nil {
 		return errors.New("parent_skill_name cannot be updated")
 	}
@@ -1268,27 +1307,11 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 	newDescription = resolvedDescription
 	shouldRecordContentChange := req.Content != nil && currentContent != newContent
 	if oldCategory != newCategory || oldName != newName {
-		var count int64
-		if oldName != newName {
-			if err := db.WithContext(ctx).
-				Model(&orm.SkillResource{}).
-				Where("owner_user_id = ? AND category = ? AND node_type = ? AND skill_name = ? AND id <> ?", userID, newCategory, evolution.SkillNodeTypeParent, newName, row.ID).
-				Count(&count).Error; err != nil {
-				return err
-			}
-			if count > 0 {
-				return gorm.ErrDuplicatedKey
-			}
-		}
-		newRelativePath := parentRelativePath(newCategory, newName)
-		if err := db.WithContext(ctx).
-			Model(&orm.SkillResource{}).
-			Where("owner_user_id = ? AND relative_path = ? AND id <> ?", userID, newRelativePath, row.ID).
-			Count(&count).Error; err != nil {
+		if err := ensureDBParentSkillIdentityAvailable(ctx, db, userID, newCategory, newName, row.ID); err != nil {
 			return err
 		}
-		if count > 0 {
-			return gorm.ErrDuplicatedKey
+		if err := ensureNoBuiltinParentSkillConflict(newCategory, newName); err != nil {
+			return err
 		}
 	}
 	row.RelativePath = parentRelativePath(newCategory, newName)
@@ -1392,11 +1415,14 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 }
 
 func updateChildSkill(ctx context.Context, db *gorm.DB, userID string, row *orm.SkillResource, req updateSkillRequest) error {
-	if req.Category != nil && strings.TrimSpace(*req.Category) != strings.TrimSpace(row.Category) {
-		return errors.New("child skill category is immutable")
-	}
-	if req.Category != nil || req.IsEnabled != nil {
-		return errors.New("child skill only supports name/description/tags/content/file_ext/auto_evo/parent_skill_id updates")
+	hasParentReference := req.ParentSkillID != nil || req.ParentSkillName != nil
+	if !hasParentReference {
+		if req.Category != nil && strings.TrimSpace(*req.Category) != strings.TrimSpace(row.Category) {
+			return errors.New("child skill category is immutable")
+		}
+		if req.Category != nil || req.IsEnabled != nil {
+			return errors.New("child skill only supports name/description/tags/content/file_ext/auto_evo/parent_skill_id updates")
+		}
 	}
 	currentContent, err := storedSkillContent(*row)
 	if err != nil {
@@ -1469,6 +1495,9 @@ func updateChildSkill(ctx context.Context, db *gorm.DB, userID string, row *orm.
 		}
 		if count > 0 {
 			return gorm.ErrDuplicatedKey
+		}
+		if err := ensureNoBuiltinRelativePathConflict(newRelative); err != nil {
+			return err
 		}
 	}
 	update := map[string]any{

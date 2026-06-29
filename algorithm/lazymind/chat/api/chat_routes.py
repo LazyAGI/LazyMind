@@ -47,7 +47,10 @@ async def chat(
     session_id: Annotated[str, Body(description='Session ID')] = 'session_id',
     conversation_id: Annotated[Optional[str], Body(description='Conversation ID for SubAgent task lookup')] = None,
     filters: Annotated[Optional[Dict[str, Any]], Body(description='Retrieval filter conditions')] = None,
-    files: Annotated[Optional[List[str]], Body(description='Uploaded temporary files')] = None,
+    files: Annotated[
+        Optional[Dict[str, List[str]]],
+        Body(description='Per-turn file paths. Keys: "current" or "<seq>". Values: local paths.'),
+    ] = None,
     debug: Annotated[Optional[bool], Body(description='Enable debug mode')] = False,
     reasoning: Annotated[Optional[bool], Body(description='Enable reasoning mode')] = False,
     databases: Annotated[Optional[List[Dict]], Body(description='Associated databases')] = None,
@@ -115,6 +118,41 @@ async def chat(
             )
         ),
     ] = None,
+    local_fs_sources: Annotated[
+        Optional[List[Dict[str, Any]]],
+        Body(
+            description=(
+                'Per-request local filesystem source scopes. Each item: '
+                '{source_id, paths, file_extensions}. file_extensions must be lowercase suffixes '
+                'without dot and limited to pdf, doc, docx, csv, xls, xlsx.'
+            )
+        ),
+    ] = None,
+    ask_response: Annotated[
+        Optional[Dict[str, Any]],
+        Body(
+            description=(
+                'User response to a pending ask_user request. '
+                'Fields: ask_id (str), selected (list of str). '
+                'Injected by Go when the user replies to an ask_pending card.'
+            )
+        ),
+    ] = None,
+    current_turn_seq: Annotated[
+        Optional[int],
+        Body(description='The seq number of the current conversation turn, provided by Go core. '
+                         'Used to correctly label the current-turn attachments.'),
+    ] = None,
+    enable_plugin: Annotated[
+        Optional[bool],
+        Body(description='Whether plugin tooling is enabled for this conversation. '
+                         'Resolved by Go from conversations.enable_plugin.'),
+    ] = None,
+    enable_subagent: Annotated[
+        Optional[bool],
+        Body(description='Whether SubAgent task creation is enabled for this conversation. '
+                         'Resolved by Go from conversations.enable_subagent.'),
+    ] = None,
 ):
     return await handle_chat(
         query=query,
@@ -139,4 +177,9 @@ async def chat(
         mcp_config=mcp_config,
         trace=trace,
         plugin_context=plugin_context,
+        local_fs_sources=local_fs_sources,
+        ask_response=ask_response,
+        current_turn_seq=current_turn_seq,
+        enable_plugin=enable_plugin,
+        enable_subagent=enable_subagent,
     )

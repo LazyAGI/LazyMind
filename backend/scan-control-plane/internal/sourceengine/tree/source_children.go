@@ -20,14 +20,14 @@ func (e *DBSourceTreeQueryEngine) ListChildren(ctx context.Context, req SourceTr
 		return TreeNodePage{}, err
 	}
 	if req.BindingID == "" {
-		return e.listBindingRoots(ctx, req.SourceID)
+		return e.listBindingRoots(ctx, source)
 	}
 	binding, err := e.repo.GetBinding(ctx, req.SourceID, req.BindingID)
 	if err != nil {
 		return TreeNodePage{}, mapStoreError(err)
 	}
 	if sourceTreeRootRequest(req) {
-		roots, ok, err := e.maybeListBindingRoots(ctx, req.SourceID)
+		roots, ok, err := e.maybeListBindingRoots(ctx, source)
 		if err != nil {
 			return TreeNodePage{}, err
 		}
@@ -222,31 +222,56 @@ func (e *DBSourceTreeQueryEngine) listObjects(ctx context.Context, req SourceTre
 	})
 }
 
-func (e *DBSourceTreeQueryEngine) listBindingRoots(ctx context.Context, sourceID string) (TreeNodePage, error) {
-	bindings, err := e.repo.ListBindings(ctx, sourceID)
+func (e *DBSourceTreeQueryEngine) listBindingRoots(ctx context.Context, source store.Source) (TreeNodePage, error) {
+	bindings, err := e.repo.ListBindings(ctx, source.SourceID)
 	if err != nil {
 		return TreeNodePage{}, mapStoreError(err)
 	}
-	return bindingRootsPage(bindings), nil
+	return e.bindingRootsPage(ctx, source, bindings)
 }
 
-func bindingRootsPage(bindings []store.Binding) TreeNodePage {
+func (e *DBSourceTreeQueryEngine) bindingRootsPage(ctx context.Context, source store.Source, bindings []store.Binding) (TreeNodePage, error) {
 	nodes := make([]TreeNode, 0, len(bindings))
 	for _, binding := range bindings {
-		nodes = append(nodes, bindingRootNode(binding))
+		node, err := e.bindingRootNode(ctx, source, binding)
+		if err != nil {
+			return TreeNodePage{}, err
+		}
+		nodes = append(nodes, node)
 	}
-	return TreeNodePage{Items: nodes, ListComplete: true}
+	return TreeNodePage{Items: nodes, ListComplete: true}, nil
 }
 
-func (e *DBSourceTreeQueryEngine) maybeListBindingRoots(ctx context.Context, sourceID string) (TreeNodePage, bool, error) {
-	bindings, err := e.repo.ListBindings(ctx, sourceID)
+func (e *DBSourceTreeQueryEngine) bindingRootNode(ctx context.Context, source store.Source, binding store.Binding) (TreeNode, error) {
+	node := bindingRootNode(binding)
+	root, ok, err := e.indexedBindingRoot(ctx, SourceTreeChildrenRequest{
+		SourceID:          source.SourceID,
+		BindingID:         binding.BindingID,
+		IncludeDocuments:  true,
+		IncludeContainers: true,
+	}, binding)
+	if err != nil {
+		return TreeNode{}, err
+	}
+	if ok {
+		node = bindingRootNodeWithObject(node, root)
+	}
+	return node, nil
+}
+
+func (e *DBSourceTreeQueryEngine) maybeListBindingRoots(ctx context.Context, source store.Source) (TreeNodePage, bool, error) {
+	bindings, err := e.repo.ListBindings(ctx, source.SourceID)
 	if err != nil {
 		return TreeNodePage{}, false, mapStoreError(err)
 	}
 	if len(bindings) <= 1 {
 		return TreeNodePage{}, false, nil
 	}
-	return bindingRootsPage(bindings), true, nil
+	page, err := e.bindingRootsPage(ctx, source, bindings)
+	if err != nil {
+		return TreeNodePage{}, false, err
+	}
+	return page, true, nil
 }
 
 func (e *DBSourceTreeQueryEngine) resolveBindingForRequestedParent(ctx context.Context, req SourceTreeChildrenRequest, fallback store.Binding) (store.Binding, bool, error) {

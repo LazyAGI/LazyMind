@@ -5,6 +5,7 @@ import {
   type Dataset,
 } from "@/api/generated/core-client";
 import { BASE_URL, axiosInstance } from "@/components/request";
+import i18n from "@/i18n";
 
 export type EvolutionMode = "auto" | "interactive";
 export type ExtraEvalStrategy = "skip" | "generate";
@@ -281,13 +282,19 @@ export const EVO_API_BASE = `${BASE_URL}/api/evo/v1/evo`;
 export const SELF_EVOLUTION_LAST_THREAD_STORAGE_KEY = "lazymind:self-evolution:last-thread";
 export const DEPRECATED_SELF_EVOLUTION_THREAD_HISTORY_STORAGE_KEY = "lazymind:self-evolution:thread-history";
 
-export const workflowResultLabels: Record<WorkflowResultKind, string> = {
-  datasets: "数据集结果",
-  "eval-reports": "评测报告",
-  "analysis-reports": "分析报告",
-  diffs: "代码 diff 结果",
-  abtests: "ABTest 详情",
-};
+function t(key: string, options?: Record<string, unknown>): string {
+  return i18n.t(key, options) as string;
+}
+
+export function getWorkflowResultLabels(): Record<WorkflowResultKind, string> {
+  return {
+    datasets: t("selfEvolutionRun.workflowResultDatasets"),
+    "eval-reports": t("selfEvolutionRun.workflowResultEvalReports"),
+    "analysis-reports": t("selfEvolutionRun.workflowResultAnalysisReports"),
+    diffs: t("selfEvolutionRun.workflowResultDiffs"),
+    abtests: t("selfEvolutionRun.workflowResultAbtests"),
+  };
+}
 
 export function getSelfEvolutionWorkflowImageSrc(language?: string) {
   return language?.startsWith("en") ? "/Lazy-e.png" : "/Lazy-c.png";
@@ -395,12 +402,14 @@ export type AbSummaryReport = {
   guardMetrics: string[];
 };
 
-export const pxMetricMeta: Array<{ key: PxMetricKey; label: string; color: string }> = [
-  { key: "answer_correctness", label: "答案正确性", color: "#1a73e8" },
-  { key: "answer_score", label: "综合得分", color: "#22a06b" },
-  { key: "chunk_recall", label: "Chunk 召回", color: "#f08c00" },
-  { key: "doc_recall", label: "文档召回", color: "#7048e8" },
-];
+export function getPxMetricMeta(): Array<{ key: PxMetricKey; label: string; color: string }> {
+  return [
+    { key: "answer_correctness", label: t("selfEvolutionRun.metricAnswerCorrectness"), color: "#1a73e8" },
+    { key: "answer_score", label: t("selfEvolutionRun.metricAnswerScore"), color: "#22a06b" },
+    { key: "chunk_recall", label: t("selfEvolutionRun.metricChunkRecall"), color: "#f08c00" },
+    { key: "doc_recall", label: t("selfEvolutionRun.metricDocRecall"), color: "#7048e8" },
+  ];
+}
 
 const pxMetricFieldAliases: Record<PxMetricKey, string[]> = {
   answer_correctness: ["answer_correctness", "answer_correctness_avg", "correct_rate"],
@@ -421,13 +430,15 @@ export const stageStepMap: Record<ThreadEventStage, WorkflowStepId> = {
   abtest: "ab-test",
 };
 
-export const stageLabels: Record<ThreadEventStage, string> = {
-  dataset: "生成数据集",
-  eval: "执行评测",
-  analysis: "问题分析",
-  repair: "代码修改",
-  abtest: "ABTest 与切流",
-};
+export function getStageLabels(): Record<ThreadEventStage, string> {
+  return {
+    dataset: t("selfEvolutionRun.stageDataset"),
+    eval: t("selfEvolutionRun.stageEval"),
+    analysis: t("selfEvolutionRun.stageAnalysis"),
+    repair: t("selfEvolutionRun.stageRepair"),
+    abtest: t("selfEvolutionRun.stageAbtest"),
+  };
+}
 
 const stageResultKindMap: Record<ThreadEventStage, WorkflowResultKind> = {
   dataset: "datasets",
@@ -445,72 +456,82 @@ const stepStageMap: Record<WorkflowStepId, ThreadEventStage> = {
   "ab-test": "abtest",
 };
 
-export const checkpointCommandText = "继续执行";
+export function getCheckpointCommandText(): string {
+  return t("selfEvolutionRun.checkpointCommand");
+}
 
 export const terminalThreadEventTypes = new Set(["done", "thread.done", "thread.stop", "intent.done"]);
 export const failedThreadEventTypes = new Set(["error", "thread.error", "intent.error", "USER_ACTIVE_THREAD_EXISTS"]);
 const inactiveTerminalThreadStatuses = new Set(["cancelled", "canceled", "ended", "failed", "error"]);
 
-export const eventActionLabels: Record<string, string> = {
-  start: "开始",
-  progress: "进度更新",
-  finish: "完成",
-  failed: "失败",
-  cancel: "已取消",
-  pause: "已暂停",
-  resume: "已恢复",
-  "indexer.result": "索引器结果",
-  "conductor.result": "编排器结果",
-  "researcher.result": "研究员结果",
-  "tool.used": "工具调用",
-  "round.diff": "代码变更",
-};
+export function getEventActionLabels(): Record<string, string> {
+  return {
+    start: t("selfEvolutionRun.actionStart"),
+    progress: t("selfEvolutionRun.actionProgress"),
+    finish: t("selfEvolutionRun.actionFinish"),
+    failed: t("selfEvolutionRun.actionFailed"),
+    cancel: t("selfEvolutionRun.actionCancel"),
+    pause: t("selfEvolutionRun.actionPause"),
+    resume: t("selfEvolutionRun.actionResume"),
+    "indexer.result": t("selfEvolutionRun.actionIndexerResult"),
+    "conductor.result": t("selfEvolutionRun.actionConductorResult"),
+    "researcher.result": t("selfEvolutionRun.actionResearcherResult"),
+    "tool.used": t("selfEvolutionRun.actionToolUsed"),
+    "round.diff": t("selfEvolutionRun.actionRoundDiff"),
+  };
+}
 
-export const analysisCategoryLabels: Record<string, string> = {
-  retrieval_miss: "检索问题",
-  generation_drift: "生成偏移",
-  score_anomaly: "评分异常",
-};
+export function getAnalysisCategoryLabels(): Record<string, string> {
+  return {
+    retrieval_miss: t("selfEvolutionRun.categoryRetrievalMiss"),
+    generation_drift: t("selfEvolutionRun.categoryGenerationDrift"),
+    score_anomaly: t("selfEvolutionRun.categoryScoreAnomaly"),
+  };
+}
 
-export const analysisVerdictLabels: Record<string, string> = {
-  confirmed: "已确认",
-  refuted: "已推翻",
-  inconclusive: "待补证",
-  partial: "部分成立",
-};
+export function getAnalysisVerdictLabels(): Record<string, string> {
+  return {
+    confirmed: t("selfEvolutionRun.verdictConfirmed"),
+    refuted: t("selfEvolutionRun.verdictRefuted"),
+    inconclusive: t("selfEvolutionRun.verdictInconclusive"),
+    partial: t("selfEvolutionRun.verdictPartial"),
+  };
+}
 
-export const workflowStepDefinitions: Omit<WorkflowStep, "status" | "runtimeText">[] = [
-  {
-    id: "dataset",
-    title: "Step 1 · 生成数据集",
-    desc: "将任务目标拆分为训练样本，生成数据集数据并写入自进化流水线。",
-  },
-  {
-    id: "px-report",
-    title: "Step 2 · 执行评测",
-    desc: "基于数据集执行 RAG 评测和 judge 评分，建立效果基线。",
-  },
-  {
-    id: "analysis",
-    title: "Step 3 · 问题分析",
-    desc: "自动分析误答样本，产出问题归因和优先级建议。",
-  },
-  {
-    id: "code-optimize",
-    title: "Step 4 · 代码修改",
-    desc: "展示 repair/opencode 的补丁生成、验证和优化 diff。",
-  },
-  {
-    id: "ab-test",
-    title: "Step 5 · ABTest 与切流",
-    desc: "执行对照实验并在用户确认后推进候选服务切流。",
-  },
-];
+export function getWorkflowStepDefinitions(): Omit<WorkflowStep, "status" | "runtimeText">[] {
+  return [
+    {
+      id: "dataset",
+      title: t("selfEvolutionRun.stepDatasetTitle"),
+      desc: t("selfEvolutionRun.stepDatasetDesc"),
+    },
+    {
+      id: "px-report",
+      title: t("selfEvolutionRun.stepEvalTitle"),
+      desc: t("selfEvolutionRun.stepEvalDesc"),
+    },
+    {
+      id: "analysis",
+      title: t("selfEvolutionRun.stepAnalysisTitle"),
+      desc: t("selfEvolutionRun.stepAnalysisDesc"),
+    },
+    {
+      id: "code-optimize",
+      title: t("selfEvolutionRun.stepCodeOptimizeTitle"),
+      desc: t("selfEvolutionRun.stepCodeOptimizeDesc"),
+    },
+    {
+      id: "ab-test",
+      title: t("selfEvolutionRun.stepAbTestTitle"),
+      desc: t("selfEvolutionRun.stepAbTestDesc"),
+    },
+  ];
+}
 
-export const workflowStepOrder = workflowStepDefinitions.map((step) => step.id);
+export const workflowStepOrder: WorkflowStepId[] = ["dataset", "px-report", "analysis", "code-optimize", "ab-test"];
 
 export const getKnowledgeBaseName = (dataset: Dataset) =>
-  dataset.display_name || dataset.name || dataset.dataset_id || "未命名知识库";
+  dataset.display_name || dataset.name || dataset.dataset_id || t("selfEvolutionRun.unnamedKnowledgeBase");
 
 export const isCanceledRequest = (error: unknown) => {
   const normalizedError = error as {
@@ -531,9 +552,11 @@ export const isCanceledRequest = (error: unknown) => {
   );
 };
 
-export const existingEvalSetOptions = [
-  { label: "不使用已有评测集", value: "__none__" },
-];
+export function getExistingEvalSetOptions() {
+  return [
+    { label: t("selfEvolutionRun.noExistingEvalSet"), value: "__none__" },
+  ];
+}
 
 export const evalSetPreviewData: EvalDataset = {
   eval_set_id: "b2e1616d-3d60-4327-9995-3d700e0a6e81",
@@ -572,16 +595,18 @@ export const evalSetPreviewData: EvalDataset = {
   ],
 };
 
-export const questionTypeLabelMap: Record<number, string> = {
-  1: "单跳",
-  2: "多跳",
-  3: "公式",
-  4: "表格",
-  5: "代码",
-};
+export function getQuestionTypeLabelMap(): Record<number, string> {
+  return {
+    1: t("selfEvolutionRun.qtSingleHop"),
+    2: t("selfEvolutionRun.qtMultiHop"),
+    3: t("selfEvolutionRun.qtFormula"),
+    4: t("selfEvolutionRun.qtTable"),
+    5: t("selfEvolutionRun.qtCode"),
+  };
+}
 
 export const formatQuestionType = (questionType: number) => {
-  const label = questionTypeLabelMap[questionType];
+  const label = getQuestionTypeLabelMap()[questionType];
   if (!label) {
     return String(questionType);
   }
@@ -607,7 +632,7 @@ export const getQuestionTypeDisplayName = (item: EvalQuestionTypeSummary, index:
   if (typeof item.question_type === "number") {
     return formatQuestionType(item.question_type);
   }
-  return `分类 ${index + 1}`;
+  return t("selfEvolutionRun.categoryN", { n: index + 1 });
 };
 
 export const buildPxCategoryMetricAveragesFromReport = (payload: unknown): PxCategoryMetricAverage[] => {
@@ -643,7 +668,7 @@ export const buildPxCategoryMetricAveragesFromReport = (payload: unknown): PxCat
   const metricsRecord = getNestedRecordField(reportRecord, ["metrics"]);
   if (metricsRecord) {
     return [{
-      category: "总体",
+      category: t("selfEvolutionRun.categoryOverall"),
       caseCount: getNumberField(reportRecord, ["total", "total_cases", "case_count"]) || 0,
       metrics: {
         answer_correctness: getMetricFieldNumber(metricsRecord, "answer_correctness"),
@@ -744,21 +769,21 @@ export function createInitialWorkflowResultsState(): WorkflowResultsState {
 
 export function getStepStatusLabel(status: StepStatus) {
   if (status === "running") {
-    return "进行中";
+    return t("selfEvolutionRun.statusRunning");
   }
   if (status === "done") {
-    return "已完成";
+    return t("selfEvolutionRun.statusDone");
   }
   if (status === "paused") {
-    return "已暂停";
+    return t("selfEvolutionRun.statusPaused");
   }
   if (status === "canceled") {
-    return "已取消";
+    return t("selfEvolutionRun.statusCanceled");
   }
   if (status === "failed") {
-    return "已失败";
+    return t("selfEvolutionRun.statusFailed");
   }
-  return "待执行";
+  return t("selfEvolutionRun.statusPending");
 }
 
 export function getTerminalFlowStepStatus(status?: string): StepStatus | undefined {
@@ -1158,7 +1183,7 @@ export function formatThreadListTime(value: unknown) {
     }
   }
 
-  return "刚刚";
+  return t("selfEvolutionRun.justNow");
 }
 
 export function getThreadListItemTitle(item: Record<string, unknown>, threadId: string) {
@@ -1166,7 +1191,7 @@ export function getThreadListItemTitle(item: Record<string, unknown>, threadId: 
   return (
     getNestedStringField(item, ["title", "name", "thread_name", "display_name"]) ||
     getNestedStringField(payload, ["title", "name", "thread_name", "display_name", "kb_id", "dataset_id"]) ||
-    `自进化会话 ${threadId.slice(0, 8)}`
+    t("selfEvolutionRun.sessionTitle", { prefix: threadId.slice(0, 8) })
   );
 }
 
@@ -1198,10 +1223,10 @@ export function getDialogueEventAgentLabel(event: NormalizedThreadEvent) {
     return "AutoOperator";
   }
   if (event.type === "message.user") {
-    return "模拟用户";
+    return t("selfEvolutionRun.simulatedUser");
   }
   if (event.type === "message.assistant") {
-    return "回复 Agent";
+    return t("selfEvolutionRun.replyAgent");
   }
   return undefined;
 }
@@ -1491,15 +1516,15 @@ export function clampPercent(value: number) {
 
 export function getRuntimeProgressStatusLabel(action: string | undefined) {
   if (action === "finish") {
-    return "已完成";
+    return t("selfEvolutionRun.statusDone");
   }
   if (action === "cancel") {
-    return "已取消";
+    return t("selfEvolutionRun.statusCanceled");
   }
   if (action === "pause") {
-    return "已暂停";
+    return t("selfEvolutionRun.statusPaused");
   }
-  return "进行中";
+  return t("selfEvolutionRun.statusRunning");
 }
 
 function getOperationRunId(payload: Record<string, unknown> | undefined) {
@@ -1538,6 +1563,14 @@ function getEventArtifactId(payload: Record<string, unknown> | undefined) {
     getStringField(payload, ["artifact_id", "writes_artifact_id"]);
 }
 
+function getEventRuntimeArtifactId(payload: Record<string, unknown> | undefined) {
+  const data = getEventPayloadData(payload);
+  const detail = getNestedRecordField(data, ["detail"]) || getStructuredRecordField(data, ["detail"]);
+  return getStringField(data, ["runtime_artifact_id", "source_artifact_id"]) ||
+    getStringField(detail, ["runtime_artifact_id", "source_artifact_id"]) ||
+    getStringField(payload, ["runtime_artifact_id", "source_artifact_id"]);
+}
+
 function getEventDetailField(payload: Record<string, unknown> | undefined, keys: string[]) {
   const data = getEventPayloadData(payload);
   const detail = getNestedRecordField(data, ["detail"]) || getStructuredRecordField(data, ["detail"]);
@@ -1568,7 +1601,7 @@ function createSegmentProgressSnapshot(
         ? 100
         : 0;
   return {
-    statusText: isActionKind(action, "finish") ? `${label}已完成` : `${label}中`,
+    statusText: isActionKind(action, "finish") ? t("selfEvolutionRun.segmentDone", { label }) : t("selfEvolutionRun.segmentRunning", { label }),
     percent: clampPercent(base + (span * operationPercent) / 100),
     rank: rank + (current || 0),
   };
@@ -1586,37 +1619,37 @@ function getAbtestWorkflowProgressSnapshot(
   const decision = getEventDetailField(payload, ["decision_status"]);
 
   if (flowKind === "abtest.candidate_rag_answer" && getEventCaseId(payload)) {
-    return createSegmentProgressSnapshot("候选回答生成", 8, 40, action, 100, operationProgress?.current, caseTotal);
+    return createSegmentProgressSnapshot(t("selfEvolutionRun.segCandidateAnswer"), 8, 40, action, 100, operationProgress?.current, caseTotal);
   }
   if (flowKind === "abtest.candidate_judge" && getEventCaseId(payload)) {
-    return createSegmentProgressSnapshot("候选结果评测", 48, 40, action, 300, operationProgress?.current, caseTotal);
+    return createSegmentProgressSnapshot(t("selfEvolutionRun.segCandidateEval"), 48, 40, action, 300, operationProgress?.current, caseTotal);
   }
   if (flowKind === "eval.aggregate" || artifactId === "candidate_eval_report") {
-    return createSegmentProgressSnapshot("候选评测汇总", 88, 4, isActionKind(action, "finish") ? "progress" : action, 500);
+    return createSegmentProgressSnapshot(t("selfEvolutionRun.segCandidateEvalSummary"), 88, 4, isActionKind(action, "finish") ? "progress" : action, 500);
   }
   if (flowKind === "abtest.candidate_service.start") {
-    return createSegmentProgressSnapshot("候选服务启动", 0, 8, action, 50);
+    return createSegmentProgressSnapshot(t("selfEvolutionRun.segCandidateServiceStart"), 0, 8, action, 50);
   }
   if (flowKind === "abtest.candidate_service.stop") {
     return {
-      statusText: isActionKind(action, "finish") ? "候选服务回收已完成" : "候选服务回收中",
+      statusText: isActionKind(action, "finish") ? t("selfEvolutionRun.segCandidateServiceRecycleDone") : t("selfEvolutionRun.segCandidateServiceRecycling"),
       percent: isActionKind(action, "finish") ? 100 : 98,
       rank: 750,
     };
   }
   if (decision) {
     return {
-      statusText: decision.toLowerCase() === "accept" ? "候选通过切流门槛" : "候选未通过切流门槛",
+      statusText: decision.toLowerCase() === "accept" ? t("selfEvolutionRun.segCandidatePassedCutover") : t("selfEvolutionRun.segCandidateFailedCutover"),
       percent: 96,
       rank: 650,
     };
   }
   if (flowKind === "abtest.compare") {
-    return createSegmentProgressSnapshot("A/B 对照决策", 92, 4, action, 600);
+    return createSegmentProgressSnapshot(t("selfEvolutionRun.segAbCompareDecision"), 92, 4, action, 600);
   }
   if (flowKind === "abtest.candidate_cutover" || artifactId === "candidate_algorithm_cutover") {
     return {
-      statusText: isActionKind(action, "finish") ? "候选算法切流已完成" : "等待确认切流",
+      statusText: isActionKind(action, "finish") ? t("selfEvolutionRun.segCandidateCutoverDone") : t("selfEvolutionRun.segWaitingCutoverConfirm"),
       percent: isActionKind(action, "finish") ? 100 : 96,
       rank: 700,
     };
@@ -1625,19 +1658,22 @@ function getAbtestWorkflowProgressSnapshot(
   return undefined;
 }
 
-const datasetOperationSegments = {
-  "dataset.load_corpus": { label: "加载语料", base: 0, span: 18, rank: 10 },
-  "dataset.build_corpus_snapshot": { label: "构建语料快照", base: 18, span: 17, rank: 20 },
-  "dataset.generate_case": { label: "生成样本", base: 35, span: 45, rank: 30 },
-  "dataset.assemble": { label: "组装数据集", base: 80, span: 20, rank: 50 },
-} as const;
+function getDatasetOperationSegments() {
+  return {
+    "dataset.load_corpus": { label: t("selfEvolutionRun.segLoadCorpus"), base: 0, span: 18, rank: 10 },
+    "dataset.build_corpus_snapshot": { label: t("selfEvolutionRun.segBuildCorpusSnapshot"), base: 18, span: 17, rank: 20 },
+    "dataset.generate_case": { label: t("selfEvolutionRun.segGenerateCase"), base: 35, span: 45, rank: 30 },
+    "dataset.assemble": { label: t("selfEvolutionRun.segAssembleDataset"), base: 80, span: 20, rank: 50 },
+  };
+}
 
 function getDatasetWorkflowProgressSnapshot(
   action: string | undefined,
   payload: Record<string, unknown> | undefined,
 ): WorkflowProgressSnapshot | undefined {
   const eventData = getEventPayloadData(payload);
-  const segment = datasetOperationSegments[getEventFlowKind(payload) as keyof typeof datasetOperationSegments];
+  const datasetOperationSegments = getDatasetOperationSegments();
+  const segment = datasetOperationSegments[getEventFlowKind(payload) as keyof ReturnType<typeof getDatasetOperationSegments>];
   if (!segment) {
     if (isActionKind(action, "finish")) {
       return getStringField(eventData, ["stage"]) === "dataset" ? getCompletedProgressSnapshot() : undefined;
@@ -1664,14 +1700,14 @@ function getDatasetWorkflowProgressSnapshot(
 
   if (typeof operationPercent !== "number") {
     return {
-      statusText: `${segment.label}进行中`,
+      statusText: t("selfEvolutionRun.segmentRunning", { label: segment.label }),
       percent: segment.base,
       rank: segment.rank,
     };
   }
 
   return {
-    statusText: isActionKind(action, "finish") ? `${segment.label}已完成` : `${segment.label}进行中`,
+    statusText: isActionKind(action, "finish") ? t("selfEvolutionRun.segmentDone", { label: segment.label }) : t("selfEvolutionRun.segmentRunning", { label: segment.label }),
     percent: clampPercent(segment.base + (segment.span * operationPercent) / 100),
     rank: segment.rank,
   };
@@ -1728,30 +1764,31 @@ function getEvalPhasePayloadData(payload: Record<string, unknown> | undefined, p
 
 function getEvalPhaseLabel(phase: EvalPayloadPhase | undefined) {
   if (phase === "judge") {
-    return "实际评测";
+    return t("selfEvolutionRun.evalPhaseJudge");
   }
   if (phase === "rag") {
-    return "评测集问答生成";
+    return t("selfEvolutionRun.evalPhaseRag");
   }
-  return "执行评测";
+  return t("selfEvolutionRun.evalPhaseDefault");
 }
 
 function getEvalProgressStatusLabel(action: string | undefined, phase: EvalPayloadPhase | undefined) {
+  const label = getEvalPhaseLabel(phase);
   if (isActionKind(action, "finish")) {
-    return `${getEvalPhaseLabel(phase)}已完成`;
+    return t("selfEvolutionRun.segmentDone", { label });
   }
   if (isActionKind(action, "cancel")) {
-    return `${getEvalPhaseLabel(phase)}已取消`;
+    return t("selfEvolutionRun.segmentCanceled", { label });
   }
   if (isActionKind(action, "pause")) {
-    return `${getEvalPhaseLabel(phase)}已暂停`;
+    return t("selfEvolutionRun.segmentPaused", { label });
   }
-  return `${getEvalPhaseLabel(phase)}中`;
+  return t("selfEvolutionRun.segmentActive", { label });
 }
 
 export function getCompletedProgressSnapshot(): WorkflowProgressSnapshot {
   return {
-    statusText: "已完成",
+    statusText: t("selfEvolutionRun.statusDone"),
     percent: 100,
   };
 }
@@ -1779,13 +1816,13 @@ function mergeProgressSnapshot(
 const evalProgressPhaseDefinitions: Record<WorkflowProgressPhaseId, Omit<WorkflowProgressPhaseSnapshot, "statusText" | "percent">> = {
   rag: {
     id: "rag",
-    title: "RAG 生成回答",
-    desc: "取评测集样本，调用大模型生成回答",
+    title: t("selfEvolutionRun.evalPhaseRagTitle"),
+    desc: t("selfEvolutionRun.evalPhaseRagDesc"),
   },
   judge: {
     id: "judge",
-    title: "Judge 实际评测",
-    desc: "对回答进行评分并汇总评测结果",
+    title: t("selfEvolutionRun.evalPhaseJudgeTitle"),
+    desc: t("selfEvolutionRun.evalPhaseJudgeDesc"),
   },
 };
 
@@ -1795,7 +1832,7 @@ function createEvalProgressPhaseSnapshot(
 ): WorkflowProgressPhaseSnapshot {
   return {
     ...evalProgressPhaseDefinitions[phase],
-    statusText: progress?.statusText || "等待开始",
+    statusText: progress?.statusText || t("selfEvolutionRun.waitingToStart"),
     percent: progress?.percent ?? 0,
   };
 }
@@ -1819,11 +1856,10 @@ function getEvalOverallProgressSnapshot(phases: WorkflowProgressPhaseSnapshot[] 
     return undefined;
   }
   const activePhase =
-    phases.find((item) => item.statusText.endsWith("中")) ||
     phases.find((item) => item.percent > 0 && item.percent < 100) ||
     phases.find((item) => item.percent < 100);
   return {
-    statusText: phases.every((item) => item.percent >= 100) ? "已完成" : activePhase?.statusText || "进行中",
+    statusText: phases.every((item) => item.percent >= 100) ? t("selfEvolutionRun.statusDone") : activePhase?.statusText || t("selfEvolutionRun.statusRunning"),
     percent: clampPercent(phases.reduce((sum, item) => sum + item.percent, 0) / phases.length),
   };
 }
@@ -1853,7 +1889,7 @@ function updateEvalProgressPhases(
   const currentPhase = next.find((item) => item.id === phase);
   const progressSnapshot = progress || {
     statusText: isActionKind(action, "finish") && isOperationScoped
-      ? `${getEvalPhaseLabel(phase)}中`
+      ? t("selfEvolutionRun.segmentActive", { label: getEvalPhaseLabel(phase) })
       : getEvalProgressStatusLabel(action, phase),
     percent: isActionKind(action, "finish") && !isOperationScoped ? 100 : currentPhase?.percent ?? 0,
   };
@@ -1962,16 +1998,16 @@ export function getStructuredArrayField(payload: Record<string, unknown> | undef
 
 export function formatAnalysisVerdict(verdict: string | undefined) {
   if (!verdict) {
-    return "调查中";
+    return t("selfEvolutionRun.verdictInvestigating");
   }
-  return analysisVerdictLabels[verdict] || verdict;
+  return getAnalysisVerdictLabels()[verdict] || verdict;
 }
 
 export function formatAnalysisCategory(category: string | undefined) {
   if (!category) {
-    return "待归类";
+    return t("selfEvolutionRun.categoryUncategorized");
   }
-  return analysisCategoryLabels[category] || category;
+  return getAnalysisCategoryLabels()[category] || category;
 }
 
 export function formatConfidencePercent(value: number | undefined) {
@@ -1985,10 +2021,10 @@ export function formatConfidencePercent(value: number | undefined) {
 
 export function formatAnalysisAgentName(agent: string | undefined) {
   if (!agent) {
-    return "研究子代理";
+    return t("selfEvolutionRun.researchSubagent");
   }
   if (agent.startsWith("researcher:")) {
-    return `研究员 ${agent.slice("researcher:".length)}`;
+    return t("selfEvolutionRun.researcherN", { n: agent.slice("researcher:".length) });
   }
   return agent;
 }
@@ -2001,15 +2037,15 @@ export function buildAnalysisEventDisplayText(
   const eventData = getEventPayloadData(payload);
 
   if (action === "start") {
-    return "已启动问题归因分析，正在生成调查方向。";
+    return t("selfEvolutionRun.analysisStarted");
   }
 
   if (type === "run.indexer.result") {
     const resultRecord = getNestedRecordField(eventData, ["result"]) || getStructuredRecordField(eventData, ["summary"]);
     const hypotheses = getStructuredArrayField(resultRecord, ["hypotheses"]) || [];
     return hypotheses.length > 0
-      ? `已生成 ${hypotheses.length} 条调查假设，准备分配给研究子代理。`
-      : "已完成首轮问题扫描，正在整理调查假设。";
+      ? t("selfEvolutionRun.analysisHypothesesGenerated", { count: hypotheses.length })
+      : t("selfEvolutionRun.analysisFirstScanDone");
   }
 
   if (type === "run.conductor.result") {
@@ -2018,19 +2054,19 @@ export function buildAnalysisEventDisplayText(
     const converged = resultRecord?.converged === true;
     const totalActions = getNumberField(resultRecord, ["total_actions"]);
     if (converged) {
-      const actionText = typeof totalActions === "number" ? `，累计处理 ${totalActions} 项动作` : "";
-      return `分析已收敛，共完成 ${iteration || 0} 轮编排${actionText}。`;
+      const actionText = typeof totalActions === "number" ? t("selfEvolutionRun.analysisConvergedActions", { count: totalActions }) : "";
+      return t("selfEvolutionRun.analysisConverged", { iterations: iteration || 0, actionText });
     }
     if (typeof iteration === "number" && iteration > 0) {
-      return `已完成第 ${iteration} 轮编排，正在继续分配调查任务。`;
+      return t("selfEvolutionRun.analysisIterationDone", { iteration });
     }
-    return "编排器正在整理研究子代理的调查任务。";
+    return t("selfEvolutionRun.analysisConductorOrganizing");
   }
 
   if (type === "run.tool.used") {
     const agent = formatAnalysisAgentName(getStringField(eventData, ["agent"]));
-    const tool = getStringField(eventData, ["tool"]) || "工具";
-    return `${agent} 正在使用 ${tool} 收集证据。`;
+    const tool = getStringField(eventData, ["tool"]) || t("selfEvolutionRun.genericTool");
+    return t("selfEvolutionRun.analysisToolUsed", { agent, tool });
   }
 
   if (type === "run.researcher.result") {
@@ -2039,20 +2075,20 @@ export function buildAnalysisEventDisplayText(
     const hypothesisId = getStringField(resultRecord, ["hypothesis_id"]);
     const verdict = formatAnalysisVerdict(getStringField(resultRecord, ["verdict"]));
     return hypothesisId
-      ? `${agent} 已提交 ${hypothesisId} 的调查结论：${verdict}。`
-      : `${agent} 已提交一条调查结论。`;
+      ? t("selfEvolutionRun.analysisResearcherConclusionWithHypothesis", { agent, hypothesisId, verdict })
+      : t("selfEvolutionRun.analysisResearcherConclusion", { agent });
   }
 
   if (action === "finish") {
-    return "分析完成，已生成可查看的分析报告。";
+    return t("selfEvolutionRun.analysisDone");
   }
 
   if (action === "cancel") {
-    return "分析已取消，当前结果未继续推进。";
+    return t("selfEvolutionRun.analysisCanceled");
   }
 
   if (action === "pause") {
-    return "分析已暂停，等待继续执行。";
+    return t("selfEvolutionRun.analysisPaused");
   }
 
   return undefined;
@@ -2071,27 +2107,27 @@ export function buildApplyEventDisplayText(
 
   if (phase === "repair_loop") {
     if (isActionKind(action, "finish")) {
-      const decision = getStringField(detail, ["decision"]) || "完成";
-      return `修复循环已结束，结果：${decision}。`;
+      const decision = getStringField(detail, ["decision"]) || t("selfEvolutionRun.repairDecisionDefault");
+      return t("selfEvolutionRun.repairLoopDone", { decision });
     }
-    return typeof attempt === "number" ? `修复循环正在执行第 ${attempt} 轮。` : "修复循环正在运行。";
+    return typeof attempt === "number" ? t("selfEvolutionRun.repairLoopAttempt", { attempt }) : t("selfEvolutionRun.repairLoopRunning");
   }
 
   if (phase === "opencode") {
-    return typeof attempt === "number" ? `opencode 正在执行第 ${attempt} 轮代码修改。` : "opencode 正在生成候选改动。";
+    return typeof attempt === "number" ? t("selfEvolutionRun.opencodeAttempt", { attempt }) : t("selfEvolutionRun.opencodeGenerating");
   }
 
   if (phase === "repair_patch") {
-    const status = isActionKind(action, "failed") ? "未通过" : "已生成";
-    return failure ? `候选补丁${status}：${failure}。` : `候选补丁${status}，正在等待验证。`;
+    const status = isActionKind(action, "failed") ? t("selfEvolutionRun.patchFailed") : t("selfEvolutionRun.patchGenerated");
+    return failure ? t("selfEvolutionRun.patchStatusWithFailure", { status, failure }) : t("selfEvolutionRun.patchStatusWaiting", { status });
   }
 
   if (phase === "repair_candidate_service" || phase === "candidate_service") {
-    return isActionKind(action, "finish") ? "候选服务已启动并可用于验证。" : "候选服务正在启动，用于真实评测验证。";
+    return isActionKind(action, "finish") ? t("selfEvolutionRun.candidateServiceReady") : t("selfEvolutionRun.candidateServiceStarting");
   }
 
   if (action === "start") {
-    return "已启动代码修改，正在生成候选改动。";
+    return t("selfEvolutionRun.repairStarted");
   }
 
   if (type === "apply.round.diff") {
@@ -2101,25 +2137,25 @@ export function buildApplyEventDisplayText(
     );
     const diffSummary = getStringField(eventData, ["diff_summary"]);
     const testsText = diffSummary?.includes("tests passed")
-      ? "，测试已通过"
+      ? t("selfEvolutionRun.testsPassed")
       : diffSummary?.includes("tests not run")
-        ? "，尚未执行测试"
+        ? t("selfEvolutionRun.testsNotRun")
         : diffSummary?.includes("tests failed")
-          ? "，测试未通过"
+          ? t("selfEvolutionRun.testsFailed")
           : "";
     const fileText =
-      filesChanged.length > 0 ? `涉及 ${filesChanged.length} 个文件` : "暂未产出文件改动";
+      filesChanged.length > 0 ? t("selfEvolutionRun.filesChanged", { count: filesChanged.length }) : t("selfEvolutionRun.noFileChanges");
     return typeof round === "number"
-      ? `已产出第 ${round} 轮候选改动，${fileText}${testsText}。`
-      : `已产出一轮候选改动，${fileText}${testsText}。`;
+      ? t("selfEvolutionRun.roundDiffDone", { round, fileText, testsText })
+      : t("selfEvolutionRun.diffDone", { fileText, testsText });
   }
 
   if (action === "finish") {
-    return "候选修改版本已准备完成，可查看代码改动结果。";
+    return t("selfEvolutionRun.repairDone");
   }
 
   if (action === "cancel") {
-    return "代码修改已取消，当前候选版本未继续推进。";
+    return t("selfEvolutionRun.repairCanceled");
   }
 
   return undefined;
@@ -2130,34 +2166,35 @@ export function buildDatasetEventDisplayText(
   payload: Record<string, unknown> | undefined,
 ) {
   const eventData = getEventPayloadData(payload);
-  const operationSegment = datasetOperationSegments[getEventFlowKind(payload) as keyof typeof datasetOperationSegments];
+  const _datasetOperationSegments = getDatasetOperationSegments();
+  const operationSegment = _datasetOperationSegments[getEventFlowKind(payload) as keyof ReturnType<typeof getDatasetOperationSegments>];
   const current = getNumberField(eventData, ["current", "completed", "done", "processed"]);
   const total = getNumberField(eventData, ["total", "num_cases", "cases", "count"]);
   const countText =
     typeof current === "number" && typeof total === "number" && total > 0
-      ? `，进度 ${current}/${total}`
+      ? t("selfEvolutionRun.progressCount", { current, total })
       : typeof total === "number" && total > 0
-        ? `，共 ${total} 条样本`
+        ? t("selfEvolutionRun.totalCount", { total })
         : "";
 
   if (isActionKind(action, "start")) {
-    return "已启动数据集生成，正在准备评测样本。";
+    return t("selfEvolutionRun.datasetStarted");
   }
   if (isActionKind(action, "finish")) {
     if (operationSegment && operationSegment.base + operationSegment.span < 100) {
-      return `${operationSegment.label}已完成，继续等待后续数据集操作。`;
+      return t("selfEvolutionRun.segmentDoneWaiting", { label: operationSegment.label });
     }
-    return "数据集生成已完成，可下载查看结果。";
+    return t("selfEvolutionRun.datasetDone");
   }
   if (isActionKind(action, "cancel")) {
-    return "数据集生成已取消。";
+    return t("selfEvolutionRun.datasetCanceled");
   }
   if (isActionKind(action, "pause")) {
-    return "数据集生成已暂停，等待继续执行。";
+    return t("selfEvolutionRun.datasetPaused");
   }
   return operationSegment
-    ? `${operationSegment.label}正在执行${countText}。`
-    : `数据集生成正在执行${countText}。`;
+    ? t("selfEvolutionRun.segmentRunningCount", { label: operationSegment.label, countText })
+    : t("selfEvolutionRun.datasetRunningCount", { countText });
 }
 
 export function buildEvalEventDisplayText(
@@ -2172,37 +2209,37 @@ export function buildEvalEventDisplayText(
   const total = getNumberField(eventData, ["total", "num_cases", "cases", "count"]);
   const countText =
     typeof current === "number" && typeof total === "number" && total > 0
-      ? `，进度 ${current}/${total}`
+      ? t("selfEvolutionRun.progressCount", { current, total })
       : typeof total === "number" && total > 0
-        ? `，共 ${total} 条样本`
+        ? t("selfEvolutionRun.totalCount", { total })
         : "";
 
   if (isActionKind(action, "start")) {
     return phase === "rag"
-      ? "已开始从评测集取样并调用大模型生成回答。"
+      ? t("selfEvolutionRun.evalRagStarted")
       : phase === "judge"
-        ? "已开始对模型回答进行实际评测。"
-        : "已启动评测流程，正在准备评测任务。";
+        ? t("selfEvolutionRun.evalJudgeStarted")
+        : t("selfEvolutionRun.evalStarted");
   }
 
   if (isActionKind(action, "finish")) {
     return phase === "rag"
-      ? "评测集问答生成已完成，准备进入实际评测。"
+      ? t("selfEvolutionRun.evalRagDone")
       : phase === "judge"
-        ? "实际评测已完成，可生成评测报告。"
-        : "评测流程已完成，可查看评测报告。";
+        ? t("selfEvolutionRun.evalJudgeDone")
+        : t("selfEvolutionRun.evalDone");
   }
 
   if (isActionKind(action, "cancel")) {
-    return `${phaseLabel}已取消。`;
+    return t("selfEvolutionRun.segmentCanceled", { label: phaseLabel });
   }
 
   if (isActionKind(action, "pause")) {
-    return `${phaseLabel}已暂停，等待继续执行。`;
+    return t("selfEvolutionRun.segmentPausedWaiting", { label: phaseLabel });
   }
 
   if (phase) {
-    return `${phaseLabel}正在执行${countText}。`;
+    return t("selfEvolutionRun.segmentRunningCount", { label: phaseLabel, countText });
   }
 
   return undefined;
@@ -2219,41 +2256,41 @@ export function buildAbtestEventDisplayText(action: string | undefined, payload?
     ? `，case ${operationProgress.current}${caseTotal ? `/${caseTotal}` : ""}`
     : "";
   if (flowKind === "abtest.candidate_rag_answer" && getEventCaseId(payload)) {
-    return `候选版本正在生成回答${caseText}。`;
+    return t("selfEvolutionRun.abtestCandidateGenerating", { caseText });
   }
   if (flowKind === "abtest.candidate_judge" && getEventCaseId(payload)) {
-    return `候选版本正在接受实际评测${caseText}。`;
+    return t("selfEvolutionRun.abtestCandidateEvaluating", { caseText });
   }
   if (flowKind === "eval.aggregate" || getEventArtifactId(payload) === "candidate_eval_report") {
-    return isActionKind(action, "finish") ? "候选评测报告已汇总完成。" : "正在汇总候选评测报告。";
+    return isActionKind(action, "finish") ? t("selfEvolutionRun.abtestEvalReportDone") : t("selfEvolutionRun.abtestEvalReportSummarizing");
   }
   if (flowKind === "abtest.candidate_cutover") {
-    return isActionKind(action, "finish") ? "候选算法切流已完成。" : "正在准备候选算法切流，需用户确认后推进。";
+    return isActionKind(action, "finish") ? t("selfEvolutionRun.abtestCutoverDone") : t("selfEvolutionRun.abtestCutoverPending");
   }
   if (flowKind === "abtest.candidate_service.stop") {
     return status === "success" || isActionKind(action, "finish")
-      ? "候选服务已停止，候选版本未切流。"
-      : "正在停止候选服务，回收未通过的候选版本。";
+      ? t("selfEvolutionRun.abtestCandidateServiceStopped")
+      : t("selfEvolutionRun.abtestCandidateServiceStopping");
   }
   if (flowKind === "abtest.candidate_service.start") {
-    return isActionKind(action, "finish") ? "候选服务已就绪，可用于 A/B 对照。" : "正在启动候选服务。";
+    return isActionKind(action, "finish") ? t("selfEvolutionRun.abtestCandidateServiceReady") : t("selfEvolutionRun.abtestCandidateServiceStarting");
   }
   if (decision) {
     return decision === "accept"
-      ? "A/B 对照决策完成：候选版本通过切流门槛。"
-      : "A/B 对照决策完成：候选版本未通过切流门槛。";
+      ? t("selfEvolutionRun.abtestDecisionPassed")
+      : t("selfEvolutionRun.abtestDecisionFailed");
   }
   if (flowKind === "abtest.compare") {
-    return isActionKind(action, "finish") ? "A/B 对照评测已完成，正在整理决策结果。" : "正在执行 A/B 对照评测。";
+    return isActionKind(action, "finish") ? t("selfEvolutionRun.abtestCompareDone") : t("selfEvolutionRun.abtestCompareRunning");
   }
   if (action === "start") {
-    return "已启动 A/B 测试，正在基于同一批样本执行对照评测。";
+    return t("selfEvolutionRun.abtestStarted");
   }
   if (action === "finish") {
-    return "A/B 测试已完成，可查看对比结果。";
+    return t("selfEvolutionRun.abtestDone");
   }
   if (action === "cancel") {
-    return "A/B 测试已取消。";
+    return t("selfEvolutionRun.abtestCanceled");
   }
   return undefined;
 }
@@ -2307,7 +2344,7 @@ export function getWorkflowProgressSnapshot(
 
   const rank = operationProgress?.current ?? (getEventFlowKind(payload) === "dataset.assemble" ? current : undefined);
   return {
-    statusText: rank ? "进行中" : stage === "eval" ? getEvalProgressStatusLabel(action, evalPhase) : getRuntimeProgressStatusLabel(action),
+    statusText: rank ? t("selfEvolutionRun.statusRunning") : stage === "eval" ? getEvalProgressStatusLabel(action, evalPhase) : getRuntimeProgressStatusLabel(action),
     percent: clampPercent(percent),
     rank,
   };
@@ -2367,7 +2404,7 @@ export function toThreadEventStage(value: unknown): ThreadEventStage | undefined
 export function getStageLabel(value: unknown) {
   const stage = toThreadEventStage(value);
   if (stage) {
-    return stageLabels[stage];
+    return getStageLabels()[stage];
   }
   if (typeof value === "string" && value.trim()) {
     return value.trim();
@@ -2393,14 +2430,14 @@ export function formatCheckpointOperation(value: string | undefined) {
   const stageLabel = getStageLabel(operationStage);
   const rawAction = operationParts.join(".");
   const actionLabel =
-    {
+    ({
       "": "",
       run: "",
       loop: "",
-      candidate_cutover: "候选算法切流",
-      "candidate_service.start": "候选服务启动",
-      "candidate_service.stop": "候选服务停止",
-    }[rawAction] ?? rawAction.replace(/_/g, " ");
+      candidate_cutover: t("selfEvolutionRun.opCandidateCutover"),
+      "candidate_service.start": t("selfEvolutionRun.opCandidateServiceStart"),
+      "candidate_service.stop": t("selfEvolutionRun.opCandidateServiceStop"),
+    } as Record<string, string>)[rawAction] ?? rawAction.replace(/_/g, " ");
   return [stageLabel, actionLabel].filter(Boolean).join(" · ");
 }
 
@@ -2409,12 +2446,12 @@ function formatCheckpointCapability(value: string | undefined) {
     return undefined;
   }
 
-  return {
-    patch_dataset_case: "修改数据集样本",
-    regenerate_dataset_case: "重写数据集样本",
-    prepare_dataset_case: "准备评测样本",
-    generate_dataset_case: "生成评测样本",
-  }[value] ?? value.replace(/_/g, " ");
+  return ({
+    patch_dataset_case: t("selfEvolutionRun.capPatchDatasetCase"),
+    regenerate_dataset_case: t("selfEvolutionRun.capRegenerateDatasetCase"),
+    prepare_dataset_case: t("selfEvolutionRun.capPrepareDatasetCase"),
+    generate_dataset_case: t("selfEvolutionRun.capGenerateDatasetCase"),
+  } as Record<string, string>)[value] ?? value.replace(/_/g, " ");
 }
 
 export function sanitizeCheckpointMessage(
@@ -2435,12 +2472,12 @@ export function sanitizeCheckpointMessage(
   }
 
   if (completedStageLabel && nextOperationLabel) {
-    return `${completedStageLabel}已完成，请确认是否继续执行下一步。`;
+    return t("selfEvolutionRun.checkpointStageDoneConfirmNext", { stageLabel: completedStageLabel });
   }
   if (completedStageLabel) {
-    return `${completedStageLabel}已完成，请确认是否继续执行。`;
+    return t("selfEvolutionRun.checkpointStageDoneConfirm", { stageLabel: completedStageLabel });
   }
-  return "当前流程已暂停，请确认是否继续执行。";
+  return t("selfEvolutionRun.checkpointPausedConfirm");
 }
 
 export function buildCheckpointWaitPrompt(payload: Record<string, unknown> | undefined): CheckpointWaitPrompt {
@@ -2457,7 +2494,7 @@ export function buildCheckpointWaitPrompt(payload: Record<string, unknown> | und
   const messageText =
     getStringField(eventData, ["message", "text", "content"]) ||
     getStringField(payload, ["message", "text", "content"]) ||
-    "当前流程已暂停，等待确认是否继续下一步。";
+    t("selfEvolutionRun.checkpointPausedWaiting");
   const completedStageLabel = getStageLabel(
     getStringField(eventData, ["completed_flow", "completed_stage", "stage"]) ||
       getStringField(artifacts, ["completed_flow", "stage"]),
@@ -2472,12 +2509,12 @@ export function buildCheckpointWaitPrompt(payload: Record<string, unknown> | und
       getStringField(artifacts, ["next_stage", "nextStage"]),
   ) || getNextStageFromOperation(nextOperationName);
   const command = checkpointKind === "manual_cutover"
-    ? "确认切流"
+    ? t("selfEvolutionRun.confirmCutover")
     : checkpointKind === "intent_confirmation"
-      ? "确认执行"
-      : checkpointCommandText;
+      ? t("selfEvolutionRun.confirmExecute")
+      : getCheckpointCommandText();
   const checkpointMessage = checkpointKind === "intent_confirmation"
-    ? `已准备好执行${capabilityLabel ? `「${capabilityLabel}」` : "本次修改"}，确认后将应用这条干预。`
+    ? t("selfEvolutionRun.intentConfirmationMessage", { capability: capabilityLabel ? `「${capabilityLabel}」` : t("selfEvolutionRun.thisModification") })
     : sanitizeCheckpointMessage(messageText, completedStageLabel, nextOperationLabel);
 
   return {
@@ -2504,7 +2541,7 @@ export function buildFailureRetryPrompt(
   payload: Record<string, unknown> | undefined,
 ): CheckpointWaitPrompt {
   const eventData = getEventPayloadData(payload);
-  const stageLabel = getStageLabel(stage) || "当前步骤";
+  const stageLabel = getStageLabel(stage) || t("selfEvolutionRun.currentStep");
   const rawMessage =
     getStringField(eventData, ["message", "error_message", "error", "detail"]) ||
     getStringField(payload, ["message", "error_message", "error", "detail"]);
@@ -2518,28 +2555,28 @@ export function buildFailureRetryPrompt(
 
   return {
     kind: "failure",
-    message: `${stageLabel}执行失败：${reason} 你可以重试，或补充说明后再继续。`,
+    message: t("selfEvolutionRun.stageFailedMessage", { stageLabel, reason }),
     completedStageLabel: stageLabel,
     nextStage: stage,
-    command: "重试",
+    command: t("selfEvolutionRun.retryCommand"),
     taskId,
   };
 }
 
 export function getFriendlyFailureReason(errorCode: string | undefined, rawMessage: string | undefined) {
   if (errorCode === "REPORT_ACTIONS_NOT_READY" || rawMessage?.includes("below apply confidence/validity thresholds")) {
-    return "分析报告里的自动修改建议把握不够，系统为了避免改错代码，暂时没有继续执行代码修改。";
+    return t("selfEvolutionRun.failureReasonReportNotReady");
   }
   if (errorCode === "RAG_CALL_FAILED" || rawMessage?.includes("chat service failed")) {
-    return "调用问答服务时超时或失败，可能是模型服务暂时不稳定。";
+    return t("selfEvolutionRun.failureReasonRagCallFailed");
   }
   if (rawMessage) {
     return rawMessage;
   }
   if (errorCode) {
-    return `错误码：${errorCode}。`;
+    return t("selfEvolutionRun.failureReasonErrorCode", { errorCode });
   }
-  return "执行过程中出现错误。";
+  return t("selfEvolutionRun.failureReasonGeneric");
 }
 
 export function compactPayloadForDisplay(payload: Record<string, unknown> | undefined) {
@@ -2556,10 +2593,10 @@ export function compactPayloadForDisplay(payload: Record<string, unknown> | unde
   const metrics = [
     getNumberField(eventData, ["current", "completed", "done", "processed"]) !== undefined &&
     getNumberField(eventData, ["total", "num_cases", "cases", "count"]) !== undefined
-      ? `进度 ${getNumberField(eventData, ["current", "completed", "done", "processed"])}/${getNumberField(eventData, ["total", "num_cases", "cases", "count"])}`
+      ? t("selfEvolutionRun.compactProgress", { current: getNumberField(eventData, ["current", "completed", "done", "processed"]), total: getNumberField(eventData, ["total", "num_cases", "cases", "count"]) })
       : "",
-    getStringField(detailRecord, ["artifact_id"]) ? `产物 ${getStringField(detailRecord, ["artifact_id"])}` : "",
-    currentItem ? `当前 ${currentItem}` : "",
+    getStringField(detailRecord, ["artifact_id"]) ? t("selfEvolutionRun.compactArtifact", { id: getStringField(detailRecord, ["artifact_id"]) }) : "",
+    currentItem ? t("selfEvolutionRun.compactCurrentItem", { item: currentItem }) : "",
   ].filter(Boolean);
   const structured = [
     operationRunId ? formatOperationRunId(operationRunId) : phase,
@@ -2600,10 +2637,10 @@ export function compactPayloadForDisplay(payload: Record<string, unknown> | unde
 
   return entries.slice(0, 4).map(([key, value]) => {
     if (Array.isArray(value)) {
-      return `${key} ${value.length} 项`;
+      return t("selfEvolutionRun.compactArrayCount", { key, count: value.length });
     }
     if (isRecord(value)) {
-      return `${key} 已更新`;
+      return t("selfEvolutionRun.compactRecordUpdated", { key });
     }
     return `${key} ${String(value).slice(0, 80)}`;
   }).join(" · ");
@@ -2766,7 +2803,7 @@ export function buildAbCategoryComparisons(reports: AbSummaryReport[]): AbCatego
       const experiment = {} as Record<PxMetricKey, number>;
       const delta = {} as Record<PxMetricKey, number>;
 
-      pxMetricMeta.forEach((metric) => {
+      getPxMetricMeta().forEach((metric) => {
         const row = metricMap.get(metric.key);
         baseline[metric.key] = clampScore(row?.meanA ?? 0);
         experiment[metric.key] = clampScore(row?.meanB ?? 0);
@@ -2774,7 +2811,7 @@ export function buildAbCategoryComparisons(reports: AbSummaryReport[]): AbCatego
       });
 
       return {
-        category: reports.length === 1 ? "总体" : report.id || `报告 ${index + 1}`,
+        category: reports.length === 1 ? t("selfEvolutionRun.categoryOverall") : report.id || t("selfEvolutionRun.reportN", { n: index + 1 }),
         baseline,
         experiment,
         delta,
@@ -2793,10 +2830,10 @@ export function formatMetricDelta(value: number) {
 
 export function formatMetricSummary(metrics: Record<PxMetricKey, number>) {
   return [
-    `正确性 ${formatMetricPercent(metrics.answer_correctness)}`,
-    `综合得分 ${formatMetricPercent(metrics.answer_score)}`,
-    `Chunk 召回 ${formatMetricPercent(metrics.chunk_recall)}`,
-    `文档召回 ${formatMetricPercent(metrics.doc_recall)}`,
+    t("selfEvolutionRun.metricCorrectnessSummary", { value: formatMetricPercent(metrics.answer_correctness) }),
+    t("selfEvolutionRun.metricAnswerScoreSummary", { value: formatMetricPercent(metrics.answer_score) }),
+    t("selfEvolutionRun.metricChunkRecallSummary", { value: formatMetricPercent(metrics.chunk_recall) }),
+    t("selfEvolutionRun.metricDocRecallSummary", { value: formatMetricPercent(metrics.doc_recall) }),
   ].join(" / ");
 }
 
@@ -2811,7 +2848,7 @@ export function toFiniteNumber(value: unknown, fallback = 0) {
 }
 
 export function formatAbMetricLabel(metric: string) {
-  return pxMetricMeta.find((item) => item.key === metric)?.label || metric;
+  return getPxMetricMeta().find((item) => item.key === metric)?.label || metric;
 }
 
 export function getAbtestResultRecords(value: unknown): Record<string, unknown>[] {
@@ -2848,7 +2885,7 @@ export function buildAbSummaryReports(payload: unknown): AbSummaryReport[] {
       );
       const improvedCount = caseDeltas.filter((item) => getStringField(item, ["outcome"]) === "improved").length;
       const metricRows = baselineMetrics && candidateMetrics
-        ? pxMetricMeta.map((metric) => ({
+        ? getPxMetricMeta().map((metric) => ({
           key: metric.key,
           metric: metric.key,
           metricLabel: metric.label,
@@ -3059,12 +3096,12 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
       taskId,
       type,
       payload,
-      displayText: "事件流已结束，线程停止信号已收到。",
+      displayText: t("selfEvolutionRun.eventStreamEnded"),
     };
   }
 
   if (isFailedThreadEvent(frame.eventName) || isFailedThreadEvent(type)) {
-    const errorText = content || "消息处理失败，请稍后重试。";
+    const errorText = content || t("selfEvolutionRun.messageProcessFailed");
     return {
       key,
       timestamp,
@@ -3115,7 +3152,7 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
       taskId,
       type,
       role: "assistant",
-      content: type === "intent.thought" && content ? `意图分析：${content}` : content,
+      content: type === "intent.thought" && content ? t("selfEvolutionRun.intentThought", { content }) : content,
       payload,
       displayText: content,
     };
@@ -3141,11 +3178,11 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
     const displayText =
       type === "checkpoint.created"
         ? checkpointId
-          ? `已保存流程 checkpoint：${checkpointId}。`
-          : "已保存流程 checkpoint。"
+          ? t("selfEvolutionRun.checkpointSavedWithId", { checkpointId })
+          : t("selfEvolutionRun.checkpointSaved")
         : type === "checkpoint.cancel"
-          ? "用户已终止当前 checkpoint。"
-          : "用户已确认继续执行。";
+          ? t("selfEvolutionRun.checkpointCanceled")
+          : t("selfEvolutionRun.checkpointContinued");
     return {
       key,
       timestamp,
@@ -3189,7 +3226,9 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
     };
   }
 
-  const actionLabel = action ? eventActionLabels[action] || action : "事件更新";
+  const _eventActionLabels = getEventActionLabels();
+  const _stageLabels = getStageLabels();
+  const actionLabel = action ? _eventActionLabels[action] || action : t("selfEvolutionRun.eventUpdate");
   const detail = content || compactPayloadForDisplay(payload);
   const displayText =
     (stage === "dataset" && buildDatasetEventDisplayText(action, payload)) ||
@@ -3197,8 +3236,8 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
     (stage === "repair" && buildApplyEventDisplayText(action, type, payload)) ||
     (stage === "eval" && buildEvalEventDisplayText(action, type, payload)) ||
     (stage === "abtest" && buildAbtestEventDisplayText(action, payload)) ||
-    (stage === "dataset" && "数据集生成正在执行。") ||
-    (detail ? `${stageLabels[stage]}：${actionLabel}，${detail}` : `${stageLabels[stage]}：${actionLabel}`);
+    (stage === "dataset" && t("selfEvolutionRun.datasetRunning")) ||
+    (detail ? t("selfEvolutionRun.stageActionDetail", { stage: _stageLabels[stage], action: actionLabel, detail }) : t("selfEvolutionRun.stageAction", { stage: _stageLabels[stage], action: actionLabel }));
   const progress = getWorkflowProgressSnapshot(stage, action, payload, type);
   const progressPhase = stage === "eval" ? getEvalPayloadPhase(action, type, payload) : undefined;
 
@@ -3266,7 +3305,8 @@ export function createWorkflowStepFromRuntime(
   runtimeState: WorkflowRuntimeState,
   renderKey = stepId,
 ): WorkflowStep {
-  const definition = workflowStepDefinitions.find((step) => step.id === stepId) || workflowStepDefinitions[0];
+  const _workflowStepDefinitions = getWorkflowStepDefinitions();
+  const definition = _workflowStepDefinitions.find((step) => step.id === stepId) || _workflowStepDefinitions[0];
   const runtime = runtimeState[stepId];
   return {
     ...definition,
@@ -3278,11 +3318,13 @@ export function createWorkflowStepFromRuntime(
   };
 }
 
-const terminalFlowRuntimeText: Partial<Record<StepStatus, string>> = {
-  canceled: "流程已取消。",
-  done: "流程已结束。",
-  failed: "流程已失败。",
-};
+function getTerminalFlowRuntimeText(): Partial<Record<StepStatus, string>> {
+  return {
+    canceled: t("selfEvolutionRun.flowCanceled"),
+    done: t("selfEvolutionRun.flowDone"),
+    failed: t("selfEvolutionRun.flowFailed"),
+  };
+}
 
 function getTerminalOverrideStepIndex(steps: WorkflowStep[]) {
   for (let index = steps.length - 1; index >= 0; index -= 1) {
@@ -3314,7 +3356,7 @@ function applyTerminalFlowStepStatus(
       ? {
           ...step,
           status: terminalStepStatus,
-          runtimeText: terminalFlowRuntimeText[terminalStepStatus] || step.runtimeText,
+          runtimeText: getTerminalFlowRuntimeText()[terminalStepStatus] || step.runtimeText,
           progress: terminalStepStatus === "done"
             ? step.progress || getCompletedProgressSnapshot()
             : step.progress,
@@ -3434,7 +3476,8 @@ export function buildVisibleWorkflowSteps(
   });
 
   const steps = groups.map((group, index) => {
-    const definition = workflowStepDefinitions.find((step) => step.id === group.stepId) || workflowStepDefinitions[0];
+    const _wsd = getWorkflowStepDefinitions();
+    const definition = _wsd.find((step) => step.id === group.stepId) || _wsd[0];
     return {
       ...definition,
       renderKey: `${group.stepId}-${index}`,
@@ -3462,28 +3505,28 @@ function eventActivityTone(event: NormalizedThreadEvent): EvoStageActivity["tone
 
 function eventActivityTitle(event: NormalizedThreadEvent) {
   if (event.type.startsWith("autooperator.")) {
-    return "自动处理记录";
+    return t("selfEvolutionRun.activityAutoOperator");
   }
   if (event.type === "checkpoint.wait") {
-    return "等待确认";
+    return t("selfEvolutionRun.activityWaitConfirm");
   }
   if (event.type === "checkpoint.continue") {
-    return "继续执行";
+    return t("selfEvolutionRun.activityContinue");
   }
   if (event.type === "checkpoint.cancel") {
-    return "终止流程";
+    return t("selfEvolutionRun.activityTerminate");
   }
   if (event.type === "message.user") {
-    return "前端干预";
+    return t("selfEvolutionRun.activityFrontendIntervention");
   }
   if (event.type === "message.assistant" || event.type.startsWith("intent.")) {
-    return "意图处理";
+    return t("selfEvolutionRun.activityIntentProcessing");
   }
   const operationRunId = getOperationRunId(event.payload);
   if (operationRunId) {
     return formatOperationRunId(operationRunId);
   }
-  return event.stage ? stageLabels[event.stage] : event.type;
+  return event.stage ? getStageLabels()[event.stage] : event.type;
 }
 
 function formatOperationRunId(operationRunId: string) {
@@ -3574,7 +3617,7 @@ function getActivityArtifactLabel(artifactKind: WorkflowResultKind | undefined) 
   if (!artifactKind) {
     return undefined;
   }
-  return `查看${workflowResultLabels[artifactKind]}`;
+  return t("selfEvolutionRun.viewArtifact", { label: getWorkflowResultLabels()[artifactKind] });
 }
 
 function buildEventActivity(event: NormalizedThreadEvent): EvoStageActivity {
@@ -3669,6 +3712,24 @@ function getOperationCaseId(payload: Record<string, unknown> | undefined) {
   return getEventCaseId(payload) || getStringField(getEventPayloadData(payload), ["current_item"]);
 }
 
+function resolveAnalysisCaseStep(flowKind: string | undefined, operationRunId: string | undefined): "coarse" | "fine" | undefined {
+  if (
+    flowKind === "analysis.trace_summary" ||
+    flowKind === "analysis.coarse_classify" ||
+    operationRunId === "analysis.trace_summary"
+  ) {
+    return "coarse";
+  }
+  if (
+    flowKind === "analysis.fine_classify" ||
+    flowKind === "analysis.classification" ||
+    operationRunId === "analysis.classify_case"
+  ) {
+    return "fine";
+  }
+  return undefined;
+}
+
 function applyGlobalDatasetStep(cases: Map<string, CaseProgressState>, step: string, status: StepStatus | undefined, updatedAt?: string, artifactId?: string) {
   cases.forEach((item) => updateCaseStep(cases, item.caseId, step, status, updatedAt, artifactId));
 }
@@ -3701,7 +3762,7 @@ function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCaseProgre
   events.forEach((event) => {
     const operationRunId = getOperationRunId(event.payload);
     const flowKind = getEventFlowKind(event.payload);
-    const artifactId = getEventArtifactId(event.payload);
+    const artifactId = getEventRuntimeArtifactId(event.payload) || getEventArtifactId(event.payload);
     const status = getCaseProgressActionStatus(event);
     if (!operationRunId || !status) {
       return;
@@ -3728,17 +3789,18 @@ function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCaseProgre
       updateCaseStep(abtestCases, caseId, "rag", status, event.timestamp, artifactId);
     } else if (caseId && flowKind === "abtest.candidate_judge") {
       updateCaseStep(abtestCases, caseId, "judge", status, event.timestamp, artifactId);
-    } else if (caseId && flowKind === "analysis.coarse_classify") {
-      updateCaseStep(analysisCases, caseId, "coarse", status, event.timestamp, artifactId);
-    } else if (caseId && flowKind === "analysis.fine_classify") {
-      updateCaseStep(analysisCases, caseId, "fine", status, event.timestamp, artifactId);
+    } else if (caseId) {
+      const analysisStep = resolveAnalysisCaseStep(flowKind, operationRunId);
+      if (analysisStep) {
+        updateCaseStep(analysisCases, caseId, analysisStep, status, event.timestamp, artifactId);
+      }
     }
   });
   const groups: EvoCaseProgressGroup[] = [
-    { stage: "dataset", title: "Step 1 · 数据集 case", pageSize: 10, cases: Array.from(datasetCases.values()).map((item) => buildCaseItem(item, datasetCaseSteps, "datasets", areCaseStepsDone(item, datasetCaseSteps) ? item.artifactId : undefined, "查看该 case 详情")).sort(sortCaseItems) },
-    { stage: "eval", title: "Step 2 · 评测 case", pageSize: 10, cases: Array.from(evalCases.values()).map((item) => buildCaseItem(item, evalCaseSteps, "eval-reports", areCaseStepsDone(item, evalCaseSteps) ? item.artifactId : undefined, "查看该 case 结果")).sort(sortCaseItems) },
-    { stage: "analysis", title: "Step 3 · 分析 case", pageSize: 10, cases: Array.from(analysisCases.values()).map((item) => buildCaseItem(item, analysisCaseSteps, "analysis-reports", areCaseStepsDone(item, analysisCaseSteps) ? item.artifactId : undefined, "查看该 case 分类")).sort(sortCaseItems) },
-    { stage: "abtest", title: "Step 5 · ABTest case", pageSize: 10, cases: Array.from(abtestCases.values()).map((item) => buildCaseItem(item, evalCaseSteps, "abtests", areCaseStepsDone(item, evalCaseSteps) ? item.artifactId : undefined, "查看该 case 对照")).sort(sortCaseItems) },
+    { stage: "dataset", title: t("selfEvolutionRun.caseGroupDataset"), pageSize: 10, cases: Array.from(datasetCases.values()).map((item) => buildCaseItem(item, datasetCaseSteps, "datasets", areCaseStepsDone(item, datasetCaseSteps) ? item.artifactId : undefined, t("selfEvolutionRun.viewCaseDetail"))).sort(sortCaseItems) },
+    { stage: "eval", title: t("selfEvolutionRun.caseGroupEval"), pageSize: 10, cases: Array.from(evalCases.values()).map((item) => buildCaseItem(item, evalCaseSteps, "eval-reports", areCaseStepsDone(item, evalCaseSteps) ? item.artifactId : undefined, t("selfEvolutionRun.viewCaseResult"))).sort(sortCaseItems) },
+    { stage: "analysis", title: t("selfEvolutionRun.caseGroupAnalysis"), pageSize: 10, cases: Array.from(analysisCases.values()).map((item) => buildCaseItem(item, analysisCaseSteps, "analysis-reports", areCaseStepsDone(item, analysisCaseSteps) ? item.artifactId : undefined, t("selfEvolutionRun.viewCaseCategory"))).sort(sortCaseItems) },
+    { stage: "abtest", title: t("selfEvolutionRun.caseGroupAbtest"), pageSize: 10, cases: Array.from(abtestCases.values()).map((item) => buildCaseItem(item, evalCaseSteps, "abtests", areCaseStepsDone(item, evalCaseSteps) ? item.artifactId : undefined, t("selfEvolutionRun.viewCaseCompare"))).sort(sortCaseItems) },
   ];
   return groups.filter((group) => group.cases.length > 0);
 }
@@ -3818,7 +3880,7 @@ export function buildEvoProcessDashboard(
     buildVisibleWorkflowSteps(sortedEvents, runtimeState, includeFirstStep, terminalStepStatus)
       .map((step) => [step.id, step]),
   );
-  const runtimeSteps = workflowStepDefinitions.map((definition) =>
+  const runtimeSteps = getWorkflowStepDefinitions().map((definition) =>
     visibleStepsById.get(definition.id) || createWorkflowStepFromRuntime(definition.id, runtimeState),
   );
   const hasStageEvents = sortedEvents.some((event) => event.stage);
@@ -3837,7 +3899,7 @@ export function buildEvoProcessDashboard(
         ...step,
         status,
         progress: cutoverCompleted
-          ? { ...getCompletedProgressSnapshot(), statusText: stage === "abtest" ? "候选算法切流已完成" : "已完成" }
+          ? { ...getCompletedProgressSnapshot(), statusText: stage === "abtest" ? t("selfEvolutionRun.cutoverCompleted") : t("selfEvolutionRun.statusCompleted") }
           : step.progress || stageProgressFromEvents(sortedEvents, stage),
       },
       stage,
@@ -3944,7 +4006,7 @@ export function reduceWorkflowRuntimeState(
   const stepIndex = getWorkflowStepIndex(stepId);
   const action = event.action;
   const next: WorkflowRuntimeState = { ...prev };
-  workflowStepDefinitions.forEach((step, index) => {
+  getWorkflowStepDefinitions().forEach((step, index) => {
     next[step.id] = { ...prev[step.id] };
     if (index < stepIndex && next[step.id].status === "pending") {
       next[step.id].status = "done";

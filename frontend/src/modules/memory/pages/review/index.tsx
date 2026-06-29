@@ -15,6 +15,7 @@ import SendIcon from "@/modules/chat/assets/icons/send_icon.svg?react";
 import RouteLoading from "../../components/RouteLoading";
 import { useMemoryManagementOutletContext } from "../../context";
 import { getSkillBodyContentForDisplay } from "../../shared";
+import { DiffLineContent } from "../../components/DiffLineContent";
 
 export default function MemoryReviewPage() {
   const {
@@ -407,7 +408,7 @@ export default function MemoryReviewPage() {
                                   <strong>{`${index + 1}. ${suggestion.title || "-"}`}</strong>
                                   {isRemoveSuggestion ? (
                                     <span className="memory-backend-suggestion-delete-badge">
-                                      删除建议
+                                      {t("admin.memoryBackendSuggestionDeleteBadge")}
                                     </span>
                                   ) : null}
                                 </div>
@@ -474,7 +475,7 @@ export default function MemoryReviewPage() {
                         !backendSuggestionLoadMoreError &&
                         !backendSuggestionHasMore ? (
                           <span className="memory-backend-suggestion-loadmore-end">
-                            已展示全部建议
+                            {t("admin.memoryBackendSuggestionEnd")}
                           </span>
                         ) : null}
                       </div>
@@ -506,7 +507,7 @@ export default function MemoryReviewPage() {
                           <span className="memory-diff-prefix">
                             {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
                           </span>
-                          <span>{line.text}</span>
+                          <DiffLineContent line={line} />
                         </div>
                       ))
                     ) : (
@@ -788,7 +789,7 @@ export default function MemoryReviewPage() {
                                 <span className="memory-diff-prefix">
                                   {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
                                 </span>
-                                <span>{line.text || " "}</span>
+                                <DiffLineContent line={line} />
                               </div>
                             ))}
                           </div>
@@ -806,7 +807,7 @@ export default function MemoryReviewPage() {
                                 <span className="memory-diff-prefix">
                                   {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
                                 </span>
-                                <span>{line.text || " "}</span>
+                                <DiffLineContent line={line} />
                               </div>
                             ))}
                           </div>
@@ -822,7 +823,7 @@ export default function MemoryReviewPage() {
                             <span className="memory-diff-prefix">
                               {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
                             </span>
-                            <span>{line.text || " "}</span>
+                            <DiffLineContent line={line} />
                           </div>
                         ))}
                       </div>

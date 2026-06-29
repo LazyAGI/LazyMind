@@ -77,6 +77,8 @@ config.add('algo_id', str, 'general_algo', 'ALGO_ID', description='LazyMind algo
 # entrypoint and the router entrypoint can read it without cross-importing router config.
 config.add('enable_router', bool, False, 'ENABLE_ROUTER',
            description='Enable router mode. When false, app.py falls back to the original chat service.')
+config.add('state_backend', str, 'redis', 'STATE_BACKEND',
+           description='Short-lived state backend: redis or sqlite.')
 # Marks a process as a router-spawned child that only serves proxied request types
 # (chat / subagent). Set automatically by ProcessManager when spawning children.
 config.add('router_child_proxied_only', bool, False, 'ROUTER_CHILD_PROXIED_ONLY',
@@ -131,6 +133,8 @@ config.add('mineru_backend', str, 'pipeline', 'MINERU_BACKEND', description='Min
 config.add('mineru_server_port', int, 8000, 'MINERU_SERVER_PORT', description='MinerU server port.')
 config.add('ocr_cache_dir', str, os.path.join(config['shared_upload_dir'], '.image_cache'), 'OCR_CACHE_DIR',
            description='OCR cache root for parsed results and images.')
+config.add('document_parse_profile', str, 'cloud', 'DOCUMENT_PARSE_PROFILE',
+           description='Document parsing profile: cloud or local.')
 config.add('document_processor_url', str, 'http://localhost:8000', 'DOCUMENT_PROCESSOR_URL',
            description='Document processor service URL.')
 config.add('algo_server_port', int, 8000, 'ALGO_SERVER_PORT', description='Algorithm server port.')

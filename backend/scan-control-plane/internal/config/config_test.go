@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -31,6 +32,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("SOURCEENGINE_TEMP_TTL", "2h")
 	t.Setenv("SOURCEENGINE_WORKER_LEASE_TTL", "45s")
 	t.Setenv("SOURCEENGINE_WORKER_MAX_BACKOFF", "3m")
+	t.Setenv("SOURCEENGINE_CRAWL_LIST_REQUEST_INTERVAL", "750ms")
 	t.Setenv("SOURCEENGINE_PARSE_DEAD_LETTER_AFTER", "4")
 	t.Setenv("SOURCEENGINE_GENERATE_TASKS_MAX_OBJECTS_PER_REQUEST", "7")
 	t.Setenv("SOURCEENGINE_PARSE_WORKER_GLOBAL_CONCURRENCY", "9")
@@ -61,11 +63,78 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	if cfg.GenerateTasksMaxObjectsPerRequest != 7 || cfg.ParseWorkerGlobalConcurrency != 9 || cfg.ParseWorkerSourceConcurrency != 3 {
 		t.Fatalf("config did not read limits: %+v", cfg)
 	}
-	if cfg.TempTTL != 2*time.Hour || cfg.WorkerLeaseTTL != 45*time.Second || cfg.WorkerMaxBackoff != 3*time.Minute || cfg.ParseDeadLetterAfter != 4 {
+	if cfg.TempTTL != 2*time.Hour || cfg.WorkerLeaseTTL != 45*time.Second || cfg.WorkerMaxBackoff != 3*time.Minute || cfg.CrawlListRequestInterval != 750*time.Millisecond || cfg.ParseDeadLetterAfter != 4 {
 		t.Fatalf("config did not read worker ttl/backoff/deadletter: %+v", cfg)
 	}
 	if cfg.WorkerPollInterval != 6*time.Second || cfg.CoreResultPollInterval != 11*time.Second || cfg.CompensationPollInterval != 31*time.Second {
 		t.Fatalf("config did not read poll intervals: %+v", cfg)
+	}
+}
+
+func validConfigForTest() Config {
+	return Config{
+		Address:                           "127.0.0.1",
+		Port:                              18080,
+		DBDSN:                             "postgres://scan-control-plane",
+		CoreBaseURL:                       "http://core.test",
+		DefaultDatasetAlgoID:              "general_algo",
+		DefaultDatasetAlgoName:            "General",
+		AgentBaseURL:                      "http://agent.test",
+		FeishuBaseURL:                     "http://feishu.test",
+		AuthServiceBaseURL:                "http://auth.test",
+		AuthServiceInternalToken:          "internal-token",
+		TempDir:                           "/tmp/scan-control-plane-test",
+		TempTTL:                           24 * time.Hour,
+		WorkerLeaseTTL:                    time.Minute,
+		WorkerMaxBackoff:                  10 * time.Minute,
+		ParseDeadLetterAfter:              3,
+		GenerateTasksMaxObjectsPerRequest: 20,
+		ParseWorkerGlobalConcurrency:      20,
+		ParseWorkerSourceConcurrency:      2,
+		WorkerPollInterval:                5 * time.Second,
+		CoreResultPollInterval:            10 * time.Second,
+		CompensationPollInterval:          30 * time.Second,
+	}
+}
+
+func TestRedisURLConflictsWithSQLiteStateBackend(t *testing.T) {
+	t.Setenv("LAZYMIND_REDIS_URL", "redis://global:6379/0")
+	t.Setenv("LAZYMIND_STATE_BACKEND", "sqlite")
+
+	cfg := validConfigForTest()
+	cfg.applyEnv()
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "redis url must not be configured") {
+		t.Fatalf("validate error = %v, want redis/sqlite conflict", err)
+	}
+}
+
+func TestExplicitRedisURLConflictsWithSQLiteStateBackend(t *testing.T) {
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_REDIS_URL", "redis://scan:6379/0")
+	t.Setenv("LAZYMIND_STATE_BACKEND", "sqlite")
+
+	cfg := validConfigForTest()
+	cfg.applyEnv()
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "redis url must not be configured") {
+		t.Fatalf("validate error = %v, want redis/sqlite conflict", err)
+	}
+}
+
+func TestRedisURLLoadsOutsideSQLiteStateBackend(t *testing.T) {
+	t.Setenv("LAZYMIND_REDIS_URL", "redis://global:6379/0")
+	t.Setenv("LAZYMIND_STATE_BACKEND", "redis")
+
+	cfg := validConfigForTest()
+	cfg.applyEnv()
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate config: %v", err)
+	}
+	if cfg.RedisURL != "redis://global:6379/0" {
+		t.Fatalf("redis url = %q, want global redis url", cfg.RedisURL)
 	}
 }
 

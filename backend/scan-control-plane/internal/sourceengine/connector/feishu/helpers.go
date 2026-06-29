@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -66,6 +67,9 @@ func driveFolderToken(ref string) string {
 	if ref == VirtualDriveRootRef {
 		return "root"
 	}
+	if token := lastURLPathSegment(ref); token != "" {
+		ref = token
+	}
 	ref = strings.TrimPrefix(ref, "feishu:")
 	ref = strings.TrimPrefix(ref, "drive:")
 	ref = strings.TrimPrefix(ref, "drive_folder:")
@@ -96,6 +100,52 @@ func wikiNode(ref string) (string, string, error) {
 		return "", "", connector.NewError(connector.ErrorCodeInvalidArgument, "wiki node ref is invalid")
 	}
 	return parts[0], parts[1], nil
+}
+
+func looseWikiNodeToken(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || ref == VirtualWikiSpacesRef {
+		return ""
+	}
+	if _, ok := wikiSpaceID(ref); ok {
+		return ""
+	}
+	if token := lastURLPathSegment(ref); token != "" {
+		ref = token
+	}
+	ref = strings.TrimSpace(strings.TrimPrefix(ref, "feishu:"))
+	ref = strings.TrimSpace(strings.TrimPrefix(ref, "wiki:"))
+	parts := strings.Split(ref, ":")
+	if len(parts) != 1 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
+}
+
+func lastURLPathSegment(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if !strings.Contains(ref, "://") {
+		return ""
+	}
+	parsed, err := url.Parse(ref)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		segment := strings.TrimSpace(parts[i])
+		if segment == "" {
+			continue
+		}
+		unescaped, err := url.PathUnescape(segment)
+		if err == nil {
+			segment = strings.TrimSpace(unescaped)
+		}
+		if segment != "" {
+			return segment
+		}
+	}
+	return ""
 }
 
 func wikiSpaceID(ref string) (string, bool) {

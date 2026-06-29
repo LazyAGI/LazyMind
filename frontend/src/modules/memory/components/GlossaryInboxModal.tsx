@@ -47,10 +47,30 @@ type GlossaryMergeStage = "select" | "edit" | "confirm";
 type GlossaryCreateStage = "edit" | "confirm";
 
 const mergeColorOptions = [
-  { value: "red", label: "红色", color: "#d84a4a", textColor: "#b42318" },
-  { value: "green", label: "绿色", color: "#9fd3ad", textColor: "#027a48" },
-  { value: "blue", label: "蓝色", color: "#8bb7e8", textColor: "#175cd3" },
-  { value: "yellow", label: "黄色", color: "#f4d06f", textColor: "#b54708" },
+  {
+    value: "red",
+    labelKey: "admin.memoryGlossaryInboxColorRed",
+    color: "#d84a4a",
+    textColor: "#b42318",
+  },
+  {
+    value: "green",
+    labelKey: "admin.memoryGlossaryInboxColorGreen",
+    color: "#9fd3ad",
+    textColor: "#027a48",
+  },
+  {
+    value: "blue",
+    labelKey: "admin.memoryGlossaryInboxColorBlue",
+    color: "#8bb7e8",
+    textColor: "#175cd3",
+  },
+  {
+    value: "yellow",
+    labelKey: "admin.memoryGlossaryInboxColorYellow",
+    color: "#f4d06f",
+    textColor: "#b54708",
+  },
 ];
 const MERGED_GROUP_OPTION_ID = "__merged_glossary_group__";
 const MERGED_GROUP_OPTION_ID_PREFIX = `${MERGED_GROUP_OPTION_ID}:`;
@@ -245,25 +265,31 @@ const GlossaryGroupCards = ({
   </div>
 );
 
-const getActionModeLabel = (mode: GlossaryInboxActionMode, conflictWord: string) => {
+const getActionModeLabel = (
+  mode: GlossaryInboxActionMode,
+  conflictWord: string,
+  t: TFunction,
+) => {
   if (mode === "reject") {
-    return "放弃该词";
+    return t("admin.memoryGlossaryInboxReject");
   }
   if (mode === "merge") {
-    return `先合并若干个词，然后将${conflictWord}作为别名加入`;
+    return t("admin.memoryGlossaryInboxActionLabelMerge", { word: conflictWord });
   }
   if (mode === "create") {
-    return "新建一个专有名词";
+    return t("admin.memoryGlossaryInboxActionLabelCreate");
   }
-  return `选择1到多个词，将${conflictWord}作为别名加入`;
+  return t("admin.memoryGlossaryInboxActionLabelSeparate", { word: conflictWord });
 };
 
 const GlossaryTermBubble = ({
   asset,
   term,
+  t,
 }: {
   asset: GlossaryAsset;
   term?: string;
+  t: TFunction;
 }) => {
   const displayTerm = term || asset.term;
 
@@ -272,11 +298,11 @@ const GlossaryTermBubble = ({
       title={
         <div className="memory-glossary-term-tooltip">
           <div>
-            <span>词</span>
+            <span>{t("admin.memoryGlossaryAliases")}</span>
             <strong>{displayTerm || "-"}</strong>
           </div>
           <div>
-            <span>描述</span>
+            <span>{t("common.description")}</span>
             <strong>{asset.content || "-"}</strong>
           </div>
         </div>
@@ -678,25 +704,29 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                       <span className="memory-glossary-inbox-note">{proposal.reason}</span>
                       <div className="memory-glossary-inbox-summary">
                         <strong>{index + 1}.</strong>
-                        <GlossaryTermBubble asset={proposal.after} term={conflictWord} />
+                        <GlossaryTermBubble asset={proposal.after} term={conflictWord} t={t} />
                         {targetGroups.length ? (
                           <>
-                            <span>与</span>
+                            <span>{t("admin.memoryGlossaryInboxConflictWith")}</span>
                             {targetGroups.map((group, groupIndex) => (
                               <span
                                 key={group.id}
                                 className="memory-glossary-conflict-group"
                               >
-                                <GlossaryTermBubble asset={group} />
-                                {groupIndex < targetGroups.length - 1 ? "、" : null}
+                                <GlossaryTermBubble asset={group} t={t} />
+                                {groupIndex < targetGroups.length - 1
+                                  ? t("admin.memoryGlossaryInboxGroupSeparator")
+                                  : null}
                               </span>
                             ))}
-                            <span>产生了</span>
-                            <span className="memory-glossary-inbox-conflict-text">冲突</span>
-                            <span>，请处理</span>
+                            <span>{t("admin.memoryGlossaryInboxConflictHappened")}</span>
+                            <span className="memory-glossary-inbox-conflict-text">
+                              {t("admin.memoryGlossaryInboxConflictKeyword")}
+                            </span>
+                            <span>{t("admin.memoryGlossaryInboxConflictHandle")}</span>
                           </>
                         ) : (
-                          <span>待确认写入方式</span>
+                          <span>{t("admin.memoryGlossaryInboxPendingWriteMode")}</span>
                         )}
                       </div>
                     </div>
@@ -741,7 +771,7 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                                 onChange={() => setActionMode(proposal, mode)}
                               >
                                 <span className="memory-glossary-action-option-copy">
-                                  <strong>{getActionModeLabel(mode, conflictWord)}</strong>
+                                  <strong>{getActionModeLabel(mode, conflictWord, t)}</strong>
                                 </span>
                               </Checkbox>
                             );
@@ -772,8 +802,12 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                         mergeStage === "confirm" ? (
                           <div className="memory-glossary-merge-final-stage">
                             <div className="memory-glossary-merge-stage-title">
-                              <strong>阶段3：选择一个到多个词组，把{conflictWord}加入</strong>
-                              <span>可选择新合并词组，也可选择未合并词组继续写入。</span>
+                              <strong>
+                                {t("admin.memoryGlossaryInboxMergeStageConfirmTitle", {
+                                  word: conflictWord,
+                                })}
+                              </strong>
+                              <span>{t("admin.memoryGlossaryInboxMergeStageConfirmDesc")}</span>
                             </div>
                             <GlossaryGroupCards
                               groups={finalTargetGroups}
@@ -791,19 +825,22 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                               loading={glossaryInboxSubmitting === "accept"}
                               onClick={() => submitProposalAction(proposal)}
                             >
-                              确认
+                              {t("common.confirm")}
                             </Button>
                           </div>
                         ) : mergeStage === "edit" ? (
                           <Form layout="vertical" className="memory-glossary-create-form">
                             <div className="memory-glossary-merge-stage-title">
-                              <strong>阶段2：编辑合并结果</strong>
-                              <span>确认合并后的专有名词、别名和描述，再进入写入阶段。</span>
+                              <strong>{t("admin.memoryGlossaryInboxMergeStageEditTitle")}</strong>
+                              <span>{t("admin.memoryGlossaryInboxMergeStageEditDesc")}</span>
                             </div>
                             {mergeDrafts.length > 1 ? (
                               <div className="memory-glossary-merge-edit-meta">
                                 <span>
-                                  当前第 {mergeEditPage} 组 / 共 {mergeDrafts.length} 组
+                                  {t("admin.memoryGlossaryInboxMergeEditProgress", {
+                                    current: mergeEditPage,
+                                    total: mergeDrafts.length,
+                                  })}
                                 </span>
                                 <span>
                                   {currentMergeDraft?.groupIds
@@ -935,14 +972,16 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                                 }));
                               }}
                             >
-                              {canDirectConfirmMerge ? "确认" : "下一步"}
+                              {canDirectConfirmMerge
+                                ? t("common.confirm")
+                                : t("admin.memoryGlossaryInboxNext")}
                             </Button>
                           </Form>
                         ) : (
                           <div className="memory-glossary-merge-stage">
                             <div className="memory-glossary-merge-stage-title">
-                              <strong>阶段1：合并阶段</strong>
-                              <span>请为词组选色块，相同颜色视为合并</span>
+                              <strong>{t("admin.memoryGlossaryInboxMergeStageSelectTitle")}</strong>
+                              <span>{t("admin.memoryGlossaryInboxMergeStageSelectDesc")}</span>
                             </div>
                             <div className="memory-glossary-merge-stage-list">
                               {targetGroups.map((group) => {
@@ -968,7 +1007,7 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                                                 style={{ backgroundColor: selectedColor.color }}
                                                 aria-hidden
                                               />
-                                              {selectedColor.label}
+                                              {t(selectedColor.labelKey)}
                                             </span>
                                           ) : null;
                                         }}
@@ -982,7 +1021,7 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                                                 style={{ backgroundColor: colorMeta?.color }}
                                                 aria-hidden
                                               />
-                                              {colorMeta?.label}
+                                              {colorMeta ? t(colorMeta.labelKey) : option.label}
                                             </span>
                                           );
                                         }}
@@ -1018,7 +1057,7 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                                         }}
                                         options={mergeColorOptions.map((item) => ({
                                           value: item.value,
-                                          label: item.label,
+                                          label: t(item.labelKey),
                                         }))}
                                       />
                                     </span>
@@ -1037,7 +1076,7 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                               })}
                             </div>
                             <div className="memory-glossary-merge-stage-summary">
-                              将合并{" "}
+                              {t("admin.memoryGlossaryInboxMergeSummaryPrefix")}{" "}
                               <span className="memory-glossary-merge-stage-summary-terms">
                                 {targetGroups
                                   .filter((group) => mergeGroupIds.includes(group.id))
@@ -1050,7 +1089,9 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                                         className="memory-glossary-merge-stage-summary-term"
                                         style={{ color: colorMeta?.textColor || colorMeta?.color }}
                                       >
-                                        {index > 0 ? "、" : ""}
+                                        {index > 0
+                                          ? t("admin.memoryGlossaryInboxGroupSeparator")
+                                          : ""}
                                         {group.term}
                                       </span>
                                     );
@@ -1067,7 +1108,7 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                                 }))
                               }
                             >
-                              请求合并
+                              {t("admin.memoryGlossaryInboxMergeRequest")}
                             </Button>
                           </div>
                         )
@@ -1076,8 +1117,12 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                         createStage === "confirm" ? (
                           <div className="memory-glossary-merge-final-stage">
                             <div className="memory-glossary-merge-stage-title">
-                              <strong>阶段2：选择一个到多个词组，把{conflictWord}加入</strong>
-                              <span>可选择新建词组，也可选择已有冲突词组继续写入。</span>
+                              <strong>
+                                {t("admin.memoryGlossaryInboxCreateStageConfirmTitle", {
+                                  word: conflictWord,
+                                })}
+                              </strong>
+                              <span>{t("admin.memoryGlossaryInboxCreateStageConfirmDesc")}</span>
                             </div>
                             <GlossaryGroupCards
                               groups={createTargetGroups}
@@ -1100,14 +1145,14 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                               loading={glossaryInboxSubmitting === "accept"}
                               onClick={() => submitProposalAction(proposal)}
                             >
-                              确认
+                              {t("common.confirm")}
                             </Button>
                           </div>
                         ) : (
                           <Form layout="vertical" className="memory-glossary-create-form">
                             <div className="memory-glossary-merge-stage-title">
-                              <strong>阶段1：新建一个词</strong>
-                              <span>填写新词组的词、别名和描述。</span>
+                              <strong>{t("admin.memoryGlossaryInboxCreateStageEditTitle")}</strong>
+                              <span>{t("admin.memoryGlossaryInboxCreateStageEditDesc")}</span>
                             </div>
                             <Form.Item
                               label={t("admin.memoryGlossaryGroup")}
@@ -1134,7 +1179,9 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                               label={t("admin.memoryGlossaryAliases")}
                               validateStatus={isCreateGroupInAliases ? "error" : ""}
                               help={
-                                isCreateGroupInAliases ? "词组归属不允许和其中一个词相同" : undefined
+                                isCreateGroupInAliases
+                                  ? t("admin.memoryGlossaryGroupAliasDuplicate")
+                                  : undefined
                               }
                             >
                               <Select
@@ -1153,7 +1200,9 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                               label={t("admin.memoryContent")}
                               validateStatus={isCreateContentSameAsTerm ? "error" : ""}
                               help={
-                                isCreateContentSameAsTerm ? "内容不可以和词相同" : undefined
+                                isCreateContentSameAsTerm
+                                  ? t("admin.memoryGlossaryContentSameAsTerm")
+                                  : undefined
                               }
                             >
                               <Input.TextArea
@@ -1197,7 +1246,7 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                                 }));
                               }}
                             >
-                              确认新建
+                              {t("admin.memoryGlossaryInboxConfirmCreate")}
                             </Button>
                           </Form>
                         )

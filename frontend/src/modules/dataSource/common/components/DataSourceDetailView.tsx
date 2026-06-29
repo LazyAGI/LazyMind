@@ -31,7 +31,6 @@ export interface DataSourceDetailViewProps {
   detailLoading: boolean;
   documentLoading?: boolean;
   lastSync: string;
-  documents: DocumentStatusRow[];
   lastOperation: DataSourceDetailLastOperation | null;
   keyword: string;
   setKeyword: (value: string) => void;
@@ -48,7 +47,6 @@ export default function DataSourceDetailView({
   detailLoading,
   documentLoading,
   lastSync,
-  documents,
   lastOperation,
   keyword,
   setKeyword,
@@ -142,7 +140,7 @@ export default function DataSourceDetailView({
             {t("admin.dataSourceDetailParsedDocs")}
           </Text>
           <div className="data-source-detail-stat-value">
-            {documents.length}
+            {detailSource.parsedDocumentCount ?? 0}
           </div>
         </div>
         <div className="data-source-detail-meta-item">

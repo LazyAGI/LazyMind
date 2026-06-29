@@ -37,14 +37,12 @@ import ChatInput, {
 import { ChatConfig } from "../ChatConfigs";
 import { allowedImageTypes } from "../ImageUpload";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
-import { useModelSelectionStore } from "@/modules/chat/store/modelSelection";
-import type { PreferenceType } from "../MultiAnswerDisplay";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
-import { CHAT_RESUME_CONVERSATION_KEY } from "@/modules/chat/constants/chat";
+import { CHAT_AUTO_ADVANCE_EVENT, CHAT_RESUME_CONVERSATION_KEY, type ChatAutoAdvanceDetail } from "@/modules/chat/constants/chat";
 import { useTranslation } from "react-i18next";
-import { getRegenerationInputs } from "@/modules/chat/utils/message";
+import { getRegenerationInputs, mergeChatMessageLists, buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import {
   splitThinkingContent,
   formatThinkingForDisplay,
@@ -99,6 +97,8 @@ export interface ChatImperativeProps {
   sendMessage: (params: SendMessageParams) => void;
   uploadFiles?: (files: File[]) => void;
   openResumeSSE?: (conversationId: string) => void;
+  appendAutoAdvanceTurn?: (conversationId: string, driverMessage: string) => void;
+  ensureAutoAdvanceUserTurn?: (conversationId: string, driverMessage: string) => void;
 }
 
 interface Props {
@@ -109,6 +109,7 @@ interface Props {
     input: any[],
     action: ChatConversationsRequestActionEnum,
     callbacks: Record<string, (e: CustomEvent) => void>,
+    extras?: Record<string, unknown>,
   ) => any; // Return new SSE.
   onOpenResumeSSE?: (
     conversationId: string,
@@ -130,6 +131,9 @@ interface Props {
   disabledReason?: string;
   disabledDescription?: string;
   disabledAction?: ReactNode;
+  onPluginSettingsChange?: (settings: import('@/modules/chat/utils/request').ConversationPluginSettings) => void;
+  initialPluginSettings?: import('@/modules/chat/utils/request').ConversationPluginSettings;
+  hasPluginSession?: boolean;
 }
 
 export interface ChatMessage {
@@ -192,28 +196,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       disabledReason,
       disabledDescription,
       disabledAction,
+      onPluginSettingsChange,
+      initialPluginSettings,
+      hasPluginSession,
     } = props;
-    const { getModelSelection, setModelSelection, resetForNewChat } =
-      useModelSelectionStore();
-
-    const handlePreferenceSelect = useCallback(
-      (preference: PreferenceType, sessId?: string) => {
-        const sid =
-          sessId ?? sessionId ?? currentConversationIdRef.current ?? "";
-        if (preference === "prefer_first") {
-          setModelSelection(sid, "value_engineering");
-          message.success("后续回答将为 LazyMind 大模型");
-        } else if (preference === "prefer_second") {
-          setModelSelection(sid, "deepseek");
-          message.success("后续回答将为DeepSeek");
-        } else if (preference === "similar") {
-          message.success("感谢您的反馈，后续回答将仍为双模型");
-        } else if (preference === "neither") {
-          message.success("抱歉您的体验不佳，反馈已收到，后续回答将仍为双模型");
-        }
-      },
-      [sessionId, setModelSelection],
-    );
     const { clearPendingMessage: clearStorePendingMessage } =
       useChatMessageStore();
     const isMouseScrollingRef = useRef(false);
@@ -250,6 +236,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         chatInputRef.current?.uploadFiles(files);
       },
       openResumeSSE: onOpenResumeSSE ? openResumeSSE : undefined,
+      appendAutoAdvanceTurn: onOpenResumeSSE ? appendAutoAdvanceTurn : undefined,
+      ensureAutoAdvanceUserTurn: ensureAutoAdvanceUserTurn,
     }));
 
     useEffect(() => {
@@ -310,7 +298,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       fileRef.current?.clear();
     }
 
-    function sendMessage(params: SendMessageParams) {
+    async function sendMessage(params: SendMessageParams) {
       const {
         text,
         citeMessage: paramsCiteMessage,
@@ -348,16 +336,14 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
       const tempGroup =
         Object.groupBy(params?.fileList ?? [], (item) => {
-          const suffix = item.name
-            .substring(item.name.lastIndexOf("."))
-            .toLowerCase();
+          const name = item.name ?? '';
+          const suffix = name.substring(name.lastIndexOf(".")).toLowerCase();
           return allowedImageTypes.includes(suffix) ? "image" : "file";
         }) ?? {};
       const tempFileGroup =
         Object.groupBy(params?.files ?? [], (item) => {
-          const suffix = item.name
-            .substring(item.name.lastIndexOf("."))
-            .toLowerCase();
+          const name = item.name ?? '';
+          const suffix = name.substring(name.lastIndexOf(".")).toLowerCase();
           return allowedImageTypes.includes(suffix) ? "image" : "file";
         }) ?? {};
 
@@ -379,9 +365,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         setContent("");
         clearMultiData();
       }
-      const currentModelSelection = getModelSelection(
-        currentConversationIdRef.current || sessionId,
-      );
 
       const userMessage = {
         delta: normalizedText,
@@ -396,7 +379,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         finish_reason:
           ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
         create_time,
-        model_mode: currentModelSelection,
+        model_mode: "value_engineering",
       };
       const assistantMessage = {
         role: RoleTypes.ASSISTANT,
@@ -406,7 +389,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
         answers: [],
         sources: [],
-        model_mode: currentModelSelection,
+        model_mode: "value_engineering",
       };
       const newMessageList = [...messageList, userMessage, assistantMessage];
       messageListRef.current = newMessageList;
@@ -414,7 +397,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
       isMouseScrollingRef.current = true;
       scrollToEnd();
-      openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext);
+      openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, params.run_in_background ? { run_in_background: true } : undefined);
 
       const currentId = currentConversationIdRef.current;
       if (currentId) {
@@ -423,9 +406,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       }
     }
 
-    const openSSE = (
+    const openSSE = async (
       input: any[],
       action: ChatConversationsRequestActionEnum,
+      extras?: Record<string, unknown>,
     ) => {
       activeStreamRef.current = true;
       setLoading(true);
@@ -444,7 +428,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         timeout: (e) => onTimeout(e),
       };
 
-      const sse = onOpenSSE(input, action, {});
+      const sseOrPromise = onOpenSSE(input, action, {}, extras);
+      const sse = sseOrPromise instanceof Promise ? await sseOrPromise : sseOrPromise;
       sseRef.current = sse;
 
       streamManager.registerStream(conversationId, sse, callbacks);
@@ -476,8 +461,60 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       }
     };
 
+    async function syncGeneratingHistory(conversationId: string) {
+      try {
+        const statusRes = await ChatServiceApi().conversationServiceGetChatStatus({
+          conversationId,
+        });
+        if (!statusRes.data?.is_generating) {
+          return;
+        }
+        const historyRes =
+          await ChatServiceApi().conversationServiceGetConversationHistory({
+            name: conversationId,
+          });
+        const apiList = buildChatMessageListFromHistory(historyRes.data.history, {
+          isGenerating: true,
+        });
+        if (apiList.length === 0) {
+          return;
+        }
+        const cached = conversationMessagesCache.current.get(conversationId) ?? [];
+        const baseList =
+          currentConversationIdRef.current === conversationId
+            ? messageListRef.current
+            : cached;
+        const merged = mergeChatMessageLists(apiList, baseList);
+        conversationMessagesCache.current.set(conversationId, merged);
+        streamManager.saveMessageList(conversationId, merged);
+        if (currentConversationIdRef.current === conversationId) {
+          messageListRef.current = merged;
+          setMessageList(merged);
+          isMouseScrollingRef.current = true;
+          scrollToEnd();
+        }
+      } catch {
+        // ignore sync failures; resume SSE still proceeds
+      }
+    }
+
     function openResumeSSE(conversationId: string) {
       if (!onOpenResumeSSE) {
+        return;
+      }
+      if (streamManager.hasActiveStream(conversationId)) {
+        if (currentConversationIdRef.current === conversationId) {
+          activeStreamRef.current = true;
+          setLoading(true);
+          setIS_STREAMING(true);
+          const callbacks: Record<string, (e: CustomEvent) => void> = {
+            message: (e) => onMessage(e),
+            error: (e) => onError(e),
+            timeout: (e) => onTimeout(e),
+          };
+          streamManager.restoreStreamCallbacks(conversationId, callbacks);
+          sseRef.current = streamManager.getStream(conversationId) ?? sseRef.current;
+        }
         return;
       }
       activeStreamRef.current = true;
@@ -500,6 +537,90 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       streamManager.saveMessageList(conversationId, currentList);
       sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
     }
+
+    function ensureAutoAdvanceUserTurn(conversationId: string, driverMessage: string) {
+      const text = (driverMessage || '').trim();
+      if (!text) return;
+
+      const cached = conversationMessagesCache.current.get(conversationId) ?? [];
+      const sourceList =
+        currentConversationIdRef.current === conversationId
+          ? messageListRef.current
+          : cached;
+      const lastUser = sourceList.findLast(
+        (msg) => msg?.role === RoleTypes.USER,
+      );
+      const alreadyHasUserTurn =
+        lastUser?.delta === text ||
+        lastUser?.display_delta === text;
+
+      if (alreadyHasUserTurn) {
+        conversationMessagesCache.current.set(conversationId, sourceList);
+        streamManager.saveMessageList(conversationId, sourceList);
+        return;
+      }
+
+      const create_time = new Date().toISOString();
+      const userMessage = {
+        delta: text,
+        display_delta: text,
+        role: RoleTypes.USER,
+        inputs: [{ input_type: 'text', text }],
+        finish_reason:
+          ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+        create_time,
+        model_mode: 'value_engineering',
+        auto_advance: true,
+      };
+      const assistantMessage = {
+        role: RoleTypes.ASSISTANT,
+        delta: '',
+        reasoning_content: '',
+        finish_reason:
+          ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+        answers: [],
+        sources: [],
+        model_mode: 'value_engineering',
+      };
+      const nextList = [...sourceList, userMessage, assistantMessage];
+      conversationMessagesCache.current.set(conversationId, nextList);
+      streamManager.saveMessageList(conversationId, nextList);
+
+      if (currentConversationIdRef.current === conversationId) {
+        messageListRef.current = nextList;
+        setMessageList(nextList);
+        isMouseScrollingRef.current = true;
+        scrollToEnd();
+      }
+    }
+
+    function appendAutoAdvanceTurn(conversationId: string, driverMessage: string) {
+      ensureAutoAdvanceUserTurn(conversationId, driverMessage);
+      openResumeSSE(conversationId);
+    }
+
+    useEffect(() => {
+      const handleAutoAdvance = (event: Event) => {
+        const detail = (event as CustomEvent<ChatAutoAdvanceDetail>).detail;
+        if (!detail?.conversationId) return;
+        if (detail.phase === 'append') {
+          ensureAutoAdvanceUserTurn(detail.conversationId, detail.driverMessage || '');
+          return;
+        }
+        if (detail.phase === 'resume') {
+          if (detail.conversationId !== currentConversationIdRef.current) {
+            return;
+          }
+          void syncGeneratingHistory(detail.conversationId).finally(() => {
+            openResumeSSE(detail.conversationId);
+          });
+        }
+      };
+      window.addEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
+      return () => {
+        window.removeEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
+      };
+    }, []);
 
     function closeSSE() {
       sseRef.current = null;
@@ -571,9 +692,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
         const previousConversationId = currentConversationIdRef.current;
         const isPreviousTempId = previousConversationId.startsWith("temp_");
-
-        const newChatModelSelection = getModelSelection("");
-        setModelSelection(result.conversation_id, newChatModelSelection);
 
         if (isPreviousTempId) {
           const currentList = messageListRef.current;
@@ -705,63 +823,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           newList.push(assistantMessage);
         }
 
-        const convModelSelection =
-          assistantMessage?.model_mode ||
-          getModelSelection(
-            messageConversationId || currentConversationIdAtStart,
-          );
-        const isMultiAnswerMode =
-          convModelSelection === "both" && result.history_id;
-
-        if (isMultiAnswerMode) {
-          if (!assistantMessage.answers) {
-            assistantMessage.answers = [];
-          }
-
-          let targetAnswer = assistantMessage.answers.find(
-            (ans: any) => ans.history_id === result.history_id,
-          );
-
-          if (!targetAnswer) {
-            const answerIndex = assistantMessage.answers.length;
-            targetAnswer = {
-              content: "",
-              index: answerIndex,
-              history_id: result.history_id,
-              raw_content: "",
-              reasoning_content: "",
-              sources: [],
-            };
-            assistantMessage.answers.push(targetAnswer);
-          }
-
-          targetAnswer.raw_content =
-            (targetAnswer.raw_content || targetAnswer.content || "") +
-            (result.delta || "");
-          const answerSplitResult = splitThinkingContent(
-            targetAnswer.raw_content,
-            targetAnswer.reasoning_content || "",
-          );
-          targetAnswer.content = answerSplitResult.content;
-          targetAnswer.reasoning_content = answerSplitResult.reasoning_content;
-
-          if (result.sources && result.sources.length > 0) {
-            targetAnswer.sources = result.sources;
-          }
-
-          if (result.thinking_duration_s) {
-            targetAnswer.thinking_duration_s = result.thinking_duration_s;
-          }
-
-          assistantMessage = {
-            ...assistantMessage,
-            finish_reason:
-              result.finish_reason || assistantMessage.finish_reason,
-            conversation_id:
-              result.conversation_id || assistantMessage.conversation_id,
-            id: result.messageId || assistantMessage.id,
-          };
-        } else {
+        {
           const previousRawDelta =
             assistantMessage.raw_delta || assistantMessage.delta || "";
           const mergedRawDelta = previousRawDelta + (result.delta || "");
@@ -974,9 +1036,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         const streamState = streamManager.getStreamState(id);
         if (streamState) {
           const cachedList = conversationMessagesCache.current.get(id);
+          const baseList = mergeChatMessageLists(list, cachedList);
 
-          if (cachedList && cachedList.length > 0) {
-            const savedList = [...cachedList];
+          if (baseList.length > 0) {
+            const savedList = [...baseList];
             const lastIndex = savedList.length - 1;
             if (savedList[lastIndex]?.role === RoleTypes.ASSISTANT) {
               savedList[lastIndex] = {
@@ -990,6 +1053,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             }
             messageListRef.current = savedList;
             setMessageList(savedList);
+            conversationMessagesCache.current.set(id, savedList);
+            streamManager.saveMessageList(id, savedList);
             setLoading(true);
             if (
               streamState.finish_reason ===
@@ -1099,8 +1164,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       }
 
       currentConversationIdRef.current = "";
-
-      resetForNewChat();
 
       setMessageList([]);
       messageListRef.current = [];
@@ -1311,9 +1374,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         inputs: rebuiltInputs,
       };
 
-      const currentModelSelection = getModelSelection(
-        currentConversationIdRef.current || sessionId,
-      );
       const assistantMessage = {
         role: RoleTypes.ASSISTANT,
         delta: "",
@@ -1322,7 +1382,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
         answers: [],
         sources: [],
-        model_mode: currentModelSelection,
+        model_mode: "value_engineering",
       };
 
       const truncated = messageListRef.current.slice(0, index);
@@ -1583,7 +1643,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             onScroll={handleScroll}
             chatContentRef={chatContentRef}
             sessionId={sessionId}
-            onPreferenceSelect={handlePreferenceSelect}
             editingUserMessageIndex={editingUserMessageIndex}
             editingUserMessageText={editingUserMessageText}
             editingUserMessageCites={editingUserMessageCites}
@@ -1643,6 +1702,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             citeMessages={citeMessages}
             onRemoveCiteMessage={handleRemoveCiteMessage}
             onClearCiteMessage={() => setCiteMessages([])}
+            onPluginSettingsChange={onPluginSettingsChange}
+            initialPluginSettings={initialPluginSettings}
+            hasPluginSession={hasPluginSession}
           />
         </div>
       </div>

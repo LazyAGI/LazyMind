@@ -4,6 +4,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/chat"
+	"lazymind/core/datasource"
 	"lazymind/core/doc"
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
@@ -15,8 +16,10 @@ import (
 	"lazymind/core/preference"
 	"lazymind/core/resourcechange"
 	"lazymind/core/resourceupdate"
+	"lazymind/core/scheduler"
 	"lazymind/core/skill"
 	"lazymind/core/subagent"
+	"lazymind/core/taskcenter"
 	"lazymind/core/wordgroup"
 
 	"github.com/gorilla/mux"
@@ -34,6 +37,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, doc.UpdateDataset)
 	handleAPI(r, "POST", "/datasets/{dataset}:setDefault", []string{"document.write"}, doc.SetDefault)
 	handleAPI(r, "POST", "/datasets/{dataset}:unsetDefault", []string{"document.write"}, doc.UnsetDefault)
+	handleAPI(r, "GET", "/data-sources/local-fs-chat-setting", []string{"document.read"}, datasource.GetLocalFSChatSetting)
+	handleAPI(r, "PUT", "/data-sources/local-fs-chat-setting", []string{"document.write"}, datasource.SetLocalFSChatSetting)
 
 	// ----- Eval set metadata -----
 	handleAPI(r, "GET", "/eval-sets", []string{"document.read"}, evalset.ListEvalSets)
@@ -139,6 +144,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/agent/threads", []string{"qa.read"}, agent.ListThreads)
 	handleAPI(r, "POST", "/agent/threads", []string{"qa.write"}, agent.CreateThread)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}:events", []string{"qa.read"}, agent.StreamThreadEvents)
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/events/{step_id}", []string{"qa.read"}, agent.StreamThreadStepEvents)
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/steps", []string{"qa.read"}, agent.ListThreadSteps)
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/steps/{step_id}/records", []string{"qa.read"}, agent.ListThreadStepRecords)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}", []string{"qa.read"}, agent.GetThread)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/history", []string{"qa.read"}, agent.GetThreadHistory)
 	handleAPI(r, "DELETE", "/agent/threads/{thread_id}:history", []string{"qa.write"}, agent.DeleteThreadHistory)
@@ -150,6 +158,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/analysis-reports", []string{"qa.read"}, agent.GetThreadResultAnalysisReports)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/diffs", []string{"qa.read"}, agent.GetThreadResultDiffs)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/abtests", []string{"qa.read"}, agent.GetThreadResultAbtests)
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details", []string{"qa.read"}, agent.GetThreadABTestCaseDetails)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/flow-status", []string{"qa.read"}, agent.GetThreadFlowStatus)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/artifacts/{artifact_id}", []string{"qa.read"}, agent.GetThreadArtifact)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/traces/{trace_id}", []string{"qa.read"}, agent.GetThreadResultTrace)
@@ -168,6 +177,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)
 	handleAPI(r, "POST", "/conversations:resumeChat", []string{"qa.write"}, chat.ResumeChat)
 	handleAPI(r, "POST", "/conversations:stopChatGeneration", []string{"qa.write"}, chat.StopChatGeneration)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:stop", []string{"qa.write"}, chat.StopChatGeneration)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
 
 	// ----- SubAgent (Task Center) -----
@@ -184,14 +194,44 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/plugins", []string{"qa.read"}, plugin.ListPlugins)
 	handleAPI(r, "GET", "/plugins/{plugin_id}", []string{"qa.read"}, plugin.GetPluginInfo)
 
-	// ----- Plugin Sessions -----
-	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions", []string{"qa.read"}, plugin.ListConversationSessions)
+	// ----- Task Center -----
+	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
+	handleAPI(r, "POST", "/task-center/tasks", []string{"qa.write"}, taskcenter.AddTaskHandler)
+	handleAPI(r, "GET", "/task-center/tasks/{task_id}", []string{"qa.read"}, taskcenter.GetTaskByID)
+	handleAPI(r, "POST", "/task-center/tasks/{task_id}:cancel", []string{"qa.write"}, taskcenter.CancelTaskByID)
+	handleAPI(r, "GET", "/task-center/schedules/{schedule_id}/tasks", []string{"qa.read"}, taskcenter.ListScheduleTasks)
+
+	// ----- Schedules -----
+	handleAPI(r, "GET", "/schedules", []string{"qa.read"}, scheduler.ListSchedulesHandler)
+	handleAPI(r, "POST", "/schedules", []string{"qa.write"}, scheduler.CreateScheduleHandler)
+	handleAPI(r, "POST", "/schedules/{schedule_id}:cancel", []string{"qa.write"}, scheduler.CancelScheduleHandler)
+
+	// ----- User Chat Settings (global plugin/subagent defaults) -----
+	handleAPI(r, "GET", "/user/chat-settings", []string{"qa.read"}, chat.GetChatSettings)
+	handleAPI(r, "PATCH", "/user/chat-settings", []string{"qa.write"}, chat.PatchChatSettings)
+	handleAPI(r, "PATCH", "/conversations/{conversation_id}/plugin-settings", []string{"qa.write"}, chat.PatchConversationPluginSettings)
+
+	// ----- Plugin Sessions -----	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions", []string{"qa.read"}, plugin.ListConversationSessions)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions:active", []string{"qa.read"}, plugin.GetActiveConversationSession)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions:latest", []string{"qa.read"}, plugin.GetLatestConversationSession)
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}", []string{"qa.read"}, plugin.GetSessionDetail)
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots", []string{"qa.read"}, plugin.GetSessionSlots)
+	handleAPI(r, "GET", "/plugin-sessions/{session_id}/steps", []string{"qa.read"}, plugin.GetSessionSteps)
 	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, plugin.PatchSessionSlot)
 	handleAPI(r, "POST", "/plugin-sessions/{session_id}:advance", []string{"qa.write"}, plugin.AdvanceSession)
+	// Phase 3: slot item management.
+	// Stable list_index-based routes (preferred).
+	handleAPI(r, "DELETE", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.DeleteSlotItemByIndex)
+	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.PatchSlotItemByIndex)
+	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions", []string{"qa.read"}, plugin.GetSlotItemVersionsByIndex)
+	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback", []string{"qa.write"}, plugin.RollbackSlotItemByIndex)
+	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption", []string{"qa.write"}, plugin.PatchSlotCaptionByIndex)
+	// Order management
+	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.write"}, plugin.ReorderSlotItems)
+	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.read"}, plugin.GetSlotOrderHandler)
+	// Phase 4: caption editing and manual item creation
+	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items", []string{"qa.write"}, plugin.CreateSlotItem)
+	handleAPI(r, "POST", "/plugin-sessions/{session_id}/artifacts", []string{"qa.write"}, plugin.SaveArtifactByKey)
 	handleAPI(r, "GET", "/evolution/tasks", []string{"qa.read"}, resourceupdate.ListTasks)
 	handleAPI(r, "GET", "/evolution/tasks/{task_id}", []string{"qa.read"}, resourceupdate.GetTask)
 	handleAPI(r, "GET", "/skill-review-results", []string{"qa.read"}, resourceupdate.ListSkillReviewResults)
@@ -209,6 +249,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/personalization-setting", []string{"qa.write"}, evolution.SetPersonalizationSetting)
 	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skill.List)
 	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skill.ListTags)
+	handleAPI(r, "GET", "/skills/categories", []string{"qa.read"}, skill.ListCategories)
 	handleAPI(r, "POST", "/skills", []string{"qa.write"}, skill.CreateManaged)
 	handleAPI(r, "POST", "/builtin-skills/{builtin_skill_uid}:enable", []string{"qa.write"}, skill.EnableBuiltinSkill)
 	handleAPI(r, "GET", "/skills/{skill_id}:shares", []string{"qa.read"}, skill.ListSkillShareTargets)
@@ -270,12 +311,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/inner/word_group:apply", nil, wordgroup.ApplyWordGroupAction)
 
 	// ----- Model provider -----
-	handleAPI(r, "GET", "/model_providers/features", nil, modelprovider.GetModelFeatures)
+	handleAPI(r, "GET", "/model_providers/features", []string{"model.read"}, modelprovider.GetModelFeatures)
 	handleAPI(r, "GET", "/model_providers", []string{"model.read"}, modelprovider.ListUserProviders)
 	handleAPI(r, "GET", "/model_providers:with_groups", []string{"model.read"}, modelprovider.ListUserProvidersWithGroups)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}:check", []string{"model.write"}, modelprovider.CheckGroup)
 	handleAPI(r, "GET", "/model_providers/models", []string{"model.read"}, modelprovider.ListUserModelsByModelType)
-	handleAPI(r, "GET", "/model_providers/models/ready", nil, modelprovider.GetModelReady)
+	handleAPI(r, "GET", "/model_providers/models/ready", []string{"model.read"}, modelprovider.GetModelReady)
 	handleAPI(r, "GET", "/model_providers/selected_models", []string{"model.read"}, modelprovider.GetSelectedModels)
 	handleAPI(r, "PUT", "/model_providers/selected_models", []string{"model.write"}, modelprovider.SetSelectedModels)
 	handleAPI(r, "PUT", "/model_providers/selected_models/share", []string{"model.write"}, modelprovider.SetSharedModel)

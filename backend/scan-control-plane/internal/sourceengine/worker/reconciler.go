@@ -99,6 +99,8 @@ func (r *CoreResultReconciler) RunOnce(ctx context.Context, workerID string) err
 		return r.complete(ctx, task, result, now)
 	case coreclient.ResultStatusFailed:
 		return r.fail(ctx, task, result, now)
+	case coreclient.ResultStatusCanceled:
+		return r.fail(ctx, task, result, now)
 	default:
 		_, _, err = r.store.ReleaseTaskLease(ctx, task.TaskID, workerID, now.Add(r.pollInterval))
 		return err
@@ -192,6 +194,7 @@ func (r *CoreResultReconciler) fail(ctx context.Context, task store.ParseTask, r
 		Task:      task,
 		ErrorCode: code,
 		Message:   result.ErrorMessage,
+		Phase:     "parse",
 		FailedAt:  now,
 	})
 }

@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
@@ -387,6 +388,9 @@ func (r *DBStateReducer) ApplyTaskFailure(ctx context.Context, input TaskFailure
 		}
 		current.ParseQueueState = ParseQueueStateFailed
 		current.LastError = store.JSON{"code": input.ErrorCode, "message": input.Message}
+		if input.Phase != "" {
+			current.LastError["phase"] = input.Phase
+		}
 		current.UpdatedAt = now
 		if err := r.store.SaveDocumentState(ctx, current); err != nil {
 			return err
@@ -395,11 +399,20 @@ func (r *DBStateReducer) ApplyTaskFailure(ctx context.Context, input TaskFailure
 		if err != nil {
 			return err
 		}
-		document.ParseStatus = "FAILED"
+		document.ParseStatus = documentFailureParseStatus(input.ErrorCode)
 		document.UpdatedAt = now
 		return r.store.UpdateDocument(ctx, document)
 	}
 	return nil
+}
+
+func documentFailureParseStatus(errorCode string) string {
+	switch strings.ToUpper(strings.TrimSpace(errorCode)) {
+	case "CANCELED", "CANCELLED":
+		return "CANCELED"
+	default:
+		return "FAILED"
+	}
 }
 
 func stateForSeenObject(baseline string, object store.SourceObject) string {

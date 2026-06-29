@@ -47,6 +47,11 @@ import {
   type FeishuAuthAccount,
 } from "./common/feishuAccounts";
 import {
+  FeishuCredentialHintAlertFromForm,
+  FEISHU_OPEN_PLATFORM_URL,
+  getFeishuOpenPlatformAppUrl,
+} from "./common/FeishuCredentialHintAlert";
+import {
   FEISHU_DEFAULT_SCOPES,
   type OAuthState,
   type PendingOAuthAttempt,
@@ -57,11 +62,6 @@ import "./index.scss";
 
 const { Link, Paragraph, Text } = Typography;
 const FEISHU_LOGO_URL = "https://www.google.com/s2/favicons?domain=feishu.cn&sz=96";
-const FEISHU_OPEN_PLATFORM_URL = "https://open.feishu.cn/app";
-
-function getFeishuOpenPlatformAppUrl(appId: string) {
-  return `${FEISHU_OPEN_PLATFORM_URL}/${encodeURIComponent(appId)}/baseinfo`;
-}
 
 function isFeishuAppId(value?: string | null) {
   return /^cli_[a-z0-9]+$/i.test(`${value || ""}`.trim());
@@ -718,13 +718,25 @@ export default function FeishuAccountPage() {
     updateFeishuConnection(connectionId, {
       chat_enabled: checked,
       chatEnabled: checked,
-    }).catch((error: any) => {
-      persistAccounts(previousAccounts);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-          t("common.requestFailed"),
-      );
-    });
+    })
+      .then(() => {
+        message.success(
+          checked
+            ? t("admin.dataSourceFeishuAccountChatEnabledSuccess", {
+                name: account.name,
+              })
+            : t("admin.dataSourceFeishuAccountChatDisabledSuccess", {
+                name: account.name,
+              }),
+        );
+      })
+      .catch((error: any) => {
+        persistAccounts(previousAccounts);
+        message.error(
+          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+            t("common.requestFailed"),
+        );
+      });
   };
 
   const handleSubmitManualOauthCallback = async () => {
@@ -1056,11 +1068,7 @@ export default function FeishuAccountPage() {
           >
             <Input.Password placeholder={t("admin.dataSourceAppSecretPlaceholder")} />
           </Form.Item>
-          <Alert
-            showIcon
-            type="info"
-            message={t("admin.dataSourceFeishuCredentialHint")}
-          />
+          <FeishuCredentialHintAlertFromForm form={form} />
         </Form>
       </Modal>
 

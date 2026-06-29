@@ -5,14 +5,13 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/gorilla/mux"
-	"gopkg.in/yaml.v3"
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
 	"lazymind/core/chat"
@@ -25,10 +24,13 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
+	"lazymind/core/scheduler"
+	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/gorilla/mux"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed docs.html
@@ -91,6 +93,18 @@ func registerCoreRoutes(r *mux.Router) {
 		common.ReplyJSON(w, map[string]string{"message": "Admin only area"})
 	})
 	registerAllRoutes(r)
+}
+
+func coreListenAddr() string {
+	host := strings.TrimSpace(os.Getenv("LAZYMIND_CORE_HOST"))
+	port := strings.TrimSpace(os.Getenv("LAZYMIND_CORE_PORT"))
+	if port == "" {
+		port = "8000"
+	}
+	if host == "" {
+		return ":" + port
+	}
+	return net.JoinHostPort(host, port)
 }
 
 func exportRegisteredOpenAPIArtifacts() error {
@@ -175,7 +189,7 @@ func main() {
 	log.Logger.Info().Str("driver", driver).Msg("ACL store initialized")
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
-	store.Init(db.DB, readonlyDB.DB, store.MustRedisFromEnv())
+	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
 	evalset.RegisterAsyncJobs()
 	asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
 	asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{
@@ -188,7 +202,7 @@ func main() {
 	resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
 	resourceupdate.LogStartup(resourceUpdateEnabled)
 	if resourceUpdateEnabled {
-		resourceupdate.Start(context.Background(), store.DB(), store.Redis(), resourceupdate.DefaultConfig())
+		resourceupdate.Start(context.Background(), store.DB(), store.State(), resourceupdate.DefaultConfig())
 	}
 
 	// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
@@ -203,20 +217,25 @@ func main() {
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
 	subagent.EventHooks.RegisterConversationEventHook(
-		func(ctx context.Context, rdb *redis.Client, convID, _ string, eventType string, payload map[string]any) {
-			_ = chat.AppendConvEvent(ctx, rdb, convID, &chat.ConvEvent{
-				Type: eventType,
-				Payload: map[string]any{
-					"event_type": eventType,
-					"session_id": payload["session_id"],
-					"plugin_id":  payload["plugin_id"],
-					"step_id":    payload["step_id"],
-					"message":    payload["message"],
-				},
+		func(_ context.Context, stateStore state.Store, convID, _ string, eventType string, payload map[string]any) {
+			enriched := make(map[string]any, len(payload)+2)
+			for k, v := range payload {
+				enriched[k] = v
+			}
+			enriched["event_type"] = eventType
+			if _, ok := enriched["conversation_id"]; !ok {
+				enriched["conversation_id"] = convID
+			}
+			_ = chat.AppendConvEvent(context.Background(), stateStore, convID, &chat.ConvEvent{
+				Type:    eventType,
+				Payload: enriched,
 			})
 		},
 	)
 	log.Logger.Info().Msg("plugin subagent hooks registered")
+
+	// Start the schedule ticker.
+	scheduler.RunScheduler(context.Background(), store.DB(), "")
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()
@@ -255,8 +274,9 @@ func main() {
 		w.Write(swaggerUIHTML)
 	}).Methods(http.MethodGet)
 
-	log.Logger.Info().Msg("Core listening on :8000")
-	if err := http.ListenAndServe(":8000", r); err != nil {
+	listenAddr := coreListenAddr()
+	log.Logger.Info().Str("addr", listenAddr).Msg("Core listening")
+	if err := http.ListenAndServe(listenAddr, r); err != nil {
 		log.Logger.Fatal().Err(err).Msg("http listen failed")
 	}
 }

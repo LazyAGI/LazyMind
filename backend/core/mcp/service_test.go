@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	appLog "lazymind/core/log"
 )
 
 func newTestDB(t *testing.T) *orm.DB {
@@ -23,6 +24,30 @@ func newTestDB(t *testing.T) *orm.DB {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	return db
+}
+
+func TestDoRPCNon2xxHidesResponseBodyFromError(t *testing.T) {
+	appLog.InitNop()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"trace_id":"trace-1","error":{"code":"bad_request","message":"model is required"}}`))
+	}))
+	defer server.Close()
+
+	_, _, err := doRPC(context.Background(), server.Client(), server.URL, nil, jsonRPCRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "initialize",
+	})
+	if err == nil {
+		t.Fatalf("expected rpc error")
+	}
+	if got, want := err.Error(), "mcp rpc returned 400"; got != want {
+		t.Fatalf("unexpected error: got %q want %q", got, want)
+	}
+	if strings.Contains(err.Error(), "model is required") || strings.Contains(err.Error(), "trace-1") {
+		t.Fatalf("error leaked response body: %q", err.Error())
+	}
 }
 
 func TestCreateServerMasksAndEncryptsAPIKey(t *testing.T) {
@@ -103,6 +128,81 @@ func TestCreateServerIgnoresEnabledAndStartsDisabled(t *testing.T) {
 	}
 	if len(runtime) != 0 {
 		t.Fatalf("disabled new server should not load into runtime config: %#v", runtime)
+	}
+}
+
+func TestListServersFiltersByKeywordAndPaginates(t *testing.T) {
+	db := newTestDB(t)
+	for _, item := range []struct {
+		name string
+		url  string
+	}{
+		{name: "网站检索", url: "https://search.example.com/mcp"},
+		{name: "Alpha API", url: "https://alpha.example.com/mcp"},
+		{name: "网站分析", url: "https://analytics.example.com/mcp"},
+	} {
+		if _, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+			Name:      item.name,
+			Transport: "http",
+			URL:       item.url,
+		}, "u1", "User 1"); err != nil {
+			t.Fatalf("create server %q: %v", item.name, err)
+		}
+	}
+
+	resp, err := ListServers(context.Background(), db.DB, "u1", ListServersRequest{
+		Keyword:  "网站",
+		Page:     1,
+		PageSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("list servers: %v", err)
+	}
+	if resp.Total != 2 || resp.Page != 1 || resp.PageSize != 1 {
+		t.Fatalf("unexpected list metadata: %#v", resp)
+	}
+	if len(resp.MCPServers) != 1 || !strings.Contains(resp.MCPServers[0].Name, "网站") {
+		t.Fatalf("unexpected first page: %#v", resp.MCPServers)
+	}
+
+	resp, err = ListServers(context.Background(), db.DB, "u1", ListServersRequest{
+		Keyword:  "网站",
+		Page:     2,
+		PageSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("list second page: %v", err)
+	}
+	if resp.Total != 2 || len(resp.MCPServers) != 1 || !strings.Contains(resp.MCPServers[0].Name, "网站") {
+		t.Fatalf("unexpected second page: %#v", resp)
+	}
+}
+
+func TestListServersKeywordMatchesURLCaseInsensitively(t *testing.T) {
+	db := newTestDB(t)
+	if _, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+		Name:      "docs",
+		Transport: "http",
+		URL:       "https://Website.example.com/mcp",
+	}, "u1", "User 1"); err != nil {
+		t.Fatalf("create matching server: %v", err)
+	}
+	if _, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+		Name:      "alpha",
+		Transport: "http",
+		URL:       "https://alpha.example.com/mcp",
+	}, "u1", "User 1"); err != nil {
+		t.Fatalf("create non-matching server: %v", err)
+	}
+
+	resp, err := ListServers(context.Background(), db.DB, "u1", ListServersRequest{
+		Keyword: "WEBSITE",
+	})
+	if err != nil {
+		t.Fatalf("list servers: %v", err)
+	}
+	if resp.Total != 1 || len(resp.MCPServers) != 1 || resp.MCPServers[0].Name != "docs" {
+		t.Fatalf("unexpected keyword response: %#v", resp)
 	}
 }
 

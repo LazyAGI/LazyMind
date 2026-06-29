@@ -179,6 +179,7 @@ export default function DatasetListPage() {
         title: t("datasetManagement.fields.knowledgeBase"),
         dataIndex: "knowledge_bases",
         width: 220,
+        className: "dataset-kb-column",
         render: (_, record) =>
           record.knowledge_bases?.length ? (
             <div className="dataset-kb-scroll-list">
@@ -282,7 +283,8 @@ export default function DatasetListPage() {
           loading={loading}
           columns={columns}
           dataSource={datasets}
-          scroll={{ x: 1050 }}
+          scroll={{ x: 1050, y: "calc(100vh - 340px)" }}
+          tableLayout="fixed"
           pagination={{
             pageSize: 10,
             showTotal: (total) => t("common.totalItems", { total }),

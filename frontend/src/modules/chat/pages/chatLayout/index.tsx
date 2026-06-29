@@ -19,18 +19,15 @@ import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
   ChatServiceApi,
+  parseConversationPluginSettings,
+  type ConversationPluginSettings,
 } from "@/modules/chat/utils/request";
+import { draftStore } from "@/modules/chat/store/pluginPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
-import {
-  useModelSelectionStore,
-  MODEL_API_LABELS,
-  parseModelSelectionFromModels,
-} from "@/modules/chat/store/modelSelection";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
-  CHAT_AUTO_ADVANCE_EVENT,
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
@@ -38,6 +35,7 @@ import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { usePluginStore } from "@/modules/chat/store/pluginPanel";
+import { useChatInputStore } from "@/modules/chat/store/chatInput";
 
 // Stable empty reference to avoid returning a fresh array from the zustand
 // selector on every render, which (with useSyncExternalStore) would trigger an
@@ -55,6 +53,8 @@ interface IChatLayoutProps {
   chatDisabledReason?: string;
   chatDisabledDescription?: string;
   chatDisabledAction?: ReactNode;
+  /** Plugin settings selected on the welcome screen before the first message is sent. */
+  initPendingPluginSettings?: ConversationPluginSettings | null;
 }
 
 const ChatLayout: FC<IChatLayoutProps> = (props) => {
@@ -70,14 +70,54 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     chatDisabledReason,
     chatDisabledDescription,
     chatDisabledAction,
+    initPendingPluginSettings,
   } = props;
   const [sessionId, setSessionId] = useState("");
   const [chatConfig, setChatConfig] = useState<ChatConfig>(
     initchatConfig || {},
   );
+  // Pending plugin settings from the chat config popover before a conversation is created.
+  // Initialised from the welcome-screen selection (initPendingPluginSettings) when provided.
+  const pendingPluginSettingsRef = useRef<ConversationPluginSettings | null>(
+    initPendingPluginSettings ?? null,
+  );
+  // Plugin settings loaded from conversation detail (for existing conversations).
+  const [conversationPluginSettings, setConversationPluginSettings] = useState<ConversationPluginSettings | undefined>(undefined);
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
+
+  // Keep pendingPluginSettingsRef in sync with the welcome screen while no conversation is active.
+  useEffect(() => {
+    if (!sessionId) {
+      pendingPluginSettingsRef.current = initPendingPluginSettings ?? null;
+    }
+  }, [initPendingPluginSettings, sessionId]);
+
+  // Load persisted plugin settings once a real conversation id is available.
+  useEffect(() => {
+    if (!sessionId || sessionId.startsWith('temp_')) {
+      if (!sessionId) {
+        setConversationPluginSettings(undefined);
+      }
+      return;
+    }
+    let cancelled = false;
+    ChatServiceApi()
+      .conversationServiceGetConversationDetail({ conversation: sessionId })
+      .then((detailRes) => {
+        if (cancelled) {
+          return;
+        }
+        setConversationPluginSettings(
+          parseConversationPluginSettings(detailRes.data.conversation),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
   const panelDragRef = useRef<{ startX: number; startW: number } | null>(null);
 
   const onPanelResizeStart = useCallback((e: React.MouseEvent) => {
@@ -108,7 +148,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   });
 
   const { pendingMessage, clearPendingMessage } = useChatMessageStore();
-  const { getModelSelection, setModelSelection } = useModelSelectionStore();
 
   const chatRef = useRef<ChatImperativeProps>(null);
 
@@ -129,14 +168,22 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const unsubscribeConvEvents = useTaskCenterStore((s) => s.unsubscribeConvEvents);
 
   useEffect(() => {
-    if (sessionId) {
-      loadConversationTasks(sessionId);
-      subscribeConvEvents(sessionId);
-    }
-    return () => {
-      if (sessionId) {
-        unsubscribeConvEvents(sessionId);
+    if (!sessionId) return;
+    // Load the persisted task list first, then subscribe to conv-level events.
+    // convEvents are replayed from the start on every new SSE connection, so we
+    // must have the authoritative task states in the store before the replay
+    // delivers task_created events — otherwise a replayed task_created for an
+    // already-finished task would look "new" and we would re-subscribe to its
+    // task stream, causing the full execution log to be appended again.
+    let cancelled = false;
+    loadConversationTasks(sessionId).then(() => {
+      if (!cancelled) {
+        subscribeConvEvents(sessionId);
       }
+    });
+    return () => {
+      cancelled = true;
+      unsubscribeConvEvents(sessionId);
     };
   }, [sessionId, loadConversationTasks, subscribeConvEvents, unsubscribeConvEvents]);
 
@@ -248,11 +295,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setKnowledgeRefreshKey((key) => key + 1);
         setConversationId(resolvedId);
 
-        const modelSelection = parseModelSelectionFromModels(
-          (conversation as any)?.models,
-        );
-        setModelSelection(resolvedId, modelSelection);
-
         const list = buildChatMessageListFromHistory(history, {
           isGenerating,
         });
@@ -270,24 +312,26 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       });
   }, []);
 
-  function onOpenSSE(
+  async function onOpenSSE(
     input: Query[],
     action: ChatConversationsRequestActionEnum,
     callbacks: Record<string, (e: CustomEvent) => void>,
+    extras?: Record<string, unknown>,
   ) {
-    const modelSelection = getModelSelection(sessionId);
+    // Flush any pending slot drafts before sending so the AI sees the latest content.
+    // Draft keys use the plugin session_id (not the conversation_id), so pass the
+    // plugin session_id when one is active; fall back to conversationId otherwise.
+    const activePluginSession = usePluginStore.getState().sessionByConversation[sessionId];
+    const draftSessionId = activePluginSession?.session_id ?? sessionId;
+    await draftStore.flushAllDrafts(draftSessionId);
 
     const hasUploadedFiles = input?.some(
       (q: Query) => q.input_type === "image" || q.input_type === "file",
     );
-    const useKnowledgeBase =
-      modelSelection === "value_engineering" || modelSelection === "both";
     const datasetList =
-      hasUploadedFiles || !useKnowledgeBase
+      hasUploadedFiles || !chatConfig?.knowledgeBaseId?.length
         ? []
-        : chatConfig?.knowledgeBaseId?.length
-          ? chatConfig.knowledgeBaseId.map((k) => ({ id: k }))
-          : [];
+        : chatConfig.knowledgeBaseId.map((k) => ({ id: k }));
 
     // Attach active plugin session context so Go/Python can inject advance_step
     // instead of cold-start trigger tools on follow-up messages.
@@ -300,6 +344,27 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             current_step: activeSession.current_step_id,
           }
         : undefined;
+
+    // Attach focused_tab and focused_sort_order so the AI knows what the user is looking at.
+    const pluginUIState =
+      activeSession && (activeSession.focusedTab || activeSession.focusedSortOrder !== undefined)
+        ? {
+            focused_tab: activeSession.focusedTab,
+            focused_sort_order: activeSession.focusedSortOrder,
+          }
+        : undefined;
+
+    // Collect pending artifact references from the chat input store.
+    const { getArtifactRefs, clearArtifactRefs } = useChatInputStore.getState();
+    const artifactRefs = getArtifactRefs(sessionId);
+    // Clear after reading so they are not repeated in the next message.
+    if (artifactRefs.length > 0) {
+      clearArtifactRefs(sessionId);
+    }
+    // Clear after reading so they are not repeated in the next message.
+    if (artifactRefs.length > 0) {
+      clearArtifactRefs(sessionId);
+    }
 
     return new SSE(CHAT_STREAM_URL, {
       method: Method.POST,
@@ -320,12 +385,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             tags: chatConfig?.tags,
           },
         },
-        models:
-          modelSelection === "both"
-            ? [MODEL_API_LABELS.lazyMind, MODEL_API_LABELS.deepSeek]
-            : modelSelection === "value_engineering"
-              ? [MODEL_API_LABELS.lazyMind]
-              : [MODEL_API_LABELS.deepSeek],
+        models: ["LazyMind 大模型"],
         // enable_thinking: think ? true : false,
         stream: true,
         input,
@@ -333,6 +393,24 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         create_time: new Date().toISOString(),
         environment_context: buildEnvironmentContext(),
         ...(pluginContext ? { plugin_context: pluginContext } : {}),
+        ...(pluginUIState ? { plugin_ui_state: pluginUIState } : {}),
+        ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
+        ...(extras?.run_in_background ? { run_in_background: true } : {}),
+        // If the user changed plugin settings before a conversation was created,
+        // carry them in the first request so Go can persist them on ensureConversation.
+        // Only send the three known fields to avoid polluting the payload with API response leftovers.
+        ...(() => {
+          const pending = pendingPluginSettingsRef.current;
+          if (!sessionId && pending) {
+            pendingPluginSettingsRef.current = null;
+            const clean: Record<string, unknown> = {};
+            if (pending.enable_plugin != null) clean.enable_plugin = pending.enable_plugin;
+            if (pending.enable_subagent != null) clean.enable_subagent = pending.enable_subagent;
+            if (pending.plugin_mode != null) clean.plugin_mode = pending.plugin_mode;
+            return { initial_plugin_settings: clean };
+          }
+          return {};
+        })(),
       }),
       callbacks,
     });
@@ -371,19 +449,32 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const loadConversation = useCallback((conversationId: string) => {
     setIsRestoringConversation(true);
     ChatServiceApi()
-      .conversationServiceGetConversationDetail({
-        conversation: conversationId,
-      })
-      .then((detailRes) =>
+      .conversationServiceGetChatStatus({ conversationId })
+      .then((res) => ({
+        resolvedId: conversationId,
+        isGenerating: !!res.data?.is_generating,
+      }))
+      .catch(() => ({ resolvedId: conversationId, isGenerating: false }))
+      .then(({ resolvedId, isGenerating }) =>
         ChatServiceApi()
-          .conversationServiceGetConversationHistory({
-            name: conversationId,
+          .conversationServiceGetConversationDetail({
+            conversation: resolvedId,
           })
-          .then((historyRes) => ({ detailRes, historyRes })),
+          .then((detailRes) =>
+            ChatServiceApi()
+              .conversationServiceGetConversationHistory({
+                name: resolvedId,
+              })
+              .then((historyRes) => ({
+                detailRes,
+                historyRes,
+                resolvedId,
+                isGenerating,
+              })),
+          ),
       )
-      .then(({ detailRes, historyRes }) => {
+      .then(({ detailRes, historyRes, resolvedId, isGenerating }) => {
         const conversation = detailRes.data.conversation;
-        const resolvedId = conversation?.conversation_id || conversationId;
         const tempData = {
           knowledgeBaseId: conversation?.search_config?.dataset_list
             ?.map((dataset: any) => dataset.id)
@@ -396,25 +487,26 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setChatConfigFn(tempData);
         setKnowledgeRefreshKey((key) => key + 1);
 
-        const modelSelection = parseModelSelectionFromModels(
-          (conversation as any)?.models,
+        setConversationPluginSettings(
+          parseConversationPluginSettings(conversation),
         );
-        if (resolvedId) {
-          setModelSelection(resolvedId, modelSelection);
-        }
 
         setConversationId(resolvedId);
 
         const history = historyRes.data.history;
         const list = buildChatMessageListFromHistory(history, {
           fallbackCreateTime: "xxx-xxx-xxx",
+          isGenerating,
         });
         chatRef.current?.replaceMessageList(resolvedId, list);
+        if (isGenerating) {
+          chatRef.current?.openResumeSSE?.(resolvedId);
+        }
       })
       .finally(() => {
         setIsRestoringConversation(false);
       });
-  }, [setConversationId, setChatConfigFn, setModelSelection]);
+  }, [setConversationId, setChatConfigFn]);
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {
@@ -427,6 +519,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       const conversationId = detail.conversationId || "";
       if (!conversationId) {
         setIsRestoringConversation(false);
+        setConversationPluginSettings(undefined);
+        setChatConfig({});
+        setChatConfigFn({});
         chatRef.current?.createNewChat();
         return;
       }
@@ -449,19 +544,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     };
   }, [sessionId, setIsChatContent, loadConversation]);
 
-  // Auto-advance: when driver agent triggers a new chat turn, open resume SSE.
-  useEffect(() => {
-    const handleAutoAdvance = (event: Event) => {
-      const { conversationId } = (event as CustomEvent<{ conversationId: string }>).detail || {};
-      if (!conversationId || conversationId !== sessionId) return;
-      chatRef.current?.openResumeSSE?.(conversationId);
-    };
-    window.addEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
-    return () => {
-      window.removeEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
-    };
-  }, [sessionId]);
-
   function parseErrorData(data: string) {
     const dataObject = UIUtils.jsonParser(data) || {};
     return dataObject.message;
@@ -476,6 +558,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     e.preventDefault();
     e.stopPropagation();
     if (!canChat) {
+      return;
+    }
+    // Ignore internal DOM drag-and-drop (e.g. plugin panel card sorting).
+    if (!Array.from(e.dataTransfer.types).includes('Files')) {
       return;
     }
     dragCounterRef.current++;
@@ -559,6 +645,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         chatConfig={chatConfig}
         setChatConfig={setChatConfig}
         setChatConfigFn={setChatConfigFn}
+        onPluginSettingsChange={(settings) => {
+          if (!sessionId) {
+            pendingPluginSettingsRef.current = settings;
+          } else {
+            setConversationPluginSettings(settings);
+          }
+        }}
+        initialPluginSettings={conversationPluginSettings}
+        hasPluginSession={hasPluginSession}
         knowledgeRefreshKey={knowledgeRefreshKey}
         embeddingReady={embeddingReady}
         multimodalEmbeddingReady={multimodalEmbeddingReady}

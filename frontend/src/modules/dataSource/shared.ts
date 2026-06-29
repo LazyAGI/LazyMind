@@ -14,9 +14,13 @@ export type CloudTargetType = FeishuTargetType | NotionTargetType;
 export type DetailParseStatus =
   | "parsed"
   | "pending"
+  | "downloading"
   | "reindexing"
   | "duplicate"
   | "deleted"
+  | "download_failed"
+  | "parse_failed"
+  | "canceled"
   | "failed";
 export type DataSourceKind = "local" | "feishu" | "notion";
 export type DataSourceFileType =
@@ -45,7 +49,14 @@ export type DataSourceFileType =
   | "mp3"
   | "mp4"
   | "txt"
-  | "xml";
+  | "xml"
+  | "json"
+  | "jsonl"
+  | "yaml"
+  | "yml"
+  | "html"
+  | "htm"
+  | "py";
 
 // New source state machine fields exposed by the backend.
 export type SourceStateValue = "UNCHANGED" | "NEW" | "MODIFIED" | "DELETED";
@@ -206,6 +217,41 @@ export const DATA_SOURCE_FILE_TYPE_OPTIONS: Array<{
     extensions: ["xml"],
     i18nKey: "admin.dataSourceFileTypeXml",
   },
+  {
+    value: "json",
+    extensions: ["json"],
+    i18nKey: "admin.dataSourceFileTypeJson",
+  },
+  {
+    value: "jsonl",
+    extensions: ["jsonl"],
+    i18nKey: "admin.dataSourceFileTypeJsonl",
+  },
+  {
+    value: "yaml",
+    extensions: ["yaml"],
+    i18nKey: "admin.dataSourceFileTypeYaml",
+  },
+  {
+    value: "yml",
+    extensions: ["yml"],
+    i18nKey: "admin.dataSourceFileTypeYml",
+  },
+  {
+    value: "html",
+    extensions: ["html"],
+    i18nKey: "admin.dataSourceFileTypeHtml",
+  },
+  {
+    value: "htm",
+    extensions: ["htm"],
+    i18nKey: "admin.dataSourceFileTypeHtm",
+  },
+  {
+    value: "py",
+    extensions: ["py"],
+    i18nKey: "admin.dataSourceFileTypePy",
+  },
 ];
 export const DEFAULT_DATA_SOURCE_FILE_TYPES: DataSourceFileType[] = [
   "pdf",
@@ -290,6 +336,7 @@ export interface DataSourceItem {
   tenantId?: string;
   scanManaged?: boolean;
   storageUsed?: string;
+  parsedDocumentCount?: number;
   detailDocuments?: DetailDocumentItem[];
   rootPath?: string;
   targetRef?: string;
@@ -353,6 +400,7 @@ export interface DataSourceSummary {
   deleteCount: number;
   changeCount: number;
   storageUsed?: string;
+  parsedDocumentCount?: number;
   documents?: DocumentStatusRow[];
   scanManaged?: boolean;
   tenantId?: string;
@@ -531,7 +579,116 @@ export function normalizeDataSourceFileUpdateState(
   return hasUpdate ? "changed" : "unchanged";
 }
 
-export function normalizeDataSourceParseStatus(parseState?: string): DetailParseStatus {
+function statusField(value: unknown, key: string) {
+  if (typeof value !== "object" || value === null) {
+    return "";
+  }
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" ? field : "";
+}
+
+function dataSourceFailureText(parseState?: string, lastError?: unknown) {
+  if (!lastError) {
+    return parseState || "";
+  }
+  if (typeof lastError === "string") {
+    return [parseState, lastError].filter(Boolean).join(" ");
+  }
+  if (typeof lastError !== "object") {
+    return [parseState, `${lastError}`].filter(Boolean).join(" ");
+  }
+  return [
+    parseState,
+    statusField(lastError, "phase"),
+    statusField(lastError, "stage"),
+    statusField(lastError, "code"),
+    statusField(lastError, "reason"),
+    statusField(lastError, "message"),
+    statusField(lastError, "error"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+export interface DataSourceParseStatusOptions {
+  sourceType?: SourceType | DataSourceKind;
+}
+
+function supportsDownloadParseStatus(sourceType?: SourceType | DataSourceKind) {
+  return sourceType !== "local";
+}
+
+function normalizeDataSourceFailureStatus(
+  parseState?: string,
+  lastError?: unknown,
+  options?: DataSourceParseStatusOptions,
+): DetailParseStatus | undefined {
+  const supportsDownloadStatus = supportsDownloadParseStatus(options?.sourceType);
+  const phase = statusField(lastError, "phase");
+  if (
+    supportsDownloadStatus &&
+    hasStatusToken(phase, ["download", "export", "fetch", "source"])
+  ) {
+    return "download_failed";
+  }
+  if (hasStatusToken(phase, ["parse", "index", "ingest", "core", "knowledge"])) {
+    return "parse_failed";
+  }
+
+  const code = statusField(lastError, "code") || statusField(lastError, "reason");
+  const text = dataSourceFailureText(parseState, lastError);
+  if (
+    hasStatusText(text, [
+      "download_failed",
+      "download failed",
+      "export_failed",
+      "export failed",
+      "fetch_failed",
+      "fetch failed",
+      "transient_source_error",
+      "unsupported_export",
+      "auth_connection_invalid",
+      "permission_denied",
+    ]) ||
+    hasStatusToken(text, ["download", "export"])
+  ) {
+    return supportsDownloadStatus ? "download_failed" : undefined;
+  }
+  if (
+    hasStatusText(text, [
+      "parse_failed",
+      "parse failed",
+      "core_task_failed",
+      "core_submit_failed",
+      "core_task_not_found",
+      "index_failed",
+      "index failed",
+      "ingest_failed",
+      "ingest failed",
+    ]) ||
+    hasStatusToken(code, ["parse", "core", "index", "ingest"])
+  ) {
+    return "parse_failed";
+  }
+  return undefined;
+}
+
+export function normalizeDataSourceParseStatus(
+  parseState?: string,
+  lastError?: unknown,
+  options?: DataSourceParseStatusOptions,
+): DetailParseStatus {
+  if (hasStatusToken(parseState, ["cancel", "canceled", "cancelled"])) {
+    return "canceled";
+  }
+  const failureStatus = normalizeDataSourceFailureStatus(
+    parseState,
+    lastError,
+    options,
+  );
+  if (failureStatus) {
+    return failureStatus;
+  }
   if (
     hasStatusText(parseState, [
       "not_parsed",
@@ -560,6 +717,29 @@ export function normalizeDataSourceParseStatus(parseState?: string): DetailParse
     ])
   ) {
     return "failed";
+  }
+  if (
+    supportsDownloadParseStatus(options?.sourceType) &&
+    (hasStatusToken(parseState, ["download", "downloading", "exporting", "fetching"]) ||
+      (hasStatusToken(parseState, [
+        "queued",
+        "running",
+        "pending",
+        "waiting",
+        "working",
+        "processing",
+      ]) &&
+        !hasStatusToken(parseState, [
+          "submitted",
+          "parse",
+          "parsing",
+          "index",
+          "indexing",
+          "reindex",
+          "reindexing",
+        ])))
+  ) {
+    return "downloading";
   }
   if (
     hasStatusToken(parseState, [
@@ -747,6 +927,26 @@ export function resolveStorageUsed(
   }
 
   return fallback || "0 B";
+}
+
+export function resolveParsedDocumentCount(
+  summary?: Record<string, any>,
+  fallback = 0,
+) {
+  const value =
+    summary?.parsed_document_count ??
+    summary?.parsedDocumentCount;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : Number.NaN;
+
+  if (Number.isFinite(parsed)) {
+    return Math.max(0, Math.trunc(parsed));
+  }
+  return fallback;
 }
 
 // Source/sync state helpers below.

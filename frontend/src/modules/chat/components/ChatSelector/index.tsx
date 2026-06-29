@@ -1,9 +1,9 @@
-import { Button, Input, Popover, Tooltip } from "antd";
+import { Button, Input, Popover, Tooltip, message } from "antd";
 import {
   SearchOutlined,
   CheckOutlined,
-  PushpinOutlined,
   PushpinFilled,
+  PushpinOutlined,
 } from "@ant-design/icons";
 import {
   useEffect,
@@ -87,14 +87,9 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
     const [knowledgeLoading, setKnowledgeLoading] = useState(false);
     const [defaultKnowledgeId, setDefaultKnowledgeId] = useState<string[]>([]);
     const [searchValue, setSearchValue] = useState<string>("");
+    const [defaultUpdatingId, setDefaultUpdatingId] = useState("");
     const isResettingSelectionRef = useRef(false);
-    const isUpdatingDefaultRef = useRef(false);
-    const selectedIdsRef = useRef<string[]>([]);
     const previousRefreshKeyRef = useRef(refreshKey);
-
-    useEffect(() => {
-      selectedIdsRef.current = selectedIds;
-    }, [selectedIds]);
 
     function getDefaultDatasetIds(datasets: Dataset[]) {
       return (datasets
@@ -110,10 +105,7 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
     }
 
     useEffect(() => {
-      if (
-        isResettingSelectionRef.current ||
-        isUpdatingDefaultRef.current
-      ) {
+      if (isResettingSelectionRef.current) {
         return;
       }
       const setData = new Set([
@@ -192,37 +184,6 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
         .finally(() => setKnowledgeLoading(false));
     }
 
-    function refreshKnowledgeBaseListPreservingSelection() {
-      isUpdatingDefaultRef.current = true;
-      setKnowledgeLoading(true);
-      KnowledgeBaseServiceApi()
-        .datasetServiceListDatasets({ pageSize: 1000 })
-        .then((res) => {
-          const datasets = res.data.datasets || [];
-          setKnowledgeBaseList(datasets);
-          setFilteredList(datasets);
-          const defaultIds = getDefaultDatasetIds(datasets);
-          setDefaultKnowledgeId(defaultIds);
-
-          const mergedIds = mergeSelectedIds(
-            defaultIds,
-            selectedIdsRef.current,
-          );
-          setSelectedIds(mergedIds);
-          onChange?.(
-            mergedIds,
-            [],
-            [],
-          );
-        })
-        .finally(() => {
-          setKnowledgeLoading(false);
-          window.setTimeout(() => {
-            isUpdatingDefaultRef.current = false;
-          }, 0);
-        });
-    }
-
     const filterKnowledgeBaseListFn = debounce((search: string) => {
       setSearchValue(search);
     }, 300);
@@ -277,23 +238,6 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
         return;
       }
 
-      // Default knowledge bases should stay selected until the pin is removed.
-      if (item.default_dataset) {
-        const mergedIds = mergeSelectedIds(
-          defaultKnowledgeId,
-          selectedIdsRef.current,
-        );
-        if (mergedIds.length !== selectedIdsRef.current.length) {
-          setSelectedIds(mergedIds);
-          onChange?.(
-            mergedIds,
-            [],
-            [],
-          );
-        }
-        return;
-      }
-
       const newSelectedIds = selectedIds.includes(datasetId)
         ? selectedIds.filter((id) => id !== datasetId)
         : [...selectedIds, datasetId];
@@ -306,56 +250,78 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
       );
     }
 
-    function unSetDefaultDatasetFn(item: Dataset) {
-      KnowledgeBaseServiceApi()
-        .datasetServiceUnsetDefaultDataset({
-          dataset: item?.dataset_id ?? "",
-          unsetDefaultDatasetRequest: { name: item?.name ?? "" },
-        })
-        .then(() => {
-          refreshKnowledgeBaseListPreservingSelection();
-        });
-    }
+    async function setDefaultDatasetFn(item: Dataset) {
+      const datasetId = item.dataset_id;
+      const datasetName = item.display_name || "";
+      if (!datasetId || defaultUpdatingId) {
+        return;
+      }
 
-    function setDefaultDatasetFn(item: Dataset) {
-      KnowledgeBaseServiceApi()
-        .datasetServiceSetDefaultDataset({
-          dataset: item?.dataset_id ?? "",
-          setDefaultDatasetRequest: { name: item?.name ?? "" },
-        })
-        .then(() => {
-          refreshKnowledgeBaseListPreservingSelection();
-        });
-    }
-
-    function renderDefaultItem(
-      item: Dataset,
-      isSelected: boolean,
-      isDefault: boolean,
-    ) {
-      if (isSelected) {
-        if (isDefault) {
-          return (
-            <PushpinFilled
-              className="defaultDataset"
-              onClick={(e) => {
-                e.stopPropagation();
-                unSetDefaultDatasetFn(item);
-              }}
-            />
+      const nextDefault = !item.default_dataset;
+      setDefaultUpdatingId(datasetId);
+      try {
+        if (nextDefault) {
+          await KnowledgeBaseServiceApi().datasetServiceSetDefaultDataset(
+            datasetId,
+            datasetName,
+          );
+        } else {
+          await KnowledgeBaseServiceApi().datasetServiceUnsetDefaultDataset(
+            datasetId,
+            datasetName,
           );
         }
-        return (
-          <PushpinOutlined
-            className="cancelDefaultDataset"
+
+        setKnowledgeBaseList((previous) =>
+          previous.map((knowledgeBase) =>
+            knowledgeBase.dataset_id === datasetId
+              ? { ...knowledgeBase, default_dataset: nextDefault }
+              : knowledgeBase,
+          ),
+        );
+        setDefaultKnowledgeId((previous) =>
+          nextDefault
+            ? mergeSelectedIds(previous, [datasetId])
+            : previous.filter((id) => id !== datasetId),
+        );
+
+        if (nextDefault && !selectedIds.includes(datasetId)) {
+          const nextSelectedIds = mergeSelectedIds(selectedIds, [datasetId]);
+          setSelectedIds(nextSelectedIds);
+          onChange?.(
+            nextSelectedIds,
+            [],
+            [],
+          );
+        }
+      } catch (error) {
+        console.error("Set default dataset failed:", error);
+        message.error(t("chat.pinKnowledgeBaseFailed"));
+      } finally {
+        setDefaultUpdatingId("");
+      }
+    }
+
+    function renderDefaultItem(item: Dataset, isSelected: boolean) {
+      if (!isSelected) {
+        return null;
+      }
+
+      const isDefault = Boolean(item.default_dataset);
+      const Icon = isDefault ? PushpinFilled : PushpinOutlined;
+      return (
+        <Tooltip
+          title={isDefault ? t("chat.unpinKnowledgeBase") : t("chat.pinKnowledgeBase")}
+        >
+          <Icon
+            className={`chat-selector-pin-icon ${isDefault ? "is-pinned" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
-              setDefaultDatasetFn(item);
+              void setDefaultDatasetFn(item);
             }}
           />
-        );
-      }
-      return null;
+        </Tooltip>
+      );
     }
 
     function renderContent() {
@@ -375,36 +341,16 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
               className="chat-selector-action-button"
               disabled={knowledgeLoading}
               onClick={() => {
-                // setSearchValue('');
                 isResettingSelectionRef.current = true;
-                setKnowledgeLoading(true);
-                KnowledgeBaseServiceApi()
-                  .datasetServiceResetDefaultDatasets({ body: {} })
-                  .then(() =>
-                    KnowledgeBaseServiceApi().datasetServiceListDatasets({
-                      pageSize: 1000,
-                    }),
-                  )
-                  .then((res) => {
-                    const datasets = res.data.datasets || [];
-                    setKnowledgeBaseList(datasets);
-                    const defaultIds =
-                      (datasets
-                        ?.filter((it) => it?.default_dataset)
-                        ?.map((k) => k.dataset_id)
-                        .filter(Boolean) as string[]) || [];
-                    setDefaultKnowledgeId(defaultIds);
-                    setSelectedIds(defaultIds);
-                    onChange?.(
-                      defaultIds,
-                      [],
-                      [],
-                    );
-                  })
-                  .finally(() => {
-                    isResettingSelectionRef.current = false;
-                    setKnowledgeLoading(false);
-                  });
+                setSelectedIds(defaultKnowledgeId);
+                onChange?.(
+                  defaultKnowledgeId,
+                  [],
+                  [],
+                );
+                window.setTimeout(() => {
+                  isResettingSelectionRef.current = false;
+                }, 0);
               }}
             >
               {t("chat.reset")}
@@ -448,20 +394,23 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
           <div className="chat-selector-list-container">
             {filteredList.map((item) => {
               const isSelected = selectedIds.includes(item.dataset_id || "");
-              const isDefault = !!item?.default_dataset;
               return (
                 <div
                   key={item.dataset_id}
-                  className={`chat-selector-list-item ${isDefault || isSelected ? "selected" : ""}`}
+                  className={`chat-selector-list-item ${isSelected ? "selected" : ""} ${
+                    item.default_dataset ? "defaultDataset" : ""
+                  }`}
                   onClick={() => handleItemClick(item)}
                 >
                   <span className="chat-selector-item-label">
                     {item.display_name}
                   </span>
-                  {renderDefaultItem(item, isSelected, isDefault)}
-                  {(isDefault || isSelected) && (
-                    <CheckOutlined className="chat-selector-check-icon" />
-                  )}
+                  <span className="chat-selector-item-actions">
+                    {renderDefaultItem(item, isSelected)}
+                    {isSelected && (
+                      <CheckOutlined className="chat-selector-check-icon" />
+                    )}
+                  </span>
                 </div>
               );
             })}

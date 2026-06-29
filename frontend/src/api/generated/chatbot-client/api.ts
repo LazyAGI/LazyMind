@@ -1026,6 +1026,24 @@ export interface Conversation {
    * @memberof Conversation
    */
   models?: Array<string>;
+  /**
+   * Whether plugin tooling is enabled for this conversation.
+   * @type {boolean}
+   * @memberof Conversation
+   */
+  enable_plugin?: boolean | null;
+  /**
+   * Plugin driver mode for this conversation: 'dynamic' or 'auto'.
+   * @type {string}
+   * @memberof Conversation
+   */
+  plugin_mode?: string | null;
+  /**
+   * Whether SubAgent task creation is enabled for this conversation.
+   * @type {boolean}
+   * @memberof Conversation
+   */
+  enable_subagent?: boolean | null;
 }
 /**
  * Response message containing detailed conversation information.

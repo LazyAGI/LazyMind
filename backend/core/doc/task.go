@@ -1331,6 +1331,11 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 		log.Printf("[startParseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
 		ocrConfig = nil
 	}
+	parseProfile := resolveDocumentParseProfile()
+	applog.Logger.Info().
+		Str("document_parse_profile", string(parseProfile)).
+		Str("document_parse_strategy", documentParseStrategyName(parseProfile)).
+		Msg("resolved document parse profile")
 	resultsByTaskID := make(map[string]StartTaskResult, len(taskIDs))
 	orderedUniqueIDs := make([]string, 0, len(taskIDs))
 
@@ -1364,7 +1369,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 		}
 		candidate := startCandidate{task: taskRow, doc: docRow, docExt: dExt}
 		candidates = append(candidates, candidate)
-		if needsOfficeConvertBeforeParse(dExt, ocrConfig) {
+		if needsOfficeConvertBeforeParse(dExt, ocrConfig, parseProfile) {
 			officeCandidates = append(officeCandidates, candidate)
 		} else {
 			pdfCandidates = append(pdfCandidates, candidate)
@@ -1387,7 +1392,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 		baseDocExts := make([]documentExt, 0, len(pdfCandidates))
 		items := make([]addFileItem, 0, len(pdfCandidates))
 		for _, candidate := range pdfCandidates {
-			parsePath := parsePathForIngestion(candidate.docExt, ocrConfig)
+			parsePath := parsePathForIngestion(candidate.docExt, ocrConfig, parseProfile)
 			if strings.TrimSpace(parsePath) == "" {
 				resultsByTaskID[candidate.task.ID] = StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "parse file path is empty"}
 				continue
@@ -1438,8 +1443,16 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 				defer wg.Done()
 				defer func() { <-guard }()
 				dExt := cloneDocumentExt(candidate.docExt)
-				callOfficeConvertWithRetry(r.Context(), &dExt)
+				callOfficeConvertWithRetry(r.Context(), &dExt, parseProfile)
 				persistDocumentConvertState(r.Context(), datasetID, candidate.doc.ID, dExt)
+				if parseProfile == documentParseProfileLocal && strings.TrimSpace(dExt.ConvertStatus) == ConvertStatusFailed {
+					msg := strings.TrimSpace(dExt.ConvertError)
+					if msg == "" {
+						msg = officeConvertUserError(parseProfile, "local Office to PDF fallback failed")
+					}
+					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: msg}}
+					return
+				}
 				parsePath := parsePathForAdd(dExt)
 				if strings.TrimSpace(parsePath) == "" {
 					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "parse file path is empty"}}

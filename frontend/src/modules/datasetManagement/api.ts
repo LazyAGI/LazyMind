@@ -236,6 +236,11 @@ function mapEvalSetToDatasetListItem(item: EvalSetResponse): DatasetListItem {
 }
 
 function mapEvalSetItemToDatasetItem(item: EvalSetItemResponse): DatasetItem {
+  const itemWithReferenceInvalidState = item as EvalSetItemResponse & {
+    reference_doc_invalid?: boolean;
+    reference_chunk_invalid?: boolean;
+  };
+
   return {
     id: item.id,
     dataset_id: item.eval_set_id,
@@ -250,6 +255,12 @@ function mapEvalSetItemToDatasetItem(item: EvalSetItemResponse): DatasetItem {
     reference_chunk_ids: splitListField(item.reference_chunk_ids),
     reference_doc_from_knowledge_base: item.reference_doc_from_knowledge_base,
     reference_chunk_selected: item.reference_chunk_selected,
+    reference_doc_invalid: Boolean(
+      itemWithReferenceInvalidState.reference_doc_invalid,
+    ),
+    reference_chunk_invalid: Boolean(
+      itemWithReferenceInvalidState.reference_chunk_invalid,
+    ),
     generate_reason: item.generate_reason,
     is_deleted: item.is_deleted,
     source: normalizeItemSource(item.source),
@@ -287,15 +298,16 @@ function buildUpdateEvalSetPayload(
     knowledge_base_ids?: string[];
   },
 ): UpdateEvalSetRequest {
-  const fallbackDatasetIds = (current.knowledge_bases || []).map((item) => `${item.id || ""}`.trim());
+  // Use submitted IDs when explicitly provided (even if empty), otherwise keep current ones.
+  // An empty array is valid when the user intentionally clears all KB associations
+  // (e.g. the previously linked KB was deleted).
+  const sourceIds =
+    payload.knowledge_base_ids !== undefined
+      ? payload.knowledge_base_ids
+      : (current.knowledge_bases || []).map((item) => `${item.id || ""}`.trim());
   const datasetIds = Array.from(
-    new Set(
-      (payload.knowledge_base_ids || fallbackDatasetIds).map((item) => `${item || ""}`.trim()),
-    ),
+    new Set(sourceIds.map((item) => `${item || ""}`.trim())),
   ).filter(Boolean);
-  if (datasetIds.length === 0) {
-    throw new Error(i18n.t("datasetManagement.form.validation.knowledgeBaseRequired"));
-  }
   return {
     name: payload.name.trim(),
     description: `${payload.description || ""}`.trim(),

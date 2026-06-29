@@ -1,0 +1,61 @@
+listen:
+  host: "127.0.0.1"
+  port: ${LAZYMIND_LOCAL_PROXY_PORT}
+
+allowNonLocalBind: true
+
+auth:
+  mode: "local-rbac"
+  authServiceURL: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT}"
+
+cors:
+  allowedOrigins:
+    - "http://localhost:5173"
+    - "http://127.0.0.1:5173"
+    - "http://localhost:${LAZYMIND_FRONTEND_PORT}"
+    - "http://127.0.0.1:${LAZYMIND_FRONTEND_PORT}"
+
+timeouts:
+  connect: 10s
+  read: 30s
+  write: 30s
+
+log:
+  level: "info"
+
+routes:
+  - name: "authservice-route"
+    prefix: "/api/authservice"
+    upstream: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT}"
+    stripPath: false
+    enabled: true
+    optional: false
+    healthPath: "/api/authservice/auth/health"
+  - name: "chat-route"
+    prefix: "/api/chat"
+    upstream: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT}"
+    stripPath: false
+    enabled: true
+    optional: false
+    healthPath: "/health"
+  - name: "scan-route"
+    prefix: "/api/scan"
+    upstream: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT}"
+    stripPath: false
+    enabled: true
+    optional: true
+    healthPath: "/healthz"
+  - name: "core-route"
+    prefix: "/api/core"
+    upstream: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT}"
+    stripPath: true
+    enabled: true
+    optional: false
+    healthPath: "/health"
+  - name: "evo-route"
+    prefix: "/api/evo"
+    upstream: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT}"
+    stripPath: true
+    enabled: true
+    optional: true
+    healthPath: "/healthz"

@@ -28,11 +28,11 @@ type ModelCapability =
   | "embed_main"
   | "vlm"
   | "reranker"
-  | "stt"
+  | "speech_to_text"
   | "tts"
-  | "text2image"
+  | "image_generator"
   | "embed_image"
-  | "image_editing"
+  | "image_editor"
   | "evo_llm";
 
 interface ProviderModel {
@@ -212,17 +212,17 @@ const moduleConfigs: ModuleConfig[] = [
     subtitleKey: "modelProvider.module.rerankSubtitle",
   },
   {
-    key: "stt",
+    key: "speech_to_text",
     titleKey: "modelProvider.module.asrTitle",
     subtitleKey: "modelProvider.module.asrSubtitle",
   },
   {
-    key: "text2image",
+    key: "image_generator",
     titleKey: "modelProvider.module.textToImageTitle",
     subtitleKey: "modelProvider.module.textToImageSubtitle",
   },
   {
-    key: "image_editing",
+    key: "image_editor",
     titleKey: "modelProvider.module.imageEditingTitle",
     subtitleKey: "modelProvider.module.imageEditingSubtitle",
   },
@@ -258,6 +258,9 @@ const cloudServiceCategoryBySlot = cloudServiceConfigs.reduce(
 
 const selectedCapabilityByModelType: Record<string, ModelCapability> = {
   evo_llm: "evo_llm",
+  stt: "speech_to_text",
+  text2image: "image_generator",
+  image_editing: "image_editor",
 };
 
 function normalizeProviderKey(value: string) {
