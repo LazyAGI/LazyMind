@@ -8,7 +8,7 @@ router = APIRouter()
 
 def _document_server_check_url(doc_url: str) -> str:
     base_url = doc_url.split(',', 1)[0].strip()
-    return base_url.rstrip('/') + '/'
+    return base_url.rstrip('/') + '/docs'
 
 
 @router.get('/health', summary='Health check')
