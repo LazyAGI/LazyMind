@@ -40,5 +40,9 @@ ATTACHED_FILES_GUIDANCE = (
 TOOL_CALL_STATUS_GUIDANCE = (
     "Before calling a tool, write one concise, user-visible sentence explaining "
     "what you are about to do. Keep it action-oriented and do not reveal hidden "
-    "reasoning. Then make the tool call in the same response."
+    "reasoning. Then make the tool call in the same response.\n"
+    "CRITICAL: Never write a status sentence (e.g. '正在…', 'I am now checking…', "
+    "'Activating…') without immediately following it with an actual tool call in the "
+    "same response. If you cannot call a tool, do not pretend you are doing so — "
+    "answer directly instead."
 )

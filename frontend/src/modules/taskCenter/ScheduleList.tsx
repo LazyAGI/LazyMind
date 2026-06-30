@@ -130,7 +130,9 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
 
   // Fully controlled: derive display state from `value` prop directly.
   // Internal state is only used as a fallback when value is absent.
-  const [localWeekdays, setLocalWeekdays] = useState<number[]>(parsed.weekdays);
+  const [localWeekdays, setLocalWeekdays] = useState<number[]>(
+    parsed.weekdays.length === 0 ? WEEKDAY_VALUES : parsed.weekdays,
+  );
   const [localTime, setLocalTime] = useState<dayjs.Dayjs>(parsed.time);
 
   // Sync whenever the controlled value changes (e.g. form.setFieldsValue in edit mode).
@@ -139,12 +141,16 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
     if (value !== undefined && value !== prevValue.current) {
       prevValue.current = value;
       const p = parseCronExpr(value);
-      setLocalWeekdays(p.weekdays);
+      // Normalise: empty means every day, store as all 7 so localWeekdays stays consistent.
+      setLocalWeekdays(p.weekdays.length === 0 ? WEEKDAY_VALUES : p.weekdays);
       setLocalTime(p.time);
     }
   }, [value]);
 
-  const weekdays = value ? parseCronExpr(value).weekdays : localWeekdays;
+  const rawWeekdays = value ? parseCronExpr(value).weekdays : localWeekdays;
+  // Empty array means "every day" (dow=*). Treat it as all 7 days selected so
+  // the buttons light up correctly; buildCronExpr still emits '*' for all-7.
+  const weekdays = rawWeekdays.length === 0 ? WEEKDAY_VALUES : rawWeekdays;
   const time = value ? parseCronExpr(value).time : localTime;
 
   const emit = (wd: number[], t: dayjs.Dayjs) => {
@@ -333,6 +339,9 @@ export default function ScheduleList() {
   const [keyword, setKeyword] = useState('');
   // Edit modal state
   const [editTarget, setEditTarget] = useState<Schedule | null>(null);
+  // Incremented each time the modal opens to give VisualScheduler a fresh key,
+  // forcing it to re-initialise its internal useState from the new value prop.
+  const [modalKey, setModalKey] = useState(0);
 
   const localTimezone = useRef(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai');
 
@@ -414,7 +423,6 @@ export default function ScheduleList() {
 
   const handleOpenEdit = (record: Schedule) => {
     setEditTarget(record);
-    const parsed = parseCronExpr(record.cron_expr);
     form.setFieldsValue({
       prompt_template: record.prompt_template,
       remark: record.remark,
@@ -424,9 +432,8 @@ export default function ScheduleList() {
     setScheduleNameInput(record.name || '');
     setFileList([]);
     setUploadedPaths(record.file_ids ?? []);
+    setModalKey((k) => k + 1);
     setModalOpen(true);
-    // suppress unused-var warning for parsed — used by VisualScheduler via form value
-    void parsed;
   };
 
   const handleCreate = async () => {
@@ -473,6 +480,7 @@ export default function ScheduleList() {
     setFileList([]);
     setUploadedPaths([]);
     setScheduleNameInput('');
+    setModalKey((k) => k + 1);
     setModalOpen(true);
   };
 
@@ -624,10 +632,9 @@ export default function ScheduleList() {
         }}
         okText={editTarget ? '保存' : '创建'}
         confirmLoading={submitting || uploading}
-        destroyOnHidden
         width={600}
       >
-        <Form form={form} layout='vertical' size='small'>
+        <Form key={modalKey} form={form} layout='vertical' size='small'>
           <Form.Item name='prompt_template' label='任务描述' rules={[{ required: true, message: '请输入任务描述' }]}>
             <Input.TextArea rows={3} placeholder='描述你希望系统定期执行的任务' />
           </Form.Item>

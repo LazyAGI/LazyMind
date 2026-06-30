@@ -212,6 +212,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
     const messageListRef = useRef<any[]>([]);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const conversationMessagesCache = useRef<Map<string, any[]>>(new Map());
+    // Tracks the temp_id used when a conversation was started before the server
+    // assigned a real id. Maps real_id -> temp_id so that when a stream becomes
+    // a background stream (user switched away before the first frame arrived),
+    // we can still find the correct cache entry.
+    const tempIdToRealIdRef = useRef<Map<string, string>>(new Map());
 
     const [messageList, setMessageList] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -426,6 +431,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       if (!conversationId) {
         conversationId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
         currentConversationIdRef.current = conversationId;
+        // Record this temp_id so we can locate its cache when the real id arrives
+        // and this stream has already become a background stream.
+        tempIdToRealIdRef.current.set(conversationId, conversationId);
       } else {
         sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
       }
@@ -680,6 +688,31 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         }
       } else {
         isActiveConversation = currentConversationIdAtStart === "";
+      }
+
+      // When the user switched away before the first server frame arrived,
+      // isFirstTimeReceivingId (below) won't fire because isActiveConversation
+      // is false. We still need to migrate the cached message list from the
+      // temp_id key to the real_id key so that switching back can find it.
+      if (
+        messageConversationId &&
+        !isActiveConversation
+      ) {
+        // Find if there's a temp_id whose cache should be migrated to this real_id.
+        for (const [tempKey] of tempIdToRealIdRef.current) {
+          if (
+            tempKey.startsWith("temp_") &&
+            conversationMessagesCache.current.has(tempKey) &&
+            !conversationMessagesCache.current.has(messageConversationId)
+          ) {
+            const cachedList = conversationMessagesCache.current.get(tempKey)!;
+            conversationMessagesCache.current.set(messageConversationId, cachedList);
+            conversationMessagesCache.current.delete(tempKey);
+            streamManager.saveMessageList(messageConversationId, cachedList);
+            tempIdToRealIdRef.current.delete(tempKey);
+            break;
+          }
+        }
       }
 
       const isFirstTimeReceivingId =

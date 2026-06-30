@@ -12,6 +12,67 @@ from typing import Any, Dict, List, Optional
 from lazymind.chat.engine.tools.infra import handle_tool_errors
 
 
+def _cron_to_human(cron_expr: str) -> str:
+    """Convert a 5-field cron expression to a human-readable Chinese description.
+
+    Handles common patterns; falls back to the raw expression for edge cases.
+    """
+    try:
+        parts = cron_expr.strip().split()
+        if len(parts) != 5:
+            return cron_expr
+        minute, hour, day, month, weekday = parts
+
+        WEEKDAY_NAMES = {
+            '0': 'Sun', '7': 'Sun',
+            '1': 'Mon', '2': 'Tue', '3': 'Wed',
+            '4': 'Thu', '5': 'Fri', '6': 'Sat',
+        }
+
+        def _fmt_weekdays(wd: str) -> str:
+            names = []
+            for token in wd.split(','):
+                if '-' in token:
+                    a, b = token.split('-', 1)
+                    names.append(f'{WEEKDAY_NAMES.get(a, a)}-{WEEKDAY_NAMES.get(b, b)}')
+                else:
+                    names.append(WEEKDAY_NAMES.get(token, token))
+            return '/'.join(names)
+
+        def _is_any(f: str) -> bool:
+            return f in ('*', '?')
+
+        # Build time part
+        if minute.isdigit() and hour.isdigit():
+            time_str = f'{int(hour):02d}:{int(minute):02d}'
+        elif _is_any(minute) and _is_any(hour):
+            time_str = 'every minute'
+        elif minute.isdigit() and _is_any(hour):
+            time_str = f'at minute {minute} of every hour'
+        else:
+            time_str = f'at {hour}h{minute}m'
+
+        # Build date/repeat part
+        if _is_any(day) and _is_any(month) and _is_any(weekday):
+            date_str = 'every day'
+        elif not _is_any(weekday):
+            date_str = f'every {_fmt_weekdays(weekday)}'
+        elif day.isdigit() and _is_any(month):
+            date_str = f'on day {day} of every month'
+        elif day.isdigit() and month.isdigit():
+            date_str = f'on {month}/{day} every year'
+        else:
+            date_str = f'({cron_expr})'
+
+        if time_str == 'every minute':
+            return time_str
+        if time_str.startswith('at minute'):
+            return f'{date_str}, {time_str}'
+        return f'{date_str} at {time_str}'
+    except Exception:
+        return cron_expr
+
+
 def _agentic_config() -> Dict[str, Any]:
     try:
         return lazyllm.globals['agentic_config'] or {}
@@ -64,25 +125,19 @@ def _schedule_tools() -> List[Any]:
         data = resp.json()
         return (
             f"Schedule created (id={data.get('id')}).\n"
-            f"Next run: {data.get('next_run_at')} | Cron: {cron_expr}"
+            f"Next run: {data.get('next_run_at')} | Schedule: {_cron_to_human(cron_expr)}"
         )
 
     @handle_tool_errors
-    def list_schedules(include_disabled: bool = False) -> str:
+    def list_schedules(include_disabled: bool = True) -> str:
         """List recurring schedules for this user.
 
-        Default (include_disabled=False): only enabled (active) schedules.
-        Pass include_disabled=True in ANY of these situations:
-        - User asks about disabled / stopped / cancelled schedules.
-        - User asks to see ALL schedules.
-        - User asks which schedules are enabled vs disabled.
-        - User wants to verify or confirm whether disabled schedules exist.
-        - User expresses doubt or surprise about the count (e.g. "are you sure?",
-          "I think there should be more", "confirm there are no disabled ones").
+        Default (include_disabled=True): returns ALL schedules (enabled and disabled).
+        Pass include_disabled=False only when the user explicitly asks for active/enabled schedules only.
 
         Args:
-            include_disabled: When True, return all schedules regardless of enabled state.
-                Default False — only enabled schedules are returned.
+            include_disabled: When True (default), return all schedules regardless of enabled state.
+                Pass False only when user explicitly wants only active/enabled schedules.
         """
         import httpx
         from lazymind.config import config as _cfg
@@ -104,7 +159,7 @@ def _schedule_tools() -> List[Any]:
             name = s.get('name') or ''
             label = f' ({name})' if name else ''
             lines.append(
-                f"- [{status}] id={s.get('id')}{label} | cron={s.get('cron_expr')} "
+                f"- [{status}] id={s.get('id')}{label} | schedule={_cron_to_human(s.get('cron_expr', ''))} "
                 f"| next={s.get('next_run_at')} | {s.get('prompt_template', '')[:60]}"
             )
         return '\n'.join(lines)
@@ -165,7 +220,7 @@ def _schedule_tools() -> List[Any]:
         data = resp.json()
         return (
             f'Schedule {schedule_id!r} updated.\n'
-            f"Next run: {data.get('next_run_at')} | Cron: {data.get('cron_expr')}"
+            f"Next run: {data.get('next_run_at')} | Schedule: {_cron_to_human(data.get('cron_expr', ''))}"
         )
 
     @handle_tool_errors
@@ -208,9 +263,9 @@ def build_schedule_tool_group() -> dict:
         'name': 'schedule',
         'tools': _schedule_tools(),
         'desc': (
-            'Activate this group when the user mentions scheduled tasks, recurring jobs, '
-            'timed reminders, or asks to create / view / modify / cancel / trigger a schedule. '
-            'Provides: create_schedule, list_schedules, cancel_schedule, update_schedule, trigger_schedule.'
+            'Manage and query recurring scheduled tasks. '
+            'Use this tool group to list existing schedules, create new ones, '
+            'modify or cancel a schedule, and trigger a schedule immediately.'
         ),
         'lazy': True,
     }

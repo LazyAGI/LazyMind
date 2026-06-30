@@ -975,7 +975,7 @@ def resolve_plugin_injection(
             plugin_stop_tools.append('ask_user')
             if plugin_tools:
                 scenarios = [
-                    plugin_loader.get_scenario(spec.plugin_id)
+                    plugin_loader.get_plugin_intro(spec.plugin_id)
                     for spec in (plugin_loader._registry or {}).values()
                 ]
                 plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
@@ -988,7 +988,7 @@ def resolve_plugin_injection(
         plugin_stop_tools.append('ask_user')
         if plugin_tools:
             scenarios = [
-                plugin_loader.get_scenario(spec.plugin_id)
+                plugin_loader.get_plugin_intro(spec.plugin_id)
                 for spec in (plugin_loader._registry or {}).values()
             ]
             plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
