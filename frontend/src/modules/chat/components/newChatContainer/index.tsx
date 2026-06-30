@@ -801,7 +801,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           messageConversationId || currentConversationIdAtStart;
         if (cleanupConversationId) {
           streamManager.closeAndCleanup(cleanupConversationId);
-          conversationMessagesCache.current.delete(cleanupConversationId);
+          // Only clear cache for the active conversation. If the stream finished
+          // in the background (user switched away), keep the cache so the user
+          // can switch back and see the completed messages without a blank screen.
+          if (isActiveConversation) {
+            conversationMessagesCache.current.delete(cleanupConversationId);
+          }
         }
         sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
       }

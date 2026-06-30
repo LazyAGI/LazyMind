@@ -71,10 +71,14 @@ def _schedule_tools() -> List[Any]:
     def list_schedules(include_disabled: bool = False) -> str:
         """List recurring schedules for this user.
 
-        By default only enabled (active) schedules are returned.
-        Pass include_disabled=True when the user explicitly asks about disabled /
-        stopped schedules, asks to see all schedules, or asks which ones are
-        enabled vs disabled.
+        Default (include_disabled=False): only enabled (active) schedules.
+        Pass include_disabled=True in ANY of these situations:
+        - User asks about disabled / stopped / cancelled schedules.
+        - User asks to see ALL schedules.
+        - User asks which schedules are enabled vs disabled.
+        - User wants to verify or confirm whether disabled schedules exist.
+        - User expresses doubt or surprise about the count (e.g. "are you sure?",
+          "I think there should be more", "confirm there are no disabled ones").
 
         Args:
             include_disabled: When True, return all schedules regardless of enabled state.
