@@ -68,24 +68,39 @@ def _schedule_tools() -> List[Any]:
         )
 
     @handle_tool_errors
-    def list_schedules() -> str:
-        """List all active recurring schedules for this user."""
+    def list_schedules(include_disabled: bool = False) -> str:
+        """List recurring schedules for this user.
+
+        By default only enabled (active) schedules are returned.
+        Pass include_disabled=True when the user explicitly asks about disabled /
+        stopped schedules, asks to see all schedules, or asks which ones are
+        enabled vs disabled.
+
+        Args:
+            include_disabled: When True, return all schedules regardless of enabled state.
+                Default False — only enabled schedules are returned.
+        """
         import httpx
         from lazymind.config import config as _cfg
         cfg = _agentic_config()
         user_id = cfg.get('user_id', '')
         core_url = str(_cfg['core_api_url']).rstrip('/')
         headers = {'X-User-Id': user_id} if user_id else {}
-        resp = httpx.get(f'{core_url}/schedules', headers=headers, timeout=5.0)
+        params = {'include_disabled': 'true'} if include_disabled else {}
+        resp = httpx.get(f'{core_url}/schedules', headers=headers, params=params, timeout=5.0)
         if resp.status_code != 200:
             return f'Could not fetch schedules: {resp.text}'
         items = resp.json().get('items', [])
         if not items:
-            return 'No active schedules.'
-        lines = ['## Active schedules']
+            return 'No schedules found.'
+        header = '## All schedules' if include_disabled else '## Active schedules'
+        lines = [header]
         for s in items:
+            status = 'enabled' if s.get('enabled', True) else 'disabled'
+            name = s.get('name') or ''
+            label = f' ({name})' if name else ''
             lines.append(
-                f"- id={s.get('id')} | cron={s.get('cron_expr')} "
+                f"- [{status}] id={s.get('id')}{label} | cron={s.get('cron_expr')} "
                 f"| next={s.get('next_run_at')} | {s.get('prompt_template', '')[:60]}"
             )
         return '\n'.join(lines)
@@ -145,7 +160,7 @@ def _schedule_tools() -> List[Any]:
             return f'Failed to update schedule {schedule_id!r}: {resp.text}'
         data = resp.json()
         return (
-            f"Schedule {schedule_id!r} updated.\n"
+            f'Schedule {schedule_id!r} updated.\n'
             f"Next run: {data.get('next_run_at')} | Cron: {data.get('cron_expr')}"
         )
 
@@ -172,7 +187,7 @@ def _schedule_tools() -> List[Any]:
             return f'Failed to trigger schedule {schedule_id!r}: {resp.text}'
         data = resp.json()
         return (
-            f"Schedule {schedule_id!r} triggered immediately.\n"
+            f'Schedule {schedule_id!r} triggered immediately.\n'
             f"Task ID: {data.get('task_id')} | Conversation: {data.get('conversation_id')}"
         )
 
