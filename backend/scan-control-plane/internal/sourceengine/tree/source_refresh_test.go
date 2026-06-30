@@ -179,6 +179,39 @@ func TestSourceReadRefresherRefreshesCachedNonFeishuPolicyState(t *testing.T) {
 		UpdatedAt:         now.Add(-time.Minute),
 	})
 
+	syncedWithoutStateDocID := refreshObject("synced-missing-state-doc-id.pdf", "root", true, false, now)
+	syncedWithoutStateDocID.FileExtension = ".pdf"
+	repo.objects[syncedWithoutStateDocID.ObjectKey] = syncedWithoutStateDocID
+	repo.states[syncedWithoutStateDocID.ObjectKey] = store.DocumentState{
+		SourceID:            "source-1",
+		BindingID:           "binding-1",
+		BindingGeneration:   1,
+		ObjectKey:           syncedWithoutStateDocID.ObjectKey,
+		SourceVersion:       syncedWithoutStateDocID.SourceVersion,
+		SourceState:         "NEW",
+		SyncState:           "IDLE",
+		PendingAction:       "CREATE",
+		DocumentListVisible: true,
+		Selectable:          true,
+		ParseQueueState:     "NONE",
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	repo.tasks = append(repo.tasks, store.ParseTask{
+		TaskID:            "task-synced-missing-state-doc-id-create",
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		ObjectKey:         syncedWithoutStateDocID.ObjectKey,
+		DocumentID:        "document-synced-missing-state-doc-id",
+		TaskAction:        store.ParseTaskActionCreate,
+		TargetVersionID:   syncedWithoutStateDocID.SourceVersion,
+		SourceVersion:     syncedWithoutStateDocID.SourceVersion,
+		Status:            store.ParseTaskStatusSucceeded,
+		CreatedAt:         now.Add(-time.Minute),
+		UpdatedAt:         now.Add(-time.Minute),
+	})
+
 	newPDF := refreshObject("new.pdf", "root", true, false, now)
 	newPDF.FileExtension = ".pdf"
 	repo.objects[newPDF.ObjectKey] = newPDF
@@ -212,6 +245,36 @@ func TestSourceReadRefresherRefreshesCachedNonFeishuPolicyState(t *testing.T) {
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	})
+
+	documentOnlyPDF := refreshObject("document-only.pdf", "root", true, false, now)
+	documentOnlyPDF.FileExtension = ".pdf"
+	repo.objects[documentOnlyPDF.ObjectKey] = documentOnlyPDF
+	repo.states[documentOnlyPDF.ObjectKey] = store.DocumentState{
+		SourceID:            "source-1",
+		BindingID:           "binding-1",
+		BindingGeneration:   1,
+		ObjectKey:           documentOnlyPDF.ObjectKey,
+		SourceVersion:       documentOnlyPDF.SourceVersion,
+		SourceState:         "NEW",
+		SyncState:           "IDLE",
+		PendingAction:       "CREATE",
+		DocumentListVisible: true,
+		Selectable:          true,
+		ParseQueueState:     "NONE",
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	repo.documents[documentOnlyPDF.ObjectKey] = store.Document{
+		DocumentID:     "document-only-synced",
+		SourceID:       "source-1",
+		BindingID:      "binding-1",
+		ObjectKey:      documentOnlyPDF.ObjectKey,
+		CoreDocumentID: "core-document-only-synced",
+		SourceVersion:  documentOnlyPDF.SourceVersion,
+		ParseStatus:    "SUCCEEDED",
+		CreatedAt:      now.Add(-time.Minute),
+		UpdatedAt:      now.Add(-time.Minute),
+	}
 
 	cleanedPDF := refreshObject("cleaned.pdf", "root", true, false, now)
 	cleanedPDF.FileExtension = ".pdf"
@@ -261,6 +324,17 @@ func TestSourceReadRefresherRefreshesCachedNonFeishuPolicyState(t *testing.T) {
 			UpdatedAt:         now.Add(-time.Minute),
 		},
 	)
+	repo.documents[cleanedPDF.ObjectKey] = store.Document{
+		DocumentID:     "document-cleaned",
+		SourceID:       "source-1",
+		BindingID:      "binding-1",
+		ObjectKey:      cleanedPDF.ObjectKey,
+		CoreDocumentID: "core-document-cleaned",
+		SourceVersion:  cleanedPDF.SourceVersion,
+		ParseStatus:    "SUCCEEDED",
+		CreatedAt:      now.Add(-2 * time.Minute),
+		UpdatedAt:      now.Add(-2 * time.Minute),
+	}
 
 	sheet := refreshObject("sheet.xlsx", "root", true, false, now)
 	sheet.FileExtension = ".xlsx"
@@ -299,9 +373,17 @@ func TestSourceReadRefresherRefreshesCachedNonFeishuPolicyState(t *testing.T) {
 	if gotSyncedPDF.SourceState != "OUT_OF_SCOPE" || gotSyncedPDF.PendingAction != "DELETE" || !gotSyncedPDF.DocumentListVisible || !gotSyncedPDF.Selectable {
 		t.Fatalf("synced unsupported document should be pending cleanup and visible: %+v", gotSyncedPDF)
 	}
+	gotSyncedWithoutStateDocID := repo.states[syncedWithoutStateDocID.ObjectKey]
+	if gotSyncedWithoutStateDocID.SourceState != "OUT_OF_SCOPE" || gotSyncedWithoutStateDocID.PendingAction != "DELETE" || gotSyncedWithoutStateDocID.DocumentID != "document-synced-missing-state-doc-id" {
+		t.Fatalf("historically synced unsupported document without state document_id should be pending cleanup: %+v", gotSyncedWithoutStateDocID)
+	}
 	gotNewPDF := repo.states[newPDF.ObjectKey]
 	if gotNewPDF.SourceState != "UNCHANGED" || gotNewPDF.PendingAction != "" || gotNewPDF.DocumentListVisible || gotNewPDF.Selectable {
 		t.Fatalf("unsynced unsupported document should be hidden, got %+v", gotNewPDF)
+	}
+	gotDocumentOnlyPDF := repo.states[documentOnlyPDF.ObjectKey]
+	if gotDocumentOnlyPDF.SourceState != "OUT_OF_SCOPE" || gotDocumentOnlyPDF.PendingAction != "DELETE" || gotDocumentOnlyPDF.DocumentID != "document-only-synced" {
+		t.Fatalf("document-backed unsupported document should be pending cleanup: %+v", gotDocumentOnlyPDF)
 	}
 	gotCleanedPDF := repo.states[cleanedPDF.ObjectKey]
 	if gotCleanedPDF.SourceState != "UNCHANGED" || gotCleanedPDF.PendingAction != "" || gotCleanedPDF.DocumentListVisible || gotCleanedPDF.Selectable {

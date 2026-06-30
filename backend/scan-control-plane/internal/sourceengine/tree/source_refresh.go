@@ -182,7 +182,7 @@ func (r *DBSourceReadRefresher) repairCachedSyncedBaselines(ctx context.Context,
 	}
 	wanted := map[string]store.DocumentState{}
 	for _, state := range states {
-		if strings.TrimSpace(state.BaselineVersion) == "" && strings.TrimSpace(state.DocumentID) != "" {
+		if strings.TrimSpace(state.BaselineVersion) == "" && strings.TrimSpace(state.ObjectKey) != "" {
 			wanted[state.ObjectKey] = state
 		}
 	}
@@ -223,19 +223,64 @@ func (r *DBSourceReadRefresher) repairCachedSyncedBaselines(ctx context.Context,
 	now := r.clock().UTC()
 	for objectKey, state := range wanted {
 		task, ok := latest[objectKey]
-		if !ok || task.TaskAction == store.ParseTaskActionDelete || strings.TrimSpace(task.TargetVersionID) == "" {
+		if ok {
+			if task.TaskAction == store.ParseTaskActionDelete {
+				continue
+			}
+			if repairStateFromSuccessfulTask(&state, task, now) {
+				if err := r.repo.SaveDocumentState(ctx, state); err != nil {
+					return mapStoreError(err)
+				}
+				continue
+			}
+		}
+		document, err := r.repo.GetDocument(ctx, binding.SourceID, binding.BindingID, objectKey)
+		if err != nil {
+			if store.ErrorCodeOf(err) == store.ErrCodeNotFound {
+				continue
+			}
+			return mapStoreError(err)
+		}
+		if !repairStateFromSyncedDocument(&state, document, now) {
 			continue
 		}
-		state.BaselineVersion = task.TargetVersionID
-		if strings.TrimSpace(state.DocumentID) == "" {
-			state.DocumentID = task.DocumentID
-		}
-		state.UpdatedAt = now
 		if err := r.repo.SaveDocumentState(ctx, state); err != nil {
 			return mapStoreError(err)
 		}
 	}
 	return nil
+}
+
+func repairStateFromSuccessfulTask(state *store.DocumentState, task store.ParseTask, now time.Time) bool {
+	baseline := strings.TrimSpace(task.TargetVersionID)
+	if baseline == "" {
+		baseline = strings.TrimSpace(task.SourceVersion)
+	}
+	if baseline == "" {
+		return false
+	}
+	state.BaselineVersion = baseline
+	if strings.TrimSpace(state.DocumentID) == "" {
+		state.DocumentID = strings.TrimSpace(task.DocumentID)
+	}
+	state.UpdatedAt = now
+	return true
+}
+
+func repairStateFromSyncedDocument(state *store.DocumentState, document store.Document, now time.Time) bool {
+	if strings.TrimSpace(document.CoreDocumentID) == "" || !strings.EqualFold(strings.TrimSpace(document.ParseStatus), "SUCCEEDED") {
+		return false
+	}
+	baseline := strings.TrimSpace(document.SourceVersion)
+	if baseline == "" {
+		return false
+	}
+	state.BaselineVersion = baseline
+	if strings.TrimSpace(state.DocumentID) == "" {
+		state.DocumentID = strings.TrimSpace(document.DocumentID)
+	}
+	state.UpdatedAt = now
+	return true
 }
 
 func taskNewer(candidate, current store.ParseTask) bool {
