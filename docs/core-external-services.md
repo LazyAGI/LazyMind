@@ -54,7 +54,7 @@ Core 调用的端点:
 
 | 方法 | 路径 | 用途 | 触发模块 |
 | --- | --- | --- | --- |
-| GET | `/v1/algorithms` | 获取算法列表 | `doc/dataset.go` |
+| GET | `/v1/algo/list` | 获取算法列表（返回 `{items: [...]}`） | `doc/dataset.go` |
 | GET | `/v1/algo/{algo_id}/groups` | 获取算法 parser/group 信息 | `doc/dataset.go`, `doc/segment.go` |
 | POST | `/v1/kbs` | 创建 KB | `doc/dataset.go` |
 | DELETE | `/v1/kbs/{kb_id}` | 删除 KB | `doc/dataset.go` |
