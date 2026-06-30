@@ -11,7 +11,9 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/state"
+	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/taskcenter"
 )
 
 // RegisterSubAgentHooks wires plugin lifecycle hooks into the subagent EventHooks.
@@ -19,6 +21,16 @@ import (
 func RegisterSubAgentHooks() {
 	subagent.EventHooks.RegisterArtifactHook(onArtifact)
 	subagent.EventHooks.RegisterTerminalStatusHook(onTerminalStatus)
+
+	// Wire the task-cancel hook so that CancelTaskByID actually stops Python execution.
+	taskcenter.OnCancelHook = func(ctx context.Context, convID string) {
+		db := store.DB()
+		stateStore := store.State()
+		if db != nil {
+			StopActivePluginSession(ctx, db, stateStore, convID)
+		}
+		go NotifyChatCancel(convID)
+	}
 }
 
 // onArtifact is called by the subagent runner when any artifact is emitted.

@@ -17,6 +17,12 @@ import (
 	"lazymind/core/store"
 )
 
+// OnCancelHook is called by CancelTaskByID after the DB status is updated to "canceled".
+// It receives the conversation_id so the caller can interrupt any active plugin session
+// and notify Python to terminate the running ReAct loop.
+// Register this hook at startup from the plugin package to avoid import cycles.
+var OnCancelHook func(ctx context.Context, convID string)
+
 // ── DB helpers ───────────────────────────────────────────────────────────────
 
 // CreateTask inserts a new TaskCenterTask row.
@@ -246,8 +252,10 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 			Where("id = ?", *t.PluginSessionID).
 			First(&sess).Error; err == nil {
 			switch sess.Status {
-			case "active", "waiting":
+			case "active":
 				return "running"
+			case "waiting":
+				return "waiting"
 			case "completed":
 				return "completed"
 			case "failed":
@@ -459,6 +467,12 @@ func CancelTaskByID(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// If the task was running, notify Python to actually stop execution.
+	if existing.Status == "running" && OnCancelHook != nil {
+		go OnCancelHook(r.Context(), existing.ConversationID)
+	}
+
 	common.ReplyOK(w, nil)
 }
 
