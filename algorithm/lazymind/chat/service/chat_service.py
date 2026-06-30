@@ -160,13 +160,13 @@ def _build_user_attachment_tools(has_files: bool) -> list:
 
 
 def _build_schedule_tools() -> list:
-    """Return schedule management tools (create/list/cancel).
+    """Return a lazy ToolGroup dict for all schedule management tools.
 
-    These are independent of plugin and subagent flags — scheduling is a
-    standalone capability available whenever the chat service is running.
+    Injected as a single lazy group so the LLM only sees the gateway tool until
+    the user mentions scheduling topics.
     """
-    from lazymind.chat.plugin.plugin_manager import build_schedule_tools
-    return build_schedule_tools()
+    from lazymind.chat.engine.tools.schedule import build_schedule_tool_group
+    return [build_schedule_tool_group()]
 
 
 def _collect_active_tool_names(configs: list) -> set[str]:
@@ -510,11 +510,12 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     lazyllm.globals['active_tool_names'] |= {
         getattr(fn, '__name__', '') for fn in attachment_tools if callable(fn)
     }
-    # Schedule tools (create_schedule / list_schedules / cancel_schedule) are independent
-    # of plugin and subagent flags — always inject them.
+    # Schedule tools are independent of plugin and subagent flags — always inject them
+    # as a lazy group so the LLM only sees the gateway until the user mentions scheduling.
     schedule_tools = _build_schedule_tools()
     lazyllm.globals['active_tool_names'] |= {
-        getattr(fn, '__name__', '') for fn in schedule_tools if callable(fn)
+        'create_schedule', 'list_schedules', 'cancel_schedule',
+        'update_schedule', 'trigger_schedule',
     }
     all_tools = agent_tools + subagent_tools + attachment_tools + schedule_tools + plugin_tools + mcp_tools
     set_trace_context({
