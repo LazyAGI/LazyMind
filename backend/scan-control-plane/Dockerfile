@@ -3,6 +3,7 @@ FROM ${DOCKER_MIRROR}golang:1.25-bookworm AS build
 
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
+ARG TARGETARCH
 ENV GOPROXY=${GOPROXY} \
     GOSUMDB=${GOSUMDB}
 
@@ -14,7 +15,7 @@ COPY internal ./internal
 COPY migrations ./migrations
 COPY scripts ./scripts
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /out/scan-control-plane ./cmd/scan-control-plane
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -o /out/scan-control-plane ./cmd/scan-control-plane
 
 FROM ${DOCKER_MIRROR}alpine:3.21
 

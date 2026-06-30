@@ -2,6 +2,7 @@
 
 Routes:
     POST /api/plugin/driver              DriverAgent evaluation endpoint (called by Go EventLoop).
+    POST /api/plugin/step-cancel         Enqueue cancel signal into the step_done FileSystemQueue (called by Go :stop).
     GET  /api/plugin/slot-binding        Slot binding lookup (called by Go OnArtifactEvent).
     GET  /api/plugins                    List all loaded plugins.
     GET  /api/plugins/{plugin_id}        Get plugin spec (supports Accept-Language for i18n labels).
@@ -14,7 +15,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from lazymind.chat.plugin import plugin_loader
-from lazymind.chat.plugin.driver_agent import evaluate_step
+from lazymind.chat.plugin.driver_agent import DriverEvaluationError, evaluate_step
 
 router = APIRouter()
 
@@ -25,11 +26,29 @@ class DriverRequest(BaseModel):
     step_result: str
     session_id: Optional[str] = None
     history_files_per_turn: Optional[Dict[str, List[str]]] = None
+    llm_config: Optional[Dict[str, Any]] = None
+    plugin_artifacts_summary: Optional[str] = None
 
 
 class DriverResponse(BaseModel):
-    verdict: str  # PASS | RETRY | DONE | FAIL
-    reason: str
+    message: str  # Natural-language assessment passed verbatim to ChatAgent as user input
+
+
+class StepCancelRequest(BaseModel):
+    session_id: str
+    step_id: str
+
+
+class StepCancelResponse(BaseModel):
+    ok: bool
+
+
+class TaskCancelRequest(BaseModel):
+    task_id: str
+
+
+class TaskCancelResponse(BaseModel):
+    ok: bool
 
 
 @router.post('/api/plugin/driver', response_model=DriverResponse, summary='Evaluate plugin step result')
@@ -37,19 +56,61 @@ async def plugin_driver(req: DriverRequest) -> DriverResponse:
     """DriverAgent evaluation endpoint.
 
     Called by the Go EventLoop after a plugin_step SubAgent reaches terminal status.
-    Returns a structured verdict (PASS/RETRY/DONE/FAIL) and optional reason.
+    Returns a natural-language assessment that the Go EventLoop forwards verbatim to
+    the ChatAgent as a synthetic user turn.  The ChatAgent then decides autonomously
+    whether to advance, retry, rewind, or complete the plugin.
     """
-    result = evaluate_step(
-        plugin_id=req.plugin_id,
-        step_id=req.step_id,
-        step_result=req.step_result,
-        session_id=req.session_id,
-        user_files=[p for paths in (req.history_files_per_turn or {}).values() for p in paths] or None,
-    )
-    return DriverResponse(
-        verdict=result.get('verdict', 'PASS'),
-        reason=result.get('reason', ''),
-    )
+    try:
+        result = evaluate_step(
+            plugin_id=req.plugin_id,
+            step_id=req.step_id,
+            step_result=req.step_result,
+            session_id=req.session_id,
+            user_files=[p for paths in (req.history_files_per_turn or {}).values() for p in paths] or None,
+            llm_config=req.llm_config,
+            plugin_artifacts_summary=req.plugin_artifacts_summary,
+        )
+    except DriverEvaluationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return DriverResponse(message=result.get('message', ''))
+
+
+@router.post('/api/plugin/step-cancel', response_model=StepCancelResponse, summary='Cancel a running plugin step')
+async def step_cancel(req: StepCancelRequest) -> StepCancelResponse:
+    """Enqueue a cancel signal for a running plugin step.
+
+    Called by the Go EventLoop when the user stops chat generation.
+    The signal is written into the FileSystemQueue that _wait_for_step_done polls,
+    causing the dynamic-mode advance_step tool to unblock and return immediately.
+    """
+    import json
+    try:
+        from lazyllm.common.queue import FileSystemQueue
+        queue_key = f'step_done_{req.session_id}_{req.step_id}'
+        fsq = FileSystemQueue(klass=queue_key)
+        fsq.enqueue(json.dumps({'tag': 'cancel'}))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return StepCancelResponse(ok=True)
+
+
+@router.post('/api/plugin/task-cancel', response_model=TaskCancelResponse, summary='Cancel a running SubAgent task')
+async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
+    """Enqueue a cancel signal for a running SubAgent ReAct loop.
+
+    Called by the Go EventLoop when the user stops chat generation.
+    The signal is written into the FileSystemQueue(klass='cancel') scoped
+    to the task's sid, causing the ReAct stop_condition to raise CancelledError.
+    """
+    import json as _json
+    try:
+        import lazyllm
+        from lazyllm.common.queue import FileSystemQueue
+        lazyllm.globals._init_sid(sid=req.task_id)
+        FileSystemQueue(klass='cancel').enqueue(_json.dumps({'tag': 'cancel'}))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return TaskCancelResponse(ok=True)
 
 
 @router.get('/api/plugin/slot-binding', summary='Lookup slot binding for artifact key')

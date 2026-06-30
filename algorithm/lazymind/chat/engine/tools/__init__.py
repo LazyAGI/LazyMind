@@ -5,7 +5,7 @@ registration side effects happen in one consistent place.
 """
 
 from .calculator import calculator
-from .kb import KBToolGroup, TempKBToolGroup
+from .kb import KBToolGroup, kb_tmp_search
 from .local_fs import LocalFSToolGroup
 from .memory_editor import memory_editor
 from .memory_reader import read_memory
@@ -19,8 +19,8 @@ __all__ = [
     'image_editor',
     'image_generator',
     'KBToolGroup',
+    'kb_tmp_search',
     'LocalFSToolGroup',
-    'TempKBToolGroup',
     'memory_editor',
     'read_memory',
     'vision_extractor',

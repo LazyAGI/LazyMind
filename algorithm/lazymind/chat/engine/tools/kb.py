@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import lazyllm
 from lazyllm import AutoModel, LOG
@@ -28,13 +28,30 @@ from lazymind.model_config import get_dynamic_role_slot_map
 
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
+_DEFAULT_RETRIEVER_TOPK = 20
+_DEFAULT_RERANK_TOPK = 20
+_DEFAULT_K_MAX = 10
+_DEFAULT_IMAGE_TOPK = 3
+_RERANKER_MODULE = 'ModuleReranker'
+_RERANKER_MODEL = 'reranker'
+_KB_RETRIEVER_CONFIGS = [
+    {'group_name': 'line', 'embed_keys': [EMBED_MAIN], 'target': 'block'},
+    {'group_name': 'block', 'embed_keys': [EMBED_MAIN]},
+]
+_KB_IMAGE_RETRIEVER_CONFIG = {
+    'group_name': 'image',
+    'embed_keys': [EMBED_IMAGE],
+}
+_TEMP_NODE_GROUP_NAME = 'block'
+_TEMP_NODE_GROUP_DISPLAY_NAME = 'paragraph slice'
+_TEMP_NODE_GROUP_MAX_LENGTH = 2048
+_TEMP_NODE_GROUP_SPLIT_BY = '\n'
 
-
-def build_default_retriever_configs() -> List[dict]:
-    return [
-        {'group_name': 'line', 'embed_keys': [EMBED_MAIN], 'target': 'block'},
-        {'group_name': 'block', 'embed_keys': [EMBED_MAIN]},
-    ]
+_kb_retrievers = None
+_kb_reranker = None
+_kb_image_retriever = None
+_tmp_retriever = None
+_tmp_reranker = None
 
 
 def _is_reranker_enabled() -> bool:
@@ -48,6 +65,44 @@ def _is_reranker_enabled() -> bool:
         cfg = None
     role_cfg = cfg.get('reranker') if isinstance(cfg, dict) else None
     return isinstance(role_cfg, dict) and bool(role_cfg.get(role_slots['reranker']))
+
+
+def _build_reranker() -> Optional[Reranker]:
+    return (
+        Reranker(_RERANKER_MODULE, model=AutoModel(model=_RERANKER_MODEL))
+        if _is_reranker_enabled()
+        else None
+    )
+
+
+def _ensure_kb_search_runtime() -> tuple[List[Retriever], Optional[Reranker], Retriever]:
+    global _kb_retrievers, _kb_reranker, _kb_image_retriever
+    if _kb_retrievers is None:
+        _kb_retrievers = [
+            Retriever(DOCUMENT, **cfg)
+            for cfg in _KB_RETRIEVER_CONFIGS
+        ]
+        _kb_reranker = _build_reranker()
+        _kb_image_retriever = Retriever(DOCUMENT, **_KB_IMAGE_RETRIEVER_CONFIG)
+    return _kb_retrievers, _kb_reranker, _kb_image_retriever
+
+
+def _ensure_temp_search_runtime() -> tuple[TempDocRetriever, Optional[Reranker]]:
+    global _tmp_retriever, _tmp_reranker
+    if _tmp_retriever is None:
+        _tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
+        _tmp_retriever.create_node_group(
+            name=_TEMP_NODE_GROUP_NAME,
+            display_name=_TEMP_NODE_GROUP_DISPLAY_NAME,
+            group_type=NodeGroupType.CHUNK,
+            transform=GeneralParser(
+                max_length=_TEMP_NODE_GROUP_MAX_LENGTH,
+                split_by=_TEMP_NODE_GROUP_SPLIT_BY,
+            ),
+        )
+        _tmp_retriever.add_subretriever(_TEMP_NODE_GROUP_NAME)
+        _tmp_reranker = _build_reranker()
+    return _tmp_retriever, _tmp_reranker
 
 
 def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
@@ -192,34 +247,21 @@ def _annotate_result_citations(result: Any) -> Any:
 
 
 class KBToolGroup:
-    """Knowledge base search and navigation tools."""
+    """Knowledge base search and navigation tools.
+
+    This tool group has the highest retrieval priority. If this tool group is
+    visible, use it before Wikipedia, web search, academic search, URL fetching,
+    or answering from the model's own knowledge for every factual, definition,
+    explanation, or retrieval-style question. Do not skip it because the topic
+    looks general, familiar, popular, or likely available on the web. Use other
+    retrieval sources only after this knowledge-base search returns no useful
+    evidence.
+    """
     __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
-    _retrievers = None
-    _reranker = None
-    _image_retriever = None
 
     def __key_source__(self) -> Any:
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         return (agentic_config.get('filters') or {}).get('kb_id')
-
-    def _ensure_search_runtime(self) -> None:
-        cls = type(self)
-        if cls._retrievers is not None:
-            return
-        cls._retrievers = [
-            Retriever(DOCUMENT, **cfg)
-            for cfg in build_default_retriever_configs()
-        ]
-        cls._reranker = (
-            Reranker('ModuleReranker', model=AutoModel(model='reranker'))
-            if _is_reranker_enabled()
-            else None
-        )
-        cls._image_retriever = Retriever(
-            DOCUMENT,
-            group_name='image',
-            embed_keys=[EMBED_IMAGE],
-        )
 
     @handle_tool_errors
     def kb_search(
@@ -232,6 +274,10 @@ class KBToolGroup:
         filters: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """Search the knowledge base and return text and image retrieval results.
+
+        Use this semantic search method for open-ended knowledge-base questions.
+        Search with the user's core question, and treat the returned text and
+        image retrieval results as the primary evidence before answering.
 
         IMPORTANT: Each call handles exactly ONE search intent. If the user asks
         about multiple unrelated keywords or topics, you MUST call this tool
@@ -255,9 +301,7 @@ class KBToolGroup:
                 {'file_name': 'report.pdf'}.
         """
         agentic_config = lazyllm.globals['agentic_config']
-        self._ensure_search_runtime()
-        if not isinstance(query, str) or not query.strip():
-            raise ValueError('query is required and must be a non-empty string')
+        retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
 
         payload = {
             'query': query.strip(),
@@ -267,13 +311,13 @@ class KBToolGroup:
 
         result = search_kb(
             payload,
-            retrievers=type(self)._retrievers,
-            reranker=type(self)._reranker,
-            image_retriever=type(self)._image_retriever,
-            retriever_topk=retriever_topk or 20,
-            rerank_topk=rerank_topk or 20,
-            k_max=k_max or 10,
-            image_topk=image_topk or 3,
+            retrievers=retrievers,
+            reranker=reranker,
+            image_retriever=image_retriever,
+            retriever_topk=retriever_topk or _DEFAULT_RETRIEVER_TOPK,
+            rerank_topk=rerank_topk or _DEFAULT_RERANK_TOPK,
+            k_max=k_max or _DEFAULT_K_MAX,
+            image_topk=image_topk or _DEFAULT_IMAGE_TOPK,
         )
         serialized = _serialize_kb_result(result)
         _annotate_result_citations(serialized)
@@ -297,9 +341,6 @@ class KBToolGroup:
             The matched parent node, if the current node has a parent and the
             parent can be found.
         """
-        if not node_id:
-            raise ValueError('node_id is required')
-
         config = lazyllm.globals['agentic_config']
         doc = DOCUMENT
 
@@ -371,11 +412,6 @@ class KBToolGroup:
         Returns:
             A compact dict with node numbers and contents only.
         """
-        if not docid:
-            raise ValueError('docid is required')
-        if number is None:
-            raise ValueError('number is required')
-
         start, end = parse_number_range(number)
 
         numbers = set(range(start, end + 1))
@@ -420,47 +456,49 @@ class KBToolGroup:
     def kb_keyword_search(
         self,
         keyword: str,
-        docid: str = '',
+        target: str,
+        target_type: Literal['file_name', 'docid'] = 'file_name',
         group: str = 'block',
         phrase: bool = True,
         size: int = 10,
         sort_by: str = 'score',
-        file_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for exact keyword or phrase matches within a specific document.
 
-        Use when the user names a document file — pass it as ``file_name``.
+        Use when the user names a document file -- pass it as ``target`` with
+        ``target_type='file_name'``.
         Performs full-text keyword matching inside one target document,
         useful for finding all occurrences of a term or checking whether a
         document mentions something specific.
 
-        You must provide at least one of ``docid`` or ``file_name`` to identify
-        the target document. When only ``file_name`` is given the search is
-        scoped to all segments belonging to that file.
+        You must provide ``target`` to identify the document. By default
+        ``target`` is treated as a file name. Use ``target_type='docid'`` only
+        when a document id is already known.
+
+        Use this method only when the user names a specific document and asks for
+        an exact term or phrase inside that document. For open-ended semantic
+        questions, use kb_search instead.
 
         Args:
             keyword: Keyword or phrase to search in ``content``.
-            docid: Target document id (optional if ``file_name`` is given).
+            target: Target file name or document id.
+            target_type: How to interpret ``target``; either ``file_name`` or
+                ``docid``. Defaults to ``file_name``.
             group: Search granularity, either ``block`` or ``line``.
             phrase: Use ``match_phrase`` when true, otherwise ``match``.
             size: Maximum number of hits.
             sort_by: score for relevance first, or number for document
                 order.
-            file_name: Target file name, e.g. ``report.pdf`` (optional if
-                ``docid`` is given).
 
         Returns:
             Matching nodes with content snippets.
         """
-        if not keyword:
-            raise ValueError('keyword is required')
-        if not docid and not file_name:
-            raise ValueError('docid or file_name is required')
-
         config = lazyllm.globals['agentic_config']
         index_name = resolve_index(group)
         size = max(1, min(int(size), _MAX_RESULT_ITEMS))
         doc = DOCUMENT
+        docid = target if target_type == 'docid' else ''
+        file_name = target if target_type == 'file_name' else None
         LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
                  f'file_name={file_name!r} group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 
@@ -495,81 +533,56 @@ class KBToolGroup:
         })
 
 
-class TempKBToolGroup:
-    """Temporary file search tools."""
-    __public_apis__ = ['kb_tmp_search']
-    _tmp_retriever = None
-    _reranker = None
+@handle_tool_errors
+def kb_tmp_search(
+    query: str,
+    retriever_topk: Optional[int] = None,
+    rerank_topk: Optional[int] = None,
+    k_max: Optional[int] = None,
+    files: Optional[List[str]] = None,
+) -> Any:
+    """Search attached temporary uploaded files with the temporary document retriever.
 
-    def __key_source__(self) -> Any:
-        agentic_config = lazyllm.globals.get('agentic_config') or {}
-        return agentic_config.get('files')
+    Use this tool before answering questions that depend on attached temporary
+    uploaded files that require text or document retrieval, such as PDFs, text
+    files, office documents, and data files. Scope retrieval to the current
+    uploaded files by default, or pass explicit temporary file IDs in ``files``
+    when needed.
 
-    def _ensure_search_runtime(self) -> None:
-        cls = type(self)
-        if cls._tmp_retriever is not None:
-            return
-        cls._tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
-        cls._tmp_retriever.create_node_group(
-            name='block',
-            display_name='paragraph slice',
-            group_type=NodeGroupType.CHUNK,
-            transform=GeneralParser(max_length=2048, split_by='\n'),
-        )
-        cls._tmp_retriever.add_subretriever('block')
-        cls._reranker = (
-            Reranker('ModuleReranker', model=AutoModel(model='reranker'))
-            if _is_reranker_enabled()
-            else None
-        )
+    Each call handles exactly one search intent. If the user asks about
+    multiple unrelated keywords or topics, call this tool separately for each
+    keyword/topic. Do not combine unrelated terms into one query with spaces,
+    commas, or list-like text.
 
-    @handle_tool_errors
-    def kb_tmp_search(
-        self,
-        query: str,
-        retriever_topk: Optional[int] = None,
-        rerank_topk: Optional[int] = None,
-        k_max: Optional[int] = None,
-        files: Optional[List[str]] = None,
-    ) -> Any:
-        """Search temporary uploaded files with the temporary document retriever.
-
-        Each call handles exactly one search intent. If the user asks about
-        multiple unrelated keywords or topics, call this tool separately for
-        each keyword/topic. Do not combine unrelated terms into one query
-        with spaces, commas, or list-like text.
-
-        Args:
-            query: A single natural language query for retrieval.
-            retriever_topk: Candidate count used by the temporary retriever
-                before reranking. Defaults to 20.
-            rerank_topk: Number of nodes the reranker keeps before adaptive-k
-                trimming. Defaults to 20.
-            k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
-            files: Optional list of temporary file IDs. Defaults to the current
-                request's agentic_config.files.
-        """
-        agentic_config = lazyllm.globals['agentic_config']
-        self._ensure_search_runtime()
-        if not isinstance(query, str) or not query.strip():
-            raise ValueError('query is required and must be a non-empty string')
-        payload = {
-            'query': query.strip(),
-            'filters': {},
-            'files': files,
-            'user_id': agentic_config.get('user_id', ''),
-        }
-        result = search_temp_files(
-            payload,
-            tmp_retriever=type(self)._tmp_retriever,
-            reranker=type(self)._reranker,
-            retriever_topk=retriever_topk or 20,
-            rerank_topk=rerank_topk or 20,
-            k_max=k_max or 10,
-        )
-        serialized = _serialize_kb_result(result)
-        _annotate_result_citations(serialized)
-        return tool_success(
-            'kb_tmp_search',
-            serialized,
-        )
+    Args:
+        query: A single natural language query for retrieval.
+        retriever_topk: Candidate count used by the temporary retriever before
+            reranking. Defaults to 20.
+        rerank_topk: Number of nodes the reranker keeps before adaptive-k
+            trimming. Defaults to 20.
+        k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
+        files: Optional list of temporary file IDs. Defaults to the current
+            request's agentic_config.files.
+    """
+    agentic_config = lazyllm.globals['agentic_config']
+    tmp_retriever, reranker = _ensure_temp_search_runtime()
+    payload = {
+        'query': query.strip(),
+        'filters': {},
+        'files': files,
+        'user_id': agentic_config.get('user_id', ''),
+    }
+    result = search_temp_files(
+        payload,
+        tmp_retriever=tmp_retriever,
+        reranker=reranker,
+        retriever_topk=retriever_topk or _DEFAULT_RETRIEVER_TOPK,
+        rerank_topk=rerank_topk or _DEFAULT_RERANK_TOPK,
+        k_max=k_max or _DEFAULT_K_MAX,
+    )
+    serialized = _serialize_kb_result(result)
+    _annotate_result_citations(serialized)
+    return tool_success(
+        'kb_tmp_search',
+        serialized,
+    )

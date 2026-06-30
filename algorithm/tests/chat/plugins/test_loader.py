@@ -102,7 +102,7 @@ _STATE_YML = textwrap.dedent("""\
 """)
 
 _SCENARIO_MD = 'Call trigger_test_plugin when user wants to test.\n'
-_DRIVER_MD = 'Evaluate step results. Output <verdict>PASS</verdict>.\n'
+_DRIVER_MD = 'Evaluate step results and describe whether the step is complete.\n'
 
 
 def make_plugin_dir(tmp_path: Path) -> Path:

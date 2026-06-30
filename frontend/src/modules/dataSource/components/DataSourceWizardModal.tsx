@@ -52,6 +52,7 @@ const SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
 const SCHEDULE_WEEKDAY_DISPLAY_ORDER = ["7", "1", "2", "3", "4", "5", "6"];
 const SCHEDULE_WORKDAYS = ["1", "2", "3", "4", "5"];
 const SCHEDULE_WEEKENDS = ["6", "7"];
+const FEISHU_MANUAL_TARGET_VALUE_PREFIX = "__scan-feishu-manual-target__";
 
 function normalizeSelectedWeekdays(value?: string[]) {
   return Array.from(new Set(value || []))
@@ -165,6 +166,78 @@ function getTreeSelectValuePath(
 ) {
   const normalizedValue = `${value || ""}`.trim();
   return pathMap.get(normalizedValue) || getTreeSelectLabelText(label) || normalizedValue;
+}
+
+function parseManualFeishuTargetValue(value: unknown) {
+  const normalizedValue = `${value || ""}`.trim();
+  if (!normalizedValue.startsWith(`${FEISHU_MANUAL_TARGET_VALUE_PREFIX}:`)) {
+    return null;
+  }
+
+  const parts = normalizedValue.split(":");
+  const kind = parts[1] || "";
+  const encodedTargetRef = parts.slice(2).join(":");
+  if (!["current", "wiki", "drive"].includes(kind)) {
+    return null;
+  }
+
+  let targetRef = encodedTargetRef;
+  try {
+    targetRef = decodeURIComponent(encodedTargetRef);
+  } catch {
+  }
+
+  const normalizedTargetRef = targetRef.trim();
+  return normalizedTargetRef ? { kind, targetRef: normalizedTargetRef } : null;
+}
+
+function formatManualFeishuTargetLabel(
+  value: unknown,
+  t: DataSourceWizardModalProps["t"],
+) {
+  const parsed = parseManualFeishuTargetValue(value);
+  if (!parsed) {
+    return null;
+  }
+  if (parsed.kind === "wiki") {
+    return t("admin.dataSourceUseCurrentFeishuWikiInput", {
+      value: parsed.targetRef,
+    });
+  }
+  if (parsed.kind === "drive") {
+    return t("admin.dataSourceUseCurrentFeishuDriveInput", {
+      value: parsed.targetRef,
+    });
+  }
+  return t("admin.dataSourceUseCurrentInput", {
+    value: parsed.targetRef,
+  });
+}
+
+function getFeishuTargetDisplayText(
+  value: unknown,
+  label: ReactNode,
+  t: DataSourceWizardModalProps["t"],
+) {
+  const labelText = getTreeSelectLabelText(label);
+  if (labelText && !labelText.startsWith(FEISHU_MANUAL_TARGET_VALUE_PREFIX)) {
+    return labelText;
+  }
+  return formatManualFeishuTargetLabel(value, t) || labelText;
+}
+
+function getFeishuTargetValuePath(
+  value: unknown,
+  label: ReactNode,
+  pathMap: Map<string, string>,
+  t: DataSourceWizardModalProps["t"],
+) {
+  const normalizedValue = `${value || ""}`.trim();
+  return (
+    pathMap.get(normalizedValue) ||
+    getFeishuTargetDisplayText(value, label, t) ||
+    normalizedValue
+  );
 }
 
 export type LocalPathSelectOption = DataNode & {
@@ -330,7 +403,7 @@ export default function DataSourceWizardModal({
     closable,
     onClose,
   }) => (
-    <Tooltip title={getTreeSelectValuePath(value, label, feishuTargetPathMap)}>
+    <Tooltip title={getFeishuTargetValuePath(value, label, feishuTargetPathMap, t)}>
       <Tag
         className="data-source-tree-select-tag"
         closable={closable}
@@ -340,7 +413,9 @@ export default function DataSourceWizardModal({
           event.stopPropagation();
         }}
       >
-        <span className="data-source-tree-select-tag-label">{label}</span>
+        <span className="data-source-tree-select-tag-label">
+          {getFeishuTargetDisplayText(value, label, t)}
+        </span>
       </Tag>
     </Tooltip>
   );
@@ -352,7 +427,9 @@ export default function DataSourceWizardModal({
     }
 
     const paths = omittedValues
-      .map((item) => getTreeSelectValuePath(item.value, item.label, feishuTargetPathMap))
+      .map((item) =>
+        getFeishuTargetValuePath(item.value, item.label, feishuTargetPathMap, t),
+      )
       .filter(Boolean);
 
     return (
