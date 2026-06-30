@@ -171,6 +171,10 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 }
 
 // routeError synthesizes a terminal error event when the run cannot be driven by the stream.
+// The actual DB write is protected at the UpdateFinalStatus layer: "failed" will never overwrite
+// an already-terminal "interrupted" or "succeeded" status, so a race between
+// StopActivePluginSession (which writes interrupted) and the SSE EOF handler (which calls us)
+// cannot silently downgrade interrupted → failed.
 func routeError(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, message string) {
 	ev := TaskEvent{Type: "error", TaskID: taskID, Status: StatusFailed, Message: message}
 	_ = UpdateFinalStatus(ctx, db, taskID, StatusFailed, message)

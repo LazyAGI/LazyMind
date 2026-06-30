@@ -13,7 +13,6 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/store"
-	"lazymind/core/subagent"
 )
 
 // resolveValuePaths normalises a human-uploaded value by ensuring it carries a stable
@@ -98,6 +97,7 @@ type sessionDTO struct {
 	PluginID       string    `json:"plugin_id"`
 	Status         string    `json:"status"`
 	CurrentStepID  string    `json:"current_step_id"`
+	IntentContext  string    `json:"intent_context,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Slots          []slotDTO `json:"slots,omitempty"`
@@ -106,11 +106,12 @@ type sessionDTO struct {
 
 // stepDTO summarises one plugin_session_steps row (used for dependency validation).
 type stepDTO struct {
-	StepID    string    `json:"step_id"`
-	Attempt   int       `json:"attempt"`
-	TaskID    string    `json:"task_id"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	StepID        string    `json:"step_id"`
+	Attempt       int       `json:"attempt"`
+	TaskID        string    `json:"task_id"`
+	Status        string    `json:"status"`
+	IntentContext string    `json:"intent_context,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // slotDTO represents a currently-selected slot revision, with its artifact value inline.
@@ -144,6 +145,7 @@ func toSessionDTO(s *orm.PluginSession) sessionDTO {
 		PluginID:       s.PluginID,
 		Status:         s.Status,
 		CurrentStepID:  s.CurrentStepID,
+		IntentContext:  s.IntentContext,
 		CreatedAt:      s.CreatedAt,
 		UpdatedAt:      s.UpdatedAt,
 	}
@@ -157,6 +159,22 @@ func toStepDTO(r *orm.PluginSessionStep) stepDTO {
 		Status:    r.Status,
 		CreatedAt: r.CreatedAt,
 	}
+}
+
+// buildStepIntentMap loads all step intents for a session and returns a map[step_id]intent_context.
+// Returns an empty map on error (non-fatal).
+func buildStepIntentMap(ctx context.Context, db *gorm.DB, sessionID string) map[string]string {
+	intents, err := ListStepIntents(ctx, db, sessionID)
+	m := make(map[string]string, len(intents))
+	if err != nil {
+		return m
+	}
+	for _, si := range intents {
+		if si.IntentContext != "" && si.IntentContext != "{}" {
+			m[si.StepID] = si.IntentContext
+		}
+	}
+	return m
 }
 
 func toSlotDTO(r *orm.PluginSlotRevision) slotDTO {
@@ -404,8 +422,12 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 	enrichSlots(ctx, db, sessionID, dto.Slots)
 	// Load steps inline (used by Python Layer-2 dependency validation).
 	steps, _ := ListSteps(ctx, db, sessionID)
+	// Build step intent map for fast lookup.
+	intentMap := buildStepIntentMap(ctx, db, sessionID)
 	for i := range steps {
-		dto.Steps = append(dto.Steps, toStepDTO(&steps[i]))
+		sd := toStepDTO(&steps[i])
+		sd.IntentContext = intentMap[steps[i].StepID]
+		dto.Steps = append(dto.Steps, sd)
 	}
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
@@ -455,26 +477,29 @@ func GetSessionSteps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type stepDTO struct {
-		ID        string `json:"id"`
-		SessionID string `json:"session_id"`
-		StepID    string `json:"step_id"`
-		Attempt   int    `json:"attempt"`
-		TaskID    string `json:"task_id"`
-		Status    string `json:"status"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
+		ID            string `json:"id"`
+		SessionID     string `json:"session_id"`
+		StepID        string `json:"step_id"`
+		Attempt       int    `json:"attempt"`
+		TaskID        string `json:"task_id"`
+		Status        string `json:"status"`
+		IntentContext string `json:"intent_context,omitempty"`
+		CreatedAt     string `json:"created_at"`
+		UpdatedAt     string `json:"updated_at"`
 	}
+	intentMap := buildStepIntentMap(r.Context(), db, sessionID)
 	out := make([]stepDTO, 0, len(steps))
 	for _, s := range steps {
 		out = append(out, stepDTO{
-			ID:        s.ID,
-			SessionID: s.SessionID,
-			StepID:    s.StepID,
-			Attempt:   s.Attempt,
-			TaskID:    s.TaskID,
-			Status:    s.Status,
-			CreatedAt: s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-			UpdatedAt: s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			ID:            s.ID,
+			SessionID:     s.SessionID,
+			StepID:        s.StepID,
+			Attempt:       s.Attempt,
+			TaskID:        s.TaskID,
+			Status:        s.Status,
+			IntentContext: intentMap[s.StepID],
+			CreatedAt:     s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:     s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	common.ReplyOK(w, map[string]any{"steps": out})
@@ -570,6 +595,13 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, map[string]any{"session": nil})
 		return
 	}
+
+	// Self-healing: if the session appears active but no steps are still running
+	// (e.g. the server crashed before updating statuses), repair the state so
+	// the frontend doesn't get stuck on "executing".
+	if s.Status == SessionStatusActive {
+		healStaleActiveSession(r.Context(), db, s)
+	}
 	dto := toSessionDTO(s)
 	revisions, _ := LoadSelectedSlots(r.Context(), db, s.ID)
 	for i := range revisions {
@@ -656,123 +688,6 @@ func ListPlugins(w http.ResponseWriter, r *http.Request) {
 		if readErr != nil {
 			break
 		}
-	}
-}
-
-// AdvanceSession handles POST /plugin-sessions/{session_id}:advance.
-// This is the §5.5 manual-mode resume path: the frontend calls this after
-// the user confirms they want to proceed or retry the current step.
-//
-// Body (optional): {"action": "continue"|"retry"}  — defaults to "continue".
-//   - "continue": proceed to the next step after the current one succeeds.
-//   - "retry":    re-run the current step from scratch (full retry via self-loop).
-func AdvanceSession(w http.ResponseWriter, r *http.Request) {
-	sessionID := common.PathVar(r, "session_id")
-	if sessionID == "" {
-		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
-		return
-	}
-
-	var body struct {
-		Action string `json:"action"` // "continue" | "retry"; default "continue"
-	}
-	// Ignore decode errors — body is optional; default action is "continue".
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	if body.Action == "" {
-		body.Action = "continue"
-	}
-	if body.Action != "continue" && body.Action != "retry" {
-		common.ReplyErr(w, `action must be "continue" or "retry"`, http.StatusBadRequest)
-		return
-	}
-
-	db := store.DB()
-	stateStore := store.State()
-	if db == nil {
-		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
-		return
-	}
-	ctx := r.Context()
-
-	session, err := GetSession(ctx, db, sessionID)
-	if err != nil {
-		if IsNotFound(err) {
-			common.ReplyErr(w, "session not found", http.StatusNotFound)
-			return
-		}
-		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
-		return
-	}
-	// completed sessions can be retried (re-run a step), but not continued.
-	if session.Status == SessionStatusCompleted {
-		if body.Action != "retry" {
-			common.ReplyErr(w, "completed sessions can only be retried, not continued", http.StatusConflict)
-			return
-		}
-		// Reset to active so the state machine can proceed.
-		if err := UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive); err != nil {
-			common.ReplyErr(w, "reset session status failed", http.StatusInternalServerError)
-			return
-		}
-		session.Status = SessionStatusActive
-	} else if session.Status != SessionStatusWaiting && session.Status != SessionStatusActive {
-		// Under the current state machine only active/waiting/completed are valid states,
-		// so this branch should never be reached. Guard retained for safety.
-		common.ReplyErr(w, "session is not in a resumable state", http.StatusConflict)
-		return
-	}
-
-	// Find the latest step for the current step_id.
-	step, err := GetLatestStep(ctx, db, sessionID, session.CurrentStepID)
-	if err != nil || step == nil {
-		common.ReplyErr(w, "no step found for current_step_id", http.StatusInternalServerError)
-		return
-	}
-
-	userID := store.UserID(r)
-
-	switch step.Status {
-	case StepStatusInterrupted:
-		// Resume the interrupted SubAgent directly, bypassing ChatAgent.
-		_ = UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive)
-		task, tErr := subagent.GetTask(ctx, db, step.TaskID)
-		if tErr != nil {
-			common.ReplyErr(w, "fetch task failed", http.StatusInternalServerError)
-			return
-		}
-		var params PluginStepParams
-		if len(task.Params) > 0 {
-			_ = json.Unmarshal(task.Params, &params)
-		}
-		// LLMConfig is not persisted on the task; subagent runner uses its default model on resume.
-		// input_artifact_keys, output_artifact_keys, and tools are read by the Python runner from DB.
-		go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
-			TaskID:        task.ID,
-			AgentType:     "plugin_step",
-			Params:        params.asMap(),
-			WorkspacePath: task.WorkspacePath,
-			Resume:        true,
-		})
-		common.ReplyOK(w, map[string]any{"action": "resumed", "task_id": task.ID})
-
-	case StepStatusSucceeded:
-		_ = UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive)
-		var syntheticMsg string
-		if body.Action == "retry" {
-			// User wants to redo the current step (full retry via state-machine self-loop).
-			syntheticMsg = fmt.Sprintf("Step %s completed but user wants to retry it. Please re-run step %s from scratch.", session.CurrentStepID, session.CurrentStepID)
-		} else {
-			// Default: user confirmed, proceed to next step.
-			syntheticMsg = fmt.Sprintf("Step %s completed. User confirmed. Please proceed.", session.CurrentStepID)
-		}
-		go triggerNextChatTurn(
-			session.ConversationID, sessionID, session.PluginID,
-			session.CurrentStepID, userID, syntheticMsg, nil,
-		)
-		common.ReplyOK(w, map[string]any{"action": body.Action, "message": syntheticMsg})
-
-	default:
-		common.ReplyErr(w, fmt.Sprintf("step status %q is not resumable", step.Status), http.StatusConflict)
 	}
 }
 

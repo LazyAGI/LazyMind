@@ -310,7 +310,7 @@ if self._stop_tools:
 
 ---
 
-## 六、意图与约束（框架级，插件无感知） ⚠️ 待调试
+## 六、意图与约束（框架级，插件无感知）
 
 全局约束与步骤约束是**平台机制**，插件 `plugin.yaml` / `scenario.md` **不需要**声明字段，也**不需要**插件作者实现工具。
 
@@ -565,7 +565,7 @@ Worker：Task 进入 `running` 后，本质仍是标准 chat/plugin 管道；Tas
 
 ---
 
-## 十、定时任务（用户行为，与 plugin 无关） ⚠️ 待调试
+## 十、定时任务（用户行为，与 plugin 无关） 
 
 ### 10.1 原则
 
@@ -696,7 +696,7 @@ task_status_changed  → TaskCenter 状态变更
 
 ---
 
-## 十四、步骤中断恢复（Checkpoint-Resume）⚠️ 待调试
+## 十四、步骤中断恢复（Checkpoint-Resume）
 
 ### 14.1 问题
 

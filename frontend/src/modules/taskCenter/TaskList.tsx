@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Badge, Button, Input, Select, Space, Table, Tag, Tooltip, message } from 'antd';
+import { Badge, Button, Input, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { debounce } from 'lodash';
-import { cancelTask, listTasks } from './api';
+import { cancelTask, listTasks, removeTask } from './api';
 import type { StepInfo, Task } from './api';
 import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
 
@@ -12,6 +12,7 @@ const PAGE_SIZE = 20;
 
 const STATUS_BADGE: Record<string, 'processing' | 'success' | 'error' | 'default' | 'warning'> = {
   running: 'processing',
+  waiting: 'warning',
   completed: 'success',
   succeeded: 'success',
   failed: 'error',
@@ -88,17 +89,18 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [typeFilter, setTypeFilter] = useState<string>('');
   const [keyword, setKeyword] = useState('');
   const [inputKeyword, setInputKeyword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const fetchTasks = useCallback(
-    async (p: number, status: string, kw: string) => {
+    async (p: number, status: string, kw: string, type: string) => {
       setLoading(true);
       try {
         const resp = await listTasks({
           status: status || undefined,
-          task_type: scheduleId ? 'scheduled' : undefined,
+          task_type: scheduleId ? 'scheduled' : (type || undefined),
           keyword: kw || undefined,
           page: p,
           page_size: PAGE_SIZE,
@@ -115,8 +117,8 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
   );
 
   useEffect(() => {
-    void fetchTasks(page, statusFilter, keyword);
-  }, [fetchTasks, page, statusFilter, keyword]);
+    void fetchTasks(page, statusFilter, keyword, typeFilter);
+  }, [fetchTasks, page, statusFilter, keyword, typeFilter]);
 
   const debouncedSetKeyword = useRef(
     debounce((v: string) => {
@@ -130,13 +132,36 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
     debouncedSetKeyword(v);
   };
 
-  const handleCancel = async (id: string) => {
+  const handleStop = (id: string) => {
+    Modal.confirm({
+      title: t('taskCenter.stopConfirmTitle'),
+      content: t('taskCenter.stopConfirmContent'),
+      okText: t('taskCenter.cancel'),
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await cancelTask(id);
+          message.success(t('taskCenter.cancelSuccess'));
+          void fetchTasks(page, statusFilter, keyword, typeFilter);
+        } catch {
+          message.error(t('taskCenter.cancelError'));
+        }
+      },
+    });
+  };
+
+  const handleRemove = async (id: string, status: string) => {
     try {
-      await cancelTask(id);
-      message.success(t('taskCenter.cancelSuccess'));
-      void fetchTasks(page, statusFilter, keyword);
+      await removeTask(id);
+      if (status === 'running') {
+        message.info(t('taskCenter.removeRunningHint'));
+      } else {
+        message.success('已移出任务中心');
+      }
+      void fetchTasks(page, statusFilter, keyword, typeFilter);
     } catch {
-      message.error(t('taskCenter.cancelError'));
+      message.error('移出失败');
     }
   };
 
@@ -148,19 +173,22 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
   const columns: ColumnsType<Task> = useMemo(
     () => [
       {
-        title: t('taskCenter.tasks'),
+        title: '任务描述',
         dataIndex: 'conversation_title',
         render: (v: string, record: Task) => {
-          const displayTitle = v || record.title || t('taskCenter.noTitle');
+          const fullTitle = v || record.title || t('taskCenter.noTitle');
+          const truncated = fullTitle.length > 50 ? `${fullTitle.slice(0, 50)}…` : fullTitle;
           return (
             <div>
-              <Button
-                type='link'
-                style={{ padding: 0, textAlign: 'left', height: 'auto', whiteSpace: 'normal' }}
-                onClick={() => handleOpenConversation(record.conversation_id)}
-              >
-                {displayTitle}
-              </Button>
+              <Tooltip title={fullTitle.length > 50 ? fullTitle : undefined}>
+                <Button
+                  type='link'
+                  style={{ padding: 0, textAlign: 'left', height: 'auto', whiteSpace: 'normal' }}
+                  onClick={() => handleOpenConversation(record.conversation_id)}
+                >
+                  {truncated}
+                </Button>
+              </Tooltip>
               {record.schedule_name && (
                 <Tag color='blue' style={{ marginLeft: 6, fontSize: 11 }}>
                   {record.schedule_name}
@@ -212,17 +240,29 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
       {
         title: '',
         key: 'actions',
-        width: 90,
-        render: (_: unknown, record: Task) =>
-          record.status === 'running' ? (
-            <Button size='small' danger onClick={() => handleCancel(record.id)}>
-              {t('taskCenter.cancel')}
-            </Button>
-          ) : null,
+        width: 120,
+        render: (_: unknown, record: Task) => {
+          const isStoppable = record.status === 'running' || record.status === 'pending';
+          const isRemovable = record.task_type !== 'scheduled';
+          return (
+            <Space>
+              {isStoppable && (
+                <Button size='small' danger onClick={() => handleStop(record.id)}>
+                  {t('taskCenter.cancel')}
+                </Button>
+              )}
+              {isRemovable && (
+                <Button size='small' onClick={() => handleRemove(record.id, record.status)}>
+                  移出
+                </Button>
+              )}
+            </Space>
+          );
+        },
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, page, statusFilter, keyword],
+    [t, page, statusFilter, keyword, typeFilter],
   );
 
   return (
@@ -248,6 +288,19 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
             { value: 'canceled', label: t('taskCenter.statusCanceled') },
           ]}
         />
+        {!scheduleId && (
+          <Select
+            value={typeFilter}
+            style={{ width: 120 }}
+            onChange={(v) => { setTypeFilter(v); setPage(1); }}
+            options={[
+              { value: '', label: t('taskCenter.taskType') + '：全部' },
+              { value: 'plugin_run', label: t('taskCenter.typePluginRun') },
+              { value: 'background_chat', label: t('taskCenter.typeBackgroundChat') },
+              { value: 'scheduled', label: t('taskCenter.typeScheduled') },
+            ]}
+          />
+        )}
       </Space>
       <Table<Task>
         rowKey='id'

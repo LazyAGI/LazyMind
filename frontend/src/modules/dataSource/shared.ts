@@ -7,7 +7,7 @@ export type SyncMode = "manual" | "scheduled";
 export type ConflictPolicy = "overwrite" | "skip" | "versioned";
 export type FileSyncMode = "all" | "partial";
 export type OAuthState = "pending" | "waiting" | "connected" | "expired" | "error";
-export type FileUpdateState = "new" | "changed" | "unchanged" | "deleted";
+export type FileUpdateState = "new" | "changed" | "unchanged" | "deleted" | "cleanup";
 export type FeishuTargetType = "wiki_space" | "drive_folder";
 export type NotionTargetType = "page" | "database";
 export type CloudTargetType = FeishuTargetType | NotionTargetType;
@@ -59,7 +59,12 @@ export type DataSourceFileType =
   | "py";
 
 // New source state machine fields exposed by the backend.
-export type SourceStateValue = "UNCHANGED" | "NEW" | "MODIFIED" | "DELETED";
+export type SourceStateValue =
+  | "UNCHANGED"
+  | "NEW"
+  | "MODIFIED"
+  | "DELETED"
+  | "OUT_OF_SCOPE";
 export type SyncStateValue =
   | "IDLE"
   | "PENDING"
@@ -532,6 +537,19 @@ export function normalizeDataSourceFileUpdateState(
   hasUpdate?: boolean,
 ): FileUpdateState {
   if (
+    hasStatusToken(updateType, ["cleanup"]) ||
+    hasStatusText(updateType, [
+      "out_of_scope",
+      "out of scope",
+      "out-of-scope",
+      "unsupported_type",
+      "unsupported type",
+      "type unsupported",
+    ])
+  ) {
+    return "cleanup";
+  }
+  if (
     hasStatusText(updateType, [
       "unchanged",
       "no_change",
@@ -851,7 +869,12 @@ export function getSyncModeLabel(mode: SyncMode, t: TFunction) {
 }
 
 export function shouldSyncFileCandidate(state: FileUpdateState) {
-  return state === "new" || state === "changed" || state === "deleted";
+  return (
+    state === "new" ||
+    state === "changed" ||
+    state === "deleted" ||
+    state === "cleanup"
+  );
 }
 
 export function getFileUpdateMeta(state: FileUpdateState, t: TFunction) {
@@ -863,6 +886,9 @@ export function getFileUpdateMeta(state: FileUpdateState, t: TFunction) {
   }
   if (state === "deleted") {
     return { color: "error", text: t("admin.dataSourceFileUpdateDeleted") };
+  }
+  if (state === "cleanup") {
+    return { color: "warning", text: t("admin.dataSourceFileUpdateCleanup") };
   }
   return { color: "default", text: t("admin.dataSourceFileUpdateUnchanged") };
 }
@@ -956,6 +982,7 @@ const VALID_SOURCE_STATES: ReadonlyArray<SourceStateValue> = [
   "NEW",
   "MODIFIED",
   "DELETED",
+  "OUT_OF_SCOPE",
 ];
 
 const VALID_SYNC_STATES: ReadonlyArray<SyncStateValue> = [
@@ -997,6 +1024,7 @@ export function sourceStateToFileUpdate(state?: SourceStateValue): FileUpdateSta
   if (state === "NEW") return "new";
   if (state === "MODIFIED") return "changed";
   if (state === "DELETED") return "deleted";
+  if (state === "OUT_OF_SCOPE") return "cleanup";
   return "unchanged";
 }
 
@@ -1021,6 +1049,7 @@ export function resolveSourceState(input: DocumentLikeStatus): SourceStateValue 
   if (legacy === "new") return "NEW";
   if (legacy === "changed") return "MODIFIED";
   if (legacy === "deleted") return "DELETED";
+  if (legacy === "cleanup") return "OUT_OF_SCOPE";
   return "UNCHANGED";
 }
 
@@ -1031,7 +1060,7 @@ export function resolveSyncState(input: DocumentLikeStatus): SyncStateValue {
 export interface SourceStateMeta {
   color: string;
   text: string;
-  tone: "new" | "changed" | "deleted" | "unchanged";
+  tone: "new" | "changed" | "deleted" | "cleanup" | "unchanged";
 }
 
 export function getSourceStateMeta(state: SourceStateValue, t: TFunction): SourceStateMeta {
@@ -1054,6 +1083,13 @@ export function getSourceStateMeta(state: SourceStateValue, t: TFunction): Sourc
       color: "error",
       text: t("admin.dataSourceSourceStateDeleted"),
       tone: "deleted",
+    };
+  }
+  if (state === "OUT_OF_SCOPE") {
+    return {
+      color: "warning",
+      text: t("admin.dataSourceSourceStateOutOfScope"),
+      tone: "cleanup",
     };
   }
   return {
@@ -1122,6 +1158,9 @@ export function buildDocumentStatusDetail(
       return t("admin.dataSourceFileUpdateDeletedDoneDetail");
     }
     return t("admin.dataSourceFileUpdateDeletedPendingDetail");
+  }
+  if (sourceState === "OUT_OF_SCOPE") {
+    return t("admin.dataSourceFileUpdateCleanupDetail");
   }
   if (syncState === "FAILED" && input.last_error) {
     return t("admin.dataSourceSyncStateFailedWithError", { error: input.last_error });

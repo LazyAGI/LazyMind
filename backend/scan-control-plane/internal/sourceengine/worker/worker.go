@@ -209,13 +209,16 @@ func (w *DefaultParseWorker) validateTaskFreshness(exec executionContext) error 
 		return fmt.Errorf("state generation changed")
 	}
 	if exec.task.TaskAction == taskpkg.TaskActionDelete {
-		if exec.state.SourceState != statepkg.SourceStateDeleted || exec.state.PendingAction != statepkg.PendingActionDelete {
+		if !deleteTaskStillPending(exec.state) {
 			return fmt.Errorf("delete task is obsolete")
 		}
 		if exec.state.ActiveTaskID != "" && exec.state.ActiveTaskID != exec.task.TaskID {
 			return fmt.Errorf("task was replaced")
 		}
 		return nil
+	}
+	if !parseTaskStillPending(exec.state, exec.task.TaskAction) {
+		return fmt.Errorf("parse task is obsolete")
 	}
 	if exec.state.SourceVersion != exec.task.SourceVersion {
 		return fmt.Errorf("source version changed")
@@ -224,6 +227,27 @@ func (w *DefaultParseWorker) validateTaskFreshness(exec executionContext) error 
 		return fmt.Errorf("task was replaced")
 	}
 	return nil
+}
+
+func deleteTaskStillPending(state store.DocumentState) bool {
+	if state.PendingAction != statepkg.PendingActionDelete {
+		return false
+	}
+	return state.SourceState == statepkg.SourceStateDeleted || state.SourceState == statepkg.SourceStateOutOfScope
+}
+
+func parseTaskStillPending(state store.DocumentState, taskAction string) bool {
+	if state.PendingAction != "" {
+		return state.PendingAction == taskAction
+	}
+	switch taskAction {
+	case taskpkg.TaskActionCreate:
+		return state.SourceState == statepkg.SourceStateNew
+	case taskpkg.TaskActionReparse:
+		return state.SourceState == statepkg.SourceStateModified
+	default:
+		return false
+	}
 }
 
 func (w *DefaultParseWorker) exportObject(ctx context.Context, exec executionContext) (connector.ExportedObject, error) {

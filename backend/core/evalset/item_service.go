@@ -29,6 +29,8 @@ type ListEvalSetItemsFilter struct {
 	OrderBy      string
 }
 
+const invalidReferenceScanBatchSize = 500
+
 func (s *Service) requireEvalSetPermission(ctx context.Context, id, userID string, groupIDs []string, want string) (*orm.EvalSet, error) {
 	row, err := s.repo.GetActive(ctx, id)
 	if err != nil {
@@ -48,28 +50,11 @@ func (s *Service) requireEvalSetPermission(ctx context.Context, id, userID strin
 }
 
 func (s *Service) ListItems(ctx context.Context, evalSet *orm.EvalSet, filter ListEvalSetItemsFilter) (*ListEvalSetItemsResponse, error) {
-	filter.Keyword = strings.TrimSpace(filter.Keyword)
-	filter.QuestionType = strings.TrimSpace(filter.QuestionType)
-	filter.Source = strings.TrimSpace(filter.Source)
-	filter.OrderBy = strings.TrimSpace(filter.OrderBy)
-	if filter.Page < 1 {
-		filter.Page = 1
+	normalizedFilter, err := normalizeListEvalSetItemsFilter(filter)
+	if err != nil {
+		return nil, err
 	}
-	if filter.PageSize < 1 {
-		filter.PageSize = 20
-	}
-	if filter.PageSize > 100 {
-		filter.PageSize = 100
-	}
-	if filter.OrderBy == "" {
-		filter.OrderBy = "created_at_desc"
-	}
-	if filter.OrderBy != "created_at_desc" && filter.OrderBy != "updated_at_desc" {
-		return nil, errors.New("unsupported order_by")
-	}
-	if filter.Source != "" && !isValidItemSource(filter.Source) {
-		return nil, errors.New("invalid source")
-	}
+	filter = normalizedFilter
 
 	items, total, err := s.repo.ListItems(ctx, evalSet.ID, evalSet.ShardID, filter)
 	if err != nil {
@@ -89,6 +74,110 @@ func (s *Service) ListItems(ctx context.Context, evalSet *orm.EvalSet, filter Li
 		Page:     filter.Page,
 		PageSize: filter.PageSize,
 	}, nil
+}
+
+func (s *Service) ListInvalidReferenceItems(ctx context.Context, evalSet *orm.EvalSet, filter ListEvalSetItemsFilter) (*ListEvalSetItemsResponse, error) {
+	normalizedFilter, err := normalizeListEvalSetItemsFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	filter = normalizedFilter
+
+	datasetIDs := parseDatasetIDsJSON(evalSet.DatasetIDs)
+	offset := (filter.Page - 1) * filter.PageSize
+	candidateOffset := 0
+	invalidSeen := 0
+	collected := make([]orm.EvalSetItem, 0, filter.PageSize+1)
+
+	for len(collected) <= filter.PageSize {
+		batch, err := s.repo.ListReferenceDocCandidateItems(
+			ctx,
+			evalSet.ID,
+			evalSet.ShardID,
+			filter,
+			candidateOffset,
+			invalidReferenceScanBatchSize,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		candidateOffset += len(batch)
+
+		referenceDocIDs, err := s.repo.KnowledgeBaseReferenceDocIDs(
+			ctx,
+			datasetIDs,
+			collectReferenceDocIDs(batch),
+		)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range batch {
+			if !hasInvalidReferenceDoc(item.ReferenceDocIDs, referenceDocIDs) {
+				continue
+			}
+			invalidSeen++
+			if invalidSeen <= offset {
+				continue
+			}
+			collected = append(collected, item)
+			if len(collected) > filter.PageSize {
+				break
+			}
+		}
+		if len(batch) < invalidReferenceScanBatchSize {
+			break
+		}
+	}
+
+	hasMore := len(collected) > filter.PageSize
+	if hasMore {
+		collected = collected[:filter.PageSize]
+	}
+
+	referenceDocIDs, err := s.repo.KnowledgeBaseReferenceDocIDs(
+		ctx,
+		datasetIDs,
+		collectReferenceDocIDs(collected),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &ListEvalSetItemsResponse{
+		Items:    itemResponses(collected, referenceDocIDs),
+		Total:    int64(invalidSeen),
+		Page:     filter.Page,
+		PageSize: filter.PageSize,
+		HasMore:  hasMore,
+	}, nil
+}
+
+func normalizeListEvalSetItemsFilter(filter ListEvalSetItemsFilter) (ListEvalSetItemsFilter, error) {
+	filter.Keyword = strings.TrimSpace(filter.Keyword)
+	filter.QuestionType = strings.TrimSpace(filter.QuestionType)
+	filter.Source = strings.TrimSpace(filter.Source)
+	filter.OrderBy = strings.TrimSpace(filter.OrderBy)
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PageSize < 1 {
+		filter.PageSize = 20
+	}
+	if filter.PageSize > 100 {
+		filter.PageSize = 100
+	}
+	if filter.OrderBy == "" {
+		filter.OrderBy = "created_at_desc"
+	}
+	if filter.OrderBy != "created_at_desc" && filter.OrderBy != "updated_at_desc" {
+		return ListEvalSetItemsFilter{}, errors.New("unsupported order_by")
+	}
+	if filter.Source != "" && !isValidItemSource(filter.Source) {
+		return ListEvalSetItemsFilter{}, errors.New("invalid source")
+	}
+	return filter, nil
 }
 
 func (s *Service) ListEvalSetQuestionTypes(ctx context.Context, evalSet *orm.EvalSet) (*QuestionTypeOptionsResponse, error) {
@@ -172,6 +261,32 @@ func (s *Service) BatchDeleteItems(ctx context.Context, evalSetID string, req Ba
 }
 
 func (r *Repository) ListItems(ctx context.Context, evalSetID, shardID string, filter ListEvalSetItemsFilter) ([]orm.EvalSetItem, int64, error) {
+	q := r.evalSetItemsQuery(ctx, evalSetID, shardID, filter)
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var rows []orm.EvalSetItem
+	err := q.Order(listItemsOrderBy(filter)).
+		Offset((filter.Page - 1) * filter.PageSize).
+		Limit(filter.PageSize).
+		Find(&rows).Error
+	return rows, total, err
+}
+
+func (r *Repository) ListReferenceDocCandidateItems(ctx context.Context, evalSetID, shardID string, filter ListEvalSetItemsFilter, offset, limit int) ([]orm.EvalSetItem, error) {
+	var rows []orm.EvalSetItem
+	err := r.evalSetItemsQuery(ctx, evalSetID, shardID, filter).
+		Where("reference_doc_ids <> ''").
+		Order(listItemsOrderBy(filter)).
+		Offset(offset).
+		Limit(limit).
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *Repository) evalSetItemsQuery(ctx context.Context, evalSetID, shardID string, filter ListEvalSetItemsFilter) *gorm.DB {
 	q := r.db.WithContext(ctx).Model(&orm.EvalSetItem{}).
 		Where("shard_id = ? AND eval_set_id = ?", shardID, evalSetID)
 	if filter.Keyword != "" {
@@ -184,22 +299,14 @@ func (r *Repository) ListItems(ctx context.Context, evalSetID, shardID string, f
 	if filter.Source != "" {
 		q = q.Where("source = ?", filter.Source)
 	}
+	return q
+}
 
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	orderBy := "created_at DESC, id DESC"
+func listItemsOrderBy(filter ListEvalSetItemsFilter) string {
 	if filter.OrderBy == "updated_at_desc" {
-		orderBy = "updated_at DESC, id DESC"
+		return "updated_at DESC, id DESC"
 	}
-	var rows []orm.EvalSetItem
-	err := q.Order(orderBy).
-		Offset((filter.Page - 1) * filter.PageSize).
-		Limit(filter.PageSize).
-		Find(&rows).Error
-	return rows, total, err
+	return "created_at DESC, id DESC"
 }
 
 func (r *Repository) ListEvalSetQuestionTypes(ctx context.Context, evalSetID, shardID string) ([]string, error) {
@@ -647,6 +754,8 @@ func itemResponses(items []orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[str
 }
 
 func itemResponse(item *orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[string]struct{}) *EvalSetItemResponse {
+	referenceDocInvalid := hasInvalidReferenceDoc(item.ReferenceDocIDs, knowledgeBaseReferenceDocIDs)
+	referenceChunkSelected := len(splitListIDs(item.ReferenceChunkIDs)) > 0
 	return &EvalSetItemResponse{
 		ID:                            item.ID,
 		EvalSetID:                     item.EvalSetID,
@@ -662,7 +771,9 @@ func itemResponse(item *orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[string
 		ReferenceDoc:                  item.ReferenceDoc,
 		ReferenceDocIDs:               item.ReferenceDocIDs,
 		ReferenceDocFromKnowledgeBase: hasReferenceDocInSet(item.ReferenceDocIDs, knowledgeBaseReferenceDocIDs),
-		ReferenceChunkSelected:        len(splitListIDs(item.ReferenceChunkIDs)) > 0,
+		ReferenceDocInvalid:           referenceDocInvalid,
+		ReferenceChunkSelected:        referenceChunkSelected,
+		ReferenceChunkInvalid:         referenceChunkSelected && referenceDocInvalid,
 		IsDeleted:                     item.IsDeleted,
 		Source:                        item.Source,
 		SourceSessionID:               item.SourceSessionID,
@@ -695,6 +806,19 @@ func hasReferenceDocInSet(raw string, ids map[string]struct{}) bool {
 	}
 	for _, id := range splitListIDs(raw) {
 		if _, ok := ids[id]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func hasInvalidReferenceDoc(raw string, ids map[string]struct{}) bool {
+	docIDs := splitListIDs(raw)
+	if len(docIDs) == 0 {
+		return false
+	}
+	for _, id := range docIDs {
+		if _, ok := ids[id]; !ok {
 			return true
 		}
 	}

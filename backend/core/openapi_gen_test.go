@@ -114,6 +114,22 @@ func TestOpenAPISpecIncludesEvalReportResultSchema(t *testing.T) {
 		}
 	}
 
+	abtestsOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/results/abtests")
+	abtestsResponseRef := openAPIResponseRefForTest(t, abtestsOp)
+	if abtestsResponseRef != "#/components/schemas/agentABTestResultOpenAPIResponse" {
+		t.Fatalf("unexpected abtest result item schema ref: %q", abtestsResponseRef)
+	}
+	abtestsParams := openAPIParameterNamesForTest(t, abtestsOp)
+	if _, ok := abtestsParams["thread_id"]; !ok {
+		t.Fatalf("abtest result operation missing parameter %q", "thread_id")
+	}
+	abtestsProps := schemaPropertiesForTest(t, schemas, "agentABTestResultOpenAPIResponse")
+	for _, name := range []string{"artifact_id", "artifact_ref", "schema", "case_count", "data", "abtest_id", "case_details_summary", "file_url"} {
+		if _, ok := abtestsProps[name]; !ok {
+			t.Fatalf("abtest result schema missing property %q", name)
+		}
+	}
+
 	abCaseOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details")
 	abCaseResponseRef := openAPIObjectResponseRefForTest(t, abCaseOp)
 	if abCaseResponseRef != "#/components/schemas/agentABTestCaseDetailListOpenAPIResponse" {

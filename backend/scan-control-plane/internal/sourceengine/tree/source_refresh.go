@@ -29,6 +29,10 @@ type SourceReadRefreshRepository interface {
 	stateengine.Store
 }
 
+type parseTaskLister interface {
+	ListParseTasks(ctx context.Context, req store.ParseTaskListRequest) ([]store.ParseTaskWithRefs, int, error)
+}
+
 type DBSourceReadRefresher struct {
 	repo     SourceReadRefreshRepository
 	registry connector.ConnectorRegistry
@@ -88,7 +92,7 @@ func (r *DBSourceReadRefresher) RefreshSourceRead(ctx context.Context, req Sourc
 
 func (r *DBSourceReadRefresher) refreshBinding(ctx context.Context, binding store.Binding) error {
 	if strings.TrimSpace(binding.ConnectorType) != "feishu" {
-		return nil
+		return r.refreshCachedBindingState(ctx, binding)
 	}
 	if binding.Status != "" && binding.Status != crawl.BindingStatusActive {
 		return nil
@@ -123,6 +127,170 @@ func (r *DBSourceReadRefresher) refreshBinding(ctx context.Context, binding stor
 		return NewError(ErrCodeInternal, "source read refresh failed")
 	}
 	return nil
+}
+
+func (r *DBSourceReadRefresher) refreshCachedBindingState(ctx context.Context, binding store.Binding) error {
+	if binding.Status != "" && binding.Status != crawl.BindingStatusActive {
+		return nil
+	}
+	states, err := r.repo.ListDocumentStates(ctx, binding.SourceID, binding.BindingID)
+	if err != nil {
+		return mapStoreError(err)
+	}
+	if len(states) == 0 {
+		return nil
+	}
+	if err := r.repairCachedSyncedBaselines(ctx, binding, states); err != nil {
+		return err
+	}
+	objects := make([]store.SourceObject, 0, len(states))
+	for _, state := range states {
+		object, err := r.repo.GetObject(ctx, binding.SourceID, binding.BindingID, state.ObjectKey)
+		if err != nil {
+			if store.ErrorCodeOf(err) == store.ErrCodeNotFound {
+				continue
+			}
+			return mapStoreError(err)
+		}
+		if object.IsDocument {
+			objects = append(objects, object)
+		}
+	}
+	if len(objects) == 0 {
+		return nil
+	}
+	now := r.clock().UTC()
+	reducer := stateengine.NewDBStateReducer(r.repo, stateengine.WithClock(func() time.Time { return now }))
+	_, err = reducer.ReduceSeenObjects(ctx, crawl.ReduceSeenInput{
+		SourceID:          binding.SourceID,
+		BindingID:         binding.BindingID,
+		BindingGeneration: binding.BindingGeneration,
+		RunID:             fmt.Sprintf("read-refresh-%s-%d", binding.BindingID, now.UnixNano()),
+		Objects:           objects,
+		DetectedAt:        now,
+	})
+	if err != nil {
+		return mapStoreError(err)
+	}
+	return nil
+}
+
+func (r *DBSourceReadRefresher) repairCachedSyncedBaselines(ctx context.Context, binding store.Binding, states []store.DocumentState) error {
+	lister, ok := r.repo.(parseTaskLister)
+	if !ok {
+		return nil
+	}
+	wanted := map[string]store.DocumentState{}
+	for _, state := range states {
+		if strings.TrimSpace(state.BaselineVersion) == "" && strings.TrimSpace(state.ObjectKey) != "" {
+			wanted[state.ObjectKey] = state
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+	latest := map[string]store.ParseTask{}
+	const pageSize = 1000
+	for page := 1; ; page++ {
+		items, total, err := lister.ListParseTasks(ctx, store.ParseTaskListRequest{
+			SourceID:  binding.SourceID,
+			BindingID: binding.BindingID,
+			Statuses:  []string{store.ParseTaskStatusSucceeded},
+			TaskActions: []string{
+				store.ParseTaskActionCreate,
+				store.ParseTaskActionReparse,
+				store.ParseTaskActionDelete,
+			},
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			return mapStoreError(err)
+		}
+		for _, item := range items {
+			task := item.Task
+			if _, ok := wanted[task.ObjectKey]; !ok {
+				continue
+			}
+			if previous, ok := latest[task.ObjectKey]; !ok || taskNewer(task, previous) {
+				latest[task.ObjectKey] = task
+			}
+		}
+		if len(items) == 0 || page*pageSize >= total {
+			break
+		}
+	}
+	now := r.clock().UTC()
+	for objectKey, state := range wanted {
+		task, ok := latest[objectKey]
+		if ok {
+			if task.TaskAction == store.ParseTaskActionDelete {
+				continue
+			}
+			if repairStateFromSuccessfulTask(&state, task, now) {
+				if err := r.repo.SaveDocumentState(ctx, state); err != nil {
+					return mapStoreError(err)
+				}
+				continue
+			}
+		}
+		document, err := r.repo.GetDocument(ctx, binding.SourceID, binding.BindingID, objectKey)
+		if err != nil {
+			if store.ErrorCodeOf(err) == store.ErrCodeNotFound {
+				continue
+			}
+			return mapStoreError(err)
+		}
+		if !repairStateFromSyncedDocument(&state, document, now) {
+			continue
+		}
+		if err := r.repo.SaveDocumentState(ctx, state); err != nil {
+			return mapStoreError(err)
+		}
+	}
+	return nil
+}
+
+func repairStateFromSuccessfulTask(state *store.DocumentState, task store.ParseTask, now time.Time) bool {
+	baseline := strings.TrimSpace(task.TargetVersionID)
+	if baseline == "" {
+		baseline = strings.TrimSpace(task.SourceVersion)
+	}
+	if baseline == "" {
+		return false
+	}
+	state.BaselineVersion = baseline
+	if strings.TrimSpace(state.DocumentID) == "" {
+		state.DocumentID = strings.TrimSpace(task.DocumentID)
+	}
+	state.UpdatedAt = now
+	return true
+}
+
+func repairStateFromSyncedDocument(state *store.DocumentState, document store.Document, now time.Time) bool {
+	if strings.TrimSpace(document.CoreDocumentID) == "" || !strings.EqualFold(strings.TrimSpace(document.ParseStatus), "SUCCEEDED") {
+		return false
+	}
+	baseline := strings.TrimSpace(document.SourceVersion)
+	if baseline == "" {
+		return false
+	}
+	state.BaselineVersion = baseline
+	if strings.TrimSpace(state.DocumentID) == "" {
+		state.DocumentID = strings.TrimSpace(document.DocumentID)
+	}
+	state.UpdatedAt = now
+	return true
+}
+
+func taskNewer(candidate, current store.ParseTask) bool {
+	if !candidate.UpdatedAt.Equal(current.UpdatedAt) {
+		return candidate.UpdatedAt.After(current.UpdatedAt)
+	}
+	if !candidate.CreatedAt.Equal(current.CreatedAt) {
+		return candidate.CreatedAt.After(current.CreatedAt)
+	}
+	return candidate.TaskID > current.TaskID
 }
 
 func readRefreshTargetMissing(result crawl.RunResult) bool {

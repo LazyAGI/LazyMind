@@ -59,6 +59,8 @@ func (e *DefaultEngine) prepareUpdateBinding(ctx context.Context, callerID strin
 	changedTarget := targetChanged(current, input)
 	if changedTarget {
 		input = completeTargetInput(current, input)
+	}
+	if input.ProviderOptions != nil {
 		input.ProviderOptions = providerOptionsWithActor(input.ProviderOptions, callerID, src.TenantID)
 	}
 	if err := validateBindingInput(input, changedTarget); err != nil {
@@ -134,9 +136,6 @@ func targetChanged(current store.Binding, input BindingInput) bool {
 	if input.AuthConnectionID != "" && input.AuthConnectionID != current.AuthConnectionID {
 		return true
 	}
-	if len(input.ProviderOptions) > 0 {
-		return true
-	}
 	return false
 }
 
@@ -153,6 +152,9 @@ func patchNonTargetFields(binding store.Binding, input BindingInput, now time.Ti
 	}
 	if input.ExcludeExtensions != nil {
 		binding.ExcludeExtensions = jsonFromStrings(input.ExcludeExtensions)
+	}
+	if input.ProviderOptions != nil {
+		binding.ProviderOptions = providerOptionsJSON(input.ProviderOptions)
 	}
 	if input.Status != "" {
 		binding.Status = input.Status

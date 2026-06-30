@@ -314,7 +314,12 @@ function getParseStatusMeta(status: DocumentStatusRow["parseStatus"], t: TFuncti
 }
 
 function isDocumentNeedSync(status: DocumentStatusRow["updateState"]) {
-  return status === "new" || status === "changed" || status === "deleted";
+  return (
+    status === "new" ||
+    status === "changed" ||
+    status === "deleted" ||
+    status === "cleanup"
+  );
 }
 
 function formatNow() {
@@ -350,6 +355,9 @@ function mapScanSyncDetail(
   }
   if (updateState === "deleted") {
     return t("admin.dataSourceFileUpdateDeletedDetail");
+  }
+  if (updateState === "cleanup") {
+    return t("admin.dataSourceFileUpdateCleanupDetail");
   }
   return t("admin.dataSourceFileUpdateUnchangedDetail");
 }
@@ -1228,13 +1236,16 @@ export default function DataSourceDetail() {
         priority: 5,
       }
 
-      // If at least one selected target is a deleted-state synthetic node,
+      // If at least one selected target is a cleanup or deleted-state synthetic node,
       // attempting with a stale selection_token may be rejected by backend.
       // Retry once without the token in that case.
       const hasDeletedTarget = documents.some(
         (item) =>
           (targetSet.has(item.id) || targetSet.has(item.path)) &&
-          (item.sourceState === "DELETED" || item.updateState === "deleted"),
+          (item.sourceState === "DELETED" ||
+            item.sourceState === "OUT_OF_SCOPE" ||
+            item.updateState === "deleted" ||
+            item.updateState === "cleanup"),
       );
 
       let generateResponse;
@@ -1282,7 +1293,7 @@ export default function DataSourceDetail() {
                 return item;
               }
 
-              if (item.updateState === "deleted") {
+              if (item.updateState === "deleted" || item.updateState === "cleanup") {
                 return null;
               }
 

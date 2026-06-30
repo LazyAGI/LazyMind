@@ -50,6 +50,45 @@ func ListEvalSetItems(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, resp)
 }
 
+func ListInvalidReferenceEvalSetItems(w http.ResponseWriter, r *http.Request) {
+	svc, ok := serviceForRequest(w)
+	if !ok {
+		return
+	}
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+	evalSetID := strings.TrimSpace(common.PathVar(r, "eval_set_id"))
+	if evalSetID == "" {
+		common.ReplyErr(w, "invalid eval_set_id", http.StatusBadRequest)
+		return
+	}
+
+	groupIDs := acl.ResolveUserGroupIDs(userID)
+	evalSet, err := svc.requireEvalSetPermission(r.Context(), evalSetID, userID, groupIDs, acl.PermissionEvalSetRead)
+	if err != nil {
+		replyServiceError(w, err, "query eval set failed")
+		return
+	}
+
+	query := r.URL.Query()
+	resp, err := svc.ListInvalidReferenceItems(r.Context(), evalSet, ListEvalSetItemsFilter{
+		Keyword:      query.Get("keyword"),
+		QuestionType: query.Get("question_type"),
+		Source:       query.Get("source"),
+		Page:         parsePositiveInt(query.Get("page"), 1),
+		PageSize:     parsePositiveInt(query.Get("page_size"), 20),
+		OrderBy:      query.Get("order_by"),
+	})
+	if err != nil {
+		replyServiceError(w, err, "list invalid reference eval set items failed")
+		return
+	}
+	common.ReplyOK(w, resp)
+}
+
 func ListEvalSetQuestionTypes(w http.ResponseWriter, r *http.Request) {
 	svc, ok := serviceForRequest(w)
 	if !ok {

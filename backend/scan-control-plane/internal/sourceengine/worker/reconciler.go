@@ -147,11 +147,17 @@ func validateReconcilerFreshness(exec reconcilerExecutionContext) error {
 	if exec.document.DocumentID != "" && exec.document.DocumentID != exec.task.DocumentID {
 		return errors.New("document changed")
 	}
-	if exec.task.TaskAction != "DELETE" && exec.state.SourceVersion != exec.task.SourceVersion {
-		return errors.New("source version changed")
+	if exec.task.TaskAction == "DELETE" {
+		if !deleteTaskStillPending(exec.state) {
+			return errors.New("delete task is obsolete")
+		}
+		return nil
 	}
-	if exec.task.TaskAction == "DELETE" && (exec.state.SourceState != statepkg.SourceStateDeleted || exec.state.PendingAction != statepkg.PendingActionDelete) {
-		return errors.New("delete task is obsolete")
+	if !parseTaskStillPending(exec.state, exec.task.TaskAction) {
+		return errors.New("parse task is obsolete")
+	}
+	if exec.state.SourceVersion != exec.task.SourceVersion {
+		return errors.New("source version changed")
 	}
 	return nil
 }

@@ -170,6 +170,11 @@ export function buildChatMessageListFromHistory(
       thinking_time_s: record.thinking_time_s,
     };
 
+    // Restore ask_pending from persisted ext so the AskCard is visible after page reload.
+    if ((record as any).ask_pending) {
+      assistantMessage.ask_pending = (record as any).ask_pending;
+    }
+
     list.push(assistantMessage);
   });
 
@@ -201,11 +206,15 @@ export function buildChatMessageListFromHistory(
   return list;
 }
 
-/** Prefer the longer list when switching back to a conversation with an active stream. */
+/** Prefer cached (in-memory) list over API list when switching back to a
+ * conversation with an active stream. The cache always reflects the latest
+ * client-side state (including edits and truncations), whereas the API list
+ * may lag behind or contain messages that were already truncated by the user.
+ * Fall back to the API list only when the cache is empty. */
 export function mergeChatMessageLists(apiList: any[] = [], cachedList?: any[] | null) {
   const api = Array.isArray(apiList) ? apiList : [];
   const cached = Array.isArray(cachedList) ? cachedList : [];
-  if (cached.length > api.length) {
+  if (cached.length > 0) {
     return cached;
   }
   return api;

@@ -83,6 +83,42 @@ func TestGenerateTasksSkipsUnsupportedDocumentTypes(t *testing.T) {
 	}
 }
 
+func TestGenerateTasksQueuesOutOfScopeDeleteForUnsupportedDocument(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newPlannerStore(now)
+	repo.binding.IncludeExtensions = store.JSON{"items": []any{"pdf"}}
+	script := sourceObject("script.py", true)
+	script.ObjectKey = "script"
+	script.FileExtension = ".py"
+	repo.objects["script"] = script
+	repo.states["script"] = documentState("script", statepkg.SourceStateOutOfScope, true, now)
+	cleanupState := repo.states["script"]
+	cleanupState.PendingAction = statepkg.PendingActionDelete
+	cleanupState.BaselineVersion = "v1"
+	cleanupState.DocumentID = "document-script"
+	repo.states["script"] = cleanupState
+	planner := NewDBTaskPlanner(repo, WithClock(func() time.Time { return now }), WithIDGenerator(repo.nextID))
+
+	result, err := planner.GenerateTasks(ctx, GenerateRequest{
+		SourceID:   "source-1",
+		BindingID:  "binding-1",
+		ObjectKeys: []string{"script"},
+	})
+	if err != nil {
+		t.Fatalf("generate cleanup task: %v", err)
+	}
+	if result.RequestedCount != 1 || result.AcceptedCount != 1 || result.SkippedCount != 0 {
+		t.Fatalf("out-of-scope document should generate delete task, got %+v", result)
+	}
+	task := repo.tasks[result.TaskIDs[0]]
+	if task.TaskAction != TaskActionDelete || task.TargetVersionID != "v1" {
+		t.Fatalf("cleanup should generate delete task for baseline version: %+v", task)
+	}
+}
+
 func TestGenerateTasksUsesSourceIncludeExtensionsWhenBindingIncludeIsEmpty(t *testing.T) {
 	t.Parallel()
 

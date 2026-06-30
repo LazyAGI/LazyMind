@@ -516,6 +516,39 @@ type agentEvalReportResultOpenAPIResponse struct {
 	TraceCoverage *agentEvalReportTraceCoverageOpenAPIResponse `json:"trace_coverage,omitempty"`
 }
 
+type agentABTestResultOpenAPIResponse struct {
+	ArtifactID         string                                  `json:"artifact_id"`
+	ArtifactRef        string                                  `json:"artifact_ref"`
+	Schema             string                                  `json:"schema"`
+	CaseCount          int                                     `json:"case_count,omitempty"`
+	Data               map[string]any                          `json:"data"`
+	ABTestID           string                                  `json:"abtest_id,omitempty"`
+	CaseDetailsSummary *agentCaseDetailsSummaryOpenAPIResponse `json:"case_details_summary,omitempty"`
+	FileURL            string                                  `json:"file_url,omitempty"`
+	RuntimeArtifactID  string                                  `json:"runtime_artifact_id,omitempty"`
+	SourceArtifactID   string                                  `json:"source_artifact_id,omitempty"`
+}
+
+type agentCaseDetailsSummaryOpenAPIResponse struct {
+	TotalCount    int                                           `json:"total_count"`
+	QuestionTypes []agentCaseDetailsQuestionTypeOpenAPIResponse `json:"question_types"`
+}
+
+type agentCaseDetailsQuestionTypeOpenAPIResponse struct {
+	QuestionType     int                                           `json:"question_type"`
+	QuestionTypeKey  string                                        `json:"question_type_key"`
+	QuestionTypeName string                                        `json:"question_type_name"`
+	Count            int                                           `json:"count"`
+	Averages         agentCaseDetailsMetricAveragesOpenAPIResponse `json:"averages"`
+}
+
+type agentCaseDetailsMetricAveragesOpenAPIResponse struct {
+	ContextRecall     *float64 `json:"context_recall,omitempty"`
+	DocRecall         *float64 `json:"doc_recall,omitempty"`
+	AnswerCorrectness *float64 `json:"answer_correctness,omitempty"`
+	Faithfulness      *float64 `json:"faithfulness,omitempty"`
+}
+
 type agentEvalReportBadCaseListPathParams struct {
 	ThreadID string `path:"thread_id"`
 	ReportID string `path:"report_id"`
@@ -1516,6 +1549,15 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "GET",
+			Path:        "/eval-sets/{eval_set_id}/items:invalidReferences",
+			Summary:     "List eval set items with invalid references",
+			Tags:        []string{"eval-set-items"},
+			PathParams:  evalset.EvalSetPathParams{},
+			QueryParams: evalset.ListEvalSetItemsQuery{},
+			Responses:   map[int]openAPIResponse{200: resp("Invalid reference eval set item list", evalset.ListEvalSetItemsResponse{})},
+		},
+		{
+			Method:      "GET",
 			Path:        "/eval-sets/{eval_set_id}/items",
 			Summary:     "List eval set items",
 			Tags:        []string{"eval-set-items"},
@@ -2427,6 +2469,15 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  agentEvalReportBadCaseListPathParams{},
 			QueryParams: agentEvalReportBadCaseListQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Eval report bad case list", agentEvalReportBadCaseListOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/threads/{thread_id}/results/abtests",
+			Summary:     "GET /agent/threads/{thread_id}/results/abtests",
+			Description: "Returns ABTest artifact rows from Evo, with normalized abtest_id, case details summary, and CSV file URL when available.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("ABTest result rows", []agentABTestResultOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",

@@ -114,14 +114,15 @@ type ChatPluginOptions struct {
 
 // LazyChatData text data text。
 type LazyChatData struct {
-	Text          string            `json:"text"`
-	Sources       []any             `json:"sources"`
-	Status        string            `json:"status"`
-	ReasoningText string            `json:"think"`
-	TaskCreated   *TaskCreatedEvent `json:"task_created,omitempty"`
-	AskPending    *AskPendingEvent  `json:"ask_pending,omitempty"`
-	Heartbeat     bool              `json:"heartbeat,omitempty"`
-	ToolCallTurns int64             `json:"tool_call_turns"`
+	Text          string              `json:"text"`
+	Sources       []any               `json:"sources"`
+	Status        string              `json:"status"`
+	ReasoningText string              `json:"think"`
+	TaskCreated   *TaskCreatedEvent   `json:"task_created,omitempty"`
+	AskPending    *AskPendingEvent    `json:"ask_pending,omitempty"`
+	IntentUpdated *IntentUpdatedEvent `json:"intent_updated,omitempty"`
+	Heartbeat     bool                `json:"heartbeat,omitempty"`
+	ToolCallTurns int64               `json:"tool_call_turns"`
 }
 
 // TaskCreatedEvent is emitted by create_subagent (via translator) on the main SSE.
@@ -145,6 +146,16 @@ type AskPendingEvent struct {
 	AskID    string   `json:"ask_id"`
 	Question string   `json:"question"`
 	Choices  []string `json:"choices,omitempty"`
+}
+
+// IntentUpdatedEvent is emitted by update_intent (via _write_agent_data) on the main SSE stream.
+// Go writes the intent to DB and pushes an intent_updated convEvent so the frontend refreshes
+// the session immediately without requiring a manual page reload.
+type IntentUpdatedEvent struct {
+	SessionID string `json:"session_id"`
+	Scope     string `json:"scope"` // "session" | "step"
+	Content   string `json:"content"`
+	StepID    string `json:"step_id,omitempty"`
 }
 
 // LazyChatResponse text /api/chat textResponse。
@@ -298,15 +309,16 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 
 // UpstreamStreamChunk text ChatConversations text，text LazyChatResponse.Data。
 type UpstreamStreamChunk struct {
-	Text          string            `json:"text"`
-	Think         string            `json:"think"`
-	Status        string            `json:"status"`
-	Sources       []any             `json:"sources"`
-	ReasoningText string            `json:"reasoning_text"` // text think
-	TaskCreated   *TaskCreatedEvent `json:"task_created,omitempty"`
-	AskPending    *AskPendingEvent  `json:"ask_pending,omitempty"`
-	Heartbeat     bool              `json:"heartbeat,omitempty"`
-	ToolCallTurns int64             `json:"tool_call_turns"`
+	Text          string              `json:"text"`
+	Think         string              `json:"think"`
+	Status        string              `json:"status"`
+	Sources       []any               `json:"sources"`
+	ReasoningText string              `json:"reasoning_text"` // text think
+	TaskCreated   *TaskCreatedEvent   `json:"task_created,omitempty"`
+	AskPending    *AskPendingEvent    `json:"ask_pending,omitempty"`
+	IntentUpdated *IntentUpdatedEvent `json:"intent_updated,omitempty"`
+	Heartbeat     bool                `json:"heartbeat,omitempty"`
+	ToolCallTurns int64               `json:"tool_call_turns"`
 }
 
 type upstreamStreamLine struct {
@@ -676,6 +688,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				ReasoningText: d.Resp.Data.ReasoningText,
 				TaskCreated:   d.Resp.Data.TaskCreated,
 				AskPending:    d.Resp.Data.AskPending,
+				IntentUpdated: d.Resp.Data.IntentUpdated,
 				Heartbeat:     d.Resp.Data.Heartbeat,
 				ToolCallTurns: d.Resp.Data.ToolCallTurns,
 			}

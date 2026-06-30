@@ -44,6 +44,10 @@ from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
+
+# Maps conversation_id → session_id for active chat sessions.
+# Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
+_active_sessions: dict[str, str] = {}
 _CITE_MESSAGE_PATTERN = re.compile(
     r'<cite_message>([\s\S]*?)</cite_message>\s*',
     re.IGNORECASE,
@@ -156,13 +160,13 @@ def _build_user_attachment_tools(has_files: bool) -> list:
 
 
 def _build_schedule_tools() -> list:
-    """Return schedule management tools (create/list/cancel).
+    """Return a lazy ToolGroup dict for all schedule management tools.
 
-    These are independent of plugin and subagent flags — scheduling is a
-    standalone capability available whenever the chat service is running.
+    Injected as a single lazy group so the LLM only sees the gateway tool until
+    the user mentions scheduling topics.
     """
-    from lazymind.chat.plugin.plugin_manager import build_schedule_tools
-    return build_schedule_tools()
+    from lazymind.chat.engine.tools.schedule import build_schedule_tool_group
+    return [build_schedule_tool_group()]
 
 
 def _collect_active_tool_names(configs: list) -> set[str]:
@@ -420,6 +424,10 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         resolve_plugin_injection,
         _build_chat_agent_task_context,
     )
+    # Register the active session so the cancel endpoint can find it by conversation_id.
+    _conv_id_key = conversation_id  # already stripped above
+    if _conv_id_key:
+        _active_sessions[_conv_id_key] = conversation.session_id
     lazyllm.globals._init_sid(sid=conversation.session_id)
     lazyllm.locals._init_sid(sid=conversation.session_id)
     inject_model_config(runtime.llm_config)
@@ -441,11 +449,6 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         f'[enable_plugin={_enable_plugin!r}] [enable_subagent={_enable_subagent!r}] '
         f'[plugin_tools={[getattr(t, "__name__", str(t)) for t in plugin_tools]!r}]'
     )
-    if _enable_plugin or _enable_subagent:
-        task_ctx = _build_chat_agent_task_context(conversation_id)
-        if task_ctx:
-            plugin_system_prompt = (plugin_system_prompt + '\n\n' + task_ctx).strip()
-
     # Build user attachment context from files_map and inject before plugin context.
     user_attachment_context = _build_user_attachment_context(files_map, _eff_current_seq)
 
@@ -453,6 +456,13 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     parts = []
     if plugin_artifact_context:
         parts.append(plugin_artifact_context)
+    if _enable_plugin or _enable_subagent:
+        task_ctx = _build_chat_agent_task_context((conversation_id or '').strip())
+        if task_ctx:
+            # Inject as a per-turn authoritative block (same as plugin_artifact_context)
+            # rather than into the system prompt, so stale task state from history is
+            # overridden by the live snapshot queried at request time.
+            parts.append(task_ctx)
     if user_attachment_context:
         parts.append(user_attachment_context)
     # Inject the authoritative current-turn declaration so the model is never misled
@@ -500,11 +510,12 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     lazyllm.globals['active_tool_names'] |= {
         getattr(fn, '__name__', '') for fn in attachment_tools if callable(fn)
     }
-    # Schedule tools (create_schedule / list_schedules / cancel_schedule) are independent
-    # of plugin and subagent flags — always inject them.
+    # Schedule tools are independent of plugin and subagent flags — always inject them
+    # as a lazy group so the LLM only sees the gateway until the user mentions scheduling.
     schedule_tools = _build_schedule_tools()
     lazyllm.globals['active_tool_names'] |= {
-        getattr(fn, '__name__', '') for fn in schedule_tools if callable(fn)
+        'create_schedule', 'list_schedules', 'cancel_schedule',
+        'update_schedule', 'trigger_schedule',
     }
     all_tools = agent_tools + subagent_tools + attachment_tools + schedule_tools + plugin_tools + mcp_tools
     set_trace_context({
@@ -549,12 +560,23 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             async with rag_sem:
                 async for kind, payload in drive_agent(react_agent, agent_query, history=agent_history):
                     if kind == 'event':
+                        event_tag = payload.get('tag', '') if isinstance(payload, dict) else ''
+                        if event_tag in ('tool_calls', 'tool_results'):
+                            LOG.info(
+                                f'[ChatServer] [DBG_AGENT_EVENT] [sid={conversation.session_id}] '
+                                f'[tag={event_tag}] [payload={payload}]'
+                            )
                         for frame in translator.feed(payload):
                             cost = round(time.time() - start_time, 3)
                             yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FEED')
                     else:
                         # 'final' -- payload is already the resolved result value;
                         # if future.result() raised, drive_agent propagated it before yielding.
+                        LOG.info(
+                            f'[ChatServer] [DBG_AGENT_FINAL] [sid={conversation.session_id}] '
+                            f'[tool_call_turns={translator.tool_call_turns}] '
+                            f'[result_type={type(payload).__name__}] [result={str(payload)[:200]}]'
+                        )
                         final_result = payload
 
             for frame in translator.finish(final_result):
@@ -576,6 +598,10 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 {'status': 'FINISHED', 'tool_call_turns': translator.tool_call_turns},
                 0.0,
             )
+        finally:
+            # Unregister the active session so the cancel endpoint no longer targets it.
+            if _conv_id_key:
+                _active_sessions.pop(_conv_id_key, None)
 
         cost = round(time.time() - start_time, 3)
         final_resp['cost'] = cost

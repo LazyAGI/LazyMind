@@ -88,6 +88,10 @@ export async function cancelTask(id: string): Promise<void> {
   await axiosInstance.post(`${CORE}/task-center/tasks/${id}:cancel`);
 }
 
+export async function removeTask(id: string): Promise<void> {
+  await axiosInstance.post(`${CORE}/task-center/tasks/${id}:remove`);
+}
+
 export async function addTask(conversationId: string, title?: string): Promise<Task> {
   const resp = await axiosInstance.post<Task>(`${CORE}/task-center/tasks`, {
     conversation_id: conversationId,
@@ -96,8 +100,9 @@ export async function addTask(conversationId: string, title?: string): Promise<T
   return resp.data;
 }
 
-export async function listSchedules(): Promise<ScheduleListResponse> {
-  const resp = await axiosInstance.get<ScheduleListResponse>(`${CORE}/schedules`);
+export async function listSchedules(includeDisabled = false): Promise<ScheduleListResponse> {
+  const query = includeDisabled ? '?include_disabled=true' : '';
+  const resp = await axiosInstance.get<ScheduleListResponse>(`${CORE}/schedules${query}`);
   return resp.data;
 }
 
@@ -108,6 +113,21 @@ export async function createSchedule(req: CreateScheduleRequest): Promise<Schedu
 
 export async function cancelSchedule(id: string): Promise<void> {
   await axiosInstance.post(`${CORE}/schedules/${id}:cancel`);
+}
+
+export async function enableSchedule(id: string): Promise<Schedule> {
+  const resp = await axiosInstance.post<Schedule>(`${CORE}/schedules/${id}:enable`);
+  return resp.data;
+}
+
+export async function runScheduleNow(id: string): Promise<{ task_id: string; conversation_id: string }> {
+  const resp = await axiosInstance.post(`${CORE}/schedules/${id}:run-now`);
+  return resp.data;
+}
+
+export async function updateSchedule(id: string, req: Partial<CreateScheduleRequest>): Promise<Schedule> {
+  const resp = await axiosInstance.put<Schedule>(`${CORE}/schedules/${id}`, req);
+  return resp.data;
 }
 
 export async function listScheduleTasks(

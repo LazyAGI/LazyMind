@@ -1121,6 +1121,45 @@ func TestSourceTreeListChildrenFiltersUnsupportedDocuments(t *testing.T) {
 	}
 }
 
+func TestSourceTreeListChildrenShowsOutOfScopeDocuments(t *testing.T) {
+	t.Parallel()
+
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:         "binding-1",
+		SourceID:          "source-1",
+		TreeKey:           "tree-root",
+		IncludeExtensions: store.JSON{"items": []any{"pdf"}},
+		Status:            "ACTIVE",
+	}}
+	script := indexedObject("source-1", "binding-1", "tree-root", "script-1", "", "script.py", true, false)
+	script.Object.FileExtension = ".py"
+	script.State.SourceState = "OUT_OF_SCOPE"
+	script.State.PendingAction = "DELETE"
+	script.State.Selectable = true
+	repo.objects = []ObjectWithState{script}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "tree-root",
+		ParentKey: "",
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list indexed children: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ObjectKey != "script-1" {
+		t.Fatalf("expected out-of-scope document to remain visible, got %+v", page.Items)
+	}
+	node := page.Items[0]
+	if node.UpdateType != "cleanup" || node.UpdateDesc != "待清理" {
+		t.Fatalf("out-of-scope document should render as cleanup: %+v", node)
+	}
+}
+
 func TestSourceTreeListChildrenUsesSourceIncludeExtensions(t *testing.T) {
 	t.Parallel()
 
@@ -1644,6 +1683,50 @@ func TestSourceDocumentQueryFiltersUnsupportedDocuments(t *testing.T) {
 	}
 	if len(resp.Items) != 1 || resp.Items[0].ObjectKey != "pdf-1" {
 		t.Fatalf("expected only supported pdf document, got %+v", resp.Items)
+	}
+}
+
+func TestSourceDocumentQueryShowsOutOfScopeDocuments(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 31, 16, 0, 0, 0, time.UTC)
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:         "binding-1",
+		SourceID:          "source-1",
+		IncludeExtensions: store.JSON{"items": []any{"pdf"}},
+	}}
+	script := indexedObject("source-1", "binding-1", "tree-root", "script-1", "", "script.py", true, false).Object
+	script.FileExtension = ".py"
+	repo.documents = []DocumentWithState{{
+		Object: script,
+		State: store.DocumentState{
+			SourceID:            "source-1",
+			BindingID:           "binding-1",
+			ObjectKey:           "script-1",
+			SourceState:         "OUT_OF_SCOPE",
+			SyncState:           "IDLE",
+			PendingAction:       "DELETE",
+			DocumentListVisible: true,
+			Selectable:          true,
+			SourceVersion:       "v1",
+			BaselineVersion:     "v1",
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		},
+	}}
+	query := NewDBSourceDocumentQuery(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10})
+
+	resp, err := query.ListDocuments(context.Background(), SourceDocumentListRequest{SourceID: "source-1", BindingID: "binding-1"})
+	if err != nil {
+		t.Fatalf("list documents: %v", err)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].ObjectKey != "script-1" {
+		t.Fatalf("expected out-of-scope document, got %+v", resp.Items)
+	}
+	if resp.Items[0].UpdateType != "cleanup" || resp.Items[0].UpdateDesc != "待清理" {
+		t.Fatalf("out-of-scope document should render as cleanup: %+v", resp.Items[0])
 	}
 }
 

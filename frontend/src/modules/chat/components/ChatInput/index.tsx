@@ -150,6 +150,8 @@ export interface SendMessageParams {
   create_time?: string;
   /** When true, the payload will include run_in_background=true and the task center badge will increment. */
   run_in_background?: boolean;
+  /** When set, send ask_response alongside the message to resolve an ask_pending. */
+  ask_response?: { ask_id: string; selected: string[] };
 }
 
 interface ChatInputProps {

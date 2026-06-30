@@ -934,6 +934,68 @@ func TestUpdateBindingNonTargetChangeDoesNotTriggerSync(t *testing.T) {
 	}
 }
 
+func TestUpdateBindingProviderOptionsDoNotClearIndexedState(t *testing.T) {
+	t.Parallel()
+
+	now := fixedSourceTestTime()
+	repo := newSourceEngineRepoStub()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1", TenantID: "tenant-1", CreatedBy: "user-1", DatasetID: "dataset-1", Status: SourceStatusActive, CreatedAt: now, UpdatedAt: now}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:              "binding-1",
+		SourceID:               "source-1",
+		ConnectorType:          string(localFSConnectorType),
+		TargetType:             string(localFSTargetType),
+		TargetRef:              "/tmp/docs",
+		TargetFingerprint:      "fp-/tmp/docs",
+		AgentID:                "agent-1",
+		ProviderOptions:        store.JSON{"user_id": "user-1", "tenant_id": "tenant-1", "include_patterns": []any{"**/*.pdf"}},
+		TreeKey:                "root-target",
+		BindingGeneration:      3,
+		CoreParentDocumentID:   "folder-1",
+		CoreParentDocumentName: "Before",
+		SyncMode:               SyncModeManual,
+		IncludeExtensions:      store.JSON{"items": []any{"pdf"}},
+		Status:                 BindingStatusActive,
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}}
+	core := &sourceCoreSpy{}
+	scheduler := &sourceScheduleSpy{}
+	engine := newTestSourceEngineWithSchedule(t, repo, core, &sourceSpyConnector{}, scheduler, now)
+
+	resp, err := engine.UpdateBinding(context.Background(), "user-1", "source-1", "binding-1", BindingInput{
+		SyncMode:          SyncModeManual,
+		IncludeExtensions: []string{"doc", "docx"},
+		ProviderOptions:   map[string]any{"include_patterns": []any{"**/*.doc", "**/*.docx"}},
+	})
+	if err != nil {
+		t.Fatalf("update binding: %v", err)
+	}
+	if resp.OldGeneration != 3 || resp.NewGeneration != 3 || len(resp.JobIDs) != 0 {
+		t.Fatalf("provider option update should not change generation or create jobs: %+v", resp)
+	}
+	if repo.lastCleanup.ClearIndexedState {
+		t.Fatalf("provider option update should not clear indexed state: %+v", repo.lastCleanup)
+	}
+	if len(core.createdFolders) != 0 || len(core.deletedFolders) != 0 {
+		t.Fatalf("provider option update touched core folders: created=%v deleted=%v", core.createdFolders, core.deletedFolders)
+	}
+	if len(scheduler.triggered) != 0 {
+		t.Fatalf("provider option update triggered sync: %+v", scheduler.triggered)
+	}
+	updated := repo.bindings["source-1"][0]
+	if updated.BindingGeneration != 3 {
+		t.Fatalf("binding generation changed: %+v", updated)
+	}
+	if !jsonEqual(updated.IncludeExtensions, store.JSON{"items": []any{"doc", "docx"}}) {
+		t.Fatalf("include extensions were not updated: %+v", updated.IncludeExtensions)
+	}
+	wantOptions := store.JSON{"user_id": "user-1", "tenant_id": "tenant-1", "include_patterns": []any{"**/*.doc", "**/*.docx"}}
+	if !jsonEqual(updated.ProviderOptions, wantOptions) {
+		t.Fatalf("provider options were not updated: got=%+v want=%+v", updated.ProviderOptions, wantOptions)
+	}
+}
+
 func TestUpdateBindingScheduleChangeRecomputesNextSyncAndCancelsPendingScheduledRun(t *testing.T) {
 	t.Parallel()
 

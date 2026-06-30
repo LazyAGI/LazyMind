@@ -156,13 +156,6 @@ export function PluginSessionApi() {
         options,
       );
     },
-    advanceSession(sessionId: string, action: 'continue' | 'retry' = 'continue', options?: RawAxiosRequestConfig) {
-      return axiosInstance.post(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:advance`,
-        { action },
-        options,
-      );
-    },
     // Phase 3: slot item management — addressed by stable list_index (not sort_order).
     deleteSlotItem(sessionId: string, slotId: string, listIndex: number, orderVersion?: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.delete(
