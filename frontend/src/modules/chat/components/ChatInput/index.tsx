@@ -173,6 +173,7 @@ interface ChatInputProps {
   configResetKey?: number | string;
   sessionId?: string;
   isStreaming?: boolean;
+  onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
   /** Called when plugin settings change (e.g. from the chat config popover). */
   onPluginSettingsChange?: (settings: ConversationPluginSettings) => void;
@@ -207,21 +208,36 @@ export interface ChatInputImperativeProps {
   uploadFiles: (files: File[]) => void;
 }
 
-interface SendIconProps {
+interface SendButtonProps {
+  isStreaming: boolean;
+  sendDisabled: boolean;
   disabled: boolean;
-  label: string;
-  onClick: () => void;
+  sendLabel: string;
+  stopLabel: string;
+  onSend: () => void;
+  onStop?: () => void;
 }
-const SendButton: React.FC<SendIconProps> = ({ disabled, label, onClick }) => {
+const SendButton: React.FC<SendButtonProps> = ({
+  isStreaming,
+  sendDisabled,
+  disabled,
+  sendLabel,
+  stopLabel,
+  onSend,
+  onStop,
+}) => {
+  const isStopMode = isStreaming && Boolean(onStop);
+  const isDisabled = isStopMode ? disabled : sendDisabled || disabled;
+
   return (
     <button
       type="button"
-      className={`send-button ${disabled ? "disabled" : ""}`}
-      onClick={disabled ? undefined : onClick}
-      disabled={disabled}
-      aria-label={label}
+      className={`send-button${isStopMode ? " stop-mode" : ""}${isDisabled ? " disabled" : ""}`}
+      onClick={isDisabled ? undefined : isStopMode ? onStop : onSend}
+      disabled={isDisabled}
+      aria-label={isStopMode ? stopLabel : sendLabel}
     >
-      <SendIcon />
+      {isStopMode ? <span className="stop-icon" aria-hidden="true" /> : <SendIcon />}
     </button>
   );
 };
@@ -250,6 +266,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       configResetKey,
       sessionId,
       isStreaming = false,
+      onStopGeneration,
       embeddingReady,
       multimodalEmbeddingReady,
       rerankReady,
@@ -483,7 +500,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       ? Math.max(documentFileCount, 1)
       : documentFileCount;
     const isSendDisabled =
-      disabled || isPromptPolishing || !value?.trim() || isUploading || isStreaming;
+      disabled || isPromptPolishing || !value?.trim() || isUploading;
     const shouldShowPromptSuggestions =
       showPromptSuggestions && !disabled && !isStreaming && value.trim().length > 0;
 
@@ -498,7 +515,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         }
         return;
       }
-      if (isSendDisabled) {
+      if (isStreaming || isSendDisabled) {
         return;
       }
       const normalizedText = value.trim();
@@ -649,7 +666,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     );
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key !== "Enter" || e.shiftKey || isUploading || disabled || isPromptPolishing) {
+      if (
+        e.key !== "Enter" ||
+        e.shiftKey ||
+        isUploading ||
+        disabled ||
+        isPromptPolishing ||
+        isStreaming
+      ) {
         return;
       }
 
@@ -882,9 +906,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         size="small"
                         type="text"
                         style={{ fontSize: 12, color: '#888', padding: '0 4px' }}
-                        disabled={isSendDisabled}
+                        disabled={isSendDisabled || isStreaming}
                         onClick={() => {
-                          if (isSendDisabled) return;
+                          if (isSendDisabled || isStreaming) return;
                           const normalizedText = value.trim();
                           setNewMessage(false);
                           const sendParams: SendMessageParams = {
@@ -916,9 +940,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   </div>
                   <div className="input-bottom-actions-right-item">
                     <SendButton
-                      disabled={isSendDisabled}
-                      label={t("chat.send")}
-                      onClick={handleSend}
+                      isStreaming={isStreaming}
+                      sendDisabled={isSendDisabled}
+                      disabled={disabled}
+                      sendLabel={t("chat.send")}
+                      stopLabel={t("chat.stopGenerate")}
+                      onSend={handleSend}
+                      onStop={onStopGeneration}
                     />
                   </div>
                 </div>

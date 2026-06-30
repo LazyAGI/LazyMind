@@ -52,31 +52,64 @@ type DatasetFilters struct {
 }
 
 type LazyChatRequest struct {
-	Query              string              `json:"query"`
-	History            []ChatMessage       `json:"history,omitempty"`
-	SessionID          string              `json:"session_id"`
-	Files              map[string][]string `json:"files,omitempty"`
-	Filters            *DatasetFilters     `json:"filters"`
-	Reasoning          bool                `json:"reasoning"`
-	Databases          []any               `json:"databases,omitempty"`
-	EnableThinking     bool                `json:"enable_thinking,omitempty"`
-	DisabledTools      []string            `json:"disabled_tools,omitempty"`
-	AvailableSkills    []string            `json:"available_skills,omitempty"`
-	Memory             string              `json:"memory,omitempty"`
-	UserPreference     string              `json:"user_preference,omitempty"`
-	UseMemory          bool                `json:"use_memory"`
-	UserID             string              `json:"user_id"`
-	EnvironmentContext map[string]any      `json:"environment_context,omitempty"`
-	LLMConfig          map[string]any      `json:"llm_config,omitempty"`
-	ToolConfig         map[string]any      `json:"tool_config,omitempty"`
-	Mode               string              `json:"mode,omitempty"`
-	HasSubagents       bool                `json:"has_subagents"`
-	ConversationID     string              `json:"conversation_id,omitempty"`
-	MCPConfig          []any               `json:"mcp_config,omitempty"`
-	PluginContext      map[string]any      `json:"plugin_context,omitempty"`
-	CurrentTurnSeq     int                 `json:"current_turn_seq,omitempty"`
-	EnablePlugin       *bool               `json:"enable_plugin,omitempty"`
-	EnableSubagent     *bool               `json:"enable_subagent,omitempty"`
+	Message         ChatMessageOptions         `json:"message"`
+	Conversation    ChatConversationOptions    `json:"conversation"`
+	Retrieval       ChatRetrievalOptions       `json:"retrieval,omitempty"`
+	Runtime         ChatRuntimeOptions         `json:"runtime,omitempty"`
+	Personalization ChatPersonalizationOptions `json:"personalization,omitempty"`
+	Agent           ChatAgentOptions           `json:"agent,omitempty"`
+	Plugin          ChatPluginOptions          `json:"plugin,omitempty"`
+}
+
+type ChatMessageOptions struct {
+	Query          string              `json:"query"`
+	History        []ChatMessage       `json:"history,omitempty"`
+	Files          map[string][]string `json:"files,omitempty"`
+	CurrentTurnSeq int                 `json:"current_turn_seq,omitempty"`
+}
+
+type ChatConversationOptions struct {
+	SessionID      string `json:"session_id"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	UserID         string `json:"user_id"`
+	Mode           string `json:"mode,omitempty"`
+}
+
+type ChatRetrievalOptions struct {
+	Filters        *DatasetFilters `json:"filters,omitempty"`
+	Databases      []any           `json:"databases,omitempty"`
+	Dataset        string          `json:"dataset,omitempty"`
+	LocalFSSources []any           `json:"local_fs_sources,omitempty"`
+}
+
+type ChatRuntimeOptions struct {
+	Debug              bool           `json:"debug,omitempty"`
+	Reasoning          bool           `json:"reasoning"`
+	Priority           *int           `json:"priority,omitempty"`
+	Trace              bool           `json:"trace,omitempty"`
+	EnvironmentContext map[string]any `json:"environment_context,omitempty"`
+	LLMConfig          map[string]any `json:"llm_config,omitempty"`
+	ToolConfig         map[string]any `json:"tool_config,omitempty"`
+	MCPConfig          []any          `json:"mcp_config,omitempty"`
+}
+
+type ChatPersonalizationOptions struct {
+	Memory         string `json:"memory,omitempty"`
+	UserPreference string `json:"user_preference,omitempty"`
+	UseMemory      bool   `json:"use_memory"`
+}
+
+type ChatAgentOptions struct {
+	DisabledTools   []string `json:"disabled_tools,omitempty"`
+	AvailableSkills []string `json:"available_skills,omitempty"`
+	HasSubagents    bool     `json:"has_subagents"`
+	EnableSubagent  *bool    `json:"enable_subagent,omitempty"`
+}
+
+type ChatPluginOptions struct {
+	EnablePlugin  *bool          `json:"enable_plugin,omitempty"`
+	PluginContext map[string]any `json:"plugin_context,omitempty"`
+	AskResponse   map[string]any `json:"ask_response,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -176,7 +209,8 @@ func (c *ChatService) Chat(ctx context.Context, req *LazyChatRequest) (*LazyChat
 	}
 	fmt.Printf(
 		"[Core] [CHAT_UPSTREAM_REQUEST] [stream=false] [url=%s] [session_id=%s] [user_id=%s] [reasoning=%v] [%s]\n",
-		c.chatURL, req.SessionID, req.UserID, req.Reasoning, modelconfig.SummarizeLLMConfigForLog(req.LLMConfig),
+		c.chatURL, req.Conversation.SessionID, req.Conversation.UserID, req.Runtime.Reasoning,
+		modelconfig.SummarizeLLMConfigForLog(req.Runtime.LLMConfig),
 	)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.chatURL, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -207,7 +241,8 @@ func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-c
 	}
 	fmt.Printf(
 		"[Core] [CHAT_UPSTREAM_REQUEST] [stream=true] [url=%s] [session_id=%s] [user_id=%s] [reasoning=%v] [%s]\n",
-		c.streamChatURL, req.SessionID, req.UserID, req.Reasoning, modelconfig.SummarizeLLMConfigForLog(req.LLMConfig),
+		c.streamChatURL, req.Conversation.SessionID, req.Conversation.UserID, req.Runtime.Reasoning,
+		modelconfig.SummarizeLLMConfigForLog(req.Runtime.LLMConfig),
 	)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.streamChatURL, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -282,54 +317,69 @@ type upstreamStreamLine struct {
 
 func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	req := &LazyChatRequest{
-		Reasoning: true,
+		Runtime: ChatRuntimeOptions{
+			Reasoning: true,
+		},
+		Personalization: ChatPersonalizationOptions{
+			UseMemory: true,
+		},
 	}
 	if q, ok := body["query"].(string); ok {
-		req.Query = q
+		req.Message.Query = q
 	}
 	if s, ok := body["session_id"].(string); ok {
-		req.SessionID = s
+		req.Conversation.SessionID = s
 	}
-	req.History = chatMessagesFromAny(body["history"])
-	req.Filters = datasetFiltersFromAny(body["filters"])
-	req.Files = filesMapFromAny(body["files"])
+	req.Message.History = chatMessagesFromAny(body["history"])
+	req.Message.Files = filesMapFromAny(body["files"])
+	req.Retrieval.Filters = datasetFiltersFromAny(body["filters"])
 	if reasoning, ok := body["reasoning"].(bool); ok {
-		req.Reasoning = reasoning
+		req.Runtime.Reasoning = reasoning
 	}
 	if databases, ok := body["databases"].([]any); ok {
-		req.Databases = databases
+		req.Retrieval.Databases = databases
 	}
-	if enableThinking, ok := body["enable_thinking"].(bool); ok {
-		req.EnableThinking = enableThinking
+	if dataset, ok := body["dataset"].(string); ok {
+		req.Retrieval.Dataset = strings.TrimSpace(dataset)
 	}
-	req.DisabledTools = stringSlice(body["disabled_tools"])
-	req.AvailableSkills = stringSlice(body["available_skills"])
+	req.Retrieval.LocalFSSources = anySlice(body["local_fs_sources"])
+	req.Agent.DisabledTools = stringSlice(body["disabled_tools"])
+	req.Agent.AvailableSkills = stringSlice(body["available_skills"])
 	if memory, ok := body["memory"].(string); ok {
-		req.Memory = memory
+		req.Personalization.Memory = memory
 	}
 	if preference, ok := body["user_preference"].(string); ok {
-		req.UserPreference = preference
+		req.Personalization.UserPreference = preference
 	}
 	if useMemory, ok := body["use_memory"].(bool); ok {
-		req.UseMemory = useMemory
+		req.Personalization.UseMemory = useMemory
 	}
 	if environmentContext, ok := body["environment_context"].(map[string]any); ok {
-		req.EnvironmentContext = environmentContext
+		req.Runtime.EnvironmentContext = environmentContext
 	}
 	if userID, ok := body["user_id"].(string); ok {
-		req.UserID = strings.TrimSpace(userID)
+		req.Conversation.UserID = strings.TrimSpace(userID)
 	}
 	if mode, ok := body["mode"].(string); ok {
-		req.Mode = strings.TrimSpace(mode)
+		req.Conversation.Mode = strings.TrimSpace(mode)
 	}
 	if hasSubagents, ok := body["has_subagents"].(bool); ok {
-		req.HasSubagents = hasSubagents
+		req.Agent.HasSubagents = hasSubagents
 	}
 	if convID, ok := body["conversation_id"].(string); ok {
-		req.ConversationID = strings.TrimSpace(convID)
+		req.Conversation.ConversationID = strings.TrimSpace(convID)
+	}
+	if debug, ok := body["debug"].(bool); ok {
+		req.Runtime.Debug = debug
+	}
+	if priority, ok := body["priority"]; ok {
+		req.Runtime.Priority = intPointerFromAny(priority)
+	}
+	if trace, ok := body["trace"].(bool); ok {
+		req.Runtime.Trace = trace
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
-		req.LLMConfig = llmConfig
+		req.Runtime.LLMConfig = llmConfig
 	}
 	if toolConfig, ok := body["tool_config"].(map[string]string); ok {
 		tc := make(map[string]any, len(toolConfig))
@@ -339,7 +389,7 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 			}
 		}
 		if len(tc) > 0 {
-			req.ToolConfig = tc
+			req.Runtime.ToolConfig = tc
 		}
 	} else if toolConfigAny, ok := body["tool_config"].(map[string]any); ok {
 		tc := make(map[string]any, len(toolConfigAny))
@@ -359,36 +409,54 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 			}
 		}
 		if len(tc) > 0 {
-			req.ToolConfig = tc
+			req.Runtime.ToolConfig = tc
 		}
 	}
 	if mcpConfig, ok := body["mcp_config"].([]any); ok {
-		req.MCPConfig = mcpConfig
+		req.Runtime.MCPConfig = mcpConfig
 	} else if mcpConfigAny, ok := body["mcp_config"].([]map[string]any); ok {
-		req.MCPConfig = make([]any, 0, len(mcpConfigAny))
+		req.Runtime.MCPConfig = make([]any, 0, len(mcpConfigAny))
 		for _, item := range mcpConfigAny {
-			req.MCPConfig = append(req.MCPConfig, item)
+			req.Runtime.MCPConfig = append(req.Runtime.MCPConfig, item)
 		}
 	}
 	if pluginContext, ok := body["plugin_context"].(map[string]any); ok && len(pluginContext) > 0 {
-		req.PluginContext = pluginContext
+		req.Plugin.PluginContext = pluginContext
+	}
+	if askResponse, ok := body["ask_response"].(map[string]any); ok && len(askResponse) > 0 {
+		req.Plugin.AskResponse = askResponse
 	}
 	// current_turn_seq is an int in the body map. JSON numbers decode as float64.
 	switch v := body["current_turn_seq"].(type) {
 	case int:
-		req.CurrentTurnSeq = v
+		req.Message.CurrentTurnSeq = v
 	case int64:
-		req.CurrentTurnSeq = int(v)
+		req.Message.CurrentTurnSeq = int(v)
 	case float64:
-		req.CurrentTurnSeq = int(v)
+		req.Message.CurrentTurnSeq = int(v)
 	}
 	if v, ok := body["enable_plugin"].(bool); ok {
-		req.EnablePlugin = &v
+		req.Plugin.EnablePlugin = &v
 	}
 	if v, ok := body["enable_subagent"].(bool); ok {
-		req.EnableSubagent = &v
+		req.Agent.EnableSubagent = &v
 	}
 	return req
+}
+
+func intPointerFromAny(v any) *int {
+	switch value := v.(type) {
+	case int:
+		return &value
+	case int64:
+		converted := int(value)
+		return &converted
+	case float64:
+		converted := int(value)
+		return &converted
+	default:
+		return nil
+	}
 }
 
 func chatMessagesFromAny(v any) []ChatMessage {
@@ -497,6 +565,24 @@ func stringSlice(v any) []string {
 		return nil
 	}
 	return result
+}
+
+func anySlice(v any) []any {
+	if raw, ok := v.([]any); ok {
+		if len(raw) == 0 {
+			return nil
+		}
+		return raw
+	}
+	rawMaps, ok := v.([]map[string]any)
+	if !ok || len(rawMaps) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(rawMaps))
+	for _, item := range rawMaps {
+		out = append(out, item)
+	}
+	return out
 }
 
 func debugJSON(v any) string {

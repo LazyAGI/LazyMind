@@ -458,11 +458,15 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 			"creator": []any{"u1"},
 			"tags":    []any{"t1"},
 		},
-		"files":           map[string]any{"1": []any{"f1", "f2"}},
-		"reasoning":       false,
-		"databases":       []any{map[string]any{"name": "db1"}},
-		"enable_thinking": true,
-		"disabled_tools":  []any{"bing"},
+		"files":            map[string]any{"1": []any{"f1", "f2"}},
+		"current_turn_seq": 7,
+		"reasoning":        false,
+		"databases":        []any{map[string]any{"name": "db1"}},
+		"dataset":          "default",
+		"local_fs_sources": []any{
+			map[string]any{"source_id": "src-1"},
+		},
+		"disabled_tools": []any{"bing"},
 		"available_skills": []any{
 			"coding/git-workflow",
 		},
@@ -475,9 +479,17 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 				"timezone": "Asia/Shanghai",
 			},
 		},
-		"user_id": "user-1",
+		"user_id":         "user-1",
+		"conversation_id": "conv-id-1",
+		"mode":            "manual",
+		"debug":           true,
+		"priority":        9,
+		"trace":           true,
 		"llm_config": map[string]any{
 			"llm": map[string]any{"source": "openai", "model": "gpt-4o"},
+		},
+		"tool_config": map[string]any{
+			"bing": "token-1",
 		},
 		"mcp_config": []any{
 			map[string]any{
@@ -487,59 +499,99 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 				"url":       "https://mcp.example.com/sse",
 			},
 		},
+		"has_subagents":   true,
+		"enable_plugin":   true,
+		"enable_subagent": false,
+		"plugin_context": map[string]any{
+			"session_id": "plugin-session-1",
+		},
+		"ask_response": map[string]any{
+			"ask_id": "ask-1",
+		},
 	})
 
-	if req.Query != "hello" || req.SessionID != "conv-1" {
+	if req.Message.Query != "hello" || req.Conversation.SessionID != "conv-1" {
 		t.Fatalf("unexpected base fields: %#v", req)
 	}
-	if len(req.History) != 2 || req.History[0].Role != "user" || req.History[1].Content != "a1" {
-		t.Fatalf("unexpected history: %#v", req.History)
+	if len(req.Message.History) != 2 || req.Message.History[0].Role != "user" || req.Message.History[1].Content != "a1" {
+		t.Fatalf("unexpected history: %#v", req.Message.History)
 	}
-	if req.Filters == nil || len(req.Filters.DatasetIDs) != 1 || req.Filters.DatasetIDs[0] != "ds_1" {
-		t.Fatalf("unexpected filters: %#v", req.Filters)
+	if req.Retrieval.Filters == nil || len(req.Retrieval.Filters.DatasetIDs) != 1 || req.Retrieval.Filters.DatasetIDs[0] != "ds_1" {
+		t.Fatalf("unexpected filters: %#v", req.Retrieval.Filters)
 	}
-	if len(req.Filters.Creators) != 1 || req.Filters.Creators[0] != "u1" {
-		t.Fatalf("unexpected creators: %#v", req.Filters.Creators)
+	if len(req.Retrieval.Filters.Creators) != 1 || req.Retrieval.Filters.Creators[0] != "u1" {
+		t.Fatalf("unexpected creators: %#v", req.Retrieval.Filters.Creators)
 	}
-	if len(req.Filters.Tags) != 1 || req.Filters.Tags[0] != "t1" {
-		t.Fatalf("unexpected tags: %#v", req.Filters.Tags)
+	if len(req.Retrieval.Filters.Tags) != 1 || req.Retrieval.Filters.Tags[0] != "t1" {
+		t.Fatalf("unexpected tags: %#v", req.Retrieval.Filters.Tags)
 	}
-	if len(req.Files) != 1 || len(req.Files["1"]) != 2 || req.Files["1"][0] != "f1" || req.Files["1"][1] != "f2" {
-		t.Fatalf("unexpected files: %#v", req.Files)
+	if len(req.Message.Files) != 1 || len(req.Message.Files["1"]) != 2 || req.Message.Files["1"][0] != "f1" || req.Message.Files["1"][1] != "f2" {
+		t.Fatalf("unexpected files: %#v", req.Message.Files)
 	}
-	if len(req.Databases) != 1 {
-		t.Fatalf("unexpected databases: %#v", req.Databases)
+	if req.Message.CurrentTurnSeq != 7 {
+		t.Fatalf("unexpected current_turn_seq: %d", req.Message.CurrentTurnSeq)
 	}
-	if req.Reasoning {
+	if len(req.Retrieval.Databases) != 1 || req.Retrieval.Dataset != "default" || len(req.Retrieval.LocalFSSources) != 1 {
+		t.Fatalf("unexpected retrieval: %#v", req.Retrieval)
+	}
+	if req.Runtime.Reasoning {
 		t.Fatalf("expected reasoning to be false")
 	}
-	if !req.EnableThinking {
-		t.Fatalf("expected enable_thinking to be true")
+	if !req.Runtime.Debug || req.Runtime.Priority == nil || *req.Runtime.Priority != 9 || !req.Runtime.Trace {
+		t.Fatalf("unexpected runtime flags: %#v", req.Runtime)
 	}
-	if len(req.DisabledTools) != 1 || req.DisabledTools[0] != "bing" {
-		t.Fatalf("unexpected disabled_tools: %#v", req.DisabledTools)
+	if len(req.Agent.DisabledTools) != 1 || req.Agent.DisabledTools[0] != "bing" {
+		t.Fatalf("unexpected disabled_tools: %#v", req.Agent.DisabledTools)
 	}
-	if len(req.AvailableSkills) != 1 || req.AvailableSkills[0] != "coding/git-workflow" {
-		t.Fatalf("unexpected available_skills: %#v", req.AvailableSkills)
+	if len(req.Agent.AvailableSkills) != 1 || req.Agent.AvailableSkills[0] != "coding/git-workflow" {
+		t.Fatalf("unexpected available_skills: %#v", req.Agent.AvailableSkills)
 	}
-	if req.Memory != "memory-content" || req.UserPreference != "preference-content" {
+	if !req.Agent.HasSubagents || req.Agent.EnableSubagent == nil || *req.Agent.EnableSubagent {
+		t.Fatalf("unexpected agent flags: %#v", req.Agent)
+	}
+	if req.Personalization.Memory != "memory-content" || req.Personalization.UserPreference != "preference-content" {
 		t.Fatalf("unexpected memory context: %+v", req)
 	}
-	if !req.UseMemory {
+	if !req.Personalization.UseMemory {
 		t.Fatalf("expected use_memory to be true")
 	}
-	timeContext, _ := req.EnvironmentContext["time"].(map[string]any)
+	timeContext, _ := req.Runtime.EnvironmentContext["time"].(map[string]any)
 	if timeContext["now"] != "2026-05-11T11:48:00.000Z" || timeContext["timezone"] != "Asia/Shanghai" {
-		t.Fatalf("unexpected environment_context: %#v", req.EnvironmentContext)
+		t.Fatalf("unexpected environment_context: %#v", req.Runtime.EnvironmentContext)
 	}
-	if req.UserID != "user-1" {
-		t.Fatalf("unexpected user_id: %q", req.UserID)
+	if req.Conversation.UserID != "user-1" || req.Conversation.ConversationID != "conv-id-1" || req.Conversation.Mode != "manual" {
+		t.Fatalf("unexpected conversation: %#v", req.Conversation)
 	}
-	if req.LLMConfig == nil || req.LLMConfig["llm"] == nil {
-		t.Fatalf("expected llm_config to be forwarded, got %#v", req.LLMConfig)
+	if req.Runtime.LLMConfig == nil || req.Runtime.LLMConfig["llm"] == nil {
+		t.Fatalf("expected llm_config to be forwarded, got %#v", req.Runtime.LLMConfig)
 	}
-	if len(req.MCPConfig) != 1 {
-		t.Fatalf("expected mcp_config to be forwarded, got %#v", req.MCPConfig)
+	if req.Runtime.ToolConfig == nil || req.Runtime.ToolConfig["bing"] != "token-1" {
+		t.Fatalf("expected tool_config to be forwarded, got %#v", req.Runtime.ToolConfig)
+	}
+	if len(req.Runtime.MCPConfig) != 1 {
+		t.Fatalf("expected mcp_config to be forwarded, got %#v", req.Runtime.MCPConfig)
+	}
+	if req.Plugin.EnablePlugin == nil || !*req.Plugin.EnablePlugin || req.Plugin.PluginContext["session_id"] != "plugin-session-1" || req.Plugin.AskResponse["ask_id"] != "ask-1" {
+		t.Fatalf("unexpected plugin options: %#v", req.Plugin)
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	for _, key := range []string{"message", "conversation", "retrieval", "runtime", "personalization", "agent", "plugin"} {
+		if _, ok := raw[key]; !ok {
+			t.Fatalf("expected grouped key %q in payload: %s", key, payload)
+		}
+	}
+	for _, key := range []string{"query", "history", "session_id", "filters", "llm_config", "plugin_context", "enable_thinking"} {
+		if _, ok := raw[key]; ok {
+			t.Fatalf("unexpected top-level key %q in payload: %s", key, payload)
+		}
 	}
 }
 
@@ -576,7 +628,7 @@ func TestBuildLazyChatRequestDefaultsReasoningTrue(t *testing.T) {
 		"session_id": "conv-1",
 	})
 
-	if !req.Reasoning {
+	if !req.Runtime.Reasoning {
 		t.Fatalf("expected reasoning default true")
 	}
 }
