@@ -242,8 +242,8 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
         key: 'actions',
         width: 120,
         render: (_: unknown, record: Task) => {
-          const isTerminal = ['succeeded', 'failed', 'canceled'].includes(record.status);
           const isStoppable = record.status === 'running' || record.status === 'pending';
+          const isRemovable = record.task_type !== 'scheduled';
           return (
             <Space>
               {isStoppable && (
@@ -251,9 +251,11 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
                   {t('taskCenter.cancel')}
                 </Button>
               )}
-              <Button size='small' onClick={() => handleRemove(record.id, record.status)}>
-                移出
-              </Button>
+              {isRemovable && (
+                <Button size='small' onClick={() => handleRemove(record.id, record.status)}>
+                  移出
+                </Button>
+              )}
             </Space>
           );
         },

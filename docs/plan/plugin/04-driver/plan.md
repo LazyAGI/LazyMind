@@ -565,7 +565,7 @@ Worker：Task 进入 `running` 后，本质仍是标准 chat/plugin 管道；Tas
 
 ---
 
-## 十、定时任务（用户行为，与 plugin 无关） ⚠️ 待调试
+## 十、定时任务（用户行为，与 plugin 无关） 
 
 ### 10.1 原则
 
