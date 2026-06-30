@@ -310,10 +310,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// run_in_background: create a background_chat task record; update status after SSE drains.
-	runInBackground, _ := raw["run_in_background"].(bool)
-	var bgTaskID string
-	if runInBackground {
+	// run_in_background: create a background_chat task record so it appears in the
+	// task center. Status is derived on read via resolveTaskStatus (chat_histories
+	// presence), so no status callback is needed after the SSE drains.
+	if runInBackground, _ := raw["run_in_background"].(bool); runInBackground {
 		taskTitle := query
 		if len([]rune(taskTitle)) > 40 {
 			taskTitle = string([]rune(taskTitle)[:40]) + "..."
@@ -325,17 +325,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			Title:          &taskTitle,
 			Status:         "running",
 		}
-		if err := taskcenter.CreateTask(reqCtx, db, bgTask); err == nil {
-			bgTaskID = bgTask.ID
-		}
+		_ = taskcenter.CreateTask(reqCtx, db, bgTask)
 	}
 
 	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, query, target, dualReply, historyExt)
-
-	// After handleStreamChat returns (SSE fully drained), mark background task completed.
-	if bgTaskID != "" {
-		_ = taskcenter.UpdateTaskStatus(context.Background(), db, bgTaskID, "completed")
-	}
 }
 
 // ResumeChat text POST /api/v1/conversations:resumeChat

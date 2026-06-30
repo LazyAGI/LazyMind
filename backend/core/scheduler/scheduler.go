@@ -149,96 +149,23 @@ func truncateRunes(s string, maxRunes int, suffix string) string {
 
 // ── Scheduler loop ────────────────────────────────────────────────────────────
 
-// RunScheduler starts a goroutine that fires due schedules every minute.
+// RunScheduler starts a goroutine that fires due schedules every 30 seconds.
 // Call once at application startup. The goroutine stops when ctx is cancelled.
+// Task status is now derived on read via resolveTaskStatus (chat_histories presence),
+// so no periodic reconciler is needed here.
 func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		// Stale-task reconciler: runs every 5 minutes to fix tasks that got
-		// stuck in "running" due to a crashed process or a timed-out context.
-		reconcileTicker := time.NewTicker(5 * time.Minute)
-		defer reconcileTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				fireSchedules(ctx, db, chatBaseURL)
-			case <-reconcileTicker.C:
-				reconcileStaleScheduledTasks(ctx, db)
 			}
 		}
 	}()
-}
-
-// sseFinishedGracePeriod is the buffer after the last chat_history update_time
-// before we consider the SSE stream truly finished. This guards against the
-// reconciler racing with an in-flight stream that is still writing chunks.
-const sseFinishedGracePeriod = 5 * time.Minute
-
-// reconcileStaleScheduledTasks fixes scheduled tasks stuck in "running".
-// It uses the chat_histories.update_time (written atomically when the SSE stream
-// ends) as the ground truth for whether the stream has actually finished:
-//
-//   - Has history AND latest update_time < now-5min  → SSE finished, status write
-//     was lost → mark completed.
-//   - Has history AND latest update_time >= now-5min → SSE may still be running
-//     (long task or just finished); skip this cycle.
-//   - No history AND task created_at < now-2h        → timed out with no output
-//     → mark failed.
-//   - No history AND task is newer than 2h            → still in-flight; skip.
-func reconcileStaleScheduledTasks(ctx context.Context, db *gorm.DB) {
-	// Only consider tasks that have been running for at least the grace period
-	// so we never touch genuinely in-flight requests.
-	minAge := time.Now().UTC().Add(-sseFinishedGracePeriod)
-
-	var stale []orm.TaskCenterTask
-	if err := db.WithContext(ctx).
-		Where("task_type = 'scheduled' AND status = 'running' AND created_at <= ?", minAge).
-		Find(&stale).Error; err != nil || len(stale) == 0 {
-		return
-	}
-
-	updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	now := time.Now().UTC()
-	failedThreshold := now.Add(-2 * time.Hour)
-
-	for _, t := range stale {
-		// Look up the most recent chat_history for this conversation.
-		var latest struct {
-			UpdateTime time.Time `gorm:"column:update_time"`
-		}
-		err := db.WithContext(updateCtx).
-			Table("chat_histories").
-			Select("update_time").
-			Where("conversation_id = ?", t.ConversationID).
-			Order("update_time DESC").
-			Limit(1).
-			Scan(&latest).Error
-
-		var newStatus string
-		switch {
-		case err == nil && !latest.UpdateTime.IsZero() && latest.UpdateTime.Before(now.Add(-sseFinishedGracePeriod)):
-			// SSE finished (history written) and the grace period has elapsed.
-			newStatus = "completed"
-		case err == nil && !latest.UpdateTime.IsZero():
-			// History exists but update_time is recent — SSE may still be in progress.
-			continue
-		case t.CreatedAt.Before(failedThreshold):
-			// No history at all and task is old enough to have timed out.
-			newStatus = "failed"
-		default:
-			// No history yet but task is still within the normal run window.
-			continue
-		}
-
-		fmt.Printf("[Scheduler] reconcile stale task id=%s conv=%s → %s (last_history_update=%s)\n",
-			t.ID, t.ConversationID, newStatus, latest.UpdateTime.Format(time.RFC3339))
-		_ = taskcenter.UpdateTaskStatus(updateCtx, db, t.ID, newStatus)
-	}
 }
 
 // maxConcurrentFires is the maximum number of schedules fired concurrently in one tick.
@@ -379,15 +306,17 @@ func renderPromptTemplate(tpl string, t time.Time) string {
 	return r.Replace(tpl)
 }
 
-// sendScheduledChatRequest posts the scheduled trigger to Go core and updates TaskCenter status.
-func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBody map[string]any) {
+// sendScheduledChatRequest fires a chat request for a scheduled task in a background
+// goroutine. Status is no longer written here; resolveTaskStatus derives it on read
+// from chat_histories (present = completed, absent + old = failed).
+func sendScheduledChatRequest(userID, convID, taskID string, _ *gorm.DB, reqBody map[string]any) {
 	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
 	body, _ := json.Marshal(reqBody)
 	reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, coreURL, bytes.NewReader(body))
 	if err != nil {
-		_ = taskcenter.UpdateTaskStatus(context.Background(), db, taskID, "failed")
+		fmt.Printf("[Scheduler] sendScheduledChatRequest: build request failed for task %s: %v\n", taskID, err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -395,26 +324,19 @@ func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBod
 	req.Header.Set("X-User-Id", userID)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		_ = taskcenter.UpdateTaskStatus(context.Background(), db, taskID, "failed")
+		fmt.Printf("[Scheduler] sendScheduledChatRequest: HTTP error for task %s: %v\n", taskID, err)
 		return
 	}
-	defer resp.Body.Close()
-	// Drain the response so the upstream can finish writing events to Redis.
+	// Drain the response body so the upstream goroutines can finish writing to
+	// Redis and DB before we exit. We do not use the status code to set task
+	// status — resolveTaskStatus handles that on read.
 	buf := make([]byte, 4096)
 	for {
 		if _, err := resp.Body.Read(buf); err != nil {
 			break
 		}
 	}
-	// Always use a fresh context for the status update so a timed-out reqCtx
-	// does not cause the DB write to fail and leave the task stuck in "running".
-	updateCtx, updateCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer updateCancel()
-	if resp.StatusCode >= 400 {
-		_ = taskcenter.UpdateTaskStatus(updateCtx, db, taskID, "failed")
-	} else {
-		_ = taskcenter.UpdateTaskStatus(updateCtx, db, taskID, "completed")
-	}
+	resp.Body.Close()
 }
 
 // ── API handlers ──────────────────────────────────────────────────────────────

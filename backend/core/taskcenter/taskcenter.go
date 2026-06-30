@@ -222,9 +222,16 @@ func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) [
 	return steps
 }
 
-// resolveTaskStatus returns the effective display status for a task.
-// For running/pending tasks with a plugin session, it queries plugin_sessions.status.
-// Terminal tasks use the DB value directly.
+// resolveTaskStatus returns the effective display status for a task by querying
+// live data rather than relying on any write-time status callback.
+//
+// Decision tree (evaluated only when t.Status is non-terminal):
+//
+//  1. Plugin task (plugin_session_id set): derive from plugin_sessions.status.
+//  2. No plugin: check whether chat_histories has a row for this conversation.
+//     - Row exists  → SSE finished and was persisted → "completed".
+//     - No row, task is older than 2 h → timed out with no output → "failed".
+//     - No row, task is recent → still running → keep "running".
 func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) string {
 	if isTerminal(t.Status) {
 		return t.Status
@@ -247,8 +254,25 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 				return "failed"
 			}
 		}
+		return t.Status
 	}
-	return t.Status
+
+	// No plugin session: use chat_histories presence as the completion signal.
+	// Go writes a chat_histories row atomically at the very end of streamSingleAnswer,
+	// after all SSE tokens have been consumed from Python. Its existence is therefore
+	// a reliable indicator that the Python→Go SSE stream has fully completed.
+	var histCount int64
+	db.WithContext(ctx).
+		Table("chat_histories").
+		Where("conversation_id = ?", t.ConversationID).
+		Count(&histCount)
+	if histCount > 0 {
+		return "completed"
+	}
+	if time.Since(t.CreatedAt) > 2*time.Hour {
+		return "failed"
+	}
+	return "running"
 }
 
 // ── API handlers ─────────────────────────────────────────────────────────────
