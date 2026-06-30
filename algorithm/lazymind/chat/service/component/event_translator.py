@@ -80,6 +80,10 @@ class AgentEventFrameTranslator:
             task_created = {k: v for k, v in event.items() if k != 'tag'}
             frames.append(_stream_frame(extra={'task_created': task_created}))
             return frames
+        if event_type == 'intent_updated':
+            payload = {k: v for k, v in event.items() if k != 'tag'}
+            frames.append(_stream_frame(extra={'intent_updated': payload}))
+            return frames
         if event_type == 'heartbeat':
             frames.append(_stream_frame(extra={'heartbeat': True}))
             return frames

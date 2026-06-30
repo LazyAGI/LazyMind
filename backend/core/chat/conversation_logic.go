@@ -1023,6 +1023,10 @@ func streamSingleAnswer(
 			}
 			continue
 		}
+		if d.IntentUpdated != nil {
+			handleIntentUpdated(chatCtx, db, stateStore, convID, d.IntentUpdated)
+			continue
+		}
 		if d.Heartbeat {
 			continue
 		}
@@ -1594,6 +1598,43 @@ func handlePluginStepCreated(
 
 // mergeAskPendingIntoExt merges ask_pending data into the ext JSON field so that
 // the ask card is persisted and can be restored on page reload.
+// handleIntentUpdated writes the intent emitted by the update_intent tool to DB,
+// then pushes an intent_updated convEvent so the frontend can refresh immediately.
+func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, ev *IntentUpdatedEvent) {
+	if ev == nil || ev.SessionID == "" {
+		return
+	}
+	if db != nil {
+		now := time.Now().UTC()
+		payload := fmt.Sprintf(`{"text":%q}`, ev.Content)
+		if ev.Scope == "session" {
+			db.WithContext(ctx).Exec(
+				`UPDATE plugin_sessions SET intent_context = ?, updated_at = ? WHERE id = ?`,
+				payload, now, ev.SessionID,
+			)
+		} else if ev.Scope == "step" && ev.StepID != "" {
+			rowID := fmt.Sprintf("psi_%s", common.GenerateID())
+			db.WithContext(ctx).Exec(
+				`INSERT INTO plugin_step_intents (id, session_id, step_id, intent_context, updated_at)
+				 VALUES (?, ?, ?, ?, ?)
+				 ON CONFLICT (session_id, step_id) DO UPDATE
+				 SET intent_context = EXCLUDED.intent_context, updated_at = EXCLUDED.updated_at`,
+				rowID, ev.SessionID, ev.StepID, payload, now,
+			)
+		}
+	}
+	if stateStore != nil {
+		_ = AppendConvEvent(ctx, stateStore, convID, &ConvEvent{
+			Type: "intent_updated",
+			Payload: map[string]any{
+				"session_id": ev.SessionID,
+				"scope":      ev.Scope,
+				"step_id":    ev.StepID,
+			},
+		})
+	}
+}
+
 func mergeAskPendingIntoExt(ext json.RawMessage, askPending any) json.RawMessage {
 	m := make(map[string]any)
 	if len(ext) > 0 {

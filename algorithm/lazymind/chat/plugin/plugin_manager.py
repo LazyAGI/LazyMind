@@ -653,20 +653,19 @@ def build_update_intent_tool() -> Any:
         session_id = cfg.get('plugin_session_id', '')
         if not session_id:
             return 'Error: no active plugin session.'
-        try:
-            from lazymind.chat.engine.subagent.db import TaskQueryDB
-            db = TaskQueryDB()
-            if scope == 'session':
-                db.upsert_session_intent(session_id, content)
-            elif scope == 'step':
-                if not step_id:
-                    return 'Error: step_id required for scope="step".'
-                db.upsert_step_intent(session_id, step_id, content)
-            else:
-                return f'Error: unknown scope {scope!r}. Use "session" or "step".'
-            return '约束已更新'
-        except Exception as exc:
-            return f'Error updating intent: {exc}'
+        if scope not in ('session', 'step'):
+            return f'Error: unknown scope {scope!r}. Use "session" or "step".'
+        if scope == 'step' and not step_id:
+            return 'Error: step_id required for scope="step".'
+        # Emit via SSE so Go writes the DB and pushes an intent_updated convEvent
+        # to notify the frontend immediately — avoids the user having to refresh.
+        _write_agent_data('intent_updated', **{
+            'session_id': session_id,
+            'scope': scope,
+            'content': content,
+            'step_id': step_id or '',
+        })
+        return '约束已更新'
 
     return update_intent
 
@@ -1077,10 +1076,11 @@ def resolve_plugin_injection(
 # ---------------------------------------------------------------------------
 
 def _build_intent_section(session_id: str, step_id: Optional[str] = None) -> str:
-    """Serialize session-level intent/constraints for injection into ChatAgent prompts.
+    """Serialize session-level and step-level intent/constraints for injection into ChatAgent prompts.
 
-    Only global (session-level) constraints are injected here. Step-level constraints
-    are injected directly into SubAgent via runner.py:_build_intent_context_section.
+    Both global (session-level) and all recorded step-level constraints are injected here
+    so ChatAgent has full visibility when deciding whether to call update_intent and which
+    step to advance next.
     """
     if not session_id:
         return ''
@@ -1088,9 +1088,18 @@ def _build_intent_section(session_id: str, step_id: Optional[str] = None) -> str
         from lazymind.chat.engine.subagent.db import TaskQueryDB
         db = TaskQueryDB()
         session_intent = db.get_session_intent(session_id) if hasattr(db, 'get_session_intent') else None
+        step_intents: Dict[str, str] = db.list_step_intents(session_id) if hasattr(db, 'list_step_intents') else {}
+
+        if not session_intent and not step_intents:
+            return ''
+
+        lines = ['## User Intent & Constraints']
+        lines.append('These constraints were recorded from the user and MUST be respected when advancing steps.')
         if session_intent:
-            return f'## 全局约束\n{session_intent}'
-        return ''
+            lines.append(f'Global: {session_intent}')
+        for sid, txt in step_intents.items():
+            lines.append(f'Step "{sid}": {txt}')
+        return '\n'.join(lines)
     except Exception:
         return ''
 
