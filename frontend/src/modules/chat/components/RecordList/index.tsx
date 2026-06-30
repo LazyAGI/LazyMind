@@ -526,7 +526,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                         >
                           <Button
                             size="small"
-                            type={convTypeFilter.length !== 1 || !convTypeFilter.includes('normal') ? 'primary' : 'link'}
+                            type="text"
                             icon={<FilterOutlined />}
                             style={{ padding: '0 4px' }}
                           />

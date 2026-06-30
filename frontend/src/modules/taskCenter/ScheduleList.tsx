@@ -16,14 +16,20 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd/es/upload/interface';
-import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { PlusOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { cancelSchedule, createSchedule, listSchedules, listScheduleTasks } from './api';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+dayjs.extend(utc);
+dayjs.extend(timezone);
+import { cancelSchedule, createSchedule, enableSchedule, listSchedules, listScheduleTasks, runScheduleNow, updateSchedule } from './api';
 import type { Schedule, Task, TaskListResponse } from './api';
 import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { axiosInstance, BASE_URL } from '@/components/request';
+import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
 
 /* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */
 interface KnowledgeSelectProps {
@@ -118,17 +124,28 @@ interface VisualSchedulerProps {
 }
 
 function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
-  const parsed = value ? parseCronExpr(value) : { weekdays: [1, 2, 3, 4, 5], time: dayjs().hour(9).minute(0).second(0) };
-  const [weekdays, setWeekdays] = useState<number[]>(parsed.weekdays);
-  const [time, setTime] = useState<dayjs.Dayjs>(parsed.time);
+  const parsed = value
+    ? parseCronExpr(value)
+    : { weekdays: [1, 2, 3, 4, 5], time: dayjs().hour(9).minute(0).second(0) };
 
+  // Fully controlled: derive display state from `value` prop directly.
+  // Internal state is only used as a fallback when value is absent.
+  const [localWeekdays, setLocalWeekdays] = useState<number[]>(parsed.weekdays);
+  const [localTime, setLocalTime] = useState<dayjs.Dayjs>(parsed.time);
+
+  // Sync whenever the controlled value changes (e.g. form.setFieldsValue in edit mode).
+  const prevValue = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (value) {
+    if (value !== undefined && value !== prevValue.current) {
+      prevValue.current = value;
       const p = parseCronExpr(value);
-      setWeekdays(p.weekdays);
-      setTime(p.time);
+      setLocalWeekdays(p.weekdays);
+      setLocalTime(p.time);
     }
   }, [value]);
+
+  const weekdays = value ? parseCronExpr(value).weekdays : localWeekdays;
+  const time = value ? parseCronExpr(value).time : localTime;
 
   const emit = (wd: number[], t: dayjs.Dayjs) => {
     onChange?.(buildCronExpr(wd, t));
@@ -138,13 +155,13 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
     const next = weekdays.includes(day)
       ? weekdays.filter((d) => d !== day)
       : [...weekdays, day].sort((a, b) => a - b);
-    setWeekdays(next);
+    setLocalWeekdays(next);
     emit(next, time);
   };
 
   const handleTimeChange = (val: dayjs.Dayjs | null) => {
     if (!val) return;
-    setTime(val);
+    setLocalTime(val);
     emit(weekdays, val);
   };
 
@@ -182,10 +199,12 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
 ──────────────────────────────────────────────── */
 function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [data, setData] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [statusFilter, setStatusFilterLocal] = useState<string[]>([]);
 
   const fetch = useCallback(async (p: number) => {
     setLoading(true);
@@ -202,17 +221,48 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
 
   useEffect(() => { void fetch(page); }, [fetch, page]);
 
+  const handleOpenConversation = (conversationId: string) => {
+    sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
+    navigate('/agent/chat/home');
+  };
+
+  const statusOptions = [
+    { text: t('taskCenter.statusRunning'), value: 'running' },
+    { text: t('taskCenter.statusCompleted'), value: 'completed' },
+    { text: t('taskCenter.statusFailed'), value: 'failed' },
+    { text: t('taskCenter.statusInterrupted'), value: 'interrupted' },
+    { text: t('taskCenter.statusCanceled'), value: 'canceled' },
+  ];
+
   const columns: ColumnsType<Task> = [
     {
-      title: t('taskCenter.tasks'),
+      title: t('taskCenter.scheduleDescription'),
       dataIndex: 'conversation_title',
-      render: (v: string, r: Task) => v || r.title || r.conversation_id,
+      render: (v: string, r: Task) => {
+        const label = v || r.title || r.conversation_id;
+        return (
+          <Button
+            type='link'
+            style={{ padding: 0, textAlign: 'left', height: 'auto', whiteSpace: 'normal' }}
+            onClick={() => handleOpenConversation(r.conversation_id)}
+          >
+            {label}
+          </Button>
+        );
+      },
     },
     {
       title: t('taskCenter.statusCol'),
       dataIndex: 'status',
       width: 90,
-      render: (v: string) => <Tag color={v === 'completed' ? 'green' : v === 'failed' ? 'red' : 'blue'}>{t(`taskCenter.status${capitalize(v)}`) || v}</Tag>,
+      filters: statusOptions,
+      filteredValue: statusFilter,
+      onFilter: (value, record) => record.status === value,
+      render: (v: string) => (
+        <Tag color={v === 'completed' ? 'green' : v === 'failed' ? 'red' : 'blue'}>
+          {t(`taskCenter.status${capitalize(v)}`) || v}
+        </Tag>
+      ),
     },
     {
       title: t('taskCenter.steps'),
@@ -230,6 +280,12 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
       width: 160,
       render: (v: string) => new Date(v).toLocaleString(),
     },
+    {
+      title: t('taskCenter.finishedAt'),
+      dataIndex: 'finished_at',
+      width: 160,
+      render: (v: string) => (v ? new Date(v).toLocaleString() : '—'),
+    },
   ];
 
   return (
@@ -239,6 +295,9 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
       loading={loading}
       dataSource={data}
       columns={columns}
+      onChange={(_pagination, filters) => {
+        setStatusFilterLocal((filters.status as string[]) ?? []);
+      }}
       pagination={{
         current: page,
         pageSize: 10,
@@ -268,24 +327,41 @@ export default function ScheduleList() {
   const [kbOptions, setKbOptions] = useState<{ value: string; label: string }[]>([]);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
-  // Inline-editable schedule name in modal header (merges "新建定时任务" + "任务名称" fields)
   const [scheduleNameInput, setScheduleNameInput] = useState('');
+  // Filter state
+  const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('enabled');
+  const [keyword, setKeyword] = useState('');
+  // Edit modal state
+  const [editTarget, setEditTarget] = useState<Schedule | null>(null);
 
   const localTimezone = useRef(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai');
 
   const fetchSchedules = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await listSchedules();
+      const resp = await listSchedules(statusFilter === 'all' || statusFilter === 'disabled');
       setSchedules(resp.items ?? []);
     } catch {
       message.error(t('taskCenter.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, statusFilter]);
 
   useEffect(() => { void fetchSchedules(); }, [fetchSchedules]);
+
+  // Client-side filter: status tab + keyword search
+  const displaySchedules = schedules.filter((s) => {
+    if (statusFilter === 'enabled' && !s.enabled) return false;
+    if (statusFilter === 'disabled' && s.enabled) return false;
+    if (keyword) {
+      const kw = keyword.toLowerCase();
+      const name = (s.name || s.prompt_template || '').toLowerCase();
+      const desc = (s.prompt_template || '').toLowerCase();
+      if (!name.includes(kw) && !desc.includes(kw)) return false;
+    }
+    return true;
+  });
 
   useEffect(() => {
     KnowledgeBaseServiceApi()
@@ -316,11 +392,48 @@ export default function ScheduleList() {
     }
   };
 
+  const handleEnable = async (id: string) => {
+    try {
+      await enableSchedule(id);
+      message.success('已启用');
+      void fetchSchedules();
+    } catch {
+      message.error('启用失败');
+    }
+  };
+
+  const handleRunNow = async (id: string) => {
+    try {
+      await runScheduleNow(id);
+      message.success('已触发立即执行，任务正在运行中');
+      void fetchSchedules();
+    } catch {
+      message.error('立即执行失败');
+    }
+  };
+
+  const handleOpenEdit = (record: Schedule) => {
+    setEditTarget(record);
+    const parsed = parseCronExpr(record.cron_expr);
+    form.setFieldsValue({
+      prompt_template: record.prompt_template,
+      remark: record.remark,
+      cron_expr: record.cron_expr,
+      kb_ids: record.kb_ids ?? [],
+    });
+    setScheduleNameInput(record.name || '');
+    setFileList([]);
+    setUploadedPaths(record.file_ids ?? []);
+    setModalOpen(true);
+    // suppress unused-var warning for parsed — used by VisualScheduler via form value
+    void parsed;
+  };
+
   const handleCreate = async () => {
     try {
       const values = await form.validateFields();
       setSubmitting(true);
-      await createSchedule({
+      const payload = {
         name: scheduleNameInput.trim(),
         remark: values.remark ?? '',
         cron_expr: values.cron_expr || buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)),
@@ -328,9 +441,16 @@ export default function ScheduleList() {
         timezone: localTimezone.current,
         kb_ids: values.kb_ids ?? [],
         file_ids: uploadedPaths,
-      });
-      message.success(t('taskCenter.createSuccess'));
+      };
+      if (editTarget) {
+        await updateSchedule(editTarget.id, payload);
+        message.success('修改成功');
+      } else {
+        await createSchedule(payload);
+        message.success(t('taskCenter.createSuccess'));
+      }
       setModalOpen(false);
+      setEditTarget(null);
       form.resetFields();
       setScheduleNameInput('');
       setFileList([]);
@@ -339,7 +459,7 @@ export default function ScheduleList() {
     } catch (err: unknown) {
       const isValidation = err != null && typeof err === 'object' && 'errorFields' in err;
       if (!isValidation) {
-        message.error(t('taskCenter.createError'));
+        message.error(editTarget ? '修改失败' : t('taskCenter.createError'));
       }
     } finally {
       setSubmitting(false);
@@ -347,6 +467,7 @@ export default function ScheduleList() {
   };
 
   const handleOpenModal = () => {
+    setEditTarget(null);
     form.resetFields();
     form.setFieldValue('cron_expr', buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)));
     setFileList([]);
@@ -391,9 +512,9 @@ export default function ScheduleList() {
       render: (v: string) => describeCron(v),
     },
     {
-      title: t('taskCenter.scheduleTaskCount'),
+      title: '已执行次数',
       dataIndex: 'run_count',
-      width: 90,
+      width: 100,
       render: (v: number, record: Schedule) => (
         <Button
           type='link'
@@ -413,7 +534,7 @@ export default function ScheduleList() {
       title: t('taskCenter.nextRunAt'),
       dataIndex: 'next_run_at',
       width: 160,
-      render: (v: string) => (v ? new Date(v).toLocaleString() : '—'),
+      render: (v: string) => (v ? dayjs(v).format('YYYY/MM/DD HH:mm:ss') : '—'),
     },
     {
       title: t('taskCenter.enabled'),
@@ -425,34 +546,58 @@ export default function ScheduleList() {
     {
       title: '',
       key: 'actions',
-      width: 80,
-      render: (_: unknown, record: Schedule) =>
-        record.enabled ? (
-          <Button size='small' onClick={() => handleDisable(record.id)}>
-            {t('taskCenter.cancelSchedule')}
-          </Button>
-        ) : null,
+      width: 180,
+      render: (_: unknown, record: Schedule) => (
+        <Space size={4}>
+          <Button size='small' onClick={() => handleOpenEdit(record)}>编辑</Button>
+          <Button size='small' onClick={() => handleRunNow(record.id)}>立即执行</Button>
+          {record.enabled
+            ? <Button size='small' onClick={() => handleDisable(record.id)}>{t('taskCenter.cancelSchedule')}</Button>
+            : <Button size='small' type='primary' onClick={() => handleEnable(record.id)}>启用</Button>
+          }
+        </Space>
+      ),
     },
   ];
 
   return (
     <div>
-      <Space style={{ marginBottom: 12 }}>
+      <Space style={{ marginBottom: 12, flexWrap: 'wrap' }} size={[8, 8]}>
         <Button type='primary' icon={<PlusOutlined />} onClick={handleOpenModal}>
           {t('taskCenter.newSchedule')}
         </Button>
+        <Input
+          prefix={<SearchOutlined style={{ color: '#bbb' }} />}
+          placeholder='搜索任务名称或描述'
+          allowClear
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          style={{ width: 220 }}
+        />
+        <Space.Compact>
+          {(['enabled', 'all', 'disabled'] as const).map((v) => (
+            <Button
+              key={v}
+              size='middle'
+              type={statusFilter === v ? 'primary' : 'default'}
+              onClick={() => setStatusFilter(v)}
+            >
+              {v === 'enabled' ? '启用中' : v === 'disabled' ? '已停用' : '全部'}
+            </Button>
+          ))}
+        </Space.Compact>
       </Space>
       <Table<Schedule>
         rowKey='id'
         loading={loading}
-        dataSource={schedules}
+        dataSource={displaySchedules}
         columns={columns}
         pagination={false}
         expandable={{
           expandedRowKeys: expandedKeys,
           onExpandedRowsChange: (keys) => setExpandedKeys(keys as string[]),
           expandedRowRender: (record) => <ExpandedScheduleTasks scheduleId={record.id} />,
-          rowExpandable: () => false,
+          rowExpandable: (record) => (record.run_count ?? 0) > 0,
           showExpandColumn: false,
         }}
       />
@@ -461,7 +606,7 @@ export default function ScheduleList() {
           <Input
             value={scheduleNameInput}
             onChange={(e) => setScheduleNameInput(e.target.value)}
-            placeholder='新定时任务'
+            placeholder={editTarget ? '任务名称' : '新定时任务'}
             variant='borderless'
             style={{ fontWeight: 600, fontSize: 16, padding: 0, width: '100%' }}
             maxLength={100}
@@ -471,11 +616,13 @@ export default function ScheduleList() {
         onOk={handleCreate}
         onCancel={() => {
           setModalOpen(false);
+          setEditTarget(null);
           form.resetFields();
           setScheduleNameInput('');
           setFileList([]);
           setUploadedPaths([]);
         }}
+        okText={editTarget ? '保存' : '创建'}
         confirmLoading={submitting || uploading}
         destroyOnHidden
         width={600}

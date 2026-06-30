@@ -821,17 +821,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           assistantMessage.role !== RoleTypes.ASSISTANT ||
           isLastAssistantCompleted
         ) {
-          if (isLastAssistantCompleted) {
-            newList.push({
-              role: RoleTypes.USER,
-              delta: "",
-              finish_reason:
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
-              inputs: [],
-              is_resumed: true,
-            });
-          }
-
           assistantMessage = {
             role: RoleTypes.ASSISTANT,
             delta: "",

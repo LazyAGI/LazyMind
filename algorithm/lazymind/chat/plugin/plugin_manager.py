@@ -687,8 +687,15 @@ def build_schedule_tools() -> List[Any]:
         """Create a recurring scheduled task.
 
         Args:
-            cron_expr: 5-field cron expression, e.g. '0 9 * * 1-5' for 9am weekdays.
+            cron_expr: Standard 5-field cron expression: "<minute> <hour> <day> <month> <weekday>".
+                Fields: minute(0-59), hour(0-23), day(1-31), month(1-12), weekday(0-6, 0=Sunday).
+                Examples:
+                  '0 12 * * *'   — every day at noon
+                  '30 8 * * 1-5' — 8:30am on weekdays
+                  '0 9 1 * *'    — 9am on the 1st of every month
+                IMPORTANT: use exactly 5 fields. Do NOT use 6-field (seconds-prefixed) cron format.
             prompt_template: The query that will be sent to this conversation on each trigger.
+                Supports placeholders: {{date}}, {{time}}, {{datetime}}.
             timezone: IANA timezone name. Defaults to 'Asia/Shanghai'.
             conversation_id: Bind to a specific conversation. Defaults to the current one.
         """
@@ -696,7 +703,9 @@ def build_schedule_tools() -> List[Any]:
         from lazymind.config import config as _cfg
         cfg = _agentic_config()
         conv_id = conversation_id or cfg.get('conversation_id', '')
+        user_id = cfg.get('user_id', '')
         core_url = str(_cfg['core_api_url']).rstrip('/')
+        headers = {'X-User-Id': user_id} if user_id else {}
         payload = {
             'cron_expr': cron_expr,
             'prompt_template': prompt_template,
@@ -704,7 +713,7 @@ def build_schedule_tools() -> List[Any]:
         }
         if conv_id:
             payload['conversation_id'] = conv_id
-        resp = httpx.post(f'{core_url}/schedules', json=payload, timeout=10.0)
+        resp = httpx.post(f'{core_url}/schedules', json=payload, headers=headers, timeout=10.0)
         if resp.status_code not in (200, 201):
             return f'Failed to create schedule: {resp.text}'
         data = resp.json()
@@ -718,8 +727,11 @@ def build_schedule_tools() -> List[Any]:
         """List all active recurring schedules for this user."""
         import httpx
         from lazymind.config import config as _cfg
+        cfg = _agentic_config()
+        user_id = cfg.get('user_id', '')
         core_url = str(_cfg['core_api_url']).rstrip('/')
-        resp = httpx.get(f'{core_url}/schedules', timeout=5.0)
+        headers = {'X-User-Id': user_id} if user_id else {}
+        resp = httpx.get(f'{core_url}/schedules', headers=headers, timeout=5.0)
         if resp.status_code != 200:
             return f'Could not fetch schedules: {resp.text}'
         items = resp.json().get('items', [])
@@ -738,8 +750,11 @@ def build_schedule_tools() -> List[Any]:
         """Cancel (disable) a recurring schedule by its ID."""
         import httpx
         from lazymind.config import config as _cfg
+        cfg = _agentic_config()
+        user_id = cfg.get('user_id', '')
         core_url = str(_cfg['core_api_url']).rstrip('/')
-        resp = httpx.post(f'{core_url}/schedules/{schedule_id}:cancel', timeout=5.0)
+        headers = {'X-User-Id': user_id} if user_id else {}
+        resp = httpx.post(f'{core_url}/schedules/{schedule_id}:cancel', headers=headers, timeout=5.0)
         if resp.status_code != 200:
             return f'Failed to cancel schedule {schedule_id!r}: {resp.text}'
         return f'Schedule {schedule_id!r} has been cancelled.'

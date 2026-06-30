@@ -315,8 +315,8 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	var bgTaskID string
 	if runInBackground {
 		taskTitle := query
-		if len(taskTitle) > 120 {
-			taskTitle = taskTitle[:120] + "..."
+		if len([]rune(taskTitle)) > 40 {
+			taskTitle = string([]rune(taskTitle)[:40]) + "..."
 		}
 		bgTask := &orm.TaskCenterTask{
 			UserID:         userID,
@@ -1129,9 +1129,12 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	switch isTaskConvParam {
 	case "true":
 		q = q.Where("is_task_conv = ?", true)
-	default:
-		// Default: show only regular (non-task) conversations.
+	case "false":
+		// Explicit false: show only regular (non-task) conversations.
 		q = q.Where("is_task_conv = ? OR is_task_conv IS NULL", false)
+	default:
+		// No filter param: show all conversations (both regular and task).
+		// This path is hit when the frontend selects both "普通对话" and "Task 对话".
 	}
 	var total int64
 	q.Count(&total)
