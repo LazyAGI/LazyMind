@@ -383,6 +383,22 @@
   font-size: 12px;
 }
 
+.dataset-reference-invalid-clear.ant-btn {
+  align-self: flex-start;
+  height: auto;
+  padding: 0;
+  font-size: 12px;
+}
+
+.dataset-inline-display-wrapper.is-reference-invalid .dataset-inline-display {
+  background: #fff7e6;
+
+  &:hover,
+  &:focus-visible {
+    background: #fff1d6;
+  }
+}
+
 .dataset-reference-doc-tag {
   display: inline-flex;
   align-items: center;

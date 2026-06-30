@@ -43,11 +43,32 @@ def memory_editor(
 ) -> Dict[str, Any]:
     """Apply edit operations to memory or user profile and submit a review row.
 
-    Call this tool only after comparing the conversation with the current full
-    target text. The tool applies the supplied JSON edit operations to that
-    original text, validates the edited full text, and writes one pending row to
-    the algorithm-side ``memory_review`` table. It returns status metadata only;
-    it does not return the edited content.
+    Use this tool for durable cross-session knowledge only, and only after
+    comparing the conversation with the current full target text. Save
+    user-stated identity, preferred names or nicknames, communication tone,
+    language preference, output format, and stable habits to
+    ``target='user_preference'``. Save agent working memory to
+    ``target='memory'``: timestamped notes about what the user and agent
+    discussed, what the user was working on, active context that may matter in
+    later sessions, and other concise session-history facts from the agent's
+    perspective.
+
+    Never save workflows, procedures, lessons learned, tool usage patterns,
+    implementation recipes, SOPs, or general task conventions to memory or user
+    profile; those belong in reusable skills. Do not save obvious facts
+    derivable from the codebase or raw transcript dumps. Do not use memory for
+    explicit user-specific vocabulary or terminology mappings; use the
+    vocabulary learning tool instead when it is available.
+
+    Only claim to have saved, remembered, or recorded something when this tool
+    or another durable-write tool was actually called in the same response. If
+    no write tool was called, do not say things like "已保存到记忆",
+    "我会记住你的偏好", "I've saved this", or "I'll remember that".
+
+    The tool applies the supplied JSON edit operations to the original text,
+    validates the edited full text, and writes one pending row to the
+    algorithm-side ``memory_review`` table. It returns status metadata only; it
+    does not return the edited content.
 
     Args:
         target: Which buffer the edit operations belong to. ``'memory'`` is the
@@ -114,6 +135,7 @@ def memory_editor(
     )
     return tool_success('memory_editor', {
         'target': raw_target,
-        'status': 'success',
+        'status': 'pending_review',
+        'message': '记忆修改已提交，等待审核',
         'operation_count': len(operation_payload),
     })

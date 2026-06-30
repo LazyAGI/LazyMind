@@ -20,6 +20,7 @@ tool_scripts:
       - web_search_tool
       - image_search_tool
       - generate_image_tool
+      - enhance_image_tool
 
 steps:
   - id: analyze_subject

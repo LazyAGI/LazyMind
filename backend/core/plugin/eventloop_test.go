@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/core/subagent"
 )
@@ -46,8 +46,6 @@ func seedSessionAndTask(t *testing.T, ctx context.Context, gdb interface {
 // ──────────────────────────────────────────────
 
 func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
-	t.Setenv("LAZYMIND_PLUGIN_MODE", "manual")
-
 	db := newTestDB(t)
 	ctx := context.Background()
 
@@ -60,9 +58,14 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 		t.Fatalf("step: %v", err)
 	}
 
+	// plugin_mode=dynamic in pctx → step_waiting with reason=dynamic_pause
 	pctx := &PluginChatContext{
-		SessionID: "ps-1", PluginID: "image-plugin", StepID: "analyze_subject",
-		ConvID: "conv-1", UserID: "user-1",
+		SessionID:  "ps-1",
+		PluginID:   "image-plugin",
+		StepID:     "analyze_subject",
+		ConvID:     "conv-1",
+		UserID:     "user-1",
+		PluginMode: "dynamic",
 	}
 
 	var gotEvent string
@@ -79,6 +82,9 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	}
 	if gotPayload["session_id"] != "ps-1" {
 		t.Fatalf("unexpected payload: %v", gotPayload)
+	}
+	if gotPayload["reason"] != "dynamic_pause" {
+		t.Fatalf("expected reason=dynamic_pause, got %v", gotPayload["reason"])
 	}
 	interrupted, _ := gotPayload["interrupted"].(bool)
 	if interrupted {
@@ -105,29 +111,26 @@ func TestOnSubAgentDone_Interrupted_SetsWaiting(t *testing.T) {
 	}
 
 	var gotEvent string
-	var gotPayload map[string]any
-	onSSE := func(et string, pl map[string]any) {
+	onSSE := func(et string, _ map[string]any) {
 		gotEvent = et
-		gotPayload = pl
 	}
 
 	OnSubAgentDone(ctx, db.DB, nil, "task-2", subagent.StatusInterrupted, "heartbeat timeout", onSSE, pctx)
 
+	// Interrupted steps now follow the unified path: session → waiting, event = step_waiting.
+	// The interrupted=true payload field is no longer emitted; the subtask card carries that detail.
 	if gotEvent != "step_waiting" {
 		t.Fatalf("expected step_waiting for interrupted, got %q", gotEvent)
 	}
-	if gotPayload["interrupted"] != true {
-		t.Fatalf("expected interrupted=true in payload, got %v", gotPayload)
-	}
 
-	// Session status must be 'waiting' not 'failed'.
+	// Session status must be 'waiting'.
 	s, _ := GetSession(ctx, db.DB, "ps-2")
 	if s.Status != SessionStatusWaiting {
 		t.Fatalf("expected session waiting, got %s", s.Status)
 	}
 }
 
-func TestOnSubAgentDone_Failed_SetsSessionFailed(t *testing.T) {
+func TestOnSubAgentDone_Failed_SetsSessionWaiting(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 
@@ -145,17 +148,20 @@ func TestOnSubAgentDone_Failed_SetsSessionFailed(t *testing.T) {
 		ConvID: "conv-3",
 	}
 
-	var gotEvent string
-	onSSE := func(et string, _ map[string]any) { gotEvent = et }
+	var gotEvents []string
+	onSSE := func(et string, _ map[string]any) { gotEvents = append(gotEvents, et) }
 
 	OnSubAgentDone(ctx, db.DB, nil, "task-3", subagent.StatusFailed, "step error", onSSE, pctx)
 
-	if gotEvent != "plugin_error" {
-		t.Fatalf("expected plugin_error, got %q", gotEvent)
+	// Failed path: first plugin_error (frontend can show error detail on subtask card),
+	// then step_waiting (session is demoted to waiting, not failed).
+	if len(gotEvents) < 2 || gotEvents[0] != "plugin_error" || gotEvents[len(gotEvents)-1] != "step_waiting" {
+		t.Fatalf("expected [plugin_error ... step_waiting], got %v", gotEvents)
 	}
+	// Session must be waiting so the user can retry.
 	s, _ := GetSession(ctx, db.DB, "ps-3")
-	if s.Status != SessionStatusFailed {
-		t.Fatalf("expected session failed, got %s", s.Status)
+	if s.Status != SessionStatusWaiting {
+		t.Fatalf("expected session waiting, got %s", s.Status)
 	}
 }
 
@@ -163,77 +169,145 @@ func TestOnSubAgentDone_Failed_SetsSessionFailed(t *testing.T) {
 // callDriverAgent — mock HTTP server
 // ──────────────────────────────────────────────
 
-func TestCallDriverAgent_ParsesVerdict(t *testing.T) {
+func TestCallDriverAgent_ReturnsMessage(t *testing.T) {
 	cases := []struct {
-		body          string
-		wantVerdict   string
-		wantReasonHas string
+		body       string
+		wantMsgHas string
 	}{
 		{
-			body:          `{"verdict":"PASS","reason":"Prompt looks good."}`,
-			wantVerdict:   "PASS",
-			wantReasonHas: "good",
+			body:       `{"message":"optimized_prompt saved with 65 words."}`,
+			wantMsgHas: "optimized_prompt",
 		},
 		{
-			body:          `{"verdict":"done","reason":"All steps complete."}`,
-			wantVerdict:   "DONE",
-			wantReasonHas: "complete",
+			body:       `{"message":"enhanced_image_url saved. The pipeline is complete."}`,
+			wantMsgHas: "complete",
 		},
 		{
-			body:          `{"verdict":"RETRY","reason":"No artifact found."}`,
-			wantVerdict:   "RETRY",
-			wantReasonHas: "artifact",
-		},
-		{
-			body:          `{"verdict":"FAIL","reason":"Repeated failures."}`,
-			wantVerdict:   "FAIL",
-			wantReasonHas: "failures",
+			body:       `{"message":"No artifact found; prompt generation may have failed."}`,
+			wantMsgHas: "artifact",
 		},
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.wantVerdict, func(t *testing.T) {
+	for i, tc := range cases {
+		t.Run(fmt.Sprintf("case%d", i), func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				fmt.Fprint(w, tc.body)
 			}))
 			defer srv.Close()
 
-			// Point chat service endpoint at the mock server.
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
 
-			verdict, reason := callDriverAgent("image-plugin", "optimize_prompt", "step output", "ps-1")
-			if verdict != tc.wantVerdict {
-				t.Fatalf("expected verdict %s, got %s", tc.wantVerdict, verdict)
+			msg, fallback := callDriverAgent("image-plugin", "optimize_prompt", "step output", "ps-1", nil, nil, "")
+			if fallback {
+				t.Fatalf("unexpected fallback")
 			}
-			if tc.wantReasonHas != "" && !strings.Contains(reason, tc.wantReasonHas) {
-				t.Fatalf("expected reason to contain %q, got %q", tc.wantReasonHas, reason)
+			if !strings.Contains(msg, tc.wantMsgHas) {
+				t.Fatalf("expected message to contain %q, got %q", tc.wantMsgHas, msg)
 			}
 		})
 	}
 }
 
-func TestCallDriverAgent_DefaultsToPassOnError(t *testing.T) {
+func TestCallDriverAgent_DefaultsToFallbackOnError(t *testing.T) {
 	// Point to a non-existent server so the HTTP call fails.
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://127.0.0.1:19999")
 
-	verdict, _ := callDriverAgent("image-plugin", "generate_image", "result", "ps-1")
-	if verdict != "PASS" {
-		t.Fatalf("expected PASS fallback, got %s", verdict)
+	msg, fallback := callDriverAgent("image-plugin", "generate_image", "result", "ps-1", nil, nil, "")
+	if !fallback {
+		t.Fatal("expected fallback=true on connection error")
+	}
+	if !strings.Contains(msg, "generate_image") {
+		t.Fatalf("fallback message should contain step ID, got %q", msg)
 	}
 }
 
-func TestCallDriverAgent_DefaultsToPassOnUnknownVerdict(t *testing.T) {
+func TestCallDriverAgent_DefaultsToFallbackOnEmptyMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"verdict":"UNKNOWN","reason":"weird"}`)
+		fmt.Fprint(w, `{"message":""}`)
 	}))
 	defer srv.Close()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
 
-	verdict, _ := callDriverAgent("image-plugin", "analyze_subject", "output", "ps-1")
-	if verdict != "PASS" {
-		t.Fatalf("expected PASS for unknown verdict, got %s", verdict)
+	msg, fallback := callDriverAgent("image-plugin", "analyze_subject", "output", "ps-1", nil, nil, "")
+	if fallback {
+		t.Fatal("empty message should not trigger fallback; got fallback=true")
+	}
+	if !strings.Contains(msg, "analyze_subject") {
+		t.Fatalf("fallback message should contain step ID, got %q", msg)
+	}
+}
+
+func TestCheckAndFallbackIfStuck_SkipsWhenSubAgentRunning(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "ps-stuck-1", ConversationID: "conv-stuck-1", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := UpdateSessionStatus(ctx, db.DB, "ps-stuck-1", SessionStatusActive); err != nil {
+		t.Fatalf("UpdateSessionStatus: %v", err)
+	}
+	if _, err := CreateSessionStep(ctx, db.DB, "ps-stuck-1", "generate_image", "task-stuck-1", 1); err != nil {
+		t.Fatalf("CreateSessionStep: %v", err)
+	}
+	if err := UpdateStepStatus(ctx, db.DB, "task-stuck-1", StepStatusRunning); err != nil {
+		t.Fatalf("UpdateStepStatus: %v", err)
+	}
+
+	checkAndFallbackIfStuck(ctx, db.DB, nil, func(string, map[string]any) {}, &PluginChatContext{
+		SessionID: "ps-stuck-1",
+		StepID:    "optimize_prompt",
+	})
+
+	s, err := GetSession(ctx, db.DB, "ps-stuck-1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if s.Status != SessionStatusActive {
+		t.Fatalf("expected active while subagent running, got %q", s.Status)
+	}
+}
+
+func TestCheckAndFallbackIfStuck_DemotesWhenIdle(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "ps-stuck-2", ConversationID: "conv-stuck-2", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := UpdateSessionStatus(ctx, db.DB, "ps-stuck-2", SessionStatusActive); err != nil {
+		t.Fatalf("UpdateSessionStatus: %v", err)
+	}
+	if _, err := CreateSessionStep(ctx, db.DB, "ps-stuck-2", "optimize_prompt", "task-stuck-2", 1); err != nil {
+		t.Fatalf("CreateSessionStep: %v", err)
+	}
+	if err := UpdateStepStatus(ctx, db.DB, "task-stuck-2", StepStatusSucceeded); err != nil {
+		t.Fatalf("UpdateStepStatus: %v", err)
+	}
+
+	var gotEvent string
+	checkAndFallbackIfStuck(ctx, db.DB, nil, func(eventType string, _ map[string]any) {
+		gotEvent = eventType
+	}, &PluginChatContext{
+		SessionID: "ps-stuck-2",
+		StepID:    "optimize_prompt",
+	})
+
+	s, err := GetSession(ctx, db.DB, "ps-stuck-2")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if s.Status != SessionStatusWaiting {
+		t.Fatalf("expected waiting when idle, got %q", s.Status)
+	}
+	if gotEvent != "step_waiting" {
+		t.Fatalf("expected step_waiting event, got %q", gotEvent)
 	}
 }
 
@@ -279,44 +353,107 @@ func TestResolveSlotBinding_NoBinding_ReturnsEmpty(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────
-// buildSyntheticMessage
+// StopActivePluginSession — sends task-cancel to Python
 // ──────────────────────────────────────────────
 
-func TestBuildSyntheticMessage(t *testing.T) {
-	cases := []struct {
-		verdict string
-		stepID  string
-		reason  string
-		wantHas []string
-	}{
-		{"PASS", "optimize_prompt", "looks good", []string{"optimize_prompt", "looks good", "Proceed"}},
-		{"RETRY", "generate_image", "no url", []string{"generate_image", "no url", "Retry"}},
+func TestStopActivePluginSession_SendsTaskCancel(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "stop-sess-1", ConversationID: "stop-conv-1", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
 	}
-	for _, tc := range cases {
-		msg := buildSyntheticMessage(tc.verdict, tc.stepID, tc.reason)
-		for _, want := range tc.wantHas {
-			if !strings.Contains(msg, want) {
-				t.Errorf("verdict=%s: message %q missing %q", tc.verdict, msg, want)
-			}
+	if _, err := CreateSessionStep(ctx, db.DB, "stop-sess-1", "analyze_subject", "stop-task-1", 1); err != nil {
+		t.Fatalf("CreateSessionStep: %v", err)
+	}
+	// Mark the step as running so StopActivePluginSession picks it up.
+	if err := UpdateStepStatus(ctx, db.DB, "stop-task-1", StepStatusRunning); err != nil {
+		t.Fatalf("UpdateStepStatus: %v", err)
+	}
+
+	taskCancelCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "task-cancel") {
+			taskCancelCalls++
 		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
+
+	StopActivePluginSession(ctx, db.DB, nil, "stop-conv-1")
+
+	// notifyTaskCancel runs in a goroutine; give it a moment to complete.
+	time.Sleep(100 * time.Millisecond)
+
+	if taskCancelCalls == 0 {
+		t.Fatal("expected at least one /api/plugin/task-cancel call")
 	}
 }
 
 // ──────────────────────────────────────────────
-// defaultMode
+// OnSubAgentDone — parallel step completion
 // ──────────────────────────────────────────────
 
-func TestDefaultMode(t *testing.T) {
-	os.Unsetenv("LAZYMIND_PLUGIN_MODE")
-	if defaultMode() != "auto" {
-		t.Fatal("expected auto when env unset")
+func TestOnSubAgentDone_ParallelStepsAllDone(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "par-sess-1", ConversationID: "par-conv-1", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("session: %v", err)
 	}
-	t.Setenv("LAZYMIND_PLUGIN_MODE", "manual")
-	if defaultMode() != "manual" {
-		t.Fatal("expected manual")
+	// Two parallel steps: complete step-A first, then step-B.
+	if _, err := CreateSessionStep(ctx, db.DB, "par-sess-1", "step_a", "par-task-a", 1); err != nil {
+		t.Fatalf("step_a: %v", err)
 	}
-	t.Setenv("LAZYMIND_PLUGIN_MODE", "invalid")
-	if defaultMode() != "auto" {
-		t.Fatal("expected auto for invalid value")
+	if _, err := CreateSessionStep(ctx, db.DB, "par-sess-1", "step_b", "par-task-b", 1); err != nil {
+		t.Fatalf("step_b: %v", err)
 	}
+
+	// Mark step_a succeeded; step_b is still running — should NOT trigger DriverAgent.
+	driverCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		driverCalls++
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"next_step":null}`)
+	}))
+	defer srv.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
+
+	onSSE := func(_ string, _ map[string]any) {}
+
+	OnSubAgentDone(ctx, db.DB, nil, "par-task-a", "succeeded", "", onSSE, nil)
+	if driverCalls != 0 {
+		t.Fatalf("expected 0 driver calls while step_b still running, got %d", driverCalls)
+	}
+}
+
+func TestOnSubAgentDone_ParallelStepsPartialDone(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "par-sess-2", ConversationID: "par-conv-2", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if _, err := CreateSessionStep(ctx, db.DB, "par-sess-2", "only_step", "par-task-only", 1); err != nil {
+		t.Fatalf("step: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"next_step":null}`)
+	}))
+	defer srv.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
+
+	onSSE := func(_ string, _ map[string]any) {}
+
+	// Only step completes — should not panic.
+	OnSubAgentDone(ctx, db.DB, nil, "par-task-only", "succeeded", "", onSSE, nil)
 }

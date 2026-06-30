@@ -236,6 +236,11 @@ function mapEvalSetToDatasetListItem(item: EvalSetResponse): DatasetListItem {
 }
 
 function mapEvalSetItemToDatasetItem(item: EvalSetItemResponse): DatasetItem {
+  const itemWithReferenceInvalidState = item as EvalSetItemResponse & {
+    reference_doc_invalid?: boolean;
+    reference_chunk_invalid?: boolean;
+  };
+
   return {
     id: item.id,
     dataset_id: item.eval_set_id,
@@ -250,6 +255,12 @@ function mapEvalSetItemToDatasetItem(item: EvalSetItemResponse): DatasetItem {
     reference_chunk_ids: splitListField(item.reference_chunk_ids),
     reference_doc_from_knowledge_base: item.reference_doc_from_knowledge_base,
     reference_chunk_selected: item.reference_chunk_selected,
+    reference_doc_invalid: Boolean(
+      itemWithReferenceInvalidState.reference_doc_invalid,
+    ),
+    reference_chunk_invalid: Boolean(
+      itemWithReferenceInvalidState.reference_chunk_invalid,
+    ),
     generate_reason: item.generate_reason,
     is_deleted: item.is_deleted,
     source: normalizeItemSource(item.source),

@@ -60,6 +60,28 @@ class StateMachine:
             return True
         return target_step in self.get_reachable_steps(current_step)
 
+    def get_terminal_steps(self, from_step: Optional[str] = None) -> List[str]:
+        """Return terminal step IDs whose only forward transitions lead to __end__.
+
+        When from_step is given, only the current step and its direct successors
+        are considered — past steps are irrelevant and distant future steps would
+        only add noise to the LLM prompt.
+        """
+        def _is_terminal(step: str) -> bool:
+            targets = self._transitions.get(step, [])
+            non_reserved = [t for t in targets if t not in self._RESERVED]
+            return '__end__' in targets and not non_reserved
+
+        if from_step is None:
+            return [s for s in self._transitions if s not in self._RESERVED and _is_terminal(s)]
+
+        candidates = {from_step}
+        candidates.update(
+            t for t in self._transitions.get(from_step or '__start__', [])
+            if t not in self._RESERVED
+        )
+        return [s for s in candidates if _is_terminal(s)]
+
     def get_ancestors(self, step: str) -> set:
         """Return all ancestor step IDs of step in the state machine graph.
 

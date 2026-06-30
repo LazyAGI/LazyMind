@@ -6,7 +6,6 @@ import lazyllm
 from lazyllm import AutoModel, fc_register
 from lazyllm.components.formatter import encode_query_with_filepaths
 
-from lazymind.chat.engine.prompts import VISION_EXTRACT_DEFAULT_INSTRUCTION
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_success
 from lazymind.chat.engine.tools.infra.image_generation_support import (
     _DEFAULT_BATCH_SIZE,
@@ -16,7 +15,10 @@ from lazymind.chat.engine.tools.infra.image_generation_support import (
     run_image_model,
 )
 
-_SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif'}
+_VISION_EXTRACT_DEFAULT_INSTRUCTION = (
+    'Describe the image in plain text. Include visible text, objects, charts, and any '
+    'details that would help answer follow-up questions about this image.'
+)
 
 
 @fc_register('tool', execute_in_sandbox=False)
@@ -26,6 +28,12 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
 
     Supports common image formats (JPEG, PNG, GIF, WebP, BMP, TIFF).
     Uses a vision-language model to describe visual content in natural language.
+    Use this for visual content from knowledge-base results or attached images
+    before answering questions that depend on what is visible in the image.
+
+    Prefer passing the short filename shown in tool results or under Attached
+    Files, or a ``local_path`` field from the source result. Avoid passing
+    ``/static-files/`` signed URLs when a short ref or local path is available.
 
     Args:
         url: Short image ref (filename), local filesystem path, or a
@@ -46,7 +54,7 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
         raise ValueError(f'image file not found: {raw}')
 
     prompt_instruction = (
-        str(instruction).strip() if instruction else VISION_EXTRACT_DEFAULT_INSTRUCTION
+        str(instruction).strip() if instruction else _VISION_EXTRACT_DEFAULT_INSTRUCTION
     )
     encoded_query = encode_query_with_filepaths(prompt_instruction, [local_path])
 

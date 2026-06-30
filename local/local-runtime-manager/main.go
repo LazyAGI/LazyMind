@@ -97,6 +97,20 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 
 	sub := args[0]
 	subArgs := args[1:]
+	if sub == "algorithm-run" || sub == "algorithm-down" {
+		service, profile, repoRoot, err := parseAlgorithmInternalArgs(sub, subArgs, c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		if err != nil {
+			return err
+		}
+		if sub == "algorithm-run" {
+			return manager.algorithm.Run(ctx, cfg, paths, service)
+		}
+		return manager.algorithm.Down(ctx, paths, service)
+	}
 	profile, repoRoot, err := parseCommonArgs("internal", subArgs, c.errOut)
 	if err != nil {
 		return err
@@ -108,7 +122,7 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 
 	switch sub {
 	case "compose-up":
-		return manager.compose.ComposeUp(ctx, paths.RepoRoot, cfg.Profile)
+		return manager.compose.ComposeUp(ctx, cfg, paths)
 	case "compose-down":
 		return manager.compose.ComposeDown(ctx, paths.RepoRoot, cfg.Profile)
 	case "compose-services":
@@ -128,9 +142,35 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		return manager.authService.Run(ctx, cfg, paths)
 	case "auth-service-down":
 		return manager.authService.Down(ctx, cfg, paths)
+	case "core-run":
+		return manager.coreService.Run(ctx, cfg, paths)
+	case "core-down":
+		return manager.coreService.Down(ctx, cfg, paths)
+	case "frontend-run":
+		return manager.frontend.Run(ctx, cfg, paths)
+	case "frontend-down":
+		return manager.frontend.Down(ctx, cfg, paths)
 	default:
 		return fmt.Errorf("unknown internal command: %s", sub)
 	}
+}
+
+func parseAlgorithmInternalArgs(name string, args []string, out io.Writer) (string, string, string, error) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(out)
+	service := fs.String("service", "", "")
+	profile := fs.String("profile", defaultProfileValue(), "")
+	repoRoot := fs.String("repo-root", "", "")
+	if err := fs.Parse(args); err != nil {
+		return "", "", "", err
+	}
+	if len(fs.Args()) != 0 {
+		return "", "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+	}
+	if *service == "" {
+		return "", "", "", fmt.Errorf("--service is required")
+	}
+	return *service, *profile, *repoRoot, nil
 }
 
 func parseCommonArgs(name string, args []string, out io.Writer) (string, string, error) {
@@ -167,5 +207,5 @@ func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "  lazymind-local up --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local down --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local status --json\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down|auth-service-run|auth-service-down --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|frontend-run|frontend-down|algorithm-run|algorithm-down --profile <profile>\n")
 }

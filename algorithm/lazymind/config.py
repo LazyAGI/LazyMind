@@ -133,6 +133,8 @@ config.add('mineru_backend', str, 'pipeline', 'MINERU_BACKEND', description='Min
 config.add('mineru_server_port', int, 8000, 'MINERU_SERVER_PORT', description='MinerU server port.')
 config.add('ocr_cache_dir', str, os.path.join(config['shared_upload_dir'], '.image_cache'), 'OCR_CACHE_DIR',
            description='OCR cache root for parsed results and images.')
+config.add('document_parse_profile', str, 'cloud', 'DOCUMENT_PARSE_PROFILE',
+           description='Document parsing profile: cloud or local.')
 config.add('document_processor_url', str, 'http://localhost:8000', 'DOCUMENT_PROCESSOR_URL',
            description='Document processor service URL.')
 config.add('algo_server_port', int, 8000, 'ALGO_SERVER_PORT', description='Algorithm server port.')

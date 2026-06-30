@@ -15,11 +15,12 @@ import {
   Configuration as AuthServiceConfiguration,
   UsersApiFactory,
 } from "@/api/generated/authservice-client";
-import { axiosInstance, BASE_URL } from "@/components/request";
+import { axiosInstance } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
+import { authServiceApiUrl, getApiBaseUrl } from "@/runtime/apiBase";
 
-const baseUrl = BASE_URL || window.location.origin;
-const authServiceBaseUrl = `${baseUrl}/api/authservice/v1`;
+const baseUrl = getApiBaseUrl();
+const authServiceBaseUrl = authServiceApiUrl("v1");
 
 const commonBaseOptions = {
   headers: { "Content-Type": "application/json" },
@@ -189,7 +190,7 @@ export async function logoutFromServer() {
   }
 
   try {
-    const logoutUrl = `${BASE_URL}/api/authservice/auth/logout`;
+    const logoutUrl = authServiceApiUrl("auth/logout");
 
     const logoutAxios = axios.create({
       timeout: 10000,
