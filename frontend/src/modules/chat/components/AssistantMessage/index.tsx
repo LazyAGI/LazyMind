@@ -873,11 +873,8 @@ const AssistantMessage = (props: any) => {
         <AskCard
           askPending={askPending}
           disabled={isAnswered}
-          onSubmit={(selected) => {
-            props.sendMessage?.({
-              text: '',
-              ask_response: { ask_id: askPending.ask_id, selected },
-            });
+          onSubmit={(formattedText) => {
+            props.sendMessage?.({ text: formattedText });
           }}
         />
       );

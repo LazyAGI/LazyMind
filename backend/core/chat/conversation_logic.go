@@ -572,11 +572,6 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		}
 		body["plugin_context"] = mergedPC
 	}
-	// Propagate ask_response so Python ChatAgent can resolve ask_pending state.
-	// Format: {"ask_id": "...", "selected": [...]}
-	if ar, ok := raw["ask_response"].(map[string]any); ok && len(ar) > 0 {
-		body["ask_response"] = ar
-	}
 	if resourceContext != nil {
 		body["disabled_tools"] = resourceContext.DisabledTools
 		body["available_skills"] = resourceContext.AvailableSkills

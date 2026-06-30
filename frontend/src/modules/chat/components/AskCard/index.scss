@@ -10,19 +10,37 @@
     opacity: 0.7;
   }
 
+  &__question-block {
+    margin-bottom: 14px;
+
+    &:last-of-type {
+      margin-bottom: 0;
+    }
+  }
+
   &__question {
     font-size: 14px;
     font-weight: 500;
     color: #1a1a2e;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     line-height: 1.5;
+  }
+
+  &__boolean-buttons {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  &__bool-btn {
+    min-width: 56px;
   }
 
   &__choices {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    margin-bottom: 10px;
+    margin-bottom: 4px;
 
     .ant-checkbox-group,
     .ant-radio-group {
@@ -37,10 +55,14 @@
   }
 
   &__input {
-    margin-bottom: 10px;
+    margin-bottom: 4px;
+  }
+
+  &__other-input {
+    margin-top: 6px;
   }
 
   &__submit {
-    margin-top: 4px;
+    margin-top: 12px;
   }
 }

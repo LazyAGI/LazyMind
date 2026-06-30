@@ -777,6 +777,7 @@ const zhCN = {
     pluginStop: "停止",
     askCardSubmit: "提交",
     askCardInputPlaceholder: "输入回复…",
+    askCardOtherPlaceholder: "请输入其他内容…",
     pluginPanelTitle: "插件面板",
     pluginStatusRunning: "执行中",
     pluginStatusDone: "已完成",

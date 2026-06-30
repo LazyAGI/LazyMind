@@ -558,55 +558,6 @@ def _wait_for_step_done(step_id: str, trigger_result: str, timeout: float = 600.
 
 
 # ---------------------------------------------------------------------------
-# ask_user — stop-tool for ChatAgent only
-# ---------------------------------------------------------------------------
-
-def build_ask_user_tool() -> Any:
-    """Build the ask_user tool for ChatAgent.
-
-    Suspends the current ReAct turn and sends a question to the user.
-    The user's answer arrives in the next chat request.
-    Registered as a stop-tool so ReAct exits immediately after invocation.
-    """
-    @handle_tool_errors
-    def ask_user(
-        question: str,
-        choices: Optional[List[str]] = None,
-        allow_multiple: bool = False,
-    ) -> str:
-        """Ask the user a question and end the current ReAct turn.
-
-        The user's answer arrives on the next chat request.  Use this when key
-        information is missing that the user must supply (e.g. style preference,
-        target audience, specific constraints).
-
-        When to ask:
-          - Before starting the plugin: missing critical intent (both modes OK).
-          - During plugin execution (dynamic mode only): per-step clarification.
-          - Auto mode during execution: only if user explicitly asks to confirm.
-
-        Args:
-            question (str): The question to show the user.
-            choices (list[str], optional): Predefined answer options.
-                If provided, renders as a single/multi-select card in the UI.
-            allow_multiple (bool): Whether multiple choices can be selected (default False).
-
-        Returns:
-            Placeholder string; ReAct exits immediately after this call.
-        """
-        ask_id = str(uuid.uuid4())
-        _write_agent_data('ask_pending', {
-            'ask_id': ask_id,
-            'question': question,
-            'choices': choices or [],
-            'allow_multiple': allow_multiple,
-        })
-        return f'Question sent to user (ask_id={ask_id}). Waiting for answer on next turn.'
-
-    return ask_user
-
-
-# ---------------------------------------------------------------------------
 # update_intent — ChatAgent only, persists intent/constraint to DB
 # ---------------------------------------------------------------------------
 
@@ -828,7 +779,6 @@ def _build_chat_agent_task_context(conversation_id: str) -> str:
 def resolve_plugin_injection(
     plugin_context: Optional[Dict[str, Any]],
     conversation_id: str = '',
-    ask_response: Optional[Dict[str, Any]] = None,
 ) -> tuple:
     """Resolve plugin tools, system prompt, stop-tools and agentic_config patches.
 
@@ -918,11 +868,6 @@ def resolve_plugin_injection(
                     step_labels=step_labels,
                 ))
 
-            # ask_user is always available to ChatAgent (stop-tool).
-            ask_tool = build_ask_user_tool()
-            plugin_tools.append(ask_tool)
-            plugin_stop_tools.append('ask_user')
-
             # update_intent for ChatAgent only.
             plugin_tools.append(build_update_intent_tool())
 
@@ -944,18 +889,6 @@ def resolve_plugin_injection(
             if intent_section:
                 plugin_artifact_context = (plugin_artifact_context + '\n\n' + intent_section).strip()
 
-            # Inject ask_response so ChatAgent knows the user replied to an ask_pending card.
-            if ask_response and isinstance(ask_response, dict):
-                ask_id = ask_response.get('ask_id', '')
-                selected = ask_response.get('selected', [])
-                if ask_id and selected:
-                    ask_section = (
-                        f'\n\n[ASK_RESPONSE] The user replied to ask request "{ask_id}".\n'
-                        f'Selected options: {", ".join(str(s) for s in selected)}\n'
-                        'Process this response and continue the workflow accordingly.'
-                    )
-                    plugin_artifact_context = (plugin_artifact_context + ask_section).strip()
-
             # Append mode-specific system prompt guidance.
             sm_for_mode = plugin_loader.get_state_machine(p_plugin_id)
             terminal_steps = (
@@ -969,10 +902,6 @@ def resolve_plugin_injection(
             # Cold start: no active session yet
             plugin_tools = build_cold_start_tools()
             plugin_stop_tools = [t.__name__ for t in plugin_tools]
-            # ask_user is always available to ChatAgent, even pre-session.
-            ask_tool = build_ask_user_tool()
-            plugin_tools.append(ask_tool)
-            plugin_stop_tools.append('ask_user')
             if plugin_tools:
                 scenarios = [
                     plugin_loader.get_plugin_intro(spec.plugin_id)
@@ -983,9 +912,6 @@ def resolve_plugin_injection(
         # No plugin_context provided: still inject cold-start triggers
         plugin_tools = build_cold_start_tools()
         plugin_stop_tools = [t.__name__ for t in plugin_tools]
-        ask_tool = build_ask_user_tool()
-        plugin_tools.append(ask_tool)
-        plugin_stop_tools.append('ask_user')
         if plugin_tools:
             scenarios = [
                 plugin_loader.get_plugin_intro(spec.plugin_id)

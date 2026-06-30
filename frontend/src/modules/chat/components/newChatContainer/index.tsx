@@ -405,7 +405,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       scrollToEnd();
       openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
         ...(params.run_in_background ? { run_in_background: true } : {}),
-        ...(params.ask_response ? { ask_response: params.ask_response } : {}),
       });
 
       const currentId = currentConversationIdRef.current;

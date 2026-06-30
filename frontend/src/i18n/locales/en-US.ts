@@ -804,6 +804,7 @@ const enUS = {
     pluginStop: "Stop",
     askCardSubmit: "Submit",
     askCardInputPlaceholder: "Enter your reply…",
+    askCardOtherPlaceholder: "Please specify…",
     pluginPanelTitle: "Plugin Panel",
     pluginStatusRunning: "Running",
     pluginStatusDone: "Done",
