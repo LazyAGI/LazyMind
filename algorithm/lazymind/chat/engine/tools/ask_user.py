@@ -17,7 +17,7 @@ receive it (SubAgent tool resolution falls back to DEFAULT_TOOLS).
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from lazyllm.tools.agent.base import _write_agent_data
 
@@ -64,7 +64,11 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 @handle_tool_errors
-def ask_user(questions: List[Dict[str, Any]]) -> str:
+def ask_user(
+    questions: List[Dict[str, Any]],
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+) -> str:
     """Ask the user one or more questions and end the current ReAct turn.
 
     Use this tool INSTEAD of writing questions as plain text whenever you need
@@ -94,6 +98,10 @@ def ask_user(questions: List[Dict[str, Any]]) -> str:
             type    (str)           : One of "boolean", "single", "multiple", "text".
             choices (list[str], optional): Required for "single" and "multiple".
                 Leave empty or omit for "boolean" (auto-filled) and "text".
+        title: Optional group title displayed at the top of the wizard card
+            (e.g. "收集周报信息").  Omit to show no title.
+        description: Optional subtitle / description shown below the title
+            (e.g. "我将逐项收集信息，填写完成后生成你的周报").  Omit to show no description.
 
     Example:
         questions=[
@@ -101,7 +109,9 @@ def ask_user(questions: List[Dict[str, Any]]) -> str:
              "choices": ["写实", "插画", "极简"]},
             {"text": "是否需要竖版构图？", "type": "boolean"},
             {"text": "还有其他特殊要求吗？", "type": "text"},
-        ]
+        ],
+        title="图片生成设置",
+        description="请回答以下问题，我将为你生成个性化图片。"
 
     Returns:
         Placeholder string; ReAct exits immediately after this call.
@@ -112,5 +122,10 @@ def ask_user(questions: List[Dict[str, Any]]) -> str:
 
     normalised = _normalise_questions(questions)
     ask_id = str(uuid.uuid4())
-    _write_agent_data('ask_pending', ask_id=ask_id, questions=normalised)
+    payload: Dict[str, Any] = {'ask_id': ask_id, 'questions': normalised}
+    if title and str(title).strip():
+        payload['title'] = str(title).strip()
+    if description and str(description).strip():
+        payload['description'] = str(description).strip()
+    _write_agent_data('ask_pending', **payload)
     return f'Question sent to user (ask_id={ask_id}). Waiting for answer on next turn.'

@@ -273,6 +273,19 @@ export function ChatServiceApi() {
         withJsonOptions(options),
       );
     },
+    /** Save partial ask-user answers so they survive page reload. */
+    conversationServiceSaveAskAnswers(
+      conversationId: string,
+      historyId: string,
+      answers: Record<string, any>,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:ask-answers`,
+        { history_id: historyId, answers },
+        withJsonOptions(options),
+      );
+    },
     conversationServiceListConversations(
       requestParameters: ConversationServiceApiConversationServiceListConversationsRequest = {},
       options?: RawAxiosRequestConfig,

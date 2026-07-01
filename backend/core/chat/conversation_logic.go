@@ -20,6 +20,7 @@ import (
 	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/state"
+	"lazymind/core/store"
 	"lazymind/core/subagent"
 )
 
@@ -1641,4 +1642,89 @@ func mergeAskPendingIntoExt(ext json.RawMessage, askPending any) json.RawMessage
 		return ext
 	}
 	return b
+}
+
+// markLastAskPendingAnswered finds the most recent history entry that has
+// ask_pending in ext, sets ask_answered=true in its ext, and clears
+// ask_saved_answers so the AskCard shows as submitted on next page load.
+func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []orm.ChatHistory) {
+	if db == nil {
+		return
+	}
+	for i := len(histories) - 1; i >= 0; i-- {
+		h := &histories[i]
+		if len(h.Ext) == 0 {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(h.Ext, &m); err != nil {
+			continue
+		}
+		if m["ask_pending"] == nil {
+			continue
+		}
+		if answered, _ := m["ask_answered"].(bool); answered {
+			break
+		}
+		m["ask_answered"] = true
+		delete(m, "ask_saved_answers")
+		updated, err := json.Marshal(m)
+		if err != nil {
+			break
+		}
+		db.WithContext(ctx).Model(&orm.ChatHistory{}).
+			Where("id = ?", h.ID).
+			Update("ext", updated)
+		break
+	}
+}
+
+// SaveAskAnswers persists partial ask answers into the history ext so the
+// user can return to the AskCard and continue where they left off.
+func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	var body struct {
+		HistoryID string         `json:"history_id"`
+		Answers   map[string]any `json:"answers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if body.HistoryID == "" {
+		common.ReplyErr(w, "history_id required", http.StatusBadRequest)
+		return
+	}
+
+	var h orm.ChatHistory
+	if err := db.WithContext(r.Context()).Where("id = ?", body.HistoryID).First(&h).Error; err != nil {
+		common.ReplyErr(w, "history not found", http.StatusNotFound)
+		return
+	}
+	m := make(map[string]any)
+	if len(h.Ext) > 0 {
+		_ = json.Unmarshal(h.Ext, &m)
+	}
+	if answered, _ := m["ask_answered"].(bool); answered {
+		// Already submitted — do not allow overwriting answers.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	m["ask_saved_answers"] = body.Answers
+	updated, err := json.Marshal(m)
+	if err != nil {
+		common.ReplyErr(w, "failed to marshal ext", http.StatusInternalServerError)
+		return
+	}
+	if err := db.WithContext(r.Context()).Model(&orm.ChatHistory{}).
+		Where("id = ?", body.HistoryID).
+		Update("ext", updated).Error; err != nil {
+		common.ReplyErr(w, "failed to update history", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

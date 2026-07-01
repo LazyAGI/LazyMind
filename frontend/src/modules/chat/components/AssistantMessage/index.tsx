@@ -873,8 +873,24 @@ const AssistantMessage = (props: any) => {
         <AskCard
           askPending={askPending}
           disabled={isAnswered}
+          savedAnswers={item.ask_saved_answers}
+          onAnswerChange={(idx, ans) => {
+            const currentAnswers = { ...(item.ask_saved_answers || {}), [idx]: ans };
+            // Update in-memory message so answers survive session switches.
+            updateMessage({ ...item, ask_saved_answers: currentAnswers });
+            // Persist to backend so answers survive page reload.
+            if (!sessionId || !item.history_id) return;
+            import('@/modules/chat/utils/request').then(({ ChatServiceApi }) => {
+              ChatServiceApi().conversationServiceSaveAskAnswers(
+                sessionId, item.history_id!, currentAnswers,
+              ).catch(() => {});
+            });
+          }}
           onSubmit={(formattedText) => {
-            props.sendMessage?.({ text: formattedText });
+            // Mark the card as answered in memory so it shows as disabled immediately.
+            updateMessage({ ...item, ask_answered: true, ask_saved_answers: undefined });
+            // sendMessage prop signature is (text: string, clearInput?: boolean)
+            props.sendMessage?.(formattedText);
           }}
         />
       );

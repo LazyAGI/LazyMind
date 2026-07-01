@@ -1005,6 +1005,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         if (targetIndex >= 0) {
           newList[targetIndex] = { ...newList[targetIndex], ...data };
         }
+        // Keep messageListRef and cache in sync so answer changes survive
+        // conversation switches without requiring a full DB reload.
+        messageListRef.current = newList;
+        const currentId = currentConversationIdRef.current;
+        if (currentId) {
+          conversationMessagesCache.current.set(currentId, newList);
+        }
         return newList;
       });
       if (!id) {

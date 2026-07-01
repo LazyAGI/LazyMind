@@ -173,6 +173,14 @@ export function buildChatMessageListFromHistory(
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.
     if ((record as any).ask_pending) {
       assistantMessage.ask_pending = (record as any).ask_pending;
+      // Restore partially-filled answers so the wizard resumes where the user left off.
+      if ((record as any).ask_saved_answers) {
+        assistantMessage.ask_saved_answers = (record as any).ask_saved_answers;
+      }
+      // Mark as answered so the card is disabled when the user already replied.
+      if ((record as any).ask_answered) {
+        assistantMessage.ask_answered = true;
+      }
     }
 
     list.push(assistantMessage);

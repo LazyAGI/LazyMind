@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Button, Checkbox, Input, Radio } from 'antd';
+import { Button, Checkbox, Input, Progress, Radio } from 'antd';
+import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import './index.scss';
 
@@ -12,6 +13,10 @@ export interface AskQuestion {
 export interface AskPending {
   ask_id: string;
   questions: AskQuestion[];
+  /** Optional group title shown at the top of the card */
+  title?: string;
+  /** Optional subtitle / description shown below the title */
+  description?: string;
 }
 
 interface AskCardProps {
@@ -19,11 +24,15 @@ interface AskCardProps {
   /** Called with one formatted answer string per question, joined by newlines. */
   onSubmit: (formattedText: string) => void;
   disabled?: boolean;
+  /** Cached answers to pre-populate (index → serialized answer) */
+  savedAnswers?: Record<number, AnswerState>;
+  /** Called whenever an answer changes, for external caching */
+  onAnswerChange?: (index: number, ans: AnswerState) => void;
 }
 
 const OTHER_OPTION = '其他';
 
-type AnswerState =
+export type AnswerState =
   | { type: 'boolean'; value: string | null }
   | { type: 'single'; value: string | null; otherText: string }
   | { type: 'multiple'; value: string[]; otherText: string }
@@ -77,138 +86,247 @@ function formatAnswer(q: AskQuestion, ans: AnswerState): string {
   }
 }
 
-export default function AskCard({ askPending, onSubmit, disabled = false }: AskCardProps) {
+export default function AskCard({
+  askPending,
+  onSubmit,
+  disabled = false,
+  savedAnswers,
+  onAnswerChange,
+}: AskCardProps) {
   const { t } = useTranslation();
-  const { questions } = askPending;
+  const { questions, title, description } = askPending;
+  const total = questions.length;
 
   const [answers, setAnswers] = useState<AnswerState[]>(() =>
-    questions.map(initAnswer),
+    questions.map((q, i) => savedAnswers?.[i] ?? initAnswer(q)),
   );
+  const [currentIndex, setCurrentIndex] = useState(0);
 
-  const updateAnswer = (idx: number, next: AnswerState) => {
-    setAnswers((prev) => prev.map((a, i) => (i === idx ? next : a)));
+  const currentQ = questions[currentIndex]!;
+  const currentAns = answers[currentIndex]!;
+  const currentAnswered = isAnswered(currentAns);
+  const allAnswered = answers.every(isAnswered);
+
+  const progressPercent = Math.round((answers.filter(isAnswered).length / total) * 100);
+
+  const updateAnswer = (idx: number, next: AnswerState, autoAdvance = false) => {
+    setAnswers((prev) => {
+      const updated = prev.map((a, i) => (i === idx ? next : a));
+      onAnswerChange?.(idx, next);
+      return updated;
+    });
+    // For boolean and single-choice, automatically advance to the next question
+    // after a selection is made (unless it's the last question or needs other-text).
+    if (autoAdvance && idx < total - 1) {
+      // Small delay so the selection visually registers before moving.
+      setTimeout(() => setCurrentIndex(idx + 1), 180);
+    }
   };
 
-  const canSubmit = answers.every(isAnswered);
-
   const handleSubmit = () => {
-    if (disabled || !canSubmit) return;
+    if (disabled || !allAnswered) return;
     const lines = questions.map((q, i) => formatAnswer(q, answers[i]!));
     onSubmit(lines.join('\n'));
   };
 
+  const goTo = (idx: number) => {
+    if (idx >= 0 && idx < total) setCurrentIndex(idx);
+  };
+
+  const canGoNext = currentIndex < total - 1;
+  const canGoPrev = currentIndex > 0;
+
   return (
-    <div className={`ask-card${disabled ? ' ask-card--disabled' : ''}`} aria-label='Ask card'>
-      {questions.map((q, idx) => {
-        const ans = answers[idx]!;
-        return (
-          <div key={idx} className='ask-card__question-block'>
-            <div className='ask-card__question'>{q.text}</div>
-            {q.type === 'boolean' && (
-              <div className='ask-card__boolean-buttons'>
-                {(q.choices ?? ['是', '否']).map((c) => (
-                  <Button
-                    key={c}
-                    size='small'
-                    type={ans.type === 'boolean' && ans.value === c ? 'primary' : 'default'}
-                    disabled={disabled}
-                    onClick={() => updateAnswer(idx, { type: 'boolean', value: c })}
-                    className='ask-card__bool-btn'
-                  >
+    <div className={`ask-wizard${disabled ? ' ask-wizard--disabled' : ''}`} aria-label='Ask card'>
+      {/* Header */}
+      <div className='ask-wizard__header'>
+        <div className='ask-wizard__header-top'>
+          <div className='ask-wizard__title-area'>
+            {title && <h3 className='ask-wizard__title'>{title}</h3>}
+            {description && <p className='ask-wizard__description'>{description}</p>}
+          </div>
+          <div className='ask-wizard__meta'>
+            <span className='ask-wizard__count'>
+              {currentIndex + 1} / {total}
+            </span>
+          </div>
+        </div>
+        <Progress
+          percent={progressPercent}
+          showInfo={false}
+          size={['100%', 3]}
+          className='ask-wizard__progress'
+          strokeColor='#4e6ef2'
+          trailColor='#e4e9f5'
+        />
+        <div className='ask-wizard__progress-label'>
+          {progressPercent}% {t('chat.askCardCompleted')}
+        </div>
+      </div>
+
+      {/* Question body */}
+      <div className='ask-wizard__body'>
+        <div className='ask-wizard__question-label'>
+          <span className='ask-wizard__index-badge'>{currentIndex + 1}</span>
+          <span className='ask-wizard__question-text'>{currentQ.text}</span>
+        </div>
+
+        <div className='ask-wizard__answer-area'>
+          {currentQ.type === 'boolean' && (
+            <div className='ask-wizard__boolean-buttons'>
+              {(currentQ.choices ?? ['是', '否']).map((c) => (
+                <Button
+                  key={c}
+                  type={currentAns.type === 'boolean' && currentAns.value === c ? 'primary' : 'default'}
+                  disabled={disabled}
+                  onClick={() => updateAnswer(currentIndex, { type: 'boolean', value: c }, true)}
+                  className='ask-wizard__bool-btn'
+                >
+                  {c}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {currentQ.type === 'single' && (
+            <div className='ask-wizard__choices'>
+              <Radio.Group
+                value={currentAns.type === 'single' ? currentAns.value : null}
+                onChange={(e) => {
+                  const chosen = e.target.value as string;
+                  updateAnswer(
+                    currentIndex,
+                    { type: 'single', value: chosen, otherText: currentAns.type === 'single' ? currentAns.otherText : '' },
+                    // Auto-advance only when not selecting "其他" (which needs a text input).
+                    chosen !== OTHER_OPTION,
+                  );
+                }}
+                disabled={disabled}
+              >
+                {(currentQ.choices ?? []).map((c, ci) => (
+                  <Radio key={ci} value={c} className='ask-wizard__choice'>
                     {c}
-                  </Button>
+                  </Radio>
                 ))}
-              </div>
-            )}
-            {q.type === 'single' && (
-              <div className='ask-card__choices'>
-                <Radio.Group
-                  value={ans.type === 'single' ? ans.value : null}
+              </Radio.Group>
+              {currentAns.type === 'single' && currentAns.value === OTHER_OPTION && (
+                <Input
+                  value={currentAns.otherText}
                   onChange={(e) =>
-                    updateAnswer(idx, { type: 'single', value: e.target.value, otherText: ans.type === 'single' ? ans.otherText : '' })
+                    updateAnswer(currentIndex, { type: 'single', value: OTHER_OPTION, otherText: e.target.value })
                   }
                   disabled={disabled}
-                >
-                  {(q.choices ?? []).map((c, ci) => (
-                    <Radio key={ci} value={c} className='ask-card__choice'>
-                      {c}
-                    </Radio>
-                  ))}
-                </Radio.Group>
-                {ans.type === 'single' && ans.value === OTHER_OPTION && (
-                  <Input
-                    size='small'
-                    value={ans.otherText}
-                    onChange={(e) =>
-                      updateAnswer(idx, { type: 'single', value: OTHER_OPTION, otherText: e.target.value })
-                    }
-                    disabled={disabled}
-                    placeholder={t('chat.askCardOtherPlaceholder')}
-                    className='ask-card__other-input'
-                  />
-                )}
-              </div>
-            )}
-            {q.type === 'multiple' && (
-              <div className='ask-card__choices'>
-                <Checkbox.Group
-                  value={ans.type === 'multiple' ? ans.value : []}
-                  onChange={(vals) =>
-                    updateAnswer(idx, {
+                  placeholder={t('chat.askCardOtherPlaceholder')}
+                  className='ask-wizard__other-input'
+                />
+              )}
+            </div>
+          )}
+
+          {currentQ.type === 'multiple' && (
+            <div className='ask-wizard__choices'>
+              <Checkbox.Group
+                value={currentAns.type === 'multiple' ? currentAns.value : []}
+                onChange={(vals) =>
+                  updateAnswer(currentIndex, {
+                    type: 'multiple',
+                    value: vals as string[],
+                    otherText: currentAns.type === 'multiple' ? currentAns.otherText : '',
+                  })
+                }
+                disabled={disabled}
+              >
+                {(currentQ.choices ?? []).map((c, ci) => (
+                  <Checkbox key={ci} value={c} className='ask-wizard__choice'>
+                    {c}
+                  </Checkbox>
+                ))}
+              </Checkbox.Group>
+              {currentAns.type === 'multiple' && currentAns.value.includes(OTHER_OPTION) && (
+                <Input
+                  value={currentAns.otherText}
+                  onChange={(e) =>
+                    updateAnswer(currentIndex, {
                       type: 'multiple',
-                      value: vals as string[],
-                      otherText: ans.type === 'multiple' ? ans.otherText : '',
+                      value: (currentAns as any).value,
+                      otherText: e.target.value,
                     })
                   }
                   disabled={disabled}
-                >
-                  {(q.choices ?? []).map((c, ci) => (
-                    <Checkbox key={ci} value={c} className='ask-card__choice'>
-                      {c}
-                    </Checkbox>
-                  ))}
-                </Checkbox.Group>
-                {ans.type === 'multiple' && ans.value.includes(OTHER_OPTION) && (
-                  <Input
-                    size='small'
-                    value={ans.otherText}
-                    onChange={(e) =>
-                      updateAnswer(idx, {
-                        type: 'multiple',
-                        value: ans.value,
-                        otherText: e.target.value,
-                      })
-                    }
-                    disabled={disabled}
-                    placeholder={t('chat.askCardOtherPlaceholder')}
-                    className='ask-card__other-input'
-                  />
-                )}
-              </div>
-            )}
-            {q.type === 'text' && (
-              <Input.TextArea
-                value={ans.type === 'text' ? ans.value : ''}
-                onChange={(e) => updateAnswer(idx, { type: 'text', value: e.target.value })}
-                disabled={disabled}
-                placeholder={t('chat.askCardInputPlaceholder')}
-                className='ask-card__input'
-                autoSize={{ minRows: 1, maxRows: 4 }}
-              />
-            )}
-          </div>
-        );
-      })}
+                  placeholder={t('chat.askCardOtherPlaceholder')}
+                  className='ask-wizard__other-input'
+                />
+              )}
+            </div>
+          )}
+
+          {currentQ.type === 'text' && (
+            <Input.TextArea
+              value={currentAns.type === 'text' ? currentAns.value : ''}
+              onChange={(e) => updateAnswer(currentIndex, { type: 'text', value: e.target.value })}
+              disabled={disabled}
+              placeholder={t('chat.askCardInputPlaceholder')}
+              className='ask-wizard__text-input'
+              autoSize={{ minRows: 2, maxRows: 5 }}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Navigation + quick jump */}
+      <div className='ask-wizard__footer'>
+        <div className='ask-wizard__nav-buttons'>
+          <Button
+            icon={<LeftOutlined />}
+            disabled={!canGoPrev || disabled}
+            onClick={() => goTo(currentIndex - 1)}
+            className='ask-wizard__nav-btn'
+          >
+            {t('chat.askCardPrev')}
+          </Button>
+          {canGoNext ? (
+            <Button
+              type='primary'
+              onClick={() => goTo(currentIndex + 1)}
+              disabled={disabled}
+              className='ask-wizard__nav-btn'
+            >
+              {t('chat.askCardNext')}
+              <RightOutlined />
+            </Button>
+          ) : (
+            !disabled && (
+              <Button
+                type='primary'
+                disabled={!allAnswered}
+                onClick={handleSubmit}
+                className='ask-wizard__submit-btn'
+              >
+                {t('chat.askCardSubmit')}
+              </Button>
+            )
+          )}
+        </div>
+
+        {/* Quick-jump sidebar */}
+        <div className='ask-wizard__jump-list'>
+          {questions.map((_, idx) => (
+            <button
+              key={idx}
+              type='button'
+              className={`ask-wizard__jump-item${idx === currentIndex ? ' is-current' : ''}${isAnswered(answers[idx]!) ? ' is-done' : ''}`}
+              onClick={() => goTo(idx)}
+              disabled={disabled}
+              aria-label={`跳转到第 ${idx + 1} 题`}
+            >
+              {idx + 1}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {!disabled && (
-        <Button
-          type='primary'
-          size='small'
-          disabled={!canSubmit}
-          onClick={handleSubmit}
-          className='ask-card__submit'
-        >
-          {t('chat.askCardSubmit')}
-        </Button>
+        <p className='ask-wizard__hint'>{t('chat.askCardAutoSaveHint')}</p>
       )}
     </div>
   );
