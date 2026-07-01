@@ -63,8 +63,6 @@ type Dataset struct {
 	Type           string         `json:"type"`
 	Tags           []string       `json:"tags"`
 	DefaultDataset bool           `json:"default_dataset"`
-	ScanManaged    bool           `json:"scan_managed,omitempty"`
-	ScanSourceType string         `json:"scan_source_type,omitempty"`
 }
 
 type ListAlgosResponse struct {
@@ -102,12 +100,10 @@ type algoListResp struct {
 }
 
 type extTags struct {
-	Tags           []string       `json:"tags"`
-	AlgoID         string         `json:"algo_id"`
-	AlgoName       string         `json:"algo_name"`
-	Parsers        []ParserConfig `json:"parsers"`
-	ScanManaged    bool           `json:"scan_managed,omitempty"`
-	ScanSourceType string         `json:"scan_source_type,omitempty"`
+	Tags     []string       `json:"tags"`
+	AlgoID   string         `json:"algo_id"`
+	AlgoName string         `json:"algo_name"`
+	Parsers  []ParserConfig `json:"parsers"`
 }
 
 type algoGroupInfoResp struct {
@@ -238,36 +234,6 @@ func parseDatasetParsers(ext json.RawMessage) []ParserConfig {
 		})
 	}
 	return out
-}
-
-func parseDatasetScanManaged(ext json.RawMessage) bool {
-	if len(ext) == 0 {
-		return false
-	}
-	var v extTags
-	if err := json.Unmarshal(ext, &v); err != nil {
-		return false
-	}
-	if v.ScanManaged {
-		return true
-	}
-	for _, tag := range v.Tags {
-		if strings.EqualFold(strings.TrimSpace(tag), "scan") {
-			return true
-		}
-	}
-	return false
-}
-
-func parseDatasetScanSourceType(ext json.RawMessage) string {
-	if len(ext) == 0 {
-		return ""
-	}
-	var v extTags
-	if err := json.Unmarshal(ext, &v); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(v.ScanSourceType)
 }
 
 func fetchParsersByAlgoID(ctx context.Context, algoID string) []ParserConfig {
@@ -653,8 +619,6 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 			Type:           datasetTypeToPB(ds.Type),
 			Tags:           parseDatasetTags(ds.Ext),
 			DefaultDataset: isDefaultDatasetForUser(r.Context(), userID, ds.ID),
-			ScanManaged:    parseDatasetScanManaged(ds.Ext),
-			ScanSourceType: parseDatasetScanSourceType(ds.Ext),
 		})
 	}
 
@@ -966,12 +930,10 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	parsers := fetchParsersByAlgoID(r.Context(), algoID)
 	extBytes, _ := json.Marshal(map[string]any{
-		"tags":             body.Tags,
-		"algo_id":          algoID,
-		"algo_name":        body.Algo.DisplayName,
-		"parsers":          parsers,
-		"scan_managed":     body.ScanManaged,
-		"scan_source_type": strings.TrimSpace(body.ScanSourceType),
+		"tags":      body.Tags,
+		"algo_id":   algoID,
+		"algo_name": body.Algo.DisplayName,
+		"parsers":   parsers,
 	})
 
 	ds := orm.Dataset{
@@ -1034,8 +996,6 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		Type:           datasetTypeToPB(ds.Type),
 		Tags:           body.Tags,
 		DefaultDataset: false,
-		ScanManaged:    body.ScanManaged,
-		ScanSourceType: strings.TrimSpace(body.ScanSourceType),
 	})
 }
 func GetDataset(w http.ResponseWriter, r *http.Request) {
@@ -1092,8 +1052,6 @@ func GetDataset(w http.ResponseWriter, r *http.Request) {
 		Type:           datasetTypeToPB(ds.Type),
 		Tags:           parseDatasetTags(ds.Ext),
 		DefaultDataset: isDefaultDatasetForUser(r.Context(), userID, ds.ID),
-		ScanManaged:    parseDatasetScanManaged(ds.Ext),
-		ScanSourceType: parseDatasetScanSourceType(ds.Ext),
 	})
 }
 func DeleteDataset(w http.ResponseWriter, r *http.Request) {
@@ -1122,16 +1080,14 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if parseDatasetScanManaged(ds.Ext) {
-		if err := deleteScanManagedSourceForDataset(r.Context(), datasetID, userID); err != nil {
-			log.Logger.Error().
-				Err(err).
-				Str("dataset_id", datasetID).
-				Str("user_id", userID).
-				Msg("scan source delete failed")
-			common.ReplyErr(w, "delete scan source failed", http.StatusBadGateway)
-			return
-		}
+	if err := deleteScanSourceForDataset(r.Context(), datasetID); err != nil {
+		log.Logger.Error().
+			Err(err).
+			Str("dataset_id", datasetID).
+			Str("user_id", userID).
+			Msg("scan source delete failed")
+		common.ReplyErr(w, "delete scan source failed", http.StatusBadGateway)
+		return
 	}
 
 	// 1) text DELETE /v1/kbs/{kb_id}
@@ -1185,14 +1141,13 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func deleteScanManagedSourceForDataset(ctx context.Context, datasetID, userID string) error {
+func deleteScanSourceForDataset(ctx context.Context, datasetID string) error {
 	datasetID = strings.TrimSpace(datasetID)
 	if datasetID == "" {
 		return nil
 	}
 	scanURL := common.JoinURL(common.ScanControlPlaneEndpoint(), "/api/scan/internal/sources/by-dataset/"+url.PathEscape(datasetID))
-	headers := map[string]string{"X-User-ID": strings.TrimSpace(userID)}
-	if err := common.ApiDelete(ctx, scanURL, headers, nil, 10*time.Second); err != nil {
+	if err := common.ApiDelete(ctx, scanURL, nil, nil, 10*time.Second); err != nil {
 		var httpErr *common.HTTPError
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
 			return nil
@@ -1338,15 +1293,11 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	if len(parsers) == 0 {
 		parsers = fetchParsersByAlgoID(r.Context(), algoID)
 	}
-	scanManaged := parseDatasetScanManaged(ds.Ext)
-	scanSourceType := parseDatasetScanSourceType(ds.Ext)
 	extBytes, _ := json.Marshal(map[string]any{
-		"tags":             body.Tags,
-		"algo_id":          algoID,
-		"algo_name":        algoName,
-		"parsers":          parsers,
-		"scan_managed":     scanManaged,
-		"scan_source_type": scanSourceType,
+		"tags":      body.Tags,
+		"algo_id":   algoID,
+		"algo_name": algoName,
+		"parsers":   parsers,
 	})
 
 	// 1) text POST /v1/kbs/{kb_id}/update
@@ -1430,8 +1381,6 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		Type:           datasetTypeToPB(ds.Type),
 		Tags:           parseDatasetTags(ds.Ext),
 		DefaultDataset: isDefaultDatasetForUser(r.Context(), userID, ds.ID),
-		ScanManaged:    parseDatasetScanManaged(ds.Ext),
-		ScanSourceType: parseDatasetScanSourceType(ds.Ext),
 	})
 }
 func SetDefault(w http.ResponseWriter, r *http.Request) {

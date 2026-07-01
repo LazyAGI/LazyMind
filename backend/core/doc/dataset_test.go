@@ -407,14 +407,23 @@ func TestDeleteDatasetRemovesEvalSetDatasetReferences(t *testing.T) {
 
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/v1/kbs/kb-delete" {
-			t.Errorf("unexpected algo request %s %q", r.Method, r.URL.Path)
+		if r.Method != http.MethodDelete {
+			t.Errorf("unexpected method %s for %q", r.Method, r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
 		}
-		return testJSONResponse(http.StatusOK, `{}`), nil
+		switch r.URL.Path {
+		case "/api/scan/internal/sources/by-dataset/ds-delete":
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		case "/v1/kbs/kb-delete":
+			return testJSONResponse(http.StatusOK, `{}`), nil
+		default:
+			t.Errorf("unexpected delete path %q", r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
 	})
 	t.Cleanup(func() { http.DefaultTransport = prevTransport })
 	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/core/datasets/ds-delete", nil)
 	req = mux.SetURLVars(req, map[string]string{"dataset": "ds-delete"})
@@ -449,7 +458,7 @@ func TestDeleteDatasetRemovesEvalSetDatasetReferences(t *testing.T) {
 	}
 }
 
-func TestDeleteDatasetDeletesScanManagedSourceFirst(t *testing.T) {
+func TestDeleteDatasetDeletesScanSourceFirst(t *testing.T) {
 	db := newDocumentTestDB(t)
 	now := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
 	if err := db.Create(&orm.Dataset{
@@ -459,7 +468,7 @@ func TestDeleteDatasetDeletesScanManagedSourceFirst(t *testing.T) {
 		DatasetState: 0,
 		ShareType:    0,
 		Type:         1,
-		Ext:          json.RawMessage(`{"scan_managed":true}`),
+		Ext:          json.RawMessage(`{}`),
 		BaseModel: orm.BaseModel{
 			CreateUserID:   "user-123",
 			CreateUserName: "Alice",
@@ -480,9 +489,6 @@ func TestDeleteDatasetDeletesScanManagedSourceFirst(t *testing.T) {
 		calls = append(calls, r.URL.Path)
 		switch r.URL.Path {
 		case "/api/scan/internal/sources/by-dataset/ds-delete":
-			if got := r.Header.Get("X-User-ID"); got != "user-123" {
-				t.Errorf("expected scan delete user header, got %q", got)
-			}
 			return testJSONResponse(http.StatusOK, `{}`), nil
 		case "/v1/kbs/kb-delete":
 			return testJSONResponse(http.StatusOK, `{}`), nil
@@ -517,7 +523,7 @@ func TestDeleteDatasetDeletesScanManagedSourceFirst(t *testing.T) {
 	}
 }
 
-func TestDeleteDatasetContinuesWhenScanManagedSourceAlreadyDeleted(t *testing.T) {
+func TestDeleteDatasetContinuesWhenScanSourceMissing(t *testing.T) {
 	db := newDocumentTestDB(t)
 	now := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
 	if err := db.Create(&orm.Dataset{
@@ -527,7 +533,7 @@ func TestDeleteDatasetContinuesWhenScanManagedSourceAlreadyDeleted(t *testing.T)
 		DatasetState: 0,
 		ShareType:    0,
 		Type:         1,
-		Ext:          json.RawMessage(`{"scan_managed":true}`),
+		Ext:          json.RawMessage(`{}`),
 		BaseModel: orm.BaseModel{
 			CreateUserID:   "user-123",
 			CreateUserName: "Alice",
@@ -673,28 +679,6 @@ func TestUpdateDatasetRejectsInvalidDisplayName(t *testing.T) {
 	}
 	if called {
 		t.Fatalf("algo service must not be called for invalid display names")
-	}
-}
-
-func TestParseDatasetScanManaged(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		ext  json.RawMessage
-		want bool
-	}{
-		{name: "explicit flag", ext: json.RawMessage(`{"scan_managed":true}`), want: true},
-		{name: "legacy scan tag", ext: json.RawMessage(`{"tags":["scan"]}`), want: true},
-		{name: "not scan managed", ext: json.RawMessage(`{"tags":["manual"]}`), want: false},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := parseDatasetScanManaged(tc.ext); got != tc.want {
-				t.Fatalf("expected %v, got %v", tc.want, got)
-			}
-		})
 	}
 }
 

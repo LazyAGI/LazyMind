@@ -92,9 +92,6 @@ func TestCreateSourcePersistsTargetsInBindingsOnly(t *testing.T) {
 	if len(core.folderRequests) != 1 || core.folderRequests[0].UserID != "user-1" {
 		t.Fatalf("core folder create should carry caller user id: %+v", core.folderRequests)
 	}
-	if len(core.datasetRequests) != 1 || !core.datasetRequests[0].ScanManaged || core.datasetRequests[0].ScanSourceType != string(spyConnectorType) {
-		t.Fatalf("core dataset should be marked as scan managed, got %+v", core.datasetRequests)
-	}
 }
 
 func TestCreateSourceQueuesLocalWatcherStartForManualBinding(t *testing.T) {

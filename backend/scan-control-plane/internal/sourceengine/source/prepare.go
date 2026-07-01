@@ -56,20 +56,8 @@ func (e *DefaultEngine) createCoreDataset(ctx context.Context, req CreateSourceR
 		CreatedBy:      req.CallerID,
 		TenantID:       req.TenantID,
 		Algo:           e.defaultDatasetAlgoRef(),
-		ScanManaged:    true,
-		ScanSourceType: scanSourceType(req),
 	})
 	return resp.DatasetID, err
-}
-
-func scanSourceType(req CreateSourceRequest) string {
-	if value, ok := req.SourceOptions["source_type"].(string); ok && strings.TrimSpace(value) != "" {
-		return strings.TrimSpace(value)
-	}
-	if len(req.Bindings) > 0 {
-		return strings.TrimSpace(string(req.Bindings[0].ConnectorType))
-	}
-	return ""
 }
 
 func (e *DefaultEngine) defaultDatasetAlgoRef() *coreclient.DatasetAlgo {
