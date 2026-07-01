@@ -310,13 +310,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// run_in_background: create a background_chat task record; update status after SSE drains.
-	runInBackground, _ := raw["run_in_background"].(bool)
-	var bgTaskID string
-	if runInBackground {
+	// run_in_background: create a background_chat task record so it appears in the
+	// task center. Status is derived on read via resolveTaskStatus (chat_histories
+	// presence), so no status callback is needed after the SSE drains.
+	if runInBackground, _ := raw["run_in_background"].(bool); runInBackground {
 		taskTitle := query
-		if len(taskTitle) > 120 {
-			taskTitle = taskTitle[:120] + "..."
+		if len([]rune(taskTitle)) > 40 {
+			taskTitle = string([]rune(taskTitle)[:40]) + "..."
 		}
 		bgTask := &orm.TaskCenterTask{
 			UserID:         userID,
@@ -325,17 +325,20 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			Title:          &taskTitle,
 			Status:         "running",
 		}
-		if err := taskcenter.CreateTask(reqCtx, db, bgTask); err == nil {
-			bgTaskID = bgTask.ID
+		_ = taskcenter.CreateTask(reqCtx, db, bgTask)
+	}
+
+	// Mark the last assistant turn that had an ask_pending as answered.
+	// Only mark answered when the request carries a full ask_answers_structured payload,
+	// meaning the user actually submitted the AskCard. If the user ignored the card or
+	// only partially filled it, we do NOT mark it answered so the card stays interactive.
+	if !target.IsRegeneration {
+		if _, hasStructured := raw["ask_answers_structured"]; hasStructured {
+			markLastAskPendingAnswered(r.Context(), db, histories)
 		}
 	}
 
 	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, query, target, dualReply, historyExt)
-
-	// After handleStreamChat returns (SSE fully drained), mark background task completed.
-	if bgTaskID != "" {
-		_ = taskcenter.UpdateTaskStatus(context.Background(), db, bgTaskID, "completed")
-	}
 }
 
 // ResumeChat text POST /api/v1/conversations:resumeChat
@@ -712,6 +715,9 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 		plugin.StopActivePluginSession(r.Context(), db, stateStore, convID)
 	}
 
+	// Notify Python ChatAgent to cancel any active chat session for this conversation.
+	go plugin.NotifyChatCancel(convID)
+
 	common.ReplyOK(w, nil)
 }
 
@@ -864,15 +870,24 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		}
 	}
 	var input any
+	var askPending any
+	var askAnswered bool
+	var askSavedAnswers any
 	if len(h.Ext) > 0 {
 		var ext struct {
-			Input any `json:"input"`
+			Input           any  `json:"input"`
+			AskPending      any  `json:"ask_pending"`
+			AskAnswered     bool `json:"ask_answered"`
+			AskSavedAnswers any  `json:"ask_saved_answers"`
 		}
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
+			askPending = ext.AskPending
+			askAnswered = ext.AskAnswered
+			askSavedAnswers = ext.AskSavedAnswers
 		}
 	}
-	return map[string]any{
+	item := map[string]any{
 		"seq":             h.Seq,
 		"query":           h.RawContent,
 		"result":          stripThinkTags(stripToolTags(h.Result)),
@@ -884,6 +899,16 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"expected_answer": h.ExpectedAnswer,
 		"create_time":     h.CreateTime.UTC().Format(time.RFC3339),
 	}
+	if askPending != nil {
+		item["ask_pending"] = askPending
+		if askAnswered {
+			item["ask_answered"] = true
+		}
+		if askSavedAnswers != nil && !askAnswered {
+			item["ask_saved_answers"] = askSavedAnswers
+		}
+	}
+	return item
 }
 
 func conversationHistoryResponseItems(histories []orm.ChatHistory) []map[string]any {
@@ -1067,6 +1092,8 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	db.Where("conversation_id = ?", convID).Delete(&orm.ChatHistory{})
 	db.Where("conversation_id = ?", convID).Delete(&orm.MultiAnswersChatHistory{})
+	// Cascade-delete task center entries for this conversation.
+	db.Where("conversation_id = ?", convID).Delete(&orm.TaskCenterTask{})
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 
@@ -1127,7 +1154,10 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ChatHistory{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.MultiAnswersChatHistory{}).Error
+		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.MultiAnswersChatHistory{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.TaskCenterTask{}).Error
 	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "batch delete conversations failed", err), http.StatusInternalServerError)
 		return
@@ -1171,9 +1201,12 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	switch isTaskConvParam {
 	case "true":
 		q = q.Where("is_task_conv = ?", true)
-	default:
-		// Default: show only regular (non-task) conversations.
+	case "false":
+		// Explicit false: show only regular (non-task) conversations.
 		q = q.Where("is_task_conv = ? OR is_task_conv IS NULL", false)
+	default:
+		// No filter param: show all conversations (both regular and task).
+		// This path is hit when the frontend selects both "普通对话" and "Task 对话".
 	}
 	var total int64
 	q.Count(&total)

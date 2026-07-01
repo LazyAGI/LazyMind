@@ -475,6 +475,16 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               usePluginStore.getState().loadActiveSession(conversationId);
               usePluginStore.getState().setAutoRunning(conversationId, false);
             });
+          } else if (type === 'step_partial_done') {
+            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
+              usePluginStore.getState().loadActiveSession(conversationId);
+            });
+          } else if (type === 'intent_updated') {
+            // An update_intent call completed — refresh the session so the
+            // intent badge in the plugin panel updates without a page reload.
+            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
+              usePluginStore.getState().loadActiveSession(conversationId);
+            });
           } else if (type === 'auto_chat_started') {
             import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
               usePluginStore.getState().setAutoRunning(conversationId, true);

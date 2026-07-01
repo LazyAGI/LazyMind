@@ -209,6 +209,8 @@ def _case_delta(case_id: str, baseline: Mapping[str, Any] | None,
     before = _row_metrics(baseline or {})
     after = before if skipped else _row_metrics(candidate or {})
     delta = {key: round(after.get(key, 0.0) - before.get(key, 0.0), 4) for key in METRICS}
+    baseline_trace_id = _row_trace_id(baseline or {})
+    candidate_trace_id = baseline_trace_id if skipped else _row_trace_id(candidate or {})
     if skipped:
         outcome = 'skipped'
     elif not baseline:
@@ -229,6 +231,9 @@ def _case_delta(case_id: str, baseline: Mapping[str, Any] | None,
         'before': before,
         'after': after,
         'delta': delta,
+        'trace_id': candidate_trace_id or baseline_trace_id,
+        'baseline_trace_id': baseline_trace_id,
+        'candidate_trace_id': candidate_trace_id,
         'baseline_quality': text((baseline or {}).get('quality_label')),
         'candidate_quality': text((candidate or {}).get('quality_label')),
         'baseline_failure_type': text((baseline or {}).get('failure_type')),
@@ -238,6 +243,11 @@ def _case_delta(case_id: str, baseline: Mapping[str, Any] | None,
 
 def _row_metrics(row: Mapping[str, Any]) -> dict[str, float]:
     return {key: round(float(row.get(key) or 0.0), 4) for key in METRICS}
+
+
+def _row_trace_id(row: Mapping[str, Any]) -> str:
+    answer = row.get('rag_answer') if isinstance(row.get('rag_answer'), Mapping) else {}
+    return text(row.get('trace_id') or answer.get('trace_id'))
 
 
 def _goodcase_guard(

@@ -34,6 +34,14 @@ When debugging, do not infer root causes from code alone. First collect evidence
 
 Whenever you refactor code, you must clean up the old implementation immediately. Remove dead code, unused functions, unused variables, obsolete comments, redundant logic, and superseded implementations. Do not keep both old and new versions of the same logic unless backward compatibility is explicitly required. The codebase should be cleaner after every refactor, not accumulate technical debt.
 
+## Tool Descriptions vs System Prompt Guidance
+
+All behavioral instructions for a tool (when to use it, how to call it, what types it accepts, what happens after it runs) belong in the tool function's docstring. Do NOT add corresponding guidance strings to `algorithm/lazymind/chat/engine/prompts/guidance.py` or inject them into the system prompt.
+
+The LLM reads tool schemas (function name + docstring) directly at inference time. Guidance strings in the system prompt duplicate this information, go stale, and add noise. Keep the docstring the single source of truth.
+
+Guidance strings in `guidance.py` are reserved for cross-cutting concerns that are not specific to any single tool (e.g. image URL formatting, citation style, environment context).
+
 ## 模拟前端 Chat 请求（端到端调试）
 
 用于验证完整链路（Go 落库 → Python 工具执行 → `task_created` 事件回传）时，优先从 **Go core 入口** 发请求，而不是直接打 Python chat 服务。

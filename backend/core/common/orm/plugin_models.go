@@ -15,6 +15,10 @@ type PluginSession struct {
 	// Status: active | completed | failed | waiting
 	Status        string `gorm:"column:status;type:varchar(16);not null;default:active"`
 	CurrentStepID string `gorm:"column:current_step_id;type:varchar(64)"`
+	// Dismissed marks that the user has explicitly removed this session.
+	// Orthogonal to Status: a dismissed session retains its last status for auditing
+	// but is excluded from all active-session lookups.
+	Dismissed bool `gorm:"column:dismissed;type:boolean;not null;default:false"`
 	// IntentContext stores the global constraint/intent for this session (JSON string).
 	IntentContext string    `gorm:"column:intent_context;type:text;not null;default:'{}'"`
 	CreateUserID  string    `gorm:"column:create_user_id;type:varchar(255);not null;default:''"`
