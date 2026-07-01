@@ -21,7 +21,6 @@ from typing import Any, Dict, List, Optional
 
 from lazyllm.tools.agent.base import _write_agent_data
 
-from lazymind.chat.engine.tools.infra import handle_tool_errors
 
 _OTHER_OPTION = '其他'
 _BOOLEAN_CHOICES = ['是', '否']
@@ -70,7 +69,6 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return normalised
 
 
-@handle_tool_errors
 def ask_user(
     questions: List[Dict[str, Any]],
     title: Optional[str] = None,

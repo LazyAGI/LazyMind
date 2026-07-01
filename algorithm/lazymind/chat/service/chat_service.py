@@ -493,8 +493,8 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     active_configs = filter_tools(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
     )
-    # Persist the allowlist in session globals so every @handle_tool_errors-wrapped
-    # tool can do a cheap runtime check before executing business logic.
+    # Persist the allowlist in session globals so ToolManager._safe_call can do a
+    # cheap active-tool guard check before executing any tool's business logic.
     lazyllm.globals['active_tool_names'] = _collect_active_tool_names(active_configs)
     # Plugin tools are dynamically injected and pre-validated by resolve_plugin_injection.
     # Register ALL plugin_tools (advance_step, find_artifact, save_plugin_artifact, …)

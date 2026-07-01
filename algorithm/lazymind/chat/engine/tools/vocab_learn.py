@@ -12,7 +12,6 @@ from lazymind.chat.engine.tools.infra import (
     VocabEvolutionRequest,
     fetch_chat_histories_for_session,
     fetch_vocab_groups_for_user_id,
-    handle_tool_errors,
     post_core_api,
     prepare_vocab_candidates,
     resolve_vocab_user_id,
@@ -29,7 +28,6 @@ MAX_VOCAB_SUGGESTIONS_PER_CALL = 5
 _WORD_GROUP_APPLY_INTERNAL_PATH = '/inner/word_group:apply'
 
 
-@handle_tool_errors
 def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     """Apply durable user-specific vocabulary updates for the current session user.
 
