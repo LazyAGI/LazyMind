@@ -1621,9 +1621,9 @@ export function SelfEvolutionPageController({
     }
 
     processedWorkflowEventKeysRef.current.add(event.key);
-    mergeThreadEvents([event]);
+    const mergedEvents = mergeThreadEvents([event]);
     if (event.checkpointWait) {
-      setLiveCheckpointWaitPrompt(event.checkpointWait);
+      setLiveCheckpointWaitPrompt(getPendingCheckpointWaitPrompt(mergedEvents));
     } else {
       setLiveCheckpointWaitPrompt((prev) => {
         if (!prev) {
@@ -2329,7 +2329,11 @@ export function SelfEvolutionPageController({
       if (nextTerminalFlowStepStatus) {
         setLiveCheckpointWaitPrompt(undefined);
       }
-      if (!nextTerminalFlowStepStatus && pendingCheckpoint) {
+      if (
+        !nextTerminalFlowStepStatus &&
+        pendingCheckpoint &&
+        !isThreadFlowRunning(restoredFlowStatus)
+      ) {
         const checkpointEvent = normalizeThreadEvent({
           id: `restore-checkpoint-${threadId}-${getStringField(pendingCheckpoint, ["checkpoint_id", "id"]) || "latest"}`,
           eventName: "checkpoint.wait",
@@ -2559,6 +2563,19 @@ export function SelfEvolutionPageController({
           time: getTimeLabel(),
         },
         { dedupeLast: true },
+      );
+      applyWorkflowEvent(
+        normalizeThreadEvent({
+          id: `continue-checkpoint-${Date.now()}`,
+          eventName: "checkpoint.continue",
+          data: JSON.stringify({
+            type: "checkpoint.continue",
+            thread_id: activeThreadId,
+            ts: new Date().toISOString(),
+          }),
+        }),
+        activeSessionId,
+        { appendChat: false },
       );
       await subscribeNextStepRunAfterContinue(activeThreadId, activeSessionId);
     } catch (error) {

@@ -1,5 +1,4 @@
 import {
-  Configuration as ScanConfiguration,
   ScanApi,
   type SourceBindingResponse,
   type SourceDocumentItem,
@@ -9,8 +8,7 @@ import {
   type TreeNode,
 } from "@/api/generated/scan-client";
 import { AgentAppsAuth } from "@/components/auth";
-import { BASE_URL, axiosInstance } from "@/components/request";
-import { DEFAULT_SCAN_TENANT_ID } from "./shared";
+import { DEFAULT_SCAN_TENANT_ID } from "../constants/options";
 
 export type ScanV2Client = ScanApi;
 export type ScanV2Source = (SourceListItem | SourceResponse) & Record<string, any>;
@@ -25,6 +23,9 @@ export interface ScanV2AgentHint {
   status?: string;
 }
 
+// Resolve the tenant id used inside scan request bodies (tenant_id / tenant_key)
+// and OAuth payloads. Header injection is handled globally by the request
+// interceptor, so this only feeds business payloads.
 export function getScanTenantId() {
   const userInfo = AgentAppsAuth.getUserInfo() as
     | (ReturnType<typeof AgentAppsAuth.getUserInfo> & {
@@ -41,43 +42,6 @@ export function getScanTenantId() {
     userInfo?.tenantKey ||
     userInfo?.tenant_key ||
     DEFAULT_SCAN_TENANT_ID
-  );
-}
-
-export function getScanV2Headers(extra?: Record<string, string | undefined>) {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-Tenant-ID": getScanTenantId(),
-  };
-  const authHeaders = AgentAppsAuth.getAuthHeaders();
-  if (authHeaders.authorization) {
-    headers.authorization = authHeaders.authorization;
-  }
-  if (authHeaders["X-User-Id"]) {
-    headers["X-User-ID"] = authHeaders["X-User-Id"];
-  }
-  if (!headers["X-User-ID"]) {
-    headers["X-User-ID"] = "user-demo";
-  }
-  Object.entries(extra || {}).forEach(([key, value]) => {
-    if (value) {
-      headers[key] = value;
-    }
-  });
-  return headers;
-}
-
-export function createScanV2ApiClient() {
-  const baseUrl = BASE_URL || window.location.origin;
-  return new ScanApi(
-    new ScanConfiguration({
-      basePath: baseUrl,
-      baseOptions: {
-        headers: getScanV2Headers(),
-      },
-    }),
-    baseUrl,
-    axiosInstance,
   );
 }
 

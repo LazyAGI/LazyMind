@@ -161,6 +161,57 @@ export function getFriendlyFailureReason(errorCode: string | undefined, rawMessa
   return t("selfEvolutionRun.failureReasonGeneric");
 }
 
+function isLikelyAfterCheckpoint(
+  checkpointEvent: NormalizedThreadEvent,
+  candidateEvent: NormalizedThreadEvent,
+) {
+  if (isThreadEventAfter(checkpointEvent, candidateEvent)) {
+    return true;
+  }
+
+  // Step runs can reset seq counters; trust timestamps when sequence ordering disagrees.
+  if (checkpointEvent.timestamp && candidateEvent.timestamp) {
+    const checkpointTime = new Date(checkpointEvent.timestamp).getTime();
+    const candidateTime = new Date(candidateEvent.timestamp).getTime();
+    if (
+      !Number.isNaN(checkpointTime) &&
+      !Number.isNaN(candidateTime) &&
+      candidateTime >= checkpointTime
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasCheckpointBeenContinued(
+  events: NormalizedThreadEvent[],
+  latestCheckpointEvent: NormalizedThreadEvent,
+) {
+  const nextStage = latestCheckpointEvent.checkpointWait?.nextStage;
+
+  return events.some((event) => {
+    if (event.type.startsWith("autooperator.")) {
+      return false;
+    }
+    if (
+      event.type === "checkpoint.continue" ||
+      event.type === "checkpoint.rewind" ||
+      event.type === "checkpoint.cancel"
+    ) {
+      return isLikelyAfterCheckpoint(latestCheckpointEvent, event);
+    }
+    if (!event.stage) {
+      return false;
+    }
+    if (nextStage && event.stage === nextStage) {
+      return isLikelyAfterCheckpoint(latestCheckpointEvent, event);
+    }
+    return isLikelyAfterCheckpoint(latestCheckpointEvent, event);
+  });
+}
+
 export function getPendingCheckpointWaitPrompt(events: NormalizedThreadEvent[]) {
   const hasInactiveTerminalEvent = events.some(isInactiveTerminalThreadEvent);
   if (hasInactiveTerminalEvent) {
@@ -176,27 +227,7 @@ export function getPendingCheckpointWaitPrompt(events: NormalizedThreadEvent[]) 
     return undefined;
   }
 
-  const nextStage = latestCheckpointEvent.checkpointWait.nextStage;
-  const hasContinued = events.some((event) => {
-    const isLaterEvent = isThreadEventAfter(latestCheckpointEvent, event);
-    if (!isLaterEvent) {
-      return false;
-    }
-    if (
-      event.type === "checkpoint.continue" ||
-      event.type === "checkpoint.rewind" ||
-      event.type === "checkpoint.cancel"
-    ) {
-      return true;
-    }
-    if (event.type.startsWith("autooperator.")) {
-      return false;
-    }
-    if (nextStage && event.stage === nextStage) {
-      return true;
-    }
-    return Boolean(event.stage);
-  });
+  const hasContinued = hasCheckpointBeenContinued(events, latestCheckpointEvent);
 
   return hasContinued ? undefined : latestCheckpointEvent.checkpointWait;
 }

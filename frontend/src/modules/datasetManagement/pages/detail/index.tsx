@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   ClipboardEvent as ReactClipboardEvent,
@@ -602,6 +602,12 @@ function placeCaretAtEnd(element: HTMLElement) {
   selection.addRange(range);
 }
 
+function getReferenceContextEditorValue(editor: HTMLDivElement) {
+  return serializeReferenceContextValue({
+    parts: referenceContextPartsFromEditor(editor),
+  });
+}
+
 function escapeHtml(value?: string) {
   return `${value || ""}`
     .replace(/&/g, "&amp;")
@@ -681,18 +687,28 @@ function ReferenceContextInlineEditor({
 }) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const editorValue = referenceContextEditorValue(value);
-  const editorHtml = buildReferenceContextEditorHtml(
-    value,
-    formatChunkLabel,
-    formatDeleteChunkAria,
-  );
 
-  useEffect(() => {
-    if (autoFocus && editorRef.current) {
-      editorRef.current.focus();
-      placeCaretAtEnd(editorRef.current);
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
     }
-  }, [autoFocus]);
+
+    const currentValue = getReferenceContextEditorValue(editor);
+    if (currentValue !== value) {
+      editor.innerHTML = buildReferenceContextEditorHtml(
+        value,
+        formatChunkLabel,
+        formatDeleteChunkAria,
+      );
+    }
+    editor.classList.toggle("is-empty", !value);
+
+    if (autoFocus && document.activeElement !== editor) {
+      editor.focus();
+      placeCaretAtEnd(editor);
+    }
+  }, [autoFocus, formatChunkLabel, formatDeleteChunkAria, value]);
 
   const updateInsertIndex = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) {
@@ -713,9 +729,7 @@ function ReferenceContextInlineEditor({
     if (!editor) {
       return;
     }
-    const nextValue = serializeReferenceContextValue({
-      parts: referenceContextPartsFromEditor(editor),
-    });
+    const nextValue = getReferenceContextEditorValue(editor);
     editor.classList.toggle("is-empty", !nextValue);
     onChange(nextValue);
   };
@@ -832,7 +846,6 @@ function ReferenceContextInlineEditor({
       }}
       onMouseUp={(event) => updateInsertIndex(event.target)}
       onPaste={handlePaste}
-      dangerouslySetInnerHTML={{ __html: editorHtml }}
     />
   );
 }
