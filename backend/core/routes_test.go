@@ -181,6 +181,29 @@ func TestSkillDraftPreviewRouteWinsOverGenericSkillRoute(t *testing.T) {
 	}
 }
 
+func TestDatabaseConnectionSecretRouteWinsOverGenericConnectionRoute(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/data-sources/database-connections/edb-306c5b7b:secret", nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatalf("expected database connection secret route to match")
+	}
+
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/data-sources/database-connections/{connection}:secret"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+	if gotID := match.Vars["connection"]; gotID != "edb-306c5b7b" {
+		t.Fatalf("expected connection %q, got %q", "edb-306c5b7b", gotID)
+	}
+}
+
 func TestReviewResultActionRoutesRegistered(t *testing.T) {
 	r := mux.NewRouter()
 	registerAllRoutes(r)
