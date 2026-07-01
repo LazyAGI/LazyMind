@@ -163,6 +163,51 @@ func TestReduceSeenUnsupportedDocumentIsHiddenAndNotCounted(t *testing.T) {
 	}
 }
 
+func TestReduceSeenSyncedUnsupportedDocumentIsMarkedOutOfScope(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newReducerStore()
+	repo.binding.IncludeExtensions = store.JSON{"items": []any{"pdf"}}
+	repo.states["script"] = documentState("script", now)
+	synced := repo.states["script"]
+	synced.BaselineVersion = "v1"
+	synced.DocumentID = "document-script"
+	repo.states["script"] = synced
+	reducer := NewDBStateReducer(repo, WithClock(func() time.Time { return now }))
+
+	result, err := reducer.ReduceSeenObjects(ctx, crawl.ReduceSeenInput{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		RunID:             "run-1",
+		Objects: []store.SourceObject{{
+			SourceID:      "source-1",
+			BindingID:     "binding-1",
+			ObjectKey:     "script",
+			DisplayName:   "script.py",
+			IsDocument:    true,
+			FileExtension: ".py",
+			SourceVersion: "v1",
+		}},
+		DetectedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("reduce seen: %v", err)
+	}
+	if result.NewCount != 0 || result.ModifiedCount != 0 || result.DeletedCount != 0 {
+		t.Fatalf("out-of-scope document should not count as source create/update/delete: %+v", result)
+	}
+	got := repo.states["script"]
+	if got.SourceState != SourceStateOutOfScope || got.PendingAction != PendingActionDelete {
+		t.Fatalf("synced unsupported document should be marked pending cleanup: %+v", got)
+	}
+	if !got.DocumentListVisible || !got.Selectable {
+		t.Fatalf("pending cleanup document should remain visible/selectable: %+v", got)
+	}
+}
+
 func TestReduceSeenUsesSourceIncludeExtensionsWhenBindingIncludeIsEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -233,6 +278,46 @@ func TestReduceSeenUnsupportedContainerRemainsVisibleForNavigation(t *testing.T)
 	got := repo.states["wiki-page"]
 	if !got.DocumentListVisible || got.Selectable || got.PendingAction != "" {
 		t.Fatalf("unsupported document container should stay visible but not selectable: %+v", got)
+	}
+}
+
+func TestApplyDeleteTaskSuccessClearsSyncedBaseline(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newReducerStore()
+	repo.states["script"] = documentState("script", now)
+	state := repo.states["script"]
+	state.SourceState = SourceStateOutOfScope
+	state.PendingAction = PendingActionDelete
+	state.ActiveTaskID = "task-1"
+	state.DocumentID = "document-script"
+	repo.states["script"] = state
+	reducer := NewDBStateReducer(repo, WithClock(func() time.Time { return now }))
+
+	err := reducer.ApplyTaskSuccess(ctx, TaskSuccessInput{
+		Task: store.ParseTask{
+			TaskID:            "task-1",
+			SourceID:          "source-1",
+			BindingID:         "binding-1",
+			BindingGeneration: 1,
+			ObjectKey:         "script",
+			TaskAction:        PendingActionDelete,
+			TargetVersionID:   "v1",
+			Status:            "SUCCEEDED",
+		},
+		CompletedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("apply delete success: %v", err)
+	}
+	got := repo.states["script"]
+	if got.BaselineVersion != "" || got.DocumentID != "" {
+		t.Fatalf("delete success should clear synced baseline and document link: %+v", got)
+	}
+	if got.DocumentListVisible || got.Selectable || got.PendingAction != "" {
+		t.Fatalf("delete success should hide and clear pending cleanup: %+v", got)
 	}
 }
 

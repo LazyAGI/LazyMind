@@ -342,6 +342,13 @@ function getCapabilityByModelType(
   return moduleConfigs.find((module) => module.key === normalized)?.key;
 }
 
+function getModelTypeByCapability(capability: ModelCapability): string {
+  const entry = Object.entries(selectedCapabilityByModelType).find(
+    ([, cap]) => cap === capability,
+  );
+  return entry ? entry[0] : capability;
+}
+
 const createModelProviderFallbacks = (
   t: ReturnType<typeof useTranslation>["t"],
 ) => ({
@@ -708,7 +715,7 @@ export default function DefaultModelConfigPanel() {
             moduleConfigs.map(async (module) => {
               const response = await modelProvidersDefaultApi.apiCoreModelProvidersModelsReadyGet(
                 withModelProviderJsonOptions({
-                  params: { model_type: module.key },
+                  params: { model_type: getModelTypeByCapability(module.key) },
                 }),
               );
               return {
@@ -776,7 +783,7 @@ export default function DefaultModelConfigPanel() {
     setModuleModelLoading((current) => ({ ...current, [capability]: true }));
     try {
       const response = await modelProvidersApi.apiCoreModelProvidersModelsGet({
-        modelType: capability,
+        modelType: getModelTypeByCapability(capability),
       });
       const data = unwrapModelProviderData<{
         models?: Array<
@@ -873,7 +880,7 @@ export default function DefaultModelConfigPanel() {
   ) => {
     const selections = [
       {
-        model_key: capability,
+        model_key: getModelTypeByCapability(capability),
         model_id: value ? parseModelValue(value).modelId : "",
       },
     ];
@@ -905,7 +912,7 @@ export default function DefaultModelConfigPanel() {
         withModelProviderJsonOptions({
           data: {
             model_id: parseModelValue(value).modelId,
-            model_key: capability,
+            model_key: getModelTypeByCapability(capability),
             share,
           },
         }),

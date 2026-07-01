@@ -659,11 +659,23 @@ class TestChatRouteModelConfig:
     def test_model_config_forwarded_to_handle_chat(self, monkeypatch):
         '''chat route should forward model_config to handle_chat.'''
         import importlib.util
+        from pydantic import BaseModel
         recorded = {}
 
-        async def fake_handle_chat(**kwargs):
-            recorded.update(kwargs)
+        class FakeRuntime(BaseModel):
+            llm_config: dict | None = None
+
+        class FakeChatRequest(BaseModel):
+            message: dict
+            conversation: dict = {}
+            runtime: FakeRuntime = FakeRuntime()
+
+        async def fake_handle_chat(request):
+            recorded['request'] = request
             return {'ok': True}
+
+        fake_request = ModuleType('lazymind.chat.service.chat_request')
+        fake_request.ChatRequest = FakeChatRequest
 
         fake_service = ModuleType('lazymind.chat.service.chat_service')
         fake_service.handle_chat = fake_handle_chat
@@ -671,29 +683,42 @@ class TestChatRouteModelConfig:
         fake_config = ModuleType('lazymind.chat.config')
         fake_config.DEFAULT_CHAT_DATASET = 'default'
 
+        monkeypatch.setitem(sys.modules, 'lazymind.chat.service.chat_request', fake_request)
         monkeypatch.setitem(sys.modules, 'lazymind.chat.service.chat_service', fake_service)
         monkeypatch.setitem(sys.modules, 'lazymind.chat.config', fake_config)
 
         routes_mod = _load_chat_routes_module()
 
         async def run():
-            await routes_mod.chat(
-                query='hello',
-                session_id='sid-1',
-                llm_config={'source': 'openai', 'name': 'gpt-4o'},
-            )
+            await routes_mod.chat(routes_mod.ChatRequest(
+                message={'query': 'hello'},
+                conversation={'session_id': 'sid-1'},
+                runtime={'llm_config': {'source': 'openai', 'name': 'gpt-4o'}},
+            ))
 
         asyncio.run(run())
-        assert recorded.get('model_config') == {'source': 'openai', 'name': 'gpt-4o'}
+        assert recorded['request'].runtime.llm_config == {'source': 'openai', 'name': 'gpt-4o'}
 
     def test_model_config_defaults_to_none(self, monkeypatch):
         '''model_config should default to None when not provided.'''
         import importlib.util
+        from pydantic import BaseModel
         recorded = {}
 
-        async def fake_handle_chat(**kwargs):
-            recorded.update(kwargs)
+        class FakeRuntime(BaseModel):
+            llm_config: dict | None = None
+
+        class FakeChatRequest(BaseModel):
+            message: dict
+            conversation: dict = {}
+            runtime: FakeRuntime = FakeRuntime()
+
+        async def fake_handle_chat(request):
+            recorded['request'] = request
             return {'ok': True}
+
+        fake_request = ModuleType('lazymind.chat.service.chat_request')
+        fake_request.ChatRequest = FakeChatRequest
 
         fake_service = ModuleType('lazymind.chat.service.chat_service')
         fake_service.handle_chat = fake_handle_chat
@@ -701,13 +726,17 @@ class TestChatRouteModelConfig:
         fake_config = ModuleType('lazymind.chat.config')
         fake_config.DEFAULT_CHAT_DATASET = 'default'
 
+        monkeypatch.setitem(sys.modules, 'lazymind.chat.service.chat_request', fake_request)
         monkeypatch.setitem(sys.modules, 'lazymind.chat.service.chat_service', fake_service)
         monkeypatch.setitem(sys.modules, 'lazymind.chat.config', fake_config)
 
         routes_mod = _load_chat_routes_module()
 
         async def run():
-            await routes_mod.chat(query='hello', session_id='sid-1')
+            await routes_mod.chat(routes_mod.ChatRequest(
+                message={'query': 'hello'},
+                conversation={'session_id': 'sid-1'},
+            ))
 
         asyncio.run(run())
-        assert recorded.get('model_config') is None
+        assert recorded['request'].runtime.llm_config is None

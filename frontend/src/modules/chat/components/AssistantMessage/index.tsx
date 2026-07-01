@@ -25,6 +25,7 @@ import { usePluginStore } from "@/modules/chat/store/pluginPanel";
 import { PluginPanel } from "@/modules/chat/components/PluginPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
+import AskCard from "@/modules/chat/components/AskCard";
 
 const BotAvatarIcon = new URL(
   "../../assets/images/bot_avatar.png",
@@ -864,6 +865,23 @@ const AssistantMessage = (props: any) => {
         </>
       );
     }
+    // Render ask_pending card if present
+    if (item.ask_pending) {
+      const askPending = item.ask_pending;
+      const isAnswered = !!item.ask_answered;
+      return (
+        <AskCard
+          askPending={askPending}
+          disabled={isAnswered}
+          onSubmit={(selected) => {
+            props.sendMessage?.({
+              text: '',
+              ask_response: { ask_id: askPending.ask_id, selected },
+            });
+          }}
+        />
+      );
+    }
     return null;
   }
 
@@ -966,6 +984,7 @@ const AssistantMessage = (props: any) => {
               key={sessionId}
               conversationId={sessionId}
               onSendMessage={(text) => props.sendMessage?.(text)}
+              onStop={props.stopGeneration}
             />
           )}
         </div>
@@ -1018,6 +1037,7 @@ const AssistantMessage = (props: any) => {
             key={sessionId}
             conversationId={sessionId}
             onSendMessage={(text) => props.sendMessage?.(text)}
+            onStop={props.stopGeneration}
           />
         )}
       </div>

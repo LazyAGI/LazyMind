@@ -29,6 +29,10 @@ class AutoAgentLeaseError(RuntimeError):
     pass
 
 
+class AutoAgentStateError(RuntimeError):
+    pass
+
+
 class AutoAgentStore:
     def __init__(self, base_dir: str | Path, *, lease_seconds: float = 30.0) -> None:
         self.base_dir = Path(base_dir)
@@ -119,17 +123,43 @@ class AutoAgentStore:
                 return AutoAgentState(thread_id=thread_id, config=config or AutoAgentConfig())
             try:
                 state = AutoAgentState.model_validate_json(path.read_text(encoding='utf-8'))
-            except (OSError, ValidationError):
-                state = AutoAgentState(thread_id=thread_id, config=config or AutoAgentConfig())
+            except (OSError, UnicodeError, ValidationError) as exc:
+                raise AutoAgentStateError(
+                    f'invalid auto agent state for {thread_id}: {path} preserved and not overwritten'
+                ) from exc
+            if state.thread_id != thread_id:
+                raise AutoAgentStateError(
+                    f'auto agent state thread mismatch for {thread_id}: found {state.thread_id}'
+                )
             if config is not None:
                 state = state.model_copy(update={'config': config})
             return state
 
-    def save(self, state: AutoAgentState, *, lease: AutoAgentLease | None = None) -> AutoAgentState:
+    def save(
+        self,
+        state: AutoAgentState,
+        *,
+        lease: AutoAgentLease | None = None,
+        preserve_stopped: bool = False,
+    ) -> AutoAgentState:
         with self._lock:
             if lease is not None:
                 self._require_lease(self._connection, lease)
             path = self._path(state.thread_id)
+            if path.exists():
+                try:
+                    current = AutoAgentState.model_validate_json(path.read_text(encoding='utf-8'))
+                except (OSError, UnicodeError, ValidationError) as exc:
+                    raise AutoAgentStateError(
+                        f'refusing to overwrite invalid auto agent state for {state.thread_id}: {path}'
+                    ) from exc
+                if current.thread_id != state.thread_id:
+                    raise AutoAgentStateError(
+                        f'refusing to overwrite mismatched auto agent state for {state.thread_id}: '
+                        f'found {current.thread_id}'
+                    )
+                if preserve_stopped and not current.running and state.running:
+                    state = state.model_copy(update={'running': False, 'stop_reason': current.stop_reason})
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_name(f'{path.name}.{uuid.uuid4().hex}.tmp')
             tmp.write_text(state.model_dump_json(indent=2), encoding='utf-8')
@@ -177,13 +207,21 @@ class AutoAgentStore:
         completed = state.completed_action_ids
         if status in {'ok', 'duplicate'}:
             completed = tuple(dict.fromkeys((*state.completed_action_ids, action_id)))[-500:]
-        return self.save(state.model_copy(update={'records': records, 'completed_action_ids': completed}), lease=lease)
+        return self.save(
+            state.model_copy(update={'records': records, 'completed_action_ids': completed}),
+            lease=lease,
+            preserve_stopped=lease is not None,
+        )
 
     def assert_lease(self, lease: AutoAgentLease) -> None:
         with self._lock:
             self._require_lease(self._connection, lease)
 
     def _path(self, thread_id: str) -> Path:
+        validate_nonempty(thread_id, 'thread_id')
+        parts = Path(thread_id).parts
+        if Path(thread_id).is_absolute() or len(parts) != 1 or parts[0] in {'.', '..'}:
+            raise AutoAgentStateError(f'invalid auto agent thread_id path segment: {thread_id}')
         return self.base_dir / 'state' / 'threads' / thread_id / 'auto_agent.json'
 
     @property

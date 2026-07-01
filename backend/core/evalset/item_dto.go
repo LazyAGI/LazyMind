@@ -17,7 +17,9 @@ type EvalSetItemResponse struct {
 	ReferenceDoc                  string    `json:"reference_doc"`
 	ReferenceDocIDs               string    `json:"reference_doc_ids"`
 	ReferenceDocFromKnowledgeBase bool      `json:"reference_doc_from_knowledge_base"`
+	ReferenceDocInvalid           bool      `json:"reference_doc_invalid"`
 	ReferenceChunkSelected        bool      `json:"reference_chunk_selected"`
+	ReferenceChunkInvalid         bool      `json:"reference_chunk_invalid"`
 	IsDeleted                     bool      `json:"is_deleted"`
 	Source                        string    `json:"source"`
 	SourceSessionID               string    `json:"source_session_id"`
@@ -33,6 +35,7 @@ type ListEvalSetItemsResponse struct {
 	Total    int64                 `json:"total"`
 	Page     int                   `json:"page"`
 	PageSize int                   `json:"page_size"`
+	HasMore  bool                  `json:"has_more,omitempty"`
 }
 
 type CreateEvalSetItemRequest struct {

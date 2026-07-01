@@ -113,6 +113,62 @@ func GetLatestSession(ctx context.Context, db *gorm.DB, conversationID string) (
 	return &s, nil
 }
 
+// healStaleActiveSession repairs a session that is stuck in "active" state after a crash.
+// A step is considered orphaned (and safe to mark interrupted) only when its backing
+// sub_agent_task is already in a terminal state (succeeded/failed/interrupted/canceled) while
+// the plugin_session_step still shows "running". This avoids incorrectly interrupting steps
+// that are genuinely still executing.
+//
+// If all orphaned running steps are resolved and no real running steps remain, the session
+// is flipped from "active" to "waiting".
+//
+// A grace period (staleThreshold) is applied to the session's updated_at to avoid touching
+// sessions that just started.
+func healStaleActiveSession(ctx context.Context, db *gorm.DB, s *orm.PluginSession) {
+	const staleThreshold = 2 * time.Minute
+	if time.Since(s.UpdatedAt) < staleThreshold {
+		return
+	}
+
+	now := time.Now().UTC()
+
+	// Fix orphaned running steps: plugin_session_step is "running" but the backing
+	// sub_agent_task has already reached a terminal state. Sync the step status to
+	// match the task status exactly (succeeded/failed/interrupted/canceled).
+	result := db.WithContext(ctx).Exec(`
+		UPDATE plugin_session_steps pss
+		SET status = sat.status, updated_at = ?
+		FROM sub_agent_tasks sat
+		WHERE pss.session_id = ?
+		  AND pss.task_id = sat.id
+		  AND pss.status = 'running'
+		  AND sat.status IN ('succeeded', 'failed', 'interrupted', 'canceled')
+		`, now, s.ID)
+	orphansFixed := result.RowsAffected
+
+	// Count genuinely running steps remaining after the fix.
+	var realRunning int64
+	db.WithContext(ctx).Model(&orm.PluginSessionStep{}).
+		Where("session_id = ? AND status = ?", s.ID, StepStatusRunning).
+		Count(&realRunning)
+
+	if realRunning > 0 {
+		// Some steps are still backed by a genuinely running task — don't touch the session.
+		if orphansFixed > 0 {
+			fmt.Printf("[plugin] healStaleActiveSession: session %s fixed %d orphan step(s), %d still running\n",
+				s.ID, orphansFixed, realRunning)
+		}
+		return
+	}
+
+	// No genuinely running steps → flip session to waiting.
+	db.WithContext(ctx).Model(s).
+		Updates(map[string]any{"status": SessionStatusWaiting, "updated_at": now})
+	s.Status = SessionStatusWaiting
+	fmt.Printf("[plugin] healStaleActiveSession: session %s repaired active→waiting (orphans=%d)\n",
+		s.ID, orphansFixed)
+}
+
 // GetSession loads a session by ID.
 func GetSession(ctx context.Context, db *gorm.DB, sessionID string) (*orm.PluginSession, error) {
 	var s orm.PluginSession
@@ -174,13 +230,19 @@ func CreateSessionStep(ctx context.Context, db *gorm.DB, sessionID, stepID, task
 }
 
 // UpdateStepStatus mirrors sub_agent_tasks.status changes into plugin_session_steps.
+// Terminal states (succeeded, interrupted) are never downgraded: once a step has been
+// interrupted by the user, a late EOF from the SubAgent stream must not reset it to failed.
 func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) error {
-	return db.WithContext(ctx).Model(&orm.PluginSessionStep{}).
-		Where("task_id = ?", taskID).
-		Updates(map[string]any{
-			"status":     status,
-			"updated_at": time.Now().UTC(),
-		}).Error
+	q := db.WithContext(ctx).Model(&orm.PluginSessionStep{}).
+		Where("task_id = ?", taskID)
+	if status == StepStatusFailed {
+		// Only write failed if the step is not already in a terminal state.
+		q = q.Where("status NOT IN ?", []string{StepStatusSucceeded, StepStatusInterrupted})
+	}
+	return q.Updates(map[string]any{
+		"status":     status,
+		"updated_at": time.Now().UTC(),
+	}).Error
 }
 
 // GetLatestStep returns the most recent execution instance of step_id within a session.
@@ -224,6 +286,17 @@ func ListSteps(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.Plugin
 	if err := db.WithContext(ctx).
 		Where("session_id = ?", sessionID).
 		Order("created_at ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// ListStepIntents returns all step-level intent rows for a session.
+func ListStepIntents(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.PluginStepIntent, error) {
+	var rows []orm.PluginStepIntent
+	if err := db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}

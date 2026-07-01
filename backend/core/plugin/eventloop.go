@@ -330,7 +330,7 @@ func OnSubAgentDone(
 			Where("session_id = ? AND status = ?", pctx.SessionID, StepStatusRunning).
 			Count(&runningCount)
 		if runningCount > 0 {
-			onSSE("step_parallel_done", map[string]any{
+			onSSE("step_partial_done", map[string]any{
 				"session_id": pctx.SessionID,
 				"step_id":    pctx.StepID,
 			})
@@ -346,6 +346,17 @@ func OnSubAgentDone(
 	}
 
 	if mode == "auto" {
+		// Interrupted steps should not be auto-advanced: surface the interruption to the user
+		// so they can explicitly choose to continue (checkpoint resume) or retry.
+		if status == subagent.StatusInterrupted {
+			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+			onSSE("step_waiting", map[string]any{
+				"session_id": pctx.SessionID,
+				"step_id":    pctx.StepID,
+				"reason":     "interrupted",
+			})
+			return
+		}
 		// Use a detached context: ctx originates from the SubAgent Run loop and is
 		// cancelled as soon as Run returns, before this goroutine loads LLM config.
 		go advanceAutoMode(context.Background(), db, stateStore, summary, onSSE, pctx)

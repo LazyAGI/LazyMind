@@ -424,7 +424,8 @@ export const SourceState = {
     New: 'NEW',
     Modified: 'MODIFIED',
     Deleted: 'DELETED',
-    Unchanged: 'UNCHANGED'
+    Unchanged: 'UNCHANGED',
+    OutOfScope: 'OUT_OF_SCOPE'
 } as const;
 
 export type SourceState = typeof SourceState[keyof typeof SourceState];
@@ -3055,6 +3056,4 @@ export class ScanApi extends BaseAPI {
         return ScanApiFp(this.configuration).validateBindingTarget(requestParameters.validateBindingTargetRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
-
-
 

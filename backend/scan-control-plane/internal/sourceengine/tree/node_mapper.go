@@ -429,6 +429,8 @@ func updateTypeForState(sourceState string) string {
 		return "changed"
 	case "DELETED":
 		return "deleted"
+	case "OUT_OF_SCOPE":
+		return "cleanup"
 	default:
 		return "unchanged"
 	}
@@ -442,6 +444,8 @@ func updateDescForType(updateType string) string {
 		return "内容变化待重解析"
 	case "deleted":
 		return "源端删除待清理"
+	case "cleanup":
+		return "待清理"
 	default:
 		return "当前文件已是最新"
 	}

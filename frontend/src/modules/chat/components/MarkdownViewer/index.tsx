@@ -28,6 +28,11 @@ import { getLanguageFromClassName, highlightCode } from "./syntaxHighlight";
 
 const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
 const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
+// Matches bare URLs that are NOT already inside Markdown link syntax [...](...)
+// Captures trailing fullwidth/CJK punctuation so it can be excluded from the URL.
+const BARE_URL_PATTERN = /(?<!\(|\[)(https?:\/\/[^\s<>[\]"'`（）。，、；：！？…—]+)/g;
+// Fullwidth and CJK punctuation that should never be treated as part of a URL.
+const TRAILING_FULLWIDTH_PUNCT = /[（）。，、；：！？…—\u3000-\u303F\uFF00-\uFFEF]+$/;
 
 const markdownRemarkPlugins = [[remarkGfm, { singleTilde: false }], remarkMath];
 const markdownRehypePlugins = [
@@ -59,6 +64,20 @@ function normalizeBoldBareUrls(content: string) {
     }
     const href = url.startsWith("www.") ? `https://${url}` : url;
     return `**[${url}](${href})**`;
+  });
+}
+
+/**
+ * Wraps bare URLs in Markdown link syntax and strips trailing fullwidth/CJK
+ * punctuation (e.g. Chinese parentheses, periods) that should not be part of
+ * the URL but would otherwise be picked up by remark-gfm's autolink detection.
+ */
+function normalizeBareUrls(content: string) {
+  return content.replace(BARE_URL_PATTERN, (url) => {
+    const cleanUrl = url.replace(TRAILING_FULLWIDTH_PUNCT, "");
+    if (!cleanUrl) return url;
+    const suffix = url.slice(cleanUrl.length);
+    return `[${cleanUrl}](${cleanUrl})${suffix}`;
   });
 }
 
@@ -230,7 +249,9 @@ const MarkdownViewer = memo((props: any) => {
     IS_STREAMING,
   } = props;
   const normalizedChildren =
-    typeof children === "string" ? normalizeBoldBareUrls(children) : children;
+    typeof children === "string"
+      ? normalizeBoldBareUrls(normalizeBareUrls(children))
+      : children;
 
   const [markSources, setMarkSources] = useState<any[]>([]);
 

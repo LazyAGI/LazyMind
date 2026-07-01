@@ -301,7 +301,7 @@ func openAPISchemas() map[string]any {
 		"BindingStatus":                 enumSchema("ACTIVE", "PAUSED", "DELETING", "ERROR"),
 		"CloudAuthConnectionStatus":     enumSchema("ACTIVE", "EXPIRED", "REVOKED", "ERROR", "PENDING"),
 		"SyncMode":                      enumSchema("manual", "scheduled", "watch"),
-		"SourceState":                   enumSchema("NEW", "MODIFIED", "DELETED", "UNCHANGED"),
+		"SourceState":                   enumSchema("NEW", "MODIFIED", "DELETED", "UNCHANGED", "OUT_OF_SCOPE"),
 		"SyncState":                     enumSchema("IDLE", "SCHEDULED", "PENDING", "RUNNING", "FAILED"),
 		"TaskAction":                    enumSchema("CREATE", "REPARSE", "DELETE"),
 		"ParseTaskStatus":               enumSchema("PENDING", "RUNNING", "SUBMITTED", "SUCCEEDED", "FAILED", "SUPERSEDED"),

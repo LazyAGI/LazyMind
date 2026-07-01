@@ -1,6 +1,10 @@
 import { useEffect, useMemo } from "react";
 import { Alert, Form, Input, Modal, Select } from "antd";
 import { useTranslation } from "react-i18next";
+import {
+  KNOWLEDGE_BASE_NAME_MAX_LENGTH,
+  KNOWLEDGE_BASE_NAME_PATTERN,
+} from "@/modules/knowledge/constants/validation";
 import type {
   DatasetFormValues,
   DatasetListItem,
@@ -109,16 +113,23 @@ export default function DatasetFormModal({
         <Form.Item
           name="name"
           label={t("datasetManagement.fields.datasetName")}
+          extra={t("knowledge.knowledgeNameRule")}
           rules={[
             {
               required: true,
               whitespace: true,
               message: t("datasetManagement.form.validation.nameRequired"),
             },
-            { max: 80, message: t("datasetManagement.form.validation.nameMax") },
+            {
+              pattern: KNOWLEDGE_BASE_NAME_PATTERN,
+              message: t("knowledge.knowledgeNameRule"),
+            },
           ]}
         >
-          <Input placeholder={t("datasetManagement.form.namePlaceholder")} />
+          <Input
+            maxLength={KNOWLEDGE_BASE_NAME_MAX_LENGTH}
+            placeholder={t("knowledge.knowledgeNameRule")}
+          />
         </Form.Item>
 
         <Form.Item

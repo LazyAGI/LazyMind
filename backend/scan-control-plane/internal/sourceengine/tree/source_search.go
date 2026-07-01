@@ -57,7 +57,7 @@ func (e *DBSourceTreeQueryEngine) filterSearchItems(ctx context.Context, source 
 		if err != nil {
 			return nil, err
 		}
-		if treeAllowsSourceObject(policy, item.Object) {
+		if treeAllowsObjectWithState(policy, item) {
 			out = append(out, item)
 		}
 	}

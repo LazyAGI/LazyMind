@@ -162,6 +162,8 @@ export interface PluginSession {
   plugin_id: string;
   status: "active" | "waiting" | "completed";
   current_step_id: string;
+  /** Global intent/constraint for this session, JSON string e.g. {"text":"..."} */
+  intent_context?: string;
   created_at: string;
   updated_at: string;
   slots?: SlotRevision[];
@@ -181,6 +183,8 @@ export interface PluginSessionStep {
   attempt: number;
   task_id: string;
   status: string;
+  /** Step-level intent/constraint, JSON string e.g. {"text":"..."} */
+  intent_context?: string;
   created_at: string;
   updated_at: string;
 }
@@ -296,9 +300,22 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
   slotOrderCache: {},
 
   setSession: (conversationId, session) => {
-    set((state) => ({
-      sessionByConversation: { ...state.sessionByConversation, [conversationId]: session },
-    }));
+    set((state) => {
+      const next: Record<string, any> = {
+        sessionByConversation: { ...state.sessionByConversation, [conversationId]: session },
+      };
+      // If the session is no longer active, clear any stale autoRunning flag synchronously.
+      // This ensures displayStatus is not stuck on 'active' regardless of async timing.
+      if (session && session.status !== 'active') {
+        if (state.autoRunningByConversation[conversationId]) {
+          next.autoRunningByConversation = {
+            ...state.autoRunningByConversation,
+            [conversationId]: false,
+          };
+        }
+      }
+      return next;
+    });
   },
 
   updateSlot: (conversationId, slot) => {
@@ -335,8 +352,9 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     try {
       const res = await PluginSessionApi().getLatestSession(conversationId);
       const session: PluginSession | null = res?.data?.data?.session ?? null;
-      // For completed sessions, load step records so the Panel can render the rollback list.
-      if (session && session.status === 'completed' && session.session_id) {
+      // Load step records for completed and waiting sessions so the Panel can
+      // render the rollback list and step-status badges correctly.
+      if (session && (session.status === 'completed' || session.status === 'waiting') && session.session_id) {
         try {
           const stepsRes = await PluginSessionApi().getSteps(session.session_id);
           const rawSteps = stepsRes?.data?.data?.steps ?? [];

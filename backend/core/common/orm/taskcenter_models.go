@@ -22,6 +22,7 @@ type TaskCenterTask struct {
 	CreatedAt       time.Time       `gorm:"column:created_at;not null"`
 	UpdatedAt       time.Time       `gorm:"column:updated_at;not null"`
 	FinishedAt      *time.Time      `gorm:"column:finished_at"`
+	ArchivedAt      *time.Time      `gorm:"column:archived_at"` // non-null = hidden from task center list
 }
 
 func (TaskCenterTask) TableName() string { return "task_center_tasks" }

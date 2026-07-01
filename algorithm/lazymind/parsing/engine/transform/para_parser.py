@@ -57,7 +57,7 @@ def split_by_char() -> Callable[[str], List[str]]:
 
 
 SENTENCE_CHUNK_OVERLAP = 200
-CHUNKING_REGEX = r'[^。？\?！\n]+[。？\?！\n]?'
+CHUNKING_REGEX = r'[^。？?！!.\n]+[。？?！!.\n]*|[。？?！!.\n]+'
 DEFAULT_PARAGRAPH_SEP = '\n\n\n'
 
 DEFAULT_CHUNK_SIZE = 1024

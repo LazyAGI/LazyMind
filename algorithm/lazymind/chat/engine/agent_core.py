@@ -93,4 +93,10 @@ async def drive_agent(
         yield ('event', item)
 
     # Resolve the future; let the caller decide what to do on exception.
-    yield ('final', helper.future.result())
+    try:
+        result = helper.future.result()
+    except Exception as exc:
+        import lazyllm as _lazyllm
+        _lazyllm.LOG.exception(f'[drive_agent] agent future raised: {type(exc).__name__}: {exc}')
+        raise
+    yield ('final', result)

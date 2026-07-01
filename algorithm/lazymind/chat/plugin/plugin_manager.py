@@ -259,7 +259,9 @@ def _trigger_plugin_step(
         tools=merged_tools,
         resume=False,
     )
-    return f'Step {step_id!r} triggered. Stop here.'
+    step_label = step_config.get('label', '')
+    display_name = f'{step_id} ({step_label})' if step_label else step_id
+    return f'Step {display_name!r} triggered. Stop here.'
 
 
 def _trigger_plugin_end(plugin_id: str) -> str:
@@ -435,8 +437,10 @@ def build_advance_step_and_exit_tool(
         'When the user says "继续" and the step was interrupted (not "重试"):\n'
         '  advance_step_and_exit(step_id=..., runtime_instruction=(\n'
         '    "Previous attempt was interrupted. Check existing artifacts for this step "\n'
-        '    "and only produce missing outputs. Do not regenerate already-saved artifacts."))\n'
-        'When the user says "重试": advance_step_and_exit(step_id=..., rewind=True)\n\n'
+        '    "and only produce missing outputs (resume from checkpoint). "\n'
+        '    "Do not regenerate already-saved artifacts."))\n'
+        'When the user says "重试": advance_step_and_exit(step_id=..., rewind=True)\n'
+        '  (rewind=True discards previous partial artifacts and restarts the step from scratch)\n\n'
         '## Rewind guidance\n\n'
         'If the DriverAgent or user indicates a prior step produced bad output, rewind by\n'
         'passing its step_id. Rewind-eligible steps are listed in the "Rewind" section below.\n\n'
@@ -620,17 +624,26 @@ def build_update_intent_tool() -> Any:
     ) -> str:
         """Record or update an intent/constraint for this plugin session.
 
-        Scope 'session' affects the entire session (global constraint).
-        Scope 'step' affects only the specified step_id.
+        ALWAYS call this tool BEFORE advancing any step when the user expresses
+        a style preference, quality requirement, or execution constraint in their
+        message. Do not skip this even if you are about to call advance_step_and_exit.
 
-        Use this whenever the user expresses a preference or constraint that
-        should guide current and future step executions, e.g.:
-          - "全程保持清淡风格" → scope='session'
-          - "第2步只要竖版图片" → scope='step', step_id='generate_images'
+        Also call this tool when:
+        - The user repeats or emphasizes the same point across multiple turns.
+        - The user pushes back on a result and explains why (e.g. "that's wrong because...",
+          "I didn't mean X, I meant Y") — capture the clarification so future steps honour it.
+
+        Scope 'session' — applies to the entire session (global constraint):
+          e.g. "keep the tone formal throughout", "always use bullet points"
+          → update_intent(scope='session', content='keep the tone formal throughout')
+
+        Scope 'step' — applies to a specific step only:
+          e.g. "make step 2 output shorter", "use a different format for the summary step"
+          → update_intent(scope='step', step_id='<step_id>', content='output should be shorter')
 
         Args:
             scope (str): 'session' for global or 'step' for step-specific constraint.
-            content (str): The intent/constraint description.
+            content (str): The intent/constraint description, in the user's own words.
             step_id (str, optional): Required when scope='step'.
 
         Returns:
@@ -640,101 +653,25 @@ def build_update_intent_tool() -> Any:
         session_id = cfg.get('plugin_session_id', '')
         if not session_id:
             return 'Error: no active plugin session.'
-        try:
-            from lazymind.chat.engine.subagent.db import TaskQueryDB
-            db = TaskQueryDB()
-            if scope == 'session':
-                db.upsert_session_intent(session_id, content)
-            elif scope == 'step':
-                if not step_id:
-                    return 'Error: step_id required for scope="step".'
-                db.upsert_step_intent(session_id, step_id, content)
-            else:
-                return f'Error: unknown scope {scope!r}. Use "session" or "step".'
-            return '约束已更新'
-        except Exception as exc:
-            return f'Error updating intent: {exc}'
+        if scope not in ('session', 'step'):
+            return f'Error: unknown scope {scope!r}. Use "session" or "step".'
+        if scope == 'step' and not step_id:
+            return 'Error: step_id required for scope="step".'
+        # Emit via SSE so Go writes the DB and pushes an intent_updated convEvent
+        # to notify the frontend immediately — avoids the user having to refresh.
+        _write_agent_data('intent_updated', **{
+            'session_id': session_id,
+            'scope': scope,
+            'content': content,
+            'step_id': step_id or '',
+        })
+        return '约束已更新'
 
     return update_intent
 
 
 # ---------------------------------------------------------------------------
 # Schedule management tools (ChatAgent only, always available)
-# ---------------------------------------------------------------------------
-
-def build_schedule_tools() -> List[Any]:
-    """Build create_schedule / list_schedules / cancel_schedule tools for ChatAgent."""
-
-    @handle_tool_errors
-    def create_schedule(
-        cron_expr: str,
-        prompt_template: str,
-        timezone: str = 'Asia/Shanghai',
-        conversation_id: Optional[str] = None,
-    ) -> str:
-        """Create a recurring scheduled task.
-
-        Args:
-            cron_expr: 5-field cron expression, e.g. '0 9 * * 1-5' for 9am weekdays.
-            prompt_template: The query that will be sent to this conversation on each trigger.
-            timezone: IANA timezone name. Defaults to 'Asia/Shanghai'.
-            conversation_id: Bind to a specific conversation. Defaults to the current one.
-        """
-        import httpx
-        from lazymind.config import config as _cfg
-        cfg = _agentic_config()
-        conv_id = conversation_id or cfg.get('conversation_id', '')
-        core_url = str(_cfg['core_api_url']).rstrip('/')
-        payload = {
-            'cron_expr': cron_expr,
-            'prompt_template': prompt_template,
-            'timezone': timezone,
-        }
-        if conv_id:
-            payload['conversation_id'] = conv_id
-        resp = httpx.post(f'{core_url}/schedules', json=payload, timeout=10.0)
-        if resp.status_code not in (200, 201):
-            return f'Failed to create schedule: {resp.text}'
-        data = resp.json()
-        return (
-            f"Schedule created (id={data.get('id')}).\n"
-            f"Next run: {data.get('next_run_at')} | Cron: {cron_expr}"
-        )
-
-    @handle_tool_errors
-    def list_schedules() -> str:
-        """List all active recurring schedules for this user."""
-        import httpx
-        from lazymind.config import config as _cfg
-        core_url = str(_cfg['core_api_url']).rstrip('/')
-        resp = httpx.get(f'{core_url}/schedules', timeout=5.0)
-        if resp.status_code != 200:
-            return f'Could not fetch schedules: {resp.text}'
-        items = resp.json().get('items', [])
-        if not items:
-            return 'No active schedules.'
-        lines = ['## Active schedules']
-        for s in items:
-            lines.append(
-                f"- id={s.get('id')} | cron={s.get('cron_expr')} "
-                f"| next={s.get('next_run_at')} | {s.get('prompt_template', '')[:60]}"
-            )
-        return '\n'.join(lines)
-
-    @handle_tool_errors
-    def cancel_schedule(schedule_id: str) -> str:
-        """Cancel (disable) a recurring schedule by its ID."""
-        import httpx
-        from lazymind.config import config as _cfg
-        core_url = str(_cfg['core_api_url']).rstrip('/')
-        resp = httpx.post(f'{core_url}/schedules/{schedule_id}:cancel', timeout=5.0)
-        if resp.status_code != 200:
-            return f'Failed to cancel schedule {schedule_id!r}: {resp.text}'
-        return f'Schedule {schedule_id!r} has been cancelled.'
-
-    return [create_schedule, list_schedules, cancel_schedule]
-
-
 # ---------------------------------------------------------------------------
 # Read-only query tools (ChatAgent only, active session required)
 # ---------------------------------------------------------------------------
@@ -763,9 +700,32 @@ def build_query_tools() -> List[Any]:
             steps = resp.json().get('data', {}).get('session', {}).get('steps', [])
             if not steps:
                 return 'No steps recorded yet.'
-            lines = ['## Plugin session steps']
+            # Steps arrive ordered by created_at ASC (from ListSteps).
+            # Split into contiguous "runs": a new run starts whenever step_id changes.
+            # Within each run, if the last record is 'succeeded', collapse earlier
+            # non-succeeded records and show only that final success.
+            # Otherwise show every record so ChatAgent sees the full failure history.
+            # Example: [1,2,3, 2(fail),2(int),2(succ), 3,4] → [1,2,3, 2,3,4]
+            runs: list = []   # list of lists, each inner list is one contiguous run
             for s in steps:
-                lines.append(f'- {s.get("step_id")}: {s.get("status")} (attempt {s.get("attempt", 1)})')
+                if runs and runs[-1][-1].get('step_id') == s.get('step_id'):
+                    runs[-1].append(s)
+                else:
+                    runs.append([s])
+            lines = ['## Plugin session steps']
+            for run in runs:
+                latest = run[-1]
+                if latest.get('status') == 'succeeded':
+                    lines.append(
+                        f'- {latest.get("step_id")}: succeeded'
+                        f' (attempt {latest.get("attempt", 1)})'
+                    )
+                else:
+                    for s in run:
+                        lines.append(
+                            f'- {s.get("step_id")}: {s.get("status")}'
+                            f' (attempt {s.get("attempt", 1)})'
+                        )
             return '\n'.join(lines)
         except Exception as exc:
             return f'Error querying steps: {exc}'
@@ -853,7 +813,11 @@ def _build_session_artifact_section(session_id: str) -> str:
 
 
 def _build_chat_agent_task_context(conversation_id: str) -> str:
-    """Build the ## Tasks system-prompt section for ChatAgent."""
+    """Build the ## Tasks block injected before the current user-turn query.
+
+    Returned text is prepended to the current user-turn (not the system prompt)
+    so the LLM always sees a live snapshot and treats earlier history as outdated.
+    """
     conv_id = conversation_id.strip()
     if not conv_id:
         return ''
@@ -1011,7 +975,7 @@ def resolve_plugin_injection(
             plugin_stop_tools.append('ask_user')
             if plugin_tools:
                 scenarios = [
-                    plugin_loader.get_scenario(spec.plugin_id)
+                    plugin_loader.get_plugin_intro(spec.plugin_id)
                     for spec in (plugin_loader._registry or {}).values()
                 ]
                 plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
@@ -1024,7 +988,7 @@ def resolve_plugin_injection(
         plugin_stop_tools.append('ask_user')
         if plugin_tools:
             scenarios = [
-                plugin_loader.get_scenario(spec.plugin_id)
+                plugin_loader.get_plugin_intro(spec.plugin_id)
                 for spec in (plugin_loader._registry or {}).values()
             ]
             plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
@@ -1037,10 +1001,11 @@ def resolve_plugin_injection(
 # ---------------------------------------------------------------------------
 
 def _build_intent_section(session_id: str, step_id: Optional[str] = None) -> str:
-    """Serialize session-level intent/constraints for injection into ChatAgent prompts.
+    """Serialize session-level and step-level intent/constraints for injection into ChatAgent prompts.
 
-    Only global (session-level) constraints are injected here. Step-level constraints
-    are injected directly into SubAgent via runner.py:_build_intent_context_section.
+    Both global (session-level) and all recorded step-level constraints are injected here
+    so ChatAgent has full visibility when deciding whether to call update_intent and which
+    step to advance next.
     """
     if not session_id:
         return ''
@@ -1048,9 +1013,18 @@ def _build_intent_section(session_id: str, step_id: Optional[str] = None) -> str
         from lazymind.chat.engine.subagent.db import TaskQueryDB
         db = TaskQueryDB()
         session_intent = db.get_session_intent(session_id) if hasattr(db, 'get_session_intent') else None
+        step_intents: Dict[str, str] = db.list_step_intents(session_id) if hasattr(db, 'list_step_intents') else {}
+
+        if not session_intent and not step_intents:
+            return ''
+
+        lines = ['## User Intent & Constraints']
+        lines.append('These constraints were recorded from the user and MUST be respected when advancing steps.')
         if session_intent:
-            return f'## 全局约束\n{session_intent}'
-        return ''
+            lines.append(f'Global: {session_intent}')
+        for sid, txt in step_intents.items():
+            lines.append(f'Step "{sid}": {txt}')
+        return '\n'.join(lines)
     except Exception:
         return ''
 
@@ -1096,8 +1070,9 @@ def _build_mode_guidance(
             'can review the result and decide the next action.\n\n'
             'When a step is interrupted and user says "继续": call advance_step_and_exit with '
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
-            'and only produce missing outputs."\n'
-            'When user says "重试": call advance_step_and_exit (no special runtime_instruction).'
+            'and only produce missing outputs (resume from checkpoint)."\n'
+            'When user says "重试": call advance_step_and_exit with rewind=True '
+            '(restarts the interrupted step from scratch, ignoring previous partial artifacts).'
             + terminal_hint
         )
     else:  # auto

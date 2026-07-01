@@ -89,7 +89,10 @@ func threadEventsURL(threadID string) string {
 }
 
 func threadStepEventsURL(threadID, stepID string) string {
-	return threadEventsURL(threadID)
+	return common.JoinURL(
+		agentServiceEndpoint(),
+		"/v1/evo/threads/"+url.PathEscape(threadID)+"/events/"+url.PathEscape(stepID),
+	)
 }
 
 func threadArtifactURL(threadID, artifactID string) string {
@@ -659,6 +662,14 @@ func updateThreadStepFromEvent(db *gorm.DB, threadID, stepID string, event fetch
 	}
 	if hasOrder {
 		updates["order_index"] = orderIndex
+	}
+	if nextStepRunID := extractStringByExactKeys(payload, "next_step_run_id"); nextStepRunID != "" {
+		step.NextStepRunID = nextStepRunID
+		updates["next_step_run_id"] = gorm.Expr(
+			"CASE WHEN agent_thread_steps.next_step_run_id = ? THEN ? ELSE agent_thread_steps.next_step_run_id END",
+			"",
+			nextStepRunID,
+		)
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		if active {

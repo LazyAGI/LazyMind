@@ -6,6 +6,7 @@ import (
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/filefilter"
+	statepkg "github.com/lazymind/scan_control_plane/internal/sourceengine/state"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
@@ -353,15 +354,29 @@ func objectPage(items []ObjectWithState, nextCursor string, hasMore bool, listCo
 func filterObjectItems(policy filefilter.Policy, items []ObjectWithState) []ObjectWithState {
 	out := items[:0]
 	for _, item := range items {
-		if treeAllowsSourceObject(policy, item.Object) {
+		if treeAllowsObjectWithState(policy, item) {
 			out = append(out, item)
 		}
 	}
 	return out
 }
 
+func treeAllowsObjectWithState(policy filefilter.Policy, item ObjectWithState) bool {
+	if treeAllowsSourceObject(policy, item.Object) {
+		return true
+	}
+	return treeAllowsUnsupportedDocumentState(item.State)
+}
+
 func treeAllowsSourceObject(policy filefilter.Policy, object store.SourceObject) bool {
 	return object.IsContainer || object.HasChildren || filefilter.AllowsSourceObject(policy, object)
+}
+
+func treeAllowsUnsupportedDocumentState(state *store.DocumentState) bool {
+	if state == nil || state.PendingAction != statepkg.PendingActionDelete {
+		return false
+	}
+	return state.SourceState == statepkg.SourceStateDeleted || state.SourceState == statepkg.SourceStateOutOfScope
 }
 
 func treeAllowsNormalized(policy filefilter.Policy, object connector.NormalizedSourceObject) bool {

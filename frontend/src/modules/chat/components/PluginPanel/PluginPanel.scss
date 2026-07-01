@@ -73,6 +73,137 @@
     &--waiting   { background: #fff4e0; color: #d97706; }
   }
 
+  // Intent button + popover
+  &__intent-btn-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  &__intent-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    background: transparent;
+    color: #6b7280;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+
+    &:hover {
+      background: #f3f4f6;
+      color: #374151;
+      border-color: #9ca3af;
+    }
+  }
+
+  &__intent-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 280px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    padding: 14px 16px;
+    z-index: 200;
+  }
+
+  &__intent-popover-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a1d23;
+    margin-bottom: 10px;
+  }
+
+  &__intent-section {
+    margin-bottom: 12px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  &__intent-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+  }
+
+  &__intent-section-text {
+    font-size: 12px;
+    color: #374151;
+    line-height: 1.5;
+  }
+
+  &__intent-step-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 6px;
+  }
+
+  &__intent-step-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #374151;
+  }
+
+  &__intent-step-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #e0edff;
+    color: #2563eb;
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  &__intent-step-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__intent-step-arrow {
+    color: #9ca3af;
+    flex-shrink: 0;
+  }
+
+  &__intent-step-tab {
+    color: #2563eb;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  &__intent-step-note {
+    font-size: 11px;
+    color: #9ca3af;
+    margin-top: 4px;
+  }
+
+  &__intent-empty {
+    font-size: 12px;
+    color: #9ca3af;
+    text-align: center;
+    padding: 6px 0 2px;
+  }
+
   &__collapse-btn {
     display: flex;
     align-items: center;
@@ -187,6 +318,20 @@
     .plugin-panel__tab-label {
       color: #6b7280;
     }
+  }
+
+  &__step-status {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-left: 4px;
+    flex-shrink: 0;
+
+    &--running     { background: #2563eb; }
+    &--interrupted { background: #f59e0b; }
+    &--failed      { background: #ef4444; }
+    &--succeeded   { background: #10b981; }
   }
 
   // Horizontal scrollable image card list
@@ -330,6 +475,14 @@
       border-color: #d1d5db;
 
       &:hover:not(:disabled) { background: #f9fafb; border-color: #9ca3af; }
+    }
+
+    &--danger {
+      background: #ef4444;
+      color: #fff;
+      border-color: #ef4444;
+
+      &:hover:not(:disabled) { background: #dc2626; border-color: #dc2626; }
     }
 
     &:disabled {
