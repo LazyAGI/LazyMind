@@ -1,5 +1,5 @@
 import { Avatar, Button, Divider, Flex, message, Spin, Tooltip } from "antd";
-import { trim } from "lodash";
+import { trim, debounce } from "lodash";
 import { useEffect, useReducer, useRef } from "react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -205,6 +205,13 @@ const AssistantMessage = (props: any) => {
   } = props;
   const citeButtonRef = useRef<HTMLButtonElement | null>(null);
   const citeSelectionTextRef = useRef("");
+  // Debounced backend persistence for ask-card answers. Created once per component
+  // instance with useRef so it is stable across re-renders.
+  const persistAskAnswersRef = useRef(
+    debounce((sid: string, hid: string, answers: Record<number, any>) => {
+      ChatServiceApi().conversationServiceSaveAskAnswers(sid, hid, answers).catch(() => {});
+    }, 600),
+  );
   const [feedbackState, dispatch] = useReducer(feedbackReducer, {
     showModal: false,
     isSubmitting: false,
@@ -871,22 +878,21 @@ const AssistantMessage = (props: any) => {
       const isAnswered = !!item.ask_answered;
       return (
         <AskCard
+          key={askPending.ask_id}
           askPending={askPending}
           disabled={isAnswered}
           savedAnswers={item.ask_saved_answers}
           onAnswerChange={(idx, ans) => {
             const currentAnswers = { ...(item.ask_saved_answers || {}), [idx]: ans };
-            // Update in-memory message so answers survive session switches.
+            // Update in-memory message immediately so answers survive session switches.
             updateMessage({ ...item, ask_saved_answers: currentAnswers });
-            // Persist to backend so answers survive page reload.
-            if (!sessionId || !item.history_id) return;
-            import('@/modules/chat/utils/request').then(({ ChatServiceApi }) => {
-              ChatServiceApi().conversationServiceSaveAskAnswers(
-                sessionId, item.history_id!, currentAnswers,
-              ).catch(() => {});
-            });
+            // Debounced write to backend so answers survive page reload.
+            if (sessionId && item.history_id) {
+              persistAskAnswersRef.current(sessionId, item.history_id, currentAnswers);
+            }
           }}
           onSubmit={(formattedText) => {
+            persistAskAnswersRef.current.cancel();
             // Mark the card as answered in memory so it shows as disabled immediately.
             updateMessage({ ...item, ask_answered: true, ask_saved_answers: undefined });
             // sendMessage prop signature is (text: string, clearInput?: boolean)

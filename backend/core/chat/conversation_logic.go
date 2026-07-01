@@ -1687,6 +1687,10 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
 	}
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
 	var body struct {
 		HistoryID string         `json:"history_id"`
 		Answers   map[string]any `json:"answers"`
@@ -1702,6 +1706,13 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 
 	var h orm.ChatHistory
 	if err := db.WithContext(r.Context()).Where("id = ?", body.HistoryID).First(&h).Error; err != nil {
+		common.ReplyErr(w, "history not found", http.StatusNotFound)
+		return
+	}
+	// Verify the conversation owning this history belongs to the requesting user.
+	if err := db.WithContext(r.Context()).
+		Where("id = ? AND create_user_id = ?", h.ConversationID, userID).
+		First(&orm.Conversation{}).Error; err != nil {
 		common.ReplyErr(w, "history not found", http.StatusNotFound)
 		return
 	}

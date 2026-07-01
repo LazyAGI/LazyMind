@@ -345,7 +345,7 @@ export default function AskCard({
                   onChange={(e) =>
                     updateAnswer(currentIndex, {
                       type: 'multiple',
-                      value: (currentAns as any).value,
+                      value: currentAns.type === 'multiple' ? currentAns.value : [],
                       otherText: e.target.value,
                     })
                   }

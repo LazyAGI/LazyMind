@@ -54,6 +54,13 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if q_type == 'boolean':
             choices = list(_BOOLEAN_CHOICES)
         elif q_type in ('single', 'multiple'):
+            # Clean and validate each choice; discard blank entries.
+            choices = [str(c).strip() for c in choices if str(c).strip()]
+            if not choices:
+                raise ValueError(
+                    f'Question {i} of type {q_type!r} requires at least one non-empty'
+                    ' choice.'
+                )
             if _OTHER_OPTION not in choices:
                 choices.append(_OTHER_OPTION)
         else:  # text
