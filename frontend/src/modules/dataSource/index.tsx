@@ -3974,6 +3974,27 @@ export default function DataSourceManagement() {
                   </Tooltip>
                 </div>
               ) : null}
+              <button
+                type="button"
+                className="data-source-provider-card"
+                onClick={() => navigate("/data-sources/database-connections")}
+              >
+                <span className="data-source-provider-logo data-source-icon-database">
+                  <DatabaseOutlined />
+                </span>
+                <span className="data-source-provider-card-copy">
+                  <span className="data-source-provider-title-row">
+                    <span className="data-source-provider-name">外部数据库</span>
+                    <Tag color="processing">只读查询</Tag>
+                  </span>
+                  <span className="data-source-provider-desc">
+                    管理 MySQL 和 PostgreSQL 连接，用于聊天中的外部数据查询。
+                  </span>
+                </span>
+                <span className="data-source-provider-card-arrow" aria-hidden="true">
+                  <ArrowRightOutlined />
+                </span>
+              </button>
               {providerAuthOptions.map((item) => {
                 const isFeishu = item.type === "feishu";
                 const isAuthValid = isFeishu ? isFeishuAuthValid : isNotionAuthValid;

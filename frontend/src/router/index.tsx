@@ -19,6 +19,7 @@ import UserManagement from "@/modules/admin/pages/user";
 import GroupManagement from "@/modules/admin/pages/group";
 import GroupDetail from "@/modules/admin/pages/group/detail.tsx";
 import DataSourceManagement from "@/modules/dataSource";
+import DatabaseConnectionsPage from "@/modules/dataSource/database";
 import DataSourceDetail from "@/modules/dataSource/detail";
 import DataSourceFeishuCallback from "@/modules/dataSource/common/feishuCallback";
 import FeishuAccountPage from "@/modules/dataSource/feishuAccounts";
@@ -91,6 +92,7 @@ export default function AppRouter() {
           <Route path="data-sources/providers/feishu" element={<FeishuAccountPage />} />
           <Route path="data-sources/providers/notion" element={<DataSourceManagement />} />
           <Route path="data-sources/providers/sciverse" element={<Navigate to="/model-providers/tools" replace />} />
+          <Route path="data-sources/database-connections" element={<DatabaseConnectionsPage />} />
           <Route path="data-sources/:id" element={<DataSourceDetail />} />
           <Route path="dataset-management" element={<DatasetListPage />} />
           <Route path="dataset-management/:datasetId" element={<DatasetDetailPage />} />
