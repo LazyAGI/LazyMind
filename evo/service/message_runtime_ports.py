@@ -36,7 +36,8 @@ class EvoMessageRuntimePorts:
     def continue_flow(self, thread_id: str, context: MessageCommandContext) -> dict[str, Any]:
         command_id = _message_command_id(context, 'continue_flow')
         if self.background_submitter is not None:
-            return self.background_submitter(thread_id, command_id, 'continue', lambda: self._continue_flow(thread_id, command_id, context))
+            return self.background_submitter(thread_id, command_id, 'continue',
+                                             lambda: self._continue_flow(thread_id, command_id, context))
         return self._continue_flow(thread_id, command_id, context)
 
     def pause_flow(self, thread_id: str, context: MessageCommandContext) -> dict[str, Any]:
@@ -48,20 +49,25 @@ class EvoMessageRuntimePorts:
     def cancel_flow(self, thread_id: str, context: MessageCommandContext) -> dict[str, Any]:
         request = _message_command_request(context, 'cancel_flow', RunControlIntent('cancel'), advance_until_idle=False)
         if self.sync_runner is not None:
-            return self.sync_runner(thread_id, 'cancel', lambda: self._cancel_flow(thread_id, request.command_id, context))
+            return self.sync_runner(thread_id, 'cancel',
+                                    lambda: self._cancel_flow(thread_id, request.command_id, context))
         return self._cancel_flow(thread_id, request.command_id, context)
 
     def retry_failed(self, thread_id: str, context: MessageCommandContext) -> dict[str, Any]:
         request = _message_command_request(context, 'retry_failed', RetryFailedIntent())
         if self.background_submitter is not None:
-            return self.background_submitter(thread_id, request.command_id, 'retry', lambda: self._retry_failed(thread_id, request.command_id, context))
+            return self.background_submitter(thread_id, request.command_id, 'retry',
+                                             lambda: self._retry_failed(thread_id, request.command_id, context))
         return self._retry_failed(thread_id, request.command_id, context)
 
     def rerun_case(self, thread_id: str, case_id: str, context: MessageCommandContext) -> dict[str, Any]:
         artifact = ArtifactKey('eval.rag_answer', case_id)
-        request = _message_command_request(context, 'rerun_case', MaterializeIntent((artifact,), include_downstream=True))
+        request = _message_command_request(context, 'rerun_case', MaterializeIntent((artifact,),
+                                           include_downstream=True))
         if self.background_submitter is not None:
-            return self.background_submitter(thread_id, request.command_id, 'rerun_case', lambda: self._rerun_case(thread_id, request.command_id, artifact, case_id, context))
+            return self.background_submitter(thread_id, request.command_id, 'rerun_case',
+                                             lambda: self._rerun_case(thread_id, request.command_id,
+                                                                      artifact, case_id, context))
         return self._rerun_case(thread_id, request.command_id, artifact, case_id, context)
 
     def read_report_section(
@@ -192,7 +198,11 @@ class EvoMessageRuntimePorts:
 
     def _continue_flow(self, thread_id: str, command_id: str, context: MessageCommandContext) -> dict[str, Any]:
         state = self.flow_getter(thread_id).continue_flow(command_id=command_id, run_id=context.run_id)
-        return {'status': state.gate_status, 'current_step': state.current_step, 'completed_steps': list(state.completed_steps)}
+        return {
+            'status': state.gate_status,
+            'current_step': state.current_step,
+            'completed_steps': list(state.completed_steps),
+        }
 
     def _pause_flow(self, thread_id: str, command_id: str, context: MessageCommandContext) -> dict[str, Any]:
         state = self.flow_getter(thread_id).pause_flow(command_id=command_id, run_id=context.run_id)

@@ -141,7 +141,10 @@ class MessageIntentService:
         )
         return self.handle_typed_intervention(
             thread_id,
-            {'kind': 'approval', 'action': action, 'approval_token': approval_token, '_frame': frame.model_dump(mode='json')},
+            {
+                'kind': 'approval', 'action': action, 'approval_token': approval_token,
+                '_frame': frame.model_dump(mode='json')
+            },
             command_id=command_id,
         )
 
@@ -221,10 +224,13 @@ class MessageIntentService:
                 self.store.clear_blocked_intent(lease)
                 return last_result or self._assistant(lease, turn_id, message_id, '没有需要处理的新操作。')
             if plan.status == 'clarification':
-                self._set_blocked_intent(lease, next_text or prior_agenda, None if plan.current is None else plan.current, plan.clarification)
+                self._set_blocked_intent(lease, next_text or prior_agenda,
+                                         None if plan.current is None else plan.current,
+                                         plan.clarification,
+                                         )
                 return self._clarify(lease, turn_id, message_id, plan.clarification)
             if plan.current is None:
-                self._set_blocked_intent(lease, next_text or prior_agenda, None, 'planner did not provide current intent')
+                self._set_blocked_intent(lease, next_text or prior_agenda, None, 'planner did not provide this intent')
                 return self._clarify(lease, turn_id, message_id, '我没能可靠解析这条消息要执行的 evo 操作，请换个更明确的说法。')
 
             last_result = self._handle_frame(
@@ -361,13 +367,25 @@ class MessageIntentService:
                 return self._clarify(lease, turn_id, message_id, '请指定要读取的 case。')
             return self._read_case(lease, turn_id, message_id, intent)
         if kind == 'continue_flow':
-            return self._command_response(lease, turn_id, message_id, kind, self.commands.continue_flow(lease.thread_id, context))
+            return self._command_response(
+                lease, turn_id, message_id, kind,
+                self.commands.continue_flow(lease.thread_id, context)
+            )
         if kind == 'pause_flow':
-            return self._command_response(lease, turn_id, message_id, kind, self.commands.pause_flow(lease.thread_id, context))
+            return self._command_response(
+                lease, turn_id, message_id, kind,
+                self.commands.pause_flow(lease.thread_id, context)
+            )
         if kind == 'cancel_flow':
-            return self._command_response(lease, turn_id, message_id, kind, self.commands.cancel_flow(lease.thread_id, context))
+            return self._command_response(
+                lease, turn_id, message_id, kind,
+                self.commands.cancel_flow(lease.thread_id, context)
+            )
         if kind == 'retry_failed':
-            return self._command_response(lease, turn_id, message_id, kind, self.commands.retry_failed(lease.thread_id, context))
+            return self._command_response(
+                lease, turn_id, message_id, kind,
+                self.commands.retry_failed(lease.thread_id, context)
+            )
         if kind == 'rerun_case':
             return self._command_response(
                 lease,
@@ -481,7 +499,10 @@ class MessageIntentService:
             if approval.status == 'resolving':
                 return self._clarify(lease, turn_id, message_id, '该待确认操作已经开始执行，无法取消。')
             status = 'rejected' if kind == 'reject_pending' else 'cancelled'
-            self.store.resolve_approval(lease, approval.approval_token, status=status, event_payload={}, turn_id=turn_id, message_id=message_id)
+            self.store.resolve_approval(
+                lease, approval.approval_token, status=status, event_payload={},
+                turn_id=turn_id, message_id=message_id
+            )
             return self._assistant(lease, turn_id, message_id, '已取消待确认操作。')
         with self._lease_keepalive(lease):
             if approval.status == 'active':
@@ -540,7 +561,13 @@ class MessageIntentService:
         )
         return self._command_response(lease, turn_id, message_id, 'approve_pending', result)
 
-    def _read_report(self, lease: MessageLease, turn_id: str, message_id: str, intent: ResolvedIntent) -> MessageHandleResult:
+    def _read_report(
+        self,
+        lease: MessageLease,
+        turn_id: str,
+        message_id: str,
+        intent: ResolvedIntent
+    ) -> MessageHandleResult:
         args = intent.raw_args
         payload = dict(self.commands.read_report_section(
             lease.thread_id,
@@ -564,7 +591,13 @@ class MessageIntentService:
             final=False,
         )
 
-    def _read_case(self, lease: MessageLease, turn_id: str, message_id: str, intent: ResolvedIntent) -> MessageHandleResult:
+    def _read_case(
+        self,
+        lease: MessageLease,
+        turn_id: str,
+        message_id: str,
+        intent: ResolvedIntent
+    ) -> MessageHandleResult:
         args = intent.raw_args
         payload = dict(self.commands.read_case_result(
             lease.thread_id,
@@ -596,7 +629,13 @@ class MessageIntentService:
         kind: str,
         payload: Mapping[str, Any],
     ) -> MessageHandleResult:
-        event = self.store.append_event(lease, 'command_applied', {'kind': kind, **dict(payload)}, turn_id=turn_id, message_id=message_id)
+        event = self.store.append_event(
+            lease,
+            'command_applied',
+            {'kind': kind, **dict(payload)},
+            turn_id=turn_id,
+            message_id=message_id,
+        )
         text = self._synthesize_response(
             lease.thread_id,
             turn_id,
@@ -614,7 +653,10 @@ class MessageIntentService:
         else:
             status = 'done'
         terminal = self.store.append_event(lease, 'done', {'status': status}, turn_id=turn_id, message_id=message_id)
-        return MessageHandleResult(status, lease.thread_id, turn_id, message_id, text, max(event.seq, assistant.seq, terminal.seq))
+        return MessageHandleResult(
+            status, lease.thread_id, turn_id, message_id, text,
+            max(event.seq, assistant.seq, terminal.seq)
+        )
 
     def _assistant_from_tool_result(
         self,
@@ -631,7 +673,10 @@ class MessageIntentService:
             lease,
             turn_id,
             message_id,
-            self._synthesize_response(lease.thread_id, turn_id, message_id, kind=kind, tool_result=tool_result, fallback=fallback),
+            self._synthesize_response(
+                lease.thread_id, turn_id, message_id,
+                kind=kind, tool_result=tool_result, fallback=fallback
+            ),
             final=final,
         )
 
@@ -669,12 +714,31 @@ class MessageIntentService:
         return MessageHandleResult('done', lease.thread_id, turn_id, message_id, content, event.seq)
 
     def _clarify(self, lease: MessageLease, turn_id: str, message_id: str, content: str) -> MessageHandleResult:
-        event = self.store.append_event(lease, 'clarification_required', {'content': content}, turn_id=turn_id, message_id=message_id)
+        event = self.store.append_event(
+            lease,
+            'clarification_required',
+            {'content': content},
+            turn_id=turn_id,
+            message_id=message_id
+        )
         assistant = self._assistant_event(lease, turn_id, message_id, content)
-        return MessageHandleResult('clarification', lease.thread_id, turn_id, message_id, content, max(event.seq, assistant.seq))
+        return MessageHandleResult(
+            'clarification',
+            lease.thread_id,
+            turn_id,
+            message_id,
+            content,
+            max(event.seq, assistant.seq),
+        )
 
     def _assistant_event(self, lease: MessageLease, turn_id: str, message_id: str, content: str):
-        return self.store.append_event(lease, 'assistant_response', {'content': content}, turn_id=turn_id, message_id=message_id)
+        return self.store.append_event(
+            lease,
+            'assistant_response',
+            {'content': content},
+            turn_id=turn_id,
+            message_id=message_id,
+        )
 
     def _active_approval(self, lease: MessageLease, turn_id: str = '', message_id: str = '') -> PendingApproval | None:
         approval = self.store.active_approval(lease.thread_id)
@@ -720,7 +784,11 @@ class MessageIntentService:
         })
 
     def _selected_cases(self, thread_id: str) -> tuple[str, ...]:
-        return tuple(str(item) for item in self.store.working_set(thread_id).get('selected_cases') or () if str(item).strip())
+        return tuple(
+            str(item)
+            for item in self.store.working_set(thread_id).get('selected_cases') or ()
+            if str(item).strip()
+        )
 
     def _resolve_case_ref(self, case_ref: str) -> str:
         text = str(case_ref or '').strip()
@@ -765,7 +833,10 @@ class MessageIntentService:
 
     @staticmethod
     def _event_payload(event) -> dict[str, Any]:
-        return {'id': str(event.seq), 'event': event.event_type, 'data': {'seq': event.seq, 'type': event.event_type, **event.payload}}
+        return {
+            'id': str(event.seq), 'event': event.event_type,
+            'data': {'seq': event.seq, 'type': event.event_type, **event.payload},
+        }
 
 
 def _response_prompt(thread_id: str, turn_id: str, message_id: str, kind: str, tool_result: Mapping[str, Any]) -> str:
@@ -775,7 +846,8 @@ def _response_prompt(thread_id: str, turn_id: str, message_id: str, kind: str, t
         'Write concise Chinese for the user. Do not output raw JSON. '
         'Use only the tool result; do not invent facts. '
         'A flow stage_gate checkpoint is flow control, not an approval; do not call checkpoint_id an approval token. '
-        'For stage_gate status, say the flow is waiting for confirmation to continue; do not expose internal checkpoint_id unless asked. '
+        'For stage_gate status, say the flow is waiting for confirmation to continue; '
+        'do not expose internal checkpoint_id unless asked. '
         'For pending approvals, clearly mention the approval token and exact previewed change.\n\n'
         f'Thread id: {thread_id}\nTurn id: {turn_id}\nMessage id: {message_id}\nOperation: {kind}\n'
         f'Tool result JSON:\n{canonical_json(normalize_json_value(dict(tool_result), allow_tuple=True))}'

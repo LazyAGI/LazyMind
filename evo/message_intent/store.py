@@ -97,7 +97,6 @@ class MessageSessionStore:
     def close(self) -> None:
         self._connection.close()
 
-
     @contextmanager
     def lease(self, thread_id: str, *, owner_id: str | None = None) -> Iterator[MessageLease]:
         lease = self.claim_lease(thread_id, owner_id=owner_id)
@@ -426,7 +425,9 @@ class MessageSessionStore:
         with self._transaction() as conn:
             self._require_lease(conn, lease)
             existing = conn.execute(
-                "SELECT approval_token FROM pending_approval WHERE thread_id = ? AND status IN ('active', 'resolving') LIMIT 1",
+                'SELECT approval_token FROM pending_approval '
+                "WHERE thread_id = ? AND status IN ('active', 'resolving') "
+                'LIMIT 1',
                 (lease.thread_id,),
             ).fetchone()
             if existing is not None and not supersede_existing:

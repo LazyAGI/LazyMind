@@ -1494,6 +1494,7 @@ def _case_details_from_eval_rows(rows: list[dict], existing: Any) -> list[dict]:
 
 def _case_details_from_abtest_deltas(case_deltas: list[dict], existing: Any) -> list[dict]:
     trace_fields = ('trace_id', 'baseline_trace_id', 'candidate_trace_id')
+
     def case_id(row: dict) -> str:
         return str(row.get('case_id') or row.get('case_key') or row.get('caseId') or row.get('id') or '')
 

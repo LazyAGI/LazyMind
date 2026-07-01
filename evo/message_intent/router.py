@@ -21,7 +21,10 @@ READ_ONLY_KINDS = frozenset({
     'read_report_section',
     'explain_current_gate',
 })
-MUTATING_KINDS = frozenset({'continue_flow', 'pause_flow', 'cancel_flow', 'retry_failed', 'rerun_case', 'patch_artifact'})
+MUTATING_KINDS = frozenset({
+    'continue_flow', 'pause_flow', 'cancel_flow',
+    'retry_failed', 'rerun_case', 'patch_artifact'
+})
 PENDING_RESOLUTION_KINDS = frozenset({'approve_pending', 'reject_pending', 'cancel_pending'})
 UNSUPPORTED_RUNTIME_KINDS = {
     'bounded_continue_flow': '当前 evo runtime 还不支持带步骤边界的继续执行；为避免误执行，未执行任何流程控制。',
@@ -93,7 +96,11 @@ class MessageIntentRouter:
         if kind in UNSUPPORTED_RUNTIME_KINDS:
             return UNSUPPORTED_RUNTIME_KINDS[kind]
         args = _payload_args(frame.intent)
-        if kind in PENDING_RESOLUTION_KINDS and not has_active_approval and not str(args.get('approval_token') or '').strip():
+        if (
+            kind in PENDING_RESOLUTION_KINDS
+            and not has_active_approval
+            and not str(args.get('approval_token') or '').strip()
+        ):
             return '当前没有可处理的待确认操作。'
         if kind in PENDING_RESOLUTION_KINDS:
             token = str(args.get('approval_token') or '').strip()

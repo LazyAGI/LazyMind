@@ -155,7 +155,8 @@ class AutoAgentStore:
                     ) from exc
                 if current.thread_id != state.thread_id:
                     raise AutoAgentStateError(
-                        f'refusing to overwrite mismatched auto agent state for {state.thread_id}: found {current.thread_id}'
+                        f'refusing to overwrite mismatched auto agent state for {state.thread_id}: '
+                        f'found {current.thread_id}'
                     )
                 if preserve_stopped and not current.running and state.running:
                     state = state.model_copy(update={'running': False, 'stop_reason': current.stop_reason})
