@@ -3,13 +3,41 @@ package source
 import (
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	scheduleengine "github.com/lazymind/scan_control_plane/internal/sourceengine/schedule"
 )
 
+const (
+	maxSourceNameRunes = 100
+	sourceNameRule     = "supports Chinese/English, numbers, -, _, ., up to 100 characters"
+)
+
 func validateSourceName(name string) error {
-	if strings.TrimSpace(name) == "" {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
 		return FieldError("name", "required")
+	}
+	if trimmed != name || utf8.RuneCountInString(trimmed) > maxSourceNameRunes {
+		return FieldError("name", sourceNameRule)
+	}
+	for _, r := range trimmed {
+		if r >= '\u4e00' && r <= '\u9fa5' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == '_' || r == '.' || r == '-' {
+			continue
+		}
+		return FieldError("name", sourceNameRule)
 	}
 	return nil
 }

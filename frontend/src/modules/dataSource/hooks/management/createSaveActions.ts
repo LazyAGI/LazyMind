@@ -16,7 +16,6 @@ import {
 import {
   collectFeishuTargetRefs,
   collectFeishuTargetTypes,
-  collectManualFeishuTargetTypes,
   normalizeCloudTargetRefs,
   normalizeFeishuTargetRefs,
   normalizeFeishuTargetType,
@@ -177,7 +176,6 @@ export function createSaveActions(ctx: ManagementContext) {
     );
     const treeTargetTypeMap = collectFeishuTargetTypes(ctx.feishuTargetTreeData);
     const treeTargetRefMap = collectFeishuTargetRefs(ctx.feishuTargetTreeData);
-    const manualTargetTypeMap = collectManualFeishuTargetTypes(values.target);
     const fallbackTargetTypes = normalizeFeishuTargetTypeRecord(currentFeishuSource?.targetTypes);
     const defaultTargetType =
       normalizeFeishuTargetType(currentFeishuSource?.targetType) ||
@@ -188,7 +186,6 @@ export function createSaveActions(ctx: ManagementContext) {
       return {
         targetRef,
         targetType:
-          manualTargetTypeMap.get(targetRef) ||
           treeTargetTypeMap.get(targetValue) ||
           treeTargetTypeMap.get(targetRef) ||
           fallbackTargetTypes?.[targetRef] ||

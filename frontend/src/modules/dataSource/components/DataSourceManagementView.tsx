@@ -1,4 +1,5 @@
 import { Typography } from "antd";
+import TypedConfirmModal from '@/components/ui/TypedConfirmModal';
 import DataSourceWizardModal from "./DataSourceWizardModal";
 import DataSourceAssetTable from "./management/DataSourceAssetTable";
 import DataSourceProviderPanel from "./management/DataSourceProviderPanel";
@@ -37,7 +38,9 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
     resetFeishuTargetBrowseOptions,
     handleCloseWizard,
     handleNextStep,
-    handleSave,
+    requestSaveWithSyncConfirm,
+    confirmRef,
+    handleTypedConfirm,
     handleSelectType,
     handleResetFeishuSetup,
     handleResetNotionSetup,
@@ -104,7 +107,7 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
         onPrev={() => setWizardStep((step) => step - 1)}
         onNext={handleNextStep}
         onSave={(mode) => {
-          void handleSave(mode);
+          requestSaveWithSyncConfirm(mode);
         }}
         onSelectType={handleSelectType}
         onResetFeishuSetup={handleResetFeishuSetup}
@@ -122,6 +125,8 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
         onLoadFeishuTargetChildren={handleLoadFeishuTargetChildren}
         onResetFeishuTargetBrowseOptions={resetFeishuTargetBrowseOptions}
       />
+
+      <TypedConfirmModal ref={confirmRef} onClick={handleTypedConfirm} />
     </div>
   );
 }

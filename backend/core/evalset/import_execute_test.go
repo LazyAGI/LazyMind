@@ -62,6 +62,31 @@ func TestCreateImportAPIEnqueuesWithoutCreatingEvalSet(t *testing.T) {
 	}
 }
 
+func TestCreateImportAllowsEmptyDatasetIDs(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	withTempImportDir(t)
+	seedImportPreviewRows(t, db, "import_tmp_create_no_kb", "user_1", importFileTypeCSV, []ImportNormalizedRow{
+		{Question: "q", GroundTruth: "a", QuestionType: "1"},
+	}, true)
+
+	rec, req := requestWithUser(http.MethodPost, "/api/core/eval-sets:import", `{"name":"cases without kb","import_token":"import_tmp_create_no_kb"}`, "user_1")
+	CreateEvalSetByImport(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[CreateEvalSetByImportResponse](t, rec)
+
+	runImportWorkerUntilDone(t, db, resp.TaskID, string(asyncjob.StatusSucceeded))
+
+	var evalSet orm.EvalSet
+	if err := db.First(&evalSet, "id = ?", resp.EvalSetID).Error; err != nil {
+		t.Fatalf("query eval set: %v", err)
+	}
+	if evalSet.Status != StatusActive || evalSet.ItemCount != 1 || len(parseDatasetIDsJSON(evalSet.DatasetIDs)) != 0 {
+		t.Fatalf("unexpected eval set: %#v", evalSet)
+	}
+}
+
 func TestCreateImportWorkerCreatesEvalSetAndUploadItems(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	withTempImportDir(t)

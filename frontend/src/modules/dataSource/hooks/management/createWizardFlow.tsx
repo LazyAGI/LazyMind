@@ -1,5 +1,4 @@
-import { Modal, message } from "antd";
-import { WarningFilled } from "@ant-design/icons";
+import { message } from "antd";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { dataSourceScanApi } from "../../api/clients";
 import {
@@ -232,34 +231,22 @@ export function createWizardFlow(ctx: ManagementContext) {
     });
   };
 
-  const handleDeleteSource = (record: DataSourceItem) => {
-    Modal.confirm({
-      title: t("admin.dataSourceDeleteTitle"),
-      content: t("admin.dataSourceDeleteContent", { name: record.name }),
-      okText: t("common.delete"),
-      cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
-      icon: <WarningFilled />,
-      onOk: async () => {
-        try {
-          await dataSourceScanApi.deleteSource({ sourceId: record.id });
-          message.success(t("admin.dataSourceDeleteSuccess"));
-          const nextPage =
-            ctx.sources.length <= 1 && ctx.sourceListPage > 1
-              ? ctx.sourceListPage - 1
-              : ctx.sourceListPage;
-          await Promise.all([
-            ctx.refreshSources(false, { page: nextPage }),
-          ]);
-        } catch (error) {
-          message.error(
-            getLocalizedErrorMessage(error, t("admin.dataSourceDeleteFailed")) ||
-              t("admin.dataSourceDeleteFailed"),
-          );
-          throw error;
-        }
-      },
-    });
+  const executeDeleteSource = async (record: DataSourceItem) => {
+    try {
+      await dataSourceScanApi.deleteSource({ sourceId: record.id });
+      message.success(t("admin.dataSourceDeleteSuccess"));
+      const nextPage =
+        ctx.sources.length <= 1 && ctx.sourceListPage > 1
+          ? ctx.sourceListPage - 1
+          : ctx.sourceListPage;
+      await Promise.all([ctx.refreshSources(false, { page: nextPage })]);
+    } catch (error) {
+      message.error(
+        getLocalizedErrorMessage(error, t("admin.dataSourceDeleteFailed")) ||
+          t("admin.dataSourceDeleteFailed"),
+      );
+      throw error;
+    }
   };
 
   const handleNextStep = () => {
@@ -315,7 +302,7 @@ export function createWizardFlow(ctx: ManagementContext) {
     handleOpenFeishuGuideFromAuthSelect,
     handleSubmitManualOauthCallback,
     openDetailPage,
-    handleDeleteSource,
+    executeDeleteSource,
     handleNextStep,
   };
 }

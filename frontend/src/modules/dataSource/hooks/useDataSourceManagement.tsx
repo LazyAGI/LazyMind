@@ -3,6 +3,7 @@ import { Form } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
+import type { TypedConfirmModalRef } from '@/components/ui/TypedConfirmModal';
 import {
   createFeishuAccountId,
   getOAuthStateFromConnection,
@@ -34,6 +35,8 @@ import type {
 import { type ScanV2AgentHint } from "../utils/scanAccessors";
 import { pickScanAgent } from "../utils/cloudSync";
 import { isAdminRole } from "../utils/role";
+import { resolveSourceTypeFromValues } from "../utils/feishuTarget";
+import { getSourceTypeTitle } from "../utils/status";
 import { loadNotionAppSetup } from "../utils/notionSetup";
 import { sourceTypeOptions } from "../constants/sourceTypeOptions";
 import { useLocalPathTree } from "./useLocalPathTree";
@@ -118,6 +121,8 @@ export function useDataSourceManagement() {
   const sourceListRequestSeqRef = useRef(0);
   const assetSearchInitializedRef = useRef(false);
   const feishuAuthAccountsLoadedRef = useRef(false);
+  const confirmRef = useRef<TypedConfirmModalRef>(null);
+  const pendingConfirmActionRef = useRef<(() => void | Promise<void>) | null>(null);
 
   const syncMode = Form.useWatch("syncMode", form) || "scheduled";
   const feishuTargetType = (Form.useWatch("targetType", form) || "wiki_space") as FeishuTargetType;
@@ -385,6 +390,53 @@ export function useDataSourceManagement() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assetSearchValue]);
 
+  const handleTypedConfirm = (_id: string) => {
+    const action = pendingConfirmActionRef.current;
+    pendingConfirmActionRef.current = null;
+    if (action) {
+      void action();
+    }
+  };
+
+  const requestDeleteSourceConfirm = (record: DataSourceItem) => {
+    pendingConfirmActionRef.current = () => ctx.executeDeleteSource(record);
+    confirmRef.current?.onOpen({
+      id: record.id,
+      title: t("admin.dataSourceDeleteTitle", { name: record.name }),
+      content: t("admin.dataSourceDeleteContent"),
+      confirmText: t("admin.dataSourceDeleteConfirmText", { name: record.name }),
+    });
+  };
+
+  const requestSaveWithSyncConfirm = (mode: DataSourceSaveMode) => {
+    if (mode !== "createAndSync") {
+      void ctx.handleSave(mode);
+      return;
+    }
+
+    const values = form.getFieldsValue(true);
+    const effectiveSourceType = resolveSourceTypeFromValues(selectedType, values);
+    const fallbackType = effectiveSourceType || selectedType || "local";
+    const kbName = `${values.knowledgeBase || getSourceTypeTitle(fallbackType, t)}`.trim();
+    const isEditMode = wizardMode === "edit";
+
+    pendingConfirmActionRef.current = () => ctx.handleSave(mode);
+    confirmRef.current?.onOpen({
+      id: mode,
+      title: t(
+        isEditMode ? "admin.dataSourceSaveSyncTitle" : "admin.dataSourceCreateSyncTitle",
+        { name: kbName },
+      ),
+      content: t(
+        isEditMode ? "admin.dataSourceSaveSyncContent" : "admin.dataSourceCreateSyncContent",
+      ),
+      confirmText: t(
+        isEditMode ? "admin.dataSourceSaveSyncConfirmText" : "admin.dataSourceCreateSyncConfirmText",
+        { name: kbName },
+      ),
+    });
+  };
+
   return {
     t,
     form,
@@ -463,7 +515,10 @@ export function useDataSourceManagement() {
     handleResetNotionSetup: ctx.handleResetNotionSetup,
     openDetailPage: ctx.openDetailPage,
     openEditWizard: ctx.openEditWizard,
-    handleDeleteSource: ctx.handleDeleteSource,
+    requestDeleteSourceConfirm,
+    requestSaveWithSyncConfirm,
+    confirmRef,
+    handleTypedConfirm,
   };
 }
 
