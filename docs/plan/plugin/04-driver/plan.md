@@ -191,7 +191,7 @@ ChatAgent 有**两个**步骤推进工具，语义不同：
 
 ## 四、步骤级执行控制
 
-### 4.1 停止（确定性后端）⚠️ 待调试
+### 4.1 停止（确定性后端）
 
 **接口**：`POST /api/core/conversations/{id}:stop`（扩展现有 `stopChatGeneration`，新增 plugin 语义分支）。
 
@@ -245,7 +245,7 @@ ChatAgent 在 `resolve_plugin_injection` 看到 `session.status=waiting` 且有 
 
 ---
 
-## 五、并行执行 ⚠️ 待调试
+## 五、并行执行
 
 ### 5.1 并行决策者：ChatAgent
 
@@ -365,7 +365,7 @@ PluginPanel 步骤卡片旁展示当前步骤 `intent_context` 摘要；全局�
 
 ---
 
-## 七、范围重跑与自然语言触发 ⚠️ 待调试
+## 七、范围重跑与自然语言触发 ⚠️ 已开发完成，待PPT场景加好后联调
 
 ### 7.1 问题：从 `stop_tools` 到 LLM 决策
 
@@ -407,7 +407,7 @@ PluginPanel 步骤卡片旁展示当前步骤 `intent_context` 摘要；全局�
 
 ---
 
-## 八、Ask 机制（仅 ChatAgent）⚠️ 待调试
+## 八、Ask 机制（仅 ChatAgent）
 
 ### 8.1 形态
 
