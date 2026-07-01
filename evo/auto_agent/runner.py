@@ -12,7 +12,7 @@ from .models import AutoAgentConfig
 from .observer import AutoObserver
 from .policy import AutoPolicy
 from .ports import AutoAgentPorts
-from .store import AutoAgentLease, AutoAgentLeaseError, AutoAgentStore
+from .store import AutoAgentLease, AutoAgentLeaseError, AutoAgentStateError, AutoAgentStore
 
 
 class AutoAgentRunner:
@@ -34,25 +34,53 @@ class AutoAgentRunner:
             lease = self.store.claim_lease(thread_id, owner_id=owner_id)
         except AutoAgentLeaseError as exc:
             return self.status(thread_id) | {'started': False, 'skipped': True, 'reason': str(exc)}
-        state = self.store.mark_running(thread_id, config, lease=lease)
-        with self._lock:
-            old_stop = self._stops.get(thread_id)
-            if old_stop is not None:
-                old_stop.set()
-            stop = threading.Event()
-            self._stops[thread_id] = stop
-            thread = threading.Thread(
-                target=self._run_loop,
-                args=(thread_id, stop, lease),
-                name=f'evo-auto-agent-{thread_id}',
-                daemon=True,
-            )
-            self._threads[thread_id] = thread
-            thread.start()
+        started = False
+        stop: threading.Event | None = None
+        thread: threading.Thread | None = None
+        state = None
+        try:
+            state = self.store.mark_running(thread_id, config, lease=lease)
+            with self._lock:
+                old_stop = self._stops.get(thread_id)
+                if old_stop is not None:
+                    old_stop.set()
+                stop = threading.Event()
+                thread = threading.Thread(
+                    target=self._run_loop,
+                    args=(thread_id, stop, lease),
+                    name=f'evo-auto-agent-{thread_id}',
+                    daemon=True,
+                )
+                self._stops[thread_id] = stop
+                self._threads[thread_id] = thread
+                thread.start()
+                started = True
+        except Exception as exc:  # noqa: BLE001 - lease must not leak during start setup.
+            if not started:
+                with self._lock:
+                    if self._stops.get(thread_id) is stop:
+                        self._stops.pop(thread_id, None)
+                    if self._threads.get(thread_id) is thread:
+                        self._threads.pop(thread_id, None)
+                try:
+                    if state is not None:
+                        self.store.save(state.model_copy(update={
+                            'running': False,
+                            'stop_reason': f'start_error:{type(exc).__name__}:{exc}',
+                        }), lease=lease)
+                finally:
+                    self.store.release_lease(lease)
+            return {'thread_id': thread_id, 'started': False, 'running': False, 'error': str(exc)}
         return self.status(thread_id) | {'started': True, 'running': state.running}
 
     def stop(self, thread_id: str, reason: str = 'stopped_by_request') -> dict[str, Any]:
-        state = self.store.mark_stopped(thread_id, reason)
+        try:
+            state = self.store.mark_stopped(thread_id, reason)
+        except AutoAgentStateError as exc:
+            with self._lock:
+                if stop := self._stops.get(thread_id):
+                    stop.set()
+            return {'thread_id': thread_id, 'stopped': False, 'running': False, 'error': str(exc)}
         with self._lock:
             if stop := self._stops.get(thread_id):
                 stop.set()
@@ -96,18 +124,28 @@ class AutoAgentRunner:
             }
 
     def status(self, thread_id: str) -> dict[str, Any]:
-        state = self.store.load(thread_id)
+        try:
+            state = self.store.load(thread_id)
+            state_payload = _state_payload(state)
+            running = state.running
+        except AutoAgentStateError as exc:
+            state_payload = {}
+            running = False
+            state_error = str(exc)
+        else:
+            state_error = ''
         with self._lock:
             thread = self._threads.get(thread_id)
             alive = bool(thread and thread.is_alive())
         lease = self.store.lease_status(thread_id)
         return {
             'thread_id': thread_id,
-            'running': state.running,
+            'running': running,
             'alive': alive or bool(lease.get('active')),
             'local_alive': alive,
             'lease': lease,
-            'state': _state_payload(state),
+            'state': state_payload,
+            'state_error': state_error,
         }
 
     def _run_loop(self, thread_id: str, stop: threading.Event, lease: AutoAgentLease) -> None:
@@ -123,6 +161,8 @@ class AutoAgentRunner:
                         return
                     try:
                         self._step_locked(thread_id, state.config.model_dump(mode='json'), lease=lease)
+                    except AutoAgentStateError:
+                        return
                     except Exception as exc:  # noqa: BLE001 - persisted state should expose loop failures.
                         latest = self.store.load(thread_id)
                         self.store.save(latest.model_copy(update={
@@ -137,7 +177,7 @@ class AutoAgentRunner:
             finally:
                 heartbeat_stop.set()
                 self.store.release_lease(lease)
-        except AutoAgentLeaseError:
+        except (AutoAgentLeaseError, AutoAgentStateError):
             return
 
     def _start_heartbeat(self, lease: AutoAgentLease, stop: threading.Event) -> threading.Event:

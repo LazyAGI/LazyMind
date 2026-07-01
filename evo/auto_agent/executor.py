@@ -5,7 +5,7 @@ from typing import Any
 
 from evo.artifact_runtime.utils import canonical_json
 
-from .models import AutoAction, AutoAgentState, AutoDecision
+from .models import AutoAction, AutoAgentState, AutoDecision, CommandStatus, PortCommandResult
 from .ports import AutoAgentPorts
 from .store import AutoAgentLease, AutoAgentStore
 
@@ -62,25 +62,13 @@ class AutoActionExecutor:
             )
         try:
             self.store.assert_lease(lease)
-            response = self._execute_action(thread_id, action, action_id)
-            response_status = str(response.get('status') or '').strip().lower()
-            ok = (
-                response_status not in {'failed', 'error', 'clarification'}
-                and (
-                    (action.kind in self._APPROVAL_ACTIONS and response_status == 'done')
-                    or (action.kind == 'send_message' and response_status in {'done', 'accepted', 'active', 'blocked'})
-                    or action.kind not in {*self._APPROVAL_ACTIONS, 'send_message'}
-                )
-                and 'error' not in response
-            )
-            status = 'ok' if ok else 'error'
-        except ValueError as exc:
-            if action.kind == 'continue_flow' and str(exc) == 'step execution did not complete: running':
-                response = {'status': 'running', 'reason': str(exc)}
-                status = 'running'
-            else:
-                response = {'error_type': type(exc).__name__, 'error_message': str(exc)}
-                status = 'error'
+            result = self._execute_action(thread_id, action, action_id)
+            response = result.raw if not result.error else {**result.raw, 'error': result.error}
+            status = {
+                CommandStatus.OK: 'ok',
+                CommandStatus.RUNNING: 'running',
+                CommandStatus.ERROR: 'error',
+            }[result.status]
         except Exception as exc:  # noqa: BLE001 - auto executor must persist failure for inspection.
             response = {'error_type': type(exc).__name__, 'error_message': str(exc)}
             status = 'error'
@@ -137,10 +125,10 @@ class AutoActionExecutor:
             lease=lease,
         )
 
-    def _execute_action(self, thread_id: str, action: AutoAction, action_id: str) -> dict[str, Any]:
+    def _execute_action(self, thread_id: str, action: AutoAction, action_id: str) -> PortCommandResult:
         command_id = action.command_id or f'auto:{action_id}'
         if action.kind == 'noop':
-            return {'status': 'noop'}
+            return PortCommandResult(status=CommandStatus.OK)
         flow_actions = {
             'start_flow': self.ports.start_flow,
             'continue_flow': self.ports.continue_flow,
@@ -151,11 +139,13 @@ class AutoActionExecutor:
         if action.kind in flow_actions:
             return flow_actions[action.kind](thread_id, command_id=command_id)
         if action.kind == 'send_message':
-            return self.ports.send_message(
+            if action.intervention is None:
+                raise ValueError('send_message action requires typed intervention')
+            metadata = {'source': 'auto_agent', **action.metadata}
+            return self.ports.submit_intervention(
                 thread_id,
-                content=action.message,
                 message_id=f'msg_{action_id[:24]}',
-                metadata={'source': 'auto_agent', **action.metadata},
+                metadata=metadata,
                 intervention=action.intervention,
             )
         if action.kind in self._APPROVAL_ACTIONS:
@@ -166,15 +156,21 @@ class AutoActionExecutor:
                 command_id=command_id,
             )
         if action.kind == 'stop_agent':
-            return {'status': 'stopped', 'reason': action.reason}
+            return PortCommandResult(status=CommandStatus.OK, raw={'reason': action.reason})
         raise ValueError(f'unsupported auto action: {action.kind}')
 
 
 def _action_id(thread_id: str, observation_hash: str, action: AutoAction, config: dict[str, Any]) -> str:
+    action_payload = action.model_dump(mode='json')
+    if action.intervention is not None:
+        action_payload['message'] = ''
+        action_payload['metadata'] = {
+            key: value for key, value in action_payload.get('metadata', {}).items() if key != 'display_message'
+        }
     payload = {
         'thread_id': thread_id,
         'observation_hash': observation_hash,
-        'action': action.model_dump(mode='json'),
+        'action': action_payload,
         'policy': {'config': config},
     }
     return hashlib.sha256(canonical_json(payload).encode('utf-8')).hexdigest()

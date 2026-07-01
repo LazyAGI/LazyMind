@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,6 +26,18 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
 
 
+class CommandStatus(str, Enum):
+    OK = 'ok'
+    RUNNING = 'running'
+    ERROR = 'error'
+
+
+class PortCommandResult(StrictModel):
+    status: CommandStatus
+    raw: dict[str, Any] = Field(default_factory=dict)
+    error: str = ''
+
+
 class AutoAgentConfig(StrictModel):
     enabled: bool = True
     tick_interval_s: float = Field(default=1.0, ge=0.1, le=300.0)
@@ -47,6 +60,7 @@ class ActiveApproval(StrictModel):
     approval_token: str
     intent_kind: str
     risk_level: str
+    status: str = 'active'
     expected_refs: tuple[str, ...] = ()
     expires_at: float = 0.0
 

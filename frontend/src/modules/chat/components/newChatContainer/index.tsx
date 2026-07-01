@@ -405,7 +405,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       scrollToEnd();
       openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
         ...(params.run_in_background ? { run_in_background: true } : {}),
-        ...(params.ask_response ? { ask_response: params.ask_response } : {}),
       });
 
       const currentId = currentConversationIdRef.current;
@@ -1005,6 +1004,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
               : newList.length - 1;
         if (targetIndex >= 0) {
           newList[targetIndex] = { ...newList[targetIndex], ...data };
+        }
+        // Keep messageListRef and cache in sync so answer changes survive
+        // conversation switches without requiring a full DB reload.
+        messageListRef.current = newList;
+        const currentId = currentConversationIdRef.current;
+        if (currentId) {
+          conversationMessagesCache.current.set(currentId, newList);
         }
         return newList;
       });
@@ -1683,8 +1689,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           <MessageList
             messageList={messageList}
             initialCard={initialCard}
-            sendMessage={(text, clearInput) => {
-              sendMessage({ text, clearInput });
+            sendMessage={(text, clearInput, extras) => {
+              sendMessage({ text, clearInput, ...(extras ?? {}) });
             }}
             regenerate={regenerate}
             stopGeneration={stopGeneration}

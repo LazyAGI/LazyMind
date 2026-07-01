@@ -109,7 +109,6 @@ type ChatAgentOptions struct {
 type ChatPluginOptions struct {
 	EnablePlugin  *bool          `json:"enable_plugin,omitempty"`
 	PluginContext map[string]any `json:"plugin_context,omitempty"`
-	AskResponse   map[string]any `json:"ask_response,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -140,12 +139,20 @@ type TaskCreatedEvent struct {
 	Resume             bool           `json:"resume,omitempty"`
 }
 
+// AskQuestion is a single question within an AskPendingEvent.
+// type is one of "boolean", "single", "multiple", "text".
+type AskQuestion struct {
+	Text    string   `json:"text"`
+	Type    string   `json:"type"`
+	Choices []string `json:"choices,omitempty"`
+}
+
 // AskPendingEvent is emitted by ask_user (via _write_agent_data) on the main SSE stream.
-// The frontend renders a clarification UI and submits the user's reply as the next chat turn.
+// The frontend renders a clarification UI; the user's answers are sent as plain text
+// in the next chat turn's query — no special ask_response parameter is needed.
 type AskPendingEvent struct {
-	AskID    string   `json:"ask_id"`
-	Question string   `json:"question"`
-	Choices  []string `json:"choices,omitempty"`
+	AskID     string        `json:"ask_id"`
+	Questions []AskQuestion `json:"questions"`
 }
 
 // IntentUpdatedEvent is emitted by update_intent (via _write_agent_data) on the main SSE stream.
@@ -434,9 +441,6 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if pluginContext, ok := body["plugin_context"].(map[string]any); ok && len(pluginContext) > 0 {
 		req.Plugin.PluginContext = pluginContext
-	}
-	if askResponse, ok := body["ask_response"].(map[string]any); ok && len(askResponse) > 0 {
-		req.Plugin.AskResponse = askResponse
 	}
 	// current_turn_seq is an int in the body map. JSON numbers decode as float64.
 	switch v := body["current_turn_seq"].(type) {

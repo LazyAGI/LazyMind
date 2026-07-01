@@ -159,6 +159,17 @@ def _build_user_attachment_tools(has_files: bool) -> list:
     return [find_user_attachment, read_user_attachment]
 
 
+def _build_ask_user_tool() -> list:
+    """Return the ask_user stop-tool for ChatAgent.
+
+    Intentionally NOT added to DEFAULT_TOOLS so SubAgents never receive it.
+    SubAgent tool resolution falls back to DEFAULT_TOOLS; ask_user is only
+    injected here, into the ChatAgent's all_tools list.
+    """
+    from lazymind.chat.engine.tools.ask_user import ask_user
+    return [ask_user]
+
+
 def _build_schedule_tools() -> list:
     """Return a lazy ToolGroup dict for all schedule management tools.
 
@@ -435,8 +446,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     lazyllm.globals['agentic_config'] = agentic_config
 
     plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context = \
-        resolve_plugin_injection(plugin.plugin_context, conversation_id=conversation_id,
-                                 ask_response=plugin.ask_response)
+        resolve_plugin_injection(plugin.plugin_context, conversation_id=conversation_id)
     agentic_config.update(agentic_config_patch)
 
     # Inject SubAgent task context into the system prompt independently of plugin state.
@@ -517,7 +527,12 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         'create_schedule', 'list_schedules', 'cancel_schedule',
         'update_schedule', 'trigger_schedule',
     }
-    all_tools = agent_tools + subagent_tools + attachment_tools + schedule_tools + plugin_tools + mcp_tools
+    # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
+    # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
+    ask_user_tools = _build_ask_user_tool()
+    lazyllm.globals['active_tool_names'] |= {'ask_user'}
+    all_tools = (agent_tools + subagent_tools + attachment_tools
+                 + schedule_tools + ask_user_tools + plugin_tools + mcp_tools)
     set_trace_context({
         'enabled': bool(runtime.trace),
         'trace_id': conversation.session_id if runtime.trace else None,
@@ -550,8 +565,12 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         fs=FS,
         skills_dir=_cfg['skill_fs_url'],
     )
-    if plugin_stop_tools:
-        react_agent.set_stop_tools(plugin_stop_tools)
+    # ask_user is always a stop-tool for ChatAgent regardless of plugin state.
+    # Merge it with any plugin-level stop tools (e.g. advance_step_and_hand_off).
+    stop_tools = list(plugin_stop_tools) if plugin_stop_tools else []
+    if 'ask_user' not in stop_tools:
+        stop_tools.append('ask_user')
+    react_agent.set_stop_tools(stop_tools)
 
     async def event_stream() -> Any:
         final_result: Any = None

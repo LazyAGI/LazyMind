@@ -12,6 +12,7 @@ from hashlib import sha256
 from typing import Any, NamedTuple
 
 from evo.artifact_runtime import ExternalCallRequest, ExternalCallResult
+from evo.llm import LazyLLMClient
 
 METRICS = (
     'answer_correctness',
@@ -268,12 +269,10 @@ class LlmCompleteRunner:
     llm_config: Mapping[str, Any]
 
     def invoke(self, request: ExternalCallRequest, token: Any) -> ExternalCallResult:
-        from evo.message_intent.planner import LazyLLMPlannerClient
-
         token.raise_if_cancelled()
         prompt = text(request.payload.get('prompt'))
         try:
-            value = text(LazyLLMPlannerClient(llm_config=dict(self.llm_config))(prompt, stream=False))
+            value = text(LazyLLMClient(llm_config=dict(self.llm_config))(prompt, stream=False))
         except Exception as exc:  # noqa: BLE001 - external call boundary records model failures.
             return ExternalCallResult('failed_transient', error_type=type(exc).__name__, error_message=str(exc))
         token.raise_if_cancelled()

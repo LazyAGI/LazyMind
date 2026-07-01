@@ -210,6 +210,26 @@ export function PluginSessionApi() {
         options,
       );
     },
+    dismissSession(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:dismiss`,
+        {},
+        { headers: { 'Content-Type': 'application/json' }, ...options },
+      );
+    },
+    restoreSession(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:restore`,
+        {},
+        { headers: { 'Content-Type': 'application/json' }, ...options },
+      );
+    },
+    listDismissedSessions(conversationId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/dismissed-plugin-sessions`,
+        options,
+      );
+    },
   };
 }
 
@@ -270,6 +290,19 @@ export function ChatServiceApi() {
       return axiosInstance.post(
         `${coreApiBaseUrl}/conversations:stopChatGeneration`,
         requestParameters.stopChatGenerationRequest,
+        withJsonOptions(options),
+      );
+    },
+    /** Save partial ask-user answers so they survive page reload. */
+    conversationServiceSaveAskAnswers(
+      conversationId: string,
+      historyId: string,
+      answers: Record<string, any>,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:ask-answers`,
+        { history_id: historyId, answers },
         withJsonOptions(options),
       );
     },

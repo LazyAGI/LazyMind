@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { message, Popconfirm } from 'antd';
 import { usePluginSession } from '@/modules/chat/hooks/usePlugin';
 import { usePluginStore } from '@/modules/chat/store/pluginPanel';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
+import { PluginSessionApi } from '@/modules/chat/utils/request';
 import type {
   PluginSession,
   SlotRevision,
@@ -100,6 +102,8 @@ interface PluginPanelProps {
   onReference?: (slot: SlotRevision) => void;
   /** Called when the user clicks the Stop button during an active session. */
   onStop?: () => void;
+  /** Called after a session is successfully dismissed. */
+  onDismissed?: () => void;
 }
 
 /**
@@ -746,9 +750,11 @@ export function PluginPanel({
   onSendMessage,
   onReference,
   onStop,
+  onDismissed,
 }: PluginPanelProps) {
   const { t } = useTranslation();
   const { session, loading, refresh } = usePluginSession(conversationId);
+  const bumpDismissedRefresh = usePluginStore((s) => s.bumpDismissedRefresh);
   const autoRunning = usePluginStore((s) =>
     conversationId ? (s.autoRunningByConversation[conversationId] ?? false) : false,
   );
@@ -759,6 +765,21 @@ export function PluginPanel({
   const setFocusedTab = usePluginStore((s) => s.setFocusedTab);
   const setFocusedSortOrder = usePluginStore((s) => s.setFocusedSortOrder);
   const [ui, setUI] = useState<PluginUI>({});
+  const [dismissing, setDismissing] = useState(false);
+
+  const handleDismiss = useCallback(async () => {
+    if (!session || dismissing) return;
+    setDismissing(true);
+    try {
+      await PluginSessionApi().dismissSession(session.session_id);
+      bumpDismissedRefresh(conversationId);
+      onDismissed?.();
+      refresh();
+    } catch {
+      message.error(t('chat.pluginDismissFailed'));
+      setDismissing(false);
+    }
+  }, [session, dismissing, refresh, t, onDismissed, bumpDismissedRefresh, conversationId]);
   // Track which text slots are currently being edited; disable footer buttons while any are.
   const editingSlots = useRef<Set<string>>(new Set());
   const [anySlotEditing, setAnySlotEditing] = useState(false);
@@ -900,6 +921,29 @@ export function PluginPanel({
               )}
             </div>
           )}
+          <Popconfirm
+            title={t('chat.pluginDismissConfirmTitle')}
+            description={t('chat.pluginDismissConfirmDesc')}
+            onConfirm={handleDismiss}
+            okText={t('chat.pluginDismissConfirmOk')}
+            cancelText={t('chat.pluginDismissConfirmCancel')}
+            okButtonProps={{ danger: true, size: 'small' }}
+            cancelButtonProps={{ size: 'small' }}
+            disabled={dismissing}
+            placement='bottomRight'
+          >
+            <button
+              type='button'
+              className='plugin-panel__dismiss-btn'
+              disabled={dismissing}
+              aria-label={t('chat.pluginDismissBtn')}
+              title={t('chat.pluginDismissBtn')}
+            >
+              <svg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>
+                <path d='M2 2L10 10M10 2L2 10' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
+              </svg>
+            </button>
+          </Popconfirm>
           <button
             type='button'
             className='plugin-panel__collapse-btn'

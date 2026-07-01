@@ -8,6 +8,8 @@ from .models import (
     AutoAgentState,
     AutoDecision,
     AutoObservation,
+    CommandStatus,
+    PortCommandResult,
 )
 from .runner import AutoAgentRunner
 
@@ -20,4 +22,6 @@ __all__ = [
     'AutoAgentState',
     'AutoDecision',
     'AutoObservation',
+    'CommandStatus',
+    'PortCommandResult',
 ]

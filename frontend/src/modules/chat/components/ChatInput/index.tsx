@@ -40,7 +40,13 @@ import ChatSelector from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import ChatConfigModal from "./ChatConfigModal";
 import type { ConversationPluginSettings } from "../../utils/request";
+import { PluginSessionApi } from "../../utils/request";
+import { usePluginStore } from "@/modules/chat/store/pluginPanel";
 import BatchChatComponent, { BatchChatImperativeProps } from "../BatchChat";
+
+// Stable empty array reference — must NOT be inline `?? []` in a zustand selector
+// because a new array on every call triggers useSyncExternalStore to fire React error #185.
+const EMPTY_DISMISSED: Array<{ session_id: string; plugin_id: string }> = [];
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
@@ -48,8 +54,101 @@ import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
+import { Popover, Tag } from "antd";
 
 const { TextArea } = Input;
+
+/**
+ * Shows a button in the toolbar when there are dismissed plugin sessions.
+ * Clicking it opens a popover listing dismissed sessions with restore buttons.
+ * Dismissed sessions are cached in pluginPanel store so the button survives component remounts.
+ */
+function DismissedPluginRestoreButton({ conversationId }: { conversationId: string }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const bumpDismissedRefresh = usePluginStore((s) => s.bumpDismissedRefresh);
+  const fetchDismissedSessions = usePluginStore((s) => s.fetchDismissedSessions);
+  // Read the array reference from store; fall back to undefined and handle below.
+  // IMPORTANT: do NOT use `?? []` inline — a fresh array on every selector call
+  // causes useSyncExternalStore to detect a state change on every render, leading
+  // to an infinite re-render loop (React error #185).
+  const dismissedSessionsFromStore = usePluginStore((s) => s.dismissedSessionsByConversation[conversationId]);
+  const dismissedSessions = dismissedSessionsFromStore ?? EMPTY_DISMISSED;
+  const dismissedRefreshTrigger = usePluginStore((s) => s.dismissedRefreshTrigger[conversationId] ?? 0);
+
+  // Fetch on mount and whenever a dismiss/restore event fires.
+  useEffect(() => {
+    fetchDismissedSessions(conversationId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, dismissedRefreshTrigger]);
+
+  const handleOpenChange = (v: boolean) => {
+    setOpen(v);
+    if (v) fetchDismissedSessions(conversationId);
+  };
+
+  const handleRestore = async (sessionId: string) => {
+    setRestoring(sessionId);
+    try {
+      await PluginSessionApi().restoreSession(sessionId);
+      bumpDismissedRefresh(conversationId);
+      // Reload active session so PluginPanel re-appears immediately without needing a page refresh.
+      usePluginStore.getState().loadActiveSession(conversationId);
+      setOpen(false);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      message.error(err?.response?.data?.error ?? t('chat.pluginRestoreFailed'));
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  if (dismissedSessions.length === 0) return null;
+
+  const content = (
+    <div style={{ minWidth: 200 }}>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {dismissedSessions.map((s) => (
+          <li key={s.session_id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <Tag style={{ flex: 1 }}>{s.plugin_id}</Tag>
+            <Button
+              size='small'
+              loading={restoring === s.session_id}
+              onClick={() => handleRestore(s.session_id)}
+            >
+              {t('chat.pluginRestoreBtn')}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={handleOpenChange}
+      trigger='click'
+      content={content}
+      title={t('chat.pluginDismissedTitle')}
+    >
+      <Tooltip title={t('chat.pluginDismissedTitle')}>
+        <button
+          type='button'
+          className='input-bottom-actions-left-item input-bottom-actions-left-item--icon-only'
+          aria-label={t('chat.pluginDismissedTitle')}
+        >
+          {/* Trash / recycle-bin icon */}
+          <svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>
+            <path d='M1.75 3.5h10.5M5.25 3.5V2.333A.583.583 0 0 1 5.833 1.75h2.334a.583.583 0 0 1 .583.583V3.5M11.083 3.5l-.583 8.167A.583.583 0 0 1 9.917 12.25H4.083a.583.583 0 0 1-.583-.583L2.917 3.5' stroke='currentColor' strokeWidth='1.2' strokeLinecap='round' strokeLinejoin='round'/>
+            <path d='M5.833 6.417v3.5M8.167 6.417v3.5' stroke='currentColor' strokeWidth='1.2' strokeLinecap='round'/>
+          </svg>
+        </button>
+      </Tooltip>
+    </Popover>
+  );
+}
 
 const MAX_UPLOAD_FILES = 3;
 
@@ -150,8 +249,8 @@ export interface SendMessageParams {
   create_time?: string;
   /** When true, the payload will include run_in_background=true and the task center badge will increment. */
   run_in_background?: boolean;
-  /** When set, send ask_response alongside the message to resolve an ask_pending. */
-  ask_response?: { ask_id: string; selected: string[] };
+  /** Structured answers from an AskCard submission; forwarded to the backend as ask_answers_structured. */
+  ask_answers_structured?: import('@/modules/chat/components/AskCard').AskAnswersStructured;
 }
 
 interface ChatInputProps {
@@ -869,6 +968,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     hasPluginSession={hasPluginSession}
                     onSave={onPluginSettingsChange}
                   />
+                  {sessionId && !sessionId.startsWith("temp_") && (
+                    <DismissedPluginRestoreButton conversationId={sessionId} />
+                  )}
                 </div>
 
                 <div className="input-bottom-actions-right">

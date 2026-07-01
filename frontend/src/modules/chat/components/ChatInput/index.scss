@@ -290,6 +290,25 @@
                 fill: rgba(0, 106, 230, 1);
               }
             }
+            &--icon-only {
+              padding: 2px 5px;
+              svg {
+                fill: none;
+                stroke: #5f6b7e;
+              }
+              svg path {
+                fill: none;
+                stroke: #5f6b7e;
+              }
+              &:hover {
+                svg {
+                  stroke: rgba(0, 106, 230, 1);
+                }
+                svg path {
+                  stroke: rgba(0, 106, 230, 1);
+                }
+              }
+            }
             &.selected {
               background: rgba(240, 251, 255, 1);
             }

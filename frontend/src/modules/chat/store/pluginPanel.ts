@@ -268,6 +268,11 @@ interface PluginStore {
   pluginUIByPlugin: Record<string, PluginUI>;
   // Slot order cache: keyed by "sessionId:slotId"
   slotOrderCache: Record<string, SlotOrderInfo>;
+  // Incremented each time a session is dismissed, keyed by conversation_id.
+  // DismissedPluginRestoreButton subscribes to this to re-fetch the dismissed list.
+  dismissedRefreshTrigger: Record<string, number>;
+  // Cached dismissed sessions per conversation. Survives component remounts.
+  dismissedSessionsByConversation: Record<string, Array<{ session_id: string; plugin_id: string }>>;
 
   setSession: (conversationId: string, session: PluginSession | null) => void;
   updateSlot: (conversationId: string, slot: SlotRevision) => void;
@@ -277,6 +282,8 @@ interface PluginStore {
   clearSession: (conversationId: string) => void;
   setAutoRunning: (conversationId: string, running: boolean) => void;
   fetchPluginUI: (pluginId: string) => Promise<PluginUI>;
+  bumpDismissedRefresh: (conversationId: string) => void;
+  fetchDismissedSessions: (conversationId: string) => Promise<void>;
   // Phase 3: slot item management.
   deleteSlotItem: (sessionId: string, slotId: string, listIndex: number, orderVersion?: number) => Promise<void>;
   patchSlotItemValue: (sessionId: string, slotId: string, listIndex: number, value: any, contentType?: string) => Promise<void>;
@@ -298,6 +305,34 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
   autoRunningByConversation: {},
   pluginUIByPlugin: {},
   slotOrderCache: {},
+  dismissedRefreshTrigger: {},
+  dismissedSessionsByConversation: {},
+
+  bumpDismissedRefresh: (conversationId) => {
+    set((s) => ({
+      dismissedRefreshTrigger: {
+        ...s.dismissedRefreshTrigger,
+        [conversationId]: (s.dismissedRefreshTrigger[conversationId] ?? 0) + 1,
+      },
+    }));
+    // Also refresh the cached dismissed list so any remounted component gets fresh data.
+    get().fetchDismissedSessions(conversationId);
+  },
+
+  fetchDismissedSessions: async (conversationId) => {
+    try {
+      const resp = await PluginSessionApi().listDismissedSessions(conversationId);
+      const sessions = (resp.data?.data?.sessions ?? []) as Array<{ session_id: string; plugin_id: string }>;
+      set((s) => ({
+        dismissedSessionsByConversation: {
+          ...s.dismissedSessionsByConversation,
+          [conversationId]: sessions,
+        },
+      }));
+    } catch {
+      // silently ignore — stale cache is fine
+    }
+  },
 
   setSession: (conversationId, session) => {
     set((state) => {
@@ -365,6 +400,8 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
         }
       }
       get().setSession(conversationId, session);
+      // Also refresh dismissed sessions so the restore button appears immediately on load.
+      get().fetchDismissedSessions(conversationId);
     } catch {
       // ignore
     } finally {

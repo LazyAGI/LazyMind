@@ -328,6 +328,16 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		_ = taskcenter.CreateTask(reqCtx, db, bgTask)
 	}
 
+	// Mark the last assistant turn that had an ask_pending as answered.
+	// Only mark answered when the request carries a full ask_answers_structured payload,
+	// meaning the user actually submitted the AskCard. If the user ignored the card or
+	// only partially filled it, we do NOT mark it answered so the card stays interactive.
+	if !target.IsRegeneration {
+		if _, hasStructured := raw["ask_answers_structured"]; hasStructured {
+			markLastAskPendingAnswered(r.Context(), db, histories)
+		}
+	}
+
 	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, query, target, dualReply, historyExt)
 }
 
@@ -861,14 +871,20 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	var input any
 	var askPending any
+	var askAnswered bool
+	var askSavedAnswers any
 	if len(h.Ext) > 0 {
 		var ext struct {
-			Input      any `json:"input"`
-			AskPending any `json:"ask_pending"`
+			Input           any  `json:"input"`
+			AskPending      any  `json:"ask_pending"`
+			AskAnswered     bool `json:"ask_answered"`
+			AskSavedAnswers any  `json:"ask_saved_answers"`
 		}
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
 			askPending = ext.AskPending
+			askAnswered = ext.AskAnswered
+			askSavedAnswers = ext.AskSavedAnswers
 		}
 	}
 	item := map[string]any{
@@ -885,6 +901,12 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	if askPending != nil {
 		item["ask_pending"] = askPending
+		if askAnswered {
+			item["ask_answered"] = true
+		}
+		if askSavedAnswers != nil && !askAnswered {
+			item["ask_saved_answers"] = askSavedAnswers
+		}
 	}
 	return item
 }

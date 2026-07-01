@@ -33,12 +33,16 @@ class AutoPolicy:
             return AutoAction(kind='pause_flow', reason='flow failed; retry budget exhausted', target=target)
         if observation.status != 'waiting_checkpoint':
             return AutoAction(kind='noop', reason=f'flow status is {observation.status}')
-        failures = observation.facts.get('execution_failures')
-        if isinstance(failures, list) and failures:
-            return self._rerun_case_or_pause(observation, state, config, failures[0])
-        suspicious_scores = observation.facts.get('suspicious_scores')
-        if isinstance(suspicious_scores, list) and suspicious_scores:
-            return self._patch_score_or_continue(observation, state, config, suspicious_scores[0])
+        suggestions = observation.facts.get('intervention_suggestions')
+        if isinstance(suggestions, list):
+            for suggestion in suggestions:
+                if isinstance(suggestion, dict):
+                    try:
+                        action = self._suggestion_action(observation, state, config, suggestion)
+                    except ValueError:
+                        action = None
+                    if action is not None:
+                        return action
         if config.auto_continue:
             if state.continue_count >= config.max_continue_actions:
                 return AutoAction(kind='pause_flow', reason='auto continue budget exhausted')
@@ -59,6 +63,15 @@ class AutoPolicy:
         if approval is None:
             return AutoAction(kind='noop', reason='no active approval')
         auto_owned = approval.approval_token in state.auto_pending_approvals
+        if approval.status == 'resolving':
+            if auto_owned:
+                return AutoAction(
+                    kind='approve_pending',
+                    reason='auto-owned pending approval is resolving; probe command result',
+                    approval_token=approval.approval_token,
+                    target=approval.intent_kind,
+                )
+            return AutoAction(kind='noop', reason='pending approval is already resolving')
         allowed = config.auto_approve == 'all_mutations' or (
             config.auto_approve == 'evidence_backed'
             and auto_owned
@@ -75,25 +88,43 @@ class AutoPolicy:
             return AutoAction(kind='pause_flow', reason='pending approval requires human review')
         return AutoAction(kind='noop', reason='pending approval is waiting for human review')
 
+    def _suggestion_action(
+        self,
+        observation: AutoObservation,
+        state: AutoAgentState,
+        config: AutoAgentConfig,
+        suggestion: dict,
+    ) -> AutoAction | None:
+        kind = str(suggestion.get('kind') or '')
+        if kind == 'rerun_case':
+            return self._rerun_case_or_pause(observation, state, config, suggestion)
+        if kind == 'patch_judge_score':
+            return self._patch_score_or_continue(observation, state, config, suggestion)
+        return None
+
     def _rerun_case_or_pause(
         self,
         observation: AutoObservation,
         state: AutoAgentState,
         config: AutoAgentConfig,
-        failure: object,
+        suggestion: dict,
     ) -> AutoAction:
-        failure = failure if isinstance(failure, dict) else {}
-        case_id = str(failure.get('case_id') or '').strip()
-        reason = ' '.join(str(failure.get('reason') or 'unknown').split()) or 'unknown'
-        ref = observation.latest_refs.get('eval.summary') or observation.hash
-        key = f'rerun_case:{case_id}:{reason}'
+        args = suggestion.get('args') if isinstance(suggestion.get('args'), dict) else {}
+        case_id = str(args.get('case_id') or args.get('case_ref') or '').strip()
+        reason = ' '.join(str(suggestion.get('reason') or 'unknown').split()) or 'unknown'
+        intervention = AutoIntervention(
+            kind='rerun_case',
+            case_id=case_id,
+            source_ref=str(suggestion.get('source_ref') or observation.hash),
+        )
+        key = intervention.fingerprint
         if config.rerun_case_enabled and state.intervention_counts.get(key, 0) < config.rerun_case_max_per_ref:
             return AutoAction(
                 kind='send_message',
                 reason='case execution failure detected',
                 target=key,
-                message=f'{case_id} 执行失败，请重跑这个 case。失败原因：{reason}',
-                intervention=AutoIntervention(kind='rerun_case', case_id=case_id, source_ref=ref),
+                intervention=intervention,
+                metadata={'display_message': f'{case_id} 执行失败，请重跑这个 case。失败原因：{reason}'},
             )
         return AutoAction(kind='pause_flow', reason='case rerun budget exhausted', target=case_id)
 
@@ -102,14 +133,20 @@ class AutoPolicy:
         observation: AutoObservation,
         state: AutoAgentState,
         config: AutoAgentConfig,
-        suspicious: object,
+        suggestion: dict,
     ) -> AutoAction:
-        suspicious = suspicious if isinstance(suspicious, dict) else {}
-        case_id = str(suspicious.get('case_id') or '').strip()
-        field = str(suspicious.get('field') or '').strip()
-        value = suspicious.get('suggested')
-        ref = observation.latest_refs.get('eval.summary') or observation.hash
-        key = f'patch_score:{case_id}:{field}:{value}:{ref}'
+        args = suggestion.get('args') if isinstance(suggestion.get('args'), dict) else {}
+        case_id = str(args.get('case_id') or args.get('case_ref') or '').strip()
+        field = str(args.get('field') or '').strip()
+        value = args.get('value', args.get('suggested'))
+        intervention = AutoIntervention(
+            kind='patch_judge_score',
+            case_id=case_id,
+            field=field,
+            value=value,
+            source_ref=str(suggestion.get('source_ref') or observation.hash),
+        )
+        key = intervention.fingerprint
         if (
             config.patch_artifact_enabled
             and config.patch_judge_score_enabled
@@ -117,19 +154,15 @@ class AutoPolicy:
         ):
             return AutoAction(
                 kind='send_message',
-                reason='suspicious judge score detected',
+                reason='artifact suggested score patch detected',
                 target=key,
-                message=(
-                    f'{case_id} 的 {field} 评分不合理，请将 {field} 修改为 {value}。'
-                    f'理由：{suspicious.get("reason") or "auto score consistency check"}'
-                ),
-                intervention=AutoIntervention(
-                    kind='patch_judge_score',
-                    case_id=case_id,
-                    field=field,
-                    value=value,
-                    source_ref=ref,
-                ),
+                intervention=intervention,
+                metadata={
+                    'display_message': (
+                        f'{case_id} 的 {field} 评分不合理，请将 {field} 修改为 {value}。'
+                        f'理由：{suggestion.get("reason") or "artifact suggested intervention"}'
+                    )
+                },
             )
         if config.auto_continue:
             if state.continue_count >= config.max_continue_actions:
