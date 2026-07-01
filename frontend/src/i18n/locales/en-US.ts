@@ -2746,6 +2746,7 @@ const enUS = {
     developerDeactivated: "Developer mode has been deactivated",
     developerAlreadyActivated: "Developer mode is already active",
     developerActiveTag: "Active",
+    developerModeTooltip: "Developer Mode\n\nWhen active:\n• Tool management — enable, disable, and configure tools\n• Algorithm Leap — drive algorithm self-evolution via chat\n• Internal IDs shown on select components for debugging\n• SubAgent execution trace expanded by default",
     selfEvolutionTag: "Developer Only",
     selfEvolutionTitle: "Algorithm Leap",
     selfEvolutionSubtitle:

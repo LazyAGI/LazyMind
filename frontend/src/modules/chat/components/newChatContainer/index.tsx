@@ -1689,8 +1689,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           <MessageList
             messageList={messageList}
             initialCard={initialCard}
-            sendMessage={(text, clearInput) => {
-              sendMessage({ text, clearInput });
+            sendMessage={(text, clearInput, extras) => {
+              sendMessage({ text, clearInput, ...(extras ?? {}) });
             }}
             regenerate={regenerate}
             stopGeneration={stopGeneration}

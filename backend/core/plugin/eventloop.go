@@ -191,6 +191,11 @@ func HandlePluginStepCreated(
 		if sessionID == "" {
 			return "", "", false, fmt.Errorf("plugin: session_id required for non-cold-start step")
 		}
+		// Skip step advancement for dismissed sessions to prevent stale writes.
+		existingSess, dsErr := GetSession(ctx, db, sessionID)
+		if dsErr == nil && existingSess.Dismissed {
+			return sessionID, taskID, false, fmt.Errorf("plugin: session %s is dismissed, skipping step advancement", sessionID)
+		}
 		if uErr := UpdateSessionCurrentStep(ctx, db, sessionID, stepID); uErr != nil {
 			fmt.Printf("[Plugin] failed to update current_step: %v\n", uErr)
 		}

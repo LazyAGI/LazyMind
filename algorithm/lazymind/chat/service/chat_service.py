@@ -566,7 +566,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         skills_dir=_cfg['skill_fs_url'],
     )
     # ask_user is always a stop-tool for ChatAgent regardless of plugin state.
-    # Merge it with any plugin-level stop tools (e.g. advance_step_and_exit).
+    # Merge it with any plugin-level stop tools (e.g. advance_step_and_hand_off).
     stop_tools = list(plugin_stop_tools) if plugin_stop_tools else []
     if 'ask_user' not in stop_tools:
         stop_tools.append('ask_user')

@@ -329,9 +329,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mark the last assistant turn that had an ask_pending as answered.
-	// This disables the AskCard UI when the conversation history is reloaded.
+	// Only mark answered when the request carries a full ask_answers_structured payload,
+	// meaning the user actually submitted the AskCard. If the user ignored the card or
+	// only partially filled it, we do NOT mark it answered so the card stays interactive.
 	if !target.IsRegeneration {
-		markLastAskPendingAnswered(r.Context(), db, histories)
+		if _, hasStructured := raw["ask_answers_structured"]; hasStructured {
+			markLastAskPendingAnswered(r.Context(), db, histories)
+		}
 	}
 
 	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, query, target, dualReply, historyExt)

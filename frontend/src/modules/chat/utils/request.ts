@@ -210,6 +210,26 @@ export function PluginSessionApi() {
         options,
       );
     },
+    dismissSession(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:dismiss`,
+        {},
+        { headers: { 'Content-Type': 'application/json' }, ...options },
+      );
+    },
+    restoreSession(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:restore`,
+        {},
+        { headers: { 'Content-Type': 'application/json' }, ...options },
+      );
+    },
+    listDismissedSessions(conversationId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/dismissed-plugin-sessions`,
+        options,
+      );
+    },
   };
 }
 

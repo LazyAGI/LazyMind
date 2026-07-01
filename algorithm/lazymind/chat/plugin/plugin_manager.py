@@ -3,7 +3,7 @@
 Tool types registered dynamically per-conversation:
 
 - trigger_<plugin_id>       : Cold-start tool. Injected when no active plugin session exists.
-- advance_step_and_exit     : Step-advancement tool (stop-tool). Default; queues step and exits ReAct.
+- advance_step_and_hand_off : Step-advancement tool (stop-tool). Default; queues step and hands off control to user.
 - advance_step              : Synchronous step-advancement tool. Only in 'dynamic' mode; blocks until
                               the SubAgent finishes before ReAct continues.
 - ask_user                  : Ask the user a question (stop-tool). Registered on ChatAgent only.
@@ -372,17 +372,17 @@ def build_cold_start_tools() -> List[Any]:
     return tools
 
 
-def build_advance_step_and_exit_tool(
+def build_advance_step_and_hand_off_tool(
     plugin_id: str,
     current_step: str,
     rewind_steps: Optional[List[str]] = None,
     step_labels: Optional[Dict[str, str]] = None,
 ) -> Any:
-    """Build the advance_step_and_exit tool (stop-tool).
+    """Build the advance_step_and_hand_off tool (stop-tool).
 
-    Queues the step and immediately ends the current ReAct turn. The SubAgent runs in
-    the background; DriverAgent (auto mode) or the user (dynamic mode) decides next.
-    This is the DEFAULT advancement tool registered for both auto and dynamic modes.
+    Queues the step and immediately ends the current ReAct turn, handing off
+    control to the SubAgent (auto mode) or the user (dynamic mode). This is the
+    DEFAULT advancement tool registered for both auto and dynamic modes.
     """
     sm = plugin_loader.get_state_machine(plugin_id)
     forward = sm.get_reachable_steps(current_step) if sm else []
@@ -393,13 +393,13 @@ def build_advance_step_and_exit_tool(
     choices_doc = _build_step_choices_doc(forward, rewind, labels)
 
     @handle_tool_errors
-    def advance_step_and_exit(
+    def advance_step_and_hand_off(
         step_id: str,
         user_input: str,
         runtime_instruction: Optional[str] = None,
         partial_indices: Optional[Dict[str, List[int]]] = None,
     ) -> str:
-        """Advance the active plugin to the next step and END the current conversation turn.
+        """Advance the active plugin to the next step and hand off control to user.
 
         After calling this tool, the current ReAct loop exits and the SSE stream closes.
         The step runs in the background; when it completes, the next decision is made by
@@ -426,8 +426,8 @@ def build_advance_step_and_exit_tool(
             partial_indices=partial_indices or {},
         )
 
-    advance_step_and_exit.__doc__ = (
-        'Advance the active plugin to the next step and END this conversation turn.\n\n'
+    advance_step_and_hand_off.__doc__ = (
+        'Advance the active plugin to the next step and hand off control to SubAgent/user.\n\n'
         'The step runs in the background. Use this as the default advancement tool.\n'
         'Only use `advance_step` (synchronous) when you need intermediate step results\n'
         'within a single turn (e.g. user said "re-run steps 1 through 3").\n\n'
@@ -435,11 +435,11 @@ def build_advance_step_and_exit_tool(
         'Call with step_id="__end__" when the final step has succeeded.\n\n'
         '## Checkpoint-Resume (interrupted steps)\n\n'
         'When the user says "继续" and the step was interrupted (not "重试"):\n'
-        '  advance_step_and_exit(step_id=..., runtime_instruction=(\n'
+        '  advance_step_and_hand_off(step_id=..., runtime_instruction=(\n'
         '    "Previous attempt was interrupted. Check existing artifacts for this step "\n'
         '    "and only produce missing outputs (resume from checkpoint). "\n'
         '    "Do not regenerate already-saved artifacts."))\n'
-        'When the user says "重试": advance_step_and_exit(step_id=..., rewind=True)\n'
+        'When the user says "重试": advance_step_and_hand_off(step_id=..., rewind=True)\n'
         '  (rewind=True discards previous partial artifacts and restarts the step from scratch)\n\n'
         '## Rewind guidance\n\n'
         'If the DriverAgent or user indicates a prior step produced bad output, rewind by\n'
@@ -455,7 +455,7 @@ def build_advance_step_and_exit_tool(
         'Returns:\n'
         '    Confirmation that the step was queued. Exits ReAct immediately after.'
     )
-    return advance_step_and_exit
+    return advance_step_and_hand_off
 
 
 def build_advance_step_tool(
@@ -490,7 +490,7 @@ def build_advance_step_tool(
         Blocks until the SubAgent finishes, then returns the step result summary.
         Use ONLY when running multiple steps in sequence within a single turn
         (e.g. user said "re-run steps 1 to 3"). For single-step advancement,
-        prefer `advance_step_and_exit` to let the user review results.
+        prefer `advance_step_and_hand_off` to let the user review results.
         """
         if step_id == '__end__':
             return _trigger_plugin_end(plugin_id)
@@ -511,7 +511,7 @@ def build_advance_step_tool(
     advance_step.__doc__ = (
         'Advance the active plugin step synchronously and return the result.\n\n'
         'ONLY use this when running multiple steps in one turn. Otherwise use\n'
-        '`advance_step_and_exit`.\n\n'
+        '`advance_step_and_hand_off`.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
         '    step_id (str): Step to advance to (see list above).\n'
@@ -577,7 +577,7 @@ def build_update_intent_tool() -> Any:
 
         ALWAYS call this tool BEFORE advancing any step when the user expresses
         a style preference, quality requirement, or execution constraint in their
-        message. Do not skip this even if you are about to call advance_step_and_exit.
+        message. Do not skip this even if you are about to call advance_step_and_hand_off.
 
         Also call this tool when:
         - The user repeats or emphasizes the same point across multiple turns.
@@ -852,14 +852,14 @@ def resolve_plugin_injection(
                         step_labels[sid] = lbl
 
             # Build plugin tools according to plugin_mode.
-            # advance_step_and_exit is always registered (stop-tool).
+            # advance_step_and_hand_off is always registered (stop-tool).
             # advance_step (sync) is only registered in dynamic mode.
-            plugin_tools = [build_advance_step_and_exit_tool(
+            plugin_tools = [build_advance_step_and_hand_off_tool(
                 p_plugin_id, p_current_step,
                 rewind_steps=rewind_steps,
                 step_labels=step_labels,
             )]
-            plugin_stop_tools = ['advance_step_and_exit']
+            plugin_stop_tools = ['advance_step_and_hand_off']
 
             if plugin_mode == 'dynamic':
                 plugin_tools.append(build_advance_step_tool(
@@ -907,7 +907,16 @@ def resolve_plugin_injection(
                     plugin_loader.get_plugin_intro(spec.plugin_id)
                     for spec in (plugin_loader._registry or {}).values()
                 ]
-                plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
+                plugin_system_prompt = (
+                    '## Available Plugins\n'
+                    'IMPORTANT: Only trigger a plugin when the capability matches the '
+                    'user\'s PRIMARY and DIRECT intent — the main goal they are asking for '
+                    'right now. Never trigger a plugin for a sub-step that the model has '
+                    'internally decided is part of a larger multi-step plan. If the user\'s '
+                    'request involves multiple steps and only one of those steps would use a '
+                    'plugin, do NOT trigger the plugin. Never infer plugin intent from '
+                    'indirect or implicit cues.\n\n'
+                ) + '\n\n---\n\n'.join(s for s in scenarios if s)
     else:
         # No plugin_context provided: still inject cold-start triggers
         plugin_tools = build_cold_start_tools()
@@ -917,7 +926,16 @@ def resolve_plugin_injection(
                 plugin_loader.get_plugin_intro(spec.plugin_id)
                 for spec in (plugin_loader._registry or {}).values()
             ]
-            plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
+            plugin_system_prompt = (
+                '## Available Plugins\n'
+                'IMPORTANT: Only trigger a plugin when the capability matches the '
+                'user\'s PRIMARY and DIRECT intent — the main goal they are asking for '
+                'right now. Never trigger a plugin for a sub-step that the model has '
+                'internally decided is part of a larger multi-step plan. If the user\'s '
+                'request involves multiple steps and only one of those steps would use a '
+                'plugin, do NOT trigger the plugin. Never infer plugin intent from '
+                'indirect or implicit cues.\n\n'
+            ) + '\n\n---\n\n'.join(s for s in scenarios if s)
 
     return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
 
@@ -963,7 +981,7 @@ def _build_mode_guidance(
     common = (
         '\n\n## Plugin execution guidance\n\n'
         'Tools for step advancement:\n'
-        '- `advance_step_and_exit`: Queue a step and end this turn (DEFAULT). '
+        '- `advance_step_and_hand_off`: Queue a step and hand off control (DEFAULT). '
         'Use for single-step advancement.\n'
     )
     if plugin_mode == 'dynamic':
@@ -978,34 +996,34 @@ def _build_mode_guidance(
                 f'\n\n## Terminal steps (last steps before pipeline completion)\n\n'
                 f'The following steps lead directly to the end of the pipeline: {names}.\n'
                 'After one of these steps **succeeds**, immediately call '
-                '`advance_step_and_exit(step_id="__end__")` in the same turn '
+                '`advance_step_and_hand_off(step_id="__end__")` in the same turn '
                 'using `advance_step` (synchronous) so the pipeline completes without '
                 'requiring the user to click "继续" after the final step.\n\n'
                 'Concretely: use `advance_step(step_id=<terminal_step>, ...)` to run the '
                 'terminal step and wait for its result, then call '
-                '`advance_step_and_exit(step_id="__end__")` to close the session.\n'
+                '`advance_step_and_hand_off(step_id="__end__")` to close the session.\n'
                 'Only do this when the terminal step is the **last** planned step — '
-                'if the user wants to review results first, revert to `advance_step_and_exit`.'
+                'if the user wants to review results first, revert to `advance_step_and_hand_off`.'
             )
         common += (
             '- `advance_step`: Queue a step and WAIT for result (dynamic mode only). '
             'Use only when running multiple steps in one turn '
             '(e.g. user said "re-run steps 1 to 3" — use advance_step for steps 1..N-1, '
-            'then advance_step_and_exit for the last step).\n\n'
-            'After each step in dynamic mode, default to advance_step_and_exit so the user '
+            'then advance_step_and_hand_off for the last step).\n\n'
+            'After each step in dynamic mode, default to advance_step_and_hand_off so the user '
             'can review the result and decide the next action.\n\n'
-            'When a step is interrupted and user says "继续": call advance_step_and_exit with '
+            'When a step is interrupted and user says "继续": call advance_step_and_hand_off with '
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
             'and only produce missing outputs (resume from checkpoint)."\n'
-            'When user says "重试": call advance_step_and_exit with rewind=True '
+            'When user says "重试": call advance_step_and_hand_off with rewind=True '
             '(restarts the interrupted step from scratch, ignoring previous partial artifacts).'
             + terminal_hint
         )
     else:  # auto
         common += (
-            '\nIn auto mode, always use `advance_step_and_exit`. '
+            '\nIn auto mode, always use `advance_step_and_hand_off`. '
             'Do not use `advance_step` (not available in auto mode). '
-            'After calling advance_step_and_exit, the DriverAgent will evaluate the result '
+            'After calling advance_step_and_hand_off, the DriverAgent will evaluate the result '
             'and decide the next action automatically.\n\n'
             'Do not ask the user questions during step execution in auto mode '
             'unless the user explicitly requests it.'

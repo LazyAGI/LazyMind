@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -268,16 +269,175 @@ func resolveInitialPluginSettings(ctx context.Context, db *gorm.DB, userID strin
 	return out
 }
 
-func buildHistoryMessages(histories []orm.ChatHistory) []map[string]string {
+// askAnswersStructuredFromRaw extracts the ask_answers_structured map from the raw request body.
+// Returns nil if not present or not a valid map.
+func askAnswersStructuredFromRaw(raw map[string]any) map[string]any {
+	v, ok := raw["ask_answers_structured"]
+	if !ok {
+		return nil
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return m
+}
+
+// askAnswersStructuredPayload mirrors the JSON sent by the frontend when the user
+// submits an AskCard.
+type askAnswersStructuredPayload struct {
+	AskID     string                    `json:"ask_id"`
+	Questions []askAnsweredQuestionItem `json:"questions"`
+}
+
+type askAnsweredQuestionItem struct {
+	Text          string          `json:"text"`
+	Type          string          `json:"type"`
+	Choices       []string        `json:"choices"`
+	CustomChoices []string        `json:"custom_choices"`
+	Answer        json.RawMessage `json:"answer"` // null or object
+}
+
+// buildAskUserToolResultContent formats the three cases described in the plan.
+// askStructured non-nil → full submission; askSavedAnswers non-nil → partial; both nil → unanswered.
+func buildAskUserToolResultContent(
+	askPendingData map[string]any,
+	askStructured *askAnswersStructuredPayload,
+	askSavedAnswers map[string]any,
+) string {
+	questionsRaw, _ := askPendingData["questions"].([]any)
+
+	if askStructured != nil {
+		lines := []string{"Questions were shown to the user via an interactive card. The user submitted all answers.", ""}
+		for i, sq := range askStructured.Questions {
+			prefix := fmt.Sprintf("Q%d: %s", i+1, sq.Text)
+			if len(sq.Choices) > 0 {
+				opts := make([]string, len(sq.Choices))
+				for ci, ch := range sq.Choices {
+					label := ch
+					if ci < len(sq.CustomChoices) && sq.CustomChoices[ci] != "" {
+						label = sq.CustomChoices[ci]
+					}
+					opts[ci] = fmt.Sprintf("[%c] %s", rune('A'+ci), label)
+				}
+				lines = append(lines, prefix)
+				lines = append(lines, "  Options: "+strings.Join(opts, "  "))
+			} else {
+				lines = append(lines, prefix)
+			}
+			answerStr := "(no answer)"
+			if len(sq.Answer) > 0 && string(sq.Answer) != "null" {
+				var ans map[string]any
+				if json.Unmarshal(sq.Answer, &ans) == nil {
+					if v, ok := ans["value"]; ok {
+						answerStr = fmt.Sprintf("%v", v)
+					}
+				} else {
+					answerStr = string(sq.Answer)
+				}
+			}
+			lines = append(lines, "  Answer: "+answerStr)
+			lines = append(lines, "")
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	if askSavedAnswers != nil && len(questionsRaw) > 0 {
+		lines := []string{
+			"Questions were shown. The user partially filled the form but did NOT submit.",
+			"Treat the user's new message as additional guidance — use available answers and do NOT re-ask.",
+			"",
+		}
+		for i, qRaw := range questionsRaw {
+			qMap, _ := qRaw.(map[string]any)
+			qText, _ := qMap["text"].(string)
+			prefix := fmt.Sprintf("Q%d: %s", i+1, qText)
+			lines = append(lines, prefix)
+			idxKey := fmt.Sprintf("%d", i)
+			if _, hasAns := askSavedAnswers[idxKey]; hasAns {
+				lines = append(lines, "  Answer: [partial answer saved]")
+			} else {
+				lines = append(lines, "  Answer: [未填写]")
+			}
+			lines = append(lines, "")
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	return "Questions were shown but the user ignored them and sent a new message instead.\n" +
+		"Treat the new message as a clarification or modification of the original task.\n" +
+		"Do NOT re-ask these questions unless the user explicitly requests it."
+}
+
+// buildHistoryMessages converts stored chat histories to the format expected by Python.
+// When askAnswersStructured is provided, the last unanswered ask_user tool_result is
+// rewritten to contain the full structured context.
+func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[string]any) []map[string]string {
 	if len(histories) == 0 {
 		return nil
 	}
+
+	// Find the last history that has an unanswered ask_pending.
+	var askRewriteIdx int = -1
+	for i := len(histories) - 1; i >= 0; i-- {
+		h := &histories[i]
+		if len(h.Ext) == 0 {
+			continue
+		}
+		var ext map[string]any
+		if err := json.Unmarshal(h.Ext, &ext); err != nil {
+			continue
+		}
+		if ext["ask_pending"] == nil {
+			continue
+		}
+		if answered, _ := ext["ask_answered"].(bool); answered {
+			break // already answered, no rewrite needed
+		}
+		askRewriteIdx = i
+		break
+	}
+
 	out := make([]map[string]string, 0, len(histories)*2)
-	for _, h := range histories {
+	for idx, h := range histories {
+		assistantContent := buildAssistantHistoryContent(h)
+
+		// Rewrite the ask_user tool_result for the identified history entry.
+		if idx == askRewriteIdx {
+			var ext map[string]any
+			_ = json.Unmarshal(h.Ext, &ext)
+			askPendingData, _ := ext["ask_pending"].(map[string]any)
+			askSavedAnswersRaw, _ := ext["ask_saved_answers"].(map[string]any)
+
+			var structuredPayload *askAnswersStructuredPayload
+			if askAnswersStructured != nil {
+				bs, _ := json.Marshal(askAnswersStructured)
+				var p askAnswersStructuredPayload
+				if json.Unmarshal(bs, &p) == nil {
+					structuredPayload = &p
+				}
+			}
+
+			newContent := buildAskUserToolResultContent(askPendingData, structuredPayload, askSavedAnswersRaw)
+			// Replace the placeholder tool_result content in the assistant message.
+			assistantContent = replaceAskUserToolResult(assistantContent, newContent)
+		}
+
 		out = append(out, map[string]string{"role": "user", "content": h.RawContent})
-		out = append(out, map[string]string{"role": "assistant", "content": buildAssistantHistoryContent(h)})
+		out = append(out, map[string]string{"role": "assistant", "content": assistantContent})
 	}
 	return out
+}
+
+var askUserToolResultPattern = regexp.MustCompile(`(?s)(<tool_result\b[^>]*>)Question sent to user \(ask_id=[^)]+\)\.(</tool_result>)`)
+
+// replaceAskUserToolResult replaces the placeholder ask_user tool_result content
+// in an assistant message with enriched context so the LLM understands the state.
+func replaceAskUserToolResult(assistantContent, newContent string) string {
+	if !strings.Contains(assistantContent, "Question sent to user") {
+		return assistantContent
+	}
+	return askUserToolResultPattern.ReplaceAllString(assistantContent, "${1}"+newContent+"${2}")
 }
 
 const chatActionRegeneration = "CHAT_ACTION_REGENERATION"
@@ -540,7 +700,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"query":            query,
 		"session_id":       sessionID,
 		"conversation_id":  convID,
-		"history":          buildHistoryMessages(histories),
+		"history":          buildHistoryMessages(histories, askAnswersStructuredFromRaw(raw)),
 		"filters":          raw["filters"],
 		"files":            filesMap,
 		"current_turn_seq": currentSeq,

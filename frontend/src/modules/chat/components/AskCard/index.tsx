@@ -19,10 +19,30 @@ export interface AskPending {
   description?: string;
 }
 
+export interface AskAnsweredQuestion {
+  text: string;
+  type: string;
+  choices: string[];        // original choice list (from AskQuestion.choices)
+  custom_choices: string[]; // user-edited choice labels
+  answer: AnswerState | null;
+}
+
+export interface AskAnswersStructured {
+  ask_id: string;
+  questions: AskAnsweredQuestion[];
+}
+
+export interface AskSubmitPayload {
+  /** Formatted text for display in the user message bubble. */
+  text: string;
+  /** Full structured answers, forwarded to the backend as ask_answers_structured. */
+  structured: AskAnswersStructured;
+}
+
 interface AskCardProps {
   askPending: AskPending;
-  /** Called with one formatted answer string per question, joined by newlines. */
-  onSubmit: (formattedText: string) => void;
+  /** Called with a payload containing the formatted text and full structured answers. */
+  onSubmit: (payload: AskSubmitPayload) => void;
   disabled?: boolean;
   /** Cached answers to pre-populate (index → serialized answer) */
   savedAnswers?: Record<number, AnswerState>;
@@ -212,7 +232,17 @@ export default function AskCard({
     const lines = questions.map((q, i) =>
       formatAnswer(q, answers[i]!, customChoices[i] ?? q.choices ?? []),
     );
-    onSubmit(lines.join('\n'));
+    const structured: AskAnswersStructured = {
+      ask_id: askPending.ask_id,
+      questions: questions.map((q, i) => ({
+        text: q.text,
+        type: q.type,
+        choices: q.choices ?? [],
+        custom_choices: customChoices[i] ?? q.choices ?? [],
+        answer: answers[i] ?? null,
+      })),
+    };
+    onSubmit({ text: lines.join('\n'), structured });
   };
 
   const goTo = (idx: number) => {

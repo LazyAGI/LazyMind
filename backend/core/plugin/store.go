@@ -49,10 +49,10 @@ type CreateSessionInput struct {
 // CreateSession inserts a new plugin_sessions record.
 // It returns an error if an active session already exists for the conversation.
 func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*orm.PluginSession, error) {
-	// Guard: at most one active session per conversation.
+	// Guard: at most one non-dismissed active session per conversation.
 	var count int64
 	if err := db.WithContext(ctx).Model(&orm.PluginSession{}).
-		Where("conversation_id = ? AND status = ?", in.ConversationID, SessionStatusActive).
+		Where("conversation_id = ? AND status = ? AND dismissed = false", in.ConversationID, SessionStatusActive).
 		Count(&count).Error; err != nil {
 		return nil, err
 	}
@@ -79,12 +79,12 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 }
 
 // GetActiveSession returns the in-progress plugin session for a conversation, or nil if none.
-// Only 'active' status is considered: used by HandlePluginStepCreated to guard against
-// duplicate cold-start sessions.
+// Only 'active' and non-dismissed sessions are considered: used by HandlePluginStepCreated
+// to guard against duplicate cold-start sessions.
 func GetActiveSession(ctx context.Context, db *gorm.DB, conversationID string) (*orm.PluginSession, error) {
 	var s orm.PluginSession
 	err := db.WithContext(ctx).
-		Where("conversation_id = ? AND status = ?", conversationID, SessionStatusActive).
+		Where("conversation_id = ? AND status = ? AND dismissed = false", conversationID, SessionStatusActive).
 		Order("created_at DESC").
 		First(&s).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -96,12 +96,13 @@ func GetActiveSession(ctx context.Context, db *gorm.DB, conversationID string) (
 	return &s, nil
 }
 
-// GetLatestSession returns the most recent plugin session for a conversation regardless of status,
-// or nil if none exists. Used by the frontend to always show session output even after completion.
+// GetLatestSession returns the most recent non-dismissed plugin session for a conversation,
+// or nil if none exists. Used by the frontend to show the current active session.
+// Dismissed sessions are excluded so the frontend sees a clean state after dismissal.
 func GetLatestSession(ctx context.Context, db *gorm.DB, conversationID string) (*orm.PluginSession, error) {
 	var s orm.PluginSession
 	err := db.WithContext(ctx).
-		Where("conversation_id = ?", conversationID).
+		Where("conversation_id = ? AND dismissed = false", conversationID).
 		Order("created_at DESC").
 		First(&s).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -111,6 +112,70 @@ func GetLatestSession(ctx context.Context, db *gorm.DB, conversationID string) (
 		return nil, err
 	}
 	return &s, nil
+}
+
+// DismissSession marks a plugin session as dismissed, hiding it from all active-session
+// lookups. If the session has running steps, they are interrupted first. The status field
+// is preserved for audit purposes; only the dismissed flag is set.
+func DismissSession(ctx context.Context, db *gorm.DB, sessionID string) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var s orm.PluginSession
+		if err := tx.Where("id = ? AND dismissed = false", sessionID).First(&s).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("session not found or already dismissed")
+			}
+			return err
+		}
+		// If active, mark running steps interrupted before dismissing.
+		if s.Status == SessionStatusActive {
+			if err := tx.Model(&orm.PluginSessionStep{}).
+				Where("session_id = ? AND status = ?", sessionID, StepStatusRunning).
+				Updates(map[string]any{"status": StepStatusInterrupted, "updated_at": time.Now().UTC()}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&orm.PluginSession{}).
+			Where("id = ?", sessionID).
+			Updates(map[string]any{"dismissed": true, "updated_at": time.Now().UTC()}).Error
+	})
+}
+
+// RestoreSession un-dismisses a previously dismissed session. Returns an error if another
+// non-dismissed active/waiting session already exists for the same conversation. If the
+// session was active before dismissal, it is restored to waiting (SubAgent was cancelled).
+func RestoreSession(ctx context.Context, db *gorm.DB, sessionID string) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var s orm.PluginSession
+		if err := tx.Where("id = ? AND dismissed = true", sessionID).First(&s).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("session not found or not dismissed")
+			}
+			return err
+		}
+		// Guard: no other active/waiting session in this conversation.
+		var count int64
+		if err := tx.Model(&orm.PluginSession{}).
+			Where("conversation_id = ? AND dismissed = false AND status IN ?",
+				s.ConversationID, []string{SessionStatusActive, SessionStatusWaiting}).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return fmt.Errorf("another active or waiting session exists for this conversation")
+		}
+		newStatus := s.Status
+		if newStatus == SessionStatusActive {
+			// SubAgent was cancelled at dismiss time; restore to waiting so the user can retry.
+			newStatus = SessionStatusWaiting
+		}
+		return tx.Model(&orm.PluginSession{}).
+			Where("id = ?", sessionID).
+			Updates(map[string]any{
+				"dismissed":  false,
+				"status":     newStatus,
+				"updated_at": time.Now().UTC(),
+			}).Error
+	})
 }
 
 // healStaleActiveSession repairs a session that is stuck in "active" state after a crash.
@@ -178,11 +243,24 @@ func GetSession(ctx context.Context, db *gorm.DB, sessionID string) (*orm.Plugin
 	return &s, nil
 }
 
-// ListSessions returns sessions for a conversation ordered by creation time desc.
+// ListSessions returns non-dismissed sessions for a conversation ordered by creation time desc.
 func ListSessions(ctx context.Context, db *gorm.DB, conversationID string) ([]orm.PluginSession, error) {
 	var rows []orm.PluginSession
 	if err := db.WithContext(ctx).
-		Where("conversation_id = ?", conversationID).
+		Where("conversation_id = ? AND dismissed = false", conversationID).
+		Order("created_at DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// ListDismissedSessions returns dismissed sessions for a conversation ordered by creation time desc.
+// Used by the restore UI to enumerate sessions the user can bring back.
+func ListDismissedSessions(ctx context.Context, db *gorm.DB, conversationID string) ([]orm.PluginSession, error) {
+	var rows []orm.PluginSession
+	if err := db.WithContext(ctx).
+		Where("conversation_id = ? AND dismissed = true", conversationID).
 		Order("created_at DESC").
 		Find(&rows).Error; err != nil {
 		return nil, err

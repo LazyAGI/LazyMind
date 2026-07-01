@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -413,6 +414,10 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
 		return
 	}
+	if s.Dismissed {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
 	dto := toSessionDTO(s)
 	// Load slots inline.
 	revisions, _ := LoadSelectedSlots(ctx, db, sessionID)
@@ -444,7 +449,21 @@ func GetSessionSlots(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
 	}
-	revisions, err := LoadSelectedSlots(r.Context(), db, sessionID)
+	ctx := r.Context()
+	s, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if s.Dismissed {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
+	revisions, err := LoadSelectedSlots(ctx, db, sessionID)
 	if err != nil {
 		common.ReplyErr(w, "query slots failed", http.StatusInternalServerError)
 		return
@@ -453,7 +472,7 @@ func GetSessionSlots(w http.ResponseWriter, r *http.Request) {
 	for i := range revisions {
 		out = append(out, toSlotDTO(&revisions[i]))
 	}
-	enrichSlots(r.Context(), db, sessionID, out)
+	enrichSlots(ctx, db, sessionID, out)
 	common.ReplyOK(w, map[string]any{"slots": out})
 }
 
@@ -471,7 +490,21 @@ func GetSessionSteps(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
 	}
-	steps, err := ListSteps(r.Context(), db, sessionID)
+	ctx := r.Context()
+	sess, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if sess.Dismissed {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
+	steps, err := ListSteps(ctx, db, sessionID)
 	if err != nil {
 		common.ReplyErr(w, "query steps failed", http.StatusInternalServerError)
 		return
@@ -487,7 +520,7 @@ func GetSessionSteps(w http.ResponseWriter, r *http.Request) {
 		CreatedAt     string `json:"created_at"`
 		UpdatedAt     string `json:"updated_at"`
 	}
-	intentMap := buildStepIntentMap(r.Context(), db, sessionID)
+	intentMap := buildStepIntentMap(ctx, db, sessionID)
 	out := make([]stepDTO, 0, len(steps))
 	for _, s := range steps {
 		out = append(out, stepDTO{
@@ -526,6 +559,19 @@ func PatchSessionSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	s, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if s.Dismissed {
+		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
+		return
+	}
 	// Deselect all, then select the target revision.
 	if err := db.WithContext(ctx).Model(&orm.PluginSlotRevision{}).
 		Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true).
@@ -715,6 +761,19 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	reorderSess, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if reorderSess.Dismissed {
+		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
+		return
+	}
 
 	if err := ReorderSlot(ctx, db, sessionID, slotID, body.Order, body.Version); err != nil {
 		if err == ErrConflict {
@@ -748,7 +807,21 @@ func GetSlotOrderHandler(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
 	}
-	row, err := GetSlotOrder(r.Context(), db, sessionID, slotID)
+	ctx := r.Context()
+	slotOrderSess, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if slotOrderSess.Dismissed {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
+	row, err := GetSlotOrder(ctx, db, sessionID, slotID)
 	if err != nil {
 		common.ReplyErr(w, "query order failed", http.StatusInternalServerError)
 		return
@@ -797,6 +870,19 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	createItemSess, siErr := GetSession(ctx, db, sessionID)
+	if siErr != nil {
+		if IsNotFound(siErr) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if createItemSess.Dismissed {
+		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
+		return
+	}
 	// Get an existing selected revision to borrow its artifact_key and step info.
 	var anyRev orm.PluginSlotRevision
 	if err := db.WithContext(ctx).
@@ -900,6 +986,10 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "session not found", http.StatusNotFound)
 		return
 	}
+	if sess.Dismissed {
+		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
+		return
+	}
 
 	// Resolve slot binding for the artifact_key via Python plugin API.
 	slotID, cardinality := resolveSlotBinding(sess.PluginID, body.ArtifactKey)
@@ -947,4 +1037,82 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 		"artifact_key": body.ArtifactKey,
 		"revision":     rev.Revision,
 	})
+}
+
+// DismissSessionHandler handles POST /plugin-sessions/{session_id}:dismiss.
+// Marks the session as dismissed, hiding it from all active-session lookups.
+func DismissSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	if err := DismissSession(r.Context(), db, sessionID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == "session not found or already dismissed" {
+			common.ReplyErr(w, "session not found or already dismissed", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "dismiss failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"session_id": sessionID, "dismissed": true})
+}
+
+// RestoreSessionHandler handles POST /plugin-sessions/{session_id}:restore.
+// Un-dismisses a previously dismissed session, subject to no active/waiting session existing.
+func RestoreSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	if err := RestoreSession(r.Context(), db, sessionID); err != nil {
+		msg := err.Error()
+		if msg == "session not found or not dismissed" {
+			common.ReplyErr(w, msg, http.StatusNotFound)
+			return
+		}
+		if msg == "another active or waiting session exists for this conversation" {
+			common.ReplyErr(w, msg, http.StatusConflict)
+			return
+		}
+		common.ReplyErr(w, "restore failed: "+msg, http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"session_id": sessionID, "dismissed": false})
+}
+
+// ListDismissedSessionsHandler handles GET /conversations/{conversation_id}/dismissed-plugin-sessions.
+// Returns sessions the user has dismissed, so they can be restored via the UI.
+func ListDismissedSessionsHandler(w http.ResponseWriter, r *http.Request) {
+	convID := common.PathVar(r, "conversation_id")
+	if convID == "" {
+		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	sessions, err := ListDismissedSessions(r.Context(), db, convID)
+	if err != nil {
+		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+	out := make([]sessionDTO, 0, len(sessions))
+	for i := range sessions {
+		out = append(out, toSessionDTO(&sessions[i]))
+	}
+	common.ReplyOK(w, map[string]any{"sessions": out})
 }

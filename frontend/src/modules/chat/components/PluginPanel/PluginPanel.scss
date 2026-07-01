@@ -204,6 +204,32 @@
     padding: 6px 0 2px;
   }
 
+  &__dismiss-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    color: #9ca3af;
+    padding: 0;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+
+    &:hover:not(:disabled) {
+      background: #fee2e2;
+      color: #ef4444;
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+  }
+
   &__collapse-btn {
     display: flex;
     align-items: center;

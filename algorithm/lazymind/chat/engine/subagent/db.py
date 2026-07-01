@@ -601,6 +601,9 @@ class TaskQueryDB:
     def list_tasks_by_conversation(self, conv_id: str) -> List[Dict[str, Any]]:
         """Return all tasks for a conversation with their latest artifacts.
 
+        Tasks belonging to a dismissed plugin session are excluded so that the
+        ChatAgent cannot see or access their artifacts after the plugin is dismissed.
+
         Returns the same shape expected by _list_conversation_tasks / _resolve_task:
         task_id, id, title, agent_type, status, progress_pct, current_phase, summary,
         seq_in_conversation, output_artifact_keys, artifacts (list of artifact dicts).
@@ -609,11 +612,21 @@ class TaskQueryDB:
             with self._conn() as conn:
                 task_rows = conn.execute(
                     text(
-                        'SELECT id, title, agent_type, status, progress_pct, current_phase, '
-                        '       summary, seq_in_conversation, output_artifact_keys, params '
-                        'FROM sub_agent_tasks '
-                        'WHERE conversation_id = :conv_id '
-                        'ORDER BY seq_in_conversation ASC'
+                        'SELECT sat.id, sat.title, sat.agent_type, sat.status, '
+                        '       sat.progress_pct, sat.current_phase, '
+                        '       sat.summary, sat.seq_in_conversation, '
+                        '       sat.output_artifact_keys, sat.params '
+                        'FROM sub_agent_tasks sat '
+                        # Exclude tasks that belong to a dismissed plugin session.
+                        # plugin_step tasks are linked via plugin_session_steps;
+                        # non-plugin tasks have no matching row so they are always kept.
+                        'WHERE sat.conversation_id = :conv_id '
+                        '  AND NOT EXISTS ( '
+                        '    SELECT 1 FROM plugin_session_steps pss '
+                        '    JOIN plugin_sessions ps ON ps.id = pss.session_id '
+                        '    WHERE pss.task_id = sat.id AND ps.dismissed = TRUE '
+                        '  ) '
+                        'ORDER BY sat.seq_in_conversation ASC'
                     ),
                     {'conv_id': conv_id},
                 ).mappings().all()

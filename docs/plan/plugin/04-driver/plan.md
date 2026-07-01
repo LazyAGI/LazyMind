@@ -34,7 +34,7 @@
 
 | `plugin_mode` | DriverAgent 是否参与 | ChatAgent 退出时机 |
 | --- | --- | --- |
-| `auto` | 是 | 调用 `advance_step_and_exit` 后由 `plugin_stop_tools` 退出 |
+| `auto` | 是 | 调用 `advance_step_and_hand_off` 后由 `plugin_stop_tools` 退出 |
 | `dynamic`（默认） | 否 | 由 ChatAgent 自行决定（可连续多步，或 ask 后退出） |
 
 SubAgent 开关（`enable_subagent`）与插件步骤无关，控制 ChatAgent 是否允许自主发散创建非 Plugin 的 SubAgent，独立 bool 字段，默认 `true`：
@@ -156,32 +156,32 @@ SubAgent 以任何终态（`succeeded` / `failed` / `interrupted`）结束时，
 
 ### 3.2 DriverAgent 输出格式与失败降级✅
 
-**DriverAgent 输出自然语言评估（非 verdict codes）**：DriverAgent 输出 1-2 句纯自然语言，描述步骤结果是否合格及原因，**不输出** PASS/RETRY/FAIL/DONE 等结构化指令码。该评估作为 synthetic user turn 注入下一轮 ChatAgent，由 ChatAgent 自主决策（调用 `advance_step_and_exit` 推进下一步、传 `retry_hint` 重试当前步、或传 `__end__` 完成插件）。
+**DriverAgent 输出自然语言评估（非 verdict codes）**：DriverAgent 输出 1-2 句纯自然语言，描述步骤结果是否合格及原因，**不输出** PASS/RETRY/FAIL/DONE 等结构化指令码。该评估作为 synthetic user turn 注入下一轮 ChatAgent，由 ChatAgent 自主决策（调用 `advance_step_and_hand_off` 推进下一步、传 `retry_hint` 重试当前步、或传 `__end__` 完成插件）。
 
 降级策略：
 1. HTTP 超时或 500 → 降级：推送 `driver_fallback` + `step_waiting`，不自动推进（即 fallback 到 `dynamic` 让用户介入，而非静默 PASS）。
 2. `callDriverAgent` 重试 1 次（退避 5s），仍失败才降级。
 
-### 3.3 `advance_step` / `advance_step_and_exit` 与 ChatAgent 退出✅
+### 3.3 `advance_step` / `advance_step_and_hand_off` 与 ChatAgent 退出✅
 
 ChatAgent 有**两个**步骤推进工具，语义不同：
 
 | 工具 | 是否在 `plugin_stop_tools` | 行为 |
 | --- | --- | --- |
 | `advance_step` | **否** | 同步推进：工具内部阻塞等待 SubAgent 完成，返回结果摘要；ReAct 继续推理 |
-| `advance_step_and_exit` | **是** | 推进步骤并结束当前对话轮次：立即返回 `"step queued"`，框架随即强制退出 ReAct、SSE 关闭；SubAgent 后台运行，完成后由 DriverAgent 裁决或等待用户决策（Conversation Events 通知前端） |
+| `advance_step_and_hand_off` | **是** | 推进步骤并结束当前对话轮次：立即返回 `"step queued"`，框架随即强制退出 ReAct、SSE 关闭；SubAgent 后台运行，完成后由 DriverAgent 裁决或等待用户决策（Conversation Events 通知前端） |
 
 **按模式动态注册**（`resolve_plugin_injection` 中根据 `plugin_mode` 决定）：
 
 | `plugin_mode` | 注册的工具 | 设计意图 |
 | --- | --- | --- |
-| `auto` | 仅 `advance_step_and_exit` | ChatAgent 无法调用同步工具，每步必退出交给 DriverAgent 裁决 |
-| `dynamic` | `advance_step_and_exit`（默认）+ `advance_step` | 默认每步完成后交用户决策；仅用户明确要求连续推进多步时才用 `advance_step` |
+| `auto` | 仅 `advance_step_and_hand_off` | ChatAgent 无法调用同步工具，每步必退出交给 DriverAgent 裁决 |
+| `dynamic` | `advance_step_and_hand_off`（默认）+ `advance_step` | 默认每步完成后交用户决策；仅用户明确要求连续推进多步时才用 `advance_step` |
 
 使用规则（注入 ChatAgent system prompt，仅 `dynamic` 模式可见两个工具时生效）：
 
-- 默认使用 `advance_step_and_exit`：每步完成后让用户查看结果并决策下一步。
-- 仅当用户明确要求连续执行多个步骤（如「重跑 1-3」「全部跑完」）时，对前 N-1 步使用 `advance_step` 同步等结果，最后一步使用 `advance_step_and_exit` 退出。
+- 默认使用 `advance_step_and_hand_off`：每步完成后让用户查看结果并决策下一步。
+- 仅当用户明确要求连续执行多个步骤（如「重跑 1-3」「全部跑完」）时，对前 N-1 步使用 `advance_step` 同步等结果，最后一步使用 `advance_step_and_hand_off` 退出。
 
 ⚠️ TODO：仅在工具返回成功（无 Error: 前缀 / success: true）时才触发 stop-tool 退出，失败时把 Error 作为 tool result 继续 ReAct 循环。需要的话我可以帮你改这一块。
 
@@ -249,14 +249,14 @@ ChatAgent 在 `resolve_plugin_injection` 看到 `session.status=waiting` 且有 
 
 ### 5.1 并行决策者：ChatAgent
 
-并行与否由 **ChatAgent** 根据 `state.yml` 的依赖描述自行判断，不由 Go 自动推断。ChatAgent 在一次 ReAct 步骤中**同时输出多个 `advance_step` / `advance_step_and_exit` 工具调用**（parallel tool calls），触发并行执行。
+并行与否由 **ChatAgent** 根据 `state.yml` 的依赖描述自行判断，不由 Go 自动推断。ChatAgent 在一次 ReAct 步骤中**同时输出多个 `advance_step` / `advance_step_and_hand_off` 工具调用**（parallel tool calls），触发并行执行。
 
 并行与同步/异步无关：
 
 | 场景 | ChatAgent 调用方式 | SubAgent 是否并行 |
 | --- | --- | --- |
 | 并行 + 同步 | 同时输出多个 `advance_step` | 是；两个 SubAgent 同时跑，工具调用都阻塞等结果，结果全部返回后 ReAct 继续 |
-| 并行 + 异步 | 同时输出多个 `advance_step_and_exit` | 是；两个 SubAgent 同时跑，ReAct 立即退出，后续由 DriverAgent 裁决 |
+| 并行 + 异步 | 同时输出多个 `advance_step_and_hand_off` | 是；两个 SubAgent 同时跑，ReAct 立即退出，后续由 DriverAgent 裁决 |
 | 串行 + 同步 | 顺序调用多个 `advance_step` | 否；上一步完成后才调下一步 |
 
 ### 5.2 Go 并行编排
@@ -286,11 +286,11 @@ if self._stop_tools:
         return '\n'.join(str(r) for r in tool_calls_results)  # 立即退出
 ```
 
-因此：**所有 parallel tool calls 全部执行完毕后，若其中任意一个是 stop-tool，本轮 ReAct 立即退出**。这对 `advance_step_and_exit` 并行是安全的——多个工具同时输出 `task_created`，全部执行完后 ReAct 退出；各 SubAgent 已经在 Go 侧并发运行。
+因此：**所有 parallel tool calls 全部执行完毕后，若其中任意一个是 stop-tool，本轮 ReAct 立即退出**。这对 `advance_step_and_hand_off` 并行是安全的——多个工具同时输出 `task_created`，全部执行完后 ReAct 退出；各 SubAgent 已经在 Go 侧并发运行。
 
 ### 5.5 混用 sync / async 的处理
 
-混用**没有实质问题**。`tool_calls_results = self._tools_manager(tool_calls)` 并发执行所有工具：`advance_step` 在内部阻塞等 step_A SubAgent 完成，`advance_step_and_exit` 立即返回；两个工具都完成后，框架才检查 stop-tools 并退出 ReAct。因此 step_A 的同步等待结果不会被截断，Go 侧两个 SubAgent 均已正常启动。
+混用**没有实质问题**。`tool_calls_results = self._tools_manager(tool_calls)` 并发执行所有工具：`advance_step` 在内部阻塞等 step_A SubAgent 完成，`advance_step_and_hand_off` 立即返回；两个工具都完成后，框架才检查 stop-tools 并退出 ReAct。因此 step_A 的同步等待结果不会被截断，Go 侧两个 SubAgent 均已正常启动。
 
 混用的实际效果等同于「全异步」：ReAct 退出时 step_A 已完成（同步等完了）、step_B 在后台运行（异步），ChatAgent 拿到 step_A 的结果摘要但因为 stop-tool 退出而不再消费。若需要 ChatAgent 消费 step_A 的结果继续推理，应统一用 `advance_step`（全同步）；若不需要，混用和全异步行为一致，不用禁止。
 
@@ -299,8 +299,8 @@ if self._stop_tools:
 需在 system prompt 中说明并行判断规则：
 
 - 读取当前 `state.yml` 步骤的 `inputs` 声明，找出前驱均已完成、互不依赖的步骤。
-- 若存在多个就绪步骤，在同一个 ReAct 步骤中**同时**调用对应的 `advance_step` / `advance_step_and_exit`。
-- 若需要 ChatAgent 消费并行步骤的结果继续推理，用 `advance_step`（全同步）；若不需要，用 `advance_step_and_exit`（退出当前轮次，交由 DriverAgent 或用户决策）。
+- 若存在多个就绪步骤，在同一个 ReAct 步骤中**同时**调用对应的 `advance_step` / `advance_step_and_hand_off`。
+- 若需要 ChatAgent 消费并行步骤的结果继续推理，用 `advance_step`（全同步）；若不需要，用 `advance_step_and_hand_off`（退出当前轮次，交由 DriverAgent 或用户决策）。
 
 ### 5.7 前端
 
@@ -381,7 +381,7 @@ PluginPanel 步骤卡片旁展示当前步骤 `intent_context` 摘要；全局�
 
 1. 调用 `advance_step(step1, rewind=True, retry_hint=...)` → 阻塞等待 SubAgent 完成，收到结果摘要。
 2. 同理 `advance_step(step2, ...)`，同步等结果。
-3. 调用 `advance_step_and_exit(step3, ...)` → 立即返回，ReAct 强制退出，SSE 关闭。
+3. 调用 `advance_step_and_hand_off(step3, ...)` → 立即返回，ReAct 强制退出，SSE 关闭。
 4. step3 SubAgent 后台运行；完成后 Conversation Events 通知前端（`batch_done`）。
 
 **方案 B — 三步全同步后退出**
@@ -394,15 +394,15 @@ PluginPanel 步骤卡片旁展示当前步骤 `intent_context` 摘要；全局�
 | A | 第三步耗时长，用户不必保持 SSE；或用户明确说「后台跑」 |
 | B | 需要 ChatAgent 对三步结果做**一轮汇总**再交给用户 |
 
-`auto` 模式下：每步统一用 `advance_step_and_exit`，每步均由 DriverAgent 裁决，**不支持**单轮内连跑多步；用户范围重跑需切 `dynamic` 或逐步确认。
+`auto` 模式下：每步统一用 `advance_step_and_hand_off`，每步均由 DriverAgent 裁决，**不支持**单轮内连跑多步；用户范围重跑需切 `dynamic` 或逐步确认。
 
 > 代码示例见 [`code.md` · C7](./code.md#c7)。
 
-### 7.3 `advance_step` / `advance_step_and_exit` 工具增强
+### 7.3 `advance_step` / `advance_step_and_hand_off` 工具增强
 
 - docstring 动态嵌入可 `rewind` 步骤列表（已有）。
 - 可选参数 `retry_hint`、`rewind: bool`（已有）；**不**新增 Go 侧 `run_range` 批次字段。
-- ChatAgent system 提示（仅 `dynamic` 模式可见 `advance_step` 时）：识别「重跑 N~M 步」时，前 N-1 步用 `advance_step` 同步等结果，最后一步用 `advance_step_and_exit` 退出交由用户决策。`auto` 模式下 ChatAgent 只有 `advance_step_and_exit`，不支持单轮连跑多步。
+- ChatAgent system 提示（仅 `dynamic` 模式可见 `advance_step` 时）：识别「重跑 N~M 步」时，前 N-1 步用 `advance_step` 同步等结果，最后一步用 `advance_step_and_hand_off` 退出交由用户决策。`auto` 模式下 ChatAgent 只有 `advance_step_and_hand_off`，不支持单轮连跑多步。
 - 注意：dynamic模式下，当ChatAgent判断可能为最后一步时，提交同步任务，并且在执行完毕后主动推进到 `__end__` ，避免用户点击继续，发现已经结束。对应的，我们要有机制去发现state.yml中哪些步骤可以直连__end__，给予提示
 
 ---
@@ -465,7 +465,7 @@ Go 将 `ask_response` 透传 Python；`resolve_plugin_injection` 将回答注入
 | 阶段 | 条件 | `dynamic` | `auto` |
 | --- | --- | --- | --- |
 | **插件前** | 尚无 `active plugin_session`（未 `trigger_*` / 未首步 `advance_step`） | 缺失关键意图时主动 ask | **同样允许 ask**；收集齐意图后再触发插件 |
-| **插件执行中** | 已有 `plugin_session`，步骤由 SubAgent +（auto 下）DriverAgent 推进 | 允许 ask；每步完成后默认 `step_waiting` | **不主动 ask**；基于已有 `intent_context` 合理推断；每步 `advance_step_and_exit` 后即退出，后续由 DriverAgent 裁决 |
+| **插件执行中** | 已有 `plugin_session`，步骤由 SubAgent +（auto 下）DriverAgent 推进 | 允许 ask；每步完成后默认 `step_waiting` | **不主动 ask**；基于已有 `intent_context` 合理推断；每步 `advance_step_and_hand_off` 后即退出，后续由 DriverAgent 裁决 |
 | **例外** | 任意阶段，用户显式说「先问我」「帮我确认一下」 | ask | ask |
 
 要点：
@@ -716,8 +716,8 @@ SubAgent 启动时已经具备：
 
 唯一缺的是一句话告诉它"你是在续做，对比已有产出只做缺失部分"。这通过 **ChatAgent 的 `retry_hint`** 解决：
 
-- 用户说「继续」→ ChatAgent 调用 `advance_step_and_exit(step_id, retry_hint='Previous attempt was interrupted. Check existing artifacts for this step and only produce missing outputs. Do not regenerate already-saved artifacts.')`
-- 用户说「重试」→ ChatAgent 调用 `advance_step_and_exit(step_id, rewind=True)`（全量重做，现有行为）
+- 用户说「继续」→ ChatAgent 调用 `advance_step_and_hand_off(step_id, retry_hint='Previous attempt was interrupted. Check existing artifacts for this step and only produce missing outputs. Do not regenerate already-saved artifacts.')`
+- 用户说「重试」→ ChatAgent 调用 `advance_step_and_hand_off(step_id, rewind=True)`（全量重做，现有行为）
 
 SubAgent 收到带 checkpoint 语义的 `retry_hint` 后，自行对比 objective 中的 output_key 与 artifact 清单中已有的 key，跳过已完成的部分。
 
@@ -736,8 +736,8 @@ ChatAgent 通过用户消息语义 + 步骤状态决策（由 system prompt 指�
 
 | 用户操作 | ChatAgent 行为 |
 | --- | --- |
-| 说"继续" / 点击「继续」 | `advance_step_and_exit(step_id, retry_hint='Previous attempt was interrupted. Check existing artifacts and only produce missing outputs.')` |
-| 说"重试" / 点击「重试」 | `advance_step_and_exit(step_id, rewind=True)` |
+| 说"继续" / 点击「继续」 | `advance_step_and_hand_off(step_id, retry_hint='Previous attempt was interrupted. Check existing artifacts and only produce missing outputs.')` |
+| 说"重试" / 点击「重试」 | `advance_step_and_hand_off(step_id, rewind=True)` |
 
 `auto` 模式下：DriverAgent RETRY 走 `rewind=True`（全量重试）；DriverAgent 不走 resume——判定结果不合格时应完整重做。
 
@@ -775,7 +775,7 @@ ChatAgent 通过用户消息语义 + 步骤状态决策（由 system prompt 指�
    - TaskCenter repository + scheduler；**不**注册 `plugin_step_run` 到 asyncjob。
 
 3. **Python**
-   - `advance_step`（同步，FileSystemQueue 轮询等待）+ `advance_step_and_exit`（结束当前轮次，加入 `plugin_stop_tools`）。
+   - `advance_step`（同步，FileSystemQueue 轮询等待）+ `advance_step_and_hand_off`（结束当前轮次，加入 `plugin_stop_tools`）。
    - 按 `plugin_mode` 动态注册工具（§3.3）。
    - `driver_agent.py`：llm_config、附件 + **plugin artifact** 读取。
    - `plugin_manager.py`：`update_intent`、`ask_user`、查询工具；框架内置意图管理提示词。

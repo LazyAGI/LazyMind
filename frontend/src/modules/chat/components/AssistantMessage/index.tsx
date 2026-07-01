@@ -891,12 +891,11 @@ const AssistantMessage = (props: any) => {
               persistAskAnswersRef.current(sessionId, item.history_id, currentAnswers);
             }
           }}
-          onSubmit={(formattedText) => {
+          onSubmit={(payload) => {
             persistAskAnswersRef.current.cancel();
             // Mark the card as answered in memory so it shows as disabled immediately.
             updateMessage({ ...item, ask_answered: true, ask_saved_answers: undefined });
-            // sendMessage prop signature is (text: string, clearInput?: boolean)
-            props.sendMessage?.(formattedText);
+            props.sendMessage?.(payload.text, undefined, { ask_answers_structured: payload.structured });
           }}
         />
       );

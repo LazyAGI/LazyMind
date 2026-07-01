@@ -311,8 +311,8 @@ subagent_system_prompt += '\n\n' + _build_intent_section(session_id, step_id=cur
 ```python
 advance_step(step_id='step1', rewind=True, retry_hint='...')
 advance_step(step_id='step2', rewind=True, retry_hint='...')
-advance_step_and_exit(step_id='step3', rewind=True, retry_hint='...')
-# advance_step_and_exit 是 stop-tool，ReAct 退出；step3 SubAgent 后台运行
+advance_step_and_hand_off(step_id='step3', rewind=True, retry_hint='...')
+# advance_step_and_hand_off 是 stop-tool，ReAct 退出；step3 SubAgent 后台运行
 return '已提交步骤 3 后台执行'
 ```
 
@@ -335,10 +335,10 @@ for step_id in ['step1', 'step2', 'step3']:
 """
 ```
 
-**`advance_step_and_exit` 工具定义（注册为 stop-tool）**
+**`advance_step_and_hand_off` 工具定义（注册为 stop-tool）**
 
 ```python
-def advance_step_and_exit(
+def advance_step_and_hand_off(
     step_id: str,
     rewind: bool = False,
     retry_hint: str | None = None,
@@ -378,7 +378,7 @@ def advance_step(
     summary. Use ONLY when you need to run multiple steps in sequence within
     a single conversation turn (e.g. user said "re-run steps 1 to 3").
 
-    For single-step advancement, prefer `advance_step_and_exit` to let the
+    For single-step advancement, prefer `advance_step_and_hand_off` to let the
     user review the result and decide the next action.
     """
     # ... blocks via FileSystemQueue polling until step done ...
@@ -390,8 +390,8 @@ def advance_step(
 ```python
 def _build_plugin_tools(plugin_mode: str, ...) -> list:
     tools = []
-    # advance_step_and_exit: always registered (both modes)
-    tools.append(build_advance_step_and_exit_tool(...))
+    # advance_step_and_hand_off: always registered (both modes)
+    tools.append(build_advance_step_and_hand_off_tool(...))
 
     # advance_step (sync): only in dynamic mode
     if plugin_mode == 'dynamic':
@@ -475,7 +475,7 @@ SubAgent **不**注册 `ask_user`。
 
 > 对应 plan §5。
 
-**原理**：并行由 **ChatAgent** 决策——在一次 ReAct 步骤中同时输出多个 `advance_step` / `advance_step_and_exit`（parallel tool calls），每个触发一个独立的 `task_created`，Go 分别走 `HandlePluginStepCreated` → `go subagent.Run`，实现并发执行。Go 侧不主动扫描依赖图，仅做并行跟踪。
+**原理**：并行由 **ChatAgent** 决策——在一次 ReAct 步骤中同时输出多个 `advance_step` / `advance_step_and_hand_off`（parallel tool calls），每个触发一个独立的 `task_created`，Go 分别走 `HandlePluginStepCreated` → `go subagent.Run`，实现并发执行。Go 侧不主动扫描依赖图，仅做并行跟踪。
 
 **Python：可选辅助查询工具（供 ChatAgent 读取依赖）**
 
@@ -518,7 +518,7 @@ store.AddParallelStep(ctx, db, sessionID, stepID)
 go subagent.Run(ctx, db, stateStore, buildRunRequest(stepID))
 ```
 
-**混用 sync/exit 的行为**：`_tools_manager(tool_calls)` 并发执行所有工具后，框架检查 stop-tools。`advance_step`（同步）在工具并发执行阶段就等完了；`advance_step_and_exit` 立即返回并触发退出。两个 SubAgent 均已启动，结果符合预期，无需特殊处理。
+**混用 sync/exit 的行为**：`_tools_manager(tool_calls)` 并发执行所有工具后，框架检查 stop-tools。`advance_step`（同步）在工具并发执行阶段就等完了；`advance_step_and_hand_off` 立即返回并触发退出。两个 SubAgent 均已启动，结果符合预期，无需特殊处理。
 
 ---
 
@@ -615,7 +615,7 @@ def get_failed_steps() -> str:
 
 ```python
 # 用户说「继续」且步骤状态为 interrupted：
-advance_step_and_exit(
+advance_step_and_hand_off(
     step_id='generate_image',
     retry_hint=(
         'Previous attempt was interrupted. Check existing artifacts for this step '
@@ -624,7 +624,7 @@ advance_step_and_exit(
 )
 
 # 用户说「重试」：
-advance_step_and_exit(step_id='generate_image', rewind=True)
+advance_step_and_hand_off(step_id='generate_image', rewind=True)
 ```
 
 **SubAgent 视角（`_objective_prompt` 已有内容，无需改动）**
