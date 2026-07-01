@@ -531,7 +531,8 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
     ask_user_tools = _build_ask_user_tool()
     lazyllm.globals['active_tool_names'] |= {'ask_user'}
-    all_tools = agent_tools + subagent_tools + attachment_tools + schedule_tools + ask_user_tools + plugin_tools + mcp_tools
+    all_tools = (agent_tools + subagent_tools + attachment_tools
+                 + schedule_tools + ask_user_tools + plugin_tools + mcp_tools)
     set_trace_context({
         'enabled': bool(runtime.trace),
         'trace_id': conversation.session_id if runtime.trace else None,
