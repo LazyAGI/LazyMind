@@ -4,8 +4,6 @@ from typing import Any, Dict
 
 import lazyllm
 
-_F = type(lambda: None)  # placeholder for legacy compatibility
-
 
 def tool_success(tool_name: str, result: Any, meta: Dict[str, Any] | None = None) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
@@ -55,14 +53,3 @@ def tool_failure(tool_name: str, exc: Exception) -> Dict[str, Any]:
         error_type=type(exc).__name__,
         detail=str(exc),
     )
-
-
-def check_tool_active(tool_name: str) -> None:
-    # Raise PermissionError if tool_name is not in the active allowlist for this session.
-    # This is a no-op when active_tool_names is not set (e.g. in tests / non-plugin sessions).
-    active_tool_names = lazyllm.globals.get('active_tool_names')
-    if isinstance(active_tool_names, set) and tool_name not in active_tool_names:
-        raise PermissionError(
-            f'{tool_name} is not registered or active in current session. '
-            'Please enable this tool in model/tool config, then retry.'
-        )
