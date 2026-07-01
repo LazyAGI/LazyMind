@@ -6,9 +6,9 @@ invocation.  The user's answers arrive as plain text in the next chat turn's
 query; no special ask_response parameter is needed.
 
 Supported question types:
-  boolean   — yes/no question rendered as two buttons (choices always ['是', '否'])
-  single    — single-choice question; '其他' is automatically appended
-  multiple  — multi-choice question; '其他' is automatically appended
+  boolean   — yes/no question rendered as two buttons (Yes / No)
+  single    — single-choice question; "Other" is automatically appended
+  multiple  — multi-choice question; "Other" is automatically appended
   text      — free-text input field
 
 This tool is intentionally NOT added to DEFAULT_TOOLS, so SubAgents never
@@ -32,8 +32,8 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Validate and normalise the questions list.
 
     - Ensures required fields are present.
-    - For boolean: overwrites choices with ['是', '否'].
-    - For single/multiple: appends '其他' if not already present.
+    - For boolean: overwrites choices with ['Yes', 'No'].
+    - For single/multiple: appends 'Other' if not already present.
     - For text: clears choices.
     """
     normalised = []
@@ -69,52 +69,63 @@ def ask_user(
     title: Optional[str] = None,
     description: Optional[str] = None,
 ) -> str:
-    """Ask the user one or more questions and end the current ReAct turn.
+    """MANDATORY: collect user input via a structured UI card instead of plain text.
 
-    Use this tool INSTEAD of writing questions as plain text whenever you need
-    information from the user before completing a task.  It renders a structured
-    UI card (buttons, radio buttons, checkboxes, or text inputs), which is faster
-    and clearer for the user than reading a numbered list.
+    ══════════════════════════════════════════════════════════════════════
+    RULE — You MUST call ask_user whenever you need information from the
+    user.  Writing questions as plain text (numbered lists, bullet points,
+    inline questions) is STRICTLY FORBIDDEN.
 
-    WHEN to use:
-    - Before starting a task: missing critical inputs the user must supply.
-    - Mid-task: need a decision or clarification only the user can resolve.
-    - Collect ALL missing information in ONE call (multiple questions allowed).
-    - After calling ask_user, stop — do NOT continue until the user answers.
-    - Do NOT write questions as numbered text when ask_user is available.
+    WRONG — never do this:
+        "1. What is your role?
+         2. What time range should the report cover?"
+
+    RIGHT — always do this:
+        ask_user(questions=[
+            {"text": "What is your role?", "type": "single",
+             "choices": ["Engineering", "Product", "Marketing"]},
+            {"text": "What time range should the report cover?", "type": "text"},
+        ])
+    ══════════════════════════════════════════════════════════════════════
+
+    Suspends the current ReAct turn and renders an interactive card in the
+    UI.  The user's answers are delivered as plain text in the NEXT turn's
+    query — no special parameter is needed to receive them.
+
+    WHEN to call:
+    - You are missing ANY information required to complete the task.
+    - You need the user to choose between options or confirm a decision.
+    - Collect ALL missing inputs in ONE call — never split into multiple turns.
+    - After calling, do NOT continue reasoning; stop immediately and wait.
 
     Question types:
-      "boolean"  — yes/no; rendered as two clickable buttons (是 / 否).
-                   Do not pass choices; they are set automatically.
-      "single"   — pick exactly one option; '其他' is appended automatically.
-                   Pass your options in the choices list.
-      "multiple" — pick one or more options; '其他' is appended automatically.
-                   Pass your options in the choices list.
-      "text"     — free-form text input. No choices needed.
+      "boolean"  — Yes / No toggle buttons. Omit choices (auto-set).
+      "single"   — Radio buttons; pick exactly one. "Other" appended automatically.
+      "multiple" — Checkboxes; pick one or more. "Other" appended automatically.
+      "text"     — Free-form text area. Omit choices.
 
     Args:
-        questions: Non-empty list of question dicts.  Each must contain:
-            text    (str)           : The question text to display.
-            type    (str)           : One of "boolean", "single", "multiple", "text".
-            choices (list[str], optional): Required for "single" and "multiple".
-                Leave empty or omit for "boolean" (auto-filled) and "text".
-        title: Optional group title displayed at the top of the wizard card
-            (e.g. "收集周报信息").  Omit to show no title.
-        description: Optional subtitle / description shown below the title
-            (e.g. "我将逐项收集信息，填写完成后生成你的周报").  Omit to show no description.
+        questions: Non-empty list of question dicts. Each must have:
+            text    (str)  : Question text shown to the user.
+            type    (str)  : "boolean" | "single" | "multiple" | "text".
+            choices (list) : Required for "single"/"multiple". Omit otherwise.
+        title: Short group heading shown above the wizard card (optional).
+            Example: "Weekly report setup"
+        description: One-sentence subtitle shown below the title (optional).
+            Example: "Answer a few questions so I can draft your weekly report."
 
     Example:
         questions=[
-            {"text": "你偏好哪种图片风格？", "type": "single",
-             "choices": ["写实", "插画", "极简"]},
-            {"text": "是否需要竖版构图？", "type": "boolean"},
-            {"text": "还有其他特殊要求吗？", "type": "text"},
+            {"text": "Which image style do you prefer?", "type": "single",
+             "choices": ["Photorealistic", "Illustration", "Minimalist"]},
+            {"text": "Do you need a portrait (vertical) composition?", "type": "boolean"},
+            {"text": "Any other special requirements?", "type": "text"},
         ],
-        title="图片生成设置",
-        description="请回答以下问题，我将为你生成个性化图片。"
+        title="Image generation settings",
+        description="Answer these questions and I will generate your image."
 
     Returns:
-        Placeholder string; ReAct exits immediately after this call.
+        A placeholder confirmation string. ReAct exits immediately.
         The user's answers arrive as plain text in the next turn's query.
     """
     if not isinstance(questions, list) or len(questions) == 0:

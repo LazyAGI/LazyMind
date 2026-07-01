@@ -456,7 +456,7 @@ const zhCN = {
     agent: "智能体",
     knowledgeQA: "知识问答",
     resourceLib: "资源库",
-    aiEvolution: "AI自进化",
+    aiEvolution: "AI成长中心",
     knowledgeBase: "知识库",
     systemManagement: "系统管理",
     developer: "开发者",

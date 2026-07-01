@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Button, Checkbox, Input, Progress, Radio } from 'antd';
-import { LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { EditOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import './index.scss';
 
@@ -67,23 +67,93 @@ function isAnswered(ans: AnswerState): boolean {
   }
 }
 
-function formatAnswer(q: AskQuestion, ans: AnswerState): string {
+function formatAnswer(q: AskQuestion, ans: AnswerState, choices: string[]): string {
   switch (ans.type) {
     case 'boolean':
       return `${q.text}: ${ans.value ?? ''}`;
     case 'single': {
-      const val = ans.value === OTHER_OPTION ? ans.otherText.trim() : (ans.value ?? '');
+      const raw = ans.value ?? '';
+      // Resolve the original choice index to get the (possibly edited) label.
+      const origChoices = q.choices ?? [];
+      const origIdx = origChoices.indexOf(raw);
+      const label = origIdx >= 0 ? (choices[origIdx] ?? raw) : raw;
+      const val = raw === OTHER_OPTION ? ans.otherText.trim() : label;
       return `${q.text}: ${val}`;
     }
     case 'multiple': {
-      const parts = ans.value.map((v) =>
-        v === OTHER_OPTION ? ans.otherText.trim() : v,
-      );
+      const origChoices = q.choices ?? [];
+      const parts = ans.value.map((v) => {
+        if (v === OTHER_OPTION) return ans.otherText.trim();
+        const origIdx = origChoices.indexOf(v);
+        return origIdx >= 0 ? (choices[origIdx] ?? v) : v;
+      });
       return `${q.text}: ${parts.join('、')}`;
     }
     case 'text':
       return `${q.text}: ${ans.value.trim()}`;
   }
+}
+
+/** Editable inline choice label. */
+function EditableChoice({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<any>(null);
+
+  const startEdit = (e: React.MouseEvent) => {
+    if (disabled) return;
+    e.stopPropagation();
+    setDraft(value);
+    setEditing(true);
+    // Focus after render
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const commit = () => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== value) {
+      onChange(trimmed);
+    } else {
+      setDraft(value);
+    }
+  };
+
+  if (editing) {
+    return (
+      <Input
+        ref={inputRef}
+        size='small'
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onPressEnter={commit}
+        onClick={(e) => e.stopPropagation()}
+        className='ask-wizard__choice-input'
+      />
+    );
+  }
+
+  return (
+    <span className='ask-wizard__choice-label'>
+      {value}
+      {!disabled && (
+        <EditOutlined
+          className='ask-wizard__choice-edit-icon'
+          onClick={startEdit}
+          title='Edit option'
+        />
+      )}
+    </span>
+  );
 }
 
 export default function AskCard({
@@ -102,10 +172,17 @@ export default function AskCard({
   );
   const [currentIndex, setCurrentIndex] = useState(0);
 
+  // Per-question, per-choice edited labels. Keyed as `${qIdx}-${choiceIdx}`.
+  // Stored as Record<qIdx, string[]> mirroring the original choices array.
+  const [customChoices, setCustomChoices] = useState<Record<number, string[]>>(() =>
+    Object.fromEntries(questions.map((q, i) => [i, [...(q.choices ?? [])]])),
+  );
+
   const currentQ = questions[currentIndex]!;
   const currentAns = answers[currentIndex]!;
   const currentAnswered = isAnswered(currentAns);
   const allAnswered = answers.every(isAnswered);
+  const currentChoices = customChoices[currentIndex] ?? (currentQ.choices ?? []);
 
   const progressPercent = Math.round((answers.filter(isAnswered).length / total) * 100);
 
@@ -115,17 +192,26 @@ export default function AskCard({
       onAnswerChange?.(idx, next);
       return updated;
     });
-    // For boolean and single-choice, automatically advance to the next question
-    // after a selection is made (unless it's the last question or needs other-text).
     if (autoAdvance && idx < total - 1) {
-      // Small delay so the selection visually registers before moving.
       setTimeout(() => setCurrentIndex(idx + 1), 180);
     }
   };
 
+  const updateChoice = (qIdx: number, choiceIdx: number, newLabel: string) => {
+    setCustomChoices((prev) => {
+      const updated = { ...prev };
+      const arr = [...(updated[qIdx] ?? questions[qIdx]!.choices ?? [])];
+      arr[choiceIdx] = newLabel;
+      updated[qIdx] = arr;
+      return updated;
+    });
+  };
+
   const handleSubmit = () => {
     if (disabled || !allAnswered) return;
-    const lines = questions.map((q, i) => formatAnswer(q, answers[i]!));
+    const lines = questions.map((q, i) =>
+      formatAnswer(q, answers[i]!, customChoices[i] ?? q.choices ?? []),
+    );
     onSubmit(lines.join('\n'));
   };
 
@@ -174,12 +260,16 @@ export default function AskCard({
         <div className='ask-wizard__answer-area'>
           {currentQ.type === 'boolean' && (
             <div className='ask-wizard__boolean-buttons'>
-              {(currentQ.choices ?? ['是', '否']).map((c) => (
+              {(currentChoices.length > 0 ? currentChoices : ['是', '否']).map((c, ci) => (
                 <Button
-                  key={c}
-                  type={currentAns.type === 'boolean' && currentAns.value === c ? 'primary' : 'default'}
+                  key={ci}
+                  type={currentAns.type === 'boolean' && currentAns.value === (currentQ.choices?.[ci] ?? c) ? 'primary' : 'default'}
                   disabled={disabled}
-                  onClick={() => updateAnswer(currentIndex, { type: 'boolean', value: c }, true)}
+                  onClick={() => updateAnswer(
+                    currentIndex,
+                    { type: 'boolean', value: currentQ.choices?.[ci] ?? c },
+                    true,
+                  )}
                   className='ask-wizard__bool-btn'
                 >
                   {c}
@@ -197,15 +287,18 @@ export default function AskCard({
                   updateAnswer(
                     currentIndex,
                     { type: 'single', value: chosen, otherText: currentAns.type === 'single' ? currentAns.otherText : '' },
-                    // Auto-advance only when not selecting "其他" (which needs a text input).
                     chosen !== OTHER_OPTION,
                   );
                 }}
                 disabled={disabled}
               >
-                {(currentQ.choices ?? []).map((c, ci) => (
-                  <Radio key={ci} value={c} className='ask-wizard__choice'>
-                    {c}
+                {(currentQ.choices ?? []).map((origVal, ci) => (
+                  <Radio key={ci} value={origVal} className='ask-wizard__choice'>
+                    <EditableChoice
+                      value={currentChoices[ci] ?? origVal}
+                      disabled={disabled}
+                      onChange={(next) => updateChoice(currentIndex, ci, next)}
+                    />
                   </Radio>
                 ))}
               </Radio.Group>
@@ -236,15 +329,19 @@ export default function AskCard({
                 }
                 disabled={disabled}
               >
-                {(currentQ.choices ?? []).map((c, ci) => (
-                  <Checkbox key={ci} value={c} className='ask-wizard__choice'>
-                    {c}
+                {(currentQ.choices ?? []).map((origVal, ci) => (
+                  <Checkbox key={ci} value={origVal} className='ask-wizard__choice'>
+                    <EditableChoice
+                      value={currentChoices[ci] ?? origVal}
+                      disabled={disabled}
+                      onChange={(next) => updateChoice(currentIndex, ci, next)}
+                    />
                   </Checkbox>
                 ))}
               </Checkbox.Group>
               {currentAns.type === 'multiple' && currentAns.value.includes(OTHER_OPTION) && (
                 <Input
-                  value={currentAns.otherText}
+                  value={currentAns.type === 'multiple' ? currentAns.otherText : ''}
                   onChange={(e) =>
                     updateAnswer(currentIndex, {
                       type: 'multiple',
@@ -317,7 +414,7 @@ export default function AskCard({
               className={`ask-wizard__jump-item${idx === currentIndex ? ' is-current' : ''}${isAnswered(answers[idx]!) ? ' is-done' : ''}`}
               onClick={() => goTo(idx)}
               disabled={disabled}
-              aria-label={`跳转到第 ${idx + 1} 题`}
+              aria-label={`Go to question ${idx + 1}`}
             >
               {idx + 1}
             </button>

@@ -170,6 +170,7 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'regex:trigger_(.+)_plugin': 'Loading the {match} plugin now.',
 }
 _TOOL_CALL_FALLBACK_TEMPLATE = 'Calling {tool_name} to handle the request.'
+_TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = 'Gathering questions for you, please wait…'
 
 _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_search': '正在知识库中检索与 {value} 相关的知识。',
@@ -220,6 +221,7 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'regex:trigger_(.+)_plugin': '正在加载 {match} 插件...',
 }
 _ZH_TOOL_CALL_FALLBACK_TEMPLATE = '正在调用工具 {tool_name}...'
+_ZH_TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = '我正在组织问题，请稍后'
 
 _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_search': 'Knowledge base results for {value} are ready now.',
@@ -241,6 +243,7 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'skill_editor': 'Skill operation for {value} completed successfully.',
     'get_skill': 'Skill details for {value} were loaded successfully now.',
     'read_reference': 'Skill reference material from {value} was loaded successfully.',
+    'ask_user': 'Please answer the questions below.',
     'run_script': 'Skill helper script at {value} finished running successfully.',
     'read_file': 'File content from {value} was loaded successfully now.',
     'list_dir': 'Folder contents from {value} were retrieved successfully now.',
@@ -292,6 +295,7 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'skill_editor': '{value} 技能操作已完成。',
     'get_skill': '已成功加载 {value} 的技能详情。',
     'read_reference': '已成功加载 {value} 技能的参考资料。',
+    'ask_user': '请您回答下面的问题',
     'run_script': '技能 {value} 的预定义脚本已成功运行。',
     'read_file': '已成功加载文件 {value} 的内容。',
     'list_dir': '已成功获取文件夹 {value} 的内容。',
