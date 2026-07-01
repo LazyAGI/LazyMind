@@ -606,6 +606,92 @@ func TestLocalFSRootCachePrewarmBuildsCachesSearchCanReuse(t *testing.T) {
 	}
 }
 
+func TestTargetTreeSearchPathTreeWrapsFeishuOrphansWithVirtualRoots(t *testing.T) {
+	t.Parallel()
+
+	page := TreeNodePage{Items: buildSearchPathTree([]TreeNode{
+		{
+			Key:           "feishu:wiki:space:space-1",
+			NodeRef:       "feishu:wiki:space:space-1",
+			DisplayName:   "Space",
+			ConnectorType: "feishu",
+			TargetType:    "wiki_node",
+			TargetRef:     "feishu:wiki:space:space-1",
+			TreeKey:       "feishu:wiki:space:space-1",
+			ObjectKey:     "feishu:wiki:space:space-1",
+			ParentKey:     "feishu:feishu:wiki:spaces",
+			IsContainer:   true,
+			HasChildren:   true,
+			Selectable:    true,
+			ProviderMeta:  map[string]any{"kind": "wiki_space", "auth_connection_id": "conn-1"},
+		},
+		{
+			Key:           "feishu:drive:folder-1",
+			NodeRef:       "drive:folder-1",
+			DisplayName:   "Drive Folder",
+			ConnectorType: "feishu",
+			TargetType:    "drive_folder",
+			TargetRef:     "drive:folder-1",
+			TreeKey:       "feishu:drive:folder-1",
+			ObjectKey:     "feishu:drive:folder-1",
+			ParentKey:     "feishu:drive:missing-parent",
+			IsContainer:   true,
+			HasChildren:   true,
+			Selectable:    true,
+			ProviderMeta:  map[string]any{"kind": "drive_folder", "auth_connection_id": "conn-1"},
+		},
+	}, []TreeNode{
+		{
+			Key:           "feishu:wiki:space:space-1",
+			NodeRef:       "feishu:wiki:space:space-1",
+			DisplayName:   "Space",
+			ConnectorType: "feishu",
+			TargetType:    "wiki_node",
+			TargetRef:     "feishu:wiki:space:space-1",
+			TreeKey:       "feishu:wiki:space:space-1",
+			ObjectKey:     "feishu:wiki:space:space-1",
+			ParentKey:     "feishu:feishu:wiki:spaces",
+			IsContainer:   true,
+			HasChildren:   true,
+			Selectable:    true,
+			ProviderMeta:  map[string]any{"kind": "wiki_space", "auth_connection_id": "conn-1"},
+		},
+		{
+			Key:           "feishu:drive:folder-1",
+			NodeRef:       "drive:folder-1",
+			DisplayName:   "Drive Folder",
+			ConnectorType: "feishu",
+			TargetType:    "drive_folder",
+			TargetRef:     "drive:folder-1",
+			TreeKey:       "feishu:drive:folder-1",
+			ObjectKey:     "feishu:drive:folder-1",
+			ParentKey:     "feishu:drive:missing-parent",
+			IsContainer:   true,
+			HasChildren:   true,
+			Selectable:    true,
+			ProviderMeta:  map[string]any{"kind": "drive_folder", "auth_connection_id": "conn-1"},
+		},
+	})}
+
+	if len(page.Items) != 2 {
+		t.Fatalf("expected drive and wiki roots, got %+v", page.Items)
+	}
+	if page.Items[0].ObjectKey != "feishu:feishu:drive:root" || len(page.Items[0].Children) != 1 || page.Items[0].Children[0].ObjectKey != "feishu:drive:folder-1" {
+		t.Fatalf("drive orphan should be wrapped with Drive root, got %+v", page.Items)
+	}
+	if page.Items[1].ObjectKey != "feishu:feishu:wiki:spaces" || len(page.Items[1].Children) != 1 || page.Items[1].Children[0].ObjectKey != "feishu:wiki:space:space-1" {
+		t.Fatalf("wiki orphan should be wrapped with Wiki root, got %+v", page.Items)
+	}
+}
+
+func TestTargetTreeSearchPathTreeKeepsEmptyResultsEmpty(t *testing.T) {
+	t.Parallel()
+
+	if got := buildSearchPathTree([]TreeNode{{Key: "feishu:drive:folder-1"}}, nil); len(got) != 0 {
+		t.Fatalf("empty search matches should stay empty, got %+v", got)
+	}
+}
+
 func TestTargetTreeSearchCacheFailureIsReadableAndRetryable(t *testing.T) {
 	t.Parallel()
 
