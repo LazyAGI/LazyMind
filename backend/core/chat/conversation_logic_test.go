@@ -314,6 +314,96 @@ func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
 	}
 }
 
+func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail-datasets.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	deletedAt := now.Add(-time.Hour)
+	if err := db.Create([]orm.Dataset{
+		{
+			ID:          "ds_live",
+			KbID:        "ds_live",
+			DisplayName: "Live Dataset",
+			BaseModel: orm.BaseModel{
+				CreateUserID:   "u1",
+				CreateUserName: "User 1",
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			},
+		},
+		{
+			ID:          "ds_deleted",
+			KbID:        "ds_deleted",
+			DisplayName: "Deleted Dataset",
+			BaseModel: orm.BaseModel{
+				CreateUserID:   "u1",
+				CreateUserName: "User 1",
+				CreatedAt:      now,
+				UpdatedAt:      now,
+				DeletedAt:      &deletedAt,
+			},
+		},
+	}).Error; err != nil {
+		t.Fatalf("create datasets: %v", err)
+	}
+	if err := db.Create(&orm.Conversation{
+		ID:           "conv-1",
+		DisplayName:  "test",
+		ChannelID:    "default",
+		SearchConfig: json.RawMessage(`{"dataset_list":[{"id":"ds_live"},{"id":"ds_deleted"},{"id":"ds_missing"}],"creators":["u1"],"top_k":3}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "u1",
+			CreateUserName: "User 1",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/conversations/conv-1:detail", nil)
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"name": "conv-1:detail"})
+	rec := httptest.NewRecorder()
+
+	GetConversationDetail(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Conversation struct {
+			SearchConfig map[string]any `json:"search_config"`
+		} `json:"conversation"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	rawList, ok := resp.Conversation.SearchConfig["dataset_list"].([]any)
+	if !ok {
+		t.Fatalf("expected dataset_list array, got %T", resp.Conversation.SearchConfig["dataset_list"])
+	}
+	if len(rawList) != 1 {
+		t.Fatalf("expected one existing dataset, got %#v", rawList)
+	}
+	selector, _ := rawList[0].(map[string]any)
+	if selector["id"] != "ds_live" {
+		t.Fatalf("expected ds_live to remain, got %#v", rawList)
+	}
+	if resp.Conversation.SearchConfig["top_k"] != float64(3) {
+		t.Fatalf("expected top_k preserved, got %#v", resp.Conversation.SearchConfig["top_k"])
+	}
+}
+
 func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-history.db")
 	if err != nil {

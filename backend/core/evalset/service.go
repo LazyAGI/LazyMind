@@ -285,9 +285,6 @@ func containsString(items []string, want string) bool {
 }
 
 func validateDatasetIDs(datasetIDs []string) error {
-	if len(datasetIDs) == 0 {
-		return errors.New("dataset_ids required")
-	}
 	for _, id := range datasetIDs {
 		if utf8.RuneCountInString(id) > 255 {
 			return errors.New("dataset_ids too long")

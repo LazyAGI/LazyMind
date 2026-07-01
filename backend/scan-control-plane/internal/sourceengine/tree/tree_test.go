@@ -233,8 +233,11 @@ func TestLocalFSTargetSearchWithCurrentLevelBuildsRecursiveCache(t *testing.T) {
 	if page.SearchMode != SearchModeCache || page.CacheStatus != targetSearchCacheStatusComplete || !page.CacheComplete {
 		t.Fatalf("local current-level search should build and read cache, got %+v", page)
 	}
-	if len(page.Items) != 1 || page.Items[0].ObjectKey != "/workspace/docs/guides/test-plan.md" {
-		t.Fatalf("local recursive search should find nested match, got %+v", page.Items)
+	if len(page.Items) != 1 || page.Items[0].ObjectKey != "/workspace/docs/guides" {
+		t.Fatalf("local recursive search should return the matched path root, got %+v", page.Items)
+	}
+	if len(page.Items[0].Children) != 1 || page.Items[0].Children[0].ObjectKey != "/workspace/docs/guides/test-plan.md" {
+		t.Fatalf("local recursive search should nest the matched node under its path, got %+v", page.Items)
 	}
 	if len(spy.searchRequests) != 0 || len(spy.listRequests) != 2 {
 		t.Fatalf("local recursive search should list subtree without connector search, searches=%d lists=%d", len(spy.searchRequests), len(spy.listRequests))
@@ -278,8 +281,12 @@ func TestLocalFSTargetSearchWithoutCurrentLevelBuildsRootCaches(t *testing.T) {
 	if page.SearchMode != SearchModeCache || page.CacheStatus != targetSearchCacheStatusComplete || !page.CacheComplete {
 		t.Fatalf("local search without current level should build root caches, got %+v", page)
 	}
-	if len(page.Items) != 1 || page.Items[0].ObjectKey != "/workspace/docs/guides/test-plan.md" {
-		t.Fatalf("local root cache search should find nested match, got %+v", page.Items)
+	if len(page.Items) != 1 || page.Items[0].ObjectKey != "/workspace/docs" {
+		t.Fatalf("local root cache search should return the matched path root, got %+v", page.Items)
+	}
+	if len(page.Items[0].Children) != 1 || page.Items[0].Children[0].ObjectKey != "/workspace/docs/guides" ||
+		len(page.Items[0].Children[0].Children) != 1 || page.Items[0].Children[0].Children[0].ObjectKey != "/workspace/docs/guides/test-plan.md" {
+		t.Fatalf("local root cache search should nest the matched path, got %+v", page.Items)
 	}
 	if len(spy.searchRequests) != 0 || len(spy.listRequests) != 3 {
 		t.Fatalf("local search without current level should list recommended roots and subtree, searches=%d lists=%d", len(spy.searchRequests), len(spy.listRequests))
@@ -589,8 +596,10 @@ func TestLocalFSRootCachePrewarmBuildsCachesSearchCanReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search local_fs root cache: %v", err)
 	}
-	if len(page.Items) != 1 || page.Items[0].ObjectKey != "/workspace/docs/guides/test-plan.md" {
-		t.Fatalf("search should reuse prewarmed root cache, got %+v", page)
+	if len(page.Items) != 1 || page.Items[0].ObjectKey != "/workspace/docs" ||
+		len(page.Items[0].Children) != 1 || page.Items[0].Children[0].ObjectKey != "/workspace/docs/guides" ||
+		len(page.Items[0].Children[0].Children) != 1 || page.Items[0].Children[0].Children[0].ObjectKey != "/workspace/docs/guides/test-plan.md" {
+		t.Fatalf("search should reuse prewarmed root cache as a path tree, got %+v", page)
 	}
 	if len(spy.listRequests) != 1 {
 		t.Fatalf("search should only refresh root list and reuse subtree cache, got %d list requests", len(spy.listRequests))

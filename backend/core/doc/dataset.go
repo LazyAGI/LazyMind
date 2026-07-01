@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -121,9 +122,40 @@ type algoGroupInfoResp struct {
 }
 
 const (
-	maxDatasetTags     = 10
-	maxDatasetTagRunes = 20
+	maxDatasetTags             = 10
+	maxDatasetTagRunes         = 20
+	maxDatasetDisplayNameRunes = 100
+	datasetDisplayNameRule     = "dataset name supports Chinese/English, numbers, -, _, ., up to 100 characters"
 )
+
+func validateDatasetDisplayName(name string) error {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return fmt.Errorf("dataset name is required")
+	}
+	if trimmed != name || utf8.RuneCountInString(trimmed) > maxDatasetDisplayNameRunes {
+		return fmt.Errorf(datasetDisplayNameRule)
+	}
+	for _, r := range trimmed {
+		if r >= '\u4e00' && r <= '\u9fa5' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == '_' || r == '.' || r == '-' {
+			continue
+		}
+		return fmt.Errorf(datasetDisplayNameRule)
+	}
+	return nil
+}
 
 func normalizeAndValidateDatasetTags(tags []string) ([]string, error) {
 	if len(tags) == 0 {
@@ -837,12 +869,13 @@ func CreateDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
 		return
 	}
+	if err := validateDatasetDisplayName(body.DisplayName); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	displayName := strings.TrimSpace(body.DisplayName)
 	desc := strings.TrimSpace(body.Desc)
 	cover := strings.TrimSpace(body.CoverImage)
-	if displayName == "" {
-		displayName = datasetID
-	}
 	if hasReservedDatasetDisplayNamePrefix(displayName) {
 		common.ReplyErr(w, "dataset name uses reserved prefix", http.StatusBadRequest)
 		return
@@ -1089,6 +1122,18 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if parseDatasetScanManaged(ds.Ext) {
+		if err := deleteScanManagedSourceForDataset(r.Context(), datasetID, userID); err != nil {
+			log.Logger.Error().
+				Err(err).
+				Str("dataset_id", datasetID).
+				Str("user_id", userID).
+				Msg("scan source delete failed")
+			common.ReplyErr(w, "delete scan source failed", http.StatusBadGateway)
+			return
+		}
+	}
+
 	// 1) text DELETE /v1/kbs/{kb_id}
 	kbID := ds.KbID
 	if strings.TrimSpace(kbID) == "" {
@@ -1138,6 +1183,23 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func deleteScanManagedSourceForDataset(ctx context.Context, datasetID, userID string) error {
+	datasetID = strings.TrimSpace(datasetID)
+	if datasetID == "" {
+		return nil
+	}
+	scanURL := common.JoinURL(common.ScanControlPlaneEndpoint(), "/api/scan/internal/sources/by-dataset/"+url.PathEscape(datasetID))
+	headers := map[string]string{"X-User-ID": strings.TrimSpace(userID)}
+	if err := common.ApiDelete(ctx, scanURL, headers, nil, 10*time.Second); err != nil {
+		var httpErr *common.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func cleanupEvalSetDatasetReferences(ctx context.Context, tx *gorm.DB, datasetID string, now time.Time) error {
@@ -1242,6 +1304,9 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	newCover := strings.TrimSpace(body.CoverImage)
 	if newDisplay == "" {
 		newDisplay = ds.DisplayName
+	} else if err := validateDatasetDisplayName(body.DisplayName); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 	if hasReservedDatasetDisplayNamePrefix(newDisplay) {
 		common.ReplyErr(w, "dataset name uses reserved prefix", http.StatusBadRequest)

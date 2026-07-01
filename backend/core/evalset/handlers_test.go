@@ -163,6 +163,29 @@ func TestCreateEvalSetWritesOwnerACL(t *testing.T) {
 	}
 }
 
+func TestCreateEvalSetAllowsEmptyDatasetIDs(t *testing.T) {
+	db := newEvalSetTestDB(t)
+
+	rec, req := requestWithUser(http.MethodPost, "/api/core/eval-sets", `{"name":"cases without kb"}`, "owner_1")
+	CreateEvalSet(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[EvalSetResponse](t, rec)
+	if len(resp.DatasetIDs) != 0 || len(resp.DatasetNames) != 0 {
+		t.Fatalf("expected no bound datasets, got %#v", resp)
+	}
+
+	var row orm.EvalSet
+	if err := db.First(&row, "id = ?", resp.ID).Error; err != nil {
+		t.Fatalf("query created eval set: %v", err)
+	}
+	if got := parseDatasetIDsJSON(row.DatasetIDs); len(got) != 0 {
+		t.Fatalf("expected empty dataset_ids in db, got %v", got)
+	}
+}
+
 func TestCreateEvalSetRejectsDuplicateNameForSameOwner(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	existing := seedEvalSet(t, db, "eval_set_existing", "owner_1", "", "", time.Now().UTC())
@@ -356,6 +379,31 @@ func TestUpdateEvalSetMetadata(t *testing.T) {
 	}
 	if row.Name != "new name" || row.Description != "new desc" || strings.Join(parseDatasetIDsJSON(row.DatasetIDs), ",") != "dataset_new,dataset_extra" {
 		t.Fatalf("unexpected row: %#v", row)
+	}
+}
+
+func TestUpdateEvalSetAllowsClearingDatasetIDs(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	seedEvalSet(t, db, "eval_set_clear_datasets", "user_1", "", "dataset_old", time.Now().UTC())
+
+	rec, req := requestWithUser(http.MethodPatch, "/api/core/eval-sets/eval_set_clear_datasets", `{"dataset_ids":[]}`, "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_clear_datasets"})
+	UpdateEvalSet(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[EvalSetResponse](t, rec)
+	if len(resp.DatasetIDs) != 0 || len(resp.DatasetNames) != 0 {
+		t.Fatalf("expected cleared dataset ids, got %#v", resp)
+	}
+
+	var row orm.EvalSet
+	if err := db.First(&row, "id = ?", "eval_set_clear_datasets").Error; err != nil {
+		t.Fatalf("query updated eval set: %v", err)
+	}
+	if got := parseDatasetIDsJSON(row.DatasetIDs); len(got) != 0 {
+		t.Fatalf("expected empty dataset_ids in db, got %v", got)
 	}
 }
 

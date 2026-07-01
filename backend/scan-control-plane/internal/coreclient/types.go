@@ -81,6 +81,8 @@ type CreateDatasetRequest struct {
 	CreatedBy      string       `json:"created_by"`
 	TenantID       string       `json:"tenant_id,omitempty"`
 	Algo           *DatasetAlgo `json:"algo,omitempty"`
+	ScanManaged    bool         `json:"scan_managed,omitempty"`
+	ScanSourceType string       `json:"scan_source_type,omitempty"`
 }
 
 type CreateDatasetResponse struct {
