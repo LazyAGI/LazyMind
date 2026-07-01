@@ -51,9 +51,9 @@ import ImportTaskManage, {
 } from "./components/ImportTaskManage";
 import TreeUtils from "@/modules/knowledge/utils/tree";
 import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
-import ConfirmModal, {
-  ConfirmImperativeProps,
-} from "@/modules/knowledge/components/ConfirmModal";
+import TypedConfirmModal, {
+  type TypedConfirmModalRef,
+} from '@/components/ui/TypedConfirmModal';
 import CreateUpdateModal, {
   UpdateImperativeProps,
 } from "@/modules/knowledge/components/UpdateModal";
@@ -111,7 +111,7 @@ const Detail = () => {
   const importTaskRef = useRef<IImportTaskManageRef>();
   const pollingRef = useRef(new Polling());
   const importingTaskListRef = useRef([]);
-  const confirmRef = useRef<ConfirmImperativeProps>(null);
+  const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
 
   const [detail, setDetail] = useState<Dataset>();
@@ -700,7 +700,7 @@ const Detail = () => {
         />
       )}
 
-      <ConfirmModal ref={confirmRef} onClick={onDelete} />
+      <TypedConfirmModal ref={confirmRef} onClick={onDelete} />
 
       <CreateUpdateModal ref={createUpdateRef} onUpdate={onUpdate} />
 

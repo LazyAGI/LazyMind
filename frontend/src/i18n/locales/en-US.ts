@@ -21,6 +21,7 @@ const enUS = {
     sortBy: "Sort by",
     sort: "Sort",
     pleaseInput: "Please input",
+    inputMismatch: "Input does not match",
     description: "Description",
     actions: "Actions",
     totalItems: "Total {{total}} items",
@@ -923,6 +924,10 @@ const enUS = {
     noConversationToExport: "No conversation records available for export",
     exportFileUrlInvalid: "Invalid export file URL",
     searchConversation: "Search conversations",
+    filterConversationType: "Filter conversation type",
+    normalConversation: "Regular conversation",
+    taskConversation: "Task conversation",
+    selectAtLeastOneConvType: "Please select at least one",
     selectConversationToExport: "Please select conversations to export first",
     export: "Export",
     batch: "Batch",
@@ -1879,8 +1884,6 @@ const enUS = {
     dataSourceLocalScanChatNoSourceHint:
       "No local directories are connected yet. Create a local directory knowledge source first.",
     dataSourceUseCurrentInput: "Use current input: {{value}}",
-    dataSourceUseCurrentFeishuWikiInput: "Wiki: {{value}}",
-    dataSourceUseCurrentFeishuDriveInput: "Drive: {{value}}",
     dataSourceNoLocalDirectories: "No selectable directories found",
     dataSourceLocalDirectoryListFailedManual:
       "Failed to load directory list. You can enter the path manually first.",
@@ -1896,9 +1899,26 @@ const enUS = {
     dataSourceTableActions: "Actions",
     dataSourceActionDetail: "Detail",
     dataSourceActionConfig: "Configure",
-    dataSourceDeleteTitle: "Delete data source?",
+    dataSourceDeleteTitle: "Delete Data Source [{{name}}]",
     dataSourceDeleteContent:
-      "Delete data source \"{{name}}\"? Related bindings and backend records will be removed.",
+      "This action cannot be undone. Related knowledge base sync will stop and bindings will be removed. Type the text below to confirm:",
+    dataSourceDeleteConfirmText:
+      "Confirm deletion of data source [{{name}}]. I understand the impact.",
+    dataSourceCreateSyncTitle: "Create and Sync to Knowledge Base [{{name}}]",
+    dataSourceCreateSyncContent:
+      "Remote data will be synced to the knowledge base immediately after creation. This may take a while. Type the text below to confirm:",
+    dataSourceCreateSyncConfirmText:
+      "Confirm creating data source [{{name}}] and syncing to the knowledge base. I understand the impact.",
+    dataSourceSaveSyncTitle: "Save and Sync to Knowledge Base [{{name}}]",
+    dataSourceSaveSyncContent:
+      "Remote data will be synced to the knowledge base immediately after saving. This may take a while. Type the text below to confirm:",
+    dataSourceSaveSyncConfirmText:
+      "Confirm saving data source [{{name}}] and syncing to the knowledge base. I understand the impact.",
+    dataSourceSyncConfirmTitle: "Sync to Knowledge Base [{{name}}]",
+    dataSourceSyncConfirmContent:
+      "{{count}} selected file(s) will be pulled and synced to the knowledge base. Type the text below to confirm:",
+    dataSourceSyncConfirmText:
+      "Confirm syncing data source [{{name}}] to the knowledge base. I understand the impact.",
     dataSourceDeleteSuccess: "Data source deleted",
     dataSourceDeleteFailed: "Failed to delete data source",
     dataSourceSummaryDocs: "{{count}} documents",
@@ -2517,9 +2537,6 @@ const enUS = {
       "Experience memory is best shared with specific collaborators to sync preferences, tone, and accumulated know-how.",
     memoryAutoEvo: "Auto Evolution",
     memoryAutoUpdate: "Auto Update",
-    memoryAutoEvoStatusRunning: "Auto evolution running",
-    memoryAutoEvoStatusFailed: "Auto evolution failed",
-    memoryAutoEvoStatusWaiting: "Waiting for evolution suggestions",
     memoryAutoEvoToggleFailed: "Auto evolution toggle failed",
     memorySkillPendingRemoveTag: "Delete Suggested",
     memorySkillAutoEvoDisabledByRemove:

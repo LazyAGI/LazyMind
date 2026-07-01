@@ -16,9 +16,9 @@ import moment from "moment";
 import { EditFilled } from "@ant-design/icons";
 
 import ListPageHeader from "@/modules/knowledge/components/ListPageHeader";
-import ConfirmModal, {
-  ConfirmImperativeProps,
-} from "@/modules/knowledge/components/ConfirmModal";
+import TypedConfirmModal, {
+  type TypedConfirmModalRef,
+} from '@/components/ui/TypedConfirmModal';
 import CreateUpdateModal, {
   UpdateImperativeProps,
 } from "@/modules/knowledge/components/UpdateModal";
@@ -90,7 +90,7 @@ const KnowledgePage: FC = () => {
     [DocDocumentStageEnum.DocumentParsingCancelled]: t("knowledge.stageCanceled"),
   };
 
-  const confirmRef = useRef<ConfirmImperativeProps>(null);
+  const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
 
   const [loading, setLoading] = useState(false);
@@ -784,7 +784,7 @@ const KnowledgePage: FC = () => {
         }}
       />
 
-      <ConfirmModal ref={confirmRef} onClick={onDelete} />
+      <TypedConfirmModal ref={confirmRef} onClick={onDelete} />
 
       <CreateUpdateModal ref={createUpdateRef} onUpdate={onUpdate} />
       <EditTags

@@ -43,6 +43,18 @@ export function isFeishuAccountAuthValid(account: FeishuAuthAccount) {
   return account.status === "connected" && Boolean(account.connection?.connectionId?.trim());
 }
 
+export function formatValidFeishuAccountNames(
+  accounts: FeishuAuthAccount[],
+  maxDisplay = 3,
+): string {
+  const names = accounts.map(
+    (account) => account.connection?.accountName || account.name,
+  );
+  const displayed = names.slice(0, maxDisplay);
+  const hasMore = names.length > maxDisplay;
+  return `${displayed.join("、")}${hasMore ? "..." : ""}`;
+}
+
 export function splitScopes(value?: string | null) {
   return `${value || ""}`
     .split(/[,\s]+/)

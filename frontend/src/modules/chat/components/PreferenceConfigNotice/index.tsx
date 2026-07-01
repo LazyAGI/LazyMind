@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Button } from "antd";
-import { checkUserPreferenceConfigured } from "@/modules/memory/preferenceApi";
-
-const STORAGE_KEY = "lazymind:chat:preference-config-dismissed";
+import {
+  fetchUserUiPreferences,
+  patchUserUiPreferences,
+} from "@/modules/user/uiPreferencesApi";
 
 interface Props {
   /** 如果为 true，则不渲染（避免和模型未配置警告同时出现） */
@@ -18,17 +19,26 @@ const PreferenceConfigNotice = ({ hidden }: Props) => {
 
   useEffect(() => {
     if (hidden) return;
-    if (localStorage.getItem(STORAGE_KEY) === "1") return;
-    checkUserPreferenceConfigured().then((configured) => {
-      if (!configured) setVisible(true);
-    });
+    fetchUserUiPreferences()
+      .then((prefs) => {
+        if (prefs.chat_preference_notice_dismissed) return;
+        if (prefs.user_preference_configured) return;
+        setVisible(true);
+      })
+      .catch((error) => {
+        console.error("Failed to load UI preferences:", error);
+      });
   }, [hidden]);
 
   if (!visible) return null;
 
   const handleDismiss = () => {
-    localStorage.setItem(STORAGE_KEY, "1");
     setVisible(false);
+    patchUserUiPreferences({ chat_preference_notice_dismissed: true }).catch(
+      (error) => {
+        console.error("Failed to persist preference notice dismissal:", error);
+      },
+    );
   };
 
   return (

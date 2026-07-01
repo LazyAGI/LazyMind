@@ -34,7 +34,7 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
     refreshSources,
     openDetailPage,
     openEditWizard,
-    handleDeleteSource,
+    requestDeleteSourceConfirm,
   } = vm;
 
   const assetColumns: ColumnsType<DataSourceItem> = [
@@ -163,7 +163,7 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
             type="link"
             danger
             icon={<DeleteOutlined />}
-            onClick={() => handleDeleteSource(record)}
+            onClick={() => requestDeleteSourceConfirm(record)}
           >
             {t("common.delete")}
           </Button>

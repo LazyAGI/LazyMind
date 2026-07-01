@@ -1,4 +1,10 @@
-import React, { useState, forwardRef, useImperativeHandle } from "react";
+import React, {
+  useState,
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useEffect,
+} from "react";
 import { Upload, message, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 import {
@@ -27,7 +33,7 @@ interface Props {
   listNum: number;
   disabled?: boolean;
   disabledReason?: string;
-  
+
   onBeforeAddFiles?: (
     newFiles: File[],
     currentFiles: (RcFile & { uri?: string })[],
@@ -47,6 +53,19 @@ export type OnBeforeAddFilesResult = {
   toasts: string[];
 } | null;
 
+function toRawFile(file: UploadFile): File {
+  return (file.originFileObj ?? file) as File;
+}
+
+function attachUriToFile(list: FileItem[], uid: string, uri: string): FileItem[] {
+  return list.map((f) => {
+    if (f.uid === uid) {
+      f.uri = uri;
+    }
+    return f;
+  });
+}
+
 const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
   (props, ref) => {
     const { t } = useTranslation();
@@ -62,6 +81,26 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
     } = props;
     const [files, setFiles] = useState<FileItem[]>([]);
     const [uploadingCount, setUploadingCount] = useState(0);
+    const filesRef = useRef<FileItem[]>(files);
+
+    useEffect(() => {
+      filesRef.current = files;
+    }, [files]);
+
+    const commitFiles = (nextFiles: FileItem[]) => {
+      filesRef.current = nextFiles;
+      setFiles(nextFiles);
+      updateFiles?.(nextFiles);
+    };
+
+    const tryAppendFile = (rcFile: RcFile): boolean => {
+      const prev = filesRef.current;
+      if (!checkFileCountLimit(prev, rcFile, max)) {
+        return false;
+      }
+      commitFiles([...prev, rcFile] as FileItem[]);
+      return true;
+    };
 
     const validateFileType = (
       file: File | UploadFile,
@@ -137,7 +176,7 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
       onError?: () => void,
     ) => {
       setUploadingCount((prev) => prev + 1);
-      
+
       uploadFileInChunks(file as File, {
         timeout: 2 * 60 * 1000,
         onProgress: (progress) => {
@@ -168,33 +207,20 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
         if (!validateFileSize(file)) {
           return;
         }
-        setFiles((prev) => {
-          if (!checkFileCountLimit(prev, rcFile, max)) {
-            return prev;
-          }
-          const newFiles = [...prev, rcFile] as FileItem[];
-          updateFiles?.(newFiles);
-          uploadFile(
-            rcFile,
-            (uri) => {
-              setFiles((prevFiles) => {
-                const nextFiles = prevFiles.map((f) =>
-                  f.uid === rcFile.uid ? { ...f, uri } : f,
-                );
-                updateFiles?.(nextFiles);
-                return nextFiles;
-              });
-            },
-            () => {
-              setFiles((prevFiles) => {
-                const nextFiles = prevFiles.filter((f) => f.uid !== rcFile.uid);
-                updateFiles?.(nextFiles);
-                return nextFiles;
-              });
-            },
-          );
-          return newFiles;
-        });
+        if (!tryAppendFile(rcFile)) {
+          return;
+        }
+        uploadFile(
+          rcFile,
+          (uri) => {
+            commitFiles(attachUriToFile(filesRef.current, rcFile.uid, uri));
+          },
+          () => {
+            commitFiles(
+              filesRef.current.filter((f) => f.uid !== rcFile.uid),
+            );
+          },
+        );
       });
     };
 
@@ -202,9 +228,10 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
       multiple: false,
       showUploadList: false,
       disabled: disabled || listNum >= max,
-      maxCount: max,
       accept: types.join(","),
-      fileList: files,
+      // Do not bind fileList/maxCount here — file list is managed locally and
+      // rendered via ShowChatFileList. Controlled fileList + beforeUpload:false
+      // causes Ant Design to skip onChange on subsequent picks when files exist.
       className: "chat-image-upload",
       beforeUpload: () => false,
       onChange: handleOnUploadChange,
@@ -217,7 +244,7 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
         }
       },
       getFiles: () => files,
-      clear: () => setFiles([]),
+      clear: () => commitFiles([]),
       getUploadingCount: () => uploadingCount,
       uploadFiles: (droppedFiles: File[]) => {
         if (disabled) {
@@ -229,24 +256,35 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
         const current = [...files];
         const result = onBeforeAddFiles?.(droppedFiles, current);
         if (result) {
-          const docExclusive = t("chat.docImageExclusive");
-          result.toasts.forEach((toastText) => {
-            if (toastText === docExclusive) {
-              message.warning(toastText);
-            } else {
-              message.info(toastText);
-            }
-          });
-          if (result.clearFirst) {
-            setFiles([]);
-            updateFiles?.([]);
-          }
-          runAddFiles(result.filesToAdd, result.clearFirst ? [] : current);
+          applyBeforeAddResult(result, current);
           return;
         }
         runAddFiles(droppedFiles, current);
       },
     }));
+
+    function applyBeforeAddResult(
+      result: OnBeforeAddFilesResult,
+      current: FileItem[],
+    ) {
+      if (!result) {
+        return;
+      }
+      const docExclusive = t("chat.docImageExclusive");
+      result.toasts.forEach((toastText) => {
+        if (toastText === docExclusive) {
+          message.warning(toastText);
+        } else {
+          message.info(toastText);
+        }
+      });
+      if (result.clearFirst) {
+        commitFiles([]);
+      }
+      if (result.filesToAdd.length > 0) {
+        runAddFiles(result.filesToAdd, result.clearFirst ? [] : current);
+      }
+    }
 
     function handleOnUploadChange(info: UploadChangeParam): string | void {
       if (disabled) {
@@ -257,51 +295,44 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
       }
       const { file } = info;
 
-      if (!validateFileType(file, types)) return Upload.LIST_IGNORE;
-      if (!validateFileSize(file)) return Upload.LIST_IGNORE;
-
-      const current = [...files];
-      const result = onBeforeAddFiles?.([file as unknown as File], current);
-      if (result) {
-        const docExclusive = t("chat.docImageExclusive");
-        result.toasts.forEach((toastText) => {
-          if (toastText === docExclusive) {
-            message.warning(toastText);
-          } else {
-            message.info(toastText);
-          }
-        });
-        if (result.clearFirst) {
-          setFiles([]);
-          updateFiles?.([]);
-        }
-        if (result.filesToAdd.length > 0) {
-          runAddFiles(result.filesToAdd, result.clearFirst ? [] : current);
-        }
+      if (file.status === "removed") {
         return;
       }
 
-      setFiles((prev) => {
-        if (!checkFileCountLimit(prev, file, max)) {
-          return prev;
-        }
-        const newFiles = [...prev, file] as FileItem[];
-        updateFiles?.(newFiles);
-        return newFiles;
-      });
-      uploadFile(file, (uri) => {
-        setFiles((prev) => {
-          const nextFiles = prev.map((f) =>
-            f.uid === file?.uid ? { ...f, uri } : f,
-          );
-          updateFiles?.(nextFiles);
-          return nextFiles;
-        });
-      });
+      const rawFile = toRawFile(file);
+
+      if (!validateFileType(rawFile, types)) return Upload.LIST_IGNORE;
+      if (!validateFileSize(rawFile)) return Upload.LIST_IGNORE;
+
+      const current = [...files];
+      const result = onBeforeAddFiles?.([rawFile], current);
+      if (result) {
+        applyBeforeAddResult(result, current);
+        return Upload.LIST_IGNORE;
+      }
+
+      const rcFile = rawFile as RcFile;
+      if (!rcFile.uid) {
+        rcFile.uid = `rc-upload-${Date.now()}-${Math.random()}`;
+      }
+
+      if (!tryAppendFile(rcFile)) {
+        return Upload.LIST_IGNORE;
+      }
+      uploadFile(
+        rcFile,
+        (uri) => {
+          commitFiles(attachUriToFile(filesRef.current, rcFile.uid, uri));
+        },
+        () => {
+          commitFiles(filesRef.current.filter((f) => f.uid !== rcFile.uid));
+        },
+      );
+      return Upload.LIST_IGNORE;
     }
 
     function onRemove(uid: string) {
-      setFiles((prev) => prev.filter((item: FileItem) => item.uid !== uid));
+      commitFiles(filesRef.current.filter((item: FileItem) => item.uid !== uid));
     }
 
     return (

@@ -878,6 +878,10 @@ function mergeHiddenItemFields(
   const referenceDocChanged =
     `${values.reference_doc || ""}`.trim() !== `${item.reference_doc || ""}`.trim() ||
     nextReferenceDocIDs.trim() !== currentReferenceDocIDs.trim();
+  const currentReferenceChunkIDs = joinListField(item.reference_chunk_ids);
+  const referenceChunkIdsChanged =
+    `${values.reference_chunk_ids ?? currentReferenceChunkIDs}`.trim() !==
+    `${currentReferenceChunkIDs}`.trim();
 
   return {
     ...values,
@@ -885,9 +889,10 @@ function mergeHiddenItemFields(
     reference_doc_ids: referenceDocChanged
       ? nextReferenceDocIDs
       : nextReferenceDocIDs || currentReferenceDocIDs,
-    reference_chunk_ids: referenceDocChanged || referenceContextChanged
-      ? values.reference_chunk_ids || ""
-      : values.reference_chunk_ids || joinListField(item.reference_chunk_ids),
+    reference_chunk_ids:
+      referenceDocChanged || referenceContextChanged || referenceChunkIdsChanged
+        ? (values.reference_chunk_ids ?? "")
+        : currentReferenceChunkIDs,
     is_deleted: Boolean(item.is_deleted),
   };
 }
@@ -1885,6 +1890,10 @@ export default function DatasetDetailPage() {
 
     referenceContextEditingValueRef.current[item.id] = nextReferenceContext;
     referenceContextEditingDirtyRef.current[item.id] = true;
+    setDrafts((current) => ({
+      ...current,
+      [item.id]: nextValues,
+    }));
     await handleSaveItem(
       item.id,
       nextValues,

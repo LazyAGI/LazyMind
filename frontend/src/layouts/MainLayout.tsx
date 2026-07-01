@@ -35,7 +35,8 @@ import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import {
   isDeveloperModeActive,
-  setDeveloperModeActive,
+  persistDeveloperModeActive,
+  syncDeveloperModeFromServer,
 } from "@/utils/developerMode";
 import RecordList from "@/modules/chat/components/RecordList";
 import {
@@ -185,10 +186,6 @@ export default function MainLayout() {
     .filter(Boolean)
     .join(" ");
 
-  useEffect(() => {
-    setDeveloperActive(isDeveloperModeActive());
-  }, []);
-
   const refreshLayoutUser = useCallback(async () => {
     if (!AgentAppsAuth.isLoggedIn()) {
       setUserInfo(AgentAppsAuth.getUserInfo());
@@ -197,6 +194,8 @@ export default function MainLayout() {
 
     try {
       await fetchCurrentUser();
+      const devActive = await syncDeveloperModeFromServer();
+      setDeveloperActive(devActive);
     } catch (error) {
       console.error("Failed to refresh current user:", error);
     } finally {
@@ -240,7 +239,7 @@ export default function MainLayout() {
   useEffect(() => {
     if (!isAdminUser && developerActive) {
       setDeveloperActive(false);
-      setDeveloperModeActive(false);
+      void persistDeveloperModeActive(false);
     }
   }, [developerActive, isAdminUser]);
 
@@ -419,7 +418,7 @@ export default function MainLayout() {
     if (targetPath === "developer-toggle") {
       if (developerActive) {
         setDeveloperActive(false);
-        setDeveloperModeActive(false);
+        void persistDeveloperModeActive(false);
         message.success(t("admin.developerDeactivated"));
         if (pathname.startsWith("/self-evolution")) {
           navigate("/agent/chat");
@@ -428,7 +427,7 @@ export default function MainLayout() {
       }
 
       setDeveloperActive(true);
-      setDeveloperModeActive(true);
+      void persistDeveloperModeActive(true);
       message.success(t("admin.developerActivated"));
       return;
     }
