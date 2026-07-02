@@ -830,7 +830,7 @@ func GetStateGraph(w http.ResponseWriter, r *http.Request) {
 		ArtifactCount int       `gorm:"column:artifact_count"`
 	}
 	var stepRows []stepRow
-	db.WithContext(ctx).Raw(`
+	if stepQueryErr := db.WithContext(ctx).Raw(`
 		SELECT
 			s.step_id,
 			s.attempt,
@@ -848,9 +848,10 @@ func GetStateGraph(w http.ResponseWriter, r *http.Request) {
 		) a ON a.step_id = s.step_id AND a.attempt = s.attempt
 		WHERE s.session_id = ?
 		ORDER BY s.step_id, s.attempt ASC
-	`, sessionID, sessionID).Scan(&stepRows)
-
-	// Build step status map (latest attempt) and attempts map.
+	`, sessionID, sessionID).Scan(&stepRows).Error; stepQueryErr != nil {
+		common.ReplyErr(w, "query step rows failed", http.StatusInternalServerError)
+		return
+	}
 	type stepInfo struct {
 		latestStatus  string
 		latestAttempt int
@@ -894,7 +895,7 @@ func GetStateGraph(w http.ResponseWriter, r *http.Request) {
 		Value       []byte `gorm:"column:value"`
 	}
 	var artifactRows []artifactRow
-	db.WithContext(ctx).Raw(`
+	if artifactQueryErr := db.WithContext(ctx).Raw(`
 		SELECT a.artifact_key, a.content_type, a.value, s.step_id, s.attempt
 		FROM sub_agent_artifacts a
 		JOIN plugin_session_steps s ON s.task_id = a.task_id
@@ -913,7 +914,10 @@ func GetStateGraph(w http.ResponseWriter, r *http.Request) {
 			  AND s2.step_id = s.step_id
 		  )
 		ORDER BY s.step_id, a.artifact_key
-	`, sessionID).Scan(&artifactRows)
+	`, sessionID).Scan(&artifactRows).Error; artifactQueryErr != nil {
+		common.ReplyErr(w, "query artifact rows failed", http.StatusInternalServerError)
+		return
+	}
 
 	// Group artifact items by step_id, de-dup by artifact_key.
 	stepArtifacts := make(map[string][]artifactSummaryItem)
