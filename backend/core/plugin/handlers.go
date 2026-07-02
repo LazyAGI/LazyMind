@@ -657,25 +657,31 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
 
+// artifactSummaryItem is one entry in the per-step artifact summary list.
+type artifactSummaryItem struct {
+	ArtifactKey string `json:"artifact_key"`
+	ContentType string `json:"content_type"`
+	Preview     string `json:"preview"` // text snippet (≤30 chars) or filename
+}
+
 // stepAttemptDTO represents one execution attempt of a step.
 type stepAttemptDTO struct {
 	Attempt       int     `json:"attempt"`
 	Status        string  `json:"status"`
 	DurationSec   float64 `json:"duration_sec"`   // -1 if not finished
-	ArtifactCount int     `json:"artifact_count"` // number of slot revisions for this attempt
+	ArtifactCount int     `json:"artifact_count"` // slot-revision count for this attempt
 	StartedAt     string  `json:"started_at"`
 }
 
 // stateGraphNodeDTO is one node in the StateGraph response.
 type stateGraphNodeDTO struct {
-	ID              string  `json:"id"`
-	Label           string  `json:"label"`
-	StepIndex       int     `json:"step_index"` // 1-based order; 0 for terminal nodes
-	Status          string  `json:"status"`
-	IsCurrent       bool    `json:"is_current"`
-	ArtifactSummary *string `json:"artifact_summary"`
-	// StepAttempts is the full execution history for this step, ordered by attempt asc.
-	StepAttempts []stepAttemptDTO `json:"step_attempts"`
+	ID            string                `json:"id"`
+	Label         string                `json:"label"`
+	StepIndex     int                   `json:"step_index"` // 1-based; 0 for terminal nodes
+	Status        string                `json:"status"`
+	IsCurrent     bool                  `json:"is_current"`
+	ArtifactItems []artifactSummaryItem `json:"artifact_items"` // latest-attempt artifacts
+	StepAttempts  []stepAttemptDTO      `json:"step_attempts"`
 }
 
 // stateGraphEdgeDTO is one directed edge in the StateGraph response.
@@ -710,6 +716,52 @@ type pluginStateSpec struct {
 		Steps       map[string]map[string]any              `json:"steps"`
 		Transitions map[string][]pluginStateTransitionEdge `json:"transitions"`
 	} `json:"state"`
+}
+
+// buildArtifactPreview extracts a human-readable preview from a raw artifact value JSON.
+// text: first 30 runes of the "text" field.
+// image: filename (with extension) from "path" or "url"; middle-truncated to 30 chars.
+// other content types: empty string.
+func buildArtifactPreview(contentType string, raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	switch contentType {
+	case "text":
+		text, _ := m["text"].(string)
+		runes := []rune(text)
+		if len(runes) > 30 {
+			return string(runes[:30]) + "…"
+		}
+		return text
+	case "image":
+		pathVal, _ := m["path"].(string)
+		if pathVal == "" {
+			pathVal, _ = m["url"].(string)
+		}
+		if pathVal == "" {
+			return ""
+		}
+		// Extract filename from path.
+		parts := strings.Split(strings.ReplaceAll(pathVal, "\\", "/"), "/")
+		name := parts[len(parts)-1]
+		// Strip query params.
+		if idx := strings.Index(name, "?"); idx >= 0 {
+			name = name[:idx]
+		}
+		// Middle-truncate to 30 chars: keep first N and last M chars.
+		runes := []rune(name)
+		if len(runes) > 30 {
+			return string(runes[:13]) + "…" + string(runes[len(runes)-14:])
+		}
+		return name
+	default:
+		return ""
+	}
 }
 
 // GetStateGraph handles GET /plugin-sessions/{session_id}/state-graph.
@@ -830,6 +882,56 @@ func GetStateGraph(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 4. Query artifacts for the latest attempt of each step.
+	//    For text artifacts: take first 30 runes of the "text" field.
+	//    For image artifacts: take the filename from the "path" or "url" field.
+	//    De-duplicate by artifact_key, keeping the row with the highest seq.
+	type artifactRow struct {
+		StepID      string `gorm:"column:step_id"`
+		Attempt     int    `gorm:"column:attempt"`
+		ArtifactKey string `gorm:"column:artifact_key"`
+		ContentType string `gorm:"column:content_type"`
+		Value       []byte `gorm:"column:value"`
+	}
+	var artifactRows []artifactRow
+	db.WithContext(ctx).Raw(`
+		SELECT a.artifact_key, a.content_type, a.value, s.step_id, s.attempt
+		FROM sub_agent_artifacts a
+		JOIN plugin_session_steps s ON s.task_id = a.task_id
+		WHERE s.session_id = ?
+		  AND a.hidden = false
+		  AND a.seq = (
+			SELECT MAX(a2.seq)
+			FROM sub_agent_artifacts a2
+			WHERE a2.task_id = a.task_id
+			  AND a2.artifact_key = a.artifact_key
+		  )
+		  AND s.attempt = (
+			SELECT MAX(s2.attempt)
+			FROM plugin_session_steps s2
+			WHERE s2.session_id = s.session_id
+			  AND s2.step_id = s.step_id
+		  )
+		ORDER BY s.step_id, a.artifact_key
+	`, sessionID).Scan(&artifactRows)
+
+	// Group artifact items by step_id, de-dup by artifact_key.
+	stepArtifacts := make(map[string][]artifactSummaryItem)
+	seen := make(map[string]bool) // "step_id:artifact_key"
+	for _, r := range artifactRows {
+		k := r.StepID + ":" + r.ArtifactKey
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		preview := buildArtifactPreview(r.ContentType, r.Value)
+		stepArtifacts[r.StepID] = append(stepArtifacts[r.StepID], artifactSummaryItem{
+			ArtifactKey: r.ArtifactKey,
+			ContentType: r.ContentType,
+			Preview:     preview,
+		})
+	}
+
 	// 5. Build nodes — __start__ + all declared steps (in transition order) + __end__.
 	// Use BFS from initial to enumerate steps in topological order.
 	startNode := stateGraphNodeDTO{
@@ -882,12 +984,13 @@ func GetStateGraph(w http.ResponseWriter, r *http.Request) {
 			attempts = si.attempts
 		}
 		nodes = append(nodes, stateGraphNodeDTO{
-			ID:           stepID,
-			Label:        label,
-			StepIndex:    i + 1,
-			Status:       status,
-			IsCurrent:    stepID == sess.CurrentStepID,
-			StepAttempts: attempts,
+			ID:            stepID,
+			Label:         label,
+			StepIndex:     i + 1,
+			Status:        status,
+			IsCurrent:     stepID == sess.CurrentStepID,
+			StepAttempts:  attempts,
+			ArtifactItems: stepArtifacts[stepID],
 		})
 	}
 	nodes = append(nodes, endNode)

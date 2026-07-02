@@ -29,7 +29,8 @@ export interface SGNode {
   step_index: number;
   status: string;
   is_current: boolean;
-  artifact_summary?: string | null;
+  artifact_summary?: string | null; // legacy, unused
+  artifact_items?: { artifact_key: string; content_type: string; preview: string }[];
   step_attempts?: SGAttempt[];
 }
 
@@ -219,9 +220,21 @@ function NodePopover({ node }: { node: SGNode }) {
       )}
       <div style={{ padding: '10px 16px' }}>
         <div style={{ fontSize: 11, color: '#bfbfbf', fontWeight: 600, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 8 }}>产出摘要</div>
-        {node.artifact_summary
-          ? <div style={{ fontSize: 12, color: '#262626', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 6, padding: '8px 10px', lineHeight: 1.6, wordBreak: 'break-all', maxHeight: 100, overflowY: 'auto' }}>{node.artifact_summary}</div>
-          : <div style={{ fontSize: 12, color: '#d9d9d9', textAlign: 'center', padding: '8px 0' }}>暂无产出摘要</div>}
+        {node.artifact_items && node.artifact_items.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {node.artifact_items.map((item, idx) => (
+              <div key={item.artifact_key} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#262626', lineHeight: 1.5 }}>
+                <span style={{ color: '#8c8c8c', flexShrink: 0, minWidth: 16 }}>{idx + 1}.</span>
+                <span style={{ flexShrink: 0, color: '#8c8c8c', background: '#f5f5f5', borderRadius: 3, padding: '0 4px', fontSize: 11, fontFamily: 'monospace' }}>
+                  [{item.content_type}]
+                </span>
+                <span style={{ wordBreak: 'break-all', color: '#595959' }}>{item.preview || '–'}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: '#d9d9d9', textAlign: 'center', padding: '8px 0' }}>暂无产出摘要</div>
+        )}
       </div>
     </div>
   );
