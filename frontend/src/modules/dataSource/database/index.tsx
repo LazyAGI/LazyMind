@@ -119,9 +119,14 @@ export default function DatabaseConnectionsPage() {
       okButtonProps: { danger: true },
       cancelText: t("common.cancel"),
       onOk: async () => {
-        await deleteDatabaseConnection(record.id);
-        message.success(t("admin.dataSourceDatabaseDeleted"));
-        await refresh();
+        try {
+          await deleteDatabaseConnection(record.id);
+          message.success(t("admin.dataSourceDatabaseDeleted"));
+          await refresh();
+        } catch (error) {
+          message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseDeleteFailed")));
+          throw error;
+        }
       },
     });
   };

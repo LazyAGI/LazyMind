@@ -195,10 +195,15 @@ def _collect_active_tool_names(configs: list) -> set[str]:
                 names.add(tool_name)
         public_apis = getattr(inst, '__public_apis__', None)
         if isinstance(public_apis, (list, tuple)):
+            group_name = inst.__class__.__name__
+            if group_name:
+                names.add(f'get_{group_name}_methods')
             for method_name in public_apis:
                 method = str(method_name).strip()
                 if method:
                     names.add(method)
+                    if group_name:
+                        names.add(f'{group_name}_{method}')
     return names
 
 

@@ -102,5 +102,5 @@ class SystemQueryToolGroup:
         }
         return tool_success(
             'aggregate_documents',
-            post_core_api('/system-query/documents:aggregate', payload)['response'],
+            post_core_api('/system-query/documents:aggregate', payload),
         )

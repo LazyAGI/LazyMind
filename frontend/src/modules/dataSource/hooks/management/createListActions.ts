@@ -95,12 +95,12 @@ export function createListActions(ctx: ManagementContext) {
             return true;
           }
           const text = [
-            item.display_name,
-            item.description,
-            item.db_type,
-            item.host,
-            item.database_name,
-            item.username,
+            item.display_name || "",
+            item.description || "",
+            item.db_type || "",
+            item.host || "",
+            item.database_name || "",
+            item.username || "",
           ].join(" ").toLowerCase();
           return text.includes(keyword.toLowerCase());
         })
