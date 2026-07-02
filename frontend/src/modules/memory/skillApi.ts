@@ -102,6 +102,7 @@ export interface ListSkillOptions {
   tags?: string[];
   page?: number;
   pageSize?: number;
+  excludeBuiltinTemplates?: boolean;
 }
 
 export interface SkillAssetListResult {
@@ -983,6 +984,9 @@ export async function listSkillAssetsPage(
   tags.forEach((item) => {
     params.append("tags", item);
   });
+  if (options.excludeBuiltinTemplates) {
+    params.set("exclude_builtin_templates", "true");
+  }
 
   const response = await axiosInstance.get(`${coreBasePath}/skills`, {
     params,
@@ -993,14 +997,16 @@ export async function listSkillAssetsPage(
   const rawEnvelope = toRawObject(response.data);
   const skillNodes = extractSkillList(payload);
   const flattened = flattenSkillNodes(skillNodes);
-  const enabledOnly = flattened.filter((item) => item.isEnabled !== false);
   const deduped = new Map<string, SkillAssetRecord>();
 
-  enabledOnly.forEach((item) => {
+  flattened.forEach((item) => {
     deduped.set(item.id, item);
   });
 
-  const records = Array.from(deduped.values());
+  let records = Array.from(deduped.values());
+  if (options.excludeBuiltinTemplates) {
+    records = records.filter((item) => !item.isBuiltinTemplate);
+  }
   const page = Math.max(1, toNumberValue(rawPayload?.page ?? rawEnvelope?.page, options.page ?? 1));
   const pageSize = Math.max(
     1,

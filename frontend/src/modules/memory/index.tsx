@@ -741,13 +741,28 @@ export default function MemoryManagement() {
     setSkillLoading(true);
 
     try {
-      const result = await listSkillAssetsPage({
+      const requestedPage = options.page ?? skillListPage;
+      const requestedPageSize = options.pageSize ?? skillListPageSize;
+      const listOptions = {
         keyword: skillKeyword,
         category,
         tags: tag ? [tag] : [],
-        page: options.page ?? skillListPage,
-        pageSize: options.pageSize ?? skillListPageSize,
+        pageSize: requestedPageSize,
+        excludeBuiltinTemplates: skillView === "installed",
+      };
+
+      let result = await listSkillAssetsPage({
+        ...listOptions,
+        page: requestedPage,
       });
+      const maxPage = Math.max(1, Math.ceil(result.total / Math.max(1, result.pageSize)));
+      if (requestedPage > maxPage) {
+        result = await listSkillAssetsPage({
+          ...listOptions,
+          page: maxPage,
+        });
+      }
+
       const records = result.records;
       if (skillListRequestIdRef.current !== requestId) {
         return;
@@ -773,7 +788,38 @@ export default function MemoryManagement() {
         setSkillsInitialized(true);
       }
     }
-  }, [category, skillKeyword, skillListPage, skillListPageSize, tag]);
+  }, [category, skillKeyword, skillListPage, skillListPageSize, skillView, tag]);
+
+  const handleSkillListPageChange = useCallback(
+    (page: number, pageSize: number) => {
+      setSkillListPage(page);
+      setSkillListPageSize(pageSize);
+      skillListRefreshKeyRef.current = [
+        location.key,
+        location.pathname,
+        location.search,
+        skillKeyword,
+        category || "",
+        tag || "",
+        skillView,
+        installedSkillSource,
+        page,
+        pageSize,
+      ].join("|");
+      void refreshSkillAssets({ page, pageSize });
+    },
+    [
+      category,
+      installedSkillSource,
+      location.key,
+      location.pathname,
+      location.search,
+      refreshSkillAssets,
+      skillKeyword,
+      skillView,
+      tag,
+    ],
+  );
 
   const refreshAllSkillAssets = useCallback(async () => {
     const requestId = skillListRequestIdRef.current + 1;
@@ -1181,7 +1227,7 @@ export default function MemoryManagement() {
       !skillRouteItemId &&
       reviewRouteTab !== "skills" &&
       skillListRouteLocationKeyRef.current !== location.key;
-    const filterKey = [skillKeyword, category || "", tag || ""].join("|");
+    const filterKey = [skillKeyword, category || "", tag || "", installedSkillSource].join("|");
     const filtersChanged = skillListFilterKeyRef.current !== filterKey;
     if (filtersChanged) {
       skillListFilterKeyRef.current = filterKey;
@@ -1197,6 +1243,8 @@ export default function MemoryManagement() {
       skillKeyword,
       category || "",
       tag || "",
+      skillView,
+      installedSkillSource,
       requestPage,
       skillListPageSize,
     ].join("|");
@@ -1210,6 +1258,7 @@ export default function MemoryManagement() {
     void refreshSkillAssets({ page: requestPage });
   }, [
     category,
+    installedSkillSource,
     location.key,
     location.pathname,
     location.search,
@@ -1220,6 +1269,7 @@ export default function MemoryManagement() {
     skillListPage,
     skillListPageSize,
     skillRouteItemId,
+    skillView,
     tag,
   ]);
 
@@ -2312,8 +2362,8 @@ export default function MemoryManagement() {
   }, [hasStructuredFilter, matchesStructuredFilter, skillAssets]);
 
   const filteredInstalledSkillTree = useMemo<SkillTreeNode[]>(() => {
-    return filteredSkillTree.filter((item) => {
-      if (item.isBuiltinTemplate) {
+    const installedRoots = skillAssets.filter((item) => {
+      if (item.isBuiltinTemplate || item.parentId) {
         return false;
       }
       if (installedSkillSource === "all") {
@@ -2321,7 +2371,15 @@ export default function MemoryManagement() {
       }
       return resolveSkillSourceType(item) === installedSkillSource;
     });
-  }, [filteredSkillTree, installedSkillSource]);
+
+    return installedRoots.map((parent) => {
+      const children = skillAssets.filter((item) => item.parentId === parent.id);
+      return {
+        ...parent,
+        children: children.length ? children : undefined,
+      };
+    });
+  }, [installedSkillSource, skillAssets]);
 
   const resetFilters = () => {
     setQuery("");
@@ -5735,6 +5793,7 @@ export default function MemoryManagement() {
     skillListTotal,
     setSkillListPage,
     setSkillListPageSize,
+    handleSkillListPageChange,
     skillAssets,
     filteredSkillTree,
     filteredInstalledSkillTree,

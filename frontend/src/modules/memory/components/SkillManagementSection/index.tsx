@@ -5,15 +5,16 @@ import { AgentAppsAuth } from "@/components/auth";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
 import { useMemoryManagementOutletContext } from "../../context";
 import type { StructuredAsset } from "../../shared";
-import {
-  isSkillUpdatePendingForRecord,
-} from "../../shared";
+import { isSkillUpdatePendingForRecord } from "../../shared";
 import { removeSkillAsset, listSkillAssetsPage } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
 import SkillInstalledView from "./SkillInstalledView";
 import SkillMarketView from "./SkillMarketView";
 import SkillUploadView from "./SkillUploadView";
-import { collectMarketCategories, mapSkillAssetRecordToStructuredAsset } from "./skillHelpers";
+import {
+  collectMarketCategories,
+  mapSkillAssetRecordToStructuredAsset,
+} from "./skillHelpers";
 import {
   createInstalledSkillFromMock,
   isMockMarketSkill,
@@ -26,9 +27,15 @@ export default function SkillManagementSection() {
   const [memoryTableBodyHeight, setMemoryTableBodyHeight] = useState<number>();
   const [marketKeyword, setMarketKeyword] = useState("");
   const [adminPublishOpen, setAdminPublishOpen] = useState(false);
-  const [mockInstalledUids, setMockInstalledUids] = useState<Set<string>>(new Set());
-  const [mockInstalledSkills, setMockInstalledSkills] = useState<StructuredAsset[]>([]);
-  const [marketCatalogAssets, setMarketCatalogAssets] = useState<StructuredAsset[]>([]);
+  const [mockInstalledUids, setMockInstalledUids] = useState<Set<string>>(
+    new Set(),
+  );
+  const [mockInstalledSkills, setMockInstalledSkills] = useState<
+    StructuredAsset[]
+  >([]);
+  const [marketCatalogAssets, setMarketCatalogAssets] = useState<
+    StructuredAsset[]
+  >([]);
   const [marketCatalogLoading, setMarketCatalogLoading] = useState(false);
 
   const {
@@ -79,7 +86,10 @@ export default function SkillManagementSection() {
 
     void (async () => {
       try {
-        const firstResult = await listSkillAssetsPage({ page: 1, pageSize: 100 });
+        const firstResult = await listSkillAssetsPage({
+          page: 1,
+          pageSize: 100,
+        });
         if (ignore) {
           return;
         }
@@ -129,7 +139,8 @@ export default function SkillManagementSection() {
     }
 
     const updateTableHeight = () => {
-      const headerElement = contentElement.querySelector<HTMLElement>(".ant-table-thead");
+      const headerElement =
+        contentElement.querySelector<HTMLElement>(".ant-table-thead");
       const paginationElement = contentElement.querySelector<HTMLElement>(
         ".ant-table-pagination",
       );
@@ -154,7 +165,13 @@ export default function SkillManagementSection() {
       resizeObserver.disconnect();
       window.removeEventListener("resize", updateTableHeight);
     };
-  }, [skillView, skillListPage, skillListPageSize, skillAssets.length, filteredInstalledSkillTree.length]);
+  }, [
+    skillView,
+    skillListPage,
+    skillListPageSize,
+    skillAssets.length,
+    filteredInstalledSkillTree.length,
+  ]);
 
   const marketSkillAssets = useMemo(
     () => resolveMarketSkillAssets(marketCatalogAssets),
@@ -162,7 +179,10 @@ export default function SkillManagementSection() {
   );
 
   const usingMockMarketData = useMemo(
-    () => !marketCatalogAssets.some((item) => item.isBuiltinTemplate && !item.parentId),
+    () =>
+      !marketCatalogAssets.some(
+        (item) => item.isBuiltinTemplate && !item.parentId,
+      ),
     [marketCatalogAssets],
   );
 
@@ -194,7 +214,9 @@ export default function SkillManagementSection() {
   const marketCategories = useMemo(
     () =>
       collectMarketCategories(
-        marketSkillAssets.filter((item) => item.isBuiltinTemplate && !item.parentId),
+        marketSkillAssets.filter(
+          (item) => item.isBuiltinTemplate && !item.parentId,
+        ),
       ),
     [marketSkillAssets],
   );
@@ -202,7 +224,10 @@ export default function SkillManagementSection() {
   const installedUpdateCount = useMemo(
     () =>
       skillAssets.filter(
-        (item) => !item.isBuiltinTemplate && !item.parentId && isSkillUpdatePendingForRecord(item),
+        (item) =>
+          !item.isBuiltinTemplate &&
+          !item.parentId &&
+          isSkillUpdatePendingForRecord(item),
       ).length,
     [skillAssets],
   );
@@ -231,11 +256,18 @@ export default function SkillManagementSection() {
     }
 
     const firstUpdatedSkill = skillAssets.find(
-      (item) => !item.isBuiltinTemplate && !item.parentId && isSkillUpdatePendingForRecord(item),
+      (item) =>
+        !item.isBuiltinTemplate &&
+        !item.parentId &&
+        isSkillUpdatePendingForRecord(item),
     );
 
     if (firstUpdatedSkill) {
-      void openChangeReview("skills", firstUpdatedSkill.id, firstUpdatedSkill.updateStatus);
+      void openChangeReview(
+        "skills",
+        firstUpdatedSkill.id,
+        firstUpdatedSkill.updateStatus,
+      );
       return;
     }
 
@@ -253,7 +285,10 @@ export default function SkillManagementSection() {
       }
 
       setMockInstalledUids((previous) => new Set(previous).add(uid));
-      setMockInstalledSkills((previous) => [...previous, createInstalledSkillFromMock(item)]);
+      setMockInstalledSkills((previous) => [
+        ...previous,
+        createInstalledSkillFromMock(item),
+      ]);
       message.success(
         usingMockMarketData
           ? t("admin.memorySkillMarketMockInstallSuccess", { name: item.name })
@@ -275,7 +310,9 @@ export default function SkillManagementSection() {
 
       Modal.confirm({
         title: t("admin.memorySkillMarketUninstallTitle"),
-        content: t("admin.memorySkillMarketUninstallContent", { name: item.name }),
+        content: t("admin.memorySkillMarketUninstallContent", {
+          name: item.name,
+        }),
         okText: t("common.confirm"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },
@@ -288,7 +325,9 @@ export default function SkillManagementSection() {
           setMockInstalledSkills((previous) =>
             previous.filter((skill) => skill.originBuiltinSkillUid !== uid),
           );
-          message.success(t("admin.memorySkillMarketUninstallSuccess", { name: item.name }));
+          message.success(
+            t("admin.memorySkillMarketUninstallSuccess", { name: item.name }),
+          );
         },
       });
       return;
@@ -305,7 +344,9 @@ export default function SkillManagementSection() {
 
     Modal.confirm({
       title: t("admin.memorySkillMarketUninstallTitle"),
-      content: t("admin.memorySkillMarketUninstallContent", { name: enabledCopy.name }),
+      content: t("admin.memorySkillMarketUninstallContent", {
+        name: enabledCopy.name,
+      }),
       okText: t("common.confirm"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
@@ -313,7 +354,11 @@ export default function SkillManagementSection() {
         await removeSkillAsset(enabledCopy.id);
         await refreshSkillAssets({ page: skillListPage });
         setMarketCatalogAssets([]);
-        message.success(t("admin.memorySkillMarketUninstallSuccess", { name: enabledCopy.name }));
+        message.success(
+          t("admin.memorySkillMarketUninstallSuccess", {
+            name: enabledCopy.name,
+          }),
+        );
       },
     });
   };
@@ -326,7 +371,11 @@ export default function SkillManagementSection() {
 
   return (
     <div className="memory-skill-management">
-      <div className="memory-skill-view-bar" role="tablist" aria-label={t("admin.memorySkillViewBarLabel")}>
+      <div
+        className="memory-skill-view-bar"
+        role="tablist"
+        aria-label={t("admin.memorySkillViewBarLabel")}
+      >
         <div className="memory-skill-view-tabs">
           <button
             type="button"
@@ -370,7 +419,9 @@ export default function SkillManagementSection() {
         <div className="memory-skill-bar-actions">
           {skillView === "installed" ? (
             <Button onClick={handleSkillMessageCenter}>
-              {t("admin.memorySkillMessageCenterButton", { count: messageCenterCount })}
+              {t("admin.memorySkillMessageCenterButton", {
+                count: messageCenterCount,
+              })}
             </Button>
           ) : null}
           {skillView === "market" && isAdmin ? (
@@ -422,19 +473,19 @@ export default function SkillManagementSection() {
             loading={marketCatalogLoading}
             skillAssets={marketSkillAssets}
             mockInstalledUids={mockInstalledUids}
-          keyword={marketKeyword}
-          onKeywordChange={setMarketKeyword}
-          source={marketSkillSource}
-          onSourceChange={setMarketSkillSource}
-          category={marketCategory}
-          onCategoryChange={setMarketCategory}
-          categories={marketCategories}
-          onReset={handleMarketReset}
-          onInstall={handleMarketInstall}
-          onUninstall={handleMarketUninstall}
-          onDetail={handleMarketDetail}
-          installingUid={installingUid}
-        />
+            keyword={marketKeyword}
+            onKeywordChange={setMarketKeyword}
+            source={marketSkillSource}
+            onSourceChange={setMarketSkillSource}
+            category={marketCategory}
+            onCategoryChange={setMarketCategory}
+            categories={marketCategories}
+            onReset={handleMarketReset}
+            onInstall={handleMarketInstall}
+            onUninstall={handleMarketUninstall}
+            onDetail={handleMarketDetail}
+            installingUid={installingUid}
+          />
         </>
       ) : null}
 

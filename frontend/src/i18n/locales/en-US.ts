@@ -1236,6 +1236,8 @@ const enUS = {
     searchPlaceholder: "Name / Description / Tags",
     searchDocPlaceholder: "Search by name, tags, or creator",
     createKnowledgeBase: "Create Knowledge Base",
+    createDirect: "Direct create",
+    createFromCloudDisk: "Create from cloud disk",
     createFromCloudDocuments: "From cloud docs",
     createFromCloudDocumentsTitle: "Create from cloud documents",
     createFromCloudDocumentsIntro:

@@ -11,9 +11,13 @@ import "./index.scss";
 interface Props {
   onSuccess?: () => void | Promise<void>;
   vm?: SyncKnowledgeBaseCreationVm;
+  hideProviderModal?: boolean;
 }
 
-const SyncKnowledgeBaseCreationFlowInner: FC<{ vm: SyncKnowledgeBaseCreationVm }> = ({ vm }) => {
+const SyncKnowledgeBaseCreationFlowInner: FC<{
+  vm: SyncKnowledgeBaseCreationVm;
+  hideProviderModal?: boolean;
+}> = ({ vm, hideProviderModal = false }) => {
   const {
     t,
     form,
@@ -53,6 +57,7 @@ const SyncKnowledgeBaseCreationFlowInner: FC<{ vm: SyncKnowledgeBaseCreationVm }
         vm={vm}
         titleKey="knowledge.createFromCloudDocumentsTitle"
         introKey="knowledge.createFromCloudDocumentsIntro"
+        hideProviderModal={hideProviderModal}
       />
 
       <DataSourceWizardModal
@@ -98,17 +103,38 @@ const SyncKnowledgeBaseCreationFlowInner: FC<{ vm: SyncKnowledgeBaseCreationVm }
   );
 };
 
-const SyncKnowledgeBaseCreationFlowWithHook: FC<Pick<Props, "onSuccess">> = ({ onSuccess }) => {
+const SyncKnowledgeBaseCreationFlowWithHook: FC<
+  Pick<Props, "onSuccess" | "hideProviderModal">
+> = ({ onSuccess, hideProviderModal }) => {
   const vm = useSyncKnowledgeBaseCreation({ onSuccess });
-  return <SyncKnowledgeBaseCreationFlowInner vm={vm} />;
+  return (
+    <SyncKnowledgeBaseCreationFlowInner
+      vm={vm}
+      hideProviderModal={hideProviderModal}
+    />
+  );
 };
 
-const SyncKnowledgeBaseCreationFlow: FC<Props> = ({ onSuccess, vm }) => {
+const SyncKnowledgeBaseCreationFlow: FC<Props> = ({
+  onSuccess,
+  vm,
+  hideProviderModal,
+}) => {
   if (vm) {
-    return <SyncKnowledgeBaseCreationFlowInner vm={vm} />;
+    return (
+      <SyncKnowledgeBaseCreationFlowInner
+        vm={vm}
+        hideProviderModal={hideProviderModal}
+      />
+    );
   }
 
-  return <SyncKnowledgeBaseCreationFlowWithHook onSuccess={onSuccess} />;
+  return (
+    <SyncKnowledgeBaseCreationFlowWithHook
+      onSuccess={onSuccess}
+      hideProviderModal={hideProviderModal}
+    />
+  );
 };
 
 export { useSyncKnowledgeBaseCreation };

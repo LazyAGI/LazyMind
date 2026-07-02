@@ -1209,6 +1209,8 @@ const zhCN = {
     searchPlaceholder: "知识库名称/描述/标签",
     searchDocPlaceholder: "搜索文档名称、标签、创建人",
     createKnowledgeBase: "创建知识库",
+    createDirect: "直接创建",
+    createFromCloudDisk: "从云盘创建",
     createFromCloudDocuments: "从云文档创建",
     createFromCloudDocumentsTitle: "从云文档创建知识库",
     createFromCloudDocumentsIntro:

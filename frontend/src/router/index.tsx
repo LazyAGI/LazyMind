@@ -38,7 +38,11 @@ import ModelProviderPage from "@/modules/modelProvider";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
 import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
 import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPage";
-import { SelfEvolutionHomePage, SelfEvolutionDetailPage, SelfEvolutionObservationPage } from "@/modules/selfEvolution";
+import {
+  SelfEvolutionHomePage,
+  SelfEvolutionDetailPage,
+  SelfEvolutionObservationPage,
+} from "@/modules/selfEvolution";
 import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
 
@@ -46,7 +50,9 @@ export default function AppRouter() {
   const { i18n } = useTranslation();
 
   return (
-    <ConfigProvider locale={getAntdLocale(i18n.resolvedLanguage || i18n.language)}>
+    <ConfigProvider
+      locale={getAntdLocale(i18n.resolvedLanguage || i18n.language)}
+    >
       <Routes>
         <Route path="/login" element={<SigninDashboard />}>
           <Route index element={<SigninLogin />} />
@@ -90,23 +96,52 @@ export default function AppRouter() {
           <Route path="data-sources" element={<DataSourceManagement />} />
           <Route path="data-sources/:id" element={<DataSourceDetail />} />
           <Route path="dataset-management" element={<DatasetListPage />} />
-          <Route path="dataset-management/:datasetId" element={<DatasetDetailPage />} />
+          <Route
+            path="dataset-management/:datasetId"
+            element={<DatasetDetailPage />}
+          />
           <Route path="model-providers" element={<ModelProviderPage />}>
             <Route index element={<Navigate to="default-services" replace />} />
             <Route path="models" element={<ModelProvidersPage />} />
-            <Route path="document-parsing" element={<ExternalServicesPage section="parsing" />} />
-            <Route path="tools" element={<ExternalServicesPage section="tools" />} />
+            <Route
+              path="document-parsing"
+              element={<ExternalServicesPage section="parsing" />}
+            />
+            <Route
+              path="tools"
+              element={<ExternalServicesPage section="tools" />}
+            />
             <Route path="cloud-documents" element={<CloudDocumentsPage />} />
-            <Route path="cloud-documents/local" element={<LocalDataSourcePage />} />
-            <Route path="cloud-documents/feishu" element={<FeishuAccountPage />} />
-            <Route path="cloud-documents/docs/feishu-setup" element={<FeishuSetupGuide />} />
-            <Route path="cloud-documents/docs/notion-setup" element={<NotionSetupGuide />} />
-            <Route path="external-services" element={<Navigate to="/model-providers/document-parsing" replace />} />
+            <Route
+              path="cloud-documents/local"
+              element={<LocalDataSourcePage />}
+            />
+            <Route
+              path="cloud-documents/feishu"
+              element={<FeishuAccountPage />}
+            />
+            <Route
+              path="cloud-documents/docs/feishu-setup"
+              element={<FeishuSetupGuide />}
+            />
+            <Route
+              path="cloud-documents/docs/notion-setup"
+              element={<NotionSetupGuide />}
+            />
+            <Route
+              path="external-services"
+              element={
+                <Navigate to="/model-providers/document-parsing" replace />
+              }
+            />
             <Route path="default-services" element={<DefaultServicesPage />} />
           </Route>
           <Route path="memory-management" element={<MemoryManagement />}>
             <Route index element={<MemoryManagementListPage />} />
-            <Route path="tools" element={<Navigate to="/model-providers/tools" replace />} />
+            <Route
+              path="tools"
+              element={<Navigate to="/model-providers/tools" replace />}
+            />
             <Route path="skills" element={<MemoryManagementListPage />} />
             <Route path="skills/:itemId" element={<MemorySkillDetailPage />} />
             <Route path="experience" element={<MemoryManagementListPage />} />
@@ -119,26 +154,44 @@ export default function AppRouter() {
               path="glossary/:itemId"
               element={<MemoryGlossaryDetailPage />}
             />
-            <Route
-              path="review/:tab/:itemId"
-              element={<MemoryReviewPage />}
-            />
+            <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
           {runtimeFeatures.hideEvo ? (
-            <Route path="self-evolution/*" element={<Navigate to="/agent/chat" replace />} />
+            <Route
+              path="self-evolution/*"
+              element={<Navigate to="/agent/chat" replace />}
+            />
           ) : (
             <>
-              <Route path="self-evolution" element={<SelfEvolutionHomePage />} />
-              <Route path="self-evolution/detail/:threadId/observation/:kind" element={<SelfEvolutionObservationPage />} />
-              <Route path="self-evolution/detail/:threadId" element={<SelfEvolutionDetailPage />} />
-              <Route path="self-evolution/:threadId/observation/:kind" element={<SelfEvolutionObservationPage />} />
-              <Route path="self-evolution/:threadId" element={<SelfEvolutionDetailPage />} />
+              <Route
+                path="self-evolution"
+                element={<SelfEvolutionHomePage />}
+              />
+              <Route
+                path="self-evolution/detail/:threadId/observation/:kind"
+                element={<SelfEvolutionObservationPage />}
+              />
+              <Route
+                path="self-evolution/detail/:threadId"
+                element={<SelfEvolutionDetailPage />}
+              />
+              <Route
+                path="self-evolution/:threadId/observation/:kind"
+                element={<SelfEvolutionObservationPage />}
+              />
+              <Route
+                path="self-evolution/:threadId"
+                element={<SelfEvolutionDetailPage />}
+              />
             </>
           )}
           <Route path="task-center" element={<TaskCenterPage />} />
         </Route>
         {runtimeFeatures.hideCloudAdmin ? (
-          <Route path="/admin/*" element={<Navigate to="/agent/chat" replace />} />
+          <Route
+            path="/admin/*"
+            element={<Navigate to="/agent/chat" replace />}
+          />
         ) : (
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<Navigate to="groups" replace />} />
