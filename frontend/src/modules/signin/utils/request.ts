@@ -18,6 +18,7 @@ import {
 import { axiosInstance } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
 import { authServiceApiUrl, getApiBaseUrl } from "@/runtime/apiBase";
+import { syncDeveloperModeFromServer } from "@/utils/developerMode";
 
 const baseUrl = getApiBaseUrl();
 const authServiceBaseUrl = authServiceApiUrl("v1");
@@ -84,6 +85,7 @@ export async function storeLoginSession(
 
   try {
     await fetchCurrentUser();
+    await syncDeveloperModeFromServer();
   } catch {
   }
 

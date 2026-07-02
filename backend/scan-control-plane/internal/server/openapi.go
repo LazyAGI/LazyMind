@@ -345,6 +345,7 @@ func treeNodeSchema() map[string]any {
 		"update_type", stringSchema(),
 		"update_desc", stringSchema(),
 		"provider_meta", objectSchema(),
+		"children", arrayOf("TreeNode"),
 	))
 }
 

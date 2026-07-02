@@ -6,7 +6,6 @@ from typing import Any
 
 from evo.artifact_flow.contract import STEP_ROOTS
 from evo.artifact_runtime.utils import canonical_json
-from evo.operations.eval import ANSWER_METRICS, answer_score_from_metrics
 
 from .models import AutoObservation
 from .ports import AutoAgentPorts
@@ -49,69 +48,40 @@ class AutoObserver:
 
 
 def _facts_from_artifacts(artifacts: Mapping[str, dict[str, Any] | None]) -> dict[str, Any]:
-    data = {
-        artifact_id: row.get('data')
-        for artifact_id, row in artifacts.items()
-        if isinstance(row, Mapping) and isinstance(row.get('data'), Mapping)
+    facts: dict[str, list[dict[str, Any]]] = {
+        'artifact_anomalies': [],
+        'intervention_suggestions': [],
     }
-    eval_summary = data.get('eval.summary', {})
-    analysis = data.get('analysis.summary', {})
-    return {
-        'execution_failures': _execution_failures(eval_summary),
-        'bad_cases': _bad_cases(eval_summary),
-        'suspicious_scores': _suspicious_scores(eval_summary),
-        'repairable_cases': list(analysis.get('repairable_cases') or []) if isinstance(analysis, Mapping) else [],
-    }
-
-
-def _execution_failures(summary: Mapping[str, Any]) -> list[dict[str, str]]:
-    failures = []
-    for item in summary.get('execution_failures') or []:
-        if isinstance(item, Mapping):
-            case_id = str(item.get('case_id') or '').strip()
-            if case_id:
-                failures.append({'case_id': case_id, 'reason': str(item.get('reason') or '')})
-    return failures
-
-
-def _bad_cases(summary: Mapping[str, Any]) -> list[dict[str, str]]:
-    cases = []
-    for item in summary.get('bad_cases') or []:
-        if isinstance(item, Mapping):
-            case_id = str(item.get('case_id') or '').strip()
-            if case_id:
-                cases.append({
-                    'case_id': case_id,
-                    'failure_type': str(item.get('failure_type') or ''),
-                    'quality_label': str(item.get('quality_label') or ''),
+    for artifact_id, row in artifacts.items():
+        if not isinstance(row, Mapping) or not isinstance(row.get('data'), Mapping):
+            continue
+        payload = row['data']
+        source_ref = str(row.get('ref') or artifact_id)
+        source = {'source_artifact': str(artifact_id), 'source_ref': source_ref}
+        if str(payload.get('status') or '').lower() in {'failed', 'error'}:
+            facts['artifact_anomalies'].append({
+                **source,
+                'kind': 'status',
+                'reason': str(payload.get('reason') or payload.get('error') or payload.get('status') or ''),
+            })
+        for key in ('errors', 'execution_failures'):
+            rows = payload.get(key)
+            if isinstance(rows, list) and rows:
+                facts['artifact_anomalies'].append({
+                    **source,
+                    'kind': key,
+                    'reason': f'{key} present',
+                })
+        for item in payload.get('intervention_suggestions') or ():
+            if not isinstance(item, Mapping):
+                continue
+            kind = str(item.get('kind') or '').strip()
+            args = item.get('args')
+            if kind and isinstance(args, Mapping):
+                facts['intervention_suggestions'].append({
+                    **source,
+                    'kind': kind,
+                    'args': dict(args),
                     'reason': str(item.get('reason') or ''),
                 })
-    return cases
-
-
-def _suspicious_scores(summary: Mapping[str, Any]) -> list[dict[str, Any]]:
-    out = []
-    rows = summary.get('rows') if isinstance(summary.get('rows'), list) else []
-    for row in rows:
-        if not isinstance(row, Mapping):
-            continue
-        case_id = str(row.get('case_id') or '').strip()
-        if not case_id or row.get('answer_score') is None or any(row.get(key) is None for key in ANSWER_METRICS):
-            continue
-        try:
-            answer_score = float(row['answer_score'])
-            component_scores = {key: float(row[key]) for key in ANSWER_METRICS}
-            if any(value < 0.0 or value > 1.0 for value in component_scores.values()):
-                continue
-            expected = answer_score_from_metrics(component_scores)
-        except (TypeError, ValueError):
-            continue
-        if 0.0 <= answer_score <= 1.0 and abs(answer_score - expected) > 0.05:
-            out.append({
-                'case_id': case_id,
-                'field': 'answer_score',
-                'current': answer_score,
-                'suggested': expected,
-                'reason': 'answer_score differs from weighted component metrics',
-            })
-    return out
+    return facts

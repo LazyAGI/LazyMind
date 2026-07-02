@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   type DatabaseConnectionItem,
   type DatabaseConnectionPayload,
-} from "../api";
+} from "../api/databaseConnections";
 
 export type DatabaseConnectionFormValues = DatabaseConnectionPayload & {
   options_text?: string;

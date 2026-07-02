@@ -100,4 +100,7 @@ class SystemQueryToolGroup:
             'tags': _string_list(tags),
             'group_by': _string_list(group_by),
         }
-        return tool_success('aggregate_documents', post_core_api('/system-query/documents:aggregate', payload)['response'])
+        return tool_success(
+            'aggregate_documents',
+            post_core_api('/system-query/documents:aggregate', payload)['response'],
+        )

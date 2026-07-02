@@ -400,6 +400,26 @@ def get_scenario(plugin_id: str) -> str:
     return spec.scenario_md if spec else ''
 
 
+def get_plugin_intro(plugin_id: str) -> str:
+    """Return a short intro (id + description + when_to_use) for cold-start injection.
+
+    Only the trigger-relevant fields are included so the full scenario.md is not
+    leaked into the system prompt before the plugin is activated.
+    """
+    spec = get_plugin(plugin_id)
+    if not spec:
+        return ''
+    plugin_id_val = spec.plugin_id
+    description = (spec.yaml.get('description') or '').strip()
+    when_to_use = (spec.yaml.get('when_to_use') or '').strip()
+    lines = [f'## Plugin: {plugin_id_val}']
+    if description:
+        lines.append(description)
+    if when_to_use:
+        lines.append(f'When to use: {when_to_use}')
+    return '\n'.join(lines)
+
+
 def get_driver(plugin_id: str) -> Optional[str]:
     spec = get_plugin(plugin_id)
     return spec.driver_md if spec else None

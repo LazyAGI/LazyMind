@@ -24,6 +24,7 @@ import {
 } from "@/modules/chat/utils/request";
 import { draftStore } from "@/modules/chat/store/pluginPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
+import { isDeveloperModeActive } from "@/utils/developerMode";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
@@ -187,12 +188,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     };
   }, [sessionId, loadConversationTasks, subscribeConvEvents, unsubscribeConvEvents]);
 
-  // Auto-expand the task panel the first time a SubAgent task or plugin session appears.
+  // Auto-expand the task panel the first time a SubAgent task appears.
+  // In developer mode: auto-expand; otherwise: keep collapsed (user expands manually).
   const prevTasksLengthRef = useRef(0);
   useEffect(() => {
     const prev = prevTasksLengthRef.current;
     prevTasksLengthRef.current = tasks.length;
-    if (prev === 0 && tasks.length > 0) {
+    if (prev === 0 && tasks.length > 0 && isDeveloperModeActive()) {
       setIsTaskPanelCollapsed(false);
     }
   }, [tasks.length]);
@@ -202,7 +204,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   useEffect(() => {
     const prev = prevHasPluginSessionRef.current;
     prevHasPluginSessionRef.current = hasPluginSession;
-    if (!prev && hasPluginSession) {
+    if (!prev && hasPluginSession && isDeveloperModeActive()) {
       setIsTaskPanelCollapsed(false);
     }
   }, [hasPluginSession]);

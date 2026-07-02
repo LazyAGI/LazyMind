@@ -257,6 +257,7 @@ func (h *Handler) registerRoutes(mux *http.ServeMux) {
 	// Sources CRUD.
 	routeAPI(mux, "POST", "/api/scan/sources", []string{"scan.write"}, h.createSource)
 	routeAPI(mux, "GET", "/api/scan/sources", []string{"scan.read"}, h.listSources)
+	routeAPI(mux, "DELETE", "/api/scan/internal/sources/by-dataset/{dataset_id}", nil, h.deleteSourceByDataset)
 	routeAPI(mux, "GET", "/api/scan/sources/{source_id}", []string{"scan.read"}, h.getSource)
 	routeAPI(mux, "PUT", "/api/scan/sources/{source_id}", []string{"scan.write"}, h.updateSource)
 	routeAPI(mux, "DELETE", "/api/scan/sources/{source_id}", []string{"scan.write"}, h.deleteSource)

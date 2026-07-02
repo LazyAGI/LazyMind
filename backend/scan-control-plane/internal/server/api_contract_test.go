@@ -173,6 +173,30 @@ func TestNewHandlerWithoutAccessCheckerDeniesProtectedRoutes(t *testing.T) {
 	}
 }
 
+func TestDeleteSourceByDatasetInternalRouteSkipsCoreDatasetDelete(t *testing.T) {
+	t.Parallel()
+
+	engine := &serverSourceEngineStub{}
+	handler := NewHandler(WithSourceEngine(engine))
+	req := httptest.NewRequest(http.MethodDelete, "/api/scan/internal/sources/by-dataset/dataset-1", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if engine.deleteByDatasetCalls != 1 {
+		t.Fatalf("expected one delete by dataset call, got %d", engine.deleteByDatasetCalls)
+	}
+	if engine.lastDeleteDatasetID != "dataset-1" {
+		t.Fatalf("expected dataset id to be routed, got %q", engine.lastDeleteDatasetID)
+	}
+	if !engine.lastDeleteOptions.SkipCoreDatasetDelete {
+		t.Fatalf("internal dataset delete route must skip core dataset delete")
+	}
+}
+
 func TestHandlersExposeConnectorsTargetTreeAndSourceTree(t *testing.T) {
 	t.Parallel()
 
@@ -803,10 +827,13 @@ func assertJSONNumber(t *testing.T, value any, want string) {
 }
 
 type serverSourceEngineStub struct {
-	createCalls     int
-	addBindingCalls int
-	lastCreate      sourceengine.CreateSourceRequest
-	lastSync        sourceengine.TriggerSourceSyncRequest
+	createCalls          int
+	addBindingCalls      int
+	deleteByDatasetCalls int
+	lastCreate           sourceengine.CreateSourceRequest
+	lastSync             sourceengine.TriggerSourceSyncRequest
+	lastDeleteDatasetID  string
+	lastDeleteOptions    sourceengine.DeleteSourceOptions
 }
 
 func (s *serverSourceEngineStub) CreateSource(_ context.Context, req sourceengine.CreateSourceRequest) (sourceengine.CreateSourceResponse, error) {
@@ -863,6 +890,13 @@ func (s *serverSourceEngineStub) UpdateSource(context.Context, string, string, s
 
 func (s *serverSourceEngineStub) DeleteSource(context.Context, string) (sourceengine.DeleteSourceResponse, error) {
 	return sourceengine.DeleteSourceResponse{}, nil
+}
+
+func (s *serverSourceEngineStub) DeleteSourceByDatasetID(_ context.Context, datasetID string, opts sourceengine.DeleteSourceOptions) (sourceengine.DeleteSourceResponse, error) {
+	s.deleteByDatasetCalls++
+	s.lastDeleteDatasetID = datasetID
+	s.lastDeleteOptions = opts
+	return sourceengine.DeleteSourceResponse{Deleted: true, SourceID: "source-1", RemovedDatasetID: datasetID}, nil
 }
 
 func (s *serverSourceEngineStub) AddBinding(context.Context, string, string, sourceengine.BindingInput) (sourceengine.BindingMutationResponse, error) {

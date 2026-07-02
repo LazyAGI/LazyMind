@@ -13,10 +13,10 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { ArrowLeftOutlined, SearchOutlined } from "@ant-design/icons";
 import type { ReactNode } from "react";
-import type { DataSourceSummary, DocumentStatusRow } from "../../shared";
-import { getStatusMeta } from "../../shared";
+import type { DataSourceSummary, DocumentStatusRow } from "../../constants/types";
+import { getStatusMeta } from "../../utils/status";
 
-const { Paragraph, Text, Title } = Typography;
+const { Text, Title } = Typography;
 
 export interface DataSourceDetailLastOperation {
   syncedCount: number;

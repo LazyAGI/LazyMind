@@ -270,6 +270,22 @@ func (h *Handler) deleteSource(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) deleteSourceByDataset(w http.ResponseWriter, r *http.Request) {
+	if h.sources == nil {
+		writeError(w, missingDependency("source engine"))
+		return
+	}
+	datasetID := r.PathValue("dataset_id")
+	resp, err := h.sources.DeleteSourceByDatasetID(r.Context(), datasetID, sourceengine.DeleteSourceOptions{
+		SkipCoreDatasetDelete: true,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) createSourceBinding(w http.ResponseWriter, r *http.Request) {
 	if h.sources == nil {
 		writeError(w, missingDependency("source engine"))

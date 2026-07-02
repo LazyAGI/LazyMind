@@ -67,7 +67,21 @@ def build_system_prompt(
 
     if use_memory:
         if isinstance(user_preference, str) and user_preference.strip():
-            prompt_parts.append(f'## User Profile / Preferences\n{user_preference.strip()}')
+            preference_block = (
+                '## User Profile / Preferences\n'
+                "The following profile entries describe the user's long-term preferences"
+                ' and identity.\n'
+                "Apply a preference **only when it is relevant to the user's current"
+                ' intent**.\n'
+                'If a preference conflicts with or is unrelated to what the user is'
+                ' actually asking for in this turn, ignore it.\n'
+                'Do not force-apply style, format, or persona preferences when the'
+                " user's question is factual, technical, or unrelated to that"
+                ' preference.\n\n'
+                + user_preference.strip()
+                + '\n\n<!-- end of User Profile / Preferences -->'
+            )
+            prompt_parts.append(preference_block)
         if isinstance(memory, str) and memory.strip():
             prompt_parts.append(f'## Agent Working Memory\n{memory.strip()}')
 

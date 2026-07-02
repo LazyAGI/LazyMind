@@ -334,14 +334,14 @@ func paginateCachedTargetNodes(nodes []TreeNode, keyword string, includeFiles bo
 		matches = append(matches, node)
 		if len(matches) > pageSize {
 			return TreeNodePage{
-				Items:      matches[:pageSize],
+				Items:      buildSearchPathTree(nodes, matches[:pageSize]),
 				HasMore:    true,
 				NextCursor: strconv.Itoa(offset + pageSize),
 				SearchMode: SearchModeCache,
 			}, nil
 		}
 	}
-	return TreeNodePage{Items: matches, ListComplete: true, SearchMode: SearchModeCache}, nil
+	return TreeNodePage{Items: buildSearchPathTree(nodes, matches), ListComplete: true, SearchMode: SearchModeCache}, nil
 }
 
 func treeNodeSearchMatches(node TreeNode, keyword string) bool {

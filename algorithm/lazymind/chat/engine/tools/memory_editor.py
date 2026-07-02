@@ -4,7 +4,6 @@ import lazyllm
 from typing_extensions import TypedDict
 
 from lazymind.chat.engine.tools.infra import (
-    handle_tool_errors,
     tool_error,
     tool_success,
 )
@@ -36,7 +35,6 @@ class EditOperation(TypedDict, total=False):
 MemoryEditorTarget = Literal['memory', 'user_preference']
 
 
-@handle_tool_errors
 def memory_editor(
     target: MemoryEditorTarget,
     operations: List[EditOperation],

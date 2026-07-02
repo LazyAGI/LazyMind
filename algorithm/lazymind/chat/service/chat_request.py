@@ -55,7 +55,6 @@ class ChatAgentOptions(BaseModel):
 class ChatPluginOptions(BaseModel):
     enable_plugin: Optional[bool] = None
     plugin_context: Optional[Dict[str, Any]] = None
-    ask_response: Optional[Dict[str, Any]] = None
 
 
 class ChatRequest(BaseModel):

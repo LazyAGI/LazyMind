@@ -17,6 +17,12 @@ import (
 	"lazymind/core/store"
 )
 
+// OnCancelHook is called by CancelTaskByID after the DB status is updated to "canceled".
+// It receives the conversation_id so the caller can interrupt any active plugin session
+// and notify Python to terminate the running ReAct loop.
+// Register this hook at startup from the plugin package to avoid import cycles.
+var OnCancelHook func(ctx context.Context, convID string)
+
 // ── DB helpers ───────────────────────────────────────────────────────────────
 
 // CreateTask inserts a new TaskCenterTask row.
@@ -84,7 +90,7 @@ func CancelTask(ctx context.Context, db *gorm.DB, userID, id string) error {
 
 func isTerminal(status string) bool {
 	switch status {
-	case "completed", "failed", "canceled":
+	case "completed", "succeeded", "failed", "canceled":
 		return true
 	}
 	return false
@@ -222,9 +228,16 @@ func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) [
 	return steps
 }
 
-// resolveTaskStatus returns the effective display status for a task.
-// For running/pending tasks with a plugin session, it queries plugin_sessions.status.
-// Terminal tasks use the DB value directly.
+// resolveTaskStatus returns the effective display status for a task by querying
+// live data rather than relying on any write-time status callback.
+//
+// Decision tree (evaluated only when t.Status is non-terminal):
+//
+//  1. Plugin task (plugin_session_id set): derive from plugin_sessions.status.
+//  2. No plugin: check whether chat_histories has a row for this conversation.
+//     - Row exists  → SSE finished and was persisted → "completed".
+//     - No row, task is older than 2 h → timed out with no output → "failed".
+//     - No row, task is recent → still running → keep "running".
 func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) string {
 	if isTerminal(t.Status) {
 		return t.Status
@@ -239,16 +252,35 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 			Where("id = ?", *t.PluginSessionID).
 			First(&sess).Error; err == nil {
 			switch sess.Status {
-			case "active", "waiting":
+			case "active":
 				return "running"
+			case "waiting":
+				return "waiting"
 			case "completed":
 				return "completed"
 			case "failed":
 				return "failed"
 			}
 		}
+		return t.Status
 	}
-	return t.Status
+
+	// No plugin session: use chat_histories presence as the completion signal.
+	// Go writes a chat_histories row atomically at the very end of streamSingleAnswer,
+	// after all SSE tokens have been consumed from Python. Its existence is therefore
+	// a reliable indicator that the Python→Go SSE stream has fully completed.
+	var histCount int64
+	db.WithContext(ctx).
+		Table("chat_histories").
+		Where("conversation_id = ?", t.ConversationID).
+		Count(&histCount)
+	if histCount > 0 {
+		return "completed"
+	}
+	if time.Since(t.CreatedAt) > 2*time.Hour {
+		return "failed"
+	}
+	return "running"
 }
 
 // ── API handlers ─────────────────────────────────────────────────────────────
@@ -281,7 +313,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * pageSize
 
-	query := db.WithContext(r.Context()).Where("tct.user_id = ?", userID)
+	query := db.WithContext(r.Context()).Where("tct.user_id = ? AND tct.archived_at IS NULL", userID)
 	if status != "" {
 		query = query.Where("tct.status = ?", status)
 	}
@@ -304,7 +336,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		Table("task_center_tasks tct").
 		Joins("LEFT JOIN conversations c ON c.id = tct.conversation_id").
 		Joins("LEFT JOIN user_schedules us ON us.id = tct.schedule_id").
-		Where("tct.user_id = ?", userID)
+		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID)
 	if status != "" {
 		countQ = countQ.Where("tct.status = ?", status)
 	}
@@ -323,7 +355,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		Select("tct.*, c.display_name AS conv_display_name, us.name AS schedule_name").
 		Joins("LEFT JOIN conversations c ON c.id = tct.conversation_id").
 		Joins("LEFT JOIN user_schedules us ON us.id = tct.schedule_id").
-		Where("tct.user_id = ?", userID)
+		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID)
 	if status != "" {
 		dataQ = dataQ.Where("tct.status = ?", status)
 	}
@@ -419,8 +451,50 @@ func CancelTaskByID(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
 		return
 	}
+
+	// Validate: cannot cancel a terminal task.
+	var existing orm.TaskCenterTask
+	if err := db.WithContext(r.Context()).Where("id = ? AND user_id = ?", id, userID).First(&existing).Error; err != nil {
+		common.ReplyErr(w, "task not found", http.StatusNotFound)
+		return
+	}
+	if isTerminal(existing.Status) {
+		common.ReplyErr(w, "task already in terminal state", http.StatusBadRequest)
+		return
+	}
+
 	if err := CancelTask(r.Context(), db, userID, id); err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// If the task was running, notify Python to actually stop execution.
+	if existing.Status == "running" && OnCancelHook != nil {
+		go OnCancelHook(r.Context(), existing.ConversationID)
+	}
+
+	common.ReplyOK(w, nil)
+}
+
+// RemoveTaskHandler handles POST /task-center/tasks/{task_id}:remove
+// Soft-archives the task so it no longer appears in the list. The conversation is unaffected.
+func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
+	userID := store.UserID(r)
+	path := strings.TrimPrefix(r.URL.Path, "/task-center/tasks/")
+	id := strings.TrimSuffix(path, ":remove")
+	id = strings.Split(id, ":")[0]
+
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
+		return
+	}
+	now := time.Now().UTC()
+	result := db.WithContext(r.Context()).Model(&orm.TaskCenterTask{}).
+		Where("id = ? AND user_id = ?", id, userID).
+		Updates(map[string]any{"archived_at": now, "updated_at": now})
+	if result.Error != nil {
+		common.ReplyErr(w, result.Error.Error(), http.StatusInternalServerError)
 		return
 	}
 	common.ReplyOK(w, nil)

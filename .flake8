@@ -1,6 +1,6 @@
 [flake8]
 exclude = __pycache__,.git,algorithm/lazyllm,algorithm/config.py
-ignore = Q002,W503,E701
+ignore = Q002,W503,E701,Q003
 max-line-length = 121
 banned-modules =
     redis = use core.state_store / state backend adapters instead of direct Redis access

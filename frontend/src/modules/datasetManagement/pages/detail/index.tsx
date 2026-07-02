@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   ClipboardEvent as ReactClipboardEvent,
@@ -602,6 +602,12 @@ function placeCaretAtEnd(element: HTMLElement) {
   selection.addRange(range);
 }
 
+function getReferenceContextEditorValue(editor: HTMLDivElement) {
+  return serializeReferenceContextValue({
+    parts: referenceContextPartsFromEditor(editor),
+  });
+}
+
 function escapeHtml(value?: string) {
   return `${value || ""}`
     .replace(/&/g, "&amp;")
@@ -681,18 +687,28 @@ function ReferenceContextInlineEditor({
 }) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const editorValue = referenceContextEditorValue(value);
-  const editorHtml = buildReferenceContextEditorHtml(
-    value,
-    formatChunkLabel,
-    formatDeleteChunkAria,
-  );
 
-  useEffect(() => {
-    if (autoFocus && editorRef.current) {
-      editorRef.current.focus();
-      placeCaretAtEnd(editorRef.current);
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
     }
-  }, [autoFocus]);
+
+    const currentValue = getReferenceContextEditorValue(editor);
+    if (currentValue !== value) {
+      editor.innerHTML = buildReferenceContextEditorHtml(
+        value,
+        formatChunkLabel,
+        formatDeleteChunkAria,
+      );
+    }
+    editor.classList.toggle("is-empty", !value);
+
+    if (autoFocus && document.activeElement !== editor) {
+      editor.focus();
+      placeCaretAtEnd(editor);
+    }
+  }, [autoFocus, formatChunkLabel, formatDeleteChunkAria, value]);
 
   const updateInsertIndex = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) {
@@ -713,9 +729,7 @@ function ReferenceContextInlineEditor({
     if (!editor) {
       return;
     }
-    const nextValue = serializeReferenceContextValue({
-      parts: referenceContextPartsFromEditor(editor),
-    });
+    const nextValue = getReferenceContextEditorValue(editor);
     editor.classList.toggle("is-empty", !nextValue);
     onChange(nextValue);
   };
@@ -832,7 +846,6 @@ function ReferenceContextInlineEditor({
       }}
       onMouseUp={(event) => updateInsertIndex(event.target)}
       onPaste={handlePaste}
-      dangerouslySetInnerHTML={{ __html: editorHtml }}
     />
   );
 }
@@ -865,6 +878,10 @@ function mergeHiddenItemFields(
   const referenceDocChanged =
     `${values.reference_doc || ""}`.trim() !== `${item.reference_doc || ""}`.trim() ||
     nextReferenceDocIDs.trim() !== currentReferenceDocIDs.trim();
+  const currentReferenceChunkIDs = joinListField(item.reference_chunk_ids);
+  const referenceChunkIdsChanged =
+    `${values.reference_chunk_ids ?? currentReferenceChunkIDs}`.trim() !==
+    `${currentReferenceChunkIDs}`.trim();
 
   return {
     ...values,
@@ -872,9 +889,10 @@ function mergeHiddenItemFields(
     reference_doc_ids: referenceDocChanged
       ? nextReferenceDocIDs
       : nextReferenceDocIDs || currentReferenceDocIDs,
-    reference_chunk_ids: referenceDocChanged || referenceContextChanged
-      ? values.reference_chunk_ids || ""
-      : values.reference_chunk_ids || joinListField(item.reference_chunk_ids),
+    reference_chunk_ids:
+      referenceDocChanged || referenceContextChanged || referenceChunkIdsChanged
+        ? (values.reference_chunk_ids ?? "")
+        : currentReferenceChunkIDs,
     is_deleted: Boolean(item.is_deleted),
   };
 }
@@ -1872,6 +1890,10 @@ export default function DatasetDetailPage() {
 
     referenceContextEditingValueRef.current[item.id] = nextReferenceContext;
     referenceContextEditingDirtyRef.current[item.id] = true;
+    setDrafts((current) => ({
+      ...current,
+      [item.id]: nextValues,
+    }));
     await handleSaveItem(
       item.id,
       nextValues,

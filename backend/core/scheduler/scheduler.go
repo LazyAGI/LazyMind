@@ -26,7 +26,7 @@ import (
 // CreateSchedule inserts a new UserSchedule and computes the first next_run_at.
 func CreateSchedule(ctx context.Context, db *gorm.DB, s *orm.UserSchedule) error {
 	if s.ID == "" {
-		s.ID = "sched_" + common.GenerateID()
+		s.ID = common.GeneratePrefixedID("sched_", 36)
 	}
 	s.CreatedAt = time.Now().UTC()
 	if s.KbIDs == "" {
@@ -40,18 +40,20 @@ func CreateSchedule(ctx context.Context, db *gorm.DB, s *orm.UserSchedule) error
 		if err != nil {
 			return err
 		}
-		s.NextRunAt = next
+		s.NextRunAt = next.UTC()
 	}
 	return db.WithContext(ctx).Create(s).Error
 }
 
-// ListSchedules returns all active schedules for a user.
-func ListSchedules(ctx context.Context, db *gorm.DB, userID string) ([]orm.UserSchedule, error) {
+// ListSchedules returns schedules for a user. When includeDisabled is true, both
+// enabled and disabled schedules are returned; otherwise only enabled ones.
+func ListSchedules(ctx context.Context, db *gorm.DB, userID string, includeDisabled bool) ([]orm.UserSchedule, error) {
 	var rows []orm.UserSchedule
-	if err := db.WithContext(ctx).
-		Where("user_id = ? AND enabled = true", userID).
-		Order("created_at DESC").
-		Find(&rows).Error; err != nil {
+	q := db.WithContext(ctx).Where("user_id = ?", userID)
+	if !includeDisabled {
+		q = q.Where("enabled = true")
+	}
+	if err := q.Order("created_at DESC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -134,10 +136,23 @@ func matchField(field string, val, min, max int) bool {
 	return false
 }
 
+// truncateRunes truncates s to at most maxRunes Unicode code points,
+// appending suffix if truncation occurred. This avoids splitting multi-byte
+// characters (e.g. CJK) that would produce invalid UTF-8 sequences in the DB.
+func truncateRunes(s string, maxRunes int, suffix string) string {
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + suffix
+}
+
 // ── Scheduler loop ────────────────────────────────────────────────────────────
 
-// RunScheduler starts a goroutine that fires due schedules every minute.
+// RunScheduler starts a goroutine that fires due schedules every 30 seconds.
 // Call once at application startup. The goroutine stops when ctx is cancelled.
+// Task status is now derived on read via resolveTaskStatus (chat_histories presence),
+// so no periodic reconciler is needed here.
 func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
@@ -153,7 +168,11 @@ func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
 	}()
 }
 
+// maxConcurrentFires is the maximum number of schedules fired concurrently in one tick.
+const maxConcurrentFires = 50
+
 // fireSchedules queries all enabled schedules whose next_run_at <= now and fires them.
+// At most maxConcurrentFires goroutines run simultaneously to protect downstream services.
 func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 	now := time.Now().UTC()
 	var due []orm.UserSchedule
@@ -162,25 +181,50 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 		Find(&due).Error; err != nil {
 		return
 	}
+	sem := make(chan struct{}, maxConcurrentFires)
 	for _, s := range due {
 		s := s
+		sem <- struct{}{}
 		go func() {
+			defer func() { <-sem }()
 			fireOne(ctx, db, s, now)
 		}()
 	}
 }
 
 func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.Time) {
-	// Create a fresh task-conversation for every scheduled trigger.
+	// Compute next run time first so we can CAS before creating any records.
+	next, err := nextCronTime(s.CronExpr, s.Timezone)
+	if err != nil {
+		next = firedAt.Add(24 * time.Hour)
+	}
+
+	// Use an optimistic lock (CAS on next_run_at) to ensure only one instance fires
+	// this schedule tick. Do this BEFORE creating conversation/task so we never create
+	// orphaned records when two instances race.
+	result := db.WithContext(ctx).Model(&orm.UserSchedule{}).
+		Where("id = ? AND next_run_at = ?", s.ID, s.NextRunAt).
+		Updates(map[string]any{
+			"last_run_at": firedAt,
+			"next_run_at": next.UTC(),
+		})
+	if result.RowsAffected == 0 {
+		// Another instance already fired this schedule tick; skip entirely.
+		return
+	}
+
+	// CAS won — now create conversation and task. Only increment run_count after
+	// the task record is successfully persisted so the counter stays in sync.
 	convID := createTaskConversation(ctx, db, s.UserID, s.PromptTemplate)
+	if convID == "" {
+		return
+	}
 
 	taskTitle := s.Name
 	if taskTitle == "" {
 		taskTitle = "Scheduled: " + s.PromptTemplate
 	}
-	if len(taskTitle) > 120 {
-		taskTitle = taskTitle[:120] + "..."
-	}
+	taskTitle = truncateRunes(taskTitle, 40, "...")
 	task := &orm.TaskCenterTask{
 		UserID:         s.UserID,
 		ConversationID: convID,
@@ -189,29 +233,15 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 		Status:         "running",
 		ScheduleID:     &s.ID,
 	}
-	_ = taskcenter.CreateTask(ctx, db, task)
-
-	// Compute next run time and update the schedule with an optimistic lock (CAS).
-	// If another instance already updated next_run_at, RowsAffected == 0 and we skip.
-	next, err := nextCronTime(s.CronExpr, s.Timezone)
-	if err != nil {
-		next = firedAt.Add(24 * time.Hour)
-	}
-	result := db.WithContext(ctx).Model(&orm.UserSchedule{}).
-		Where("id = ? AND next_run_at = ?", s.ID, s.NextRunAt).
-		Updates(map[string]any{
-			"last_run_at": firedAt,
-			"next_run_at": next,
-			"run_count":   gorm.Expr("run_count + 1"),
-		})
-	if result.RowsAffected == 0 {
-		// Another instance already fired this schedule; skip to avoid duplicate execution.
+	if err := taskcenter.CreateTask(ctx, db, task); err != nil {
+		fmt.Printf("[Scheduler] CreateTask failed for schedule %s: %v\n", s.ID, err)
 		return
 	}
 
-	if convID == "" {
-		return
-	}
+	// Task persisted — now it's safe to increment run_count.
+	db.WithContext(ctx).Model(&orm.UserSchedule{}).
+		Where("id = ?", s.ID).
+		Update("run_count", gorm.Expr("run_count + 1"))
 
 	// Build chat request with kb_ids and file_ids from the schedule definition.
 	query := renderPromptTemplate(s.PromptTemplate, firedAt)
@@ -240,16 +270,13 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 // of the user's global chat settings.
 // Returns the new conversation ID, or "" on failure.
 func createTaskConversation(ctx context.Context, db *gorm.DB, userID, promptTemplate string) string {
-	displayName := promptTemplate
-	if len(displayName) > 80 {
-		displayName = displayName[:80] + "..."
-	}
+	displayName := truncateRunes(promptTemplate, 40, "...")
 	now := time.Now().UTC()
 	enablePlugin := true
 	pluginMode := "auto"
 	enableSubagent := true
 	conv := orm.Conversation{
-		ID:             "conv_" + common.GenerateID(),
+		ID:             common.GeneratePrefixedID("conv_", 36),
 		DisplayName:    displayName,
 		ChannelID:      "default",
 		IsTaskConv:     true,
@@ -279,15 +306,17 @@ func renderPromptTemplate(tpl string, t time.Time) string {
 	return r.Replace(tpl)
 }
 
-// sendScheduledChatRequest posts the scheduled trigger to Go core and updates TaskCenter status.
-func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBody map[string]any) {
+// sendScheduledChatRequest fires a chat request for a scheduled task in a background
+// goroutine. Status is no longer written here; resolveTaskStatus derives it on read
+// from chat_histories (present = completed, absent + old = failed).
+func sendScheduledChatRequest(userID, convID, taskID string, _ *gorm.DB, reqBody map[string]any) {
 	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
 	body, _ := json.Marshal(reqBody)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, coreURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, coreURL, bytes.NewReader(body))
 	if err != nil {
-		_ = taskcenter.UpdateTaskStatus(ctx, db, taskID, "failed")
+		fmt.Printf("[Scheduler] sendScheduledChatRequest: build request failed for task %s: %v\n", taskID, err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -295,22 +324,19 @@ func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBod
 	req.Header.Set("X-User-Id", userID)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		_ = taskcenter.UpdateTaskStatus(ctx, db, taskID, "failed")
+		fmt.Printf("[Scheduler] sendScheduledChatRequest: HTTP error for task %s: %v\n", taskID, err)
 		return
 	}
-	defer resp.Body.Close()
-	// Drain the response so the upstream can finish writing events to Redis.
+	// Drain the response body so the upstream goroutines can finish writing to
+	// Redis and DB before we exit. We do not use the status code to set task
+	// status — resolveTaskStatus handles that on read.
 	buf := make([]byte, 4096)
 	for {
 		if _, err := resp.Body.Read(buf); err != nil {
 			break
 		}
 	}
-	if resp.StatusCode >= 400 {
-		_ = taskcenter.UpdateTaskStatus(ctx, db, taskID, "failed")
-	} else {
-		_ = taskcenter.UpdateTaskStatus(ctx, db, taskID, "completed")
-	}
+	resp.Body.Close()
 }
 
 // ── API handlers ──────────────────────────────────────────────────────────────
@@ -362,10 +388,12 @@ func toScheduleResponse(s orm.UserSchedule) scheduleResponse {
 }
 
 // ListSchedulesHandler handles GET /schedules
+// Query params: include_disabled=true to include disabled schedules.
 func ListSchedulesHandler(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
+	includeDisabled := r.URL.Query().Get("include_disabled") == "true"
 	db := store.DB()
-	rows, err := ListSchedules(r.Context(), db, userID)
+	rows, err := ListSchedules(r.Context(), db, userID, includeDisabled)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -444,4 +472,173 @@ func CancelScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, nil)
+}
+
+// EnableScheduleHandler handles POST /schedules/{schedule_id}:enable
+func EnableScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	userID := store.UserID(r)
+	path := strings.TrimPrefix(r.URL.Path, "/schedules/")
+	id := strings.TrimSuffix(path, ":enable")
+	db := store.DB()
+	// Recompute next_run_at from now so the schedule fires at the correct future time.
+	var s orm.UserSchedule
+	if err := db.WithContext(r.Context()).
+		Where("id = ? AND user_id = ?", id, userID).First(&s).Error; err != nil {
+		common.ReplyErr(w, "schedule not found", http.StatusNotFound)
+		return
+	}
+	next, err := nextCronTime(s.CronExpr, s.Timezone)
+	if err != nil {
+		common.ReplyErr(w, "invalid cron expression: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := db.WithContext(r.Context()).Model(&orm.UserSchedule{}).
+		Where("id = ? AND user_id = ?", id, userID).
+		Updates(map[string]any{"enabled": true, "next_run_at": next.UTC()}).Error; err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.Enabled = true
+	s.NextRunAt = next
+	common.ReplyJSON(w, toScheduleResponse(s))
+}
+
+// UpdateScheduleHandler handles PUT /schedules/{schedule_id}
+func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	userID := store.UserID(r)
+	id := strings.TrimPrefix(r.URL.Path, "/schedules/")
+	var body struct {
+		Name           string   `json:"name"`
+		Remark         string   `json:"remark"`
+		CronExpr       string   `json:"cron_expr"`
+		Timezone       string   `json:"timezone"`
+		PromptTemplate string   `json:"prompt_template"`
+		KbIDs          []string `json:"kb_ids"`
+		FileIDs        []string `json:"file_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	var s orm.UserSchedule
+	if err := db.WithContext(r.Context()).
+		Where("id = ? AND user_id = ?", id, userID).First(&s).Error; err != nil {
+		common.ReplyErr(w, "schedule not found", http.StatusNotFound)
+		return
+	}
+	updates := map[string]any{}
+	if body.Name != "" {
+		updates["name"] = body.Name
+		s.Name = body.Name
+	}
+	updates["remark"] = body.Remark
+	s.Remark = body.Remark
+	if body.PromptTemplate != "" {
+		updates["prompt_template"] = body.PromptTemplate
+		s.PromptTemplate = body.PromptTemplate
+	}
+	if body.CronExpr != "" {
+		tz := body.Timezone
+		if tz == "" {
+			tz = s.Timezone
+		}
+		next, err := nextCronTime(body.CronExpr, tz)
+		if err != nil {
+			common.ReplyErr(w, "invalid cron_expr: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		updates["cron_expr"] = body.CronExpr
+		updates["timezone"] = tz
+		updates["next_run_at"] = next.UTC()
+		s.CronExpr = body.CronExpr
+		s.Timezone = tz
+		s.NextRunAt = next.UTC()
+	}
+	if body.KbIDs != nil {
+		if b, err := json.Marshal(body.KbIDs); err == nil {
+			updates["kb_ids"] = string(b)
+			s.KbIDs = string(b)
+		}
+	}
+	if body.FileIDs != nil {
+		if b, err := json.Marshal(body.FileIDs); err == nil {
+			updates["file_ids"] = string(b)
+			s.FileIDs = string(b)
+		}
+	}
+	if len(updates) == 0 {
+		common.ReplyJSON(w, toScheduleResponse(s))
+		return
+	}
+	if err := db.WithContext(r.Context()).Model(&orm.UserSchedule{}).
+		Where("id = ? AND user_id = ?", id, userID).Updates(updates).Error; err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	common.ReplyJSON(w, toScheduleResponse(s))
+}
+
+// RunNowHandler handles POST /schedules/{schedule_id}:run-now.
+// It immediately fires the schedule once without modifying next_run_at,
+// and increments run_count so the execution appears in the history.
+func RunNowHandler(w http.ResponseWriter, r *http.Request) {
+	userID := store.UserID(r)
+	path := strings.TrimPrefix(r.URL.Path, "/schedules/")
+	id := strings.TrimSuffix(path, ":run-now")
+	db := store.DB()
+	var s orm.UserSchedule
+	if err := db.WithContext(r.Context()).
+		Where("id = ? AND user_id = ?", id, userID).First(&s).Error; err != nil {
+		common.ReplyErr(w, "schedule not found", http.StatusNotFound)
+		return
+	}
+	now := time.Now().UTC()
+	convID := createTaskConversation(r.Context(), db, s.UserID, s.PromptTemplate)
+	if convID == "" {
+		common.ReplyErr(w, "failed to create task conversation", http.StatusInternalServerError)
+		return
+	}
+	taskTitle := s.Name
+	if taskTitle == "" {
+		taskTitle = "Scheduled: " + s.PromptTemplate
+	}
+	taskTitle = truncateRunes(taskTitle, 40, "...")
+	task := &orm.TaskCenterTask{
+		UserID:         s.UserID,
+		ConversationID: convID,
+		TaskType:       "scheduled",
+		Title:          &taskTitle,
+		Status:         "running",
+		ScheduleID:     &s.ID,
+	}
+	if err := taskcenter.CreateTask(r.Context(), db, task); err != nil {
+		common.ReplyErr(w, "failed to create task: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Increment run_count and record last_run_at without touching next_run_at.
+	db.WithContext(r.Context()).Model(&orm.UserSchedule{}).
+		Where("id = ?", s.ID).
+		Updates(map[string]any{
+			"last_run_at": now,
+			"run_count":   gorm.Expr("run_count + 1"),
+		})
+	query := renderPromptTemplate(s.PromptTemplate, now)
+	reqBody := map[string]any{
+		"query":           query,
+		"conversation_id": convID,
+		"stream":          true,
+		"mode":            "auto",
+		"input":           []map[string]any{{"input_type": "text", "text": query}},
+	}
+	var kbIDs []string
+	if json.Unmarshal([]byte(s.KbIDs), &kbIDs) == nil && len(kbIDs) > 0 {
+		reqBody["kb_ids"] = kbIDs
+	}
+	var fileIDs []string
+	if json.Unmarshal([]byte(s.FileIDs), &fileIDs) == nil && len(fileIDs) > 0 {
+		reqBody["file_ids"] = fileIDs
+	}
+	go sendScheduledChatRequest(s.UserID, convID, task.ID, db, reqBody)
+	common.ReplyJSON(w, map[string]any{"task_id": task.ID, "conversation_id": convID})
 }

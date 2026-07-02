@@ -1,0 +1,18 @@
+.typed-confirm-container {
+  .confirm-text {
+    margin-bottom: 16px;
+
+    span {
+      color: var(--color-error-active);
+    }
+  }
+
+  .error-tip {
+    height: 16px;
+    margin-top: 4px;
+
+    font-size: 14px;
+    color: var(--color-error-active);
+    line-height: 16px;
+  }
+}

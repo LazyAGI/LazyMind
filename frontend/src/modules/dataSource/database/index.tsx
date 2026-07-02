@@ -33,7 +33,7 @@ import {
   updateDatabaseConnection,
   type DatabaseConnectionItem,
   type DatabaseConnectionPayload,
-} from "../api";
+} from "../api/databaseConnections";
 import DatabaseConnectionModal from "./DatabaseConnectionModal";
 import "../index.scss";
 

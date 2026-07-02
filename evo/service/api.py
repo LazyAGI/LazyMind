@@ -7,6 +7,9 @@ import shutil
 import time
 import uuid
 from collections import Counter
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping
@@ -16,20 +19,23 @@ from sse_starlette.sse import EventSourceResponse
 
 from evo import normalize_chat_stream_url, normalize_http_origin, validate_id
 from evo.artifact_flow import EvoFlowRuntime, FlowStepState
+from evo.artifact_flow.runtime import FOLLOW_UP_STEP_RUN_PREFIX, STEPS
 from evo.artifact_runtime import ArtifactKey, ArtifactRef
 from evo.auto_agent import ActiveApproval, AutoAgentRunner
 from evo.message_intent import MessageSessionStore
 from evo.message_intent.store import MessageLeaseError, MessageStoreConflict
 from evo.message_intent.planner import LazyLLMPlannerClient, StructuredJSONNextIntentPlanner
 from evo.message_intent.service import MessageIntentService
-from evo.traces import build_trace_compare_view, build_trace_detail_view
 from evo.service.auto_ports import HubAutoAgentPorts
+from evo.service.message_runtime_ports import EvoMessageRuntimePorts, auto_intervention_frame
+from evo.traces import build_trace_compare_view, build_trace_detail_view
 
 BODY_REQUIRED = Body(...)
 BODY_DEFAULT = Body(default_factory=dict)
 RUN_ID = 'run_1'
 MAX_CREATE_THREAD_CASES = 1000
 MAX_CREATE_THREAD_WORKERS = 32
+MAX_BACKGROUND_COMMAND_WORKERS = 4
 RESULT_ARTIFACTS = {
     'datasets': ('eval.dataset',),
     'eval-reports': ('eval.summary', 'abtest.candidate_eval_summary'),
@@ -84,10 +90,6 @@ def create_app(*, planner_factory: Any | None = None) -> FastAPI:
     async def create_thread(body: dict = BODY_REQUIRED) -> dict:
         return await asyncio.to_thread(hub.create_thread, body)
 
-    @app.get('/v1/evo/threads')
-    def list_threads() -> list[dict]:
-        return hub.list_threads()
-
     @app.get('/v1/evo/threads/statuses')
     def list_thread_statuses() -> dict:
         rows = [
@@ -104,38 +106,23 @@ def create_app(*, planner_factory: Any | None = None) -> FastAPI:
             counts[row['status']] = counts.get(row['status'], 0) + 1
         return {'total': len(rows), 'counts': counts, 'threads': rows}
 
-    @app.get('/v1/evo/threads/{thread_id}')
-    def get_thread(thread_id: str) -> dict:
-        return hub.get_thread(thread_id)
-
     @app.delete('/v1/evo/threads/{thread_id}')
     def delete_thread(thread_id: str) -> dict:
         return hub.delete_thread(thread_id)
-
-    @app.get('/v1/evo/threads/{thread_id}/history')
-    def history(thread_id: str) -> dict:
-        return hub.history(thread_id)
 
     @app.get('/v1/evo/threads/{thread_id}/flow-status')
     def flow_status(thread_id: str) -> dict:
         return hub.flow_status(thread_id)
 
-    @app.post('/v1/evo/threads/{thread_id}:messages')
     @app.post('/v1/evo/threads/{thread_id}/messages')
-    async def post_message(thread_id: str, request: Request, body: dict = BODY_REQUIRED):
-        if 'text/event-stream' in request.headers.get('accept', ''):
-            return EventSourceResponse(hub.post_message_stream(thread_id, body))
-        return await asyncio.to_thread(hub.post_message, thread_id, body)
-
-    @app.get('/v1/evo/threads/{thread_id}/message-events')
-    async def message_events(thread_id: str, request: Request, since: int = 0) -> EventSourceResponse:
-        hub.get_thread(thread_id)
-        last = request.headers.get('last-event-id') or ''
-        return EventSourceResponse(hub.message_events(thread_id, int(last) if last.isdigit() else since))
+    async def post_message(thread_id: str, body: dict = BODY_REQUIRED) -> EventSourceResponse:
+        return EventSourceResponse(hub.post_message_stream(thread_id, body))
 
     @app.post('/v1/evo/threads/{thread_id}/start')
-    async def start(thread_id: str, body: dict = BODY_DEFAULT) -> dict:
-        return await asyncio.to_thread(hub.start, thread_id, body)
+    async def start(thread_id: str, response: Response, body: dict = BODY_DEFAULT) -> dict:
+        result = await asyncio.to_thread(hub.start, thread_id, body)
+        _set_accepted_status(response, result)
+        return result
 
     @app.post('/v1/evo/threads/{thread_id}/pause')
     async def pause(thread_id: str) -> dict:
@@ -146,53 +133,28 @@ def create_app(*, planner_factory: Any | None = None) -> FastAPI:
         return await asyncio.to_thread(hub.cancel, thread_id)
 
     @app.post('/v1/evo/threads/{thread_id}/retry')
-    async def retry(thread_id: str, body: dict = BODY_DEFAULT) -> dict:
-        return await asyncio.to_thread(hub.retry, thread_id, body)
+    async def retry(thread_id: str, response: Response, body: dict = BODY_DEFAULT) -> dict:
+        result = await asyncio.to_thread(hub.retry, thread_id, body)
+        _set_accepted_status(response, result)
+        return result
 
     @app.post('/v1/evo/threads/{thread_id}/continue')
-    async def continue_thread(thread_id: str, body: dict = BODY_DEFAULT) -> dict:
-        return await asyncio.to_thread(hub.continue_thread, thread_id, body)
+    async def continue_thread(thread_id: str, response: Response, body: dict = BODY_DEFAULT) -> dict:
+        result = await asyncio.to_thread(hub.continue_thread, thread_id, body)
+        _set_accepted_status(response, result)
+        return result
 
-    @app.post('/v1/evo/threads/{thread_id}/auto/step')
-    async def auto_step(thread_id: str, body: dict = BODY_DEFAULT) -> dict:
-        return await asyncio.to_thread(hub.auto_step, thread_id, body)
-
-    @app.post('/v1/evo/threads/{thread_id}/auto/start')
-    async def auto_start(thread_id: str, request: Request, body: dict = BODY_DEFAULT):
-        if 'text/event-stream' in request.headers.get('accept', ''):
-            return EventSourceResponse(_single_sse(
-                'auto_start', {'thread_id': thread_id, **hub.auto_start(thread_id, body)}))
-        return await asyncio.to_thread(hub.auto_start, thread_id, body)
-
-    @app.post('/v1/evo/threads/{thread_id}/auto/stop')
-    def auto_stop(thread_id: str) -> dict:
-        return hub.auto_stop(thread_id)
-
-    @app.get('/v1/evo/threads/{thread_id}/auto/status')
-    def auto_status(thread_id: str) -> dict:
-        return hub.auto_status(thread_id)
-
-    @app.post('/v1/evo/threads/{thread_id}/approvals/{approval_token}:approve')
-    async def approve_pending(thread_id: str, approval_token: str, body: dict = BODY_DEFAULT) -> dict:
-        return await asyncio.to_thread(hub.resolve_approval, thread_id, action='approve',
-                                       approval_token=approval_token, command_id=str(body.get('command_id') or ''))
-
-    @app.post('/v1/evo/threads/{thread_id}/approvals/{approval_token}:reject')
-    async def reject_pending(thread_id: str, approval_token: str, body: dict = BODY_DEFAULT) -> dict:
-        return await asyncio.to_thread(hub.resolve_approval, thread_id, action='reject',
-                                       approval_token=approval_token, command_id=str(body.get('command_id') or ''))
-
-    @app.post('/v1/evo/threads/{thread_id}/approvals/{approval_token}:cancel')
-    async def cancel_pending(thread_id: str, approval_token: str, body: dict = BODY_DEFAULT) -> dict:
-        return await asyncio.to_thread(hub.resolve_approval, thread_id, action='cancel',
-                                       approval_token=approval_token, command_id=str(body.get('command_id') or ''))
-
-    @app.get('/v1/evo/threads/{thread_id}:events')
     @app.get('/v1/evo/threads/{thread_id}/events')
     def events(thread_id: str, request: Request, since: int = 0) -> EventSourceResponse:
         hub.get_thread(thread_id)
         last = request.headers.get('last-event-id') or ''
         return EventSourceResponse(hub.events(thread_id, int(last) if last.isdigit() else since))
+
+    @app.get('/v1/evo/threads/{thread_id}/events/{step_run_id}')
+    def step_events(thread_id: str, step_run_id: str, request: Request, since: int = 0) -> EventSourceResponse:
+        hub.get_thread(thread_id)
+        last = request.headers.get('last-event-id') or ''
+        return EventSourceResponse(hub.events(thread_id, int(last) if last.isdigit() else since, step_run_id))
 
     @app.get('/v1/evo/threads/{thread_id}/results/traces/{trace_id}')
     def trace_detail(thread_id: str, trace_id: str) -> dict:
@@ -209,13 +171,6 @@ def create_app(*, planner_factory: Any | None = None) -> FastAPI:
     @app.get('/v1/evo/threads/{thread_id}/artifacts/{artifact_id}')
     def artifact(thread_id: str, artifact_id: str) -> dict:
         return hub.artifact(thread_id, artifact_id)
-
-    @app.get('/v1/evo/threads/{thread_id}/reports/{report_id}/content')
-    def thread_report_content(thread_id: str, report_id: str, fmt: str = ''):
-        content = hub.report_content(thread_id, report_id)
-        if fmt in {'md', 'markdown', 'text'}:
-            return Response(content, media_type='text/markdown; charset=utf-8')
-        return {'thread_id': thread_id, 'report_id': report_id, 'content': content}
 
     @app.get('/v1/evo/reports/{report_id}/content')
     def report_content(report_id: str, fmt: str = ''):
@@ -236,13 +191,84 @@ def get_app() -> FastAPI:
     return create_app()
 
 
+@dataclass(frozen=True)
+class RunningCommand:
+    thread_id: str
+    command_id: str
+    operation: str
+    submitted_at: float
+    future: Future
+
+
+class BackgroundCommandDispatcher:
+    def __init__(self, *, max_workers: int) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix='evo-command')
+        self._lock = RLock()
+        self._running: dict[str, RunningCommand] = {}
+
+    def submit(
+        self,
+        thread_id: str,
+        command_id: str,
+        operation: str,
+        work: Callable[[], Any],
+        on_accept: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            current = self._running.get(thread_id)
+            if current is not None and not current.future.done():
+                status = 'accepted_existing' if current.command_id == command_id else 'conflict'
+                return _accepted_command_response(
+                    thread_id,
+                    current.command_id,
+                    current.operation,
+                    status=status,
+                    existing_command_id=current.command_id,
+                )
+            if current is not None:
+                self._running.pop(thread_id, None)
+            if on_accept is not None:
+                on_accept()
+            future = self._executor.submit(work)
+            running = RunningCommand(thread_id, command_id, operation, time.time(), future)
+            self._running[thread_id] = running
+            future.add_done_callback(lambda done, tid=thread_id: self._complete(tid, done))
+            return _accepted_command_response(thread_id, command_id, operation)
+
+    def running(self, thread_id: str) -> RunningCommand | None:
+        with self._lock:
+            current = self._running.get(thread_id)
+            if current is None:
+                return None
+            if current.future.done():
+                self._running.pop(thread_id, None)
+                return None
+            return current
+
+    def _complete(self, thread_id: str, future: Future) -> None:
+        with self._lock:
+            current = self._running.get(thread_id)
+            if current is not None and current.future is future:
+                self._running.pop(thread_id, None)
+
+
 class EvoMessageHub:
     def __init__(self, base_dir: Path, *, planner_factory: Any | None = None):
         self.base_dir = base_dir
         self.threads_dir = base_dir / 'state' / 'threads'
         self._artifact_flows: dict[str, EvoFlowRuntime] = {}
+        self._flow_operation_locks: dict[str, RLock] = {}
+        self._pending_flow_controls: dict[str, tuple[str, str]] = {}
         self._message_services: dict[str, MessageIntentService] = {}
+        self._lifecycle_lock = RLock()
         self._message_service_lock = RLock()
+        self._background_commands = BackgroundCommandDispatcher(
+            max_workers=_bounded_positive_int(
+                os.getenv('LAZYMIND_EVO_BACKGROUND_WORKERS', str(MAX_BACKGROUND_COMMAND_WORKERS)),
+                'LAZYMIND_EVO_BACKGROUND_WORKERS',
+                MAX_CREATE_THREAD_WORKERS,
+            )
+        )
         self._planner_factory = planner_factory
         self._auto_agent = AutoAgentRunner(base_dir, HubAutoAgentPorts(self))
 
@@ -279,13 +305,34 @@ class EvoMessageHub:
         return self._meta(thread_id)
 
     def delete_thread(self, thread_id: str) -> dict:
-        self._meta(thread_id)
-        self._close_flow(thread_id)
-        self._close_message_service(thread_id)
-        run_root, thread_dir = self._run_root(thread_id), self._thread_dir(thread_id)
-        run_deleted, thread_deleted = run_root.exists(), thread_dir.exists()
-        shutil.rmtree(run_root, ignore_errors=True)
-        shutil.rmtree(thread_dir, ignore_errors=True)
+        with self._lifecycle_lock:
+            self._meta(thread_id)
+            running = self._background_commands.running(thread_id)
+            if running is not None:
+                raise HTTPException(409, _accepted_command_response(
+                    thread_id,
+                    running.command_id,
+                    running.operation,
+                    status='conflict',
+                    existing_command_id=running.command_id,
+                ))
+            operation_lock = self._flow_operation_lock(thread_id)
+            if not operation_lock.acquire(blocking=False):
+                raise HTTPException(409, _accepted_command_response(
+                    thread_id,
+                    'delete',
+                    'delete',
+                    status='conflict',
+                ))
+            try:
+                self._close_flow(thread_id)
+                self._close_message_service(thread_id)
+                run_root, thread_dir = self._run_root(thread_id), self._thread_dir(thread_id)
+                run_deleted, thread_deleted = run_root.exists(), thread_dir.exists()
+                shutil.rmtree(run_root, ignore_errors=True)
+                shutil.rmtree(thread_dir, ignore_errors=True)
+            finally:
+                operation_lock.release()
         return {
             'thread_id': thread_id,
             'deleted_run': run_deleted,
@@ -293,99 +340,85 @@ class EvoMessageHub:
             'cancelled': False,
         }
 
-    def history(self, thread_id: str) -> dict:
-        meta = self._meta(thread_id)
-        messages = []
-        service_path = self._message_store_path(thread_id)
-        if service_path.exists():
-            store = MessageSessionStore(service_path)
-            try:
-                messages = store.events_as_history(thread_id)
-            finally:
-                store.close()
-        messages = messages or _read_messages(self._thread_dir(thread_id) / 'messages.jsonl')
-        messages = messages or [_thread_summary_message(meta, self.flow_status(thread_id))]
-        return {
-            'thread_id': thread_id,
-            'title': meta.get('title') or thread_id,
-            'messages': messages,
-            'rounds': _history_rounds(thread_id, messages),
-        }
-
     def start(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
         payload = payload or {}
-        self._update_llm_config(thread_id, payload)
         self._meta(thread_id)
-        flow = self._artifact_flow(thread_id)
-        state = flow.start_full_flow(
-            command_id=str(payload.get('command_id') or f'start:{thread_id}'),
-            run_id=RUN_ID,
-            config=self._artifact_flow_config(thread_id),
+        command_id = str(payload.get('command_id') or f'start:{thread_id}')
+        return self._submit_background_flow_command(
+            thread_id,
+            command_id,
+            'start',
+            lambda: self._start_flow_now(thread_id, payload, command_id),
         )
-        return self._artifact_flow_response(thread_id, state)
 
     def pause(self, thread_id: str, command_id: str | None = None) -> dict:
         self._meta(thread_id)
+        command_id = command_id or f'pause:{uuid.uuid4().hex}'
         if not self._has_artifact_flow(thread_id):
+            if self._background_commands.running(thread_id) is not None:
+                return self._request_busy_flow_control(thread_id, 'pause', command_id)
             self._update_meta(thread_id, status='paused', pending_checkpoint=None, updated_at=time.time())
             return {'status': 'paused', 'thread_id': thread_id}
-        state = self._artifact_flow(thread_id).pause_flow(
-            command_id=command_id or f'pause:{uuid.uuid4().hex}',
-            run_id=RUN_ID,
+        state = self._run_sync_flow_operation(
+            thread_id,
+            'pause',
+            lambda: self._artifact_flow(thread_id).pause_flow(
+                command_id=command_id,
+                run_id=RUN_ID,
+            ),
         )
         response = self._artifact_flow_response(thread_id, state)
         return response | {'status': 'paused', 'pending_checkpoint': None}
 
     def cancel(self, thread_id: str, command_id: str | None = None) -> dict:
         self._meta(thread_id)
+        command_id = command_id or f'cancel:{uuid.uuid4().hex}'
         if not self._has_artifact_flow(thread_id):
+            if self._background_commands.running(thread_id) is not None:
+                return self._request_busy_flow_control(thread_id, 'cancel', command_id)
             self._update_meta(thread_id, status='cancelled', pending_checkpoint=None, updated_at=time.time())
             return {'status': 'cancelled', 'thread_id': thread_id}
-        state = self._artifact_flow(thread_id).cancel_flow(
-            command_id=command_id or f'cancel:{uuid.uuid4().hex}',
-            run_id=RUN_ID,
+        state = self._run_sync_flow_operation(
+            thread_id,
+            'cancel',
+            lambda: self._artifact_flow(thread_id).cancel_flow(
+                command_id=command_id,
+                run_id=RUN_ID,
+            ),
         )
         return self._artifact_flow_response(thread_id, state)
 
     def retry(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
-        self._update_llm_config(thread_id, payload or {})
+        payload = payload or {}
         self._meta(thread_id)
         if not self._has_artifact_flow(thread_id):
             raise HTTPException(409, 'thread has no flow to retry')
-        flow = self._artifact_flow(thread_id)
-        state = flow.retry_failed_flow(
-            command_id=str((payload or {}).get('command_id') or f'retry:{uuid.uuid4().hex}'),
-            run_id=RUN_ID,
+        command_id = str(payload.get('command_id') or f'retry:{uuid.uuid4().hex}')
+        result = self._submit_background_flow_command(
+            thread_id,
+            command_id,
+            'retry',
+            lambda: self._retry_flow_now(thread_id, payload, command_id),
         )
-        return self._artifact_flow_response(thread_id, state) | {'retried': True}
+        return result | {'retried': True}
 
     def continue_thread(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
         payload = payload or {}
-        self._update_llm_config(thread_id, payload)
         self._meta(thread_id)
         if not self._has_artifact_flow(thread_id):
             raise HTTPException(409, 'thread has no flow to continue')
-        state = self._artifact_flow(thread_id).continue_flow(
-            command_id=str(payload.get('command_id') or f'continue:{uuid.uuid4().hex}'),
-            run_id=RUN_ID,
+        command_id = str(payload.get('command_id') or f'continue:{uuid.uuid4().hex}')
+        result = self._submit_background_flow_command(
+            thread_id,
+            command_id,
+            'continue',
+            lambda: self._continue_flow_now(thread_id, payload, command_id),
         )
-        return self._artifact_flow_response(thread_id, state) | {'resumed': True}
+        return result | {'resumed': True}
 
     def auto_start(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
         self._meta(thread_id)
         return self._auto_agent.start(thread_id, payload or {})
-
-    def auto_step(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
-        self._meta(thread_id)
-        return self._auto_agent.step(thread_id, payload or {})
-
-    def auto_stop(self, thread_id: str) -> dict:
-        self._meta(thread_id)
-        return self._auto_agent.stop(thread_id)
-
-    def auto_status(self, thread_id: str) -> dict:
-        self._meta(thread_id)
-        return self._auto_agent.status(thread_id)
 
     def active_approval(self, thread_id: str) -> ActiveApproval | None:
         self._meta(thread_id)
@@ -398,6 +431,7 @@ class EvoMessageHub:
             approval_token=approval.approval_token,
             intent_kind=approval.intent_kind,
             risk_level=approval.risk_level,
+            status=approval.status,
             expected_refs=approval.expected_refs,
             expires_at=approval.expires_at,
         )
@@ -426,15 +460,51 @@ class EvoMessageHub:
             'pending_approval': result.pending_approval,
         }
 
-    def post_message(self, thread_id: str, payload: dict[str, Any], *, trusted_auto_agent: bool = False) -> dict:
+    def probe_resolving_approval(self, thread_id: str, *, approval_token: str) -> dict:
+        self._meta(thread_id)
+        try:
+            result = self._message_service(thread_id).probe_resolving_approval(
+                thread_id,
+                approval_token=approval_token,
+            )
+        except (MessageLeaseError, MessageStoreConflict, RuntimeError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {'thread_id': thread_id, **result}
+
+    def post_message(self, thread_id: str, payload: dict[str, Any]) -> dict:
         with self._message_service_lock:
             self._update_llm_config(thread_id, payload)
             self._meta(thread_id)
             try:
-                result = self._message_service(thread_id).handle(
+                result = self._message_service(thread_id).handle(thread_id, payload)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(409, str(exc)) from exc
+        return {
+            'status': result.status,
+            'thread_id': result.thread_id,
+            'turn_id': result.turn_id,
+            'message_id': result.message_id,
+            'response': result.response,
+            'message_event_cursor': result.message_event_cursor,
+            'pending_approval': result.pending_approval,
+        }
+
+    def execute_auto_intervention(
+        self,
+        thread_id: str,
+        intervention: Mapping[str, Any],
+        *,
+        command_id: str,
+    ) -> dict:
+        with self._message_service_lock:
+            self._meta(thread_id)
+            try:
+                result = self._message_service(thread_id).handle_typed_intervention(
                     thread_id,
-                    payload,
-                    trusted_auto_agent=trusted_auto_agent,
+                    {'kind': intervention.get('kind'), '_frame': auto_intervention_frame(intervention)},
+                    command_id=command_id,
                 )
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
@@ -450,57 +520,47 @@ class EvoMessageHub:
             'pending_approval': result.pending_approval,
         }
 
-    def reject_message(self, thread_id: str, payload: dict[str, Any]) -> None:
-        self._meta(thread_id)
-        content = str(payload.get('content') or payload.get('message') or '').strip()
-        if not content:
-            raise HTTPException(400, 'message content required')
-        raise HTTPException(409, 'message/NL intervention is not migrated for artifact flow')
-
     async def post_message_stream(self, thread_id: str, payload: dict[str, Any]):
-        cursor = 0
         try:
             result = self.post_message(thread_id, payload)
-            cursor = max(0, int(result.get('message_event_cursor') or 0) - 100)
             with self._message_service_lock:
-                rows = self._message_service(thread_id).subscribe_events(thread_id, cursor)
+                rows = self._message_service(thread_id).turn_events(
+                    thread_id,
+                    str(result.get('turn_id') or ''),
+                    str(result.get('message_id') or ''),
+                )
             for row in rows:
                 yield _sse(str(row['event']), {'thread_id': thread_id, **row['data']}, str(row['id']))
-            yield _sse(
-                'done',
-                {'thread_id': thread_id, 'status': result['status']},
-                str(result.get('message_event_cursor') or 0),
-            )
+            if not any(str(row['event']) == 'done' for row in rows):
+                yield _sse(
+                    'done',
+                    {'thread_id': thread_id, 'status': result['status']},
+                    str(result.get('message_event_cursor') or 0),
+                )
         except HTTPException as exc:
             yield _sse('error', {'thread_id': thread_id, 'code': exc.status_code, 'message': exc.detail})
 
-    async def message_events(self, thread_id: str, since: int = 0):
-        self._meta(thread_id)
-        cursor = max(0, since)
-        idle_ticks = 0
-        while True:
-            with self._message_service_lock:
-                rows = self._message_service(thread_id).subscribe_events(thread_id, cursor)
-            for row in rows:
-                cursor = max(cursor, int(row['id']))
-                yield _sse(str(row['event']), {'thread_id': thread_id, **row['data']}, str(row['id']))
-            idle_ticks = idle_ticks + 1 if not rows else 0
-            if idle_ticks > 4:
-                return
-            await asyncio.sleep(0.5)
-
-    async def events(self, thread_id: str, since: int = 0):
+    async def events(self, thread_id: str, since: int = 0, step_run_id: str = ''):
         self._meta(thread_id)
         if not self._has_artifact_flow(thread_id):
             return
         cursor, idle_ticks = max(0, since), 0
         flow = self._artifact_flow(thread_id)
+        seen_step_event = False
         while True:
             events = flow.runtime.controller.event_log.scan_since(cursor, limit=100)
             for event in events:
                 cursor = max(cursor, event.seq)
-                yield _sse('message', _frontend_event_payload(event), str(event.seq))
+                if step_run_id and str((event.payload or {}).get('step_run_id') or '') != step_run_id:
+                    continue
+                seen_step_event = bool(step_run_id) or seen_step_event
+                yield _sse('message', _frontend_event_payload(event, flow), str(event.seq))
             status = self.flow_status(thread_id)['status']
+            if step_run_id and cursor < flow.runtime.controller.event_log.max_seq():
+                continue
+            if step_run_id and _step_run_stream_done(flow, step_run_id, status, seen_step_event):
+                yield _sse('done', _step_run_done_payload(thread_id, status, flow, step_run_id), str(cursor + 1))
+                return
             if status in {'ended', 'failed', 'cancelled'} and not events:
                 yield _sse('done', {'thread_id': thread_id, 'status': status}, str(cursor + 1))
                 return
@@ -511,15 +571,22 @@ class EvoMessageHub:
 
     def flow_status(self, thread_id: str) -> dict:
         meta = self._meta(thread_id)
+        running = self._background_commands.running(thread_id)
+        active_task_ids = [] if running is None else [running.command_id]
         if not self._has_artifact_flow(thread_id):
-            return _flow_status_row(thread_id, str(meta.get('status') or 'idle'), [])
+            status = 'running' if active_task_ids else str(meta.get('status') or 'idle')
+            return _flow_status_row(thread_id, status, active_task_ids)
         flow = self._artifact_flow(thread_id)
         state = flow.step_store.get(RUN_ID)
-        status = _artifact_flow_http_status(state)
+        controller_state = flow.runtime.controller.state(RUN_ID)
+        run_status = controller_state.run.status if controller_state.run_exists else ''
+        status = _artifact_flow_http_status(state, run_status)
+        if active_task_ids and status in {'idle', 'paused', 'waiting_checkpoint'}:
+            status = 'running'
         return _flow_status_row(
             thread_id,
             status,
-            [],
+            active_task_ids,
             latest_abtest_status=_abtest_status(flow),
             report_ready=self._artifact_runtime_row(thread_id, 'eval.summary') is not None,
             pending_checkpoint=_artifact_checkpoint_payload(state),
@@ -581,18 +648,17 @@ class EvoMessageHub:
         raise HTTPException(404, f'diff content not found: {apply_id}')
 
     def _artifact_flow(self, thread_id: str) -> EvoFlowRuntime:
-        if thread_id not in self._artifact_flows:
-            inputs = self._artifact_flow_config(thread_id)
-            path = self._artifact_runtime_path(thread_id)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            self._artifact_flows[thread_id] = EvoFlowRuntime.open(
-                path,
-                case_count=int(inputs['num_cases']),
-                llm_config=inputs.get('llm_config') or {},
-            )
-        else:
-            self._artifact_flows[thread_id].set_llm_config(_llm_config_payload(self._meta(thread_id)))
-        return self._artifact_flows[thread_id]
+        with self._lifecycle_lock:
+            if thread_id not in self._artifact_flows:
+                inputs = self._artifact_flow_config(thread_id)
+                path = self._artifact_runtime_path(thread_id)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                self._artifact_flows[thread_id] = EvoFlowRuntime.open(
+                    path,
+                    case_count=int(inputs['num_cases']),
+                    llm_config=inputs.get('llm_config') or {},
+                )
+            return self._artifact_flows[thread_id]
 
     def _message_service(self, thread_id: str) -> MessageIntentService:
         with self._message_service_lock:
@@ -600,11 +666,15 @@ class EvoMessageHub:
                 llm = self._message_llm(thread_id)
                 self._message_services[thread_id] = MessageIntentService(
                     MessageSessionStore(self._message_store_path(thread_id)),
-                    flow_getter=self._artifact_flow,
                     has_flow=self._has_artifact_flow,
                     flow_status=self.flow_status,
-                    artifact_reader=lambda tid, artifact_id: self._artifact_runtime_row(tid, artifact_id),
                     case_count_getter=lambda tid: int(self._artifact_flow_config(tid)['num_cases']),
+                    runtime_port=EvoMessageRuntimePorts(
+                        flow_getter=self._artifact_flow,
+                        artifact_reader=lambda tid, artifact_id: self._artifact_runtime_row(tid, artifact_id),
+                        background_submitter=self.submit_background_message_command,
+                        sync_runner=self.run_sync_message_command,
+                    ),
                     planner=self._message_planner(thread_id, llm=llm),
                     response_llm=llm,
                 )
@@ -625,9 +695,11 @@ class EvoMessageHub:
         return StructuredJSONNextIntentPlanner(llm or self._message_llm(thread_id))
 
     def _close_flow(self, thread_id: str) -> None:
-        flow = self._artifact_flows.pop(thread_id, None)
-        if flow is not None:
-            flow.close()
+        with self._lifecycle_lock:
+            flow = self._artifact_flows.pop(thread_id, None)
+            self._flow_operation_locks.pop(thread_id, None)
+            if flow is not None:
+                flow.close()
 
     def _has_artifact_flow(self, thread_id: str) -> bool:
         return thread_id in self._artifact_flows or self._artifact_runtime_path(thread_id).exists()
@@ -675,9 +747,8 @@ class EvoMessageHub:
         llm_config = _llm_config_payload(payload)
         if not llm_config:
             return
-        self._update_meta(thread_id, llm_config=llm_config, updated_at=time.time())
-        if thread_id in self._artifact_flows:
-            self._artifact_flows[thread_id].set_llm_config(llm_config)
+        with self._lifecycle_lock:
+            self._update_meta(thread_id, llm_config=llm_config, updated_at=time.time())
         self._close_message_service(thread_id)
 
     def _close_message_service(self, thread_id: str) -> None:
@@ -687,7 +758,9 @@ class EvoMessageHub:
             service.store.close()
 
     def _artifact_flow_response(self, thread_id: str, state: FlowStepState) -> dict:
-        status = _artifact_flow_http_status(state)
+        controller_state = self._artifact_flow(thread_id).runtime.controller.state(state.run_id)
+        run_status = controller_state.run.status if controller_state.run_exists else ''
+        status = _artifact_flow_http_status(state, run_status)
         checkpoint = _artifact_checkpoint_payload(state)
         self._update_meta(thread_id, status=status, pending_checkpoint=checkpoint, updated_at=time.time())
         return {
@@ -701,6 +774,163 @@ class EvoMessageHub:
             'gate_artifact_ref': '' if state.gate_artifact_ref is None else str(state.gate_artifact_ref),
             'pending_checkpoint': checkpoint,
         }
+
+    def _start_flow_now(self, thread_id: str, payload: Mapping[str, Any], command_id: str) -> FlowStepState:
+        self._update_llm_config(thread_id, dict(payload))
+        config = self._artifact_flow_config(thread_id)
+        return self._artifact_flow(thread_id).start_full_flow(command_id=command_id, run_id=RUN_ID, config=config)
+
+    def _retry_flow_now(self, thread_id: str, payload: Mapping[str, Any], command_id: str) -> FlowStepState:
+        self._update_llm_config(thread_id, dict(payload))
+        self._apply_current_flow_llm_config(thread_id)
+        return self._artifact_flow(thread_id).retry_failed_flow(command_id=command_id, run_id=RUN_ID)
+
+    def _continue_flow_now(self, thread_id: str, payload: Mapping[str, Any], command_id: str) -> FlowStepState:
+        self._update_llm_config(thread_id, dict(payload))
+        self._apply_current_flow_llm_config(thread_id)
+        return self._artifact_flow(thread_id).continue_flow(command_id=command_id, run_id=RUN_ID)
+
+    def submit_background_message_command(
+        self,
+        thread_id: str,
+        command_id: str,
+        operation: str,
+        work: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        with self._lifecycle_lock:
+            result = self._background_commands.submit(
+                thread_id,
+                command_id,
+                operation,
+                lambda: self._run_locked_flow_operation(
+                    thread_id,
+                    lambda: self._run_background_message_command(thread_id, work),
+                ),
+                on_accept=lambda: self._update_meta(thread_id, status='running', updated_at=time.time()),
+            )
+        if result['status'] == 'conflict':
+            return result | {'reason': 'thread already has a running long command'}
+        return result
+
+    def run_sync_message_command(
+        self,
+        thread_id: str,
+        operation: str,
+        work: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        try:
+            return self._run_sync_flow_operation(thread_id, operation, work)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, Mapping) else {}
+            return dict(detail) if detail else {'status': 'conflict', 'reason': str(exc.detail)}
+
+    def _run_background_message_command(self, thread_id: str, work: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        try:
+            self._apply_current_flow_llm_config(thread_id)
+            result = dict(work())
+            control_result = self._apply_pending_flow_control(thread_id)
+            if control_result is not None:
+                return control_result
+            self._sync_flow_status_from_background_result(thread_id, result)
+            return result
+        except Exception:
+            self._update_meta(thread_id, status='failed', updated_at=time.time())
+            raise
+
+    def _sync_flow_status_from_background_result(self, thread_id: str, result: Mapping[str, Any]) -> None:
+        status = str(result.get('status') or '')
+        if status:
+            self._update_meta(thread_id, status=_message_background_status(status), updated_at=time.time())
+
+    def _submit_background_flow_command(
+        self,
+        thread_id: str,
+        command_id: str,
+        operation: str,
+        work: Callable[[], FlowStepState],
+    ) -> dict:
+        with self._lifecycle_lock:
+            result = self._background_commands.submit(
+                thread_id,
+                command_id,
+                operation,
+                lambda: self._run_locked_flow_operation(
+                    thread_id,
+                    lambda: self._run_background_flow_command(thread_id, work),
+                ),
+                on_accept=lambda: self._update_meta(thread_id, status='running', updated_at=time.time()),
+            )
+        if result['status'] == 'conflict':
+            raise HTTPException(409, result)
+        return result
+
+    def _run_background_flow_command(self, thread_id: str, work: Callable[[], FlowStepState]) -> dict:
+        try:
+            result = self._artifact_flow_response(thread_id, work())
+            control_result = self._apply_pending_flow_control(thread_id)
+            return control_result or result
+        except Exception:
+            self._update_meta(thread_id, status='failed', updated_at=time.time())
+            raise
+
+    def _flow_operation_lock(self, thread_id: str) -> RLock:
+        with self._lifecycle_lock:
+            lock = self._flow_operation_locks.get(thread_id)
+            if lock is None:
+                lock = RLock()
+                self._flow_operation_locks[thread_id] = lock
+            return lock
+
+    def _run_locked_flow_operation(self, thread_id: str, work: Callable[[], Any]) -> Any:
+        with self._flow_operation_lock(thread_id):
+            return work()
+
+    def _run_sync_flow_operation(self, thread_id: str, operation: str, work: Callable[[], Any]) -> Any:
+        lock = self._flow_operation_lock(thread_id)
+        if not lock.acquire(blocking=False):
+            if operation in {'pause', 'cancel'} and self._background_commands.running(thread_id) is not None:
+                return self._request_busy_flow_control(
+                    thread_id,
+                    operation,
+                    f'{operation}:{uuid.uuid4().hex}',
+                )
+            running = self._background_commands.running(thread_id)
+            command_id = '' if running is None else running.command_id
+            raise HTTPException(409, _accepted_command_response(
+                thread_id,
+                command_id or operation,
+                operation,
+                status='conflict',
+                existing_command_id=command_id,
+            ))
+        try:
+            self._apply_current_flow_llm_config(thread_id)
+            return work()
+        finally:
+            lock.release()
+
+    def _apply_current_flow_llm_config(self, thread_id: str) -> None:
+        self._artifact_flow(thread_id).set_llm_config(_llm_config_payload(self._meta(thread_id)))
+
+    def _request_busy_flow_control(self, thread_id: str, operation: str, command_id: str) -> dict:
+        with self._lifecycle_lock:
+            self._pending_flow_controls[thread_id] = (operation, command_id)
+        return _accepted_command_response(thread_id, command_id, operation) | {'control_requested': True}
+
+    def _apply_pending_flow_control(self, thread_id: str) -> dict | None:
+        with self._lifecycle_lock:
+            pending = self._pending_flow_controls.pop(thread_id, None)
+        if pending is None:
+            return None
+        operation, command_id = pending
+        flow = self._artifact_flow(thread_id)
+        if operation == 'pause':
+            state = flow.pause_flow(command_id=command_id, run_id=RUN_ID)
+            return self._artifact_flow_response(thread_id, state) | {'status': 'paused', 'pending_checkpoint': None}
+        if operation == 'cancel':
+            state = flow.cancel_flow(command_id=command_id, run_id=RUN_ID)
+            return self._artifact_flow_response(thread_id, state)
+        return None
 
     def _thread_dir(self, thread_id: str) -> Path:
         return self.threads_dir / thread_id
@@ -729,18 +959,74 @@ class EvoMessageHub:
         self._write_meta(thread_id, meta)
 
 
-def _single_sse(event: str, payload: dict[str, Any]):
-    async def gen():
-        yield _sse(event, payload)
-
-    return gen()
-
-
 def _sse(event: str, payload: dict[str, Any], event_id: str | None = None) -> dict:
     row = {'event': event, 'data': json.dumps({'type': event, **payload}, ensure_ascii=False, default=str)}
     if event_id:
         row['id'] = event_id
     return row
+
+
+def _step_run_done_payload(thread_id: str, status: str, flow: EvoFlowRuntime, step_run_id: str) -> dict[str, Any]:
+    return {
+        'thread_id': thread_id,
+        'status': status,
+        'step_run_id': step_run_id,
+        'next_step_run_id': flow.step_store.next_step_run_id_for(RUN_ID, step_run_id),
+    }
+
+
+def _step_run_stream_done(
+    flow: EvoFlowRuntime,
+    step_run_id: str,
+    status: str,
+    seen_step_event: bool,
+) -> bool:
+    step = flow.step_store.step_for_step_run_id(RUN_ID, step_run_id)
+    if not step:
+        return False
+    if step.startswith(FOLLOW_UP_STEP_RUN_PREFIX):
+        return seen_step_event and status not in {'running', 'idle'}
+    state = flow.step_store.get(RUN_ID)
+    if state is None or step not in STEPS:
+        return False
+    if step in state.completed_steps:
+        return True
+    if state.current_step == step and state.gate_status in {'paused', 'completed', 'cancelled', 'stale'}:
+        return True
+    if state.current_step in STEPS and STEPS.index(state.current_step) > STEPS.index(step):
+        return True
+    return status in {'failed', 'cancelled'} and seen_step_event
+
+
+def _set_accepted_status(response: Response, result: Mapping[str, Any]) -> None:
+    if str(result.get('status') or '') in {'accepted', 'accepted_existing'}:
+        response.status_code = 202
+
+
+def _accepted_command_response(
+    thread_id: str,
+    command_id: str,
+    operation: str,
+    *,
+    status: str = 'accepted',
+    existing_command_id: str = '',
+) -> dict[str, Any]:
+    return {
+        'status': status,
+        'accepted': status in {'accepted', 'accepted_existing'},
+        'running': status in {'accepted', 'accepted_existing', 'conflict'},
+        'thread_id': thread_id,
+        'command_id': command_id,
+        'existing_command_id': existing_command_id,
+        'operation': operation,
+        'run_id': RUN_ID,
+        'events_url': f'/v1/evo/threads/{thread_id}/events',
+        'message': (
+            '已有长任务正在运行。' if status == 'conflict'
+            else '命令已在后台运行。' if status == 'accepted_existing'
+            else '命令已受理，正在后台运行。'
+        ),
+    }
 
 
 def _flow_status_row(
@@ -763,10 +1049,11 @@ def _flow_status_row(
     }
 
 
-def _frontend_event_payload(event: Any) -> dict:
+def _frontend_event_payload(event: Any, flow: EvoFlowRuntime | None = None) -> dict:
     payload = dict(event.payload or {})
     derived = _derive_frontend_event(event.event_type, payload)
     display_payload = _compact_event_payload(event.event_type, payload)
+    step_run = _event_step_run_fields(event, flow)
     raw_event = {
         'event_type': event.event_type,
         'run_id': event.run_id,
@@ -780,9 +1067,21 @@ def _frontend_event_payload(event: Any) -> dict:
         'action': derived.get('action'),
         'event_type': event.event_type,
         'run_id': event.run_id,
-        'payload': {**display_payload, **derived, 'raw_event': raw_event},
+        'payload': {**display_payload, **derived, **step_run, 'raw_event': raw_event},
+        **step_run,
         **{key: value for key, value in derived.items() if value not in (None, '')},
     }
+
+
+def _event_step_run_fields(event: Any, flow: EvoFlowRuntime | None = None) -> dict[str, str]:
+    payload = dict(event.payload or {})
+    step_run_id = str(payload.get('step_run_id') or '')
+    if not step_run_id:
+        return {}
+    next_step_run_id = str(payload.get('next_step_run_id') or '')
+    if not next_step_run_id and flow is not None:
+        next_step_run_id = flow.step_store.next_step_run_id_for(str(event.run_id), step_run_id)
+    return {'step_run_id': step_run_id, 'next_step_run_id': next_step_run_id}
 
 
 def _compact_event_payload(event_type: str, payload: dict) -> dict:
@@ -1194,12 +1493,30 @@ def _case_details_from_eval_rows(rows: list[dict], existing: Any) -> list[dict]:
 
 
 def _case_details_from_abtest_deltas(case_deltas: list[dict], existing: Any) -> list[dict]:
+    trace_fields = ('trace_id', 'baseline_trace_id', 'candidate_trace_id')
+
+    def case_id(row: dict) -> str:
+        return str(row.get('case_id') or row.get('case_key') or row.get('caseId') or row.get('id') or '')
+
     if isinstance(existing, list):
-        return [dict(item) for item in existing if isinstance(item, dict)]
+        traces_by_case = {
+            case_id(row): {
+                key: row[key] for key in trace_fields if row.get(key)
+            }
+            for row in case_deltas
+            if case_id(row) and any(key in row for key in trace_fields)
+        }
+        return [
+            item | {key: value for key, value in traces_by_case.get(case_id(item), {}).items() if not item.get(key)}
+            for item in existing if isinstance(item, dict)
+        ]
     return [
         {
-            'case_id': row.get('case_id') or row.get('case_key') or row.get('id'),
+            'case_id': case_id(row),
             'outcome': row.get('outcome'),
+            'trace_id': row.get('trace_id') or '',
+            'baseline_trace_id': row.get('baseline_trace_id') or '',
+            'candidate_trace_id': row.get('candidate_trace_id') or '',
             **{f'baseline_{metric}': value for metric, value in _dict_items(row.get('before'))},
             **{f'candidate_{metric}': value for metric, value in _dict_items(row.get('after'))},
             **{metric: value for metric, value in _dict_items(row.get('delta'))},
@@ -1212,7 +1529,13 @@ def _dict_items(value: Any):
     return value.items() if isinstance(value, dict) else ()
 
 
-def _artifact_flow_http_status(state: FlowStepState | None) -> str:
+def _artifact_flow_http_status(state: FlowStepState | None, run_status: str = '') -> str:
+    if run_status == 'failed':
+        return 'failed'
+    if run_status == 'cancelled':
+        return 'cancelled'
+    if run_status in {'running', 'cancel_requested'}:
+        return 'running'
     if state is None:
         return 'idle'
     if state.gate_status == 'completed':
@@ -1222,6 +1545,16 @@ def _artifact_flow_http_status(state: FlowStepState | None) -> str:
     if state.gate_status in {'paused', 'stale'}:
         return 'waiting_checkpoint'
     return 'running'
+
+
+def _message_background_status(status: str) -> str:
+    if status == 'completed':
+        return 'ended'
+    if status in {'cancelled', 'failed', 'running'}:
+        return status
+    if status in {'paused', 'stale'}:
+        return 'waiting_checkpoint'
+    return status or 'running'
 
 
 def _artifact_checkpoint_payload(state: FlowStepState | None) -> dict | None:
@@ -1235,57 +1568,6 @@ def _artifact_checkpoint_payload(state: FlowStepState | None) -> dict | None:
         'message': f'{STAGE_LABELS.get(str(state.current_step), state.current_step)}已完成，请确认是否继续执行下一步。',
         'gate_artifact_ref': '' if state.gate_artifact_ref is None else str(state.gate_artifact_ref),
     }
-
-
-def _thread_summary_message(meta: dict, status: dict) -> dict:
-    completed = [STAGE_LABELS.get(str(step), str(step)) for step in status.get('completed_steps') or []]
-    content = f"自进化线程 {meta.get('id') or meta.get('thread_id') or ''} 已恢复。"
-    if completed:
-        content += f" 已完成阶段：{'、'.join(completed)}。"
-    if status.get('status'):
-        content += f" 当前状态：{status['status']}。"
-    return {
-        'id': f"{meta.get('id') or meta.get('thread_id') or 'thread'}-summary",
-        'role': 'assistant',
-        'content': content,
-        'ts': meta.get('updated_at') or meta.get('created_at') or time.time(),
-    }
-
-
-def _history_rounds(thread_id: str, messages: list[dict]) -> list[dict]:
-    rounds, pending_user = [], None
-    for index, message in enumerate(messages):
-        role, content = message.get('role'), str(message.get('content') or '').strip()
-        if not content:
-            continue
-        if role == 'user':
-            pending_user = message
-            continue
-        if role != 'assistant':
-            continue
-        user_message = pending_user or {}
-        round_id = str(user_message.get('id') or message.get('id') or f'{thread_id}-round-{index + 1}')
-        rounds.append(
-            {
-                'round_id': round_id,
-                'thread_id': thread_id,
-                'status': 'completed',
-                'user_message': str(user_message.get('content') or ''),
-                'assistant_message': content,
-                'created_at': _history_timestamp(user_message.get('ts') or message.get('ts')),
-                'updated_at': _history_timestamp(message.get('ts')),
-            }
-        )
-        pending_user = None
-    return rounds
-
-
-def _history_timestamp(value: Any) -> str:
-    if isinstance(value, (int, float)) and value > 0:
-        return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(value))
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
 def _llm_config_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1390,20 +1672,6 @@ def _bounded_positive_int(value: Any, field: str, maximum: int) -> int:
     if out > maximum:
         raise ValueError(f'{field} must be <= {maximum}')
     return out
-
-
-def _read_messages(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    rows = []
-    for index, line in enumerate(path.read_text(encoding='utf-8').splitlines()):
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if row.get('role') in {'user', 'assistant'} and row.get('content'):
-            rows.append({'id': f'msg-{index + 1}', 'role': row['role'], 'content': row['content'], 'ts': row.get('ts')})
-    return rows
 
 
 def _read_json(path: Path) -> dict:

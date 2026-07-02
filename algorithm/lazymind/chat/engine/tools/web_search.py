@@ -4,12 +4,10 @@ from typing import Any, Dict
 
 from lazymind.chat.engine.tools.infra import (
     fetch_url_content,
-    handle_tool_errors,
     tool_success,
 )
 
 
-@handle_tool_errors
 def url_fetch(url: str) -> Dict[str, Any]:
     """Fetch and summarize the readable content of a public web page.
 

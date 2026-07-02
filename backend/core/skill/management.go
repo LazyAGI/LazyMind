@@ -61,7 +61,7 @@ func List(w http.ResponseWriter, r *http.Request) {
 	var parents []orm.SkillResource
 	if err := db.WithContext(r.Context()).
 		Where("owner_user_id = ? AND node_type = ?", userID, evolution.SkillNodeTypeParent).
-		Order("updated_at DESC").
+		Order("created_at DESC").
 		Find(&parents).Error; err != nil {
 		common.ReplyErr(w, "query skills failed", http.StatusInternalServerError)
 		return

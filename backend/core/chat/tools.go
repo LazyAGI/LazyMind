@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,7 +22,6 @@ import (
 )
 
 const chatToolsPath = "/api/chat/tools"
-const defaultToolListPageSize = 10
 
 type chatToolGroup map[string]any
 
@@ -34,9 +33,7 @@ type chatToolsResponse struct {
 }
 
 type toolListQuery struct {
-	Keyword  string
-	Page     int
-	PageSize int
+	Keyword string
 }
 
 func ListTools(w http.ResponseWriter, r *http.Request) {
@@ -261,21 +258,9 @@ func markDisabledTools(groups []chatToolGroup, disabled []string) {
 
 func parseToolListQuery(r *http.Request) toolListQuery {
 	q := r.URL.Query()
-	page := parsePositiveToolListInt(q.Get("page"), 1)
-	pageSize := parsePositiveToolListInt(q.Get("page_size"), defaultToolListPageSize)
 	return toolListQuery{
-		Keyword:  strings.TrimSpace(q.Get("keyword")),
-		Page:     page,
-		PageSize: pageSize,
+		Keyword: strings.TrimSpace(q.Get("keyword")),
 	}
-}
-
-func parsePositiveToolListInt(raw string, fallback int) int {
-	value, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || value <= 0 {
-		return fallback
-	}
-	return value
 }
 
 func applyToolListQuery(resp *chatToolsResponse, query toolListQuery) {
@@ -284,9 +269,10 @@ func applyToolListQuery(resp *chatToolsResponse, query toolListQuery) {
 	}
 	filtered := filterToolGroups(resp.ToolGroups, query.Keyword)
 	total := len(filtered)
-	resp.ToolGroups = paginateToolGroups(filtered, query.Page, query.PageSize)
-	resp.Page = query.Page
-	resp.PageSize = query.PageSize
+	sortToolGroupsByDisabled(filtered)
+	resp.ToolGroups = filtered
+	resp.Page = 1
+	resp.PageSize = total
 	resp.Total = total
 }
 
@@ -314,23 +300,15 @@ func toolGroupMatchesKeyword(group chatToolGroup, keyword string) bool {
 	return false
 }
 
-func paginateToolGroups(groups []chatToolGroup, page, pageSize int) []chatToolGroup {
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = defaultToolListPageSize
-	}
-	total := len(groups)
-	start := (page - 1) * pageSize
-	if start > total {
-		start = total
-	}
-	end := start + pageSize
-	if end > total {
-		end = total
-	}
-	return groups[start:end]
+func sortToolGroupsByDisabled(groups []chatToolGroup) {
+	sort.SliceStable(groups, func(i, j int) bool {
+		return !toolGroupDisabled(groups[i]) && toolGroupDisabled(groups[j])
+	})
+}
+
+func toolGroupDisabled(group chatToolGroup) bool {
+	disabled, _ := group["disabled"].(bool)
+	return disabled
 }
 
 func listDisabledToolNames(ctx context.Context, db *gorm.DB, userID string) ([]string, error) {
