@@ -120,6 +120,10 @@ func (unavailableAccessChecker) CanUseAuthConnection(context.Context, access.Act
 	return access.NewError(access.ErrCodeForbidden, "access checker is not configured")
 }
 
+func (unavailableAccessChecker) ShouldBlockLocalSourceAccess(context.Context, access.Actor, access.LocalSourceAccessRequest) bool {
+	return false
+}
+
 func WithConnectorRegistry(registry connector.ConnectorRegistry) Option {
 	return func(h *Handler) {
 		h.registry = registry
@@ -295,9 +299,10 @@ func (h *Handler) registerRoutes(mux *http.ServeMux) {
 
 func actorFromRequest(r *http.Request) (access.Actor, error) {
 	actor := access.Actor{
-		UserID:   strings.TrimSpace(r.Header.Get("X-User-ID")),
-		TenantID: strings.TrimSpace(r.Header.Get("X-Tenant-ID")),
-		Role:     strings.TrimSpace(r.Header.Get("X-User-Role")),
+		UserID:        strings.TrimSpace(r.Header.Get("X-User-ID")),
+		TenantID:      strings.TrimSpace(r.Header.Get("X-Tenant-ID")),
+		Role:          strings.TrimSpace(r.Header.Get("X-User-Role")),
+		Authorization: strings.TrimSpace(r.Header.Get("Authorization")),
 	}
 	if actor.TenantID == "" {
 		actor.TenantID = strings.TrimSpace(r.URL.Query().Get("tenant_id"))

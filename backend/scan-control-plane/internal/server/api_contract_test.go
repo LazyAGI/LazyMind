@@ -65,7 +65,7 @@ func TestCreateSourceHandlerRejectsLocalSourceForNonAdmin(t *testing.T) {
 	t.Parallel()
 
 	engine := &serverSourceEngineStub{}
-	handler := NewHandler(WithSourceEngine(engine), WithAccessChecker(allowAccess{}))
+	handler := NewHandler(WithSourceEngine(engine), WithAccessChecker(blockLocalAccess{}))
 	body := `{"request_id":"req-1","name":"Docs","bindings":[{"connector_type":"local_fs","target_type":"local_path","target_ref":"/workspace/docs","sync_mode":"manual"}],"source_options":{"source_type":"local"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/scan/sources", strings.NewReader(body))
 	setAPIContractActorRole(req, "user")
@@ -85,7 +85,7 @@ func TestCreateSourceBindingRejectsLocalSourceForNonAdmin(t *testing.T) {
 	t.Parallel()
 
 	engine := &serverSourceEngineStub{}
-	handler := NewHandler(WithSourceEngine(engine), WithAccessChecker(allowAccess{}))
+	handler := NewHandler(WithSourceEngine(engine), WithAccessChecker(blockLocalAccess{}))
 	body := `{"connector_type":"local_fs","target_type":"local_path","target_ref":"/workspace/docs","sync_mode":"manual"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/scan/sources/source-1/bindings", strings.NewReader(body))
 	setAPIContractActorRole(req, "user")
@@ -643,6 +643,18 @@ func (allowAccess) CanUseAgent(context.Context, access.Actor, string) error {
 
 func (allowAccess) CanUseAuthConnection(context.Context, access.Actor, string) error {
 	return nil
+}
+
+func (allowAccess) ShouldBlockLocalSourceAccess(context.Context, access.Actor, access.LocalSourceAccessRequest) bool {
+	return false
+}
+
+type blockLocalAccess struct {
+	allowAccess
+}
+
+func (blockLocalAccess) ShouldBlockLocalSourceAccess(context.Context, access.Actor, access.LocalSourceAccessRequest) bool {
+	return true
 }
 
 func TestOpenAPIContractCoversScanAPIAndDoesNotExposeLegacyPaths(t *testing.T) {

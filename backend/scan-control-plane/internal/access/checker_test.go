@@ -2,10 +2,12 @@ package access
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector/localfs"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
@@ -123,11 +125,102 @@ func TestDefaultCheckerDefaultOwnerPolicyRejectsNonOwner(t *testing.T) {
 	}
 }
 
+func TestDefaultCheckerDoesNotCheckRealtimeAdminForNonLocalSource(t *testing.T) {
+	t.Parallel()
+
+	admin := &adminVerifierStub{}
+	checker := NewDefaultChecker(&checkerStore{
+		source: store.Source{SourceID: "source-1", TenantID: "tenant-1", CreatedBy: "owner-1", SourceOptions: store.JSON{"source_type": "feishu"}},
+	}, WithAdminVerifier(admin))
+
+	if err := checker.CanReadSource(context.Background(), Actor{UserID: "owner-1", TenantID: "tenant-1"}, "source-1"); err != nil {
+		t.Fatalf("expected non-local owner to be allowed, got %v", err)
+	}
+	if admin.calls != 0 {
+		t.Fatalf("non-local source should not call realtime admin verifier, got %d calls", admin.calls)
+	}
+}
+
+func TestDefaultCheckerBlocksLocalSourceForRealtimeNonAdmin(t *testing.T) {
+	t.Parallel()
+
+	checker := NewDefaultChecker(&checkerStore{
+		source: store.Source{SourceID: "source-1", TenantID: "tenant-1", CreatedBy: "owner-1", SourceOptions: store.JSON{"source_type": "local"}},
+	}, WithAdminVerifier(&adminVerifierStub{}))
+	actor := Actor{UserID: "owner-1", TenantID: "tenant-1"}
+
+	if err := checker.CanReadSource(context.Background(), actor, "source-1"); ErrorCodeOf(err) != ErrCodeForbidden {
+		t.Fatalf("expected local source read to be forbidden for realtime non-admin, got %v", err)
+	}
+	ids, err := checker.ListReadableSourceIDs(context.Background(), actor)
+	if err != nil {
+		t.Fatalf("list readable source ids: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("local source should be filtered for realtime non-admin, got %+v", ids)
+	}
+}
+
+func TestDefaultCheckerAllowsLocalSourceForRealtimeAdmin(t *testing.T) {
+	t.Parallel()
+
+	checker := NewDefaultChecker(&checkerStore{
+		source: store.Source{SourceID: "source-1", TenantID: "tenant-1", CreatedBy: "owner-1", SourceOptions: store.JSON{"source_type": "local_fs"}},
+	}, WithAdminVerifier(&adminVerifierStub{admin: true}))
+
+	if err := checker.CanWriteSource(context.Background(), Actor{UserID: "owner-1", TenantID: "tenant-1"}, "source-1"); err != nil {
+		t.Fatalf("expected realtime admin owner to access local source, got %v", err)
+	}
+}
+
+func TestDefaultCheckerBlocksSourceWithLocalBindingForRealtimeNonAdmin(t *testing.T) {
+	t.Parallel()
+
+	checker := NewDefaultChecker(&checkerStore{
+		source:   store.Source{SourceID: "source-1", TenantID: "tenant-1", CreatedBy: "owner-1"},
+		bindings: []store.Binding{{BindingID: "binding-1", SourceID: "source-1", ConnectorType: string(localfs.ConnectorType), TargetType: string(localfs.TargetTypeLocalPath), Status: "ACTIVE"}},
+	}, WithAdminVerifier(&adminVerifierStub{}))
+
+	if err := checker.CanWriteSource(context.Background(), Actor{UserID: "owner-1", TenantID: "tenant-1"}, "source-1"); ErrorCodeOf(err) != ErrCodeForbidden {
+		t.Fatalf("expected source with local binding to be forbidden for realtime non-admin, got %v", err)
+	}
+}
+
+func TestDefaultCheckerBlocksLocalBindingTargetWithoutSourceForRealtimeNonAdmin(t *testing.T) {
+	t.Parallel()
+
+	checker := NewDefaultChecker(&checkerStore{}, WithAdminVerifier(&adminVerifierStub{}))
+	err := checker.CanAccessBindingTarget(context.Background(), Actor{UserID: "user-1", TenantID: "tenant-1"}, BindingTargetRequest{
+		ConnectorType: localfs.ConnectorType,
+		TargetType:    localfs.TargetTypeLocalPath,
+	})
+	if ErrorCodeOf(err) != ErrCodeForbidden {
+		t.Fatalf("expected local binding target to be forbidden for realtime non-admin, got %v", err)
+	}
+}
+
+func TestDefaultCheckerLocalGuardTreatsVerifierErrorAsNonAdmin(t *testing.T) {
+	t.Parallel()
+
+	checker := NewDefaultChecker(&checkerStore{}, WithAdminVerifier(&adminVerifierStub{err: errors.New("auth unavailable")}))
+	if !checker.ShouldBlockLocalSourceAccess(context.Background(), Actor{UserID: "user-1"}, LocalSourceAccessRequest{
+		BindingTargets: []BindingTargetRequest{{TargetType: localfs.TargetTypeLocalPath}},
+	}) {
+		t.Fatalf("expected local access to be blocked when realtime admin verifier fails")
+	}
+	if checker.ShouldBlockLocalSourceAccess(context.Background(), Actor{UserID: "user-1"}, LocalSourceAccessRequest{
+		BindingTargets: []BindingTargetRequest{{ConnectorType: "feishu", TargetType: "wiki_node"}},
+	}) {
+		t.Fatalf("expected non-local access not to be blocked even if verifier would fail")
+	}
+}
+
 type checkerStore struct {
-	source  store.Source
-	binding store.Binding
-	task    store.ParseTaskWithRefs
-	agent   store.Agent
+	source   store.Source
+	binding  store.Binding
+	bindings []store.Binding
+	task     store.ParseTaskWithRefs
+	agent    store.Agent
 }
 
 func (s *checkerStore) GetSource(context.Context, string) (store.Source, error) {
@@ -142,6 +235,16 @@ func (s *checkerStore) GetBinding(context.Context, string, string) (store.Bindin
 		return store.Binding{}, store.NewStoreError(store.ErrCodeBindingNotFound, "binding not found")
 	}
 	return s.binding, nil
+}
+
+func (s *checkerStore) ListBindings(context.Context, string) ([]store.Binding, error) {
+	if s.bindings != nil {
+		return s.bindings, nil
+	}
+	if s.binding.BindingID != "" {
+		return []store.Binding{s.binding}, nil
+	}
+	return nil, nil
 }
 
 func (s *checkerStore) GetParseTask(context.Context, string) (store.ParseTaskWithRefs, error) {
@@ -178,6 +281,19 @@ func (v *authVerifierStub) VerifyAuthConnection(_ context.Context, actor Actor, 
 	v.actor = actor
 	v.authConnectionID = authConnectionID
 	return v.err
+}
+
+type adminVerifierStub struct {
+	admin bool
+	err   error
+	calls int
+	actor Actor
+}
+
+func (v *adminVerifierStub) IsAdmin(_ context.Context, actor Actor) (bool, error) {
+	v.calls++
+	v.actor = actor
+	return v.admin, v.err
 }
 
 type sourcePermissionVerifierStub struct {
