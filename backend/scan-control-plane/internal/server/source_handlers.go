@@ -130,6 +130,20 @@ func (h *Handler) getSource(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) getSourceByDataset(w http.ResponseWriter, r *http.Request) {
+	if h.sources == nil {
+		writeError(w, missingDependency("source engine"))
+		return
+	}
+	datasetID := r.PathValue("dataset_id")
+	resp, err := h.sources.GetSourceByDatasetID(r.Context(), datasetID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) triggerSourceSync(w http.ResponseWriter, r *http.Request) {
 	if h.sources == nil {
 		writeError(w, missingDependency("source engine"))

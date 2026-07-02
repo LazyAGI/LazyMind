@@ -49,6 +49,7 @@ func manualSchemas() map[string]any {
 			prop("type", strSchema()),
 			prop("tags", array(strSchema())),
 			prop("default_dataset", boolSchema()),
+			prop("created_by_data_source", boolSchema()),
 		),
 		"ListAlgosResponse":      obj(prop("algos", array(refSchema("Algo")))),
 		"AllDatasetTagsResponse": obj(prop("tags", array(strSchema()))),

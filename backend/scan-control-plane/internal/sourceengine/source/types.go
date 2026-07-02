@@ -34,6 +34,7 @@ type Engine interface {
 	CreateSource(ctx context.Context, req CreateSourceRequest) (CreateSourceResponse, error)
 	ListSources(ctx context.Context, req ListSourcesRequest) (ListSourcesResponse, error)
 	GetSource(ctx context.Context, req GetSourceRequest) (GetSourceResponse, error)
+	GetSourceByDatasetID(ctx context.Context, datasetID string) (GetSourceResponse, error)
 	GetSourceSummary(ctx context.Context, req SourceSummaryRequest) (SourceSummaryResponse, error)
 	TriggerSourceSync(ctx context.Context, req TriggerSourceSyncRequest) (TriggerSourceSyncResponse, error)
 	UpdateSource(ctx context.Context, callerID, sourceID string, req UpdateSourceRequest) (UpdateSourceResponse, error)

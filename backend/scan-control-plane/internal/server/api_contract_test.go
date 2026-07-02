@@ -197,6 +197,27 @@ func TestDeleteSourceByDatasetInternalRouteSkipsCoreDatasetDelete(t *testing.T) 
 	}
 }
 
+func TestGetSourceByDatasetInternalRoute(t *testing.T) {
+	t.Parallel()
+
+	engine := &serverSourceEngineStub{}
+	handler := NewHandler(WithSourceEngine(engine))
+	req := httptest.NewRequest(http.MethodGet, "/api/scan/internal/sources/by-dataset/dataset-1", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if engine.getByDatasetCalls != 1 {
+		t.Fatalf("expected one get by dataset call, got %d", engine.getByDatasetCalls)
+	}
+	if engine.lastGetDatasetID != "dataset-1" {
+		t.Fatalf("expected dataset id to be routed, got %q", engine.lastGetDatasetID)
+	}
+}
+
 func TestHandlersExposeConnectorsTargetTreeAndSourceTree(t *testing.T) {
 	t.Parallel()
 
@@ -841,9 +862,11 @@ func assertJSONNumber(t *testing.T, value any, want string) {
 type serverSourceEngineStub struct {
 	createCalls          int
 	addBindingCalls      int
+	getByDatasetCalls    int
 	deleteByDatasetCalls int
 	lastCreate           sourceengine.CreateSourceRequest
 	lastSync             sourceengine.TriggerSourceSyncRequest
+	lastGetDatasetID     string
 	lastDeleteDatasetID  string
 	lastDeleteOptions    sourceengine.DeleteSourceOptions
 }
@@ -885,6 +908,23 @@ func (s *serverSourceEngineStub) ListSources(context.Context, sourceengine.ListS
 
 func (s *serverSourceEngineStub) GetSource(context.Context, sourceengine.GetSourceRequest) (sourceengine.GetSourceResponse, error) {
 	return sourceengine.GetSourceResponse{}, nil
+}
+
+func (s *serverSourceEngineStub) GetSourceByDatasetID(_ context.Context, datasetID string) (sourceengine.GetSourceResponse, error) {
+	s.getByDatasetCalls++
+	s.lastGetDatasetID = datasetID
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	return sourceengine.GetSourceResponse{
+		Source: sourceengine.SourceResponse{
+			SourceID:      "source-1",
+			Name:          "Docs",
+			DatasetID:     datasetID,
+			Status:        sourceengine.SourceStatusActive,
+			ConfigVersion: 1,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		},
+	}, nil
 }
 
 func (s *serverSourceEngineStub) GetSourceSummary(context.Context, sourceengine.SourceSummaryRequest) (sourceengine.SourceSummaryResponse, error) {
