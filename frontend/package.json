@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "5.x",
+    "@dagrejs/dagre": "1.0.4",
     "@js-preview/docx": "^1.6.4",
     "@js-preview/excel": "^1.7.14",
     "@mdxeditor/editor": "^3.53.1",
