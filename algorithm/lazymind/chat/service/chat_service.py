@@ -493,15 +493,15 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     active_configs = filter_tools(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
     )
-    # Persist the allowlist in session globals so every @handle_tool_errors-wrapped
-    # tool can do a cheap runtime check before executing business logic.
-    lazyllm.globals['active_tool_names'] = _collect_active_tool_names(active_configs)
+    # Persist the allowlist in session globals so ToolManager._safe_call can do a
+    # cheap active-tool guard check before executing any tool's business logic.
+    lazyllm.globals.config['active_tool_names'] = _collect_active_tool_names(active_configs)
     # Plugin tools are dynamically injected and pre-validated by resolve_plugin_injection.
     # Register ALL plugin_tools (advance_step, find_artifact, save_plugin_artifact, …)
     # into the allowlist so the ToolGuard does not block any of them.
     # plugin_stop_tools is only used by set_stop_tools below to control loop exit;
     # it is not the source of the allowlist.
-    lazyllm.globals['active_tool_names'] |= {
+    lazyllm.globals.config['active_tool_names'] |= {
         getattr(fn, '__name__', '') for fn in plugin_tools if callable(fn)
     }
     agent_tools = build_agent_tools(active_configs)
@@ -510,27 +510,27 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     subagent_tools = _build_subagent_chat_tools(bool(agent.has_subagents)) if enable_subagent else []
     # SubAgent chat tools (create_subagent, list_subagents, …) are always active;
     # add their names to the allowlist so the ToolGuard does not block them.
-    lazyllm.globals['active_tool_names'] |= {
+    lazyllm.globals.config['active_tool_names'] |= {
         getattr(fn, '__name__', '') for fn in subagent_tools if callable(fn)
     }
     mcp_tools = _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
     # User attachment tools are only meaningful when the user has uploaded files.
     # Register them (and add to allowlist) whenever files_map is non-empty.
     attachment_tools = _build_user_attachment_tools(bool(files_map))
-    lazyllm.globals['active_tool_names'] |= {
+    lazyllm.globals.config['active_tool_names'] |= {
         getattr(fn, '__name__', '') for fn in attachment_tools if callable(fn)
     }
     # Schedule tools are independent of plugin and subagent flags — always inject them
     # as a lazy group so the LLM only sees the gateway until the user mentions scheduling.
     schedule_tools = _build_schedule_tools()
-    lazyllm.globals['active_tool_names'] |= {
+    lazyllm.globals.config['active_tool_names'] |= {
         'create_schedule', 'list_schedules', 'cancel_schedule',
         'update_schedule', 'trigger_schedule',
     }
     # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
     ask_user_tools = _build_ask_user_tool()
-    lazyllm.globals['active_tool_names'] |= {'ask_user'}
+    lazyllm.globals.config['active_tool_names'] |= {'ask_user'}
     all_tools = (agent_tools + subagent_tools + attachment_tools
                  + schedule_tools + ask_user_tools + plugin_tools + mcp_tools)
     set_trace_context({

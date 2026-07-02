@@ -91,3 +91,23 @@ export function getTreeSelectLabelText(label: ReactNode) {
   }
   return "";
 }
+
+export function collectTreeExpandableKeys(nodes: CollapsibleTreeNode[]) {
+  const keys: Array<string | number> = [];
+
+  const visit = (items: CollapsibleTreeNode[]) => {
+    items.forEach((node) => {
+      if (!node.children?.length) {
+        return;
+      }
+      const nodeKey = node.key ?? node.value;
+      if (nodeKey !== undefined && nodeKey !== null && `${nodeKey}` !== "") {
+        keys.push(nodeKey);
+      }
+      visit(node.children);
+    });
+  };
+
+  visit(nodes);
+  return keys;
+}

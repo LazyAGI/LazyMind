@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_success
+from lazymind.chat.engine.tools.infra import tool_error, tool_success
 
 _RG_BINARY = shutil.which('rg') or ''
 _RG_TIMEOUT = 30
@@ -164,7 +164,6 @@ class LocalFSToolGroup:
             capture_output=True, text=True, timeout=_RG_TIMEOUT, cwd=cwd,
         )
 
-    @handle_tool_errors
     def ls(self, path: Optional[str] = None, max_entries: int = 200) -> Dict[str, Any]:
         """List available local directories or one directory level.
 
@@ -215,7 +214,6 @@ class LocalFSToolGroup:
             'entries': entries,
         })
 
-    @handle_tool_errors
     def glob(self, pattern: str, path: Optional[str] = None) -> Dict[str, Any]:
         """Find local files whose names match a glob pattern.
 
@@ -249,7 +247,6 @@ class LocalFSToolGroup:
             'matches': matches[:200],
         })
 
-    @handle_tool_errors
     def grep(
         self,
         pattern: str,
@@ -379,7 +376,6 @@ class LocalFSToolGroup:
             'matches': matches,
         })
 
-    @handle_tool_errors
     def read(
         self,
         filepath: str,
@@ -421,7 +417,6 @@ class LocalFSToolGroup:
             'content': ''.join(chunk),
         })
 
-    @handle_tool_errors
     def info(self, path: Optional[str] = None) -> Dict[str, Any]:
         """Get metadata for an available local file or directory.
 

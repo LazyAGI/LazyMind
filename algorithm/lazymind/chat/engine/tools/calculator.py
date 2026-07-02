@@ -4,7 +4,6 @@ import math
 from typing import Any, Dict
 
 from lazymind.chat.engine.tools.infra import (
-    handle_tool_errors,
     safe_evaluate_expression,
     tool_success,
 )
@@ -21,7 +20,6 @@ def format_calculation_result(value: int | float) -> str:
     return text
 
 
-@handle_tool_errors
 def calculator(expression: str) -> Dict[str, Any]:
     """Evaluate a mathematical expression safely.
 

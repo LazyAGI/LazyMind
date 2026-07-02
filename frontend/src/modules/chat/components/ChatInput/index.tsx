@@ -63,24 +63,34 @@ const { TextArea } = Input;
  * Clicking it opens a popover listing dismissed sessions with restore buttons.
  * Dismissed sessions are cached in pluginPanel store so the button survives component remounts.
  */
-function DismissedPluginRestoreButton({ conversationId }: { conversationId: string }) {
+function DismissedPluginRestoreButton({
+  conversationId,
+}: {
+  conversationId: string;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
   const bumpDismissedRefresh = usePluginStore((s) => s.bumpDismissedRefresh);
-  const fetchDismissedSessions = usePluginStore((s) => s.fetchDismissedSessions);
+  const fetchDismissedSessions = usePluginStore(
+    (s) => s.fetchDismissedSessions,
+  );
   // Read the array reference from store; fall back to undefined and handle below.
   // IMPORTANT: do NOT use `?? []` inline — a fresh array on every selector call
   // causes useSyncExternalStore to detect a state change on every render, leading
   // to an infinite re-render loop (React error #185).
-  const dismissedSessionsFromStore = usePluginStore((s) => s.dismissedSessionsByConversation[conversationId]);
+  const dismissedSessionsFromStore = usePluginStore(
+    (s) => s.dismissedSessionsByConversation[conversationId],
+  );
   const dismissedSessions = dismissedSessionsFromStore ?? EMPTY_DISMISSED;
-  const dismissedRefreshTrigger = usePluginStore((s) => s.dismissedRefreshTrigger[conversationId] ?? 0);
+  const dismissedRefreshTrigger = usePluginStore(
+    (s) => s.dismissedRefreshTrigger[conversationId] ?? 0,
+  );
 
   // Fetch on mount and whenever a dismiss/restore event fires.
   useEffect(() => {
     fetchDismissedSessions(conversationId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, dismissedRefreshTrigger]);
 
   const handleOpenChange = (v: boolean) => {
@@ -98,7 +108,9 @@ function DismissedPluginRestoreButton({ conversationId }: { conversationId: stri
       setOpen(false);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } };
-      message.error(err?.response?.data?.error ?? t('chat.pluginRestoreFailed'));
+      message.error(
+        err?.response?.data?.error ?? t("chat.pluginRestoreFailed"),
+      );
     } finally {
       setRestoring(null);
     }
@@ -108,16 +120,24 @@ function DismissedPluginRestoreButton({ conversationId }: { conversationId: stri
 
   const content = (
     <div style={{ minWidth: 200 }}>
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {dismissedSessions.map((s) => (
-          <li key={s.session_id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <li
+            key={s.session_id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 6,
+            }}
+          >
             <Tag style={{ flex: 1 }}>{s.plugin_id}</Tag>
             <Button
-              size='small'
+              size="small"
               loading={restoring === s.session_id}
               onClick={() => handleRestore(s.session_id)}
             >
-              {t('chat.pluginRestoreBtn')}
+              {t("chat.pluginRestoreBtn")}
             </Button>
           </li>
         ))}
@@ -129,20 +149,38 @@ function DismissedPluginRestoreButton({ conversationId }: { conversationId: stri
     <Popover
       open={open}
       onOpenChange={handleOpenChange}
-      trigger='click'
+      trigger="click"
       content={content}
-      title={t('chat.pluginDismissedTitle')}
+      title={t("chat.pluginDismissedTitle")}
     >
-      <Tooltip title={t('chat.pluginDismissedTitle')}>
+      <Tooltip title={t("chat.pluginDismissedTitle")}>
         <button
-          type='button'
-          className='input-bottom-actions-left-item input-bottom-actions-left-item--icon-only'
-          aria-label={t('chat.pluginDismissedTitle')}
+          type="button"
+          className="input-bottom-actions-left-item input-bottom-actions-left-item--icon-only"
+          aria-label={t("chat.pluginDismissedTitle")}
         >
           {/* Trash / recycle-bin icon */}
-          <svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>
-            <path d='M1.75 3.5h10.5M5.25 3.5V2.333A.583.583 0 0 1 5.833 1.75h2.334a.583.583 0 0 1 .583.583V3.5M11.083 3.5l-.583 8.167A.583.583 0 0 1 9.917 12.25H4.083a.583.583 0 0 1-.583-.583L2.917 3.5' stroke='currentColor' strokeWidth='1.2' strokeLinecap='round' strokeLinejoin='round'/>
-            <path d='M5.833 6.417v3.5M8.167 6.417v3.5' stroke='currentColor' strokeWidth='1.2' strokeLinecap='round'/>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <path
+              d="M1.75 3.5h10.5M5.25 3.5V2.333A.583.583 0 0 1 5.833 1.75h2.334a.583.583 0 0 1 .583.583V3.5M11.083 3.5l-.583 8.167A.583.583 0 0 1 9.917 12.25H4.083a.583.583 0 0 1-.583-.583L2.917 3.5"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M5.833 6.417v3.5M8.167 6.417v3.5"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+            />
           </svg>
         </button>
       </Tooltip>
@@ -179,16 +217,21 @@ const PROMPT_SUGGESTIONS = [
   },
 ];
 
-function getSuffix(f: { name: string }) {
-  return f.name.substring(f.name.lastIndexOf(".")).toLowerCase();
+function getSuffix(f: { name?: string }) {
+  const name = f.name ?? "";
+  if (!name.includes(".")) {
+    return "";
+  }
+  return name.substring(name.lastIndexOf(".")).toLowerCase();
 }
-function isImage(f: { name: string }) {
-  return allowedImageTypes.includes(getSuffix(f));
+function isImage(f: { name?: string }) {
+  const suffix = getSuffix(f);
+  return suffix !== "" && allowedImageTypes.includes(suffix);
 }
-function isDoc(f: { name: string }) {
-  return allowedFileTypes.includes(getSuffix(f));
+function isDoc(f: { name?: string }) {
+  const suffix = getSuffix(f);
+  return suffix !== "" && allowedFileTypes.includes(suffix);
 }
-
 
 function preprocessUpload(
   newFiles: File[],
@@ -250,7 +293,7 @@ export interface SendMessageParams {
   /** When true, the payload will include run_in_background=true and the task center badge will increment. */
   run_in_background?: boolean;
   /** Structured answers from an AskCard submission; forwarded to the backend as ask_answers_structured. */
-  ask_answers_structured?: import('@/modules/chat/components/AskCard').AskAnswersStructured;
+  ask_answers_structured?: import("@/modules/chat/components/AskCard").AskAnswersStructured;
 }
 
 interface ChatInputProps {
@@ -338,7 +381,11 @@ const SendButton: React.FC<SendButtonProps> = ({
       disabled={isDisabled}
       aria-label={isStopMode ? stopLabel : sendLabel}
     >
-      {isStopMode ? <span className="stop-icon" aria-hidden="true" /> : <SendIcon />}
+      {isStopMode ? (
+        <span className="stop-icon" aria-hidden="true" />
+      ) : (
+        <SendIcon />
+      )}
     </button>
   );
 };
@@ -390,7 +437,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const textAreaRef = useRef<any>(null);
     const isComposingRef = useRef(false);
     const [isUploading, setIsUploading] = useState(false);
-    const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<string | null>(null);
+    const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<
+      string | null
+    >(null);
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
@@ -603,7 +652,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const isSendDisabled =
       disabled || isPromptPolishing || !value?.trim() || isUploading;
     const shouldShowPromptSuggestions =
-      showPromptSuggestions && !disabled && !isStreaming && value.trim().length > 0;
+      showPromptSuggestions &&
+      !disabled &&
+      !isStreaming &&
+      value.trim().length > 0;
 
     useEffect(() => {
       setTimeout(() => onHeightChange?.(), 0);
@@ -754,7 +806,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
           if (invalidFiles.length > 0) {
             message.warning(
-              t("chat.unsupportedFileType", { types: allowedUploadTypes.join(",") }),
+              t("chat.unsupportedFileType", {
+                types: allowedUploadTypes.join(","),
+              }),
             );
           }
 
@@ -880,9 +934,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 ref={textAreaRef}
                 autoSize={{ minRows: 2, maxRows: 5 }}
                 className="message-input"
-                placeholder={
-                  placeholder || t("chat.inputPlaceholder")
-                }
+                placeholder={placeholder || t("chat.inputPlaceholder")}
                 value={value}
                 onChange={(e) => handleInputChange(e.target.value)}
                 onPaste={handlePaste}
@@ -963,7 +1015,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         ? `config-reset-${configResetKey}`
                         : undefined
                     }
-                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
+                    conversationId={
+                      sessionId && !sessionId.startsWith("temp_")
+                        ? sessionId
+                        : undefined
+                    }
                     initialSettings={initialPluginSettings}
                     hasPluginSession={hasPluginSession}
                     onSave={onPluginSettingsChange}
@@ -985,7 +1041,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       onBeforeAddFiles={onBeforeAddFiles}
                       disabled={disabled || isPromptPolishing}
                       disabledReason={
-                        isPromptPolishing ? t("chat.promptPolishing") : disabledReason
+                        isPromptPolishing
+                          ? t("chat.promptPolishing")
+                          : disabledReason
                       }
                       icon={
                         <Badge
@@ -1009,7 +1067,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       <Button
                         size="small"
                         type="text"
-                        style={{ fontSize: 12, color: '#888', padding: '0 4px' }}
+                        style={{
+                          fontSize: 12,
+                          color: "#888",
+                          padding: "0 4px",
+                        }}
                         disabled={isSendDisabled || isStreaming}
                         onClick={() => {
                           if (isSendDisabled || isStreaming) return;
@@ -1066,7 +1128,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 <button
                   type="button"
                   className={`prompt-suggestion-item${
-                    polishingSuggestionKey === suggestion.key ? " is-loading" : ""
+                    polishingSuggestionKey === suggestion.key
+                      ? " is-loading"
+                      : ""
                   }`}
                   key={suggestion.key}
                   disabled={isPromptPolishing}
@@ -1099,12 +1163,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           ref={promptRef}
           onSelectPrompt={(prompt) => onChange(text + " " + prompt)}
         />
-        <BatchChatComponent
-          ref={batchChatRef}
-          cancelFn={() => {
-
-          }}
-        />
+        <BatchChatComponent ref={batchChatRef} cancelFn={() => {}} />
       </div>
     );
   },

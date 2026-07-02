@@ -507,19 +507,22 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                           placement="bottomRight"
                           content={
                             <div style={{ minWidth: 140 }}>
-                              <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 12, color: '#666' }}>筛选对话类型</div>
+                              <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 12, color: '#666' }}>{t("chat.filterConversationType")}</div>
                               <Checkbox.Group
                                 value={convTypeFilter}
                                 onChange={(vals) => {
                                   const next = vals as string[];
+                                  if (next.length === 0) {
+                                    message.warning(t("chat.selectAtLeastOneConvType"));
+                                    return;
+                                  }
                                   setConvTypeFilter(next);
                                   getHistory({ isFirst: true, filterOverride: next, searchText: keyword });
-                                  setFilterPopoverOpen(false);
                                 }}
                                 style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
                               >
-                                <Checkbox value="normal">普通对话</Checkbox>
-                                <Checkbox value="task">Task 对话</Checkbox>
+                                <Checkbox value="normal">{t("chat.normalConversation")}</Checkbox>
+                                <Checkbox value="task">{t("chat.taskConversation")}</Checkbox>
                               </Checkbox.Group>
                             </div>
                           }

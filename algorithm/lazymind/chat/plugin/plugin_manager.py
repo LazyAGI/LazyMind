@@ -26,7 +26,6 @@ import lazyllm
 from lazyllm.tools.agent.base import _write_agent_data
 
 from lazymind.chat.plugin import plugin_loader
-from lazymind.chat.engine.tools.infra import handle_tool_errors
 
 
 # ---------------------------------------------------------------------------
@@ -141,11 +140,11 @@ def _trigger_plugin_step(
         # receives meaningful context even when the LLM omits user_input.
         user_input = cfg.get('query', '').strip()
     if not user_input:
-        return 'Error: user_input must not be empty.'
+        raise ValueError('user_input must not be empty.')
 
     sm = plugin_loader.get_state_machine(plugin_id)
     if sm is None:
-        return f'Error: plugin {plugin_id!r} not found.'
+        raise ValueError(f'plugin {plugin_id!r} not found.')
 
     current_step: str = cfg.get('plugin_step', '')
     if not sm.is_reachable(current_step, step_id):
@@ -154,8 +153,8 @@ def _trigger_plugin_step(
         if step_id in ancestors:
             succeeded = _fetch_succeeded_steps(session_id)
             if step_id not in succeeded:
-                return (
-                    f'Error: step {step_id!r} is an ancestor of {current_step!r} '
+                raise ValueError(
+                    f'step {step_id!r} is an ancestor of {current_step!r} '
                     f'but has not succeeded in this session yet. '
                     f'Run it first before rewinding.'
                 )
@@ -163,8 +162,8 @@ def _trigger_plugin_step(
         else:
             reachable = sm.get_reachable_steps(current_step)
             current_label = repr(current_step) if current_step else "'__start__'"
-            return (
-                f'Error: step {step_id!r} is not reachable from '
+            raise ValueError(
+                f'step {step_id!r} is not reachable from '
                 f'{current_label}. '
                 f'Reachable steps: {reachable}.'
             )
@@ -272,7 +271,7 @@ def _trigger_plugin_end(plugin_id: str) -> str:
     cfg = _agentic_config()
     session_id: str = cfg.get('plugin_session_id', '')
     if not session_id:
-        return 'Error: no active plugin session to complete.'
+        raise ValueError('no active plugin session to complete.')
     task_id = str(uuid.uuid4())
     _write_agent_data(
         'task_created',
@@ -343,11 +342,10 @@ def build_cold_start_tools() -> List[Any]:
             def _trigger(user_input: str) -> str:
                 step_id = first[0] if first else ''
                 if not step_id:
-                    return f'Error: plugin {plugin_id!r} has no reachable first step.'
+                    raise ValueError(f'plugin {plugin_id!r} has no reachable first step.')
                 return _trigger_plugin_step(plugin_id, step_id, user_input, is_cold_start=True)
 
-            # Set __name__ before wrapping so handle_tool_errors guard checks the
-            # final public name (trigger_<plugin_id>), not the inner closure name.
+            # Set __name__ so the framework guard and logging use the public tool name.
             _trigger.__name__ = tool_name
             if when_to_use:
                 tool_desc = f'{when_to_use.rstrip(".")}.  ({desc.rstrip(".")})'
@@ -366,7 +364,7 @@ def build_cold_start_tools() -> List[Any]:
                 'Returns:\n'
                 '    Confirmation that the plugin was started.'
             )
-            return handle_tool_errors(_trigger)
+            return _trigger
 
         tools.append(_make_trigger(pid, first_steps, desc, when_to_use))
     return tools
@@ -392,7 +390,6 @@ def build_advance_step_and_hand_off_tool(
 
     choices_doc = _build_step_choices_doc(forward, rewind, labels)
 
-    @handle_tool_errors
     def advance_step_and_hand_off(
         step_id: str,
         user_input: str,
@@ -415,8 +412,8 @@ def build_advance_step_and_hand_off_tool(
         if step_id == '__end__':
             return _trigger_plugin_end(plugin_id)
         if step_id not in all_reachable:
-            return (
-                f'Error: step {step_id!r} is not reachable from '
+            raise ValueError(
+                f'step {step_id!r} is not reachable from '
                 f'{current_step!r}. Reachable: {all_reachable}.'
             )
         return _trigger_plugin_step(
@@ -431,16 +428,27 @@ def build_advance_step_and_hand_off_tool(
         'The step runs in the background. Use this as the default advancement tool.\n'
         'Only use `advance_step` (synchronous) when you need intermediate step results\n'
         'within a single turn (e.g. user said "re-run steps 1 through 3").\n\n'
-        '## Completing the plugin\n\n'
-        'Call with step_id="__end__" when the final step has succeeded.\n\n'
+        '## Intent-change rewind (MUST read before advancing)\n\n'
+        'If the user expresses dissatisfaction with or changes to the result of a step that\n'
+        'has ALREADY SUCCEEDED, you MUST rewind to the earliest affected step instead of\n'
+        'advancing the next forward step.\n\n'
+        'Examples:\n'
+        '  User: "我不喜欢日系风格，改成北欧简约风" → the style was set in an earlier step\n'
+        '    → advance_step_and_hand_off(step_id=<that_step>, rewind=True,\n'
+        '        user_input="北欧简约风格，...")\n'
+        '  User: "不要树，改成蓝天白云" → subject was defined in analyze_subject\n'
+        '    → advance_step_and_hand_off(step_id="analyze_subject", rewind=True,\n'
+        '        user_input="主体：蓝天白云...")\n\n'
         '## Checkpoint-Resume (interrupted steps)\n\n'
         'When the user says "继续" and the step was interrupted (not "重试"):\n'
-        '  advance_step_and_hand_off(step_id=..., runtime_instruction=(\n'
+        '  advance_step_and_hand_off(step_id=<current_step>, runtime_instruction=(\n'
         '    "Previous attempt was interrupted. Check existing artifacts for this step "\n'
         '    "and only produce missing outputs (resume from checkpoint). "\n'
         '    "Do not regenerate already-saved artifacts."))\n'
         'When the user says "重试": advance_step_and_hand_off(step_id=..., rewind=True)\n'
         '  (rewind=True discards previous partial artifacts and restarts the step from scratch)\n\n'
+        '## Completing the plugin\n\n'
+        'Call with step_id="__end__" when the final step has succeeded.\n\n'
         '## Rewind guidance\n\n'
         'If the DriverAgent or user indicates a prior step produced bad output, rewind by\n'
         'passing its step_id. Rewind-eligible steps are listed in the "Rewind" section below.\n\n'
@@ -478,7 +486,6 @@ def build_advance_step_tool(
 
     choices_doc = _build_step_choices_doc(forward, rewind, labels)
 
-    @handle_tool_errors
     def advance_step(
         step_id: str,
         user_input: str,
@@ -495,8 +502,8 @@ def build_advance_step_tool(
         if step_id == '__end__':
             return _trigger_plugin_end(plugin_id)
         if step_id not in all_reachable:
-            return (
-                f'Error: step {step_id!r} is not reachable from '
+            raise ValueError(
+                f'step {step_id!r} is not reachable from '
                 f'{current_step!r}. Reachable: {all_reachable}.'
             )
         result = _trigger_plugin_step(
@@ -567,7 +574,6 @@ def build_update_intent_tool() -> Any:
     UPSERT a global or step-level intent/constraint. Plugin-agnostic — the
     framework manages this, not the plugin author.
     """
-    @handle_tool_errors
     def update_intent(
         scope: str,
         content: str,
@@ -603,11 +609,11 @@ def build_update_intent_tool() -> Any:
         cfg = _agentic_config()
         session_id = cfg.get('plugin_session_id', '')
         if not session_id:
-            return 'Error: no active plugin session.'
+            raise ValueError('no active plugin session.')
         if scope not in ('session', 'step'):
-            return f'Error: unknown scope {scope!r}. Use "session" or "step".'
+            raise ValueError(f'unknown scope {scope!r}. Use "session" or "step".')
         if scope == 'step' and not step_id:
-            return 'Error: step_id required for scope="step".'
+            raise ValueError('step_id required for scope="step".')
         # Emit via SSE so Go writes the DB and pushes an intent_updated convEvent
         # to notify the frontend immediately — avoids the user having to refresh.
         _write_agent_data('intent_updated', **{
@@ -630,7 +636,6 @@ def build_update_intent_tool() -> Any:
 def build_query_tools() -> List[Any]:
     """Build read-only plugin state query tools for ChatAgent."""
 
-    @handle_tool_errors
     def list_plugin_steps(session_id: Optional[str] = None) -> str:
         """List all steps and their current status in the active plugin session.
 
@@ -681,7 +686,6 @@ def build_query_tools() -> List[Any]:
         except Exception as exc:
             return f'Error querying steps: {exc}'
 
-    @handle_tool_errors
     def get_step_result(step_id: str) -> str:
         """Return the artifact summary for a specific step.
 
@@ -704,7 +708,6 @@ def build_query_tools() -> List[Any]:
         except Exception as exc:
             return f'Error fetching step result: {exc}'
 
-    @handle_tool_errors
     def get_failed_steps() -> str:
         """Return all failed steps with their error messages.
 
@@ -840,8 +843,11 @@ def resolve_plugin_injection(
             if sm and p_session_id and p_current_step:
                 ancestors = sm.get_ancestors(p_current_step)
                 succeeded = _fetch_succeeded_steps(p_session_id)
-                candidates = ancestors | {p_current_step}
-                rewind_steps = sorted(candidates & succeeded)
+                # Only ancestors (not current_step itself) are rewind candidates.
+                # current_step is the "pending" step for this turn and is shown
+                # separately in the step-status context; including it in rewind
+                # would mislead the LLM into thinking it has already succeeded.
+                rewind_steps = sorted(ancestors & succeeded)
 
             step_labels: Dict[str, str] = {}
             spec = plugin_loader.get_plugin(p_plugin_id)
@@ -888,6 +894,14 @@ def resolve_plugin_injection(
             intent_section = _build_intent_section(p_session_id, step_id=p_current_step)
             if intent_section:
                 plugin_artifact_context = (plugin_artifact_context + '\n\n' + intent_section).strip()
+
+            # Inject authoritative step execution status (user-turn injection).
+            step_status_section = _build_step_status_section(
+                p_plugin_id, p_session_id, p_current_step,
+                rewind_steps, step_labels=step_labels,
+            )
+            if step_status_section:
+                plugin_artifact_context = (plugin_artifact_context + '\n\n' + step_status_section).strip()
 
             # Append mode-specific system prompt guidance.
             sm_for_mode = plugin_loader.get_state_machine(p_plugin_id)
@@ -973,11 +987,89 @@ def _build_intent_section(session_id: str, step_id: Optional[str] = None) -> str
         return ''
 
 
+def _build_step_status_section(
+    plugin_id: str,
+    session_id: str,
+    current_step: str,
+    rewind_steps: List[str],
+    step_labels: Optional[Dict[str, str]] = None,
+) -> str:
+    # Build an authoritative snapshot of the pipeline execution state for this turn.
+    # Injected into the user-turn prefix (not the system prompt) so it always reflects
+    # the live DB state and overrides any stale information in chat history.
+    if not session_id or not plugin_id:
+        return ''
+    try:
+        labels = step_labels or {}
+
+        def _label(sid: str) -> str:
+            lbl = labels.get(sid, '')
+            return f'{sid} ({lbl})' if lbl else sid
+
+        sm = plugin_loader.get_state_machine(plugin_id)
+        succeeded = _fetch_succeeded_steps(session_id) if session_id else set()
+
+        lines = ['## Plugin Step Status [AUTHORITATIVE — queried at request time]']
+        lines.append('> Any step-status information in the conversation history is OUTDATED. Use only this section.')
+
+        if current_step:
+            lines.append(f'\nCurrent step (pending execution this turn): **{_label(current_step)}**')
+        else:
+            lines.append('\nCurrent step: pipeline not yet started')
+
+        if succeeded:
+            sm_steps = list(sm._transitions.keys()) if sm else []
+            ordered = [s for s in sm_steps if s not in sm._RESERVED and s in succeeded]
+            unordered = sorted(succeeded - set(ordered))
+            all_succeeded = ordered + unordered
+            lines.append('Succeeded steps (in execution order): ' + ', '.join(_label(s) for s in all_succeeded))
+        else:
+            lines.append('Succeeded steps: none yet')
+
+        if rewind_steps:
+            lines.append('Rewind-eligible steps (already succeeded, can be re-run): '
+                         + ', '.join(_label(s) for s in rewind_steps))
+
+        if sm and current_step:
+            forward = [s for s in sm.get_reachable_steps(current_step) if s not in sm._RESERVED]
+            if forward:
+                lines.append('Next forward steps (after current_step succeeds): '
+                             + ', '.join(_label(s) for s in forward))
+
+        return '\n'.join(lines)
+    except Exception:
+        return ''
+
+
 def _build_mode_guidance(
         plugin_mode: str,
         terminal_steps: Optional[List[str]] = None,
         step_labels: Optional[Dict[str, str]] = None) -> str:
     """Return mode-specific system prompt instructions appended to the scenario."""
+    # --- Global decision rules (apply to both auto and dynamic modes) ---
+    global_rules = (
+        '\n\n## Step decision rules (READ BEFORE EVERY ACTION)\n\n'
+        '### Rule 1 — Intent-change detection (highest priority)\n'
+        'Before advancing any step, check whether the user is rejecting or changing\n'
+        'the outcome of a step that has ALREADY SUCCEEDED. Signals include:\n'
+        '  - Direct negation: "我不喜欢…", "换成…", "不要…", "重新…", "I don\'t like…"\n'
+        '  - Implicit correction: user describes a different style/subject/content\n'
+        '    than what the current artifacts reflect.\n'
+        'If intent has changed, identify the EARLIEST step whose output is now\n'
+        'invalidated and rewind to that step using `advance_step_and_hand_off` with\n'
+        '`step_id=<affected_step>` and `rewind=True` (clears that step\'s artifacts\n'
+        'and re-runs from scratch). Do NOT continue to the next forward step.\n\n'
+        '### Rule 2 — Step order enforcement\n'
+        'Steps MUST be executed in the order defined by the pipeline. You may only\n'
+        'execute `current_step` or rewind to a rewind-eligible step. The next forward\n'
+        'step becomes available only AFTER `current_step` succeeds.\n'
+        'Never skip steps — do not call a downstream step while an upstream step is\n'
+        'still pending.\n\n'
+        '### Rule 3 — "继续" interpretation\n'
+        'When the user says "继续" (or similar) with no other context, advance\n'
+        '`current_step` (the pending step shown in the step-status block). Do NOT\n'
+        'jump ahead to a later step, even if earlier steps already have artifacts.\n'
+    )
     common = (
         '\n\n## Plugin execution guidance\n\n'
         'Tools for step advancement:\n'
@@ -1028,4 +1120,4 @@ def _build_mode_guidance(
             'Do not ask the user questions during step execution in auto mode '
             'unless the user explicitly requests it.'
         )
-    return common
+    return global_rules + common

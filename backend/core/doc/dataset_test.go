@@ -48,6 +48,35 @@ func testParseDatasetIDs(t *testing.T, raw json.RawMessage) []string {
 	return ids
 }
 
+func TestListAlgosUsesDocServerAlgorithmsEndpoint(t *testing.T) {
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/algo/list" {
+			t.Errorf("unexpected algo request path %q", r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"code":404,"msg":"not found"}`), nil
+		}
+		return testJSONResponse(http.StatusOK, `{"code":200,"msg":"success","data":{"items":[{"algo_id":"general","display_name":"General","description":"General algo"}]}}`), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/dataset/algos", nil)
+	rec := httptest.NewRecorder()
+
+	ListAlgos(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp ListAlgosResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Algos) != 1 || resp.Algos[0].AlgoID != "general" || resp.Algos[0].DisplayName != "General" {
+		t.Fatalf("unexpected algos response: %#v", resp.Algos)
+	}
+}
+
 func TestListDatasetsKeywordMatchesTags(t *testing.T) {
 	db := newDocumentTestDB(t)
 	if err := db.AutoMigrate(&orm.DefaultDataset{}); err != nil {
@@ -205,13 +234,42 @@ func TestCreateDatasetRejectsReservedDisplayNamePrefixes(t *testing.T) {
 	}
 }
 
+func TestCreateDatasetRejectsInvalidDisplayNames(t *testing.T) {
+	newDocumentTestDB(t)
+	called := false
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		called = true
+		return testJSONResponse(http.StatusInternalServerError, `{"message":"unexpected call"}`), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+
+	for _, name := range []string{"", "Bad Name", "Bad/Name", " Knowledge", "知识库🙂", strings.Repeat("a", 101)} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/core/datasets", strings.NewReader(`{"display_name":`+strconv.Quote(name)+`}`))
+			req.Header.Set("X-User-Id", "user-123")
+			rec := httptest.NewRecorder()
+
+			CreateDataset(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+	if called {
+		t.Fatalf("algo service must not be called for invalid display names")
+	}
+}
+
 func TestCreateDatasetRejectsDuplicateDisplayNameForSameUser(t *testing.T) {
 	db := newDocumentTestDB(t)
 	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	if err := db.Create(&orm.Dataset{
 		ID:           "ds-existing",
 		KbID:         "kb-existing",
-		DisplayName:  "Duplicate Name",
+		DisplayName:  "Duplicate_Name",
 		Desc:         "existing",
 		DatasetState: 0,
 		ShareType:    0,
@@ -236,7 +294,7 @@ func TestCreateDatasetRejectsDuplicateDisplayNameForSameUser(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = prevTransport })
 	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets", strings.NewReader(`{"display_name":"Duplicate Name"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets", strings.NewReader(`{"display_name":"Duplicate_Name"}`))
 	req.Header.Set("X-User-Id", "user-123")
 	req.Header.Set("X-User-Name", "Alice")
 	rec := httptest.NewRecorder()
@@ -264,7 +322,7 @@ func TestCreateDatasetAllowsSameDisplayNameForDifferentUsers(t *testing.T) {
 	if err := db.Create(&orm.Dataset{
 		ID:           "ds-existing",
 		KbID:         "kb-existing",
-		DisplayName:  "Shared Name",
+		DisplayName:  "Shared_Name",
 		Desc:         "existing",
 		DatasetState: 0,
 		ShareType:    0,
@@ -295,7 +353,7 @@ func TestCreateDatasetAllowsSameDisplayNameForDifferentUsers(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = prevTransport })
 	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets?dataset_id=ds_new", strings.NewReader(`{"display_name":"Shared Name","algo":{"algo_id":"general_algo"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets?dataset_id=ds_new", strings.NewReader(`{"display_name":"Shared_Name","algo":{"algo_id":"general_algo"}}`))
 	req.Header.Set("X-User-Id", "user-123")
 	req.Header.Set("X-User-Name", "Alice")
 	rec := httptest.NewRecorder()
@@ -309,7 +367,7 @@ func TestCreateDatasetAllowsSameDisplayNameForDifferentUsers(t *testing.T) {
 	if err := db.First(&row, "id = ?", "ds_new").Error; err != nil {
 		t.Fatalf("query created dataset: %v", err)
 	}
-	if row.DisplayName != "Shared Name" || row.CreateUserID != "user-123" {
+	if row.DisplayName != "Shared_Name" || row.CreateUserID != "user-123" {
 		t.Fatalf("unexpected created dataset: %#v", row)
 	}
 }
@@ -378,14 +436,23 @@ func TestDeleteDatasetRemovesEvalSetDatasetReferences(t *testing.T) {
 
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/v1/kbs/kb-delete" {
-			t.Errorf("unexpected algo request %s %q", r.Method, r.URL.Path)
+		if r.Method != http.MethodDelete {
+			t.Errorf("unexpected method %s for %q", r.Method, r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
 		}
-		return testJSONResponse(http.StatusOK, `{}`), nil
+		switch r.URL.Path {
+		case "/api/scan/internal/sources/by-dataset/ds-delete":
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		case "/v1/kbs/kb-delete":
+			return testJSONResponse(http.StatusOK, `{}`), nil
+		default:
+			t.Errorf("unexpected delete path %q", r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
 	})
 	t.Cleanup(func() { http.DefaultTransport = prevTransport })
 	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/core/datasets/ds-delete", nil)
 	req = mux.SetURLVars(req, map[string]string{"dataset": "ds-delete"})
@@ -420,13 +487,132 @@ func TestDeleteDatasetRemovesEvalSetDatasetReferences(t *testing.T) {
 	}
 }
 
+func TestDeleteDatasetDeletesScanSourceFirst(t *testing.T) {
+	db := newDocumentTestDB(t)
+	now := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
+	if err := db.Create(&orm.Dataset{
+		ID:           "ds-delete",
+		KbID:         "kb-delete",
+		DisplayName:  "delete me",
+		DatasetState: 0,
+		ShareType:    0,
+		Type:         1,
+		Ext:          json.RawMessage(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-123",
+			CreateUserName: "Alice",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create dataset: %v", err)
+	}
+
+	var calls []string
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("unexpected method %s for %q", r.Method, r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+		calls = append(calls, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/scan/internal/sources/by-dataset/ds-delete":
+			return testJSONResponse(http.StatusOK, `{}`), nil
+		case "/v1/kbs/kb-delete":
+			return testJSONResponse(http.StatusOK, `{}`), nil
+		default:
+			t.Errorf("unexpected delete path %q", r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/core/datasets/ds-delete", nil)
+	req = mux.SetURLVars(req, map[string]string{"dataset": "ds-delete"})
+	req.Header.Set("X-User-Id", "user-123")
+	rec := httptest.NewRecorder()
+
+	DeleteDataset(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := strings.Join(calls, ","); got != "/api/scan/internal/sources/by-dataset/ds-delete,/v1/kbs/kb-delete" {
+		t.Fatalf("unexpected external delete order: %q", got)
+	}
+	var row orm.Dataset
+	if err := db.First(&row, "id = ?", "ds-delete").Error; err != nil {
+		t.Fatalf("query deleted dataset: %v", err)
+	}
+	if row.DeletedAt == nil {
+		t.Fatalf("expected dataset to be soft deleted")
+	}
+}
+
+func TestDeleteDatasetContinuesWhenScanSourceMissing(t *testing.T) {
+	db := newDocumentTestDB(t)
+	now := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
+	if err := db.Create(&orm.Dataset{
+		ID:           "ds-delete",
+		KbID:         "kb-delete",
+		DisplayName:  "delete me",
+		DatasetState: 0,
+		ShareType:    0,
+		Type:         1,
+		Ext:          json.RawMessage(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-123",
+			CreateUserName: "Alice",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create dataset: %v", err)
+	}
+
+	var calls []string
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls = append(calls, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/scan/internal/sources/by-dataset/ds-delete":
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		case "/v1/kbs/kb-delete":
+			return testJSONResponse(http.StatusOK, `{}`), nil
+		default:
+			t.Errorf("unexpected delete path %q", r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/core/datasets/ds-delete", nil)
+	req = mux.SetURLVars(req, map[string]string{"dataset": "ds-delete"})
+	req.Header.Set("X-User-Id", "user-123")
+	rec := httptest.NewRecorder()
+
+	DeleteDataset(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := strings.Join(calls, ","); got != "/api/scan/internal/sources/by-dataset/ds-delete,/v1/kbs/kb-delete" {
+		t.Fatalf("unexpected external delete order: %q", got)
+	}
+}
+
 func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	db := newDocumentTestDB(t)
 	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	if err := db.Create(&orm.Dataset{
 		ID:           "ds-update",
 		KbID:         "kb-update",
-		DisplayName:  "old name",
+		DisplayName:  "old_name",
 		DatasetState: 0,
 		ShareType:    0,
 		Type:         1,
@@ -444,7 +630,7 @@ func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	var got kbUpdateRequest
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/v1/kbs/kb-update/update" {
+		if r.URL.Path != "/v1/kbs/kb-update" {
 			t.Errorf("unexpected algo request path %q", r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
 		}
@@ -457,7 +643,7 @@ func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = prevTransport })
 	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/core/datasets/ds-update", strings.NewReader(`{"display_name":"new name"}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/core/datasets/ds-update", strings.NewReader(`{"display_name":"new_name"}`))
 	req = mux.SetURLVars(req, map[string]string{"dataset": "ds-update"})
 	req.Header.Set("X-User-Id", "user-123")
 	req.Header.Set("X-User-Name", "Alice")
@@ -468,37 +654,60 @@ func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if got.DisplayName == nil || *got.DisplayName != "user@user-123@new name" {
+	if got.DisplayName == nil || *got.DisplayName != "user@user-123@new_name" {
 		t.Fatalf("expected namespaced algo display name, got %#v", got.DisplayName)
 	}
 	var row orm.Dataset
 	if err := db.First(&row, "id = ?", "ds-update").Error; err != nil {
 		t.Fatalf("query updated dataset: %v", err)
 	}
-	if row.DisplayName != "new name" {
+	if row.DisplayName != "new_name" {
 		t.Fatalf("core dataset display name should stay unchanged, got %q", row.DisplayName)
 	}
 }
 
-func TestParseDatasetScanManaged(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		ext  json.RawMessage
-		want bool
-	}{
-		{name: "explicit flag", ext: json.RawMessage(`{"scan_managed":true}`), want: true},
-		{name: "legacy scan tag", ext: json.RawMessage(`{"tags":["scan"]}`), want: true},
-		{name: "not scan managed", ext: json.RawMessage(`{"tags":["manual"]}`), want: false},
+func TestUpdateDatasetRejectsInvalidDisplayName(t *testing.T) {
+	db := newDocumentTestDB(t)
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	if err := db.Create(&orm.Dataset{
+		ID:           "ds-update-invalid",
+		KbID:         "kb-update-invalid",
+		DisplayName:  "old_name",
+		DatasetState: 0,
+		ShareType:    0,
+		Type:         1,
+		Ext:          json.RawMessage(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-123",
+			CreateUserName: "Alice",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create dataset: %v", err)
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := parseDatasetScanManaged(tc.ext); got != tc.want {
-				t.Fatalf("expected %v, got %v", tc.want, got)
-			}
-		})
+	called := false
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		called = true
+		return testJSONResponse(http.StatusInternalServerError, `{"message":"unexpected call"}`), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/core/datasets/ds-update-invalid", strings.NewReader(`{"display_name":"new name"}`))
+	req = mux.SetURLVars(req, map[string]string{"dataset": "ds-update-invalid"})
+	req.Header.Set("X-User-Id", "user-123")
+	rec := httptest.NewRecorder()
+
+	UpdateDataset(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if called {
+		t.Fatalf("algo service must not be called for invalid display names")
 	}
 }
 

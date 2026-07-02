@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,7 +117,7 @@ func TestCreateSourceQueuesLocalWatcherStartForManualBinding(t *testing.T) {
 		CallerID:  "user-1",
 		TenantID:  "tenant-1",
 		RequestID: "request-1",
-		Name:      "Local Docs",
+		Name:      "Local_Docs",
 		Bindings: []BindingInput{{
 			ConnectorType: connector.ConnectorType(localFSConnectorType),
 			TargetType:    connector.TargetType(localFSTargetType),
@@ -337,6 +338,36 @@ func TestCreateSourceRejectsInvalidSchedulePolicyAsInvalidRequest(t *testing.T) 
 	assertSourceErrorCode(t, err, ErrCodeInvalidRequest)
 	if len(core.datasetRequests) != 0 {
 		t.Fatalf("invalid request should not create core dataset, got %+v", core.datasetRequests)
+	}
+}
+
+func TestCreateSourceRejectsInvalidNames(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"", "Bad Name", "Bad/Name", " Docs", "知识库🙂", strings.Repeat("a", 101)} {
+		t.Run(name, func(t *testing.T) {
+			now := fixedSourceTestTime()
+			repo := newSourceEngineRepoStub()
+			core := &sourceCoreSpy{}
+			engine := newTestSourceEngine(t, repo, core, &sourceSpyConnector{}, now)
+
+			_, err := engine.CreateSource(context.Background(), CreateSourceRequest{
+				CallerID:  "user-1",
+				TenantID:  "tenant-1",
+				RequestID: "request-1",
+				Name:      name,
+				Bindings: []BindingInput{{
+					ConnectorType: spyConnectorType,
+					TargetType:    spyTargetType,
+					TargetRef:     "target-1",
+					SyncMode:      SyncModeManual,
+				}},
+			})
+			assertSourceErrorCode(t, err, ErrCodeInvalidRequest)
+			if len(core.datasetRequests) != 0 {
+				t.Fatalf("invalid source name should not create core dataset, got %+v", core.datasetRequests)
+			}
+		})
 	}
 }
 
@@ -657,7 +688,7 @@ func TestCreateSourceIdempotencyReplaysSameRequestAndRejectsDrift(t *testing.T) 
 	}
 
 	drifted := req
-	drifted.Name = "Different Docs"
+	drifted.Name = "Different_Docs"
 	_, err = engine.CreateSource(context.Background(), drifted)
 	assertSourceErrorCode(t, err, ErrCodeIdempotencyKeyReused)
 	if len(core.createdDatasets) != 1 || len(core.createdFolders) != 1 || len(repo.createRecords) != 1 {
@@ -1359,6 +1390,91 @@ func TestDeleteBindingQueuesLocalWatcherStop(t *testing.T) {
 	}
 }
 
+func TestDeleteSourceByDatasetIDSkipsCoreDatasetDelete(t *testing.T) {
+	t.Parallel()
+
+	now := fixedSourceTestTime()
+	repo := newSourceEngineRepoStub()
+	repo.sources["source-1"] = store.Source{
+		SourceID:  "source-1",
+		TenantID:  "tenant-1",
+		CreatedBy: "user-1",
+		Name:      "Docs",
+		DatasetID: "dataset-1",
+		Status:    SourceStatusActive,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:            "binding-1",
+		SourceID:             "source-1",
+		ConnectorType:        localFSConnectorType,
+		TargetType:           localFSTargetType,
+		TargetRef:            "/workspace/docs",
+		AgentID:              "agent-1",
+		CoreParentDocumentID: "folder-1",
+		Status:               BindingStatusActive,
+	}}
+	core := &sourceCoreSpy{}
+	engine := newTestSourceEngine(t, repo, core, &sourceSpyConnector{}, now)
+
+	resp, err := engine.DeleteSourceByDatasetID(context.Background(), "dataset-1", DeleteSourceOptions{
+		SkipCoreDatasetDelete: true,
+	})
+	if err != nil {
+		t.Fatalf("delete source by dataset: %v", err)
+	}
+	if !resp.Deleted || resp.SourceID != "source-1" || resp.RemovedDatasetID != "dataset-1" {
+		t.Fatalf("unexpected delete response: %+v", resp)
+	}
+	if !reflect.DeepEqual(resp.RemovedBindingIDs, []string{"binding-1"}) {
+		t.Fatalf("expected removed binding id, got %v", resp.RemovedBindingIDs)
+	}
+	if repo.sources["source-1"].Status != "DELETING" || repo.sources["source-1"].DeletedAt == nil {
+		t.Fatalf("source was not soft deleted: %+v", repo.sources["source-1"])
+	}
+	if repo.bindings["source-1"][0].Status != BindingStatusDeleting || repo.bindings["source-1"][0].DeletedAt == nil {
+		t.Fatalf("binding was not soft deleted: %+v", repo.bindings["source-1"][0])
+	}
+	if len(core.deletedFolders) != 1 || core.deletedFolders[0] != "folder-1" {
+		t.Fatalf("core folders should still be cleaned up, got %v", core.deletedFolders)
+	}
+	if len(core.deletedDatasets) != 0 {
+		t.Fatalf("core dataset delete should be skipped, got %v", core.deletedDatasets)
+	}
+	if len(repo.agentCommands) != 1 || repo.agentCommands[0].CommandType != agentCommandStopSource {
+		t.Fatalf("local watcher stop should still be queued, got %+v", repo.agentCommands)
+	}
+}
+
+func TestDeleteSourceDeletesCoreDatasetByDefault(t *testing.T) {
+	t.Parallel()
+
+	now := fixedSourceTestTime()
+	repo := newSourceEngineRepoStub()
+	repo.sources["source-1"] = store.Source{
+		SourceID:  "source-1",
+		CreatedBy: "user-1",
+		DatasetID: "dataset-1",
+		Status:    SourceStatusActive,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	core := &sourceCoreSpy{}
+	engine := newTestSourceEngine(t, repo, core, &sourceSpyConnector{}, now)
+
+	_, err := engine.DeleteSource(context.Background(), "source-1")
+	if err != nil {
+		t.Fatalf("delete source: %v", err)
+	}
+	if len(core.deletedDatasets) != 1 || core.deletedDatasets[0] != "dataset-1" {
+		t.Fatalf("core dataset should be deleted by default, got %v", core.deletedDatasets)
+	}
+	if len(core.datasetDeletes) != 1 || core.datasetDeletes[0].UserID != "user-1" {
+		t.Fatalf("core dataset delete should use source owner, got %+v", core.datasetDeletes)
+	}
+}
+
 func TestUpdateSourceWithBindingsUsesAtomicStoreContract(t *testing.T) {
 	t.Parallel()
 
@@ -1858,6 +1974,15 @@ func (r *sourceEngineRepoStub) GetSource(_ context.Context, sourceID string) (st
 	return src, nil
 }
 
+func (r *sourceEngineRepoStub) GetSourceByDatasetID(_ context.Context, datasetID string) (store.Source, error) {
+	for _, src := range r.sources {
+		if src.DatasetID == datasetID && src.DeletedAt == nil {
+			return src, nil
+		}
+	}
+	return store.Source{}, store.NewStoreError(store.ErrCodeSourceNotFound, "source not found")
+}
+
 func (r *sourceEngineRepoStub) UpdateSource(context.Context, store.Source) error {
 	panic("sourceEngineRepoStub.UpdateSource is not used by these tests")
 }
@@ -1888,8 +2013,26 @@ func (r *sourceEngineRepoStub) UpdateSourceWithBindings(_ context.Context, mutat
 	return result, nil
 }
 
-func (r *sourceEngineRepoStub) DeleteSource(context.Context, string, time.Time) (store.SourceDeleteResult, error) {
-	panic("sourceEngineRepoStub.DeleteSource is not used by these tests")
+func (r *sourceEngineRepoStub) DeleteSource(_ context.Context, sourceID string, deletedAt time.Time) (store.SourceDeleteResult, error) {
+	src, ok := r.sources[sourceID]
+	if !ok {
+		return store.SourceDeleteResult{}, store.NewStoreError(store.ErrCodeSourceNotFound, "source not found")
+	}
+	src.Status = "DELETING"
+	src.DeletedAt = applyDeletedAt(deletedAt)
+	src.UpdatedAt = deletedAt
+	r.sources[sourceID] = src
+
+	result := store.SourceDeleteResult{Source: src}
+	for _, binding := range r.bindings[sourceID] {
+		deleted, cleanup := r.markBindingDeleted(sourceID, binding.BindingID, deletedAt)
+		if deleted.BindingID == "" {
+			continue
+		}
+		result.Bindings = append(result.Bindings, deleted)
+		result.Cleanup.Add(cleanup)
+	}
+	return result, nil
 }
 
 func (r *sourceEngineRepoStub) ListBindings(_ context.Context, sourceID string) ([]store.Binding, error) {

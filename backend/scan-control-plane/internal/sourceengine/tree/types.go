@@ -48,6 +48,7 @@ type TreeNode struct {
 	UpdateType      string         `json:"update_type,omitempty"`
 	UpdateDesc      string         `json:"update_desc,omitempty"`
 	ProviderMeta    map[string]any `json:"provider_meta,omitempty"`
+	Children        []TreeNode     `json:"children,omitempty"`
 }
 
 type TreeNodePage struct {

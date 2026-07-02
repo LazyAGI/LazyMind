@@ -20,6 +20,7 @@ import (
 	"lazymind/core/skill"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/userprefs"
 	"lazymind/core/wordgroup"
 
 	"github.com/gorilla/mux"
@@ -214,6 +215,8 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- User Chat Settings (global plugin/subagent defaults) -----
 	handleAPI(r, "GET", "/user/chat-settings", []string{"qa.read"}, chat.GetChatSettings)
 	handleAPI(r, "PATCH", "/user/chat-settings", []string{"qa.write"}, chat.PatchChatSettings)
+	handleAPI(r, "GET", "/user/ui-preferences", []string{"qa.read"}, userprefs.GetUIPreferences)
+	handleAPI(r, "PATCH", "/user/ui-preferences", []string{"qa.write"}, userprefs.PatchUIPreferences)
 	handleAPI(r, "PATCH", "/conversations/{conversation_id}/plugin-settings", []string{"qa.write"}, chat.PatchConversationPluginSettings)
 
 	// ----- Plugin Sessions -----	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions", []string{"qa.read"}, plugin.ListConversationSessions)

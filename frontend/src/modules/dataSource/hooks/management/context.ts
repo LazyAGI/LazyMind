@@ -211,7 +211,7 @@ export interface ManagementContext {
   handleNextStep: () => void;
   handleSubmitManualOauthCallback: () => Promise<void>;
   openDetailPage: (record: DataSourceItem) => void;
-  handleDeleteSource: (record: DataSourceItem) => void;
+  executeDeleteSource: (record: DataSourceItem) => Promise<void>;
 
   // Save handlers (createSaveActions)
   handleSave: (saveMode?: DataSourceSaveMode) => Promise<void>;

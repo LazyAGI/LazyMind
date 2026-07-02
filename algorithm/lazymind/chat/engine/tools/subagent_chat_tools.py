@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 
 from lazymind.chat.engine.subagent.db import TaskQueryDB
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
+from lazymind.chat.engine.tools.infra import tool_success
 from lazyllm.tools.agent.base import _write_agent_data
 
 # How often to emit a heartbeat while polling in auto mode (seconds).
@@ -75,7 +75,6 @@ def _mode() -> str:
     return mode if mode in ('auto', 'manual') else 'auto'
 
 
-@handle_tool_errors
 def create_subagent(
     agent_type: str,
     title: str,
@@ -295,7 +294,6 @@ def _resolve_task(task_ref: str, tasks: List[Dict[str, Any]]) -> Optional[Dict[s
     return None
 
 
-@handle_tool_errors
 def save_plugin_artifact(
     artifact_key: str,
     value: Any,
@@ -400,7 +398,6 @@ def save_plugin_artifact(
         })
 
 
-@handle_tool_errors
 def list_subagents(status: Optional[str] = None) -> Dict[str, Any]:
     """List SubAgent tasks in the current conversation, optionally filtered by status.
 
@@ -424,7 +421,6 @@ def list_subagents(status: Optional[str] = None) -> Dict[str, Any]:
     return tool_success('list_subagents', {'status': 'ok', 'message': msg, 'tasks': tasks})
 
 
-@handle_tool_errors
 def get_subagent_status(task_ref: str) -> Dict[str, Any]:
     """Get the status of a SubAgent task.
 
@@ -447,7 +443,6 @@ def get_subagent_status(task_ref: str) -> Dict[str, Any]:
     return tool_success('get_subagent_status', {'status': 'ok', 'message': msg, 'task': task})
 
 
-@handle_tool_errors
 def list_subagent_artifacts(task_ref: str) -> Dict[str, Any]:
     """List the artifact keys produced by a SubAgent task.
 
@@ -470,7 +465,6 @@ def list_subagent_artifacts(task_ref: str) -> Dict[str, Any]:
     return tool_success('list_subagent_artifacts', {'status': 'ok', 'message': msg, 'keys': summary})
 
 
-@handle_tool_errors
 def get_subagent_artifacts(task_ref: str, keys: Optional[List[str]] = None) -> Dict[str, Any]:
     """Get the artifacts produced by a SubAgent task.
 

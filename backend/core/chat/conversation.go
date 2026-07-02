@@ -919,6 +919,62 @@ func conversationHistoryResponseItems(histories []orm.ChatHistory) []map[string]
 	return list
 }
 
+func filterConversationSearchConfigDatasetList(ctx context.Context, db *gorm.DB, searchCfg any) any {
+	sc, ok := searchCfg.(map[string]any)
+	if !ok || db == nil {
+		return searchCfg
+	}
+
+	rawList, ok := sc["dataset_list"].([]any)
+	if !ok || len(rawList) == 0 {
+		return searchCfg
+	}
+
+	ids := make([]string, 0, len(rawList))
+	for _, item := range rawList {
+		selector, _ := item.(map[string]any)
+		if selector == nil {
+			continue
+		}
+		id, _ := selector["id"].(string)
+		id = strings.TrimSpace(id)
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		sc["dataset_list"] = []any{}
+		return sc
+	}
+
+	var rows []orm.Dataset
+	if err := db.WithContext(ctx).
+		Select("id").
+		Where("id IN ? AND deleted_at IS NULL", ids).
+		Find(&rows).Error; err != nil {
+		return searchCfg
+	}
+
+	existing := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		existing[row.ID] = struct{}{}
+	}
+
+	filtered := make([]any, 0, len(rawList))
+	for _, item := range rawList {
+		selector, _ := item.(map[string]any)
+		if selector == nil {
+			continue
+		}
+		id, _ := selector["id"].(string)
+		if _, ok := existing[strings.TrimSpace(id)]; ok {
+			filtered = append(filtered, item)
+		}
+	}
+	sc["dataset_list"] = filtered
+	return sc
+}
+
 // GetConversationDetail text GET /api/v1/conversations/{name}:detail
 func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 	name := conversationNameFromPath(r)
@@ -931,8 +987,9 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 	if userID == "" {
 		userID = "0"
 	}
+	db := store.DB()
 	var c orm.Conversation
-	if err := store.DB().Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error; err != nil {
+	if err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "conversation not found", err), http.StatusNotFound)
 		return
 	}
@@ -940,6 +997,7 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 	var searchCfg any
 	if len(c.SearchConfig) > 0 {
 		_ = json.Unmarshal(c.SearchConfig, &searchCfg)
+		searchCfg = filterConversationSearchConfigDatasetList(r.Context(), db, searchCfg)
 	}
 	var models []string
 	if len(c.Models) > 0 {
@@ -949,7 +1007,6 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var likeCnt, unlikeCnt int64
-	db := store.DB()
 	db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 1).Count(&likeCnt)
 	db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 2).Count(&unlikeCnt)
 
