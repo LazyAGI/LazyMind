@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Form,
@@ -23,6 +23,7 @@ import type { SourceFormValues, SourceType, SyncMode } from "../../constants/typ
 import {
   buildTreeValuePathMap,
   collapseSelectedTreeValues,
+  collectTreeExpandableKeys,
   getTreeSelectLabelText,
   normalizeTreeSelectValues,
   type CollapsibleTreeNode,
@@ -77,8 +78,26 @@ export default function WizardConnectionStep({
 }: WizardConnectionStepProps) {
   const [localPathSearchValue, setLocalPathSearchValue] = useState("");
   const [feishuTargetSearchValue, setFeishuTargetSearchValue] = useState("");
+  const [feishuTargetExpandedKeys, setFeishuTargetExpandedKeys] = useState<
+    Array<string | number>
+  >([]);
   const [localPathBrowseKey, setLocalPathBrowseKey] = useState(0);
   const [feishuTargetBrowseKey, setFeishuTargetBrowseKey] = useState(0);
+
+  const isFeishuTargetSearching = Boolean(feishuTargetSearchValue.trim());
+
+  useEffect(() => {
+    if (!isFeishuTargetSearching) {
+      setFeishuTargetExpandedKeys([]);
+      return;
+    }
+    if (feishuTargetLoading) {
+      return;
+    }
+    setFeishuTargetExpandedKeys(
+      collectTreeExpandableKeys(feishuTargetTreeData as CollapsibleTreeNode[]),
+    );
+  }, [feishuTargetTreeData, feishuTargetLoading, isFeishuTargetSearching]);
 
   const localPathValue = Form.useWatch("path", form);
   const selectedLocalPathValues = normalizeTreeSelectValues(localPathValue);
@@ -316,8 +335,13 @@ export default function WizardConnectionStep({
               title={feishuTargetTitle}
               treeCheckable
               treeData={feishuTargetTreeData}
-              treeDefaultExpandAll={false}
+              treeExpandedKeys={
+                isFeishuTargetSearching ? feishuTargetExpandedKeys : undefined
+              }
               treeLine
+              onTreeExpand={
+                isFeishuTargetSearching ? setFeishuTargetExpandedKeys : undefined
+              }
               showCheckedStrategy={TreeSelect.SHOW_PARENT}
               styles={{
                 popup: { root: { maxHeight: 360, overflow: "auto" } },

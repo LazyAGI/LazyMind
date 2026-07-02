@@ -1,57 +1,59 @@
-import { forwardRef, useImperativeHandle, useState } from "react";
-import { Modal, Input } from "antd";
-import { useTranslation } from "react-i18next";
-import "./index.scss";
+import { forwardRef, useImperativeHandle, useState } from 'react';
+import { Modal, Input } from 'antd';
+import { useTranslation } from 'react-i18next';
+import './TypedConfirmModal.scss';
 
-interface ModalInfo {
+export interface TypedConfirmModalInfo {
   id: string;
   title: string;
   content: string;
   confirmText: string;
 }
 
-interface ForwardProps {
+export interface TypedConfirmModalRef {
+  onOpen: (data: TypedConfirmModalInfo) => void;
+}
+
+interface TypedConfirmModalProps {
   onClick: (id: string) => void;
 }
 
-export interface ConfirmImperativeProps {
-  onOpen: (data: ModalInfo) => void;
-}
-
-const ConfirmModalComponent = forwardRef<ConfirmImperativeProps, ForwardProps>(
+const TypedConfirmModal = forwardRef<TypedConfirmModalRef, TypedConfirmModalProps>(
   ({ onClick }, ref) => {
     const { t } = useTranslation();
     const [visible, setVisible] = useState(false);
-    const [modalInfo, setModalInfo] = useState<ModalInfo | null>();
-    const [value, setValue] = useState("");
-    const [errorText, setErrorText] = useState("");
+    const [modalInfo, setModalInfo] = useState<TypedConfirmModalInfo | null>();
+    const [value, setValue] = useState('');
+    const [errorText, setErrorText] = useState('');
+
+    const onOpen = (data: TypedConfirmModalInfo) => {
+      setModalInfo(data);
+      setValue('');
+      setErrorText('');
+      setVisible(true);
+    };
+
     useImperativeHandle(ref, () => ({
       onOpen,
     }));
 
-    const onOpen = (data: ModalInfo) => {
-      setModalInfo(data);
-      setValue("");
-      setErrorText("");
-      setVisible(true);
-    };
     const onCancel = () => {
       setModalInfo(null);
-      setErrorText("");
-      setValue("");
+      setErrorText('');
+      setValue('');
       setVisible(false);
     };
 
     const isSuccess = () => {
       if (!value) {
-        setErrorText(t("knowledge.inputRequired"));
+        setErrorText(t('common.pleaseInput'));
         return false;
       }
       if (value !== modalInfo?.confirmText) {
-        setErrorText(t("knowledge.inputMismatch"));
+        setErrorText(t('common.inputMismatch'));
         return false;
       }
-      setErrorText("");
+      setErrorText('');
       return true;
     };
 
@@ -61,19 +63,19 @@ const ConfirmModalComponent = forwardRef<ConfirmImperativeProps, ForwardProps>(
         open={visible}
         maskClosable={false}
         onCancel={onCancel}
-        okText={t("common.confirm")}
-        cancelText={t("common.cancel")}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
         okType="danger"
         okButtonProps={{ disabled: value !== modalInfo?.confirmText }}
         onOk={() => {
           if (!isSuccess()) {
             return false;
           }
-          onClick(modalInfo?.id || "");
+          onClick(modalInfo?.id || '');
           onCancel();
         }}
       >
-        <div className="confirm-container">
+        <div className="typed-confirm-container">
           <p className="content">{modalInfo?.content}</p>
           <p className="confirm-text">
             “<span>{modalInfo?.confirmText}</span>”
@@ -85,7 +87,7 @@ const ConfirmModalComponent = forwardRef<ConfirmImperativeProps, ForwardProps>(
             onBlur={() => {
               isSuccess();
             }}
-            onFocus={() => setErrorText("")}
+            onFocus={() => setErrorText('')}
           />
 
           <p className="error-tip">{errorText}</p>
@@ -95,4 +97,6 @@ const ConfirmModalComponent = forwardRef<ConfirmImperativeProps, ForwardProps>(
   },
 );
 
-export default ConfirmModalComponent;
+TypedConfirmModal.displayName = 'TypedConfirmModal';
+
+export default TypedConfirmModal;

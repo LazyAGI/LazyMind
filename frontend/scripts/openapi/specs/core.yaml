@@ -1285,6 +1285,8 @@ components:
                     type: string
                 reference_chunk_ids:
                     type: string
+                reference_chunk_invalid:
+                    type: boolean
                 reference_chunk_selected:
                     type: boolean
                 reference_context:
@@ -1295,6 +1297,8 @@ components:
                     type: boolean
                 reference_doc_ids:
                     type: string
+                reference_doc_invalid:
+                    type: boolean
                 shard_id:
                     type: string
                 source:
@@ -1320,11 +1324,13 @@ components:
                 - question
                 - question_type
                 - reference_chunk_ids
+                - reference_chunk_invalid
                 - reference_chunk_selected
                 - reference_context
                 - reference_doc
                 - reference_doc_from_knowledge_base
                 - reference_doc_ids
+                - reference_doc_invalid
                 - shard_id
                 - source
                 - source_history_id
@@ -1672,6 +1678,8 @@ components:
             type: object
         ListEvalSetItemsResponse:
             properties:
+                has_more:
+                    type: boolean
                 items:
                     items:
                         $ref: '#/components/schemas/EvalSetItemResponse'
@@ -2669,6 +2677,81 @@ components:
             required:
                 - next_page_token
                 - total_size
+            type: object
+        agentABTestResultOpenAPIResponse:
+            properties:
+                abtest_id:
+                    type: string
+                artifact_id:
+                    type: string
+                artifact_ref:
+                    type: string
+                case_count:
+                    type: integer
+                case_details_summary:
+                    $ref: '#/components/schemas/agentCaseDetailsSummaryOpenAPIResponse'
+                data:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                file_url:
+                    type: string
+                runtime_artifact_id:
+                    type: string
+                schema:
+                    type: string
+                source_artifact_id:
+                    type: string
+            required:
+                - artifact_id
+                - artifact_ref
+                - schema
+            type: object
+        agentCaseDetailsMetricAveragesOpenAPIResponse:
+            properties:
+                answer_correctness:
+                    format: double
+                    type: number
+                context_recall:
+                    format: double
+                    type: number
+                doc_recall:
+                    format: double
+                    type: number
+                faithfulness:
+                    format: double
+                    type: number
+            type: object
+        agentCaseDetailsQuestionTypeOpenAPIResponse:
+            properties:
+                averages:
+                    $ref: '#/components/schemas/agentCaseDetailsMetricAveragesOpenAPIResponse'
+                count:
+                    type: integer
+                question_type:
+                    type: integer
+                question_type_key:
+                    type: string
+                question_type_name:
+                    type: string
+            required:
+                - averages
+                - count
+                - question_type
+                - question_type_key
+                - question_type_name
+            type: object
+        agentCaseDetailsSummaryOpenAPIResponse:
+            properties:
+                question_types:
+                    items:
+                        $ref: '#/components/schemas/agentCaseDetailsQuestionTypeOpenAPIResponse'
+                    type: array
+                total_count:
+                    type: integer
+            required:
+                - total_count
             type: object
         agentEvalReportBadCaseListItemOpenAPIResponse:
             properties:
@@ -4146,24 +4229,34 @@ components:
         skillUpdateManagedOpenAPIRequest:
             properties:
                 auto_evo:
+                    description: Optional. Enable or disable automatic evolution; omit to keep it unchanged.
                     type: boolean
                 category:
+                    description: Optional for parent skills. Omit for child skills unless moving to another parent.
                     type: string
                 content:
+                    description: Optional. If present, replaces stored content; omit to keep content unchanged. Empty string means clear content.
                     type: string
                 description:
+                    description: Optional. Replace the skill description; omit to keep it unchanged.
                     type: string
                 file_ext:
+                    description: Optional for child skills. File extension such as md; omit to keep it unchanged.
                     type: string
                 is_enabled:
+                    description: Optional for parent skills. Enable or disable the skill; omit to keep it unchanged.
                     type: boolean
                 name:
+                    description: Optional. Rename the skill; omit to keep the current name.
                     type: string
                 parent_skill_id:
+                    description: Optional and only valid for child skill updates. Moves the child under this parent skill. Do not send when updating a parent skill.
                     type: string
                 parent_skill_name:
+                    description: Optional and only valid for child skill updates when parent_skill_id is omitted. Do not send when updating a parent skill, even as an empty string.
                     type: string
                 tags:
+                    description: Optional. Replace tags; omit to keep tags unchanged.
                     items:
                         type: string
                     type: array
@@ -4329,6 +4422,29 @@ components:
                 - id
                 - is_configured
                 - name
+            type: object
+        userUIPreferencesOpenAPIResponse:
+            properties:
+                chat_preference_notice_dismissed:
+                    type: boolean
+                developer_mode_active:
+                    type: boolean
+                updated_at:
+                    type: string
+                user_preference_configured:
+                    type: boolean
+            required:
+                - chat_preference_notice_dismissed
+                - developer_mode_active
+                - updated_at
+                - user_preference_configured
+            type: object
+        userUIPreferencesPatchOpenAPIRequest:
+            properties:
+                chat_preference_notice_dismissed:
+                    type: boolean
+                developer_mode_active:
+                    type: boolean
             type: object
         verifiedProviderGroupOpenAPIItem:
             properties:
@@ -4578,6 +4694,7 @@ paths:
             summary: GET /agent/threads/{thread_id}/records
     /api/core/agent/threads/{thread_id}/results/abtests:
         get:
+            description: Returns ABTest artifact rows from Evo, with normalized abtest_id, case details summary, and CSV file URL when available.
             parameters:
                 - in: path
                   name: thread_id
@@ -4586,8 +4703,16 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                items:
+                                    $ref: '#/components/schemas/agentABTestResultOpenAPIResponse'
+                                type: array
+                    description: ABTest result rows
             summary: GET /agent/threads/{thread_id}/results/abtests
+            tags:
+                - agent
     /api/core/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details:
         get:
             description: Returns filtered, paginated case details for an ABTest result. keyword matches case text and identifiers; outcome matches exactly.
@@ -5078,18 +5203,6 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/events
-    /api/core/conversations/{conversation_id}/plugin-sessions:
-        get:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/plugin-sessions
     /api/core/conversations/{conversation_id}/plugin-sessions:active:
         get:
             parameters:
@@ -5114,6 +5227,18 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/plugin-sessions:latest
+    /api/core/conversations/{conversation_id}/plugin-settings:
+        patch:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /conversations/{conversation_id}/plugin-settings
     /api/core/conversations/{conversation_id}/tasks:
         get:
             parameters:
@@ -5142,6 +5267,18 @@ paths:
                                 $ref: '#/components/schemas/ConversationChatStatusResponse'
                     description: Conversation status
             summary: Get conversation status
+    /api/core/conversations/{conversation_id}:stop:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations/{conversation_id}:stop
     /api/core/conversations/{name}:
         delete:
             parameters:
@@ -6879,6 +7016,54 @@ paths:
             summary: Batch delete eval set items
             tags:
                 - eval-set-items
+    /api/core/eval-sets/{eval_set_id}/items:invalidReferences:
+        get:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: question_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: source
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: order_by
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListEvalSetItemsResponse'
+                    description: Invalid reference eval set item list
+            summary: List eval set items with invalid references
+            tags:
+                - eval-set-items
     /api/core/eval-sets/{eval_set_id}/question-types:
         get:
             parameters:
@@ -8245,6 +8430,18 @@ paths:
                 "200":
                     description: OK
             summary: GET /plugin-sessions/{session_id}
+    /api/core/plugin-sessions/{session_id}/artifacts:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-sessions/{session_id}/artifacts
     /api/core/plugin-sessions/{session_id}/slots:
         get:
             parameters:
@@ -8433,6 +8630,18 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order
+    /api/core/plugin-sessions/{session_id}/steps:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugin-sessions/{session_id}/steps
     /api/core/plugin-sessions/{session_id}:advance:
         post:
             parameters:
@@ -8694,6 +8903,29 @@ paths:
             summary: Get resource version
             tags:
                 - resource-versions
+    /api/core/schedules:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /schedules
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /schedules
+    /api/core/schedules/{schedule_id}:cancel:
+        post:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /schedules/{schedule_id}:cancel
     /api/core/skill-review-results:
         get:
             description: Lists skill draft review results for the current user.
@@ -9006,6 +9238,7 @@ paths:
             tags:
                 - skills
         patch:
+            description: Partial update. The request body is required, but every field inside it is optional; send only fields that should change. For parent skills, omit parent_skill_id and parent_skill_name entirely. parent_skill_id and parent_skill_name are only for moving child skills to another parent. If content is present, it replaces stored content; omit content to keep it unchanged.
             parameters:
                 - in: path
                   name: skill_id
@@ -9205,6 +9438,53 @@ paths:
                 "200":
                     description: OK
             summary: POST /static-files:sign
+    /api/core/task-center/schedules/{schedule_id}/tasks:
+        get:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /task-center/schedules/{schedule_id}/tasks
+    /api/core/task-center/tasks:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /task-center/tasks
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /task-center/tasks
+    /api/core/task-center/tasks/{task_id}:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /task-center/tasks/{task_id}
+    /api/core/task-center/tasks/{task_id}:cancel:
+        post:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /task-center/tasks/{task_id}:cancel
     /api/core/tasks/{task_id}:
         get:
             parameters:
@@ -9527,6 +9807,47 @@ paths:
             summary: Generate user preference draft
             tags:
                 - preferences
+    /api/core/user/chat-settings:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /user/chat-settings
+        patch:
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /user/chat-settings
+    /api/core/user/ui-preferences:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/userUIPreferencesOpenAPIResponse'
+                    description: Current user's UI preferences
+            summary: Get current user's UI preferences
+            tags:
+                - user
+        patch:
+            description: Partial update. Every field inside the request body is optional; send only fields that should change.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/userUIPreferencesPatchOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/userUIPreferencesOpenAPIResponse'
+                    description: Updated current user's UI preferences
+            summary: Partially update current user's UI preferences
+            tags:
+                - user
     /api/core/word_group:
         get:
             parameters:

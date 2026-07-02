@@ -5,7 +5,6 @@ import lazyllm
 from lazymind.chat.engine.tools.infra import (
     build_skill_identity,
     create_remote_skill,
-    handle_tool_errors,
     is_writable_skill_source,
     list_all_skill_entries,
     normalize_skill_category,
@@ -43,7 +42,6 @@ _REMOVE_SUCCESS_RESULT = {
 }
 
 
-@handle_tool_errors
 def skill_editor(
     name: str,
     action: Literal['create', 'modify', 'remove'],

@@ -48,6 +48,35 @@ func testParseDatasetIDs(t *testing.T, raw json.RawMessage) []string {
 	return ids
 }
 
+func TestListAlgosUsesDocServerAlgorithmsEndpoint(t *testing.T) {
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/algo/list" {
+			t.Errorf("unexpected algo request path %q", r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"code":404,"msg":"not found"}`), nil
+		}
+		return testJSONResponse(http.StatusOK, `{"code":200,"msg":"success","data":{"items":[{"algo_id":"general","display_name":"General","description":"General algo"}]}}`), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/dataset/algos", nil)
+	rec := httptest.NewRecorder()
+
+	ListAlgos(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp ListAlgosResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Algos) != 1 || resp.Algos[0].AlgoID != "general" || resp.Algos[0].DisplayName != "General" {
+		t.Fatalf("unexpected algos response: %#v", resp.Algos)
+	}
+}
+
 func TestListDatasetsKeywordMatchesTags(t *testing.T) {
 	db := newDocumentTestDB(t)
 	if err := db.AutoMigrate(&orm.DefaultDataset{}); err != nil {
@@ -661,7 +690,7 @@ func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 		if r.URL.Path == "/api/scan/internal/sources/by-dataset/ds-update" {
 			return testJSONResponse(http.StatusNotFound, `{"message":"source not found"}`), nil
 		}
-		if r.URL.Path != "/v1/kbs/kb-update/update" {
+		if r.URL.Path != "/v1/kbs/kb-update" {
 			t.Errorf("unexpected algo request path %q", r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
 		}

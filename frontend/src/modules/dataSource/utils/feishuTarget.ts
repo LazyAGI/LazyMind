@@ -5,13 +5,14 @@ import type {
   SourceFormValues,
   SourceType,
 } from "../constants/types";
-import { getScanBindingTarget, type ScanV2Binding } from "./scanAccessors";
+import {
+  getScanBindingTarget,
+  getScanTreeNodePath,
+  type ScanV2Binding,
+  type ScanV2TreeNode,
+} from "./scanAccessors";
 
 export const FEISHU_MANUAL_TARGET_VALUE_PREFIX = "__scan-feishu-manual-target__";
-export const FEISHU_DRIVE_ROOT_REF = "feishu:drive:root";
-export const FEISHU_WIKI_SPACES_REF = "feishu:wiki:spaces";
-
-export type FeishuManualTargetKind = "wiki" | "drive";
 
 export type FeishuTargetTreeNode = DataNode & {
   value: string;
@@ -68,13 +69,6 @@ export function toUiFeishuTargetType(targetType?: string): FeishuTargetType | un
   return normalizeFeishuTargetType(targetType);
 }
 
-export function buildManualFeishuTargetValue(
-  kind: FeishuManualTargetKind,
-  targetRef: string,
-) {
-  return `${FEISHU_MANUAL_TARGET_VALUE_PREFIX}:${kind}:${encodeURIComponent(targetRef)}`;
-}
-
 export function parseManualFeishuTargetValue(value: string) {
   const normalizedValue = value.trim();
   if (!normalizedValue.startsWith(`${FEISHU_MANUAL_TARGET_VALUE_PREFIX}:`)) {
@@ -99,7 +93,7 @@ export function parseManualFeishuTargetValue(value: string) {
     return null;
   }
 
-  const kind = rawKind as FeishuManualTargetKind;
+  const kind = rawKind as "wiki" | "drive";
   const targetType: FeishuTargetType | undefined =
     kind === "wiki" ? "wiki_space" : kind === "drive" ? "drive_folder" : undefined;
   return {
@@ -183,20 +177,6 @@ export function normalizeFeishuTargetRefs(value?: SourceFormValues["target"]) {
     .filter(Boolean);
 }
 
-export function collectManualFeishuTargetTypes(value?: SourceFormValues["target"]) {
-  const values = Array.isArray(value) ? value : value ? [value] : [];
-  const targetTypes = new Map<string, FeishuTargetType>();
-
-  values.forEach((item) => {
-    const parsed = parseManualFeishuTargetValue(`${item || ""}`);
-    if (parsed?.targetType) {
-      targetTypes.set(parsed.targetRef, parsed.targetType);
-    }
-  });
-
-  return targetTypes;
-}
-
 export function normalizeCloudTargetRefs(value?: SourceFormValues["target"]) {
   const values = Array.isArray(value) ? value : value ? [value] : [];
   return values
@@ -253,49 +233,153 @@ export function normalizeFeishuTargetTypeRecord(targetTypes?: Record<string, unk
   return hasFeishuTargetTypes(normalizedTypes) ? normalizedTypes : undefined;
 }
 
-export function isFeishuRootTargetNode(node: FeishuTargetTreeNode) {
-  const ref = `${node.targetRef || node.value || node.key || ""}`.trim().toLowerCase();
-  return ref === FEISHU_DRIVE_ROOT_REF || ref === FEISHU_WIKI_SPACES_REF;
+function getFeishuScanNodeIdentity(node: ScanV2TreeNode) {
+  return `${node.object_key || node.key || ""}`.trim();
 }
 
-export function buildFeishuRootTargetNodes(): FeishuTargetTreeNode[] {
-  return [
-    {
-      key: FEISHU_DRIVE_ROOT_REF,
-      value: FEISHU_DRIVE_ROOT_REF,
-      title: "Drive",
-      isLeaf: false,
-      targetRef: FEISHU_DRIVE_ROOT_REF,
-      targetType: "drive_folder",
-    },
-    {
-      key: FEISHU_WIKI_SPACES_REF,
-      value: FEISHU_WIKI_SPACES_REF,
-      title: "Wiki",
-      isLeaf: false,
-      targetRef: FEISHU_WIKI_SPACES_REF,
-      targetType: "wiki_space",
-    },
-  ];
+export function mapFeishuScanNodeToTreeNode(
+  node: ScanV2TreeNode,
+  inheritedTargetType?: FeishuTargetType,
+  children?: FeishuTargetTreeNode[],
+): FeishuTargetTreeNode | null {
+  const value =
+    getScanTreeNodePath(node) || `${node.key || node.node_ref || node.display_name}`;
+  const normalizedValue = `${value || ""}`.trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const title = node.display_name || node.title || node.object_key || normalizedValue;
+  const targetRef = node.target_ref || normalizedValue;
+  const nodeRef = node.node_ref;
+  const targetType =
+    normalizeFeishuTargetType(node.target_type, `${targetRef || nodeRef || normalizedValue}`) ||
+    inheritedTargetType;
+
+  return {
+    key: normalizedValue,
+    value: normalizedValue,
+    title,
+    isLeaf: children?.length ? false : !node.has_children,
+    selectable: node.selectable !== false,
+    disabled: node.selectable === false,
+    nodeRef,
+    targetRef,
+    targetType,
+    children,
+  };
 }
 
-export function mergeFeishuTargetSearchResults(
-  rootNodes: FeishuTargetTreeNode[],
-  searchNodes: FeishuTargetTreeNode[],
+export function mapFeishuScanNodesToTreeNodes(
+  nodes: ScanV2TreeNode[],
+  inheritedTargetType?: FeishuTargetType,
 ): FeishuTargetTreeNode[] {
-  const rootRefs = new Set(
-    rootNodes.map((node) => `${node.targetRef || node.value || ""}`.trim().toLowerCase()),
-  );
+  return nodes
+    .map((node) => mapFeishuScanNodeToTreeNode(node, inheritedTargetType))
+    .filter((node): node is FeishuTargetTreeNode => Boolean(node));
+}
 
-  const filteredSearchNodes = searchNodes.filter((node) => {
-    if (isFeishuRootTargetNode(node)) {
-      return false;
+export function buildFeishuTargetTreeFromScanNodes(
+  nodes: ScanV2TreeNode[],
+  inheritedTargetType?: FeishuTargetType,
+): FeishuTargetTreeNode[] {
+  if (nodes.length === 0) {
+    return [];
+  }
+
+  const hasNestedChildren = nodes.some(
+    (node) => Array.isArray(node.children) && node.children.length > 0,
+  );
+  if (hasNestedChildren) {
+    const mapNested = (
+      items: ScanV2TreeNode[],
+      inherited?: FeishuTargetType,
+    ): FeishuTargetTreeNode[] =>
+      items
+        .map((item) => {
+          const targetRef = item.target_ref || getScanTreeNodePath(item);
+          const nodeRef = item.node_ref;
+          const targetType =
+            normalizeFeishuTargetType(item.target_type, `${targetRef || nodeRef || item.key || ""}`) ||
+            inherited;
+          const children = item.children?.length
+            ? mapNested(item.children, targetType)
+            : undefined;
+          return mapFeishuScanNodeToTreeNode(item, inherited, children);
+        })
+        .filter((node): node is FeishuTargetTreeNode => Boolean(node));
+
+    return mapNested(nodes, inheritedTargetType);
+  }
+
+  const nodeByIdentity = new Map<string, FeishuTargetTreeNode>();
+  const childIdentitiesByParent = new Map<string, string[]>();
+
+  nodes.forEach((node) => {
+    const mapped = mapFeishuScanNodeToTreeNode(node, inheritedTargetType);
+    if (!mapped) {
+      return;
     }
-    const ref = `${node.targetRef || node.value || ""}`.trim().toLowerCase();
-    return !rootRefs.has(ref);
+
+    const identity = getFeishuScanNodeIdentity(node);
+    if (!identity) {
+      return;
+    }
+
+    nodeByIdentity.set(identity, mapped);
+    if (node.key && node.key !== identity) {
+      nodeByIdentity.set(node.key, mapped);
+    }
+
+    const parentKey = `${node.parent_key || ""}`.trim();
+    if (parentKey) {
+      const siblings = childIdentitiesByParent.get(parentKey) || [];
+      if (!siblings.includes(identity)) {
+        siblings.push(identity);
+      }
+      childIdentitiesByParent.set(parentKey, siblings);
+    }
   });
 
-  return [...rootNodes, ...filteredSearchNodes];
+  childIdentitiesByParent.forEach((childIdentities, parentKey) => {
+    const parent = nodeByIdentity.get(parentKey);
+    if (!parent) {
+      return;
+    }
+
+    parent.children = childIdentities
+      .map((identity) => nodeByIdentity.get(identity))
+      .filter((node): node is FeishuTargetTreeNode => Boolean(node));
+    if (parent.children.length > 0) {
+      parent.isLeaf = false;
+    }
+  });
+
+  const roots: FeishuTargetTreeNode[] = [];
+  const rootSet = new Set<FeishuTargetTreeNode>();
+  nodes.forEach((node) => {
+    const identity = getFeishuScanNodeIdentity(node);
+    if (!identity) {
+      return;
+    }
+
+    const mapped = nodeByIdentity.get(identity);
+    if (!mapped || rootSet.has(mapped)) {
+      return;
+    }
+
+    const parentKey = `${node.parent_key || ""}`.trim();
+    if (!parentKey || !nodeByIdentity.has(parentKey)) {
+      roots.push(mapped);
+      rootSet.add(mapped);
+    }
+  });
+
+  if (roots.length > 0) {
+    return roots;
+  }
+
+  return Array.from(new Set(nodeByIdentity.values()));
 }
 
 export function resolveSourceTypeFromValues(

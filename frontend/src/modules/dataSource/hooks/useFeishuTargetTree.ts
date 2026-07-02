@@ -4,18 +4,12 @@ import type { TFunction } from "i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { dataSourceScanApi } from "../api/clients";
 import type { FeishuTargetType } from "../constants/types";
+import { getScanTenantId } from "../utils/scanAccessors";
 import {
-  getScanTenantId,
-  getScanTreeNodePath,
-  type ScanV2TreeNode,
-} from "../utils/scanAccessors";
-import {
-  buildFeishuRootTargetNodes,
-  buildManualFeishuTargetValue,
-  mergeFeishuTargetSearchResults,
+  buildFeishuTargetTreeFromScanNodes,
+  mapFeishuScanNodesToTreeNodes,
   normalizeFeishuTargetType,
   toScanFeishuTargetType,
-  type FeishuManualTargetKind,
   type FeishuTargetTreeNode,
 } from "../utils/feishuTarget";
 
@@ -51,86 +45,6 @@ export function useFeishuTargetTree({
     disabled: true,
     isLeaf: true,
   });
-
-  const buildManualFeishuTargetNode = (
-    targetRef: string,
-    kind: FeishuManualTargetKind,
-  ): FeishuTargetTreeNode => {
-    const normalizedTargetRef = targetRef.trim();
-    const targetType = kind === "wiki" ? "wiki_space" : "drive_folder";
-    const title =
-      kind === "wiki"
-        ? t("admin.dataSourceUseCurrentFeishuWikiInput", { value: normalizedTargetRef })
-        : t("admin.dataSourceUseCurrentFeishuDriveInput", { value: normalizedTargetRef });
-    const value = buildManualFeishuTargetValue(kind, normalizedTargetRef);
-
-    return {
-      key: value,
-      value,
-      title,
-      isLeaf: true,
-      targetRef: normalizedTargetRef,
-      targetType,
-    };
-  };
-
-  const buildManualFeishuTargetNodes = (targetRef: string): FeishuTargetTreeNode[] =>
-    (["drive", "wiki"] as FeishuManualTargetKind[]).map((kind) =>
-      buildManualFeishuTargetNode(targetRef, kind),
-    );
-
-  const hasFeishuTargetRef = (
-    nodes: FeishuTargetTreeNode[],
-    targetRef: string,
-  ): boolean =>
-    nodes.some((node) => {
-      const refs = [node.value, node.targetRef, node.nodeRef]
-        .map((item) => `${item || ""}`.trim())
-        .filter(Boolean);
-
-      return (
-        refs.includes(targetRef) ||
-        Boolean(node.children && hasFeishuTargetRef(node.children, targetRef))
-      );
-    });
-
-  const prependManualFeishuTargetOption = (
-    targetRef: string,
-    nodes: FeishuTargetTreeNode[],
-  ): FeishuTargetTreeNode[] => {
-    const normalizedTargetRef = targetRef.trim();
-    if (!normalizedTargetRef || hasFeishuTargetRef(nodes, normalizedTargetRef)) {
-      return nodes;
-    }
-    return [...buildManualFeishuTargetNodes(normalizedTargetRef), ...nodes];
-  };
-
-  const mapFeishuTargetNodes = (
-    nodes: ScanV2TreeNode[],
-    inheritedTargetType?: FeishuTargetType,
-  ): FeishuTargetTreeNode[] =>
-    nodes.map((node) => {
-      const value =
-        getScanTreeNodePath(node) || `${node.key || node.node_ref || node.display_name}`;
-      const title = node.display_name || node.title || node.object_key || value;
-      const targetRef = node.target_ref || value;
-      const nodeRef = node.node_ref;
-      const targetType =
-        normalizeFeishuTargetType(node.target_type, `${targetRef || nodeRef || value}`) ||
-        inheritedTargetType;
-
-      return {
-        key: value,
-        value,
-        title,
-        isLeaf: !node.has_children,
-        selectable: node.selectable !== false,
-        disabled: node.selectable === false,
-        nodeRef,
-        targetRef,
-        targetType,
-      };
-    });
 
   const mergeFeishuTargetChildren = (
     list: FeishuTargetTreeNode[],
@@ -210,46 +124,28 @@ export function useFeishuTargetTree({
         return;
       }
 
-      const nodes = mapFeishuTargetNodes(response.data.items || []);
-      let nextNodes: FeishuTargetTreeNode[];
+      const rawNodes = response.data.items || [];
+      const nextNodes = normalizedKeyword
+        ? buildFeishuTargetTreeFromScanNodes(rawNodes)
+        : mapFeishuScanNodesToTreeNodes(rawNodes);
 
-      if (normalizedKeyword) {
-        const rootNodes = buildFeishuRootTargetNodes();
-        const mergedNodes = mergeFeishuTargetSearchResults(rootNodes, nodes);
-        const baseNodes =
-          nodes.length > 0
-            ? mergedNodes
-            : [...mergedNodes, buildFeishuHelperNode(t("admin.dataSourceNoFeishuTargets"))];
-        nextNodes = prependManualFeishuTargetOption(normalizedKeyword, baseNodes);
-      } else {
-        const baseNodes =
-          nodes.length > 0
-            ? nodes
-            : [buildFeishuHelperNode(t("admin.dataSourceNoFeishuTargets"))];
-        nextNodes = baseNodes;
-      }
-
-      setFeishuTargetTreeData(nextNodes);
+      setFeishuTargetTreeData(
+        nextNodes.length > 0
+          ? nextNodes
+          : [buildFeishuHelperNode(t("admin.dataSourceNoFeishuTargets"))],
+      );
     } catch (error) {
       if (feishuTargetRequestSeqRef.current !== requestSeq) {
         return;
       }
-      const fallbackNodes = [
+      setFeishuTargetTreeData([
         buildFeishuHelperNode(
           getLocalizedErrorMessage(
             error,
             t("admin.dataSourceFeishuDirectoryListFailedManual"),
           ) || t("admin.dataSourceFeishuDirectoryListFailedManual"),
         ),
-      ];
-      setFeishuTargetTreeData(
-        normalizedKeyword
-          ? prependManualFeishuTargetOption(normalizedKeyword, [
-              ...buildFeishuRootTargetNodes(),
-              ...fallbackNodes,
-            ])
-          : fallbackNodes,
-      );
+      ]);
     } finally {
       if (feishuTargetRequestSeqRef.current === requestSeq) {
         setFeishuTargetLoading(false);
@@ -272,9 +168,8 @@ export function useFeishuTargetTree({
       return;
     }
 
-    setFeishuTargetTreeData(
-      prependManualFeishuTargetOption(normalizedKeyword, buildFeishuRootTargetNodes()),
-    );
+    setFeishuTargetTreeData([]);
+    setFeishuTargetLoading(true);
     feishuTargetSearchTimerRef.current = setTimeout(() => {
       void loadFeishuTargetOptions(normalizedKeyword);
     }, 300);
@@ -320,7 +215,7 @@ export function useFeishuTargetTree({
       } as any,
     });
 
-    const children = mapFeishuTargetNodes(response.data.items || [], uiTargetType);
+    const children = mapFeishuScanNodesToTreeNodes(response.data.items || [], uiTargetType);
     setFeishuTargetTreeData((current) =>
       mergeFeishuTargetChildren(current, treeNode.key || treeNode.value, children),
     );

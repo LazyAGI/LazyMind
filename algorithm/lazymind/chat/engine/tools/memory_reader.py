@@ -4,10 +4,9 @@ from typing import Any, Dict
 
 import lazyllm
 
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_success
+from lazymind.chat.engine.tools.infra import tool_error, tool_success
 
 
-@handle_tool_errors
 def read_memory(target: str) -> Dict[str, Any]:
     """Read the agent's current working memory or user profile text.
 

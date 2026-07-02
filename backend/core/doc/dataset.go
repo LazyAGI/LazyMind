@@ -91,12 +91,14 @@ type UnsetDefaultDatasetRequest struct {
 type algoListResp struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
-	Data []struct {
-		AlgoID      string `json:"algo_id"`
-		DisplayName string `json:"display_name"`
-		Description string `json:"description"`
-		CreatedAt   string `json:"created_at"`
-		UpdatedAt   string `json:"updated_at"`
+	Data struct {
+		Items []struct {
+			AlgoID      string `json:"algo_id"`
+			DisplayName string `json:"display_name"`
+			Description string `json:"description"`
+			CreatedAt   string `json:"created_at"`
+			UpdatedAt   string `json:"updated_at"`
+		} `json:"items"`
 	} `json:"data"`
 }
 
@@ -396,7 +398,6 @@ func canAccessDataset(ds *orm.Dataset, userID string, action string) bool {
 }
 
 func ListAlgos(w http.ResponseWriter, r *http.Request) {
-	// textRequesttext。
 	const listAlgosPath = "/v1/algo/list"
 	algoURL := common.JoinURL(common.AlgoServiceEndpoint(), listAlgosPath)
 
@@ -424,8 +425,8 @@ func ListAlgos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	algos := make([]Algo, 0, len(ar.Data))
-	for _, a := range ar.Data {
+	algos := make([]Algo, 0, len(ar.Data.Items))
+	for _, a := range ar.Data.Items {
 		algos = append(algos, Algo{AlgoID: a.AlgoID, DisplayName: a.DisplayName, Description: a.Description})
 	}
 	common.ReplyJSON(w, ListAlgosResponse{Algos: algos})
@@ -1320,12 +1321,12 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		"parsers":   parsers,
 	})
 
-	// 1) text POST /v1/kbs/{kb_id}/update
+	// 1) text POST /v1/kbs/{kb_id}
 	kbID := ds.KbID
 	if strings.TrimSpace(kbID) == "" {
 		kbID = ds.ID
 	}
-	kbURL := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/kbs/"+kbID+"/update")
+	kbURL := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/kbs/"+kbID)
 	extMeta := map[string]any{"tags": body.Tags}
 	algoDisplayName := algoDatasetDisplayName(userID, newDisplay)
 	req := kbUpdateRequest{

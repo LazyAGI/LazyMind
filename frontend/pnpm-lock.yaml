@@ -11,6 +11,9 @@ importers:
       '@ant-design/icons':
         specifier: 5.x
         version: 5.6.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@dagrejs/dagre':
+        specifier: 1.0.4
+        version: 1.0.4
       '@js-preview/docx':
         specifier: ^1.6.4
         version: 1.6.4(core-js@3.48.0)
@@ -405,6 +408,13 @@ packages:
     peerDependencies:
       react: ^16.8.0 || ^17 || ^18 || ^19
       react-dom: ^16.8.0 || ^17 || ^18 || ^19
+
+  '@dagrejs/dagre@1.0.4':
+    resolution: {integrity: sha512-jrEore+HhW1yg1Rsd9H1PPMcoEOD4bVh0WCXc6GqzyzubnJj4GaWGg8ETOrskTd/3n/g5LOzumGM4CCgpNLJNw==}
+
+  '@dagrejs/graphlib@2.1.13':
+    resolution: {integrity: sha512-calbMa7Gcyo+/t23XBaqQqon8LlgE9regey4UVoikoenKBXvUnCUL3s9RP6USCxttfr0XWVICtYUuKMdehKqMw==}
+    engines: {node: '>17.0.0'}
 
   '@emotion/hash@0.8.0':
     resolution: {integrity: sha512-kBJtf7PH6aWwZ6fka3zQ0p6SBYzx4fl1LoZXE2RrnYST9Xljm7WfKJrU4g/Xr3Beg72MLrp1AWNUmuYJTL7Cow==}
@@ -4457,6 +4467,12 @@ snapshots:
       react-devtools-inline: 4.4.0
       react-dom: 18.3.1(react@18.3.1)
       react-is: 17.0.2
+
+  '@dagrejs/dagre@1.0.4':
+    dependencies:
+      '@dagrejs/graphlib': 2.1.13
+
+  '@dagrejs/graphlib@2.1.13': {}
 
   '@emotion/hash@0.8.0': {}
 

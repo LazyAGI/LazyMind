@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -192,7 +193,15 @@ func doMinerUCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKe
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	return doCloudServiceCheckRequest(req, providerName, baseURL, apiKey, minerUAcceptedMsg)
+	// mineru.net serves a *.mineru.org.cn wildcard cert that does not cover mineru.net,
+	// so standard TLS verification fails. Skip verification for this specific check only.
+	client := &http.Client{
+		Timeout: cloudServiceCheckTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		},
+	}
+	return doCloudServiceCheckRequestWithClient(client, req, providerName, baseURL, apiKey, minerUAcceptedMsg)
 }
 
 func doPaddleOCRCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
@@ -412,7 +421,14 @@ func doSearchServiceCheckRequest(req *http.Request, providerName, baseURL, apiKe
 }
 
 func doCloudServiceCheckRequest(req *http.Request, providerName, baseURL, apiKey, successMessage string) (*modelCheckResponse, error) {
-	resp, err := (&http.Client{Timeout: cloudServiceCheckTimeout}).Do(req)
+	return doCloudServiceCheckRequestWithClient(
+		&http.Client{Timeout: cloudServiceCheckTimeout},
+		req, providerName, baseURL, apiKey, successMessage,
+	)
+}
+
+func doCloudServiceCheckRequestWithClient(client *http.Client, req *http.Request, providerName, baseURL, apiKey, successMessage string) (*modelCheckResponse, error) {
+	resp, err := client.Do(req)
 	if err != nil {
 		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey), Source: providerName, URL: baseURL}, nil
 	}

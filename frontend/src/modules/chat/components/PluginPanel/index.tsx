@@ -5,6 +5,7 @@ import { usePluginSession } from '@/modules/chat/hooks/usePlugin';
 import { usePluginStore } from '@/modules/chat/store/pluginPanel';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { PluginSessionApi } from '@/modules/chat/utils/request';
+import StateGraphModal from '@/components/StateGraphModal';
 import type {
   PluginSession,
   SlotRevision,
@@ -766,6 +767,7 @@ export function PluginPanel({
   const setFocusedSortOrder = usePluginStore((s) => s.setFocusedSortOrder);
   const [ui, setUI] = useState<PluginUI>({});
   const [dismissing, setDismissing] = useState(false);
+  const [stateGraphOpen, setStateGraphOpen] = useState(false);
 
   const handleDismiss = useCallback(async () => {
     if (!session || dismissing) return;
@@ -891,6 +893,12 @@ export function PluginPanel({
           <span
             className={`plugin-panel__status plugin-panel__status--${displayStatus}`}
             aria-label={`Status: ${t(STATUS_KEY[displayStatus] ?? displayStatus)}`}
+            onClick={() => session && setStateGraphOpen(true)}
+            style={{ cursor: 'pointer' }}
+            title='查看工作流图'
+            role='button'
+            tabIndex={0}
+            onKeyDown={(e) => e.key === 'Enter' && session && setStateGraphOpen(true)}
           >
             {t(STATUS_KEY[displayStatus] ?? displayStatus)}
           </span>
@@ -1092,6 +1100,16 @@ export function PluginPanel({
         </div>
       )}
     </div>
+    {session && (
+      <StateGraphModal
+        open={stateGraphOpen}
+        onClose={() => setStateGraphOpen(false)}
+        sessionId={session.session_id}
+        pluginId={session.plugin_id}
+        liveRefresh
+        conversationId={conversationId}
+      />
+    )}
     </SlotEditingContext.Provider>
   );
 }

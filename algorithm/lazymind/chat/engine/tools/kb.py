@@ -5,7 +5,7 @@ from lazyllm import AutoModel, LOG
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 from lazyllm.tools.rag.doc_impl import NodeGroupType
 
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
+from lazymind.chat.engine.tools.infra import tool_success
 from lazymind.chat.engine.tools._utils import (
     iter_lookup_ids,
     parse_json_dict,
@@ -263,7 +263,6 @@ class KBToolGroup:
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         return (agentic_config.get('filters') or {}).get('kb_id')
 
-    @handle_tool_errors
     def kb_search(
         self,
         query: str,
@@ -326,7 +325,6 @@ class KBToolGroup:
             serialized,
         )
 
-    @handle_tool_errors
     def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
         """Get the parent node of a target document node.
 
@@ -389,7 +387,6 @@ class KBToolGroup:
         _annotate_result_citations(result)
         return tool_success('kb_get_parent_node', result)
 
-    @handle_tool_errors
     def kb_get_window_nodes(
         self,
         docid: str,
@@ -452,7 +449,6 @@ class KBToolGroup:
         _annotate_result_citations(result)
         return tool_success('kb_get_window_nodes', result)
 
-    @handle_tool_errors
     def kb_keyword_search(
         self,
         keyword: str,
@@ -533,7 +529,6 @@ class KBToolGroup:
         })
 
 
-@handle_tool_errors
 def kb_tmp_search(
     query: str,
     retriever_topk: Optional[int] = None,

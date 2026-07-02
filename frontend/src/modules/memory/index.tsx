@@ -178,28 +178,6 @@ const isPendingReviewStatus = (status?: string) =>
   String(status || "").trim().toLowerCase() === "pending";
 const isSkillRemoveSuggestion = (suggestion: EvolutionSuggestionRecord) =>
   String(suggestion.action || "").trim().toLowerCase() === "remove";
-const normalizeAutoEvoApplyStatus = (status?: string) =>
-  String(status || "").trim().toLowerCase();
-const getAutoEvoStatusMeta = (status?: string) => {
-  const normalizedStatus = normalizeAutoEvoApplyStatus(status);
-  if (normalizedStatus === "running") {
-    return {
-      color: "blue" as const,
-      textKey: "admin.memoryAutoEvoStatusRunning",
-    };
-  }
-  if (normalizedStatus === "failed") {
-    return {
-      color: "red" as const,
-      textKey: "admin.memoryAutoEvoStatusFailed",
-    };
-  }
-  return {
-    color: "blue" as const,
-    textKey: "admin.memoryAutoEvoStatusWaiting",
-  };
-};
-
 const mapSkillAssetRecordToStructuredAsset = (
   item: SkillAssetRecord,
 ): StructuredAsset => ({
@@ -4946,10 +4924,6 @@ export default function MemoryManagement() {
           activeTab === "skills" && hasSkillDraftPreviewStatus(record);
         const showPendingTag =
           !record.autoEvo && (Boolean(pendingProposal) || hasReviewableDraft);
-        const autoEvoStatusMeta =
-          activeTab === "skills" && record.autoEvo
-            ? getAutoEvoStatusMeta(record.autoEvoApplyStatus)
-            : null;
 
         return (
           <div
@@ -4975,9 +4949,6 @@ export default function MemoryManagement() {
                 <Tag color="default">{t("admin.memoryBuiltinSkillTemplateTag")}</Tag>
               ) : record.originBuiltinSkillUid ? (
                 <Tag color="blue">{t("admin.memoryBuiltinSkillEnabledTag")}</Tag>
-              ) : null}
-              {autoEvoStatusMeta ? (
-                <Tag color={autoEvoStatusMeta.color}>{t(autoEvoStatusMeta.textKey)}</Tag>
               ) : null}
               {showPendingTag ? (
                 <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
@@ -5327,9 +5298,6 @@ export default function MemoryManagement() {
       width: 320,
       render: (_value, record) => {
         const showPendingTag = hasDraftPreviewStatus(record);
-        const autoEvoStatusMeta = record.autoEvo
-          ? getAutoEvoStatusMeta(record.autoEvoApplyStatus)
-          : null;
 
         return (
           <div className="memory-table-main">
@@ -5341,9 +5309,6 @@ export default function MemoryManagement() {
               >
                 {record.title}
               </button>
-              {autoEvoStatusMeta ? (
-                <Tag color={autoEvoStatusMeta.color}>{t(autoEvoStatusMeta.textKey)}</Tag>
-              ) : null}
               {showPendingTag ? (
                 <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
               ) : null}

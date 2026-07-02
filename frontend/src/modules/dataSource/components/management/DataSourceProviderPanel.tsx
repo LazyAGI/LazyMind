@@ -1,6 +1,7 @@
 import { Tag, Tooltip, Typography } from "antd";
 import { ArrowRightOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import { getSourceTypeTitle } from "../../utils/status";
+import { formatValidFeishuAccountNames } from "../../utils/feishuAccount";
 import { providerAuthOptions } from "../../constants/sourceTypeOptions";
 import type { DataSourceManagementVm } from "../../hooks/useDataSourceManagement";
 
@@ -18,7 +19,7 @@ export default function DataSourceProviderPanel({ vm }: { vm: DataSourceManageme
     isNotionAuthValid,
     isFeishuSetupReady,
     isNotionSetupReady,
-    oauthConnection,
+    validFeishuAccounts,
     notionOauthConnection,
     handleManageFeishuAuth,
     openSourceCreateWizard,
@@ -152,8 +153,8 @@ export default function DataSourceProviderPanel({ vm }: { vm: DataSourceManageme
                     ? isFeishu
                       ? t("admin.dataSourceFeishuAuthConnectedHint", {
                           account:
-                            oauthConnection?.provider === "feishu"
-                              ? oauthConnection.accountName
+                            validFeishuAccounts.length > 0
+                              ? formatValidFeishuAccountNames(validFeishuAccounts)
                               : t("admin.dataSourceFeishuConnectedAccountFallback"),
                         })
                       : t("admin.dataSourceNotionConnected", {

@@ -68,7 +68,6 @@ from .vocab_registry import (
     get_vocab_manager,
 )
 from .tool_runtime import (
-    handle_tool_errors,
     tool_error,
     tool_failure,
     tool_success,
@@ -92,7 +91,6 @@ __all__ = [
     'fetch_url_content',
     'fetch_vocab_groups_for_user_id',
     'get_vocab_manager',
-    'handle_tool_errors',
     'is_writable_skill_source',
     'list_all_skill_entries',
     'list_all_skills_with_category',

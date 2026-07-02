@@ -9,8 +9,6 @@ from __future__ import annotations
 import lazyllm
 from typing import Any, Dict, List, Optional
 
-from lazymind.chat.engine.tools.infra import handle_tool_errors
-
 
 def _cron_to_human(cron_expr: str) -> str:
     """Convert a 5-field cron expression to a human-readable Chinese description.
@@ -83,7 +81,6 @@ def _agentic_config() -> Dict[str, Any]:
 def _schedule_tools() -> List[Any]:
     """Build and return all schedule management tool functions."""
 
-    @handle_tool_errors
     def create_schedule(
         cron_expr: str,
         prompt_template: str,
@@ -128,7 +125,6 @@ def _schedule_tools() -> List[Any]:
             f"Next run: {data.get('next_run_at')} | Schedule: {_cron_to_human(cron_expr)}"
         )
 
-    @handle_tool_errors
     def list_schedules(include_disabled: bool = True) -> str:
         """List recurring schedules for this user.
 
@@ -164,7 +160,6 @@ def _schedule_tools() -> List[Any]:
             )
         return '\n'.join(lines)
 
-    @handle_tool_errors
     def cancel_schedule(schedule_id: str) -> str:
         """Cancel (disable) a recurring schedule by its ID."""
         import httpx
@@ -178,7 +173,6 @@ def _schedule_tools() -> List[Any]:
             return f'Failed to cancel schedule {schedule_id!r}: {resp.text}'
         return f'Schedule {schedule_id!r} has been cancelled.'
 
-    @handle_tool_errors
     def update_schedule(
         schedule_id: str,
         cron_expr: Optional[str] = None,
@@ -223,7 +217,6 @@ def _schedule_tools() -> List[Any]:
             f"Next run: {data.get('next_run_at')} | Schedule: {_cron_to_human(data.get('cron_expr', ''))}"
         )
 
-    @handle_tool_errors
     def trigger_schedule(schedule_id: str) -> str:
         """Immediately run a scheduled task once, without waiting for its next scheduled time.
 

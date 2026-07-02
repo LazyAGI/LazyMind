@@ -336,7 +336,9 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		Table("task_center_tasks tct").
 		Joins("LEFT JOIN conversations c ON c.id = tct.conversation_id").
 		Joins("LEFT JOIN user_schedules us ON us.id = tct.schedule_id").
-		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID)
+		Joins("LEFT JOIN plugin_sessions ps ON ps.id = tct.plugin_session_id").
+		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID).
+		Where("tct.plugin_session_id IS NULL OR ps.dismissed = false")
 	if status != "" {
 		countQ = countQ.Where("tct.status = ?", status)
 	}
@@ -355,7 +357,9 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		Select("tct.*, c.display_name AS conv_display_name, us.name AS schedule_name").
 		Joins("LEFT JOIN conversations c ON c.id = tct.conversation_id").
 		Joins("LEFT JOIN user_schedules us ON us.id = tct.schedule_id").
-		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID)
+		Joins("LEFT JOIN plugin_sessions ps ON ps.id = tct.plugin_session_id").
+		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID).
+		Where("tct.plugin_session_id IS NULL OR ps.dismissed = false")
 	if status != "" {
 		dataQ = dataQ.Where("tct.status = ?", status)
 	}
