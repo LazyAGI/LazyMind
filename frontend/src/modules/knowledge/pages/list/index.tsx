@@ -16,6 +16,9 @@ import moment from "moment";
 import { EditFilled } from "@ant-design/icons";
 
 import ListPageHeader from "@/modules/knowledge/components/ListPageHeader";
+import SyncKnowledgeBaseCreationFlow, {
+  useSyncKnowledgeBaseCreation,
+} from "@/modules/knowledge/components/SyncKnowledgeBaseCreationFlow";
 import TypedConfirmModal, {
   type TypedConfirmModalRef,
 } from '@/components/ui/TypedConfirmModal';
@@ -108,6 +111,31 @@ const KnowledgePage: FC = () => {
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<boolean | null>(null);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
+  const syncCreateVm = useSyncKnowledgeBaseCreation({
+    onSuccess: () => {
+      getTableData();
+    },
+  });
+  const createActionDisabled =
+    embeddingReady === false || multimodalEmbeddingReady === false;
+  const createActionDisabledTooltip = isAdmin ? (
+    <span>
+      {embeddingReady === false
+        ? t("knowledge.embeddingNotReadyBannerAdmin")
+        : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
+      <a
+        href="/model-providers"
+        style={{ marginLeft: 8, color: '#fff', textDecoration: 'underline' }}
+        onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+      >
+        {t("knowledge.goToConfig")}
+      </a>
+    </span>
+  ) : (
+    embeddingReady === false
+      ? t("knowledge.embeddingNotReadyBanner")
+      : t("knowledge.multimodalEmbeddingNotReadyBanner")
+  );
 
   useEffect(() => {
     getTags();
@@ -691,26 +719,19 @@ const KnowledgePage: FC = () => {
           }
           searchKey="keyword"
           btnText={t("knowledge.createKnowledgeBase")}
-          btnDisabled={embeddingReady === false || multimodalEmbeddingReady === false}
-          btnDisabledTooltip={
-            isAdmin ? (
-              <span>
-                {embeddingReady === false
-                  ? t("knowledge.embeddingNotReadyBannerAdmin")
-                  : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
-                <a
-                  href="/model-providers"
-                  style={{ marginLeft: 8, color: '#fff', textDecoration: 'underline' }}
-                  onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
-                >
-                  {t("knowledge.goToConfig")}
-                </a>
-              </span>
-            ) : (
-              embeddingReady === false
-                ? t("knowledge.embeddingNotReadyBanner")
-                : t("knowledge.multimodalEmbeddingNotReadyBanner")
-            )
+          btnDisabled={createActionDisabled}
+          btnDisabledTooltip={createActionDisabledTooltip}
+          secondaryBtnText={
+            knowledgeType === "knowledgeBase"
+              ? t("knowledge.createFromCloudDocuments")
+              : undefined
+          }
+          secondaryBtnDisabled={createActionDisabled}
+          secondaryBtnDisabledTooltip={createActionDisabledTooltip}
+          onSecondaryClick={
+            knowledgeType === "knowledgeBase"
+              ? () => syncCreateVm.openCreateModal()
+              : undefined
           }
           onClick={() => {
             createUpdateRef.current?.onOpen();
@@ -787,6 +808,7 @@ const KnowledgePage: FC = () => {
       <TypedConfirmModal ref={confirmRef} onClick={onDelete} />
 
       <CreateUpdateModal ref={createUpdateRef} onUpdate={onUpdate} />
+      <SyncKnowledgeBaseCreationFlow vm={syncCreateVm} />
       <EditTags
         open={showTagEditModal}
         record={tagEditRecord as TreeNode | null}

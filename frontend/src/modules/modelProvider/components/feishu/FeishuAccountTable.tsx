@@ -1,4 +1,4 @@
-import { Button, Space, Table, Tag, Tooltip, Typography } from "antd";
+import { Button, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   ApiOutlined,
@@ -7,14 +7,14 @@ import {
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
 import type { TFunction } from "i18next";
-import type { FeishuAuthAccount } from "../../common/feishuAccounts";
-import { getFeishuOpenPlatformAppUrl } from "../../common/FeishuCredentialHintAlert";
-import type { OAuthState } from "../../constants/types";
-import { formatDateTime } from "../../utils/format";
+import type { FeishuAuthAccount } from "@/modules/dataSource/common/feishuAccounts";
+import { getFeishuOpenPlatformAppUrl } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
+import type { OAuthState } from "@/modules/dataSource/constants/types";
+import { formatDateTime } from "@/modules/dataSource/utils/format";
 import {
   isFeishuAccountAuthValid,
   isFeishuAppId,
-} from "../../utils/feishuAccount";
+} from "@/modules/dataSource/utils/feishuAccount";
 
 const { Link, Text } = Typography;
 const FEISHU_LOGO_URL = "https://www.google.com/s2/favicons?domain=feishu.cn&sz=96";
@@ -43,23 +43,24 @@ export default function FeishuAccountTable({
       title: t("admin.dataSourceFeishuAccountColumnAccount"),
       dataIndex: "name",
       key: "name",
-      width: 360,
+      width: 280,
       render: (_value, record) => (
-        <div className="data-source-table-name">
-          <span className="data-source-provider-logo data-source-icon-feishu">
+        <div className="model-provider-cloud-doc-table-account">
+          <span className="model-provider-service-logo model-provider-service-logo-blue">
             <img
               alt=""
               aria-hidden="true"
               loading="lazy"
               src={FEISHU_LOGO_URL}
+              className="is-loaded"
               onError={(event) => {
                 event.currentTarget.style.display = "none";
               }}
             />
           </span>
-          <div className="data-source-table-copy">
+          <div className="model-provider-cloud-doc-table-account-copy">
             <Text strong>{record.name}</Text>
-            <Text type="secondary" className="data-source-ellipsis">
+            <Text type="secondary" ellipsis={{ tooltip: record.appId }}>
               {record.appId}
             </Text>
           </div>
@@ -70,13 +71,21 @@ export default function FeishuAccountTable({
       title: t("admin.dataSourceFeishuAccountColumnStatus"),
       dataIndex: "status",
       key: "status",
-      width: 150,
+      width: 120,
       render: (status: OAuthState) => {
         if (status === "connected") {
-          return <Tag color="success">{t("admin.dataSourceProviderAuthValid")}</Tag>;
+          return (
+            <Tag className="model-provider-service-status" color="success">
+              {t("modelProvider.cloudDocuments.authValid")}
+            </Tag>
+          );
         }
         if (status === "waiting") {
-          return <Tag color="processing">{t("admin.dataSourceProviderAuthPending")}</Tag>;
+          return (
+            <Tag className="model-provider-service-status" color="processing">
+              {t("modelProvider.cloudDocuments.authPending")}
+            </Tag>
+          );
         }
         if (status === "error") {
           return <Tag color="error">{t("admin.dataSourceConnectionError")}</Tag>;
@@ -84,27 +93,25 @@ export default function FeishuAccountTable({
         if (status === "expired") {
           return <Tag color="warning">{t("admin.dataSourceConnectionExpired")}</Tag>;
         }
-        return <Tag>{t("admin.dataSourceProviderCredentialReady")}</Tag>;
+        return (
+          <Tag className="model-provider-service-status">
+            {t("modelProvider.cloudDocuments.credentialMissing")}
+          </Tag>
+        );
       },
     },
     {
       title: t("admin.dataSourceFeishuAccountColumnOpenPlatformUrl"),
       dataIndex: "appId",
       key: "openPlatformUrl",
-      width: 330,
+      ellipsis: true,
       render: (appId: string) => {
         if (!isFeishuAppId(appId)) {
           return <Text type="secondary">{t("common.noData")}</Text>;
         }
         const openPlatformUrl = getFeishuOpenPlatformAppUrl(appId);
         return (
-          <Link
-            className="data-source-ellipsis"
-            href={openPlatformUrl}
-            target="_blank"
-            rel="noreferrer"
-            title={openPlatformUrl}
-          >
+          <Link href={openPlatformUrl} target="_blank" rel="noreferrer" ellipsis>
             {openPlatformUrl}
           </Link>
         );
@@ -114,7 +121,7 @@ export default function FeishuAccountTable({
       title: t("admin.dataSourceFeishuAccountColumnChat"),
       dataIndex: "chatEnabled",
       key: "chatEnabled",
-      width: 150,
+      width: 132,
       render: (_value, record) => {
         const canToggleChat = isFeishuAccountAuthValid(record);
         const enabled = canToggleChat && Boolean(record.chatEnabled);
@@ -135,13 +142,13 @@ export default function FeishuAccountTable({
                 name: record.name,
               })}
               disabled={!canToggleChat}
-              className={`data-source-chat-switch${enabled ? " is-on" : ""}${
+              className={`model-provider-cloud-doc-switch${enabled ? " is-on" : ""}${
                 canToggleChat ? "" : " is-disabled"
               }`}
               onClick={() => onToggleChat(record, !enabled)}
             >
-              <span className="data-source-chat-switch-thumb" aria-hidden="true" />
-              <span className="data-source-chat-switch-label">
+              <span className="model-provider-cloud-doc-switch-thumb" aria-hidden="true" />
+              <span className="model-provider-cloud-doc-switch-label">
                 {enabled
                   ? t("admin.dataSourceFeishuAccountChatOn")
                   : t("admin.dataSourceFeishuAccountChatOff")}
@@ -155,19 +162,29 @@ export default function FeishuAccountTable({
       title: t("admin.dataSourceFeishuAccountColumnCreatedAt"),
       dataIndex: "createdAt",
       key: "createdAt",
-      width: 190,
-      render: (createdAt: string) => formatDateTime(createdAt),
+      width: 168,
+      render: (createdAt: string) => (
+        <Text type="secondary">{formatDateTime(createdAt)}</Text>
+      ),
     },
     {
       title: t("admin.dataSourceTableActions"),
       key: "actions",
-      width: 230,
+      width: 228,
+      align: "center",
       fixed: "right",
-      className: "data-source-action-column",
+      className: "model-provider-cloud-doc-table-action-column",
+      onHeaderCell: () => ({
+        className: "model-provider-cloud-doc-table-action-column",
+      }),
+      onCell: () => ({
+        className: "model-provider-cloud-doc-table-action-column",
+      }),
       render: (_value, record) => (
-        <Space size={14} className="data-source-table-actions">
+        <div className="model-provider-cloud-doc-table-actions">
           <Button
             type="link"
+            size="small"
             icon={<SafetyCertificateOutlined />}
             onClick={() => onAuthorize(record)}
           >
@@ -175,41 +192,40 @@ export default function FeishuAccountTable({
               ? t("admin.dataSourceFeishuReconnectAction")
               : t("admin.dataSourceFeishuAuthorizeAction")}
           </Button>
-          <Button type="link" icon={<EditOutlined />} onClick={() => onEdit(record)}>
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => onEdit(record)}>
             {t("common.edit")}
           </Button>
           <Button
             type="link"
+            size="small"
             danger
             icon={<DeleteOutlined />}
             onClick={() => onDelete(record)}
           >
             {t("common.delete")}
           </Button>
-        </Space>
+        </div>
       ),
     },
   ];
 
   return (
-    <div className="data-source-asset-table-wrap data-source-feishu-account-table-wrap">
+    <div className="model-provider-cloud-doc-table-panel">
       <Table<FeishuAuthAccount>
-        className="admin-page-table data-source-asset-table data-source-feishu-account-table"
+        className="model-provider-cloud-doc-table"
         rowKey="id"
         columns={accountColumns}
         dataSource={accounts}
         loading={accountsLoading}
-        pagination={{ pageSize: 8, showSizeChanger: false }}
+        pagination={{ pageSize: 8, showSizeChanger: false, size: "small" }}
         tableLayout="fixed"
-        scroll={{ x: 1410, y: "calc(100vh - 380px)" }}
+        scroll={{ x: 1100 }}
         locale={{
           emptyText: (
-            <div className="data-source-asset-empty">
+            <div className="model-provider-cloud-doc-table-empty">
               <ApiOutlined />
               <Text strong>{t("admin.dataSourceFeishuAccountEmptyTitle")}</Text>
-              <Text type="secondary">
-                {t("admin.dataSourceFeishuAccountEmptyDesc")}
-              </Text>
+              <Text type="secondary">{t("admin.dataSourceFeishuAccountEmptyDesc")}</Text>
             </div>
           ),
         }}

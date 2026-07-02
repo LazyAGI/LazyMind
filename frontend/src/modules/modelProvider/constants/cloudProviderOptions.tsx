@@ -1,13 +1,10 @@
 import type { ReactNode } from "react";
-import {
-  ApiOutlined,
-  DatabaseOutlined,
-  FolderOpenOutlined,
-} from "@ant-design/icons";
-import type { SourceType } from "./types";
+import { ApiOutlined, DatabaseOutlined, FolderOpenOutlined } from "@ant-design/icons";
 
-export const sourceTypeOptions: Array<{
-  type: SourceType;
+export type CloudProviderType = "local" | "feishu" | "notion";
+
+export const cloudProviderOptions: Array<{
+  type: CloudProviderType;
   icon: ReactNode;
   logoUrl?: string;
   adminOnly?: boolean;
@@ -28,3 +25,7 @@ export const sourceTypeOptions: Array<{
     logoUrl: "https://www.google.com/s2/favicons?domain=notion.so&sz=96",
   },
 ];
+
+export const cloudAuthProviderOptions = cloudProviderOptions.filter(
+  (item) => item.type === "feishu" || item.type === "notion",
+);

@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Form } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
-import type { TypedConfirmModalRef } from '@/components/ui/TypedConfirmModal';
 import {
   createFeishuAccountId,
   getOAuthStateFromConnection,
@@ -12,7 +11,7 @@ import {
   persistFeishuAuthAccounts,
   type FeishuAccountFormValues,
   type FeishuAuthAccount,
-} from "../common/feishuAccounts";
+} from "@/modules/dataSource/common/feishuAccounts";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   consumeCloudDataSourceOAuthResult,
@@ -22,7 +21,7 @@ import {
   type FeishuDataSourceConnection,
   type FeishuDataSourceOAuthMessage,
 } from "@/modules/dataSource/common/feishuOAuth";
-import { DEFAULT_DATA_SOURCE_FILE_TYPES } from "../constants/options";
+import { DEFAULT_DATA_SOURCE_FILE_TYPES } from "@/modules/dataSource/constants/options";
 import type {
   DataSourceItem,
   FeishuAppSetup,
@@ -31,38 +30,33 @@ import type {
   PendingOAuthAttempt,
   SourceFormValues,
   SourceType,
-} from "../constants/types";
-import { type ScanV2AgentHint } from "../utils/scanAccessors";
-import { pickScanAgent } from "../utils/cloudSync";
-import { isAdminRole } from "../utils/role";
-import { loadNotionAppSetup } from "../utils/notionSetup";
-import { sourceTypeOptions } from "../constants/sourceTypeOptions";
-import { useLocalPathTree } from "./useLocalPathTree";
-import { useFeishuTargetTree } from "./useFeishuTargetTree";
+} from "@/modules/dataSource/constants/types";
+import { sourceTypeOptions } from "@/modules/dataSource/constants/sourceTypeOptions";
+import { useLocalPathTree } from "@/modules/dataSource/hooks/useLocalPathTree";
+import { useFeishuTargetTree } from "@/modules/dataSource/hooks/useFeishuTargetTree";
 import type {
   CloudSetupIntent,
   DataSourceSaveMode,
   ManagementContext,
-} from "./management/context";
-import { createListActions } from "./management/createListActions";
-import { createOAuthEngine } from "./management/createOAuthEngine";
-import { createWizardSetup } from "./management/createWizardSetup";
-import { createWizardFlow } from "./management/createWizardFlow";
-import { createSaveActions } from "./management/createSaveActions";
+} from "@/modules/dataSource/hooks/management/context";
+import { createOAuthEngine } from "@/modules/dataSource/hooks/management/createOAuthEngine";
+import { createWizardSetup } from "@/modules/dataSource/hooks/management/createWizardSetup";
+import { createWizardFlow } from "@/modules/dataSource/hooks/management/createWizardFlow";
+import { createSaveActions } from "@/modules/dataSource/hooks/management/createSaveActions";
+import { type ScanV2AgentHint } from "@/modules/dataSource/utils/scanAccessors";
+import { pickScanAgent } from "@/modules/dataSource/utils/cloudSync";
+import { isAdminRole } from "@/modules/dataSource/utils/role";
+import { loadNotionAppSetup } from "@/modules/dataSource/utils/notionSetup";
 
-const DATA_SOURCE_LIST_DEFAULT_PAGE_SIZE = 10;
+interface UseSyncKnowledgeBaseCreationOptions {
+  onSuccess?: () => void | Promise<void>;
+}
 
-export function useDataSourceManagement() {
+export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreationOptions = {}) {
+  const { onSuccess } = options;
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [form] = Form.useForm<SourceFormValues>();
-  const [sources, setSources] = useState<DataSourceItem[]>([]);
-  const [assetSearchValue, setAssetSearchValue] = useState("");
-  const [sourceListPage, setSourceListPage] = useState(1);
-  const [sourceListPageSize, setSourceListPageSize] = useState(
-    DATA_SOURCE_LIST_DEFAULT_PAGE_SIZE,
-  );
-  const [sourceListTotal, setSourceListTotal] = useState(0);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardMode, setWizardMode] = useState<"create" | "edit">("create");
@@ -74,12 +68,10 @@ export function useDataSourceManagement() {
   const [connectionVerified, setConnectionVerified] = useState(false);
   const [oauthConnection, setOauthConnection] =
     useState<FeishuDataSourceConnection | null>(null);
-  const [feishuAuthAccounts, setFeishuAuthAccounts] = useState<
-    FeishuAuthAccount[]
-  >(() => loadFeishuAuthAccounts());
-  const [editingFeishuAccountId, setEditingFeishuAccountId] = useState<
-    string | null
-  >(null);
+  const [feishuAuthAccounts, setFeishuAuthAccounts] = useState<FeishuAuthAccount[]>(
+    () => loadFeishuAuthAccounts(),
+  );
+  const [editingFeishuAccountId, setEditingFeishuAccountId] = useState<string | null>(null);
   const [feishuAppSetup, setFeishuAppSetup] = useState<FeishuAppSetup | null>(
     () => loadFeishuAppSetup(),
   );
@@ -91,8 +83,7 @@ export function useDataSourceManagement() {
   const [cloudSetupProvider, setCloudSetupProvider] =
     useState<CloudDataSourceProvider>("feishu");
   const [feishuSetupModalOpen, setFeishuSetupModalOpen] = useState(false);
-  const [feishuSetupIntent, setFeishuSetupIntent] =
-    useState<CloudSetupIntent>(null);
+  const [feishuSetupIntent, setFeishuSetupIntent] = useState<CloudSetupIntent>(null);
   const [feishuSetupSubmitting, setFeishuSetupSubmitting] = useState(false);
   const [feishuSetupForm] = Form.useForm<FeishuAccountFormValues>();
   const [manualOauthModalOpen, setManualOauthModalOpen] = useState(false);
@@ -106,15 +97,14 @@ export function useDataSourceManagement() {
   const scanAgents: ScanV2AgentHint[] = [];
   const [localScanChatEnabled, setLocalScanChatEnabled] = useState(false);
   const [localScanChatSaving, setLocalScanChatSaving] = useState(false);
-  const [scanLoading, setScanLoading] = useState(false);
   const [validatedAgentId, setValidatedAgentId] = useState<string | null>(null);
   const [wizardSaving, setWizardSaving] = useState(false);
   const [wizardSavingMode, setWizardSavingMode] = useState<DataSourceSaveMode | null>(null);
-  const sourceListRequestSeqRef = useRef(0);
-  const assetSearchInitializedRef = useRef(false);
   const feishuAuthAccountsLoadedRef = useRef(false);
-  const confirmRef = useRef<TypedConfirmModalRef>(null);
-  const pendingConfirmActionRef = useRef<(() => void | Promise<void>) | null>(null);
+  const sourceListRequestSeqRef = useRef(0);
+  const onSuccessRef = useRef(onSuccess);
+
+  onSuccessRef.current = onSuccess;
 
   const syncMode = Form.useWatch("syncMode", form) || "scheduled";
   const feishuTargetType = (Form.useWatch("targetType", form) || "wiki_space") as FeishuTargetType;
@@ -134,16 +124,8 @@ export function useDataSourceManagement() {
     Boolean(notionOauthConnection.connectionId);
 
   const getPreferredLocalAgentId = () => {
-    const currentLocalSource =
-      editingId && selectedType === "local"
-        ? sources.find((item) => item.id === editingId && item.type === "local")
-        : undefined;
-    const selectedAgent = pickScanAgent(
-      scanAgents,
-      validatedAgentId || currentLocalSource?.agentId,
-    );
-
-    return selectedAgent?.agent_id || validatedAgentId || currentLocalSource?.agentId || "";
+    const selectedAgent = pickScanAgent(scanAgents, validatedAgentId);
+    return selectedAgent?.agent_id || validatedAgentId || "";
   };
 
   const {
@@ -155,16 +137,7 @@ export function useDataSourceManagement() {
     resetLocalPathBrowseOptions,
   } = useLocalPathTree({ t, form, getPreferredLocalAgentId });
 
-  const getActiveFeishuAuthConnectionId = () => {
-    if (oauthConnection?.connectionId) {
-      return oauthConnection.connectionId;
-    }
-    if (wizardMode === "edit" && editingId) {
-      return sources.find((item) => item.id === editingId && item.type === "feishu")
-        ?.authConnectionId || "";
-    }
-    return "";
-  };
+  const getActiveFeishuAuthConnectionId = () => oauthConnection?.connectionId || "";
 
   const {
     feishuTargetTreeData,
@@ -175,28 +148,30 @@ export function useDataSourceManagement() {
     resetFeishuTargetBrowseOptions,
   } = useFeishuTargetTree({ t, feishuTargetType, getActiveFeishuAuthConnectionId });
 
-  // Build the shared context once per render with all state, setters and refs,
-  // then progressively layer the handler factories on top of it.
+  const refreshSourcesAfterCreate = useCallback(async () => {
+    await onSuccessRef.current?.();
+  }, []);
+
   const ctx = {} as ManagementContext;
   Object.assign(ctx, {
     t,
     navigate,
     form,
     feishuSetupForm,
-    sources,
-    setSources,
+    sources: [] as DataSourceItem[],
+    setSources: () => undefined,
     activeView: "assets" as const,
     setActiveView: () => undefined,
-    assetSearchValue,
-    setAssetSearchValue,
-    sourceListPage,
-    setSourceListPage,
-    sourceListPageSize,
-    setSourceListPageSize,
-    sourceListTotal,
-    setSourceListTotal,
-    scanLoading,
-    setScanLoading,
+    assetSearchValue: "",
+    setAssetSearchValue: () => undefined,
+    sourceListPage: 1,
+    setSourceListPage: () => undefined,
+    sourceListPageSize: 10,
+    setSourceListPageSize: () => undefined,
+    sourceListTotal: 0,
+    setSourceListTotal: () => undefined,
+    scanLoading: false,
+    setScanLoading: () => undefined,
     wizardOpen,
     setWizardOpen,
     wizardStep,
@@ -263,8 +238,13 @@ export function useDataSourceManagement() {
     feishuTargetTreeData,
     resetLocalPathBrowseOptions,
     resetFeishuTargetBrowseOptions,
+    createSuccessMessageKey: "knowledge.createFromCloudDocumentsSuccess",
+    refreshSources: refreshSourcesAfterCreate,
+    handleToggleLocalScanChat: async () => undefined,
+    executeDeleteSource: async () => undefined,
+    openDetailPage: () => undefined,
+    openEditWizard: () => undefined,
   });
-  Object.assign(ctx, createListActions(ctx));
   Object.assign(ctx, createOAuthEngine(ctx));
   Object.assign(ctx, createWizardSetup(ctx));
   Object.assign(ctx, createWizardFlow(ctx));
@@ -345,49 +325,14 @@ export function useDataSourceManagement() {
   }, [form]);
 
   useEffect(() => {
-    void ctx.refreshSources(false);
     void ctx.refreshFeishuAuthAccounts();
     void ctx.refreshNotionAuthConnection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!assetSearchInitializedRef.current) {
-      assetSearchInitializedRef.current = true;
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      void ctx.refreshSources(false, {
-        page: 1,
-        pageSize: sourceListPageSize,
-        keyword: assetSearchValue,
-      });
-    }, 300);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assetSearchValue]);
-
-  const handleTypedConfirm = (_id: string) => {
-    const action = pendingConfirmActionRef.current;
-    pendingConfirmActionRef.current = null;
-    if (action) {
-      void action();
-    }
-  };
-
-  const requestDeleteSourceConfirm = (record: DataSourceItem) => {
-    pendingConfirmActionRef.current = () => ctx.executeDeleteSource(record);
-    confirmRef.current?.onOpen({
-      id: record.id,
-      title: t("admin.dataSourceDeleteTitle", { name: record.name }),
-      content: t("admin.dataSourceDeleteContent"),
-      confirmText: t("admin.dataSourceDeleteConfirmText", { name: record.name }),
-    });
-  };
+  const openCreateModal = useCallback(() => {
+    setCreateProviderModalOpen(true);
+  }, []);
 
   const requestSaveWithSyncConfirm = (mode: DataSourceSaveMode) => {
     void ctx.handleSave(mode);
@@ -396,15 +341,6 @@ export function useDataSourceManagement() {
   return {
     t,
     form,
-    feishuSetupForm,
-    sources,
-    assetSearchValue,
-    setAssetSearchValue,
-    sourceListPage,
-    sourceListPageSize,
-    sourceListTotal,
-    scanLoading,
-    refreshSources: ctx.refreshSources,
     wizardOpen,
     wizardStep,
     setWizardStep,
@@ -422,15 +358,6 @@ export function useDataSourceManagement() {
     manualOauthCallbackValue,
     setManualOauthCallbackValue,
     manualOauthSubmitting,
-    cloudSetupProvider,
-    feishuSetupModalOpen,
-    setFeishuSetupModalOpen,
-    feishuSetupIntent,
-    setFeishuSetupIntent,
-    feishuSetupSubmitting,
-    oauthConnection,
-    notionOauthConnection,
-    canCreateLocalSource,
     creatableSourceTypeOptions,
     isFeishuSetupReady,
     isNotionSetupReady,
@@ -449,24 +376,18 @@ export function useDataSourceManagement() {
     handleSearchFeishuTargetOptions,
     handleLoadFeishuTargetChildren,
     resetFeishuTargetBrowseOptions,
-    openSourceCreateWizard: ctx.openSourceCreateWizard,
     handleCreateProviderSelect: ctx.handleCreateProviderSelect,
     handleOpenFeishuGuideFromAuthSelect: ctx.handleOpenFeishuGuideFromAuthSelect,
     handleSelectFeishuAuthConnection: ctx.handleSelectFeishuAuthConnection,
     handleSubmitManualOauthCallback: ctx.handleSubmitManualOauthCallback,
     handleCloseWizard: ctx.handleCloseWizard,
     handleNextStep: ctx.handleNextStep,
-    handleSave: ctx.handleSave,
     handleSelectType: ctx.handleSelectType,
     handleResetFeishuSetup: ctx.handleResetFeishuSetup,
     handleResetNotionSetup: ctx.handleResetNotionSetup,
-    openDetailPage: ctx.openDetailPage,
-    openEditWizard: ctx.openEditWizard,
-    requestDeleteSourceConfirm,
     requestSaveWithSyncConfirm,
-    confirmRef,
-    handleTypedConfirm,
+    openCreateModal,
   };
 }
 
-export type DataSourceManagementVm = ReturnType<typeof useDataSourceManagement>;
+export type SyncKnowledgeBaseCreationVm = ReturnType<typeof useSyncKnowledgeBaseCreation>;

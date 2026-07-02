@@ -21,9 +21,11 @@ import GroupDetail from "@/modules/admin/pages/group/detail.tsx";
 import DataSourceManagement from "@/modules/dataSource";
 import DataSourceDetail from "@/modules/dataSource/detail";
 import DataSourceFeishuCallback from "@/modules/dataSource/common/feishuCallback";
-import FeishuAccountPage from "@/modules/dataSource/feishuAccounts";
-import FeishuSetupGuide from "@/modules/dataSource/FeishuSetupGuide";
-import NotionSetupGuide from "@/modules/dataSource/NotionSetupGuide";
+import CloudDocumentsPage from "@/modules/modelProvider/pages/CloudDocumentsPage";
+import FeishuAccountPage from "@/modules/modelProvider/pages/FeishuAccountPage";
+import LocalDataSourcePage from "@/modules/modelProvider/pages/LocalDataSourcePage";
+import FeishuSetupGuide from "@/modules/modelProvider/pages/FeishuSetupGuide";
+import NotionSetupGuide from "@/modules/modelProvider/pages/NotionSetupGuide";
 import DatasetListPage from "@/modules/datasetManagement/pages/list";
 import DatasetDetailPage from "@/modules/datasetManagement/pages/detail";
 import MemoryManagement from "@/modules/memory";
@@ -86,11 +88,6 @@ export default function AppRouter() {
             />
           </Route>
           <Route path="data-sources" element={<DataSourceManagement />} />
-          <Route path="data-sources/docs/feishu-setup" element={<FeishuSetupGuide />} />
-          <Route path="data-sources/docs/notion-setup" element={<NotionSetupGuide />} />
-          <Route path="data-sources/providers/feishu" element={<FeishuAccountPage />} />
-          <Route path="data-sources/providers/notion" element={<DataSourceManagement />} />
-          <Route path="data-sources/providers/sciverse" element={<Navigate to="/model-providers/tools" replace />} />
           <Route path="data-sources/:id" element={<DataSourceDetail />} />
           <Route path="dataset-management" element={<DatasetListPage />} />
           <Route path="dataset-management/:datasetId" element={<DatasetDetailPage />} />
@@ -99,6 +96,11 @@ export default function AppRouter() {
             <Route path="models" element={<ModelProvidersPage />} />
             <Route path="document-parsing" element={<ExternalServicesPage section="parsing" />} />
             <Route path="tools" element={<ExternalServicesPage section="tools" />} />
+            <Route path="cloud-documents" element={<CloudDocumentsPage />} />
+            <Route path="cloud-documents/local" element={<LocalDataSourcePage />} />
+            <Route path="cloud-documents/feishu" element={<FeishuAccountPage />} />
+            <Route path="cloud-documents/docs/feishu-setup" element={<FeishuSetupGuide />} />
+            <Route path="cloud-documents/docs/notion-setup" element={<NotionSetupGuide />} />
             <Route path="external-services" element={<Navigate to="/model-providers/document-parsing" replace />} />
             <Route path="default-services" element={<DefaultServicesPage />} />
           </Route>

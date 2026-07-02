@@ -157,6 +157,9 @@ export interface ManagementContext {
   resetLocalPathBrowseOptions: () => void;
   resetFeishuTargetBrowseOptions: () => void;
 
+  /** i18n key override for create success toast (defaults to admin.dataSourceCreated) */
+  createSuccessMessageKey?: string;
+
   // List actions (createListActions)
   refreshSources: (showSuccessMessage?: boolean, options?: RefreshSourcesOptions) => Promise<void>;
   handleToggleLocalScanChat: (chatEnabled: boolean) => Promise<void>;

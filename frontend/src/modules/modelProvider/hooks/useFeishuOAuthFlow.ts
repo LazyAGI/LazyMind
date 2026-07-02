@@ -9,15 +9,15 @@ import {
   openCenteredPopup,
   requestFeishuDataSourceAuthorizeUrl,
   type FeishuDataSourceOAuthMessage,
-} from "../common/feishuOAuth";
+} from "@/modules/dataSource/common/feishuOAuth";
 import {
   getOAuthStateFromConnection,
   type FeishuAuthAccount,
-} from "../common/feishuAccounts";
-import { FEISHU_DEFAULT_SCOPES } from "../constants/options";
-import type { OAuthState, PendingOAuthAttempt } from "../constants/types";
-import { getScanTenantId } from "../utils/scanAccessors";
-import { parseFeishuOAuthCallbackInput } from "../utils/feishuAccount";
+} from "@/modules/dataSource/common/feishuAccounts";
+import { FEISHU_DEFAULT_SCOPES } from "@/modules/dataSource/constants/options";
+import type { OAuthState, PendingOAuthAttempt } from "@/modules/dataSource/constants/types";
+import { getScanTenantId } from "@/modules/dataSource/utils/scanAccessors";
+import { parseFeishuOAuthCallbackInput } from "@/modules/dataSource/utils/feishuAccount";
 
 interface UseFeishuOAuthFlowParams {
   t: TFunction;

@@ -1,14 +1,19 @@
-import { Alert, Typography } from "antd";
-import { Link } from "react-router-dom";
-import TypedConfirmModal from '@/components/ui/TypedConfirmModal';
-import DataSourceWizardModal from "./DataSourceWizardModal";
-import DataSourceAssetTable from "./management/DataSourceAssetTable";
-import type { DataSourceManagementVm } from "../hooks/useDataSourceManagement";
-import { CLOUD_DOCUMENTS_PATH } from "@/modules/modelProvider/utils/cloudDocumentUrls";
+import { FC } from "react";
+import DataSourceWizardModal from "@/modules/dataSource/components/DataSourceWizardModal";
+import DataSourceManagementModals from "@/modules/dataSource/components/management/DataSourceManagementModals";
+import {
+  useSyncKnowledgeBaseCreation,
+  type SyncKnowledgeBaseCreationVm,
+} from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
+import "@/modules/dataSource/index.scss";
+import "./index.scss";
 
-const { Paragraph } = Typography;
+interface Props {
+  onSuccess?: () => void | Promise<void>;
+  vm?: SyncKnowledgeBaseCreationVm;
+}
 
-export default function DataSourceManagementView({ vm }: { vm: DataSourceManagementVm }) {
+const SyncKnowledgeBaseCreationFlowInner: FC<{ vm: SyncKnowledgeBaseCreationVm }> = ({ vm }) => {
   const {
     t,
     form,
@@ -37,41 +42,18 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
     handleCloseWizard,
     handleNextStep,
     requestSaveWithSyncConfirm,
-    confirmRef,
-    handleTypedConfirm,
     handleSelectType,
     handleResetFeishuSetup,
     handleResetNotionSetup,
   } = vm;
 
   return (
-    <div className="admin-page data-source-page">
-      <div className="admin-page-toolbar data-source-page-toolbar">
-        <div className="admin-page-toolbar-left data-source-page-toolbar-left">
-          <div>
-            <h2 className="admin-page-title">{t("admin.dataSourceManagement")}</h2>
-            <Paragraph className="data-source-page-subtitle">
-              {t("admin.dataSourceSubtitle")}
-            </Paragraph>
-          </div>
-        </div>
-      </div>
-
-      <Alert
-        showIcon
-        type="info"
-        className="data-source-cloud-doc-link-alert"
-        message={
-          <>
-            {t("modelProvider.cloudDocuments.linkFromDataSource")}{" "}
-            <Link to={CLOUD_DOCUMENTS_PATH}>{t("modelProvider.tabs.cloudDocuments")}</Link>
-          </>
-        }
+    <>
+      <DataSourceManagementModals
+        vm={vm}
+        titleKey="knowledge.createFromCloudDocumentsTitle"
+        introKey="knowledge.createFromCloudDocumentsIntro"
       />
-
-      <section className="data-source-workbench">
-        <DataSourceAssetTable vm={vm} />
-      </section>
 
       <DataSourceWizardModal
         t={t}
@@ -112,8 +94,22 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
         onLoadFeishuTargetChildren={handleLoadFeishuTargetChildren}
         onResetFeishuTargetBrowseOptions={resetFeishuTargetBrowseOptions}
       />
-
-      <TypedConfirmModal ref={confirmRef} onClick={handleTypedConfirm} />
-    </div>
+    </>
   );
-}
+};
+
+const SyncKnowledgeBaseCreationFlowWithHook: FC<Pick<Props, "onSuccess">> = ({ onSuccess }) => {
+  const vm = useSyncKnowledgeBaseCreation({ onSuccess });
+  return <SyncKnowledgeBaseCreationFlowInner vm={vm} />;
+};
+
+const SyncKnowledgeBaseCreationFlow: FC<Props> = ({ onSuccess, vm }) => {
+  if (vm) {
+    return <SyncKnowledgeBaseCreationFlowInner vm={vm} />;
+  }
+
+  return <SyncKnowledgeBaseCreationFlowWithHook onSuccess={onSuccess} />;
+};
+
+export { useSyncKnowledgeBaseCreation };
+export default SyncKnowledgeBaseCreationFlow;

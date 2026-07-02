@@ -1,5 +1,5 @@
 import { FC, ReactElement, ReactNode } from "react";
-import { Input, Select, Form, Button, Tooltip } from "antd";
+import { Input, Select, Form, Button, Tooltip, Space } from "antd";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
 
@@ -32,6 +32,10 @@ interface Props {
   btnDisabled?: boolean;
   btnDisabledTooltip?: ReactNode;
   onClick?: () => void;
+  secondaryBtnText?: string;
+  secondaryBtnDisabled?: boolean;
+  secondaryBtnDisabledTooltip?: ReactNode;
+  onSecondaryClick?: () => void;
   onSearch: () => void;
 }
 
@@ -47,6 +51,10 @@ const ListPageHeaderComponent: FC<Props> = ({
   btnDisabledTooltip,
   allowClear = true,
   onClick,
+  secondaryBtnText,
+  secondaryBtnDisabled = false,
+  secondaryBtnDisabledTooltip,
+  onSecondaryClick,
   onSearch,
   prefix,
 }) => {
@@ -84,13 +92,27 @@ const ListPageHeaderComponent: FC<Props> = ({
             <span>{t("common.sort")}</span>
           </div>
         )}
-        {btnText && onClick && (
-          <Tooltip title={btnDisabled ? btnDisabledTooltip : undefined}>
-            <Button type="primary" disabled={btnDisabled} onClick={onClick}>
-              {btnText || t("common.create")}
-            </Button>
-          </Tooltip>
-        )}
+        {(secondaryBtnText && onSecondaryClick) || (btnText && onClick) ? (
+          <Space wrap>
+            {secondaryBtnText && onSecondaryClick ? (
+              <Tooltip title={secondaryBtnDisabled ? secondaryBtnDisabledTooltip : undefined}>
+                <Button
+                  disabled={secondaryBtnDisabled}
+                  onClick={onSecondaryClick}
+                >
+                  {secondaryBtnText}
+                </Button>
+              </Tooltip>
+            ) : null}
+            {btnText && onClick ? (
+              <Tooltip title={btnDisabled ? btnDisabledTooltip : undefined}>
+                <Button type="primary" disabled={btnDisabled} onClick={onClick}>
+                  {btnText || t("common.create")}
+                </Button>
+              </Tooltip>
+            ) : null}
+          </Space>
+        ) : null}
       </div>
     </div>
   );
