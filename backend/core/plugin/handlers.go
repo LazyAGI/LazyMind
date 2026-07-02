@@ -657,6 +657,268 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
 
+// stepAttemptDTO represents one execution attempt of a step.
+type stepAttemptDTO struct {
+	Attempt       int     `json:"attempt"`
+	Status        string  `json:"status"`
+	DurationSec   float64 `json:"duration_sec"`   // -1 if not finished
+	ArtifactCount int     `json:"artifact_count"` // number of slot revisions for this attempt
+	StartedAt     string  `json:"started_at"`
+}
+
+// stateGraphNodeDTO is one node in the StateGraph response.
+type stateGraphNodeDTO struct {
+	ID              string  `json:"id"`
+	Label           string  `json:"label"`
+	StepIndex       int     `json:"step_index"` // 1-based order; 0 for terminal nodes
+	Status          string  `json:"status"`
+	IsCurrent       bool    `json:"is_current"`
+	ArtifactSummary *string `json:"artifact_summary"`
+	// StepAttempts is the full execution history for this step, ordered by attempt asc.
+	StepAttempts []stepAttemptDTO `json:"step_attempts"`
+}
+
+// stateGraphEdgeDTO is one directed edge in the StateGraph response.
+type stateGraphEdgeDTO struct {
+	From         string `json:"from"`
+	To           string `json:"to"`
+	Condition    string `json:"condition"`
+	IsActivePath bool   `json:"is_active_path"`
+}
+
+// stateGraphResponse is the full response for GET /plugin-sessions/{session_id}/state-graph.
+type stateGraphResponse struct {
+	Nodes         []stateGraphNodeDTO `json:"nodes"`
+	Edges         []stateGraphEdgeDTO `json:"edges"`
+	Initial       string              `json:"initial"`
+	CurrentStepID string              `json:"current_step_id"`
+}
+
+// pluginStateTransitionEdge matches one entry in state.transitions[from][].
+type pluginStateTransitionEdge struct {
+	To        string `json:"to"`
+	Condition string `json:"condition"`
+}
+
+// pluginStateSpec is the relevant subset of the Python /api/plugins/{id} response.
+// state.steps is a map[step_id]→{label,...}; state.transitions is map[from]→[]{to, condition}.
+type pluginStateSpec struct {
+	State struct {
+		Initial     string                                 `json:"initial"`
+		Steps       map[string]map[string]any              `json:"steps"`
+		Transitions map[string][]pluginStateTransitionEdge `json:"transitions"`
+	} `json:"state"`
+}
+
+// GetStateGraph handles GET /plugin-sessions/{session_id}/state-graph.
+// Combines the plugin state machine topology from Python with live step statuses from DB.
+func GetStateGraph(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	ctx := r.Context()
+
+	// 1. Load plugin session.
+	sess, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if sess.Dismissed {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	// 2. Fetch plugin spec from Python to get state machine topology.
+	upstream := common.ChatServiceEndpoint() + "/api/plugins/" + sess.PluginID
+	upCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(upCtx, http.MethodGet, upstream, nil)
+	if err != nil {
+		common.ReplyErr(w, "build upstream request failed", http.StatusInternalServerError)
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		common.ReplyErr(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		common.ReplyErr(w, "upstream error", http.StatusBadGateway)
+		return
+	}
+	var spec pluginStateSpec
+	if decErr := json.NewDecoder(resp.Body).Decode(&spec); decErr != nil {
+		common.ReplyErr(w, "decode plugin spec failed", http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Query all step attempts with timing + artifact count.
+	type stepRow struct {
+		StepID        string    `gorm:"column:step_id"`
+		Attempt       int       `gorm:"column:attempt"`
+		Status        string    `gorm:"column:status"`
+		TaskID        string    `gorm:"column:task_id"`
+		CreatedAt     time.Time `gorm:"column:created_at"`
+		UpdatedAt     time.Time `gorm:"column:updated_at"`
+		ArtifactCount int       `gorm:"column:artifact_count"`
+	}
+	var stepRows []stepRow
+	db.WithContext(ctx).Raw(`
+		SELECT
+			s.step_id,
+			s.attempt,
+			s.status,
+			s.task_id,
+			s.created_at,
+			s.updated_at,
+			COALESCE(a.artifact_count, 0) AS artifact_count
+		FROM plugin_session_steps s
+		LEFT JOIN (
+			SELECT step_id, attempt, COUNT(*) AS artifact_count
+			FROM plugin_slot_revisions
+			WHERE session_id = ?
+			GROUP BY step_id, attempt
+		) a ON a.step_id = s.step_id AND a.attempt = s.attempt
+		WHERE s.session_id = ?
+		ORDER BY s.step_id, s.attempt ASC
+	`, sessionID, sessionID).Scan(&stepRows)
+
+	// Build step status map (latest attempt) and attempts map.
+	type stepInfo struct {
+		latestStatus  string
+		latestAttempt int
+		attempts      []stepAttemptDTO
+	}
+	stepMap := make(map[string]*stepInfo)
+	for _, r := range stepRows {
+		si, ok := stepMap[r.StepID]
+		if !ok {
+			si = &stepInfo{}
+			stepMap[r.StepID] = si
+		}
+		// Use updated_at - created_at as duration for completed steps.
+		dur := -1.0
+		terminalStatuses := map[string]bool{"succeeded": true, "failed": true, "interrupted": true, "canceled": true}
+		if terminalStatuses[r.Status] {
+			dur = r.UpdatedAt.Sub(r.CreatedAt).Seconds()
+		}
+		si.attempts = append(si.attempts, stepAttemptDTO{
+			Attempt:       r.Attempt,
+			Status:        r.Status,
+			DurationSec:   dur,
+			ArtifactCount: r.ArtifactCount,
+			StartedAt:     r.CreatedAt.UTC().Format("2006-01-02 15:04:05"),
+		})
+		if r.Attempt >= si.latestAttempt {
+			si.latestAttempt = r.Attempt
+			si.latestStatus = r.Status
+		}
+	}
+
+	// 5. Build nodes — __start__ + all declared steps (in transition order) + __end__.
+	// Use BFS from initial to enumerate steps in topological order.
+	startNode := stateGraphNodeDTO{
+		ID:        "__start__",
+		Label:     "__start__",
+		Status:    "succeeded",
+		IsCurrent: false,
+	}
+
+	endStatus := "pending"
+	if sess.Status == "completed" {
+		endStatus = "succeeded"
+	}
+	endNode := stateGraphNodeDTO{
+		ID:        "__end__",
+		Label:     "__end__",
+		Status:    endStatus,
+		IsCurrent: false,
+	}
+
+	// BFS to produce a stable step ordering from the state machine topology.
+	visited := map[string]bool{"__start__": true, "__end__": true}
+	queue := []string{"__start__"}
+	orderedStepIDs := []string{}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, edge := range spec.State.Transitions[cur] {
+			if !visited[edge.To] && edge.To != "__end__" {
+				visited[edge.To] = true
+				orderedStepIDs = append(orderedStepIDs, edge.To)
+				queue = append(queue, edge.To)
+			}
+		}
+	}
+
+	nodes := []stateGraphNodeDTO{startNode}
+	for i, stepID := range orderedStepIDs {
+		stepData, hasStep := spec.State.Steps[stepID]
+		label := stepID
+		if hasStep {
+			if lv, ok := stepData["label"].(string); ok && lv != "" {
+				label = lv
+			}
+		}
+		status := "pending"
+		var attempts []stepAttemptDTO
+		if si, ok := stepMap[stepID]; ok {
+			status = si.latestStatus
+			attempts = si.attempts
+		}
+		nodes = append(nodes, stateGraphNodeDTO{
+			ID:           stepID,
+			Label:        label,
+			StepIndex:    i + 1,
+			Status:       status,
+			IsCurrent:    stepID == sess.CurrentStepID,
+			StepAttempts: attempts,
+		})
+	}
+	nodes = append(nodes, endNode)
+
+	// 6. Build edges from transitions map; mark is_active_path for edges leaving current node.
+	edges := make([]stateGraphEdgeDTO, 0)
+	for fromID, edgeList := range spec.State.Transitions {
+		for _, edge := range edgeList {
+			isActivePath := fromID == sess.CurrentStepID
+			edges = append(edges, stateGraphEdgeDTO{
+				From:         fromID,
+				To:           edge.To,
+				Condition:    edge.Condition,
+				IsActivePath: isActivePath,
+			})
+		}
+	}
+
+	// 7. Determine initial node id.
+	initial := spec.State.Initial
+	if initial == "" {
+		initial = "__start__"
+	}
+
+	out := stateGraphResponse{
+		Nodes:         nodes,
+		Edges:         edges,
+		Initial:       initial,
+		CurrentStepID: sess.CurrentStepID,
+	}
+	common.ReplyOK(w, out)
+}
+
 // GetPluginInfo handles GET /plugins/{plugin_id}.
 // Proxies to the Python chat service /api/plugins/{plugin_id} and returns the plugin spec
 // including the ui.tabs declaration needed by the frontend PluginPanel.

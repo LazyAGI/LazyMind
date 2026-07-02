@@ -7,6 +7,7 @@ import { debounce } from 'lodash';
 import { cancelTask, listTasks, removeTask } from './api';
 import type { StepInfo, Task } from './api';
 import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
+import StateGraphModal from '@/components/StateGraphModal';
 
 const PAGE_SIZE = 20;
 
@@ -28,7 +29,7 @@ const STEP_STATUS_COLOR: Record<string, string> = {
   canceled: 'default',
 };
 
-function StepsCell({ steps }: { steps: StepInfo[] }) {
+function StepsCell({ steps, onOpenGraph }: { steps: StepInfo[]; onOpenGraph?: () => void }) {
   if (!steps || steps.length === 0) return <span style={{ color: '#bbb' }}>—</span>;
 
   // Show up to 2 step tags inline; rest in tooltip.
@@ -58,7 +59,19 @@ function StepsCell({ steps }: { steps: StepInfo[] }) {
 
   return (
     <Tooltip title={tooltipContent} overlayStyle={{ maxWidth: 380 }}>
-      <div style={{ cursor: 'default', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+      <div
+        style={{
+          cursor: onOpenGraph ? 'pointer' : 'default',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 4,
+        }}
+        onClick={onOpenGraph}
+        role={onOpenGraph ? 'button' : undefined}
+        tabIndex={onOpenGraph ? 0 : undefined}
+        onKeyDown={onOpenGraph ? (e) => e.key === 'Enter' && onOpenGraph() : undefined}
+        title={onOpenGraph ? '查看工作流图' : undefined}
+      >
         {visibleSteps.map((s, i) => (
           <Tag
             key={i}
@@ -93,6 +106,7 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
   const [keyword, setKeyword] = useState('');
   const [inputKeyword, setInputKeyword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [stateGraphTarget, setStateGraphTarget] = useState<{ sessionId: string } | null>(null);
 
   const fetchTasks = useCallback(
     async (p: number, status: string, kw: string, type: string) => {
@@ -215,7 +229,16 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
         title: t('taskCenter.steps'),
         dataIndex: 'steps',
         width: 160,
-        render: (steps: StepInfo[]) => <StepsCell steps={steps} />,
+        render: (steps: StepInfo[], record: Task) => (
+          <StepsCell
+            steps={steps}
+            onOpenGraph={
+              record.task_type === 'plugin_run' && record.plugin_session_id
+                ? () => setStateGraphTarget({ sessionId: record.plugin_session_id! })
+                : undefined
+            }
+          />
+        ),
       },
       {
         title: t('taskCenter.statusCol') || '状态',
@@ -267,6 +290,15 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
 
   return (
     <div>
+      {stateGraphTarget && (
+        <StateGraphModal
+          open={true}
+          onClose={() => setStateGraphTarget(null)}
+          sessionId={stateGraphTarget.sessionId}
+          pluginId=''
+          liveRefresh={false}
+        />
+      )}
       <Space style={{ marginBottom: 12 }}>
         <Input.Search
           placeholder={t('taskCenter.searchPlaceholder')}
