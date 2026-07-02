@@ -27,6 +27,9 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
 
         __call__ = forward
 
+        def set_stop_tools(self, tools):
+            self.stop_tools = tools
+
     monkeypatch.setattr(chat_service, 'AutoModel', lambda model, config=False: f'{model}:{config}')
     monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', FakeAgent)
 
