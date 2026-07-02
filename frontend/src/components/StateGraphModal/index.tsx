@@ -112,13 +112,22 @@ export default function StateGraphModal({
     return () => window.removeEventListener(PLUGIN_GRAPH_REFRESH_EVENT, handler);
   }, [open, liveRefresh, conversationId, fetchGraph]);
 
+  // Compute Modal width based on node count: more nodes → wider modal.
+  const modalWidth = (() => {
+    if (!data) return 900;
+    const nonTerminal = (data.nodes ?? []).filter((n) => n.id !== '__start__' && n.id !== '__end__').length;
+    // Each node is ~148px wide + ~42px gap; clamp between 700 and min(1200, viewport*0.9).
+    const estimated = 88 + nonTerminal * (148 + 42) + 88;
+    return Math.min(1200, Math.max(700, estimated));
+  })();
+
   return (
     <Modal
       open={open}
       onCancel={onClose}
       footer={null}
       title='工作流图'
-      width={900}
+      width={modalWidth}
       style={{ top: 40 }}
       className='state-graph-modal'
       destroyOnClose

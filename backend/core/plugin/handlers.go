@@ -680,10 +680,12 @@ type stateGraphNodeDTO struct {
 
 // stateGraphEdgeDTO is one directed edge in the StateGraph response.
 type stateGraphEdgeDTO struct {
-	From         string `json:"from"`
-	To           string `json:"to"`
-	Condition    string `json:"condition"`
-	IsActivePath bool   `json:"is_active_path"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Condition string `json:"condition"`
+	// EdgeType: "executed" | "current_direct" | "current_reachable" | "skipped"
+	// Computed server-side from execution history and current step.
+	EdgeType string `json:"edge_type"`
 }
 
 // stateGraphResponse is the full response for GET /plugin-sessions/{session_id}/state-graph.
@@ -890,16 +892,77 @@ func GetStateGraph(w http.ResponseWriter, r *http.Request) {
 	}
 	nodes = append(nodes, endNode)
 
-	// 6. Build edges from transitions map; mark is_active_path for edges leaving current node.
+	// 6. Build edges with edge_type based on execution history.
+	//
+	// edge_type rules:
+	//   "executed"         — both from and to have been executed (status != pending)
+	//   "current_direct"   — from == current step (direct successor)
+	//   "current_reachable"— reachable from current via BFS (not direct)
+	//   "skipped"          — neither executed nor reachable from current
+	//
+	// Treat __start__ as always executed; __end__ as executed when session is completed.
+	executedNodes := map[string]bool{"__start__": true}
+	if sess.Status == "completed" || sess.Status == "failed" {
+		executedNodes["__end__"] = true
+	}
+	for nodeID, si := range stepMap {
+		if si.latestStatus != "" && si.latestStatus != "pending" {
+			executedNodes[nodeID] = true
+		}
+	}
+
+	// BFS from current step to find all reachable nodes (direct + indirect).
+	directSuccessors := map[string]bool{}
+	reachableFromCurrent := map[string]bool{}
+	if sess.CurrentStepID != "" {
+		for _, e := range spec.State.Transitions[sess.CurrentStepID] {
+			directSuccessors[e.To] = true
+			reachableFromCurrent[e.To] = true
+		}
+		bfsQueue := []string{}
+		for id := range directSuccessors {
+			bfsQueue = append(bfsQueue, id)
+		}
+		bfsVisited := map[string]bool{sess.CurrentStepID: true}
+		for _, id := range bfsQueue {
+			bfsVisited[id] = true
+		}
+		for len(bfsQueue) > 0 {
+			cur2 := bfsQueue[0]
+			bfsQueue = bfsQueue[1:]
+			for _, e := range spec.State.Transitions[cur2] {
+				if !bfsVisited[e.To] {
+					bfsVisited[e.To] = true
+					reachableFromCurrent[e.To] = true
+					bfsQueue = append(bfsQueue, e.To)
+				}
+			}
+		}
+	}
+
 	edges := make([]stateGraphEdgeDTO, 0)
 	for fromID, edgeList := range spec.State.Transitions {
 		for _, edge := range edgeList {
-			isActivePath := fromID == sess.CurrentStepID
+			// Skip self-loops.
+			if fromID == edge.To {
+				continue
+			}
+			var edgeType string
+			switch {
+			case executedNodes[fromID] && executedNodes[edge.To]:
+				edgeType = "executed"
+			case fromID == sess.CurrentStepID && directSuccessors[edge.To]:
+				edgeType = "current_direct"
+			case reachableFromCurrent[edge.To] && !executedNodes[edge.To]:
+				edgeType = "current_reachable"
+			default:
+				edgeType = "skipped"
+			}
 			edges = append(edges, stateGraphEdgeDTO{
-				From:         fromID,
-				To:           edge.To,
-				Condition:    edge.Condition,
-				IsActivePath: isActivePath,
+				From:      fromID,
+				To:        edge.To,
+				Condition: edge.Condition,
+				EdgeType:  edgeType,
 			})
 		}
 	}
