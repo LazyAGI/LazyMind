@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 
-export type SourceType = "local" | "s3" | "feishu" | "confluence" | "notion";
+export type SourceType = "local" | "s3" | "feishu" | "confluence" | "notion" | "database";
 export type SourceStatus = "active" | "expired" | "error" | "paused" | "deleted";
 export type ConnectionState = "connected" | "expired" | "error" | "pending";
 export type SyncMode = "manual" | "scheduled";
@@ -355,6 +355,18 @@ export interface DataSourceItem {
   bindingTreeKey?: string;
   bindingTreeKeys?: string[];
   configVersion?: number;
+  databaseConnectionId?: string;
+  databaseConnection?: {
+    id: string;
+    display_name: string;
+    description: string;
+    db_type: "mysql" | "postgresql";
+    host: string;
+    port: number;
+    database_name: string;
+    username: string;
+    options: Record<string, string>;
+  };
 }
 
 export interface SourceFormValues {
@@ -806,6 +818,9 @@ export function getSourceTypeTitle(type: SourceType, t: TFunction) {
   if (type === "notion") {
     return t("admin.dataSourceTypeNotion");
   }
+  if (type === "database") {
+    return t("admin.dataSourceTypeDatabase");
+  }
   return type;
 }
 
@@ -818,6 +833,9 @@ export function getSourceTypeDescription(type: SourceType, t: TFunction) {
   }
   if (type === "notion") {
     return t("admin.dataSourceTypeNotionDesc");
+  }
+  if (type === "database") {
+    return t("admin.dataSourceTypeDatabaseDesc");
   }
   return "";
 }

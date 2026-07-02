@@ -1,28 +1,29 @@
 import { useEffect, useState } from "react";
 import {
+  Alert,
   Button,
-  Form,
-  Input,
-  InputNumber,
   Modal,
-  Select,
   Space,
   Steps,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
+  ArrowLeftOutlined,
   CheckCircleOutlined,
   DatabaseOutlined,
   DeleteOutlined,
   EditOutlined,
+  FileTextOutlined,
   PlusOutlined,
-  QuestionCircleOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   checkDatabaseConnection,
@@ -33,46 +34,14 @@ import {
   type DatabaseConnectionItem,
   type DatabaseConnectionPayload,
 } from "../api";
+import DatabaseConnectionModal from "./DatabaseConnectionModal";
+import "../index.scss";
 
 const { Paragraph, Text } = Typography;
 
-type FormValues = DatabaseConnectionPayload & {
-  options_text?: string;
-};
-
-function parseOptions(value?: string): Record<string, string> {
-  const text = `${value || ""}`.trim();
-  if (!text) {
-    return {};
-  }
-  const parsed = JSON.parse(text) as unknown;
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-    throw new Error("连接参数必须是 JSON 对象");
-  }
-  return Object.fromEntries(
-    Object.entries(parsed).map(([key, item]) => [key, item == null ? "" : String(item)]),
-  );
-}
-
-function connectionToForm(record: DatabaseConnectionItem): FormValues {
-  return {
-    display_name: record.display_name,
-    description: record.description,
-    db_type: record.db_type,
-    host: record.host,
-    port: record.port,
-    database_name: record.database_name,
-    username: record.username,
-    password: "",
-    options: record.options || {},
-    options_text: Object.keys(record.options || {}).length > 0
-      ? JSON.stringify(record.options, null, 2)
-      : "",
-  };
-}
-
 export default function DatabaseConnectionsPage() {
-  const [form] = Form.useForm<FormValues>();
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const [items, setItems] = useState<DatabaseConnectionItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -87,7 +56,7 @@ export default function DatabaseConnectionsPage() {
       const result = await listDatabaseConnections();
       setItems(result.connections || []);
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, "加载外部数据库连接失败"));
+      message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseLoadFailed")));
     } finally {
       setLoading(false);
     }
@@ -99,33 +68,15 @@ export default function DatabaseConnectionsPage() {
 
   const openCreate = () => {
     setEditing(null);
-    form.resetFields();
-    form.setFieldsValue({ db_type: "postgresql", port: 5432 });
     setModalOpen(true);
   };
 
   const openEdit = (record: DatabaseConnectionItem) => {
     setEditing(record);
-    form.setFieldsValue(connectionToForm(record));
     setModalOpen(true);
   };
 
-  const handleSubmit = async () => {
-    const values = await form.validateFields();
-    const payload: DatabaseConnectionPayload = {
-      display_name: values.display_name.trim(),
-      description: values.description?.trim(),
-      db_type: values.db_type,
-      host: values.host.trim(),
-      port: values.port,
-      database_name: values.database_name.trim(),
-      username: values.username.trim(),
-      password: values.password,
-      options: parseOptions(values.options_text),
-    };
-    if (editing && !payload.password) {
-      delete payload.password;
-    }
+  const handleSubmit = async (payload: DatabaseConnectionPayload) => {
     setSaving(true);
     try {
       if (editing) {
@@ -133,11 +84,11 @@ export default function DatabaseConnectionsPage() {
       } else {
         await createDatabaseConnection(payload);
       }
-      message.success(editing ? "连接已更新" : "连接已创建");
+      message.success(editing ? t("admin.dataSourceDatabaseUpdated") : t("admin.dataSourceDatabaseCreated"));
       setModalOpen(false);
       await refresh();
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, "保存外部数据库连接失败"));
+      message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseSaveFailed")));
     } finally {
       setSaving(false);
     }
@@ -148,13 +99,13 @@ export default function DatabaseConnectionsPage() {
     try {
       const result = await checkDatabaseConnection(record.id);
       if (result.success) {
-        message.success(`连接成功，发现 ${result.table_count} 张表`);
+        message.success(t("admin.dataSourceDatabaseCheckSuccess", { count: result.table_count }));
       } else {
-        message.error(result.message || "连接失败");
+        message.error(result.message || t("admin.dataSourceDatabaseCheckFailed"));
       }
       await refresh();
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, "测试连接失败"));
+      message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseCheckFailed")));
     } finally {
       setCheckingId("");
     }
@@ -162,14 +113,14 @@ export default function DatabaseConnectionsPage() {
 
   const handleDelete = (record: DatabaseConnectionItem) => {
     Modal.confirm({
-      title: "删除外部数据库连接",
-      content: `确认删除 ${record.display_name}？`,
-      okText: "删除",
+      title: t("admin.dataSourceDatabaseDeleteTitle"),
+      content: t("admin.dataSourceDatabaseDeleteContent", { name: record.display_name }),
+      okText: t("common.delete"),
       okButtonProps: { danger: true },
-      cancelText: "取消",
+      cancelText: t("common.cancel"),
       onOk: async () => {
         await deleteDatabaseConnection(record.id);
-        message.success("连接已删除");
+        message.success(t("admin.dataSourceDatabaseDeleted"));
         await refresh();
       },
     });
@@ -177,184 +128,175 @@ export default function DatabaseConnectionsPage() {
 
   const columns: ColumnsType<DatabaseConnectionItem> = [
     {
-      title: "名称",
+      title: t("admin.dataSourceDatabaseName"),
       dataIndex: "display_name",
+      key: "display_name",
+      width: 360,
       render: (value, record) => (
-        <Space direction="vertical" size={0}>
-          <Text strong>{value}</Text>
-          <Text type="secondary">{record.description || record.database_name}</Text>
-        </Space>
+        <div className="data-source-table-name">
+          <span className="data-source-provider-logo data-source-icon-database">
+            <DatabaseOutlined />
+          </span>
+          <div className="data-source-table-copy">
+            <Text strong>{value}</Text>
+            <Text type="secondary" className="data-source-ellipsis">
+              {record.description || record.database_name}
+            </Text>
+          </div>
+        </div>
       ),
     },
     {
-      title: "类型",
+      title: t("admin.dataSourceDatabaseType"),
       dataIndex: "db_type",
       width: 130,
       render: (value) => <Tag color={value === "mysql" ? "blue" : "geekblue"}>{value}</Tag>,
     },
     {
-      title: "地址",
-      width: 260,
-      render: (_, record) => `${record.host}:${record.port}/${record.database_name}`,
+      title: t("admin.dataSourceDatabaseAddress"),
+      width: 360,
+      render: (_, record) => {
+        const address = `${record.host}:${record.port}/${record.database_name}`;
+        return (
+          <Tooltip title={address} placement="topLeft">
+            <Text className="data-source-ellipsis">{address}</Text>
+          </Tooltip>
+        );
+      },
     },
     {
-      title: "账号",
+      title: t("admin.dataSourceDatabaseUsername"),
       dataIndex: "username",
       width: 180,
     },
     {
-      title: "状态",
+      title: t("admin.dataSourceDatabaseStatus"),
       dataIndex: "is_verified",
       width: 150,
       render: (verified, record) => verified ? (
-        <Tag color="success" icon={<CheckCircleOutlined />}>已验证</Tag>
+        <Tag color="success" icon={<CheckCircleOutlined />}>{t("admin.dataSourceDatabaseVerified")}</Tag>
       ) : (
-        <Tag color={record.last_check_error ? "error" : "default"}>未验证</Tag>
+        <Tag color={record.last_check_error ? "error" : "default"}>{t("admin.dataSourceDatabaseUnverified")}</Tag>
       ),
     },
     {
-      title: "操作",
-      width: 280,
+      title: t("admin.dataSourceTableActions"),
+      width: 260,
+      fixed: "right",
+      className: "data-source-action-column",
       render: (_, record) => (
-        <Space>
+        <Space size={14} className="data-source-table-actions">
           <Button
+            type="link"
             icon={<SyncOutlined />}
             loading={checkingId === record.id}
             onClick={() => void handleCheck(record)}
           >
-            测试
+            {t("admin.dataSourceDatabaseTestAction")}
           </Button>
-          <Button icon={<EditOutlined />} onClick={() => openEdit(record)}>编辑</Button>
-          <Button danger icon={<DeleteOutlined />} onClick={() => handleDelete(record)}>删除</Button>
+          <Button type="link" icon={<EditOutlined />} onClick={() => openEdit(record)}>{t("common.edit")}</Button>
+          <Button type="link" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record)}>{t("common.delete")}</Button>
         </Space>
       ),
     },
   ];
 
   return (
-    <div className="admin-page data-source-page">
+    <div className="admin-page data-source-page data-source-database-page">
       <div className="admin-page-toolbar data-source-page-toolbar">
         <div className="admin-page-toolbar-left data-source-page-toolbar-left">
           <div>
-            <h2 className="admin-page-title">外部数据库</h2>
+            <Button
+              type="link"
+              icon={<ArrowLeftOutlined />}
+              className="data-source-provider-back-button"
+              onClick={() => navigate("/data-sources?view=connectors")}
+            >
+              {t("admin.dataSourceProviderBack")}
+            </Button>
+            <h2 className="admin-page-title">{t("admin.dataSourceDatabaseTitle")}</h2>
             <Paragraph className="data-source-page-subtitle">
-              配置用于聊天只读查询的 MySQL 和 PostgreSQL 数据库连接。
+              {t("admin.dataSourceDatabaseSubtitle")}
             </Paragraph>
           </div>
         </div>
         <Space>
-          <Button icon={<QuestionCircleOutlined />} onClick={() => setGuideOpen(true)}>接入教程</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增连接</Button>
+          <Button icon={<FileTextOutlined />} onClick={() => setGuideOpen(true)}>{t("admin.dataSourceDatabaseGuideAction")}</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t("admin.dataSourceDatabaseCreateAction")}</Button>
         </Space>
       </div>
 
-      <Table<DatabaseConnectionItem>
-        className="admin-page-table"
-        rowKey="id"
-        columns={columns}
-        dataSource={items}
-        loading={loading}
-        pagination={false}
-        locale={{ emptyText: <Space><DatabaseOutlined />暂无外部数据库连接</Space> }}
+      <section className="data-source-feishu-account-shell data-source-database-shell">
+        <Alert
+          showIcon
+          type="info"
+          className="data-source-feishu-account-reauth-alert data-source-database-alert"
+          message={t("admin.dataSourceDatabaseListHint")}
+        />
+        <div className="data-source-asset-table-wrap data-source-feishu-account-table-wrap">
+          <Table<DatabaseConnectionItem>
+            className="admin-page-table data-source-asset-table data-source-database-table"
+            rowKey="id"
+            columns={columns}
+            dataSource={items}
+            loading={loading}
+            pagination={{ pageSize: 8, showSizeChanger: false }}
+            tableLayout="fixed"
+            scroll={{ x: 1260, y: "calc(100vh - 360px)" }}
+            locale={{
+              emptyText: (
+                <div className="data-source-asset-empty">
+                  <DatabaseOutlined />
+                  <Text strong>{t("admin.dataSourceDatabaseEmptyTitle")}</Text>
+                  <Text type="secondary">{t("admin.dataSourceDatabaseEmptyDesc")}</Text>
+                </div>
+              ),
+            }}
+          />
+        </div>
+      </section>
+
+      <DatabaseConnectionModal
+        open={modalOpen}
+        editing={editing}
+        saving={saving}
+        onCancel={() => setModalOpen(false)}
+        onSubmit={handleSubmit}
       />
 
       <Modal
-        title={editing ? "编辑外部数据库连接" : "新增外部数据库连接"}
-        open={modalOpen}
-        okText="保存"
-        cancelText="取消"
-        confirmLoading={saving}
-        destroyOnHidden
-        onOk={() => void handleSubmit()}
-        onCancel={() => setModalOpen(false)}
-      >
-        <Form<FormValues> form={form} layout="vertical">
-          <Form.Item name="display_name" label="名称" rules={[{ required: true, message: "请输入名称" }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input />
-          </Form.Item>
-          <Space.Compact block>
-            <Form.Item name="db_type" label="类型" rules={[{ required: true }]} style={{ width: "40%" }}>
-              <Select
-                options={[
-                  { label: "PostgreSQL", value: "postgresql" },
-                  { label: "MySQL", value: "mysql" },
-                ]}
-                onChange={(value) => form.setFieldValue("port", value === "mysql" ? 3306 : 5432)}
-              />
-            </Form.Item>
-            <Form.Item name="port" label="端口" rules={[{ required: true }]} style={{ width: "60%" }}>
-              <InputNumber min={1} max={65535} style={{ width: "100%" }} />
-            </Form.Item>
-          </Space.Compact>
-          <Form.Item name="host" label="主机" rules={[{ required: true, message: "请输入主机" }]}>
-            <Input placeholder="db.example.com" />
-          </Form.Item>
-          <Form.Item name="database_name" label="数据库" rules={[{ required: true, message: "请输入数据库名" }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="username" label="用户名" rules={[{ required: true, message: "请输入用户名" }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item
-            name="password"
-            label="密码"
-            rules={editing ? [] : [{ required: true, message: "请输入密码" }]}
-          >
-            <Input.Password placeholder={editing ? "留空则不修改" : undefined} />
-          </Form.Item>
-          <Form.Item
-            name="options_text"
-            label="连接参数 JSON"
-            rules={[
-              {
-                validator: async (_, value) => {
-                  try {
-                    parseOptions(value);
-                  } catch (error) {
-                    return Promise.reject(error instanceof Error ? error : new Error("连接参数 JSON 格式错误"));
-                  }
-                  return Promise.resolve();
-                },
-              },
-            ]}
-          >
-            <Input.TextArea rows={3} placeholder='{"sslmode":"require"}' />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title="外部数据库接入教程"
+        title={t("admin.dataSourceDatabaseGuideTitle")}
         open={guideOpen}
-        footer={<Button type="primary" onClick={() => setGuideOpen(false)}>知道了</Button>}
+        width={680}
+        footer={<Button type="primary" onClick={() => setGuideOpen(false)}>{t("admin.dataSourceDatabaseGuideClose")}</Button>}
         onCancel={() => setGuideOpen(false)}
       >
+        <Paragraph className="data-source-create-provider-intro">
+          {t("admin.dataSourceDatabaseGuideIntro")}
+        </Paragraph>
         <Steps
           direction="vertical"
           current={-1}
           items={[
             {
-              title: "准备只读账号",
-              description: "在 MySQL 或 PostgreSQL 中创建只读用户，并只授予需要查询的库表 SELECT 权限。",
+              title: t("admin.dataSourceDatabaseGuideReadOnlyTitle"),
+              description: t("admin.dataSourceDatabaseGuideReadOnlyDesc"),
             },
             {
-              title: "开放网络访问",
-              description: "在云数据库白名单或安全组中放通 LazyMind 部署环境到数据库端口的访问。",
+              title: t("admin.dataSourceDatabaseGuideNetworkTitle"),
+              description: t("admin.dataSourceDatabaseGuideNetworkDesc"),
             },
             {
-              title: "填写连接信息",
-              description: "点击新增连接，填写主机、端口、数据库名、用户名、密码；PostgreSQL 如需 SSL，可在连接参数中填写 {\"sslmode\":\"require\"}。",
+              title: t("admin.dataSourceDatabaseGuideConfigTitle"),
+              description: t("admin.dataSourceDatabaseGuideConfigDesc"),
             },
             {
-              title: "测试并保存",
-              description: "保存后点击测试，状态变为已验证即可在聊天中使用。测试只会连接数据库并读取表结构。",
+              title: t("admin.dataSourceDatabaseGuideTestTitle"),
+              description: t("admin.dataSourceDatabaseGuideTestDesc"),
             },
             {
-              title: "在聊天中提问",
-              description: "直接询问已连接数据库中的数据，例如“查询订单库本月订单量”。Agent 会读取 schema、生成只读 SQL 并返回结果。",
+              title: t("admin.dataSourceDatabaseGuideUseTitle"),
+              description: t("admin.dataSourceDatabaseGuideUseDesc"),
             },
           ]}
         />

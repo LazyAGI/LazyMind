@@ -40,12 +40,18 @@ import { AgentAppsAuth } from "@/components/auth";
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   dataSourceCloudOauthApi,
+  deleteDatabaseConnection,
   getLocalFSChatSetting,
+  listDatabaseConnections,
+  updateDatabaseConnection,
   updateLocalFSChatSetting,
+  type DatabaseConnectionItem,
+  type DatabaseConnectionPayload,
 } from "./api";
 
 import "./index.scss";
 import DataSourceWizardModal from "./components/DataSourceWizardModal";
+import DatabaseConnectionModal from "./database/DatabaseConnectionModal";
 import {
   clearFeishuAppSetup,
   createFeishuAccountId,
@@ -1129,6 +1135,9 @@ export default function DataSourceManagement() {
   const [feishuSetupIntent, setFeishuSetupIntent] =
     useState<CloudSetupIntent>(null);
   const [feishuSetupSubmitting, setFeishuSetupSubmitting] = useState(false);
+  const [databaseEditingConnection, setDatabaseEditingConnection] =
+    useState<DatabaseConnectionItem | null>(null);
+  const [databaseEditSaving, setDatabaseEditSaving] = useState(false);
   const [feishuSetupForm] = Form.useForm<FeishuAccountFormValues>();
   const [manualOauthModalOpen, setManualOauthModalOpen] = useState(false);
   const [manualOauthCallbackValue, setManualOauthCallbackValue] = useState("");
@@ -1203,6 +1212,60 @@ export default function DataSourceManagement() {
       return t("admin.dataSourceNextSyncPlanned", { time: parsed.scheduleTime });
     }
     return t("admin.dataSourceNextSyncPlanned", { time: "-" });
+  };
+
+  const mapDatabaseConnectionToDataSource = (
+    connection: DatabaseConnectionItem,
+  ): DataSourceItem => {
+    const verified = Boolean(connection.is_verified);
+    const hasError = Boolean(connection.last_check_error?.trim());
+    const address = `${connection.host}:${connection.port}/${connection.database_name}`;
+    const updatedAt = formatDateTime(connection.update_time || connection.create_time);
+
+    return {
+      id: `database:${connection.id}`,
+      name: connection.display_name || connection.database_name,
+      type: "database",
+      knowledgeBase: "-",
+      description: connection.description || address,
+      target: address,
+      syncMode: "manual",
+      scheduleLabel: "-",
+      status: hasError ? "error" : "active",
+      connectionState: verified ? "connected" : hasError ? "error" : "pending",
+      lastSync: "-",
+      nextSync: "-",
+      documentCount: 0,
+      parsedDocumentCount: 0,
+      addCount: 0,
+      deleteCount: 0,
+      changeCount: 0,
+      permissions: [t("admin.dataSourcePermissionReadOnly")],
+      conflictPolicy: "versioned",
+      enabled: verified,
+      scopeMode: "all",
+      selectedFiles: [],
+      fileCandidates: [],
+      logs: [
+        {
+          id: `database-log-${connection.id}-${connection.update_time || connection.create_time}`,
+          time: updatedAt,
+          result: hasError ? "failed" : verified ? "success" : "warning",
+          title: verified
+            ? t("admin.dataSourceDatabaseVerified")
+            : hasError
+              ? t("admin.dataSourceDatabaseConnectionError")
+              : t("admin.dataSourceDatabasePending"),
+          description: connection.last_check_error || t("admin.dataSourceDatabaseReadonlyQueryLog"),
+        },
+      ],
+      warning: connection.last_check_error || undefined,
+      oauthConnection: null,
+      scanManaged: false,
+      storageUsed: "-",
+      databaseConnectionId: connection.id,
+      databaseConnection: connection,
+    };
   };
 
   const getPreferredLocalAgentId = () => {
@@ -2169,6 +2232,10 @@ export default function DataSourceManagement() {
           return { enabled: localScanChatEnabled };
         }),
       ]);
+      const databaseConnections = await listDatabaseConnections().catch((error) => {
+        console.error("Failed to refresh external database connections", error);
+        return { connections: [] as DatabaseConnectionItem[] };
+      });
       const sourceList = (sourcesResponse.data.items || []) as ScanV2Source[];
       const visibleSourceList = sourceList.filter(
         (source) => normalizeDataSourceStatus(source.status) !== "deleted",
@@ -2203,14 +2270,30 @@ export default function DataSourceManagement() {
           }
         }),
       );
+      const databaseSources = (databaseConnections.connections || [])
+        .filter((item) => {
+          if (!keyword) {
+            return true;
+          }
+          const text = [
+            item.display_name,
+            item.description,
+            item.db_type,
+            item.host,
+            item.database_name,
+            item.username,
+          ].join(" ").toLowerCase();
+          return text.includes(keyword.toLowerCase());
+        })
+        .map((item) => mapDatabaseConnectionToDataSource(item));
       if (sourceListRequestSeqRef.current !== requestSeq) {
         return;
       }
       setLocalScanChatEnabled(Boolean(nextLocalFSChatSetting.enabled));
-      setSources(nextSources);
+      setSources(nextPage === 1 ? [...databaseSources, ...nextSources] : nextSources);
       setSourceListPage(nextPage);
       setSourceListPageSize(nextPageSize);
-      setSourceListTotal(Number(sourcesResponse.data.total || 0));
+      setSourceListTotal(Number(sourcesResponse.data.total || 0) + databaseSources.length);
 
       if (showSuccessMessage) {
         message.success(t("admin.dataSourceListRefreshed"));
@@ -3135,7 +3218,76 @@ export default function DataSourceManagement() {
     }
   };
 
+  const getDatabaseConnectionId = (record: DataSourceItem) => (
+    record.databaseConnectionId || record.id.replace(/^database:/, "")
+  );
+
+  const openDatabaseConnectionConfig = (record: DataSourceItem) => {
+    const connection = record.databaseConnection as DatabaseConnectionItem | undefined;
+    if (!connection) {
+      message.error(t("admin.dataSourceDatabaseConfigMissing"));
+      return;
+    }
+    setDatabaseEditingConnection(connection);
+  };
+
+  const closeDatabaseConnectionConfig = () => {
+    if (databaseEditSaving) {
+      return;
+    }
+    setDatabaseEditingConnection(null);
+  };
+
+  const handleSaveDatabaseConnectionConfig = async (payload: DatabaseConnectionPayload) => {
+    if (!databaseEditingConnection || databaseEditSaving) {
+      return;
+    }
+    setDatabaseEditSaving(true);
+    try {
+      await updateDatabaseConnection(databaseEditingConnection.id, payload);
+      message.success(t("admin.dataSourceDatabaseUpdated"));
+      setDatabaseEditingConnection(null);
+      await refreshSources(false, { page: sourceListPage });
+    } catch (error) {
+      message.error(
+        getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseSaveFailed")) ||
+          t("admin.dataSourceDatabaseSaveFailed"),
+      );
+    } finally {
+      setDatabaseEditSaving(false);
+    }
+  };
+
+  const handleDeleteDatabaseConnection = (record: DataSourceItem) => {
+    Modal.confirm({
+      title: t("admin.dataSourceDatabaseDeleteTitle"),
+      content: t("admin.dataSourceDatabaseDeleteContent", { name: record.name }),
+      okText: t("common.delete"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      icon: <WarningFilled />,
+      onOk: async () => {
+        try {
+          await deleteDatabaseConnection(getDatabaseConnectionId(record));
+          message.success(t("admin.dataSourceDatabaseDeleted"));
+          await refreshSources(false, { page: sourceListPage });
+        } catch (error) {
+          message.error(
+            getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseDeleteFailed")) ||
+              t("admin.dataSourceDatabaseDeleteFailed"),
+          );
+          throw error;
+        }
+      },
+    });
+  };
+
   const openDetailPage = (record: DataSourceItem) => {
+    if (record.type === "database") {
+      navigate("/data-sources/database-connections");
+      return;
+    }
+
     const detailDocuments: DetailDocumentItem[] =
       record.detailDocuments ||
       record.fileCandidates.map((item) => ({
@@ -3186,6 +3338,11 @@ export default function DataSourceManagement() {
   };
 
   const handleDeleteSource = (record: DataSourceItem) => {
+    if (record.type === "database") {
+      navigate("/data-sources/database-connections");
+      return;
+    }
+
     Modal.confirm({
       title: t("admin.dataSourceDeleteTitle"),
       content: t("admin.dataSourceDeleteContent", { name: record.name }),
@@ -3705,7 +3862,9 @@ export default function DataSourceManagement() {
       render: (_value, record) => (
         <div className="data-source-table-name">
           <span className={`data-source-icon data-source-icon-${record.type}`}>
-            {sourceTypeOptions.find((item) => item.type === record.type)?.icon}
+            {record.type === "database"
+              ? <DatabaseOutlined />
+              : sourceTypeOptions.find((item) => item.type === record.type)?.icon}
           </span>
           <div className="data-source-table-copy">
             <Button
@@ -3747,7 +3906,7 @@ export default function DataSourceManagement() {
       },
       render: (knowledgeBase: string) => (
         <Tooltip title={knowledgeBase} placement="topLeft">
-          <span className="data-source-ellipsis">{knowledgeBase}</span>
+          <span className="data-source-ellipsis">{knowledgeBase || "-"}</span>
         </Tooltip>
       ),
     },
@@ -3756,10 +3915,12 @@ export default function DataSourceManagement() {
       key: "syncMode",
       width: 205,
       render: (_value, record) => (
-        <div className="data-source-sync-cell">
-          <Text strong>{getSyncModeLabel(record.syncMode, t)}</Text>
-          <Text type="secondary">{record.scheduleLabel}</Text>
-        </div>
+        record.type === "database" ? <Text type="secondary">-</Text> : (
+          <div className="data-source-sync-cell">
+            <Text strong>{getSyncModeLabel(record.syncMode, t)}</Text>
+            <Text type="secondary">{record.scheduleLabel}</Text>
+          </div>
+        )
       ),
     },
     {
@@ -3782,10 +3943,12 @@ export default function DataSourceManagement() {
       key: "lastSync",
       width: 190,
       render: (_value, record) => (
-        <div className="data-source-sync-cell">
-          <Text>{record.lastSync}</Text>
-          <Text type="secondary">{record.nextSync}</Text>
-        </div>
+        record.type === "database" ? <Text type="secondary">-</Text> : (
+          <div className="data-source-sync-cell">
+            <Text>{record.lastSync}</Text>
+            <Text type="secondary">{record.nextSync}</Text>
+          </div>
+        )
       ),
     },
     {
@@ -3793,15 +3956,17 @@ export default function DataSourceManagement() {
       key: "summary",
       width: 150,
       render: (_value, record) => (
-        <div className="data-source-sync-cell">
-          <Text type="secondary">
-            {t("admin.dataSourceSummaryChanges", {
-              add: record.addCount,
-              change: record.changeCount,
-              del: record.deleteCount,
-            })}
-          </Text>
-        </div>
+        record.type === "database" ? <Text type="secondary">-</Text> : (
+          <div className="data-source-sync-cell">
+            <Text type="secondary">
+              {t("admin.dataSourceSummaryChanges", {
+                add: record.addCount,
+                change: record.changeCount,
+                del: record.deleteCount,
+              })}
+            </Text>
+          </div>
+        )
       ),
     },
     {
@@ -3811,22 +3976,41 @@ export default function DataSourceManagement() {
       fixed: "right",
       className: "data-source-action-column",
       render: (_value, record) => (
-        <Space size={12} className="data-source-table-actions">
-          <Button type="link" icon={<EyeOutlined />} onClick={() => openDetailPage(record)}>
-            {t("admin.dataSourceActionDetail")}
-          </Button>
-          <Button type="link" icon={<EditOutlined />} onClick={() => openEditWizard(record)}>
-            {t("admin.dataSourceActionConfig")}
-          </Button>
-          <Button
-            type="link"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => handleDeleteSource(record)}
-          >
-            {t("common.delete")}
-          </Button>
-        </Space>
+        record.type === "database" ? (
+          <Space size={12} className="data-source-table-actions">
+            <Button type="link" icon={<EyeOutlined />} onClick={() => openDetailPage(record)}>
+              {t("admin.dataSourceActionDetail")}
+            </Button>
+            <Button type="link" icon={<EditOutlined />} onClick={() => openDatabaseConnectionConfig(record)}>
+              {t("admin.dataSourceActionConfig")}
+            </Button>
+            <Button
+              type="link"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleDeleteDatabaseConnection(record)}
+            >
+              {t("common.delete")}
+            </Button>
+          </Space>
+        ) : (
+          <Space size={12} className="data-source-table-actions">
+            <Button type="link" icon={<EyeOutlined />} onClick={() => openDetailPage(record)}>
+              {t("admin.dataSourceActionDetail")}
+            </Button>
+            <Button type="link" icon={<EditOutlined />} onClick={() => openEditWizard(record)}>
+              {t("admin.dataSourceActionConfig")}
+            </Button>
+            <Button
+              type="link"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleDeleteSource(record)}
+            >
+              {t("common.delete")}
+            </Button>
+          </Space>
+        )
       ),
     },
   ];
@@ -3984,11 +4168,11 @@ export default function DataSourceManagement() {
                 </span>
                 <span className="data-source-provider-card-copy">
                   <span className="data-source-provider-title-row">
-                    <span className="data-source-provider-name">外部数据库</span>
-                    <Tag color="processing">只读查询</Tag>
+                    <span className="data-source-provider-name">{t("admin.dataSourceTypeDatabase")}</span>
+                    <Tag color="processing">{t("admin.dataSourceDatabaseReadonlyTag")}</Tag>
                   </span>
                   <span className="data-source-provider-desc">
-                    管理 MySQL 和 PostgreSQL 连接，用于聊天中的外部数据查询。
+                    {t("admin.dataSourceDatabaseProviderDesc")}
                   </span>
                 </span>
                 <span className="data-source-provider-card-arrow" aria-hidden="true">
@@ -4090,6 +4274,14 @@ export default function DataSourceManagement() {
           </main>
         )}
       </section>
+
+      <DatabaseConnectionModal
+        open={Boolean(databaseEditingConnection)}
+        editing={databaseEditingConnection}
+        saving={databaseEditSaving}
+        onCancel={closeDatabaseConnectionConfig}
+        onSubmit={handleSaveDatabaseConnectionConfig}
+      />
 
       <Modal
         title={t("admin.dataSourceCreateKnowledgeSource")}
