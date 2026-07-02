@@ -11,42 +11,41 @@ def skill_extraction_gate_prompt(trajectory: str) -> str:
 You are an expert Agent Experience Evaluation Engine, your task is to decide whether this trajectory should enter the skill mining pipeline. 
 The goal is NOT to preserve conversation history; it is to find reusable procedural knowledge, reasoning patterns, execution strategies, correction behaviors, or failure patterns that can generalize to future tasks.
 
-# Extraction Threshold (Strict)
+# Extraction Threshold (Balanced)
 
-A trajectory SHOULD be extracted ONLY IF it satisfies MOST of the following conditions:
+A trajectory SHOULD be extracted when it contains a clear reusable execution pattern that could improve future agent behavior.
 
-- the task required non-trivial multi-step reasoning or execution
-- the agent dynamically adjusted strategy, retrieval direction, or planning
-- the trajectory contains reusable procedural patterns rather than task-specific facts
-- at least one critical decision, correction, refinement, or constraint-handling process affected the final outcome
-- the agent state meaningfully changed during execution
-- the trajectory demonstrates a reusable way to solve or diagnose a class of problems
-- the execution path cannot be trivially replaced by a single response or direct retrieval
+Do not require the trajectory to satisfy most signals. Extract when BOTH are true:
+1. It contains at least one concrete reusable procedural signal.
+2. The reusable signal is central enough that a future skill could be written from it, not merely a minor detail in a mostly task-specific exchange.
 
-Typical high-value signals include:
-- retrieval refinement after initial failure
-- iterative evidence validation
-- conflict resolution between multiple sources
-- adaptive tool selection
-- decomposition of complex tasks
-- recovery from incorrect assumptions or failed execution
-- constraint-aware replanning
-- reusable failure diagnosis patterns
+Concrete reusable procedural signals include:
+- a repeatable multi-step workflow with a recognizable goal, state progression, and completion check
+- reusable tool or environment interaction patterns, especially when observations guide later actions
+- decision points that change the next action based on evidence, constraints, or intermediate state
+- constraint handling, validation, consistency checking, or completion verification
+- decomposition of a task into reusable stages
+- recovery from an incorrect assumption, failed action, incomplete evidence, or unsatisfied state
+- reusable failure diagnosis or prevention patterns
 
-Do NOT extract trajectories that are mainly:
+Linear trajectories may be extracted if they contain a stable reusable procedure, state checks, or verification logic. Do not extract a linear trajectory that is only direct retrieval, direct execution, or content transformation with no reusable decision or state-management value.
+
+Return should_extract=false when the trajectory is mainly:
 - casual conversation
 - simple factual Q&A
 - one-shot responses
-- direct rewriting or translation
-- straightforward tool execution without reasoning
-- linear retrieval with no strategy evolution
+- direct rewriting, translation, formatting, or summarization without reusable process logic
+- straightforward single-step tool execution without meaningful decision, constraint handling, or verification
+- linear retrieval with no strategy evolution, evidence judgment, or reusable search pattern
 - repetitive operational interactions
 - trajectories dominated by task-specific content instead of reusable procedures
 - sessions where the final outcome mainly depended on memorized knowledge rather than execution strategy
 
 # Important
 
-Do not judge by task success, trajectory length, or number of tool calls alone. A failed trajectory can be valuable if it teaches a reusable failure or recovery pattern. Use a conservative standard: if reusable procedural value is weak or ambiguous, return should_extract=false.
+Do not judge by task success, trajectory length, or number of tool calls alone. A failed trajectory can be valuable if it teaches a reusable failure or recovery pattern.
+
+Use a balanced standard: if the trajectory has a clearly nameable reusable workflow, decision pattern, validation pattern, tool-use pattern, or recovery pattern, return should_extract=true. If the reusable value is weak, incidental, or cannot be described concretely in the reason, return should_extract=false.
 
 # Output Format
 
@@ -67,36 +66,47 @@ value_type candidates: success_pattern, failure_pattern, reasoning_pattern, retr
 
 def cluster_signature_prompt(trajectory: str) -> str:
     return f"""
-You are an expert Agent Memory Abstraction Engine.
-
-Your task is to extract a compact "cluster_signature" for future task clustering and skill mining.
+You are an expert Agent Memory Abstraction Engine. Extract a compact "cluster_signature" for future task clustering and skill mining.
 
 # Objective
 
-Extract only the reusable task structure needed to decide whether multiple drafts should become one skill.
+Extract the reusable task structure needed to decide whether multiple drafts should become one skill.
 
 The output should describe:
 1. The reusable task intent
-2. The high-level reusable procedure
+2. The reusable procedure at a distinguishable middle level
 3. The applicability boundary for the skill
 
 # Requirements
 
-- Preserve reusable workflow structure, not case-specific details
-- Describe the broad reusable skill family, not the narrow observed case
-- Keep wording general enough for reusable skill mining, but not vague
-- Remove names, ids, dates, locations, prices, exact quantities, and incidental tool errors
-- Do not mention exact tool names unless they define the reusable task
-- Do not include every observed root cause in the intent; prefer a task-family description
-- Do not include fallback options, alternative resolutions, or customer choice variants in the intent unless they define a materially different workflow
-- Merge adjacent diagnostics into broader steps when they belong to the same troubleshooting workflow
-- Use 3-6 procedure steps
-- Boundaries must be one concise paragraph describing the positive applicability scope and only materially different workflows it should not cover
-- Do not exclude nearby variants that the same reusable procedure can handle
-- Do not exclude alternative remediation options, fallback paths, optional checks, or customer preference variants that belong to the same task family
-- Do not exclude cases based on incidental episode outcomes, such as whether a tool succeeded or failed
-- Avoid vague phrases like "help the user" or "solve the issue"
-- output should be in the same language as the trajectory
+- Preserve the reusable task family, main target object, primary action space, and completion condition.
+- Keep wording general enough for reuse, but specific enough to separate nearby workflows.
+- Remove names, ids, dates, locations, prices, exact quantities, and incidental tool errors.
+- Do not mention exact tool names unless they define the reusable task.
+- Treat the cluster_signature as a compact clustering key, not a narrative summary.
+- output should be in the same language as the trajectory.
+
+For `intent`:
+- Describe exactly one primary task family, centered on one main objective, target object, action space, and completion condition.
+- Use compact discriminator wording such as "task family / target object / action / completion".
+- Prefer the stable reusable objective over the narrow observed case, but do not broaden across different target objects, action spaces, or completion conditions.
+- Do not mix read-only analysis, state-changing execution, and cross-domain side tasks into one intent.
+- Do not include fallback options, alternative resolutions, customer choice variants, or every observed root cause unless they change the core workflow.
+- Treat fallback options, optional checks, alternative remediation paths, and customer choice variants as boundary hints, not as the primary intent, unless they change the main target object, action space, or completion condition.
+- Avoid generic workflow labels like "retrieve-filter-execute-verify" unless each part names the reusable object and action.
+
+For `procedure`:
+- Use 3-6 reusable steps.
+- Keep only the core workflow needed to distinguish this skill family.
+- Each step should retain the relevant object, action, or state change that makes the workflow distinct.
+- Merge adjacent diagnostics only when they belong to the same target object and action space.
+- Do not preserve detours, retries, or auxiliary work that does not define the reusable procedure.
+
+For `boundaries`:
+- Write one concise paragraph covering the positive applicability signal and the nearest boundary signals for future clustering.
+- Mention nearby variants that the same core procedure and action space can still cover.
+- Mark changes to the primary action space, target object space, or completion condition as boundary signals for a different skill family.
+- Do not describe the boundary with only a generic inspect/filter/execute/verify shell; name the reusable object and action space that make this workflow distinct.
 
 # Output Format
 
@@ -323,10 +333,11 @@ Use the same language as the trajectories for all natural-language fields. The o
 Abstract the common execution pattern rather than summarizing individual trajectories.
 The Skill should capture reusable execution logic that can generalize to similar future tasks, including:
 * when the skill applies
+* the broader task family where this reusable procedure applies
 * what objective it achieves
 * reusable execution stages
 * key decision points
-* expected state after each stage
+* coarse completion criteria for each stage
 
 ## Abstraction Principles
 
@@ -334,6 +345,7 @@ The Skill should capture reusable execution logic that can generalize to similar
 * Generalize intentions instead of concrete actions.
 * Merge semantically equivalent behaviors across trajectories.
 * Preserve causal dependencies, prerequisites, state progression, and meaningful decisions.
+* Prefer fewer, broader stages over many fine-grained steps.
 * Keep only reusable patterns.
 * Remove tool names, parameters, entities, retries, implementation details, and user-specific information.
 * Do not invent behaviors unsupported by the trajectories.
@@ -352,21 +364,35 @@ Summarize:
 * required prerequisites
 * the nearest exclusions that distinguish this Skill from adjacent Skills
 
-The description should be concise, reusable, and retrieval-friendly.
+The applicable scenario will become the main source for the frontmatter `description` that routes future skill usage.
+
+Write it as a broad but bounded task-family trigger:
+
+* generalize from source trajectories to the reusable problem class;
+* include adjacent phrasings or variants that should use the same procedure;
+* name the capability the skill provides, not just the original task;
+* keep clear exclusion boundaries only for genuinely different task families.
 
 ### sop.steps
 
-Represent the Skill as reusable execution stages.
+Represent the Skill as a small number of broad reusable execution stages.
+
+Step granularity rules:
+
+* use 3-6 stages unless the trajectories clearly require a shorter or longer procedure;
+* merge adjacent actions that serve the same operational purpose, even if they used different tools or appeared in different orders;
+* avoid one step per tool call, evidence item, retry, message, file, or concrete subtask;
+* keep a separate step only when it changes the agent's goal, decision state, evidence state, or validation state;
+* write each step so it can cover multiple concrete implementations of the same intent.
 
 Each step contains:
 
-* **step_name**: concise procedural stage name.
-* **action_goal**: the purpose of the stage and the progress it enables.
-* **branch_conditions**: include only genuine decision points. Avoid trivial transitions such as "continue" or "proceed". Each branch contains:
+* **step_name**: concise broad procedural stage name, not a concrete action name.
+* **action_goal**: the reusable purpose of the stage, the progress it enables, and the coarse completion signal.
+* **branch_conditions**: include only class-level decision points that change the next action. Prefer optional branch guidance over splitting it into extra steps. Avoid trivial transitions such as "continue" or "proceed". Each branch contains:
 
   * `condition`
   * `next_action`
-* **expected_state**: the observable state indicating the stage is complete. Mention when the stage may be skipped if appropriate.
 
 ## Output Philosophy
 
@@ -381,21 +407,15 @@ Return ONLY valid JSON:
 {{
   "skill_name": "...",
   "applicable_scenario": "...",
-  "sop": {{
-    "steps": [
-      {{
-        "step_name": "...",
-        "action_goal": "...",
-        "branch_conditions": [
-          {{
-            "condition": "...",
-            "next_action": "..."
-          }}
-        ],
-        "expected_state": "..."
-      }}
-    ]
-  }}
+  "sop": [
+    {{
+      "step_name": "...",
+      "action_goal": "...",
+      "branch_conditions": [
+        "condition: next action"
+      ]
+    }}
+  ]
 }}
 
 # Input Data
@@ -437,7 +457,7 @@ Treat the Skill Outline as the authoritative workflow definition.
 
 Do **not** modify:
 
-* the skill scope;
+* the skill name;
 * the applicable scenario;
 * the overall procedure order;
 * the logical progression between steps.
@@ -475,20 +495,24 @@ Preserve the original SOP structure.
 
 For each procedure step:
 
+* preserve the original step as a single execution-oriented instruction rather than redesigning its structure;
 * organize the content around the step's objective;
-* describe how the step is typically executed;
+* describe how the step is typically executed in a reusable way;
 * naturally integrate useful success practices into the execution flow;
 * integrate failure avoidance only where it improves decisions or prevents common mistakes;
 
+Do not introduce new sub-steps, checklists, or headings unless they already exist in the outline.
 Avoid repeating similar guidance across multiple steps.
 
 # Scope Control
 
 The applicable_scenario defines the reusable boundary of this skill.
 
-Do not broaden its scope.
+Keep that boundary broad enough to recall the skill for adjacent tasks that need the same procedure, while preserving exclusions for materially different workflows.
 
-Discard guidelines that belong to adjacent workflows or depend on one-off environments, specific tools, identifiers, datasets, or implementation artifacts.
+Do not narrow the scope to a single source trajectory, exact tool chain, project, file, dataset, user phrase, or observed failure sequence.
+
+Discard guidelines that belong to materially different workflows or depend on one-off environments, specific tools, identifiers, datasets, or implementation artifacts.
 
 Retain reusable reasoning, decision logic, and operational practices.
 
@@ -502,12 +526,11 @@ The YAML frontmatter should include:
 * description
 * category
 
-The description should clearly express:
-
+The description should be a single concise routing sentence derived from the outline's applicable_scenario.
+It should describe:
 * when the skill applies;
-* what following the skill enables;
-* the nearest scenario that should **not** use this skill.
-* consistent with the applicable_scenario.
+* the reusable capability it provides;
+Keep the description consistent with the applicable_scenario and do not narrow it to specific trajectories, tools, projects, or implementations.
 
 The category should:
 * be a concise lowercase classification for the skill, such as `research`, `coding`, `writing`, `data-analysis`, `tool-use`, `planning`, `debugging`, `review`, or `general`

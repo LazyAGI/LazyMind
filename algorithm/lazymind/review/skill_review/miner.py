@@ -32,33 +32,21 @@ _OUTLINE_RESPONSE_SCHEMA: dict[str, Any] = {
         'skill_name': {'type': 'string'},
         'applicable_scenario': {'type': 'string'},
         'sop': {
-            'type': 'object',
-            'properties': {
-                'steps': {
-                    'type': 'array',
-                    'items': {
-                        'type': 'object',
-                        'properties': {
-                            'step_name': {'type': 'string'},
-                            'action_goal': {'type': 'string'},
-                            'branch_conditions': {
-                                'type': 'array',
-                                'items': {
-                                    'type': 'object',
-                                    'properties': {
-                                        'condition': {'type': 'string'},
-                                        'next_action': {'type': 'string'},
-                                    },
-                                    'required': ['condition', 'next_action'],
-                                },
-                            },
-                            'expected_state': {'type': 'string'},
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'properties': {
+                    'step_name': {'type': 'string'},
+                    'action_goal': {'type': 'string'},
+                    'branch_conditions': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
                         },
-                        'required': ['step_name', 'action_goal'],
                     },
                 },
+                'required': ['step_name', 'action_goal'],
             },
-            'required': ['steps'],
         },
     },
     'required': ['skill_name', 'applicable_scenario', 'sop'],

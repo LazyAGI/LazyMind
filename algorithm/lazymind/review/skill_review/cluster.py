@@ -327,6 +327,7 @@ def _cluster_report_metadata(
 
 
 def _llm_clusters(drafts: list[SkillDraft], llm) -> list[TaskCluster]:
+    LOG.info('[SkillReview] Running LLM clustering...')
     payload = call_json(llm, cluster_prompt(_cluster_prompt_items(drafts)), _CLUSTER_SCHEMA)
     raw_clusters = payload.get('clusters')
     if not isinstance(raw_clusters, list):
@@ -388,6 +389,7 @@ def _cluster_text(draft: SkillDraft) -> str:
 
 
 def _embedding_cluster_labels(embeddings: np.ndarray) -> tuple[list[int], dict]:
+    LOG.info('[SkillReview] Running embedding clustering...')
     reduced_embeddings, reduction_metadata = _umap_reduce_embeddings(embeddings)
     hdbscan_labels, hdbscan_metadata = _hdbscan_labels(reduced_embeddings)
     hdbscan_stats = _label_stats(hdbscan_labels)
@@ -407,7 +409,7 @@ def _umap_reduce_embeddings(embeddings: np.ndarray) -> tuple[np.ndarray, dict]:
 
     sample_count = len(embeddings)
     n_neighbors = min(sample_count - 1, min(20, max(10, int(round(sample_count ** 0.5 * 1.5)))))
-    n_components = min(8, sample_count - 1)
+    n_components = min(15, sample_count - 1)
     reducer = UMAP(
         n_neighbors=n_neighbors,
         n_components=n_components,
