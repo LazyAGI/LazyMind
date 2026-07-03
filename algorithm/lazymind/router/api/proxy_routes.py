@@ -52,9 +52,16 @@ async def _select_and_forward(request: Request, caller_algo_id: Optional[str]):
     instance = registry.get_healthy_instance(algorithm_id)
 
     if instance is None:
-        # Try fallback to 'default'
-        if algorithm_id != 'default':
-            instance = registry.get_healthy_instance('default')
+        if caller_algo_id:
+            raise HTTPException(
+                status_code=503,
+                detail=f'No healthy instance available for algorithm "{algorithm_id}"',
+            )
+        fallback_id = 'default'
+        if algorithm_id != fallback_id:
+            instance = registry.get_healthy_instance(fallback_id)
+            if instance is not None:
+                algorithm_id = fallback_id
         if instance is None:
             raise HTTPException(
                 status_code=503,

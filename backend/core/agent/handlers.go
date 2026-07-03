@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,19 +70,12 @@ type upstreamProxyResponse struct {
 }
 
 type threadFlowStatusResponse struct {
-	ThreadID           string   `json:"thread_id,omitempty"`
-	Status             string   `json:"status,omitempty"`
-	ActiveTaskIDs      []string `json:"active_task_ids,omitempty"`
-	LatestAbtestID     any      `json:"latest_abtest_id,omitempty"`
-	LatestAbtestStatus any      `json:"latest_abtest_status,omitempty"`
-	ReportReady        bool     `json:"report_ready,omitempty"`
-	PendingCheckpoint  any      `json:"pending_checkpoint,omitempty"`
-}
-
-type threadStatusesResponse struct {
-	Total   int                        `json:"total,omitempty"`
-	Counts  map[string]int             `json:"counts,omitempty"`
-	Threads []threadFlowStatusResponse `json:"threads,omitempty"`
+	ThreadID      string   `json:"thread_id,omitempty"`
+	Status        string   `json:"status,omitempty"`
+	CurrentStep   string   `json:"current_step,omitempty"`
+	ActiveTaskIDs []string `json:"active_task_ids,omitempty"`
+	ReportReady   bool     `json:"report_ready,omitempty"`
+	LastError     any      `json:"last_error,omitempty"`
 }
 
 var (
@@ -117,7 +111,7 @@ func ListThreads(w http.ResponseWriter, r *http.Request) {
 	statusByThread := map[string]threadFlowStatusResponse{}
 	if len(threads) > 0 {
 		var statusErr error
-		statusByThread, statusErr = fetchThreadStatuses(r.Context(), r)
+		statusByThread, statusErr = fetchThreadStatuses(r.Context(), r, threads)
 		if statusErr != nil {
 			log.Logger.Warn().Err(statusErr).Str("user_id", userID).Msg("list agent thread statuses failed; using local thread status")
 		}
@@ -159,17 +153,17 @@ func CreateThread(w http.ResponseWriter, r *http.Request) {
 	}
 	delete(requestPayload, "llm_config")
 	applyThreadCreateTitle(r.Context(), db, requestPayload, time.Now())
+	localThreadPayload := cloneJSONMap(requestPayload)
 	if err := attachThreadModelConfig(r.Context(), db, store.UserID(r), requestPayload); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", err), http.StatusInternalServerError)
 		return
 	}
-	if !hasThreadEvoLLMConfig(requestPayload) {
-		common.ReplyErr(w, "请先配置 evo_llm 模型后再创建任务", http.StatusUnprocessableEntity)
+	if !hasThreadRequiredLLMConfig(requestPayload) {
+		common.ReplyErr(w, "请先配置 llm 和 evo_llm 模型后再创建任务", http.StatusUnprocessableEntity)
 		return
 	}
 
 	var creationGuard *userActiveThreadCreationGuard
-	// Temporary integration bypass: comment this guard block to disable single-active-thread enforcement.
 	if guard, guardErr := reserveUserActiveThreadCreation(r.Context(), db, r); guardErr != nil {
 		replyUserActiveThreadError(w, guardErr)
 		return
@@ -180,8 +174,9 @@ func CreateThread(w http.ResponseWriter, r *http.Request) {
 
 	var upstreamRaw json.RawMessage
 	headers := forwardedUpstreamHeaders(r)
-	if err := common.ApiPost(r.Context(), threadCreateURL(), requestPayload, headers, &upstreamRaw, 30*time.Second); err != nil {
-		common.ReplyErrWithData(w, "create upstream thread failed", map[string]any{"detail": err.Error()}, http.StatusBadGateway)
+	upstreamPayload := buildEvoThreadCreatePayload(requestPayload)
+	if err := newEvoClient(headers).CreateThread(r.Context(), upstreamPayload, &upstreamRaw); err != nil {
+		common.ReplyErrWithData(w, "create upstream thread failed", map[string]any{"detail": err.Error()}, evoProxyStatusCode(err))
 		return
 	}
 
@@ -197,7 +192,17 @@ func CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	thread, err := upsertThread(db, threadID, "", "created", string(upstreamRaw), "", store.UserID(r), store.UserName(r))
+	localThreadPayload["upstream"] = upstreamValue
+	if status := extractStringByExactKeys(upstreamValue, "status"); status != "" {
+		localThreadPayload["status"] = status
+	}
+	localThreadPayloadBytes, err := json.Marshal(localThreadPayload)
+	if err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "marshal thread payload failed", err), http.StatusInternalServerError)
+		return
+	}
+
+	thread, err := upsertThread(db, threadID, "", "created", string(localThreadPayloadBytes), "", store.UserID(r), store.UserName(r))
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "save thread failed", err), http.StatusInternalServerError)
 		return
@@ -225,7 +230,13 @@ func GetThread(w http.ResponseWriter, r *http.Request) {
 		replyThreadLoadError(w, err)
 		return
 	}
-	common.ReplyOK(w, map[string]any{"thread": toThreadResponse(thread)})
+	item := toThreadResponse(thread)
+	if flowStatus, statusErr := fetchThreadFlowStatus(r.Context(), r, threadID); statusErr != nil {
+		log.Logger.Warn().Err(statusErr).Str("thread_id", threadID).Msg("get agent thread status failed; using local thread status")
+	} else if flowStatus != nil && strings.TrimSpace(flowStatus.Status) != "" {
+		item.Status = strings.TrimSpace(flowStatus.Status)
+	}
+	common.ReplyOK(w, map[string]any{"thread": item})
 }
 
 func ListThreadRecords(w http.ResponseWriter, r *http.Request) {
@@ -391,11 +402,20 @@ func StreamThreadMessages(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "messages request body required", http.StatusBadRequest)
 			return
 		}
-		if err := attachThreadModelConfig(r.Context(), db, store.UserID(r), requestPayload); err != nil {
-			common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", err), http.StatusInternalServerError)
-			return
+		messagePayload := map[string]any{}
+		for _, key := range []string{"message_id", "text", "content"} {
+			if value, ok := requestPayload[key]; ok {
+				messagePayload[key] = value
+			}
 		}
-		requestBytes, err := json.Marshal(requestPayload)
+		if _, ok := messagePayload["content"]; !ok {
+			if value, ok := requestPayload["message"]; ok {
+				messagePayload["content"] = value
+			} else if value, ok := requestPayload["query"]; ok {
+				messagePayload["content"] = value
+			}
+		}
+		requestBytes, err := json.Marshal(messagePayload)
 		if err != nil {
 			common.ReplyErr(w, fmt.Sprintf("%s: %v", "marshal body failed", err), http.StatusInternalServerError)
 			return
@@ -478,11 +498,8 @@ func streamThreadEvents(w http.ResponseWriter, r *http.Request, stepID string) {
 		Dur("request_elapsed", time.Since(requestStarted)).
 		Msg("agent thread events load thread completed")
 
-	upstreamURL := threadEventsURL(threadID)
-	if stepID != "" {
-		upstreamURL = threadStepEventsURL(threadID, stepID)
-	}
-	lastUpstreamEventID := strings.TrimSpace(r.URL.Query().Get("since"))
+	upstreamURL := newEvoClient(forwardedUpstreamHeaders(r)).EventsStreamURL(threadID, stepID)
+	lastUpstreamEventID := parseUpstreamThreadEventID(r)
 	for {
 		if r.Context().Err() != nil {
 			return
@@ -552,7 +569,6 @@ func streamThreadEvents(w http.ResponseWriter, r *http.Request, stepID string) {
 		if streamErr != nil {
 			log.Logger.Warn().Err(streamErr).Str("thread_id", threadID).Msg("consume upstream thread events stream failed")
 		}
-		emitPendingCheckpointWait(w, flusher, r, threadID)
 		select {
 		case <-flowStopped:
 			log.Logger.Info().
@@ -574,33 +590,11 @@ func streamThreadEvents(w http.ResponseWriter, r *http.Request, stepID string) {
 	}
 }
 
-func emitPendingCheckpointWait(w http.ResponseWriter, flusher http.Flusher, r *http.Request, threadID string) {
-	flowStatus, err := fetchThreadFlowStatus(r.Context(), r, threadID)
-	if err != nil || flowStatus == nil {
-		if err != nil {
-			log.Logger.Warn().Err(err).Str("thread_id", threadID).Msg("fetch checkpoint flow status failed")
-		}
-		return
-	}
-	status := strings.ToLower(strings.TrimSpace(flowStatus.Status))
-	if status != "waiting_checkpoint" && status != "paused" {
-		return
-	}
-	checkpoint, ok := flowStatus.PendingCheckpoint.(map[string]any)
-	if !ok || len(checkpoint) == 0 {
-		return
-	}
-	payload := make(map[string]any, len(checkpoint)+2)
-	payload["type"] = "checkpoint.wait"
-	payload["thread_id"] = threadID
-	for key, value := range checkpoint {
-		payload[key] = value
-	}
-	writeNamedSSE(w, flusher, "", payload)
-}
-
 func GetThreadResultDatasets(w http.ResponseWriter, r *http.Request) {
 	getThreadResults(w, r, "datasets")
+}
+func DownloadThreadResult(w http.ResponseWriter, r *http.Request) {
+	downloadThreadResultCSV(w, r)
 }
 func GetThreadResultEvalReports(w http.ResponseWriter, r *http.Request) {
 	getThreadResults(w, r, "eval-reports")
@@ -613,7 +607,21 @@ func GetThreadResultAbtests(w http.ResponseWriter, r *http.Request) {
 	getThreadResults(w, r, "abtests")
 }
 func GetThreadFlowStatus(w http.ResponseWriter, r *http.Request) {
-	proxyThreadGet(w, r, func(threadID string) string { return threadFlowStatusURL(threadID) }, "fetch thread flow status failed")
+	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
+	if threadID == "" {
+		common.ReplyErr(w, "thread_id required", http.StatusBadRequest)
+		return
+	}
+	if _, err := loadUserThread(store.DB(), r, threadID); err != nil {
+		replyThreadLoadError(w, err)
+		return
+	}
+	flowStatus, err := fetchThreadFlowStatus(r.Context(), r, threadID)
+	if err != nil {
+		common.ReplyErrWithData(w, "fetch thread flow status failed", map[string]any{"detail": err.Error()}, evoProxyStatusCode(err))
+		return
+	}
+	writeProxyResponse(w, &upstreamProxyResponse{Body: flowStatus, ContentType: "application/json"})
 }
 func GetThreadArtifact(w http.ResponseWriter, r *http.Request) {
 	artifactID := strings.TrimSpace(mux.Vars(r)["artifact_id"])
@@ -621,41 +629,18 @@ func GetThreadArtifact(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "artifact_id required", http.StatusBadRequest)
 		return
 	}
-	proxyThreadGet(w, r, func(threadID string) string { return threadArtifactURL(threadID, artifactID) }, "fetch thread artifact failed")
-}
-func GetThreadResultTrace(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
-	traceID := strings.TrimSpace(mux.Vars(r)["trace_id"])
-	if threadID == "" || traceID == "" {
-		common.ReplyErr(w, "thread_id and trace_id required", http.StatusBadRequest)
+	if threadID == "" {
+		common.ReplyErr(w, "thread_id required", http.StatusBadRequest)
 		return
 	}
 	if _, err := loadUserThread(store.DB(), r, threadID); err != nil {
 		replyThreadLoadError(w, err)
 		return
 	}
-	proxy, statusCode, err := fetchUpstreamProxy(r.Context(), r, threadResultTraceURL(threadID, traceID))
+	proxy, statusCode, err := fetchThreadArtifactProxy(r.Context(), r, threadID, artifactID)
 	if err != nil {
-		common.ReplyErrWithData(w, "fetch trace result failed", map[string]any{"detail": err.Error()}, statusCode)
-		return
-	}
-	writeProxyResponse(w, proxy)
-}
-func GetThreadResultTraceCompare(w http.ResponseWriter, r *http.Request) {
-	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
-	aTraceID := strings.TrimSpace(r.URL.Query().Get("a"))
-	bTraceID := strings.TrimSpace(r.URL.Query().Get("b"))
-	if threadID == "" || aTraceID == "" || bTraceID == "" {
-		common.ReplyErr(w, "thread_id, a and b required", http.StatusBadRequest)
-		return
-	}
-	if _, err := loadUserThread(store.DB(), r, threadID); err != nil {
-		replyThreadLoadError(w, err)
-		return
-	}
-	proxy, statusCode, err := fetchUpstreamProxy(r.Context(), r, threadResultTraceCompareURL(threadID, aTraceID, bTraceID))
-	if err != nil {
-		common.ReplyErrWithData(w, "fetch trace comparison failed", map[string]any{"detail": err.Error()}, statusCode)
+		common.ReplyErrWithData(w, "fetch thread artifact failed", map[string]any{"detail": err.Error()}, statusCode)
 		return
 	}
 	writeProxyResponse(w, proxy)
@@ -703,54 +688,6 @@ type userActiveThreadSSEErrorPayload struct {
 	Delta     string `json:"delta"`
 }
 
-func GetReportContent(w http.ResponseWriter, r *http.Request) {
-	reportID := strings.TrimSpace(mux.Vars(r)["report_id"])
-	if reportID == "" {
-		common.ReplyErr(w, "report_id required", http.StatusBadRequest)
-		return
-	}
-	proxy, statusCode, err := fetchUpstreamProxy(r.Context(), r, reportContentURL(reportID, strings.TrimSpace(r.URL.Query().Get("fmt"))))
-	if err != nil {
-		common.ReplyErrWithData(w, "fetch report content failed", map[string]any{"detail": err.Error()}, statusCode)
-		return
-	}
-	writeProxyResponse(w, proxy)
-}
-
-func GetDiffContent(w http.ResponseWriter, r *http.Request) {
-	applyID := strings.TrimSpace(mux.Vars(r)["apply_id"])
-	filename := strings.TrimSpace(mux.Vars(r)["filename"])
-	if applyID == "" || filename == "" {
-		common.ReplyErr(w, "apply_id and filename required", http.StatusBadRequest)
-		return
-	}
-	proxy, statusCode, err := fetchUpstreamProxy(r.Context(), r, diffContentURL(applyID, filename))
-	if err != nil {
-		common.ReplyErrWithData(w, "fetch diff content failed", map[string]any{"detail": err.Error()}, statusCode)
-		return
-	}
-	writeProxyResponse(w, proxy)
-}
-
-func GetAgentFileContent(w http.ResponseWriter, r *http.Request) {
-	body, _, err := decodeRequestBody(r)
-	if err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
-		return
-	}
-	path := strings.TrimSpace(caseCSVScalarString(body["path"]))
-	if path == "" {
-		common.ReplyErr(w, "path required", http.StatusBadRequest)
-		return
-	}
-	result, err := buildAgentFileContentResult(path)
-	if err != nil {
-		common.ReplyErrWithData(w, "read agent file content failed", map[string]any{"detail": err.Error()}, http.StatusInternalServerError)
-		return
-	}
-	common.ReplyJSON(w, result)
-}
-
 func getThreadResults(w http.ResponseWriter, r *http.Request, resultKind string) {
 	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
 	if threadID == "" {
@@ -761,72 +698,75 @@ func getThreadResults(w http.ResponseWriter, r *http.Request, resultKind string)
 		replyThreadLoadError(w, err)
 		return
 	}
-	proxy, statusCode, err := fetchUpstreamProxy(r.Context(), r, threadResultsURL(threadID, resultKind))
+	version, err := parsePositiveIntQuery(r, "version")
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	proxy, statusCode, err := fetchThreadResultProxy(r.Context(), r, threadID, resultKind, version)
 	if err != nil {
 		common.ReplyErrWithData(w, "fetch thread results failed", map[string]any{"detail": err.Error()}, statusCode)
 		return
 	}
-	if proxy != nil {
-		switch resultKind {
-		case "datasets":
-			if strings.Contains(proxy.ContentType, "application/json") {
-				if _, found, csvErr := attachCaseCSVFileURL(r.Context(), proxy.Body, caseCSVOptions{
-					ThreadID:   threadID,
-					ResultKind: resultKind,
-					FieldNames: []string{"case", "cases", "eval_data", "data", "items", "records"},
-				}); csvErr != nil {
-					log.Logger.Warn().Err(csvErr).Str("thread_id", threadID).Str("result_kind", resultKind).Bool("case_field_found", found).Msg("attach case csv file url failed")
-				}
-			}
-		case "eval-reports", "abtests":
-			if strings.Contains(proxy.ContentType, "application/json") {
-				if resultKind == "eval-reports" {
-					if found, summaryErr := attachEvalReportSummaryResult(proxy.Body, threadID); summaryErr != nil {
-						log.Logger.Warn().Err(summaryErr).Str("thread_id", threadID).Bool("eval_report_found", found).Msg("attach eval report summary result failed")
-					}
-				}
-				if _, found, reportErr := attachCaseDetailsReportResult(r.Context(), proxy.Body, caseDetailsReportOptions{
-					ThreadID:   threadID,
-					ResultKind: resultKind,
-				}); reportErr != nil {
-					log.Logger.Warn().Err(reportErr).Str("thread_id", threadID).Str("result_kind", resultKind).Bool("case_details_found", found).Msg("attach case details report result failed")
-				}
-			}
-		case "analysis-reports":
-			body, _ := findClassificationReportResult(proxy.Body)
-			common.ReplyOK(w, body)
-			return
-		case "diffs":
-			body, found, resultErr := buildDiffJSONResult(proxy.Body)
-			if resultErr != nil {
-				common.ReplyErrWithData(w, "read diff result content failed", map[string]any{"detail": resultErr.Error()}, http.StatusInternalServerError)
-				return
-			}
-			if found {
-				proxy.Body = body
-				proxy.ContentType = "application/json"
-			}
-		}
-	}
 	writeProxyResponse(w, proxy)
 }
 
-func proxyThreadGet(w http.ResponseWriter, r *http.Request, urlFor func(string) string, errorMessage string) {
+func downloadThreadResultCSV(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
+	resultKind := strings.TrimSpace(mux.Vars(r)["kind"])
 	if threadID == "" {
 		common.ReplyErr(w, "thread_id required", http.StatusBadRequest)
+		return
+	}
+	if _, ok := resultKindGateStep[resultKind]; !ok {
+		common.ReplyErr(w, "unsupported result kind", http.StatusBadRequest)
+		return
+	}
+	if format := strings.TrimSpace(r.URL.Query().Get("format")); format != "" && format != "csv" {
+		common.ReplyErr(w, "only csv download is supported", http.StatusBadRequest)
 		return
 	}
 	if _, err := loadUserThread(store.DB(), r, threadID); err != nil {
 		replyThreadLoadError(w, err)
 		return
 	}
-	proxy, statusCode, err := fetchUpstreamProxy(r.Context(), r, urlFor(threadID))
+	version, err := parsePositiveIntQuery(r, "version")
 	if err != nil {
-		common.ReplyErrWithData(w, errorMessage, map[string]any{"detail": err.Error()}, statusCode)
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeProxyResponse(w, proxy)
+	_, content, ok, err := fetchThreadResultContent(r.Context(), r, threadID, resultKind, version)
+	if err != nil {
+		common.ReplyErrWithData(w, "fetch thread result download failed", map[string]any{"detail": err.Error()}, evoProxyStatusCode(err))
+		return
+	}
+	if !ok {
+		common.ReplyErr(w, "thread result gate not found", http.StatusNotFound)
+		return
+	}
+	csvBytes, _, err := buildGateCSV(resultKind, content.Content)
+	if err != nil {
+		common.ReplyErrWithData(w, "build thread result csv failed", map[string]any{"detail": err.Error()}, http.StatusInternalServerError)
+		return
+	}
+	filename := gateCSVDownloadFilename(threadID, resultKind, content.Version)
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", gateCSVContentDisposition(filename))
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(csvBytes)
+}
+
+func parsePositiveIntQuery(r *http.Request, name string) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	return value, nil
 }
 
 func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
@@ -854,13 +794,24 @@ func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 			common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", decodeErr), http.StatusBadRequest)
 			return
 		}
-		if attachErr := attachThreadModelConfig(r.Context(), store.DB(), store.UserID(r), payload); attachErr != nil {
-			common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", attachErr), http.StatusInternalServerError)
+		commandPayload := map[string]any{}
+		for _, key := range []string{"command_id", "until_step"} {
+			if value, ok := payload[key]; ok {
+				commandPayload[key] = value
+			}
+		}
+		proxy, statusCode, err = newEvoClient(forwardedUpstreamHeaders(r)).PostCommand(r.Context(), threadID, action, commandPayload)
+	} else {
+		payload, _, decodeErr := decodeRequestBody(r)
+		if decodeErr != nil {
+			common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", decodeErr), http.StatusBadRequest)
 			return
 		}
-		proxy, statusCode, err = postUpstreamProxy(r.Context(), r, threadActionURL(threadID, action), payload)
-	} else {
-		proxy, statusCode, err = postUpstreamProxy(r.Context(), r, threadActionURL(threadID, action), nil)
+		commandPayload := map[string]any{}
+		if value, ok := payload["command_id"]; ok {
+			commandPayload["command_id"] = value
+		}
+		proxy, statusCode, err = newEvoClient(forwardedUpstreamHeaders(r)).PostCommand(r.Context(), threadID, action, commandPayload)
 	}
 	if err != nil {
 		common.ReplyErrWithData(w, "post thread action failed", map[string]any{"detail": err.Error()}, statusCode)
@@ -870,6 +821,7 @@ func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 }
 
 type fetchedThreadEvent struct {
+	EventID   string
 	TaskID    string
 	EventName string
 	RawFrame  string
@@ -1040,9 +992,13 @@ func writeThreadEventStreamChunk(
 	if chunk.UpstreamEventID != "" && lastUpstreamEventID != nil {
 		*lastUpstreamEventID = chunk.UpstreamEventID
 	}
-	eventStepID := threadEventStepID(chunk.Event)
-	if strings.TrimSpace(stepID) != "" {
-		if eventStepID != strings.TrimSpace(stepID) {
+	eventStepID := strings.TrimSpace(threadEventStepID(chunk.Event))
+	requestedStepID := strings.TrimSpace(stepID)
+	if requestedStepID != "" {
+		if eventStepID == "" {
+			eventStepID = requestedStepID
+			chunk.Event.RawFrame = threadEventRawFrameWithStepID(chunk.Event.RawFrame, requestedStepID)
+		} else if eventStepID != requestedStepID {
 			log.Logger.Info().
 				Str("thread_id", threadID).
 				Str("step_id", stepID).
@@ -1053,8 +1009,8 @@ func writeThreadEventStreamChunk(
 				Msg("agent thread step event skipped")
 			return nil
 		}
-		eventStepID = strings.TrimSpace(stepID)
 	}
+
 	downstreamFrame := buildThreadEventFrame(chunk.Event.RawFrame)
 	writeStarted := time.Now()
 	bytesWritten, writeErr := io.WriteString(w, downstreamFrame)
@@ -1062,6 +1018,9 @@ func writeThreadEventStreamChunk(
 	flusher.Flush()
 	flushElapsed := time.Since(flushStarted)
 	writeElapsed := time.Since(writeStarted)
+	if writeErr != nil {
+		return writeErr
+	}
 	log.Logger.Info().
 		Str("thread_id", threadID).
 		Str("sse_endpoint", ":events").
@@ -1078,7 +1037,6 @@ func writeThreadEventStreamChunk(
 		Dur("flush_frontend_elapsed", flushElapsed).
 		Dur("frame_total_elapsed", time.Since(chunk.FrameStarted)).
 		Dur("stream_elapsed", chunk.StreamElapsed).
-		Err(writeErr).
 		Msg("agent thread events frame forwarded")
 	if writeErr != nil {
 		return writeErr
@@ -1086,8 +1044,9 @@ func writeThreadEventStreamChunk(
 
 	saveStarted := time.Now()
 	recordKey := ""
-	if strings.TrimSpace(eventStepID) != "" && strings.TrimSpace(chunk.UpstreamEventID) != "" {
-		recordKey = sha256Hex(eventStepID + "\x00" + chunk.UpstreamEventID)
+	eventID := firstNonEmptyString(chunk.UpstreamEventID, chunk.Event.EventID)
+	if eventStepID != "" && eventID != "" {
+		recordKey = sha256Hex(eventStepID + "\x00" + eventID)
 	}
 	_, saveCreated, saveErr := saveThreadRecordWithOptions(
 		db,
@@ -1135,9 +1094,36 @@ func writeThreadEventStreamChunk(
 		Bool("record_created", saveCreated).
 		Dur("save_record_elapsed", saveElapsed).
 		Dur("update_thread_elapsed", updateElapsed).
-		Err(firstNonNil(saveErr, updateErr)).
 		Msg("agent thread events frame persisted")
 	return nil
+}
+
+func threadEventRawFrameWithStepID(rawFrame, stepID string) string {
+	stepID = strings.TrimSpace(stepID)
+	if stepID == "" {
+		return rawFrame
+	}
+	payload, ok := parseJSONValue(rawFrame).(map[string]any)
+	if !ok {
+		return rawFrame
+	}
+	changed := false
+	if firstNonEmptyScalar(payload["step_id"]) == "" {
+		payload["step_id"] = stepID
+		changed = true
+	}
+	if firstNonEmptyScalar(payload["step_run_id"]) == "" {
+		payload["step_run_id"] = stepID
+		changed = true
+	}
+	if !changed {
+		return rawFrame
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return rawFrame
+	}
+	return string(encoded)
 }
 
 func readUpstreamThreadEvents(
@@ -1286,16 +1272,18 @@ func fetchedThreadEventFromSSEFrame(frame *sseFrame) (fetchedThreadEvent, bool) 
 	if frame == nil {
 		return fetchedThreadEvent{}, false
 	}
-	rawData := strings.TrimSpace(frame.Data)
+	rawData := normalizeThreadEventRawData(frame.Data, frame.Event)
 	if rawData == "" || rawData == "[DONE]" {
 		return fetchedThreadEvent{}, false
 	}
 	payload := parseJSONValue(rawData)
 	eventName := strings.TrimSpace(frame.Event)
 	taskID := ""
+	eventID := ""
 	if payload != nil {
 		taskID = extractStringByExactKeys(payload, "task_id", "current_task_id")
-		if name := extractStringByExactKeys(payload, "kind", "event", "type"); name != "" {
+		eventID = extractStringByExactKeys(payload, "event_id")
+		if name := extractStringByExactKeys(payload, "event_type", "kind", "event", "type"); name != "" {
 			eventName = name
 		}
 	}
@@ -1303,6 +1291,7 @@ func fetchedThreadEventFromSSEFrame(frame *sseFrame) (fetchedThreadEvent, bool) 
 		return fetchedThreadEvent{}, false
 	}
 	return fetchedThreadEvent{
+		EventID:   eventID,
 		TaskID:    taskID,
 		EventName: eventName,
 		RawFrame:  rawData,
@@ -1319,11 +1308,12 @@ func buildFetchedThreadEvents(events []map[string]any) ([]fetchedThreadEvent, er
 		if err != nil {
 			return nil, err
 		}
-		eventName := extractStringByExactKeys(item, "kind", "event", "type")
+		eventName := extractStringByExactKeys(item, "event_type", "kind", "event", "type")
 		if shouldSkipStreamData(eventName, item, string(rawJSON)) {
 			continue
 		}
 		result = append(result, fetchedThreadEvent{
+			EventID:   extractStringByExactKeys(item, "event_id"),
 			TaskID:    extractStringByExactKeys(item, "task_id", "current_task_id"),
 			EventName: eventName,
 			RawFrame:  string(rawJSON),
@@ -1351,26 +1341,20 @@ func shouldSkipStreamData(eventName string, payload any, rawData string) bool {
 }
 
 func isDoneThreadEvent(event fetchedThreadEvent) bool {
+	if strings.EqualFold(strings.TrimSpace(event.EventName), "done") {
+		return true
+	}
 	payload, ok := parseJSONValue(event.RawFrame).(map[string]any)
 	if !ok {
 		return false
 	}
-	rawType, ok := payload["type"].(string)
-	return ok && strings.EqualFold(strings.TrimSpace(rawType), "done")
+	rawType := extractStringByExactKeys(payload, "event_type", "event", "type")
+	return strings.EqualFold(strings.TrimSpace(rawType), "done")
 }
 
 func threadEventStepID(event fetchedThreadEvent) string {
 	payload := parseJSONValue(event.RawFrame)
-	return extractStringByExactKeys(payload, "step_run_id")
-}
-
-func firstNonNil(errs ...error) error {
-	for _, err := range errs {
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return extractStringByExactKeys(payload, "step_id", "step_run_id")
 }
 
 func threadEventsStreamEndReason(readErr, ctxErr error) string {
@@ -1456,7 +1440,7 @@ func shouldKeepThreadFlowStreamAlive(flowStatus *threadFlowStatusResponse) bool 
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(flowStatus.Status)) {
-	case "running", "pending", "waiting_checkpoint", "paused":
+	case "running", "pending", "paused":
 		return true
 	default:
 		return false
@@ -1475,119 +1459,57 @@ func sleepBeforeThreadEventsReconnect(ctx context.Context) bool {
 }
 
 func fetchThreadFlowStatus(ctx context.Context, r *http.Request, threadID string) (*threadFlowStatusResponse, error) {
-	headers := forwardedUpstreamHeaders(r)
-	var flowStatus threadFlowStatusResponse
-	if err := common.ApiGet(ctx, threadFlowStatusURL(threadID), headers, &flowStatus, 15*time.Second); err != nil {
+	thread, err := newEvoClient(forwardedUpstreamHeaders(r)).GetThread(ctx, threadID)
+	if err != nil {
 		return nil, err
 	}
-	return &flowStatus, nil
+	return threadFlowStatusFromEvo(thread), nil
 }
 
-func fetchThreadStatuses(ctx context.Context, r *http.Request) (map[string]threadFlowStatusResponse, error) {
-	headers := forwardedUpstreamHeaders(r)
-	var statuses threadStatusesResponse
-	if err := common.ApiGet(ctx, threadStatusesURL(), headers, &statuses, 5*time.Second); err != nil {
-		return nil, err
-	}
-	result := make(map[string]threadFlowStatusResponse, len(statuses.Threads))
-	for _, status := range statuses.Threads {
-		threadID := strings.TrimSpace(status.ThreadID)
+func fetchThreadStatuses(ctx context.Context, r *http.Request, threads []orm.AgentThread) (map[string]threadFlowStatusResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	client := newEvoClient(forwardedUpstreamHeaders(r))
+	result := make(map[string]threadFlowStatusResponse, len(threads))
+	var firstErr error
+	for _, localThread := range threads {
+		threadID := strings.TrimSpace(localThread.ThreadID)
 		if threadID == "" {
 			continue
 		}
-		result[threadID] = status
+		thread, err := client.GetThread(ctx, threadID)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		result[threadID] = *threadFlowStatusFromEvo(thread)
 	}
-	return result, nil
+	return result, firstErr
 }
 
-func fetchUpstreamProxy(ctx context.Context, r *http.Request, targetURL string) (*upstreamProxyResponse, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
-	if err != nil {
-		return nil, http.StatusInternalServerError, err
+func threadFlowStatusFromEvo(thread *evoThread) *threadFlowStatusResponse {
+	if thread == nil {
+		return nil
 	}
-	for key, value := range forwardedUpstreamHeaders(r) {
-		req.Header.Set(key, value)
+	threadID := strings.TrimSpace(thread.ThreadID)
+	if threadID == "" {
+		threadID = strings.TrimSpace(thread.ID)
 	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, http.StatusBadGateway, err
+	flowStatus := &threadFlowStatusResponse{
+		ThreadID:      threadID,
+		Status:        strings.TrimSpace(thread.Status),
+		CurrentStep:   strings.TrimSpace(thread.CurrentStep),
+		ReportReady:   strings.EqualFold(strings.TrimSpace(thread.Status), "ended"),
+		LastError:     thread.LastError,
+		ActiveTaskIDs: []string{},
 	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, http.StatusBadGateway, err
+	if strings.EqualFold(flowStatus.Status, "running") && flowStatus.CurrentStep != "" {
+		flowStatus.ActiveTaskIDs = []string{flowStatus.CurrentStep}
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, http.StatusBadGateway, fmt.Errorf("%s", strings.TrimSpace(string(bodyBytes)))
-	}
-
-	contentType := resp.Header.Get("Content-Type")
-	if strings.Contains(contentType, "application/json") {
-		var payload any
-		if err := json.Unmarshal(bodyBytes, &payload); err == nil {
-			return &upstreamProxyResponse{Body: payload, ContentType: "application/json"}, http.StatusOK, nil
-		}
-	}
-	return &upstreamProxyResponse{Body: string(bodyBytes), ContentType: contentType}, http.StatusOK, nil
-}
-
-func postUpstreamProxy(ctx context.Context, r *http.Request, targetURL string, payload map[string]any) (*upstreamProxyResponse, int, error) {
-	body := ""
-	if payload != nil {
-		bodyBytes, err := json.Marshal(payload)
-		if err != nil {
-			return nil, http.StatusInternalServerError, err
-		}
-		body = string(bodyBytes)
-	} else {
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			return nil, http.StatusBadRequest, err
-		}
-		body = strings.TrimSpace(string(bodyBytes))
-	}
-	var reqBody io.Reader = http.NoBody
-	if body != "" {
-		reqBody = strings.NewReader(body)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, reqBody)
-	if err != nil {
-		return nil, http.StatusInternalServerError, err
-	}
-	for key, value := range forwardedUpstreamHeaders(r) {
-		req.Header.Set(key, value)
-	}
-	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, http.StatusBadGateway, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, http.StatusBadGateway, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, http.StatusBadGateway, fmt.Errorf("%s", strings.TrimSpace(string(respBody)))
-	}
-
-	contentType := resp.Header.Get("Content-Type")
-	if strings.Contains(contentType, "application/json") {
-		var payload any
-		if err := json.Unmarshal(respBody, &payload); err == nil {
-			return &upstreamProxyResponse{Body: payload, ContentType: "application/json"}, http.StatusOK, nil
-		}
-	}
-	return &upstreamProxyResponse{Body: string(respBody), ContentType: contentType}, http.StatusOK, nil
+	return flowStatus
 }
 
 func writeProxyResponse(w http.ResponseWriter, proxy *upstreamProxyResponse) {

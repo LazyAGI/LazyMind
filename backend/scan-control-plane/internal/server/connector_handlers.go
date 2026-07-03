@@ -76,6 +76,7 @@ func validateTargetAccess(req connector.ValidateTargetRequest) access.BindingTar
 		SourceID:         req.ProviderOptions.String("source_id"),
 		BindingID:        req.ProviderOptions.String("binding_id"),
 		ConnectorType:    req.ConnectorType,
+		TargetType:       req.TargetType,
 		AgentID:          req.AgentID,
 		AuthConnectionID: req.AuthConnectionID,
 	}

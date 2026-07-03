@@ -83,7 +83,7 @@ class ABRouter:
         registry = get_global_registry()
         valid_weights = {
             k: v for k, v in valid_weights.items()
-            if registry.get_healthy_instance(k) is not None
+            if any(item.status == 'healthy' for item in registry.get_all_instances(k))
         }
         if not valid_weights:
             return None

@@ -6,7 +6,7 @@ import lazyllm
 from lazyllm import AutoModel, fc_register
 from lazyllm.components.formatter import encode_query_with_filepaths
 
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_success
+from lazymind.chat.engine.tools.infra import tool_error, tool_success
 from lazymind.chat.engine.tools.infra.image_generation_support import (
     _DEFAULT_BATCH_SIZE,
     _DEFAULT_IMAGE_SIZE,
@@ -22,7 +22,6 @@ _VISION_EXTRACT_DEFAULT_INSTRUCTION = (
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@handle_tool_errors
 def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, Any]:
     """Extract a text description from an image reachable at the given URL.
 
@@ -74,7 +73,6 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@handle_tool_errors
 def image_generator(
     prompt: str,
     image_size: str = _DEFAULT_IMAGE_SIZE,
@@ -104,7 +102,6 @@ def image_generator(
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@handle_tool_errors
 def image_editor(
     prompt: str,
     urls: List[str],

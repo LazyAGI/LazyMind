@@ -4,7 +4,12 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
+from lazymind.chat.engine.attachment_reader import (
+    is_chat_attachment_file,
+    is_chat_image_file,
+    parse_attachment_content,
+)
+from lazymind.chat.engine.tools.infra import tool_success
 
 from .context import require_context, LARGE_ARTIFACT_THRESHOLD
 
@@ -66,7 +71,6 @@ def _build_artifact_value(value: Any, content_type: str):
     return {'text': str(value)}, 'text'
 
 
-@handle_tool_errors
 def save_artifact(key: str, value: Any, content_type: str = 'text',
                   source_tool: Optional[str] = None,
                   sort_order: Optional[int] = None,
@@ -248,7 +252,6 @@ def _resolve_list_index_from_sort_order(
         return None, None
 
 
-@handle_tool_errors
 def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[str] = None,
                  start_line: Optional[int] = None, end_line: Optional[int] = None) -> Dict[str, Any]:
     """Read a previously saved artifact by key.
@@ -504,7 +507,6 @@ def _get_plugin_artifact_all(ctx: Any, key: str, session_id: str) -> Dict[str, A
     return tool_success('get_artifact', {'status': 'ok', 'key': key, 'artifacts': artifacts})
 
 
-@handle_tool_errors
 def patch_artifact(
     key: str,
     patch: Any,
@@ -754,7 +756,6 @@ def _json_patch_apply(obj: Any, ops: List[Any]) -> Any:
     return obj
 
 
-@handle_tool_errors
 def discard_draft(key: str, sort_order: Optional[int] = None) -> Dict[str, Any]:
     """Discard all uncommitted patch edits for an artifact and revert to the last saved version.
 
@@ -785,7 +786,6 @@ def discard_draft(key: str, sort_order: Optional[int] = None) -> Dict[str, Any]:
     return tool_success('discard_draft', {'status': 'ok', 'message': msg})
 
 
-@handle_tool_errors
 def list_artifacts(task_ref: Optional[str] = None) -> Dict[str, Any]:
     """List the artifact keys produced so far in the current task.
 
@@ -805,7 +805,6 @@ def list_artifacts(task_ref: Optional[str] = None) -> Dict[str, Any]:
     return tool_success('list_artifacts', {'status': 'ok', 'keys': summary, 'message': msg})
 
 
-@handle_tool_errors
 def list_knowledge_bases() -> Dict[str, Any]:
     """List knowledge bases accessible to the current user.
 
@@ -957,13 +956,13 @@ def _resolve_attachment(
     )
 
 
-@handle_tool_errors
 def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
-    """Read the contents of a file previously uploaded by the user in this conversation.
+    """Extract text from a user-uploaded attachment (on demand only).
 
-    The list of available files is shown in the system prompt under '## User Uploaded Files'.
-    Use this tool to read a file's content when the user asks about it or when the task
-    requires processing the file.
+    Documents (pdf/doc/docx/pptx): OCR reader. Images: vision-model text description.
+    Do NOT call this just because a file is attached. For images used in visual tasks
+    (edit, plugin, image_generator), use find_user_attachment for path/url instead.
+    Call this when the user needs document text or a textual summary of image content.
 
     Args:
         filename (str): The filename (basename) or display name of the attachment to read.
@@ -974,8 +973,7 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
             Omit to search from the current turn first, then historical turns newest-first.
 
     Returns:
-        The file content as text, or a confirmation message with the absolute path for
-        binary/image files that should be passed to other tools (e.g. vision_extractor).
+        Parsed text content for supported documents and images.
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:
@@ -985,40 +983,43 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
             'status': 'error',
             'message': f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
         })
-    # Binary / image files: return path only (caller should use vision_extractor etc.).
-    binary_exts = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.pdf', '.zip'}
-    ext = os.path.splitext(matched)[1].lower()
-    if ext in binary_exts:
-        return tool_success('read_user_attachment', {
-            'status': 'ok',
-            'filename': os.path.basename(matched),
-            'path': matched,
-            'message': (
-                f"Binary file '{os.path.basename(matched)}' is available at the above path. "
-                'Pass the path to an appropriate tool (e.g. vision_extractor for images).'
-            ),
-        })
-    try:
-        with open(matched, 'r', encoding='utf-8', errors='replace') as fh:
-            content = fh.read()
-    except OSError as e:
+    if not is_chat_attachment_file(matched):
         return tool_success('read_user_attachment', {
             'status': 'error',
-            'message': f"Could not read '{os.path.basename(matched)}': {e}",
+            'message': (
+                f"Unsupported file type '{os.path.splitext(matched)[1].lower() or '(no extension)'}'. "
+                'Supported: png, jpg, jpeg, pdf, doc, docx, pptx.'
+            ),
         })
+
+    try:
+        import lazyllm
+        cfg: Dict[str, Any] = lazyllm.globals.get('agentic_config') or {}
+        priority = int(cfg.get('priority') or 0)
+        content = parse_attachment_content(matched, priority=priority)
+    except Exception as e:
+        return tool_success('read_user_attachment', {
+            'status': 'error',
+            'message': f"Could not parse '{os.path.basename(matched)}': {e}",
+        })
+
+    kind = 'image' if is_chat_image_file(matched) else 'document'
+
     return tool_success('read_user_attachment', {
         'status': 'ok',
         'filename': os.path.basename(matched),
+        'path': matched,
+        'kind': kind,
         'content': content,
     })
 
 
-@handle_tool_errors
 def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
-    """Return the accessible URL or local path of a file uploaded by the user.
+    """Return path/url of a user-uploaded attachment without parsing it.
 
-    Use this when you need to pass a file to another tool (e.g. super_pdf_reader, image tools)
-    but do not need to read its text content directly.
+    Prefer this over read_user_attachment when you only need the file location: image
+    editing, plugins, vision_extractor, or passing an image path to other tools.
+    Does not run OCR or vision description (fast).
 
     Args:
         filename (str): The filename (basename) or display name of the attachment to locate.
@@ -1069,7 +1070,6 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     return tool_success('find_user_attachment', result)
 
 
-@handle_tool_errors
 def find_artifact(artifact_key: str, sort_order: Optional[int] = None) -> Dict[str, Any]:
     """Return the accessible URL or local path of a plugin artifact.
 

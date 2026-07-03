@@ -1410,7 +1410,7 @@ func TestListPaginatesAndCountsParentSkills(t *testing.T) {
 			UpdateStatus:    evolution.UpdateStatusUpToDate,
 			CreateUserID:    "u1",
 			CreateUserName:  "User 1",
-			CreatedAt:       now,
+			CreatedAt:       now.Add(3 * time.Second),
 			UpdatedAt:       now.Add(3 * time.Second),
 		},
 		{
@@ -1429,7 +1429,7 @@ func TestListPaginatesAndCountsParentSkills(t *testing.T) {
 			UpdateStatus:    evolution.UpdateStatusUpToDate,
 			CreateUserID:    "u1",
 			CreateUserName:  "User 1",
-			CreatedAt:       now,
+			CreatedAt:       now.Add(2 * time.Second),
 			UpdatedAt:       now.Add(2 * time.Second),
 		},
 		{

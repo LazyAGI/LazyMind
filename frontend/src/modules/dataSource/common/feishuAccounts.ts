@@ -1,5 +1,6 @@
 import type { FeishuDataSourceConnection } from "@/modules/dataSource/common/feishuOAuth";
-import { FEISHU_APP_SETUP_STORAGE_KEY, type FeishuAppSetup, type OAuthState } from "../shared";
+import { FEISHU_APP_SETUP_STORAGE_KEY } from "../constants/options";
+import type { FeishuAppSetup, OAuthState } from "../constants/types";
 
 export const FEISHU_AUTH_ACCOUNTS_STORAGE_KEY =
   "lazymind:datasource:feishu:auth-accounts";

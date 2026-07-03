@@ -5,7 +5,7 @@ from lazyllm import AutoModel, LOG
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 from lazyllm.tools.rag.doc_impl import NodeGroupType
 
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
+from lazymind.chat.engine.tools.infra import tool_success
 from lazymind.chat.engine.tools._utils import (
     iter_lookup_ids,
     parse_json_dict,
@@ -120,6 +120,7 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
             'index',
             'file_name',
             'source',
+            'source_path',
             'store_num',
             'lazyllm_store_num',
             'page',
@@ -141,7 +142,17 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
         and local_path.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'))
     )
     image_markdown = None
-    if is_image and local_path:
+    source_path = metadata.get('source_path')
+    if source_path:
+        signed = static_file_url_from_any(source_path)
+        text = signed
+        compact_metadata = dict(compact_metadata)
+        compact_metadata['image_url'] = signed
+        compact_metadata['local_path'] = source_path
+        doc_file_name = global_md.get('file_name') or compact_metadata.get('file_name')
+        file_label = doc_file_name or basename_from_path(signed)
+        image_markdown = f'![{file_label}]({signed})'
+    elif is_image and local_path:
         signed = static_file_url_from_any(local_path)
         if signed:
             text = signed
@@ -157,6 +168,11 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
     else:
         local_path = ''
 
+    doc_file_name = (
+        global_md.get('file_name') or compact_metadata.get('file_name')
+        if group == 'image'
+        else compact_metadata.get('file_name') or global_md.get('file_name')
+    )
     serialized = {
         'uid': getattr(node, 'uid', None) or getattr(node, '_uid', None),
         'number': getattr(node, 'number', metadata.get('index')),
@@ -166,13 +182,13 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
         'text': truncate_text(text, _MAX_TEXT_LEN),
         'docid': global_md.get('docid'),
         'kb_id': global_md.get('kb_id'),
-        'file_name': compact_metadata.get('file_name') or global_md.get('file_name'),
+        'file_name': doc_file_name,
         'metadata': compact_metadata,
         'global_metadata': global_md,
     }
     if image_markdown:
         serialized['image_markdown'] = image_markdown
-        serialized['local_path'] = local_path
+        serialized['local_path'] = source_path or local_path
     return serialized
 
 
@@ -263,7 +279,6 @@ class KBToolGroup:
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         return (agentic_config.get('filters') or {}).get('kb_id')
 
-    @handle_tool_errors
     def kb_search(
         self,
         query: str,
@@ -326,7 +341,6 @@ class KBToolGroup:
             serialized,
         )
 
-    @handle_tool_errors
     def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
         """Get the parent node of a target document node.
 
@@ -389,7 +403,6 @@ class KBToolGroup:
         _annotate_result_citations(result)
         return tool_success('kb_get_parent_node', result)
 
-    @handle_tool_errors
     def kb_get_window_nodes(
         self,
         docid: str,
@@ -452,7 +465,6 @@ class KBToolGroup:
         _annotate_result_citations(result)
         return tool_success('kb_get_window_nodes', result)
 
-    @handle_tool_errors
     def kb_keyword_search(
         self,
         keyword: str,
@@ -533,7 +545,6 @@ class KBToolGroup:
         })
 
 
-@handle_tool_errors
 def kb_tmp_search(
     query: str,
     retriever_topk: Optional[int] = None,

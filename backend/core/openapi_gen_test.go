@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -64,7 +65,7 @@ func TestOpenAPISpecCoversAllRegisteredRoutes(t *testing.T) {
 	}
 }
 
-func TestOpenAPISpecIncludesEvalReportResultSchema(t *testing.T) {
+func TestOpenAPISpecIncludesAgentGateResultContracts(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)
 
@@ -77,74 +78,86 @@ func TestOpenAPISpecIncludesEvalReportResultSchema(t *testing.T) {
 	if err := json.Unmarshal(specJSON, &spec); err != nil {
 		t.Fatalf("decode openapi spec: %v", err)
 	}
-	op := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/results/eval-reports")
-	responseRef := openAPIResponseRefForTest(t, op)
-	if responseRef != "#/components/schemas/agentEvalReportResultOpenAPIResponse" {
-		t.Fatalf("unexpected eval report item schema ref: %q", responseRef)
+	for _, path := range []string{
+		"/api/core/agent/threads/{thread_id}/results/datasets",
+		"/api/core/agent/threads/{thread_id}/results/eval-reports",
+		"/api/core/agent/threads/{thread_id}/results/analysis-reports",
+		"/api/core/agent/threads/{thread_id}/results/diffs",
+		"/api/core/agent/threads/{thread_id}/results/abtests",
+	} {
+		op := openAPIOperationForTest(t, spec, "get", path)
+		params := openAPIParameterNamesForTest(t, op)
+		for _, name := range []string{"thread_id", "version"} {
+			if _, ok := params[name]; !ok {
+				t.Fatalf("%s missing parameter %q", path, name)
+			}
+		}
+		schema := openAPIResponseSchemaForTest(t, op)
+		if schema["type"] != "object" || schema["additionalProperties"] != true {
+			t.Fatalf("%s should document direct Evo content object, got %#v", path, schema)
+		}
+		if _, ok := schema["items"]; ok {
+			t.Fatalf("%s should not retain legacy row item schema: %#v", path, schema)
+		}
 	}
+
+	downloadOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/results/{kind}:download")
+	downloadParams := openAPIParameterNamesForTest(t, downloadOp)
+	for _, name := range []string{"thread_id", "kind", "format", "version"} {
+		if _, ok := downloadParams[name]; !ok {
+			t.Fatalf("download operation missing parameter %q", name)
+		}
+	}
+	kindSchema := openAPIParameterSchemaForTest(t, downloadOp, "kind")
+	wantKinds := []any{"datasets", "eval-reports", "analysis-reports", "diffs", "abtests"}
+	if !reflect.DeepEqual(kindSchema["enum"], wantKinds) {
+		t.Fatalf("download kind enum mismatch: %#v", kindSchema["enum"])
+	}
+	formatSchema := openAPIParameterSchemaForTest(t, downloadOp, "format")
+	if !reflect.DeepEqual(formatSchema["enum"], []any{"csv"}) {
+		t.Fatalf("download format enum mismatch: %#v", formatSchema["enum"])
+	}
+	responses := downloadOp["responses"].(map[string]any)
+	response200 := responses["200"].(map[string]any)
+	content := response200["content"].(map[string]any)
+	csvContent, ok := content["text/csv"].(map[string]any)
+	if !ok {
+		t.Fatalf("download operation should expose text/csv response, got %#v", content)
+	}
+	csvSchema := csvContent["schema"].(map[string]any)
+	if csvSchema["type"] != "string" || csvSchema["format"] != "binary" {
+		t.Fatalf("unexpected csv response schema: %#v", csvSchema)
+	}
+
+	paths := spec["paths"].(map[string]any)
+	for _, legacyPath := range []string{
+		"/api/core/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases",
+		"/api/core/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details",
+		"/api/core/agent/threads/{thread_id}/results/traces/{trace_id}",
+		"/api/core/agent/threads/{thread_id}/results/traces-compare",
+		"/api/core/agent/reports/{report_id}:content",
+		"/api/core/agent/diffs/{apply_id}/{filename:.*}",
+		"/api/core/agent/files:content",
+	} {
+		if _, ok := paths[legacyPath]; ok {
+			t.Fatalf("legacy agent result path still present in openapi spec: %s", legacyPath)
+		}
+	}
+
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
-	props := schemaPropertiesForTest(t, schemas, "agentEvalReportResultOpenAPIResponse")
-	for _, name := range []string{"artifact_id", "artifact_ref", "schema", "case_count", "data", "report_id", "bad_case_count", "trace_coverage"} {
-		if _, ok := props[name]; !ok {
-			t.Fatalf("eval report schema missing property %q", name)
-		}
-	}
-	coverageProps := schemaPropertiesForTest(t, schemas, "agentEvalReportTraceCoverageOpenAPIResponse")
-	for _, name := range []string{"covered_count", "total_count", "rate"} {
-		if _, ok := coverageProps[name]; !ok {
-			t.Fatalf("trace coverage schema missing property %q", name)
-		}
-	}
-
-	badCaseOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases")
-	badCaseResponseRef := openAPIObjectResponseRefForTest(t, badCaseOp)
-	if badCaseResponseRef != "#/components/schemas/agentEvalReportBadCaseListOpenAPIResponse" {
-		t.Fatalf("unexpected eval report bad case schema ref: %q", badCaseResponseRef)
-	}
-	params := openAPIParameterNamesForTest(t, badCaseOp)
-	for _, name := range []string{"thread_id", "report_id", "page_token", "page_size", "keyword", "failure_type"} {
-		if _, ok := params[name]; !ok {
-			t.Fatalf("bad case operation missing parameter %q", name)
-		}
-	}
-	badCaseProps := schemaPropertiesForTest(t, schemas, "agentEvalReportBadCaseListOpenAPIResponse")
-	for _, name := range []string{"items", "total_size", "next_page_token"} {
-		if _, ok := badCaseProps[name]; !ok {
-			t.Fatalf("bad case list schema missing property %q", name)
-		}
-	}
-
-	abtestsOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/results/abtests")
-	abtestsResponseRef := openAPIResponseRefForTest(t, abtestsOp)
-	if abtestsResponseRef != "#/components/schemas/agentABTestResultOpenAPIResponse" {
-		t.Fatalf("unexpected abtest result item schema ref: %q", abtestsResponseRef)
-	}
-	abtestsParams := openAPIParameterNamesForTest(t, abtestsOp)
-	if _, ok := abtestsParams["thread_id"]; !ok {
-		t.Fatalf("abtest result operation missing parameter %q", "thread_id")
-	}
-	abtestsProps := schemaPropertiesForTest(t, schemas, "agentABTestResultOpenAPIResponse")
-	for _, name := range []string{"artifact_id", "artifact_ref", "schema", "case_count", "data", "abtest_id", "case_details_summary", "file_url"} {
-		if _, ok := abtestsProps[name]; !ok {
-			t.Fatalf("abtest result schema missing property %q", name)
-		}
-	}
-
-	abCaseOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details")
-	abCaseResponseRef := openAPIObjectResponseRefForTest(t, abCaseOp)
-	if abCaseResponseRef != "#/components/schemas/agentABTestCaseDetailListOpenAPIResponse" {
-		t.Fatalf("unexpected abtest case detail schema ref: %q", abCaseResponseRef)
-	}
-	abParams := openAPIParameterNamesForTest(t, abCaseOp)
-	for _, name := range []string{"thread_id", "abtest_id", "page_token", "page_size", "keyword", "outcome"} {
-		if _, ok := abParams[name]; !ok {
-			t.Fatalf("abtest case detail operation missing parameter %q", name)
-		}
-	}
-	abCaseProps := schemaPropertiesForTest(t, schemas, "agentABTestCaseDetailListOpenAPIResponse")
-	for _, name := range []string{"items", "total_size", "next_page_token"} {
-		if _, ok := abCaseProps[name]; !ok {
-			t.Fatalf("abtest case detail list schema missing property %q", name)
+	for _, legacySchema := range []string{
+		"agentABTestCaseDetailListItemOpenAPIResponse",
+		"agentABTestCaseDetailListOpenAPIResponse",
+		"agentABTestResultOpenAPIResponse",
+		"agentEvalReportBadCaseListItemOpenAPIResponse",
+		"agentEvalReportBadCaseListOpenAPIResponse",
+		"agentEvalReportResultOpenAPIResponse",
+		"agentTraceCompareOpenAPIResponse",
+		"agentTraceDetailOpenAPIResponse",
+		"agentTraceSummaryOpenAPIResponse",
+	} {
+		if _, ok := schemas[legacySchema]; ok {
+			t.Fatalf("legacy agent result schema still present in openapi spec: %s", legacySchema)
 		}
 	}
 }
@@ -277,6 +290,27 @@ func openAPIParameterNamesForTest(t *testing.T, op map[string]any) map[string]st
 	return result
 }
 
+func openAPIParameterSchemaForTest(t *testing.T, op map[string]any, name string) map[string]any {
+	t.Helper()
+	items, ok := op["parameters"].([]any)
+	if !ok {
+		t.Fatalf("parameters missing")
+	}
+	for _, item := range items {
+		param, ok := item.(map[string]any)
+		if !ok || param["name"] != name {
+			continue
+		}
+		schema, ok := param["schema"].(map[string]any)
+		if !ok {
+			t.Fatalf("parameter %q schema missing", name)
+		}
+		return schema
+	}
+	t.Fatalf("parameter %q missing", name)
+	return nil
+}
+
 func schemaPropertiesForTest(t *testing.T, schemas map[string]any, schemaName string) map[string]any {
 	t.Helper()
 	schema, ok := schemas[schemaName].(map[string]any)
@@ -352,6 +386,8 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"delete", "/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}", false, true, true},
 		{"get", "/api/core/personalization-setting", false, false, true},
 		{"put", "/api/core/personalization-setting", true, false, true},
+		{"get", "/api/core/user/ui-preferences", false, false, true},
+		{"patch", "/api/core/user/ui-preferences", true, false, true},
 		{"put", "/api/core/memory", true, false, true},
 		{"get", "/api/core/memory:draft-preview", false, false, true},
 		{"post", "/api/core/memory:generate", true, false, true},
@@ -553,6 +589,46 @@ func TestOpenAPISpecAssignsMetadataFieldsToUserPreference(t *testing.T) {
 
 	assertRequestSchemaRef("/api/core/memory", "put", "#/components/schemas/memoryUpsertOpenAPIRequest")
 	assertRequestSchemaRef("/api/core/user-preference", "put", "#/components/schemas/managedStateUpsertOpenAPIRequest")
+}
+
+func TestOpenAPISpecMarksUIPreferencesPatchFieldsOptional(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing in openapi spec")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing in openapi spec")
+	}
+	schema, ok := schemas["userUIPreferencesPatchOpenAPIRequest"].(map[string]any)
+	if !ok {
+		t.Fatalf("userUIPreferencesPatchOpenAPIRequest missing")
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("userUIPreferencesPatchOpenAPIRequest properties missing")
+	}
+	for _, name := range []string{"chat_preference_notice_dismissed", "developer_mode_active"} {
+		if _, ok := properties[name]; !ok {
+			t.Fatalf("userUIPreferencesPatchOpenAPIRequest expected property %q", name)
+		}
+	}
+	if required, ok := schema["required"].([]any); ok && len(required) > 0 {
+		t.Fatalf("userUIPreferencesPatchOpenAPIRequest fields should all be optional, got required=%v", required)
+	}
 }
 
 func TestOpenAPISpecCoversEvalSetOperations(t *testing.T) {

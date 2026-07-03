@@ -10,6 +10,8 @@ RAG_MODE: bool = config['rag_mode']
 SENSITIVE_FILTER_RESPONSE_TEXT = 'Sorry, I have not learned how to answer this question yet. If you have other questions, I am happy to help.'  # noqa: E501
 
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg')
+CHAT_DOCUMENT_EXTENSIONS = ('.pdf', '.doc', '.docx', '.pptx')
+CHAT_ATTACHMENT_EXTENSIONS = IMAGE_EXTENSIONS + CHAT_DOCUMENT_EXTENSIONS
 DEFAULT_TMP_BLOCK_TOPK = 20
 
 DEFAULT_CHAT_DATASET: str = config['default_chat_dataset']

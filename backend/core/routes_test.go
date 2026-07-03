@@ -107,55 +107,55 @@ func TestAgentThreadStepRecordsRouteWinsOverGenericThreadRoute(t *testing.T) {
 	}
 }
 
-func TestAgentEvalReportBadCasesRouteRegistered(t *testing.T) {
+func TestAgentThreadResultDownloadRouteRegistered(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()
 	registerAllRoutes(r)
 
-	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr-1/results/eval-reports/v0001/bad-cases", nil)
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr-1/results/eval-reports:download", nil)
 	var match mux.RouteMatch
 	if !r.Match(req, &match) {
-		t.Fatalf("expected eval report bad cases route to match")
+		t.Fatalf("expected thread result download route to match")
 	}
 
 	gotTemplate, err := match.Route.GetPathTemplate()
 	if err != nil {
 		t.Fatalf("get matched route template: %v", err)
 	}
-	if want := "/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases"; gotTemplate != want {
+	if want := "/agent/threads/{thread_id}/results/{kind}:download"; gotTemplate != want {
 		t.Fatalf("expected template %q, got %q", want, gotTemplate)
 	}
 	if got := match.Vars["thread_id"]; got != "thr-1" {
 		t.Fatalf("expected thread_id %q, got %q", "thr-1", got)
 	}
-	if got := match.Vars["report_id"]; got != "v0001" {
-		t.Fatalf("expected report_id %q, got %q", "v0001", got)
+	if got := match.Vars["kind"]; got != "eval-reports" {
+		t.Fatalf("expected kind %q, got %q", "eval-reports", got)
 	}
 }
 
-func TestAgentABTestCaseDetailsRouteRegistered(t *testing.T) {
+func TestLegacyAgentResultDetailRoutesAreNotRegistered(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()
 	registerAllRoutes(r)
 
-	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr-1/results/abtests/abtest.comparison/case-details", nil)
-	var match mux.RouteMatch
-	if !r.Match(req, &match) {
-		t.Fatalf("expected abtest case details route to match")
-	}
-
-	gotTemplate, err := match.Route.GetPathTemplate()
-	if err != nil {
-		t.Fatalf("get matched route template: %v", err)
-	}
-	if want := "/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details"; gotTemplate != want {
-		t.Fatalf("expected template %q, got %q", want, gotTemplate)
-	}
-	if got := match.Vars["thread_id"]; got != "thr-1" {
-		t.Fatalf("expected thread_id %q, got %q", "thr-1", got)
-	}
-	if got := match.Vars["abtest_id"]; got != "abtest.comparison" {
-		t.Fatalf("expected abtest_id %q, got %q", "abtest.comparison", got)
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/agent/threads/thr-1/results/eval-reports/v0001/bad-cases"},
+		{http.MethodGet, "/agent/threads/thr-1/results/abtests/abtest.comparison/case-details"},
+		{http.MethodGet, "/agent/threads/thr-1/results/traces/trace-1"},
+		{http.MethodGet, "/agent/threads/thr-1/results/traces-compare"},
+		{http.MethodGet, "/agent/reports/report-1:content"},
+		{http.MethodGet, "/agent/diffs/apply-1/file.diff"},
+		{http.MethodPost, "/agent/files:content"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		var match mux.RouteMatch
+		if r.Match(req, &match) {
+			template, _ := match.Route.GetPathTemplate()
+			t.Fatalf("expected legacy route %s %q not to match, got %q", tc.method, tc.path, template)
+		}
 	}
 }
 

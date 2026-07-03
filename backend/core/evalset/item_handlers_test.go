@@ -463,6 +463,66 @@ func TestListInvalidReferenceEvalSetItemsReturnsOnlyInvalidRows(t *testing.T) {
 	}
 }
 
+func TestListEvalSetItemsWithoutKnowledgeBaseOnlyInvalidatesKnowledgeReferences(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	now := time.Now().UTC()
+	seedEvalSet(t, db, "eval_set_no_kb_reference_items", "user_1", "", "kb_old", now)
+	if err := db.Model(&orm.EvalSet{}).
+		Where("id = ?", "eval_set_no_kb_reference_items").
+		Update("dataset_ids", datasetIDsJSON(nil)).Error; err != nil {
+		t.Fatalf("clear dataset ids: %v", err)
+	}
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:              "eval_item_knowledge_reference",
+		EvalSetID:       "eval_set_no_kb_reference_items",
+		ReferenceDoc:    "old kb doc",
+		ReferenceDocIDs: "doc_old",
+		CreatedAt:       now.Add(time.Minute),
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:           "eval_item_manual_reference",
+		EvalSetID:    "eval_set_no_kb_reference_items",
+		ReferenceDoc: "manual doc",
+		CreatedAt:    now,
+	})
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_no_kb_reference_items/items?page=1&page_size=10", "", "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_no_kb_reference_items"})
+	ListEvalSetItems(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[ListEvalSetItemsResponse](t, rec)
+	itemsByID := make(map[string]EvalSetItemResponse, len(resp.Items))
+	for _, item := range resp.Items {
+		itemsByID[item.ID] = item
+	}
+	knowledgeReference := itemsByID["eval_item_knowledge_reference"]
+	if !knowledgeReference.ReferenceDocInvalid || knowledgeReference.ReferenceChunkInvalid {
+		t.Fatalf("expected knowledge reference doc to be invalid without chunk invalid, got %#v", knowledgeReference)
+	}
+	manualReference := itemsByID["eval_item_manual_reference"]
+	if manualReference.ReferenceDocInvalid || manualReference.ReferenceChunkInvalid {
+		t.Fatalf("expected manual reference to stay valid, got %#v", manualReference)
+	}
+
+	rec, req = requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_no_kb_reference_items/items:invalidReferences?page=1&page_size=10", "", "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_no_kb_reference_items"})
+	ListInvalidReferenceEvalSetItems(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	invalidResp := decodeOKData[ListEvalSetItemsResponse](t, rec)
+	if got := itemIDs(invalidResp.Items); strings.Join(got, ",") != "eval_item_knowledge_reference" {
+		t.Fatalf("unexpected invalid reference ids: %v", got)
+	}
+	if invalidResp.Total != 1 || invalidResp.HasMore {
+		t.Fatalf("unexpected invalid reference metadata: %#v", invalidResp)
+	}
+}
+
 func TestUpdateEvalSetItemKeepsUploadSource(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	seedEvalSet(t, db, "eval_set_items_update", "user_1", "", "", time.Now().UTC())

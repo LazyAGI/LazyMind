@@ -3,6 +3,7 @@ import { AgentAppsAuth } from "@/components/auth";
 import { Method, SSE } from "@/modules/chat/utils/sse";
 import { TaskServiceApi, taskStreamUrl, convEventsUrl } from "@/modules/chat/utils/request";
 import UIUtils from "@/modules/chat/utils/ui";
+import { PLUGIN_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
 
 export type TaskStatus =
   | "pending"
@@ -471,9 +472,25 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             type === 'plugin_error'
           ) {
             get().loadConversationTasks(conversationId);
+            window.dispatchEvent(
+              new CustomEvent(PLUGIN_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+            );
             import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
               usePluginStore.getState().loadActiveSession(conversationId);
               usePluginStore.getState().setAutoRunning(conversationId, false);
+            });
+          } else if (type === 'step_partial_done') {
+            window.dispatchEvent(
+              new CustomEvent(PLUGIN_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+            );
+            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
+              usePluginStore.getState().loadActiveSession(conversationId);
+            });
+          } else if (type === 'intent_updated') {
+            // An update_intent call completed — refresh the session so the
+            // intent badge in the plugin panel updates without a page reload.
+            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
+              usePluginStore.getState().loadActiveSession(conversationId);
             });
           } else if (type === 'auto_chat_started') {
             import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {

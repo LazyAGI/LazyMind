@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/mcp"
 	"lazymind/core/store"
@@ -108,11 +109,27 @@ func seedRuntimeModelConfig(t *testing.T, db *orm.DB, userID string) {
 	}
 }
 
+func seedSelectedOCRProvider(t *testing.T, db *gorm.DB, userID string) {
+	t.Helper()
+	seedSelectedToolProvider(
+		t,
+		db,
+		userID,
+		"MinerU",
+		"ocr-group",
+		"mineru-key",
+		"ocr",
+		"ocr",
+		false,
+	)
+}
+
 func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 	db := newToolsTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	seedRuntimeModelConfig(t, db, "u1")
+	seedSelectedOCRProvider(t, db.DB, "u1")
 	seedSelectedSearchTool(t, db.DB, "u1", "Bing", "search-group", "bing-key", false)
 	if err := disableToolForUser(context.Background(), db.DB, "u1", "User 1", "bing"); err != nil {
 		t.Fatalf("disable tool: %v", err)
@@ -163,6 +180,10 @@ func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 	if toolConfig["bing"] != "bing-key" {
 		t.Fatalf("expected bing tool_config, got %#v", upstreamBody["tool_config"])
 	}
+	ocrConfig, _ := upstreamBody["ocr_config"].(map[string]any)
+	if ocrConfig["ocr_type"] != "mineru" {
+		t.Fatalf("expected ocr_config forwarded, got %#v", upstreamBody["ocr_config"])
+	}
 	if _, ok := upstreamBody["mcp_config"]; ok {
 		t.Fatalf("list tools should not forward mcp_config, got %#v", upstreamBody["mcp_config"])
 	}
@@ -175,15 +196,15 @@ func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 	if len(resp.Data.ToolGroups) != 2 {
 		t.Fatalf("expected 2 tool groups, got %#v", resp.Data.ToolGroups)
 	}
-	if resp.Data.ToolGroups[0]["disabled"] != true {
-		t.Fatalf("expected bing disabled=true, got %#v", resp.Data.ToolGroups[0])
+	if resp.Data.ToolGroups[0]["name"] != "skill" || resp.Data.ToolGroups[0]["disabled"] != false {
+		t.Fatalf("expected enabled skill first, got %#v", resp.Data.ToolGroups[0])
 	}
-	if resp.Data.ToolGroups[1]["disabled"] != false {
-		t.Fatalf("expected skill disabled=false, got %#v", resp.Data.ToolGroups[1])
+	if resp.Data.ToolGroups[1]["name"] != "bing" || resp.Data.ToolGroups[1]["disabled"] != true {
+		t.Fatalf("expected disabled bing last, got %#v", resp.Data.ToolGroups[1])
 	}
 }
 
-func TestListToolsFiltersAndPaginates(t *testing.T) {
+func TestListToolsFiltersAndReturnsAll(t *testing.T) {
 	db := newToolsTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -238,14 +259,14 @@ func TestListToolsFiltersAndPaginates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &firstPage); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if firstPage.Data.Page != 1 || firstPage.Data.PageSize != 10 || firstPage.Data.Total != 12 {
+	if firstPage.Data.Page != 1 || firstPage.Data.PageSize != 12 || firstPage.Data.Total != 12 {
 		t.Fatalf("unexpected default page metadata: %#v", firstPage.Data)
 	}
-	if len(firstPage.Data.ToolGroups) != 10 {
-		t.Fatalf("expected default page size 10, got %d", len(firstPage.Data.ToolGroups))
+	if len(firstPage.Data.ToolGroups) != 12 {
+		t.Fatalf("expected all tools, got %d", len(firstPage.Data.ToolGroups))
 	}
-	if firstPage.Data.ToolGroups[0]["name"] != "tool-01" || firstPage.Data.ToolGroups[9]["name"] != "tool-10" {
-		t.Fatalf("unexpected default page items: %#v", firstPage.Data.ToolGroups)
+	if firstPage.Data.ToolGroups[0]["name"] != "tool-01" || firstPage.Data.ToolGroups[11]["name"] != "report-builder" {
+		t.Fatalf("unexpected default items: %#v", firstPage.Data.ToolGroups)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/core/tools?keyword=calendar&page=2&page_size=2", nil)
@@ -262,14 +283,14 @@ func TestListToolsFiltersAndPaginates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &filteredPage); err != nil {
 		t.Fatalf("decode filtered response: %v", err)
 	}
-	if filteredPage.Data.Page != 2 || filteredPage.Data.PageSize != 2 || filteredPage.Data.Total != 5 {
-		t.Fatalf("unexpected filtered page metadata: %#v", filteredPage.Data)
+	if filteredPage.Data.Page != 1 || filteredPage.Data.PageSize != 5 || filteredPage.Data.Total != 5 {
+		t.Fatalf("unexpected filtered metadata: %#v", filteredPage.Data)
 	}
-	if len(filteredPage.Data.ToolGroups) != 2 {
-		t.Fatalf("expected 2 filtered tools, got %#v", filteredPage.Data.ToolGroups)
+	if len(filteredPage.Data.ToolGroups) != 5 {
+		t.Fatalf("expected all filtered tools, got %#v", filteredPage.Data.ToolGroups)
 	}
-	if filteredPage.Data.ToolGroups[0]["name"] != "tool-03" || filteredPage.Data.ToolGroups[1]["name"] != "tool-04" {
-		t.Fatalf("unexpected filtered page items: %#v", filteredPage.Data.ToolGroups)
+	if filteredPage.Data.ToolGroups[0]["name"] != "tool-01" || filteredPage.Data.ToolGroups[4]["name"] != "tool-05" {
+		t.Fatalf("unexpected filtered items: %#v", filteredPage.Data.ToolGroups)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/core/tools?keyword=REPORT&page_size=10", nil)

@@ -160,9 +160,6 @@ func decodeImportJobPayload(raw json.RawMessage) (EvalSetImportJobPayload, error
 	if payload.EvalSetID == "" || payload.ImportToken == "" || payload.TempPath == "" || payload.ValidRows < 0 {
 		return payload, errors.New("invalid import payload")
 	}
-	if payload.Mode == importModeCreate && len(payload.DatasetIDs) == 0 {
-		return payload, errors.New("invalid import payload")
-	}
 	return payload, nil
 }
 

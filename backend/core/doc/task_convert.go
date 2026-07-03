@@ -192,30 +192,63 @@ func needsOfficeConvertBeforeParse(d documentExt, ocrConfig map[string]any, prof
 	if !d.ConvertRequired {
 		return false
 	}
-	src := strings.TrimSpace(d.StoredPath)
-	if !isOfficeDocument(src, d.ContentType, d.OriginalFilename) {
-		return false
-	}
-	switch profile {
-	case documentParseProfileLocal:
-		return ocrFirstWithLocalOfficeFallbackNeedsConvert(src, d, ocrConfig)
-	default:
-		return officePreconvertNeedsConvert(src, d, ocrConfig)
-	}
+	return NeedsOfficeConvertForPath(d.StoredPath, d.OriginalFilename, ocrConfig)
 }
 
-func ocrFirstWithLocalOfficeFallbackNeedsConvert(src string, d documentExt, ocrConfig map[string]any) bool {
-	if isPresentationDocument(src, d.ContentType, d.OriginalFilename) && isOfficialMinerU(ocrConfig) {
+// NeedsOfficeConvertForPath mirrors needsOfficeConvertBeforeParse for plain filesystem paths.
+func NeedsOfficeConvertForPath(filePath, originalFilename string, ocrConfig map[string]any) bool {
+	src := strings.TrimSpace(filePath)
+	if src == "" {
+		return false
+	}
+	name := strings.TrimSpace(originalFilename)
+	if name == "" {
+		name = filepath.Base(src)
+	}
+	if !isOfficeDocument(src, "", name) {
+		return false
+	}
+	if isPresentationDocument(src, "", name) && isOfficialMinerU(ocrConfig) {
 		return false
 	}
 	return true
 }
 
-func officePreconvertNeedsConvert(src string, d documentExt, ocrConfig map[string]any) bool {
-	if isPresentationDocument(src, d.ContentType, d.OriginalFilename) && isOfficialMinerU(ocrConfig) {
-		return false
+// ResolveParsePath converts office files to PDF when required and returns the parse path.
+func ResolveParsePath(ctx context.Context, sourcePath string, ocrConfig map[string]any) (string, error) {
+	src := strings.TrimSpace(sourcePath)
+	if src == "" {
+		return "", nil
 	}
-	return true
+	if !NeedsOfficeConvertForPath(src, "", ocrConfig) {
+		return src, nil
+	}
+
+	outPath := expectedParseOutputPath(src)
+	if ok, _ := reuseExistingPDFIfFresh(src, outPath); ok {
+		log.Logger.Info().Str("source", src).Str("pdf", outPath).Msg("office convert skipped, reused existing pdf")
+		return outPath, nil
+	}
+
+	url := strings.TrimSpace(os.Getenv("LAZYMIND_OFFICE_CONVERT_URL"))
+	if url == "" {
+		return "", fmt.Errorf("LAZYMIND_OFFICE_CONVERT_URL is not configured")
+	}
+
+	pdfPath, err := callOfficeConvertHTTP(ctx, url, src)
+	if err != nil {
+		return "", err
+	}
+	pdfPath = strings.TrimSpace(pdfPath)
+	if pdfPath == "" {
+		pdfPath = outPath
+	}
+	st, err := os.Stat(pdfPath)
+	if err != nil || st.IsDir() {
+		return "", fmt.Errorf("converted pdf not found: %w", err)
+	}
+	log.Logger.Info().Str("source", src).Str("pdf", pdfPath).Int64("size", st.Size()).Msg("office convert succeeded")
+	return pdfPath, nil
 }
 
 // parsePathForIngestion returns the file path passed to the parsing service.

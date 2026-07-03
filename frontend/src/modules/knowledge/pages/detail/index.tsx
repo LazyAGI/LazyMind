@@ -51,9 +51,9 @@ import ImportTaskManage, {
 } from "./components/ImportTaskManage";
 import TreeUtils from "@/modules/knowledge/utils/tree";
 import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
-import ConfirmModal, {
-  ConfirmImperativeProps,
-} from "@/modules/knowledge/components/ConfirmModal";
+import TypedConfirmModal, {
+  type TypedConfirmModalRef,
+} from '@/components/ui/TypedConfirmModal';
 import CreateUpdateModal, {
   UpdateImperativeProps,
 } from "@/modules/knowledge/components/UpdateModal";
@@ -66,8 +66,17 @@ import {
 } from "@/utils/developerMode";
 
 import { DetailPageHeader } from "@/components/ui";
+import KnowledgeBaseSyncNow from "@/modules/knowledge/components/KnowledgeBaseSyncNow";
 
 import "./index.scss";
+
+type DatasetWithDataSourceFlag = Dataset & {
+  created_by_data_source?: boolean;
+};
+
+function isDatasetCreatedByDataSource(dataset?: DatasetWithDataSourceFlag) {
+  return Boolean(dataset?.created_by_data_source);
+}
 
 const { Search } = Input;
 
@@ -111,7 +120,7 @@ const Detail = () => {
   const importTaskRef = useRef<IImportTaskManageRef>();
   const pollingRef = useRef(new Polling());
   const importingTaskListRef = useRef([]);
-  const confirmRef = useRef<ConfirmImperativeProps>(null);
+  const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
 
   const [detail, setDetail] = useState<Dataset>();
@@ -344,6 +353,15 @@ const Detail = () => {
     state.hasUploadPermission(),
   );
   const canImport = hasUploadPermission || hasWritePermission;
+  const showDataSourceSync = isDatasetCreatedByDataSource(
+    detail as DatasetWithDataSourceFlag | undefined,
+  );
+
+  const refreshKnowledgeAfterSync = useCallback(() => {
+    getDetail();
+    getImportingTotal();
+    knowledgeListRef.current?.getTableData();
+  }, [getDetail]);
 
   return (
     <div
@@ -488,6 +506,12 @@ const Detail = () => {
         />
         {canImport && (
           <div className="toolbar-actions">
+            {showDataSourceSync && detail?.dataset_id ? (
+              <KnowledgeBaseSyncNow
+                datasetId={detail.dataset_id}
+                onSyncComplete={refreshKnowledgeAfterSync}
+              />
+            ) : null}
             {hasWritePermission && (
               <Button
                 color="primary"
@@ -700,7 +724,7 @@ const Detail = () => {
         />
       )}
 
-      <ConfirmModal ref={confirmRef} onClick={onDelete} />
+      <TypedConfirmModal ref={confirmRef} onClick={onDelete} />
 
       <CreateUpdateModal ref={createUpdateRef} onUpdate={onUpdate} />
 

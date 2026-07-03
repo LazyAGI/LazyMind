@@ -1,20 +1,31 @@
-import { CloseOutlined, CloudDownloadOutlined, FilterOutlined, PlusCircleOutlined } from "@ant-design/icons";
+import {
+  CloseOutlined,
+  CloudDownloadOutlined,
+  DeleteOutlined,
+  DownOutlined,
+  FilterOutlined,
+  PlusCircleOutlined,
+} from "@ant-design/icons";
 import classnames from "classnames";
 import {
   Button,
   Checkbox,
   Col,
+  Dropdown,
   Input,
   message,
+  Modal,
   Popover,
   Row,
   Spin,
   Tooltip,
 } from "antd";
+import type { MenuProps } from "antd";
 import { Conversation } from "@/api/generated/chatbot-client";
 import {
   Configuration as CoreConfiguration,
   ConversationsApiFactory,
+  DefaultApiFactory,
 } from "@/api/generated/core-client";
 import {
   useEffect,
@@ -29,7 +40,7 @@ import InfiniteScroll from "react-infinite-scroll-component";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
-import { addTask } from "@/modules/taskCenter/api";
+import { addTask, listTasks } from "@/modules/taskCenter/api";
 
 import dayjs from "dayjs";
 
@@ -47,6 +58,11 @@ import { downloadStream } from "@/modules/chat/utils/download";
 const EXPORT_FILE_TYPE_XLSX = "EXPORT_FILE_TYPE_XLSX";
 const SIDEBAR_SEARCH_DEBOUNCE_MS = 300;
 const conversationsClient = ConversationsApiFactory(
+  new CoreConfiguration({ basePath: BASE_URL }),
+  BASE_URL,
+  axiosInstance,
+);
+const defaultCoreClient = DefaultApiFactory(
   new CoreConfiguration({ basePath: BASE_URL }),
   BASE_URL,
   axiosInstance,
@@ -123,6 +139,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [checkedList, setCheckedList] = useState<string[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+    // Set of conversation_ids already in task center (for dedup)
+    const [taskConvIds, setTaskConvIds] = useState<Set<string>>(new Set());
     // convTypeFilter: which conversation types to show. Default = normal only (no task convs).
     // Values: 'normal' = non-task, 'task' = task. Multiple values allowed.
     const [convTypeFilter, setConvTypeFilter] = useState<string[]>(['normal']);
@@ -132,8 +150,19 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       : "scrollableDiv";
     const deleteHistoryInFlightRef = useRef(false);
     const deleteHistoryLastInvokeRef = useRef(0);
+    const batchDeleteInFlightRef = useRef(false);
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
+
+    // Load task center index once on mount to support dedup check.
+    useEffect(() => {
+      listTasks({ page_size: 200 })
+        .then((resp) => {
+          const ids = new Set((resp.items ?? []).map((t) => t.conversation_id));
+          setTaskConvIds(ids);
+        })
+        .catch(() => {});
+    }, []);
     const groupedHistoryList = useMemo(() => {
       const groups: Record<ConversationGroup, Conversation[]> = {
         today: [],
@@ -163,7 +192,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     }, [historyList, t]);
     useImperativeHandle(ref, () => ({
       refresh: () => {
-        getHistory({ isFirst: true });
+        getHistory({ isFirst: true, searchText: keyword });
       },
     }));
 
@@ -173,7 +202,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           (history) => history.conversation_id === currentSessionId,
         )
       ) {
-        getHistory({ isFirst: true });
+        getHistory({ isFirst: true, searchText: keyword });
       }
     }, [currentSessionId]);
 
@@ -305,6 +334,84 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       onRemove(data);
     }
 
+    function batchDeleteHistory() {
+      if (!checkedList.length) {
+        message.warning(t("chat.selectConversationToDelete"));
+        return;
+      }
+      if (batchDeleteInFlightRef.current) {
+        return;
+      }
+      Modal.confirm({
+        title: t("chat.batchDeleteConversationTitle", {
+          count: checkedList.length,
+        }),
+        content: t("chat.batchDeleteConversationContent"),
+        okText: t("common.delete"),
+        cancelText: t("common.cancel"),
+        okButtonProps: { danger: true },
+        onOk: () => {
+          batchDeleteInFlightRef.current = true;
+          return defaultCoreClient
+            .apiCoreConversationsBatchDeletePost({
+              conversationBatchDeleteRequest: {
+                conversation_ids: checkedList,
+              },
+            })
+            .then((res) => {
+              const deletedCount = res.data?.deleted_count ?? checkedList.length;
+              message.success(
+                t("chat.batchDeleteConversationSuccess", { count: deletedCount }),
+              );
+              if (checkedList.includes(currentSessionId)) {
+                const removed = historyList.find(
+                  (item) => item.conversation_id === currentSessionId,
+                );
+                if (removed) {
+                  onRemove(removed);
+                }
+              }
+              setCheckedList([]);
+              setShowBatchExport(false);
+              getHistory({ isFirst: true });
+              document.getElementById(scrollableTargetId)?.scrollTo({ top: 0 });
+            })
+            .finally(() => {
+              batchDeleteInFlightRef.current = false;
+            });
+        },
+      });
+    }
+
+    function exitBatchMode() {
+      setShowBatchExport(false);
+      setCheckedList([]);
+    }
+
+    const batchActionMenuItems: MenuProps["items"] = [
+      {
+        key: "export",
+        label: t("chat.export"),
+        icon: <CloudDownloadOutlined />,
+        disabled: !checkedList.length,
+        onClick: () => {
+          if (checkedList?.length) {
+            exportHistoryFn();
+          } else {
+            message.warning(t("chat.selectConversationToExport"));
+          }
+        },
+      },
+      {
+        key: "delete",
+        label: t("common.delete"),
+        icon: <DeleteOutlined />,
+        danger: true,
+        disabled: !checkedList.length,
+        onClick: () => batchDeleteHistory(),
+      },
+    ];
+
     function exportHistoryFn() {
       conversationsClient
         .apiCoreConversationExportPost({
@@ -347,6 +454,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           key={item.conversation_id}
           onClick={(e) => {
             e.preventDefault();
+            if (showBatchExport) {
+              return;
+            }
             if (selected) {
               return;
             }
@@ -361,30 +471,42 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           <span className="update-time">
             {dayjs(item.update_time).format("MM/DD")}
           </span>
-          <CloseOutlined
-            className="close"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              deleteHistory(item);
-            }}
-          />
-          <Tooltip title="加入任务中心">
-            <PlusCircleOutlined
-              className="add-to-task"
-              style={{ marginLeft: 4, fontSize: 12, color: '#888', cursor: 'pointer' }}
-              onClick={async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                try {
-                  await addTask(item.conversation_id ?? '', item.display_name ?? '');
-                  message.success('已加入任务中心');
-                } catch {
-                  message.error('加入任务中心失败');
-                }
-              }}
-            />
-          </Tooltip>
+          {!showBatchExport && (
+            <>
+              <CloseOutlined
+                className="close"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  deleteHistory(item);
+                }}
+              />
+              <Tooltip title={taskConvIds.has(item.conversation_id ?? '') ? "已在任务中心" : "加入任务中心"}>
+                <PlusCircleOutlined
+                  className="add-to-task"
+                  style={{
+                    marginLeft: 4,
+                    fontSize: 12,
+                    color: taskConvIds.has(item.conversation_id ?? '') ? '#ccc' : '#888',
+                    cursor: taskConvIds.has(item.conversation_id ?? '') ? 'default' : 'pointer',
+                  }}
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const convId = item.conversation_id ?? '';
+                    if (taskConvIds.has(convId)) return;
+                    try {
+                      await addTask(convId, item.display_name ?? '');
+                      setTaskConvIds((prev) => new Set([...prev, convId]));
+                      message.success('已加入任务中心');
+                    } catch {
+                      message.error('加入任务中心失败');
+                    }
+                  }}
+                />
+              </Tooltip>
+            </>
+          )}
         </div>
       );
     }
@@ -456,25 +578,17 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                   <div className="record-toolbar-actions">
                     {showBatchExport ? (
                       <>
-                        <Button
-                          size="small"
-                          type="link"
-                          icon={<CloudDownloadOutlined />}
-                          onClick={() => {
-                            if (checkedList?.length) {
-                              exportHistoryFn();
-                            } else {
-                              message.warning(t("chat.selectConversationToExport"));
-                            }
-                          }}
+                        <Dropdown
+                          menu={{ items: batchActionMenuItems }}
+                          trigger={["click"]}
+                          placement="bottomRight"
                         >
-                          {t("chat.export")}
-                        </Button>
-                        <Button
-                          size="small"
-                          type="text"
-                          onClick={() => setShowBatchExport(false)}
-                        >
+                          <Button size="small" type="link" className="record-batch-actions-trigger">
+                            {t("common.actions")}
+                            <DownOutlined className="record-batch-actions-caret" />
+                          </Button>
+                        </Dropdown>
+                        <Button size="small" type="text" onClick={exitBatchMode}>
                           {t("common.cancel")}
                         </Button>
                       </>
@@ -487,26 +601,29 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                           placement="bottomRight"
                           content={
                             <div style={{ minWidth: 140 }}>
-                              <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 12, color: '#666' }}>筛选对话类型</div>
+                              <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 12, color: '#666' }}>{t("chat.filterConversationType")}</div>
                               <Checkbox.Group
                                 value={convTypeFilter}
                                 onChange={(vals) => {
                                   const next = vals as string[];
+                                  if (next.length === 0) {
+                                    message.warning(t("chat.selectAtLeastOneConvType"));
+                                    return;
+                                  }
                                   setConvTypeFilter(next);
-                                  getHistory({ isFirst: true, filterOverride: next });
-                                  setFilterPopoverOpen(false);
+                                  getHistory({ isFirst: true, filterOverride: next, searchText: keyword });
                                 }}
                                 style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
                               >
-                                <Checkbox value="normal">普通对话</Checkbox>
-                                <Checkbox value="task">Task 对话</Checkbox>
+                                <Checkbox value="normal">{t("chat.normalConversation")}</Checkbox>
+                                <Checkbox value="task">{t("chat.taskConversation")}</Checkbox>
                               </Checkbox.Group>
                             </div>
                           }
                         >
                           <Button
                             size="small"
-                            type={convTypeFilter.length !== 1 || !convTypeFilter.includes('normal') ? 'primary' : 'link'}
+                            type="text"
                             icon={<FilterOutlined />}
                             style={{ padding: '0 4px' }}
                           />

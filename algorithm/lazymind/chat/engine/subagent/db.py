@@ -561,7 +561,7 @@ def _get_task_query_engine() -> Engine:
 
 
 class TaskQueryDB:
-    """Read-only accessor for sub_agent_tasks / sub_agent_artifacts used by ChatAgent tools.
+    """Accessor for sub_agent_tasks / sub_agent_artifacts used by ChatAgent tools.
 
     All methods return plain dicts and swallow DB errors (returning empty fallbacks),
     so callers never need to handle database exceptions at the tool level.
@@ -601,6 +601,9 @@ class TaskQueryDB:
     def list_tasks_by_conversation(self, conv_id: str) -> List[Dict[str, Any]]:
         """Return all tasks for a conversation with their latest artifacts.
 
+        Tasks belonging to a dismissed plugin session are excluded so that the
+        ChatAgent cannot see or access their artifacts after the plugin is dismissed.
+
         Returns the same shape expected by _list_conversation_tasks / _resolve_task:
         task_id, id, title, agent_type, status, progress_pct, current_phase, summary,
         seq_in_conversation, output_artifact_keys, artifacts (list of artifact dicts).
@@ -609,11 +612,21 @@ class TaskQueryDB:
             with self._conn() as conn:
                 task_rows = conn.execute(
                     text(
-                        'SELECT id, title, agent_type, status, progress_pct, current_phase, '
-                        '       summary, seq_in_conversation, output_artifact_keys, params '
-                        'FROM sub_agent_tasks '
-                        'WHERE conversation_id = :conv_id '
-                        'ORDER BY seq_in_conversation ASC'
+                        'SELECT sat.id, sat.title, sat.agent_type, sat.status, '
+                        '       sat.progress_pct, sat.current_phase, '
+                        '       sat.summary, sat.seq_in_conversation, '
+                        '       sat.output_artifact_keys, sat.params '
+                        'FROM sub_agent_tasks sat '
+                        # Exclude tasks that belong to a dismissed plugin session.
+                        # plugin_step tasks are linked via plugin_session_steps;
+                        # non-plugin tasks have no matching row so they are always kept.
+                        'WHERE sat.conversation_id = :conv_id '
+                        '  AND NOT EXISTS ( '
+                        '    SELECT 1 FROM plugin_session_steps pss '
+                        '    JOIN plugin_sessions ps ON ps.id = pss.session_id '
+                        '    WHERE pss.task_id = sat.id AND ps.dismissed = TRUE '
+                        '  ) '
+                        'ORDER BY sat.seq_in_conversation ASC'
                     ),
                     {'conv_id': conv_id},
                 ).mappings().all()
@@ -916,39 +929,29 @@ class TaskQueryDB:
         except Exception:
             return None
 
-    def upsert_session_intent(self, session_id: str, content: str) -> None:
-        """UPSERT the global intent_context for a plugin session."""
+    def list_step_intents(self, session_id: str) -> Dict[str, str]:
+        """Return all step-level intent texts for a session as {step_id: text}."""
         try:
-            payload = json.dumps({'text': content}, ensure_ascii=False)
             with self._conn() as conn:
-                conn.execute(
+                rows = conn.execute(
                     text(
-                        'UPDATE plugin_sessions SET intent_context = :payload, updated_at = :now '
-                        'WHERE id = :sid'
+                        'SELECT step_id, intent_context FROM plugin_step_intents '
+                        'WHERE session_id = :sid'
                     ),
-                    {'payload': payload, 'now': _utcnow(), 'sid': session_id},
-                )
+                    {'sid': session_id},
+                ).mappings().all()
+            result: Dict[str, str] = {}
+            for row in rows:
+                raw = row['intent_context']
+                if raw is None:
+                    continue
+                data = json.loads(raw) if isinstance(raw, str) else raw
+                text_val = data.get('text') or data.get('content') if isinstance(data, dict) else str(data)
+                if text_val:
+                    result[row['step_id']] = text_val
+            return result
         except Exception:
-            pass
-
-    def upsert_step_intent(self, session_id: str, step_id: str, content: str) -> None:
-        """UPSERT the step-level intent_context, inserting if no row exists."""
-        try:
-            payload = json.dumps({'text': content}, ensure_ascii=False)
-            now = _utcnow()
-            row_id = _new_id('psi_')
-            with self._conn() as conn:
-                conn.execute(
-                    text(
-                        'INSERT INTO plugin_step_intents (id, session_id, step_id, intent_context, updated_at) '
-                        'VALUES (:id, :sid, :step, :payload, :now) '
-                        'ON CONFLICT (session_id, step_id) DO UPDATE '
-                        'SET intent_context = EXCLUDED.intent_context, updated_at = EXCLUDED.updated_at'
-                    ),
-                    {'id': row_id, 'sid': session_id, 'step': step_id, 'payload': payload, 'now': now},
-                )
-        except Exception:
-            pass
+            return {}
 
     def get_step_artifacts(self, session_id: str, step_id: str) -> Dict[str, Any]:
         """Return artifact key→value dict for a step (latest seq per key, non-hidden)."""

@@ -6,7 +6,13 @@ import urllib.parse
 _ID_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.:#-]*$')
 HTTP_SCHEMES = {'http', 'https'}
 URL_DELIMITERS = (';', '?', '#')
-QUESTION_TYPES = {'single_hop', 'single_doc_multi_hop', 'multi_doc_multi_hop', 'table_list', 'formula'}
+QUESTION_TYPES = {
+    'single_hop',
+    'single_doc_multi_hop',
+    'multi_doc_multi_hop',
+    'table_list',
+    'formula',
+}
 RESERVED_CASE_IDS = QUESTION_TYPES | {f'case_{item}' for item in QUESTION_TYPES}
 
 
@@ -23,16 +29,23 @@ def validate_id(value: str, kind: str = 'id') -> str:
 def validate_case_id(value: str) -> str:
     case_id = validate_id(value.strip(), 'case_id')
     if case_id in RESERVED_CASE_IDS or case_id.startswith('case_preparation_'):
-        raise ValueError(f'case_id must be a unique sample id, not a question type label: {case_id}')
+        raise ValueError(
+            'case_id must be a unique sample id, '
+            f'not a question type label: {case_id}'
+        )
     return case_id
 
 
 def normalize_chat_stream_url(url: str, field: str) -> str:
     parsed, netloc = _parse_http_url(url, field)
-    if _has_url_delimiter(url, parsed) or parsed.path not in {'/api/chat', '/api/chat/stream'}:
+    if (
+        _has_url_delimiter(url, parsed)
+        or parsed.path not in {'/api/chat', '/api/chat/stream'}
+    ):
         raise ValueError(f'{field} must end with /api/chat or /api/chat/stream')
-    return f'{parsed.scheme}://{netloc}/api/chat/stream' if parsed.path == '/api/chat' \
-        else f'{parsed.scheme}://{netloc}{parsed.path}'
+    if parsed.path == '/api/chat':
+        return f'{parsed.scheme}://{netloc}/api/chat/stream'
+    return f'{parsed.scheme}://{netloc}{parsed.path}'
 
 
 def normalize_http_origin(url: str, field: str) -> str:

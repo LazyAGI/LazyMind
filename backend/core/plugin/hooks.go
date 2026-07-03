@@ -11,7 +11,9 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/state"
+	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/taskcenter"
 )
 
 // RegisterSubAgentHooks wires plugin lifecycle hooks into the subagent EventHooks.
@@ -19,6 +21,16 @@ import (
 func RegisterSubAgentHooks() {
 	subagent.EventHooks.RegisterArtifactHook(onArtifact)
 	subagent.EventHooks.RegisterTerminalStatusHook(onTerminalStatus)
+
+	// Wire the task-cancel hook so that CancelTaskByID actually stops Python execution.
+	taskcenter.OnCancelHook = func(ctx context.Context, convID string) {
+		db := store.DB()
+		stateStore := store.State()
+		if db != nil {
+			StopActivePluginSession(ctx, db, stateStore, convID)
+		}
+		go NotifyChatCancel(convID)
+	}
 }
 
 // onArtifact is called by the subagent runner when any artifact is emitted.
@@ -159,6 +171,22 @@ func notifyTaskCancel(taskID string) {
 	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx
 	if err != nil {
 		fmt.Printf("[plugin] notifyTaskCancel: %v\n", err)
+		return
+	}
+	_ = resp.Body.Close()
+}
+
+// NotifyChatCancel posts a cancel signal to the Python chat service so that
+// the active ChatAgent session for the given conversation terminates.
+// Called by StopChatGeneration in a goroutine; errors are logged and suppressed.
+func NotifyChatCancel(convID string) {
+	body, _ := json.Marshal(map[string]string{
+		"conversation_id": convID,
+	})
+	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/plugin/task-cancel")
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx
+	if err != nil {
+		fmt.Printf("[plugin] NotifyChatCancel: %v\n", err)
 		return
 	}
 	_ = resp.Body.Close()

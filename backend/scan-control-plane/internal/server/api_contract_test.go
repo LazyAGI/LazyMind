@@ -65,7 +65,7 @@ func TestCreateSourceHandlerRejectsLocalSourceForNonAdmin(t *testing.T) {
 	t.Parallel()
 
 	engine := &serverSourceEngineStub{}
-	handler := NewHandler(WithSourceEngine(engine), WithAccessChecker(allowAccess{}))
+	handler := NewHandler(WithSourceEngine(engine), WithAccessChecker(blockLocalAccess{}))
 	body := `{"request_id":"req-1","name":"Docs","bindings":[{"connector_type":"local_fs","target_type":"local_path","target_ref":"/workspace/docs","sync_mode":"manual"}],"source_options":{"source_type":"local"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/scan/sources", strings.NewReader(body))
 	setAPIContractActorRole(req, "user")
@@ -85,7 +85,7 @@ func TestCreateSourceBindingRejectsLocalSourceForNonAdmin(t *testing.T) {
 	t.Parallel()
 
 	engine := &serverSourceEngineStub{}
-	handler := NewHandler(WithSourceEngine(engine), WithAccessChecker(allowAccess{}))
+	handler := NewHandler(WithSourceEngine(engine), WithAccessChecker(blockLocalAccess{}))
 	body := `{"connector_type":"local_fs","target_type":"local_path","target_ref":"/workspace/docs","sync_mode":"manual"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/scan/sources/source-1/bindings", strings.NewReader(body))
 	setAPIContractActorRole(req, "user")
@@ -170,6 +170,51 @@ func TestNewHandlerWithoutAccessCheckerDeniesProtectedRoutes(t *testing.T) {
 	}
 	if engine.createCalls != 0 {
 		t.Fatalf("expected denied request not to call source engine, got %d calls", engine.createCalls)
+	}
+}
+
+func TestDeleteSourceByDatasetInternalRouteSkipsCoreDatasetDelete(t *testing.T) {
+	t.Parallel()
+
+	engine := &serverSourceEngineStub{}
+	handler := NewHandler(WithSourceEngine(engine))
+	req := httptest.NewRequest(http.MethodDelete, "/api/scan/internal/sources/by-dataset/dataset-1", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if engine.deleteByDatasetCalls != 1 {
+		t.Fatalf("expected one delete by dataset call, got %d", engine.deleteByDatasetCalls)
+	}
+	if engine.lastDeleteDatasetID != "dataset-1" {
+		t.Fatalf("expected dataset id to be routed, got %q", engine.lastDeleteDatasetID)
+	}
+	if !engine.lastDeleteOptions.SkipCoreDatasetDelete {
+		t.Fatalf("internal dataset delete route must skip core dataset delete")
+	}
+}
+
+func TestGetSourceByDatasetInternalRoute(t *testing.T) {
+	t.Parallel()
+
+	engine := &serverSourceEngineStub{}
+	handler := NewHandler(WithSourceEngine(engine))
+	req := httptest.NewRequest(http.MethodGet, "/api/scan/internal/sources/by-dataset/dataset-1", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if engine.getByDatasetCalls != 1 {
+		t.Fatalf("expected one get by dataset call, got %d", engine.getByDatasetCalls)
+	}
+	if engine.lastGetDatasetID != "dataset-1" {
+		t.Fatalf("expected dataset id to be routed, got %q", engine.lastGetDatasetID)
 	}
 }
 
@@ -621,6 +666,18 @@ func (allowAccess) CanUseAuthConnection(context.Context, access.Actor, string) e
 	return nil
 }
 
+func (allowAccess) ShouldBlockLocalSourceAccess(context.Context, access.Actor, access.LocalSourceAccessRequest) bool {
+	return false
+}
+
+type blockLocalAccess struct {
+	allowAccess
+}
+
+func (blockLocalAccess) ShouldBlockLocalSourceAccess(context.Context, access.Actor, access.LocalSourceAccessRequest) bool {
+	return true
+}
+
 func TestOpenAPIContractCoversScanAPIAndDoesNotExposeLegacyPaths(t *testing.T) {
 	t.Parallel()
 
@@ -803,10 +860,15 @@ func assertJSONNumber(t *testing.T, value any, want string) {
 }
 
 type serverSourceEngineStub struct {
-	createCalls     int
-	addBindingCalls int
-	lastCreate      sourceengine.CreateSourceRequest
-	lastSync        sourceengine.TriggerSourceSyncRequest
+	createCalls          int
+	addBindingCalls      int
+	getByDatasetCalls    int
+	deleteByDatasetCalls int
+	lastCreate           sourceengine.CreateSourceRequest
+	lastSync             sourceengine.TriggerSourceSyncRequest
+	lastGetDatasetID     string
+	lastDeleteDatasetID  string
+	lastDeleteOptions    sourceengine.DeleteSourceOptions
 }
 
 func (s *serverSourceEngineStub) CreateSource(_ context.Context, req sourceengine.CreateSourceRequest) (sourceengine.CreateSourceResponse, error) {
@@ -848,6 +910,23 @@ func (s *serverSourceEngineStub) GetSource(context.Context, sourceengine.GetSour
 	return sourceengine.GetSourceResponse{}, nil
 }
 
+func (s *serverSourceEngineStub) GetSourceByDatasetID(_ context.Context, datasetID string) (sourceengine.GetSourceResponse, error) {
+	s.getByDatasetCalls++
+	s.lastGetDatasetID = datasetID
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	return sourceengine.GetSourceResponse{
+		Source: sourceengine.SourceResponse{
+			SourceID:      "source-1",
+			Name:          "Docs",
+			DatasetID:     datasetID,
+			Status:        sourceengine.SourceStatusActive,
+			ConfigVersion: 1,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		},
+	}, nil
+}
+
 func (s *serverSourceEngineStub) GetSourceSummary(context.Context, sourceengine.SourceSummaryRequest) (sourceengine.SourceSummaryResponse, error) {
 	return sourceengine.SourceSummaryResponse{SourceID: "source-1"}, nil
 }
@@ -863,6 +942,13 @@ func (s *serverSourceEngineStub) UpdateSource(context.Context, string, string, s
 
 func (s *serverSourceEngineStub) DeleteSource(context.Context, string) (sourceengine.DeleteSourceResponse, error) {
 	return sourceengine.DeleteSourceResponse{}, nil
+}
+
+func (s *serverSourceEngineStub) DeleteSourceByDatasetID(_ context.Context, datasetID string, opts sourceengine.DeleteSourceOptions) (sourceengine.DeleteSourceResponse, error) {
+	s.deleteByDatasetCalls++
+	s.lastDeleteDatasetID = datasetID
+	s.lastDeleteOptions = opts
+	return sourceengine.DeleteSourceResponse{Deleted: true, SourceID: "source-1", RemovedDatasetID: datasetID}, nil
 }
 
 func (s *serverSourceEngineStub) AddBinding(context.Context, string, string, sourceengine.BindingInput) (sourceengine.BindingMutationResponse, error) {

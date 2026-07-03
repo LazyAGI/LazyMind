@@ -3,25 +3,25 @@ from __future__ import annotations
 import json
 import os
 import select
-import shlex
 import signal
-import shutil
 import subprocess
 import time
+from contextlib import suppress
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Callable, NamedTuple
 
 PERMISSIONS = {
-    **dict.fromkeys(('read', 'grep', 'glob', 'list', 'bash', 'edit', 'external_directory'), 'allow'),
-    **dict.fromkeys(('question', 'plan_enter', 'plan_exit', 'todowrite', 'task'), 'deny'),
+    **dict.fromkeys(('read', 'grep', 'glob', 'list', 'edit', 'write'), 'allow'),
+    **dict.fromkeys(('bash', 'question', 'plan_enter', 'plan_exit', 'todowrite', 'task'), 'deny'),
 }
-OPENCODE_CONFIG_KEYS = {
-    'OPENCODE_MODEL',
-    'OPENCODE_PROVIDER',
-    'OPENCODE_PROVIDER_MODEL',
-    'OPENCODE_PROVIDER_LABEL',
-    'OPENCODE_PROVIDER_BASE_URL',
-    'OPENCODE_PROVIDER_KEY_ENV',
+OPENCODE_FIELDS = {
+    'model',
+    'provider',
+    'provider_model',
+    'provider_label',
+    'base_url',
+    'api_key',
+    'skip_auth',
 }
 
 
@@ -39,249 +39,194 @@ class OpenCodeRunResult(NamedTuple):
     provider: str
 
 
-def run_opencode_streaming(*, container: str, workdir: str, prompt: str, artifact_dir: Path, session_id: str = '',
-                           env: dict[str, str] | None = None, timeout_s: int = 900,
-                           first_response_timeout_s: int = 120, on_event: Any = None,
-                           register_cancel: Any = None) -> Any:
+def run_opencode_streaming(
+    *,
+    workdir: str,
+    prompt: str,
+    artifact_dir: Path,
+    session_id: str = '',
+    config: dict[str, str] | None = None,
+    timeout_s: int = 900,
+    first_response_timeout_s: int = 300,
+    trace: Any | None = None,
+    attempt: int | None = None,
+) -> OpenCodeRunResult:
     started = time.time()
     stdout: list[str] = []
     events: list[dict[str, Any]] = []
-    safe_env, secrets = _opencode_env(env or {}), _secrets(env or {})
+    settings, secrets = _opencode_settings(config or {}), _secrets(config or {})
+    config_path: Path | None = None
 
-    def fail(err_type: str, exc: Any, prompt_arg: str = '', setup: float | None = None) -> OpenCodeRunResult:
-        error = _clean_obj({'type': err_type, 'message': str(exc)}, secrets)
-        _push(error, events, on_event)
-        paths = _safe_write_logs(artifact_dir, stdout, events, secrets)
-        return _result(1, session_id, events, paths, prompt_arg, error, started,
-                       setup if setup is not None else time.time(), None, safe_env)
+    def emit(event: dict[str, Any]) -> None:
+        if trace is not None:
+            _emit_trace(trace, attempt, len(events) - 1, event)
 
-    if missing := _missing_config(safe_env):
+    def fail(kind: str, message: object, prompt_arg: str = '', setup_done: float | None = None) -> OpenCodeRunResult:
+        error = _clean({'type': kind, 'message': str(message)}, secrets)
+        events.append(error)
+        emit(error)
+        paths = _write_logs(artifact_dir, stdout, events, secrets)
+        return _result(1, session_id, events, paths, prompt_arg, error, started, setup_done or time.time(), None,
+                       settings)
+
+    if missing := _missing_config(settings):
         return fail('configuration_error', f'missing opencode config fields: {", ".join(missing)}')
-
     try:
+        root = Path(workdir).resolve()
         artifact_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as exc:
-        return fail('prompt_write_failed', exc)
-    host_workdir = Path(workdir) if container else None
-    run_workdir = f'/tmp/evo_repair_worktrees/{host_workdir.name}' if host_workdir else workdir
-    prompt_path = artifact_dir / 'opencode_prompt.json'
-    try:
+        prompt_path = artifact_dir / 'opencode_prompt.json'
+        config_path = root / 'opencode.json'
         prompt_path.write_text(prompt, encoding='utf-8')
+        config_path.write_text(json.dumps(_opencode_json(settings), ensure_ascii=False), encoding='utf-8')
     except Exception as exc:
+        if config_path is not None:
+            with suppress(OSError):
+                config_path.unlink()
         return fail('prompt_write_failed', exc)
-    prompt_arg = _prompt_arg(prompt_path, host_workdir, run_workdir)
-    _push({'type': 'setup', 'status': 'running', 'message': 'preparing opencode workspace'}, events, on_event)
-    if container and host_workdir:
-        try:
-            _push({'type': 'setup', 'status': 'running',
-                   'message': f'syncing candidate workspace into {container}'}, events, on_event)
-            _run(['docker', 'exec', container, 'mkdir', '-p', str(Path(run_workdir).parent)])
-            _run(['docker', 'exec', container, 'rm', '-rf', run_workdir])
-            _run(['docker', 'cp', str(host_workdir), f'{container}:{run_workdir}'])
-        except Exception as exc:
-            return fail('workspace_sync_failed', exc, prompt_arg)
 
+    prompt_arg = f'Read {prompt_path.as_posix()} first, then follow the JSON task card exactly.'
+    events.append({'type': 'setup', 'status': 'completed', 'message': f'workdir={root}'})
+    emit(events[-1])
     setup_done = time.time()
-    _push({'type': 'process_start', 'status': 'running', 'message': 'starting opencode process'}, events, on_event)
+    events.append({'type': 'process_start', 'status': 'running', 'message': 'starting opencode'})
+    emit(events[-1])
     try:
-        proc = subprocess.Popen(_cmd(container, run_workdir, prompt_arg, session_id, safe_env),
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-                                env=_process_env(safe_env), start_new_session=True)
+        proc = subprocess.Popen(
+            _cmd(prompt_arg, session_id, settings),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=str(root),
+            env=_process_env(),
+            start_new_session=True,
+        )
     except Exception as exc:
+        if config_path is not None:
+            with suppress(OSError):
+                config_path.unlink()
         return fail('process_start_failed', exc, prompt_arg, setup_done)
-    if register_cancel:
-        register_cancel(lambda: _terminate(proc))
 
     session, error, first, heartbeat = session_id, None, None, setup_done
-    while proc.poll() is None:
-        now = time.time()
-        if now - started > timeout_s:
-            error = {'type': 'timeout', 'message': f'opencode timed out after {timeout_s}s'}
-            _terminate(proc)
-            break
-        ready, _, _ = select.select([proc.stdout], [], [], 0.05) if proc.stdout else ([], [], [])
-        if not ready:
-            if first is None and now - started >= first_response_timeout_s:
-                error = {'type': 'first_response_timeout',
-                         'message': f'opencode produced no model/tool events within {first_response_timeout_s}s'}
+    try:
+        while proc.poll() is None:
+            now = time.time()
+            if now - started > timeout_s:
+                error = {'type': 'timeout', 'message': f'opencode timed out after {timeout_s}s'}
+                events.append(error)
+                emit(error)
                 _terminate(proc)
                 break
-            if now - heartbeat >= 10:
-                heartbeat = now
-                _push(_heartbeat(proc, container, run_workdir, started), events, on_event)
-            continue
-        session, error, first = _read_line(
-            ready[0].readline(), stdout, events, session, error, first, started, secrets, on_event
-        )
-
-    if proc.stdout:
-        for line in proc.stdout:
-            session, error, first = _read_line(line, stdout, events, session, error, first, started, secrets,
-                                               on_event)
-    returncode = proc.wait()
-    _push({'type': 'process_exit', 'status': 'completed' if returncode == 0 else 'failed',
-           'message': f'opencode exited with code {returncode}'}, events, on_event)
-    if returncode and not error:
-        error = {'type': 'process_failed', 'message': _clean_obj(''.join(stdout).strip()[-1000:], secrets)}
-    if error and (not events or events[-1] is not error):
-        _push({'type': str(error.get('type') or 'error'), 'message': str(error.get('message') or error)},
-              events, on_event)
-    if container and host_workdir:
-        _push({'type': 'sync_back', 'status': 'running',
-               'message': 'syncing opencode changes back to candidate workspace'}, events, on_event)
-        try:
-            _sync_back(container, run_workdir, host_workdir)
-            _push({'type': 'sync_back', 'status': 'completed',
-                   'message': 'candidate workspace synchronized'}, events, on_event)
-        except Exception as exc:
-            error = _clean_obj({'type': 'workspace_sync_back_failed', 'message': str(exc)}, secrets)
-            _push(error, events, on_event)
-            returncode = returncode or 1
-    paths = _safe_write_logs(artifact_dir, stdout, events, secrets)
-    return _result(returncode, session, events, paths, prompt_arg, error, started, setup_done, first, safe_env)
+            ready, _, _ = select.select([proc.stdout], [], [], 0.05) if proc.stdout else ([], [], [])
+            if not ready:
+                if first is None and now - started >= first_response_timeout_s:
+                    error = {
+                        'type': 'first_response_timeout',
+                        'message': f'opencode produced no model/tool event within {first_response_timeout_s}s',
+                    }
+                    events.append(error)
+                    emit(error)
+                    _terminate(proc)
+                    break
+                if now - heartbeat >= 10:
+                    heartbeat = now
+                    events.append({'type': 'process_heartbeat', 'status': 'running',
+                                   'elapsed_seconds': round(now - started, 1), 'changed_files': _changed(root)})
+                    emit(events[-1])
+                continue
+            session, error, first = _read_line(ready[0].readline(), stdout, events, emit, session, error, first,
+                                               started, secrets)
+        if proc.stdout:
+            for line in proc.stdout:
+                session, error, first = _read_line(line, stdout, events, emit, session, error, first, started, secrets)
+        returncode = proc.wait()
+        events.append({'type': 'process_exit', 'status': 'completed' if returncode == 0 else 'failed',
+                       'message': f'opencode exited with code {returncode}', 'returncode': returncode})
+        emit(events[-1])
+        if returncode and not error:
+            error = {'type': 'process_failed', 'message': _clean(''.join(stdout)[-1000:], secrets)}
+            events.append(error)
+            emit(error)
+    finally:
+        if config_path is not None:
+            with suppress(OSError):
+                config_path.unlink()
+    paths = _write_logs(artifact_dir, stdout, events, secrets)
+    return _result(returncode, session, events, paths, prompt_arg, error, started, setup_done, first, settings)
 
 
 def _result(returncode: int, session: str, events: list[dict[str, Any]], paths: dict[str, str], prompt_arg: str,
             error: dict[str, Any] | None, started: float, setup_done: float, first: float | None,
-            env: dict[str, str]) -> OpenCodeRunResult:
+            settings: dict[str, str]) -> OpenCodeRunResult:
     return OpenCodeRunResult(
-        returncode=returncode, session_id=session, events=events, raw_paths=paths, prompt_arg=prompt_arg,
-        last_error=_clean_obj(error, _secrets(env)) if error else None,
-        duration_seconds=round(time.time() - started, 3), setup_seconds=round(setup_done - started, 3),
-        first_response_seconds=first, model=env.get('OPENCODE_MODEL', ''), provider=env.get('OPENCODE_PROVIDER', ''),
+        returncode=returncode,
+        session_id=session,
+        events=events,
+        raw_paths=paths,
+        prompt_arg=prompt_arg,
+        last_error=error,
+        duration_seconds=round(time.time() - started, 3),
+        setup_seconds=round(setup_done - started, 3),
+        first_response_seconds=first,
+        model=settings.get('model', ''),
+        provider=settings.get('provider', ''),
     )
 
 
-def trace_payload(result: Any, repair_plan_ref: str, attempt: int, artifact_id: str | None = None) -> dict[str, Any]:
-    timeline = [_compact(i, event) for i, event in enumerate(result.events)]
-    ui = [item for item in (_ui(i, event) for i, event in enumerate(timeline)) if item]
-    modified = sorted({
-        path for event in timeline
-        if event.get('tool') in {'edit', 'write'} or event.get('event_type') == 'patch'
-        for path in event.get('file_paths', [])
-    })
-    if modified and 'patch' not in {item.get('kind') for item in ui}:
-        ui.append({'index': len(ui), 'kind': 'patch', 'title': '生成代码补丁',
-                   'summary': f'修改 {len(modified)} 个文件',
-                   'paths': [p.split('/candidate/', 1)[-1].lstrip('/') for p in modified],
-                   'status': 'completed', 'raw_event_index': None})
-    event_types = sorted({str(event.get('type') or 'unknown') for event in result.events})
-    return {
-        'id': artifact_id or f'opencode_run_trace_attempt_{attempt}',
-        'repair_plan_ref': repair_plan_ref,
-        'attempt': attempt,
-        'returncode': result.returncode,
-        'raw_paths': result.raw_paths,
-        'prompt_delivery': {'mode': 'file', 'instruction': result.prompt_arg,
-                            'prompt_path': result.raw_paths.get('prompt', '')},
-        'provider': result.provider,
-        'model': result.model,
-        'mapping_status': _mapping_status(result, modified),
-        'session_mapping': {'status': 'mapped' if result.session_id else 'unmapped',
-                            'source': 'opencode_stdout_json_events', 'session_id': result.session_id},
-        'event_counts': {kind: sum(str(e.get('type') or 'unknown') == kind for e in result.events)
-                         for kind in event_types},
-        'ui_events': ui,
-        'files_modified': modified,
-        'last_error': result.last_error,
-        'duration_seconds': result.duration_seconds,
-        'setup_seconds': result.setup_seconds,
-        'first_response_seconds': result.first_response_seconds,
-        'first_response_diagnosis': _diagnosis(result),
-    }
-
-
-def _read_line(line: str, stdout: list[str], events: list[dict[str, Any]], session: str,
-               error: dict[str, Any] | None, first: float | None, start: float, secrets: list[str],
-               on_event: Any) -> tuple[str, dict[str, Any] | None, float | None]:
+def _read_line(line: str, stdout: list[str], events: list[dict[str, Any]],
+               emit: Callable[[dict[str, Any]], None], session: str,
+               error: dict[str, Any] | None, first: float | None, start: float,
+               secrets: list[str]) -> tuple[str, dict[str, Any] | None, float | None]:
     if not line:
         return session, error, first
-    stdout.append(_clean_obj(line, secrets))
+    stdout.append(_clean(line, secrets))
     try:
-        event = _clean_obj(json.loads(line), secrets)
+        event = _clean(json.loads(line), secrets)
     except json.JSONDecodeError:
-        text = _clean_obj(line.strip(), secrets)
+        text = _clean(line.strip(), secrets)
         if text:
-            _push({'type': 'stdout', 'status': 'running', 'message': str(text)[:300]}, events, on_event)
+            events.append({'type': 'stdout', 'status': 'running', 'message': str(text)[:300]})
+            emit(events[-1])
         return session, error, first
-    if not isinstance(event, dict):
-        return session, error, first
-    _push(event, events, on_event)
-    if first is None and (_tool(event) or _text(event) or str(event.get('type') or '').lower() == 'error'):
-        first = round(time.time() - start, 3)
-    return session or str(event.get('sessionID') or ''), event if event.get('type') == 'error' else error, first
+    if isinstance(event, dict):
+        events.append(event)
+        emit(event)
+        if first is None and (_tool(event) or _message(event) or event.get('type') == 'error'):
+            first = round(time.time() - start, 3)
+        return session or str(event.get('sessionID') or ''), event if event.get('type') == 'error' else error, first
+    return session, error, first
 
 
-def _push(event: dict[str, Any], events: list[dict[str, Any]], on_event: Any) -> None:
-    events.append(event)
-    if on_event:
-        compact = _compact(len(events) - 1, event)
-        ui = _ui(int(compact['index']), compact)
-        on_event(event, compact | ({'ui_event': ui} if ui else {}))
-
-
-def _cmd(container: str, workdir: str, prompt: str, session: str, env: dict[str, str]) -> list[str]:
-    # Permissions come from the explicit allow/deny config written to opencode.json,
-    # never from --dangerously-skip-permissions.
-    args = ['opencode', 'run', '--format', 'json']
-    if env.get('OPENCODE_MODEL'):
-        args += ['--model', env['OPENCODE_MODEL']]
+def _cmd(prompt: str, session: str, settings: dict[str, str]) -> list[str]:
+    binary = os.getenv('LAZYMIND_EVO_CODE_BINARY') or 'opencode'
+    args = [binary, 'run', '--format', 'json']
+    if settings.get('model'):
+        args += ['--model', settings['model']]
     if session:
         args += ['--session', session]
-    command = f"cd {shlex.quote(workdir)} && {_config_cmd(env)} {' '.join(shlex.quote(x) for x in [*args, prompt])}"
-    flags = [item for key, value in env.items() if value for item in ('-e', key)]
-    if container:
-        return ['docker', 'exec', '-i', *flags, container, 'sh', '-lc', command]
-    return ['sh', '-lc', command]
+    return [*args, prompt]
 
 
-def _opencode_env(raw: dict[str, str]) -> dict[str, str]:
-    key_env = str(raw.get('OPENCODE_PROVIDER_KEY_ENV') or '').strip()
-    allowed = OPENCODE_CONFIG_KEYS | ({key_env} if key_env else set())
-    return {key: str(value).strip() for key, value in raw.items() if key in allowed and str(value).strip()}
-
-
-def _missing_config(env: dict[str, str]) -> list[str]:
-    required = [
-        'OPENCODE_MODEL',
-        'OPENCODE_PROVIDER',
-        'OPENCODE_PROVIDER_MODEL',
-        'OPENCODE_PROVIDER_BASE_URL',
-        'OPENCODE_PROVIDER_KEY_ENV',
-    ]
-    missing = [key for key in required if not env.get(key)]
-    key_env = env.get('OPENCODE_PROVIDER_KEY_ENV', '')
-    if key_env and not env.get(key_env):
-        missing.append(key_env)
-    return missing
-
-
-def _process_env(safe_env: dict[str, str]) -> dict[str, str]:
-    base_keys = ('HOME', 'PATH', 'SHELL', 'USER', 'LANG', 'LC_ALL', 'TMPDIR', 'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE')
-    base = {key: value for key in base_keys if (value := os.environ.get(key))}
-    return {**base, **safe_env}
-
-
-def _config_cmd(env: dict[str, str]) -> str:
-    provider, model = env.get('OPENCODE_PROVIDER', ''), env.get('OPENCODE_PROVIDER_MODEL', '')
-    base_url, key_env = env.get('OPENCODE_PROVIDER_BASE_URL', ''), env.get('OPENCODE_PROVIDER_KEY_ENV', '')
+def _opencode_json(settings: dict[str, str]) -> dict[str, Any]:
+    provider, model = settings.get('provider', ''), settings.get('provider_model', '')
+    base_url, api_key = settings.get('base_url', ''), settings.get('api_key', '')
     config: dict[str, Any] = {'$schema': 'https://opencode.ai/config.json', 'permission': PERMISSIONS}
-    if provider and model and base_url and key_env and env.get(key_env):
-        # Custom base URLs (inner lazyllm, proxies) must use chat-completions via
-        # openai-compatible; @ai-sdk/openai routes through Responses API which inner
-        # endpoints reject for tool use.
+    if provider and model and base_url:
         official = base_url.rstrip('/').endswith('api.openai.com/v1')
         npm = '@ai-sdk/openai' if provider == 'openai' and official else '@ai-sdk/openai-compatible'
         model_cfg: dict[str, Any] = {'name': model, 'tool_call': True}
         if not official:
             model_cfg['limit'] = {'context': 32768, 'output': 1024}
+        options = {'baseURL': base_url}
+        if api_key:
+            options['apiKey'] = api_key
         config['provider'] = {provider: {
             'npm': npm,
-            'name': env.get('OPENCODE_PROVIDER_LABEL') or provider,
-            'options': {'baseURL': base_url, 'apiKey': f'{{env:{key_env}}}'},
+            'name': settings.get('provider_label') or provider,
+            'options': options,
             'models': {model: model_cfg},
         }}
-    return f'printf %s {shlex.quote(json.dumps(config, ensure_ascii=False))} > opencode.json;'
+    return config
 
 
 def _compact(index: int, event: dict[str, Any]) -> dict[str, Any]:
@@ -292,41 +237,79 @@ def _compact(index: int, event: dict[str, Any]) -> dict[str, Any]:
         'index': index,
         'event_type': str(event.get('type') or 'unknown'),
         'tool': _tool(event),
-        'summary': _text(event)[:300] or str(event.get('message') or event.get('error') or '')[:300],
+        'execution_type': _execution_type(event),
+        'summary': _message(event)[:500],
         'file_paths': sorted(set(paths)),
-        'status': str(event.get('status') or event.get('state') or ''),
+        'command': _command(event),
+        'status': _status(event),
+        'returncode': event.get('returncode'),
     }
 
 
-def _ui(index: int, event: dict[str, Any]) -> dict[str, Any] | None:
-    paths = [p.split('/candidate/', 1)[-1].lstrip('/') for p in event.get('file_paths') or [] if isinstance(p, str)]
-    tool, etype = str(event.get('tool') or ''), str(event.get('event_type') or '')
-    kind = {'glob': 'search', 'grep': 'search', 'list': 'search', 'read': 'read_file', 'edit': 'edit_file',
-            'write': 'edit_file', 'bash': 'run_command'}.get(tool) or {
-        'patch': 'patch', 'process_heartbeat': 'heartbeat', 'error': 'error', 'setup_failed': 'error',
-        'process_failed': 'error', 'timeout': 'error', 'first_response_timeout': 'error', 'setup': 'setup',
-        'process_start': 'process', 'process_exit': 'process', 'sync_back': 'sync', 'stdout': 'agent_note',
-    }.get(etype)
-    kind = kind or ('agent_note' if event.get('summary') and etype == 'text' else '')
-    if not kind:
-        return None
-    title = {
-        'search': '查找文件',
-        'read_file': f"读取 {paths[0] if paths else '文件'}",
-        'edit_file': f"修改 {paths[0] if paths else '文件'}",
-        'patch': '生成代码补丁',
-        'run_command': '执行命令',
-        'heartbeat': 'opencode 运行中',
-        'error': 'opencode 出错',
-        'agent_note': 'opencode 分析',
-        'setup': '准备 opencode 工作区',
-        'process': 'opencode 进程',
-        'sync': '同步候选工作区',
-    }[kind]
-    status = str(event.get('status') or '')
-    return {'index': index, 'kind': kind, 'title': title, 'summary': event.get('summary', ''), 'paths': paths,
-            'status': 'completed' if 'completed' in status else 'pending' if 'pending' in status else status[:80],
-            'raw_event_index': event.get('index')}
+def _emit_trace(trace: Any, attempt: int | None, index: int, event: dict[str, Any]) -> None:
+    compact = _compact(index, event)
+    raw_type, tool = compact['event_type'], compact['tool']
+    if raw_type in {'step_start', 'step_finish'}:
+        return
+    event_type = {
+        'glob': 'opencode.tool_use.search',
+        'grep': 'opencode.tool_use.search',
+        'list': 'opencode.tool_use.search',
+        'read': 'opencode.tool_use.read_file',
+        'edit': 'opencode.tool_use.edit_file',
+        'write': 'opencode.tool_use.edit_file',
+        'bash': 'opencode.tool_use.run_command',
+    }.get(tool) or {
+        'setup': 'opencode.setup',
+        'process_start': 'opencode.process_start',
+        'process_heartbeat': 'opencode.heartbeat',
+        'process_exit': 'opencode.process_exit',
+        'error': 'opencode.error',
+        'timeout': 'opencode.error',
+        'first_response_timeout': 'opencode.error',
+        'process_failed': 'opencode.error',
+        'configuration_error': 'opencode.error',
+        'prompt_write_failed': 'opencode.error',
+        'process_start_failed': 'opencode.error',
+        'text': 'opencode.code' if 'diff --git' in compact['summary'] else 'opencode.message',
+        'stdout': 'opencode.code' if 'diff --git' in compact['summary'] else 'opencode.message',
+    }.get(raw_type, 'opencode.message')
+    trace.emit(
+        event_type,
+        status='failed' if event_type == 'opencode.error' else compact['status'] or 'running',
+        source='opencode',
+        attempt=attempt,
+        message=compact['summary'] or compact['command'] or raw_type,
+        payload={
+            'execution_type': compact['execution_type'],
+            'tool': tool,
+            'paths': compact['file_paths'],
+            'command': _command_label(compact['command']),
+            'raw_event_ref': index,
+            'returncode': compact.get('returncode'),
+        },
+    )
+    if tool in {'edit', 'write'} and _has_diff(event):
+        trace.emit(
+            'opencode.code',
+            status=compact['status'] or 'completed',
+            source='opencode',
+            attempt=attempt,
+            message='code patch produced',
+            payload={
+                'execution_type': 'code',
+                'paths': compact['file_paths'],
+                'raw_event_ref': index,
+            },
+        )
+
+
+def _execution_type(event: dict[str, Any]) -> str:
+    if _tool(event):
+        return 'tool_use'
+    if event.get('type') in {'text', 'stdout'}:
+        return 'code' if 'diff --git' in _message(event) else 'message'
+    return str(event.get('type') or 'unknown')
 
 
 def _tool(event: dict[str, Any]) -> str:
@@ -335,10 +318,49 @@ def _tool(event: dict[str, Any]) -> str:
     return str(event.get('tool') or part.get('tool') or call.get('tool') or '')
 
 
-def _text(event: dict[str, Any]) -> str:
+def _message(event: dict[str, Any]) -> str:
     part = event.get('part') if isinstance(event.get('part'), dict) else {}
-    text = part.get('text') or event.get('text')
-    return text.strip() if event.get('type') == 'text' and isinstance(text, str) else ''
+    state = part.get('state') if isinstance(part.get('state'), dict) else {}
+    text = (
+        part.get('text') or event.get('text') or event.get('message')
+        or event.get('error') or state.get('error') or part.get('title') or ''
+    )
+    return str(text).strip()
+
+
+def _command(event: dict[str, Any]) -> str:
+    part = event.get('part') if isinstance(event.get('part'), dict) else {}
+    state = part.get('state') if isinstance(part.get('state'), dict) else {}
+    tool_input = state.get('input') if isinstance(state.get('input'), dict) else {}
+    if tool_input.get('command'):
+        return str(tool_input['command'])
+    for key in ('command', 'cmd'):
+        if event.get(key):
+            return str(event[key])
+    return ''
+
+
+def _command_label(command: object) -> str:
+    return ' '.join(str(command or '').split()[:8])[:200]
+
+
+def _status(event: dict[str, Any]) -> str:
+    part = event.get('part') if isinstance(event.get('part'), dict) else {}
+    state = part.get('state') if isinstance(part.get('state'), dict) else {}
+    status = str(event.get('status') or state.get('status') or event.get('state') or '')
+    return 'failed' if status == 'error' else status
+
+
+def _has_diff(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(
+            isinstance(child, str) and key in {'diff', 'patch'} and child.strip()
+            or _has_diff(child)
+            for key, child in value.items()
+        )
+    if isinstance(value, list):
+        return any(_has_diff(child) for child in value)
+    return False
 
 
 def _paths(value: Any) -> list[str]:
@@ -351,101 +373,49 @@ def _paths(value: Any) -> list[str]:
     return []
 
 
-def _write_logs(root: Path, stdout: list[str], events: list[dict[str, Any]], secrets: list[str]) -> dict[str, str]:
-    paths = {'prompt': root / 'opencode_prompt.json', 'stdout': root / 'stdout.log', 'stderr': root / 'stderr.log',
-             'events_jsonl': root / 'events.jsonl', 'text_summary': root / 'text_summary.md'}
-    paths['stdout'].write_text(''.join(stdout), encoding='utf-8')
-    paths['stderr'].write_text('', encoding='utf-8')
-    paths['events_jsonl'].write_text(
-        ''.join(json.dumps(_clean_obj(e, secrets), ensure_ascii=False) + '\n' for e in events), encoding='utf-8'
-    )
-    paths['text_summary'].write_text(
-        '\n'.join(_text(e) for e in events if _text(e)).strip() or '_(no text events)_\n', encoding='utf-8'
-    )
-    return {key: str(path) for key, path in paths.items()}
-
-
-def _safe_write_logs(root: Path, stdout: list[str], events: list[dict[str, Any]], secrets: list[str]) -> dict[str, str]:
+def _changed(workdir: Path) -> list[str]:
     try:
-        root.mkdir(parents=True, exist_ok=True)
-        return _write_logs(root, stdout, events, secrets)
-    except Exception:
-        return {'prompt': '', 'stdout': '', 'stderr': '', 'events_jsonl': '', 'text_summary': ''}
-
-
-def _heartbeat(proc: subprocess.Popen, container: str, workdir: str, start: float) -> dict[str, Any]:
-    elapsed = round(time.time() - start, 1)
-    return {'type': 'process_heartbeat', 'status': 'running', 'pid': proc.pid, 'elapsed_seconds': elapsed,
-            'message': f'opencode running for {elapsed}s; waiting for json events',
-            'changed_files': _changed(container, workdir)}
-
-
-def _changed(container: str, workdir: str) -> list[str]:
-    try:
-        cmd = ['git', '-c', f'safe.directory={workdir}', '-C', workdir, 'diff', '--name-only']
-        command = ['docker', 'exec', container, *cmd] if container else cmd
-        return subprocess.run(command, capture_output=True, text=True, timeout=5, check=False).stdout.splitlines()
+        result = subprocess.run(['git', '-C', str(workdir), 'diff', '--name-only'],
+                                capture_output=True, text=True, timeout=5, check=False)
+        return result.stdout.splitlines()
     except Exception:
         return []
 
 
-def _sync_back(container: str, run_workdir: str, host_workdir: Path) -> None:
-    backup = host_workdir.with_name(f'{host_workdir.name}.host_before_opencode')
-    _rm(backup)
-    host_workdir.rename(backup)
+def _opencode_settings(raw: dict[str, str]) -> dict[str, str]:
+    return {
+        key: str(value).strip()
+        for key, value in raw.items()
+        if key in OPENCODE_FIELDS and str(value).strip()
+    }
+
+
+def _missing_config(settings: dict[str, str]) -> list[str]:
+    required = ['model', 'provider', 'provider_model', 'base_url']
+    missing = [key for key in required if not settings.get(key)]
+    if not settings.get('api_key') and settings.get('skip_auth') != 'true':
+        missing.append('api_key')
+    return missing
+
+
+def _process_env() -> dict[str, str]:
+    return {key: value for key in ('HOME', 'PATH', 'SHELL', 'USER', 'LANG', 'LC_ALL', 'TMPDIR')
+            if (value := os.environ.get(key))}
+
+
+def _write_logs(root: Path, stdout: list[str], events: list[dict[str, Any]], secrets: list[str]) -> dict[str, str]:
     try:
-        _run(['docker', 'cp', f'{container}:{run_workdir}', str(host_workdir)])
+        root.mkdir(parents=True, exist_ok=True)
+        paths = {'prompt': root / 'opencode_prompt.json', 'stdout': root / 'stdout.log',
+                 'events_jsonl': root / 'events.jsonl'}
+        paths['stdout'].write_text(''.join(stdout), encoding='utf-8')
+        paths['events_jsonl'].write_text(
+            ''.join(json.dumps(_clean(event, secrets), ensure_ascii=False) + '\n' for event in events),
+            encoding='utf-8',
+        )
+        return {key: str(path) for key, path in paths.items()}
     except Exception:
-        _rm(host_workdir)
-        backup.rename(host_workdir)
-        raise
-    _rm(backup)
-    _run(['docker', 'exec', container, 'rm', '-rf', run_workdir])
-
-
-def _run(cmd: list[str], timeout: int = 30) -> str:
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
-    if result.returncode:
-        raise RuntimeError((result.stderr or result.stdout).strip())
-    return result.stdout
-
-
-def _rm(path: Path) -> None:
-    if path.exists():
-        shutil.rmtree(path)
-
-
-def _prompt_arg(prompt_path: Path, host_workdir: Path | None, workdir: str) -> str:
-    if host_workdir and prompt_path.is_relative_to(host_workdir):
-        path = Path(workdir, prompt_path.relative_to(host_workdir)).as_posix()
-    else:
-        path = prompt_path.as_posix()
-    return f'Read {path} as your first tool call, then follow the JSON task card mode and stop condition exactly.'
-
-
-def _diagnosis(result: Any) -> dict[str, Any]:
-    err = str((result.last_error or {}).get('type') or '')
-    if result.first_response_seconds is not None and result.first_response_seconds < 120:
-        kind = 'ok'
-    elif result.first_response_seconds is not None:
-        kind = 'slow_model_or_tool_start'
-    elif 'key' in json.dumps(result.last_error or {}, ensure_ascii=False).lower():
-        kind = 'api_or_auth_error'
-    else:
-        kind = err or 'no_model_or_tool_event'
-    return {'kind': kind, 'setup_seconds': result.setup_seconds,
-            'first_response_seconds': result.first_response_seconds,
-            'evidence': {'last_error_type': err, 'event_count': len(result.events),
-                         'text_event_count': sum(e.get('type') == 'text' for e in result.events),
-                         'tool_event_count': sum(bool(_tool(e)) for e in result.events)}}
-
-
-def _mapping_status(result: Any, modified: list[str]) -> str:
-    if result.session_id and result.events:
-        return 'complete'
-    if modified:
-        return 'events_and_diff'
-    return 'failed' if result.last_error else 'events_only'
+        return {'prompt': '', 'stdout': '', 'events_jsonl': ''}
 
 
 def _terminate(proc: subprocess.Popen, grace_s: float = 5.0) -> None:
@@ -463,17 +433,21 @@ def _terminate(proc: subprocess.Popen, grace_s: float = 5.0) -> None:
             pass
 
 
-def _clean_obj(value: Any, secrets: list[str]) -> Any:
+def _clean(value: Any, secrets: list[str]) -> Any:
     if isinstance(value, str):
         for secret in secrets:
             value = value.replace(secret, '<redacted>')
         return value
     if isinstance(value, list):
-        return [_clean_obj(item, secrets) for item in value]
+        return [_clean(item, secrets) for item in value]
     if isinstance(value, dict):
-        return {key: _clean_obj(item, secrets) for key, item in value.items()}
+        return {key: _clean(item, secrets) for key, item in value.items()}
     return value
 
 
 def _secrets(env: dict[str, str]) -> list[str]:
-    return [str(value) for key, value in env.items() if value and any(x in key for x in ('KEY', 'TOKEN', 'SECRET'))]
+    return [
+        str(value)
+        for key, value in env.items()
+        if value and any(token in key.lower() for token in ('key', 'token', 'secret'))
+    ]

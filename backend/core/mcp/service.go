@@ -45,14 +45,7 @@ func ListServers(ctx context.Context, db *gorm.DB, userID string, req ListServer
 	req = normalizeListServersRequest(req)
 	var rows []orm.MCPServer
 	query := applyListServersKeyword(visibleServerQuery(db.WithContext(ctx), userID), req.Keyword)
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, err
-	}
-	if req.PageSize > 0 {
-		query = query.Offset((req.Page - 1) * req.PageSize).Limit(req.PageSize)
-	}
-	if err := query.Order("share ASC, updated_at DESC").Find(&rows).Error; err != nil {
+	if err := query.Order("enabled DESC, created_at DESC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -65,7 +58,7 @@ func ListServers(ctx context.Context, db *gorm.DB, userID string, req ListServer
 	for i := range rows {
 		out = append(out, serverResponse(rows[i], counts[rows[i].ID], nil))
 	}
-	return &ListServersResponse{MCPServers: out, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
+	return &ListServersResponse{MCPServers: out, Total: int64(len(out)), Page: 1, PageSize: len(out)}, nil
 }
 
 func CreateServer(ctx context.Context, db *gorm.DB, req CreateServerRequest, userID, userName string) (*ServerResponse, error) {

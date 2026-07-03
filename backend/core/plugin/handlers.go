@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -13,7 +14,6 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/store"
-	"lazymind/core/subagent"
 )
 
 // resolveValuePaths normalises a human-uploaded value by ensuring it carries a stable
@@ -98,6 +98,7 @@ type sessionDTO struct {
 	PluginID       string    `json:"plugin_id"`
 	Status         string    `json:"status"`
 	CurrentStepID  string    `json:"current_step_id"`
+	IntentContext  string    `json:"intent_context,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Slots          []slotDTO `json:"slots,omitempty"`
@@ -106,11 +107,12 @@ type sessionDTO struct {
 
 // stepDTO summarises one plugin_session_steps row (used for dependency validation).
 type stepDTO struct {
-	StepID    string    `json:"step_id"`
-	Attempt   int       `json:"attempt"`
-	TaskID    string    `json:"task_id"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	StepID        string    `json:"step_id"`
+	Attempt       int       `json:"attempt"`
+	TaskID        string    `json:"task_id"`
+	Status        string    `json:"status"`
+	IntentContext string    `json:"intent_context,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // slotDTO represents a currently-selected slot revision, with its artifact value inline.
@@ -144,6 +146,7 @@ func toSessionDTO(s *orm.PluginSession) sessionDTO {
 		PluginID:       s.PluginID,
 		Status:         s.Status,
 		CurrentStepID:  s.CurrentStepID,
+		IntentContext:  s.IntentContext,
 		CreatedAt:      s.CreatedAt,
 		UpdatedAt:      s.UpdatedAt,
 	}
@@ -157,6 +160,22 @@ func toStepDTO(r *orm.PluginSessionStep) stepDTO {
 		Status:    r.Status,
 		CreatedAt: r.CreatedAt,
 	}
+}
+
+// buildStepIntentMap loads all step intents for a session and returns a map[step_id]intent_context.
+// Returns an empty map on error (non-fatal).
+func buildStepIntentMap(ctx context.Context, db *gorm.DB, sessionID string) map[string]string {
+	intents, err := ListStepIntents(ctx, db, sessionID)
+	m := make(map[string]string, len(intents))
+	if err != nil {
+		return m
+	}
+	for _, si := range intents {
+		if si.IntentContext != "" && si.IntentContext != "{}" {
+			m[si.StepID] = si.IntentContext
+		}
+	}
+	return m
 }
 
 func toSlotDTO(r *orm.PluginSlotRevision) slotDTO {
@@ -395,6 +414,10 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
 		return
 	}
+	if s.Dismissed {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
 	dto := toSessionDTO(s)
 	// Load slots inline.
 	revisions, _ := LoadSelectedSlots(ctx, db, sessionID)
@@ -404,8 +427,12 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 	enrichSlots(ctx, db, sessionID, dto.Slots)
 	// Load steps inline (used by Python Layer-2 dependency validation).
 	steps, _ := ListSteps(ctx, db, sessionID)
+	// Build step intent map for fast lookup.
+	intentMap := buildStepIntentMap(ctx, db, sessionID)
 	for i := range steps {
-		dto.Steps = append(dto.Steps, toStepDTO(&steps[i]))
+		sd := toStepDTO(&steps[i])
+		sd.IntentContext = intentMap[steps[i].StepID]
+		dto.Steps = append(dto.Steps, sd)
 	}
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
@@ -422,7 +449,21 @@ func GetSessionSlots(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
 	}
-	revisions, err := LoadSelectedSlots(r.Context(), db, sessionID)
+	ctx := r.Context()
+	s, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if s.Dismissed {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
+	revisions, err := LoadSelectedSlots(ctx, db, sessionID)
 	if err != nil {
 		common.ReplyErr(w, "query slots failed", http.StatusInternalServerError)
 		return
@@ -431,7 +472,7 @@ func GetSessionSlots(w http.ResponseWriter, r *http.Request) {
 	for i := range revisions {
 		out = append(out, toSlotDTO(&revisions[i]))
 	}
-	enrichSlots(r.Context(), db, sessionID, out)
+	enrichSlots(ctx, db, sessionID, out)
 	common.ReplyOK(w, map[string]any{"slots": out})
 }
 
@@ -449,32 +490,49 @@ func GetSessionSteps(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
 	}
-	steps, err := ListSteps(r.Context(), db, sessionID)
+	ctx := r.Context()
+	sess, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if sess.Dismissed {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
+	steps, err := ListSteps(ctx, db, sessionID)
 	if err != nil {
 		common.ReplyErr(w, "query steps failed", http.StatusInternalServerError)
 		return
 	}
 	type stepDTO struct {
-		ID        string `json:"id"`
-		SessionID string `json:"session_id"`
-		StepID    string `json:"step_id"`
-		Attempt   int    `json:"attempt"`
-		TaskID    string `json:"task_id"`
-		Status    string `json:"status"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
+		ID            string `json:"id"`
+		SessionID     string `json:"session_id"`
+		StepID        string `json:"step_id"`
+		Attempt       int    `json:"attempt"`
+		TaskID        string `json:"task_id"`
+		Status        string `json:"status"`
+		IntentContext string `json:"intent_context,omitempty"`
+		CreatedAt     string `json:"created_at"`
+		UpdatedAt     string `json:"updated_at"`
 	}
+	intentMap := buildStepIntentMap(ctx, db, sessionID)
 	out := make([]stepDTO, 0, len(steps))
 	for _, s := range steps {
 		out = append(out, stepDTO{
-			ID:        s.ID,
-			SessionID: s.SessionID,
-			StepID:    s.StepID,
-			Attempt:   s.Attempt,
-			TaskID:    s.TaskID,
-			Status:    s.Status,
-			CreatedAt: s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-			UpdatedAt: s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			ID:            s.ID,
+			SessionID:     s.SessionID,
+			StepID:        s.StepID,
+			Attempt:       s.Attempt,
+			TaskID:        s.TaskID,
+			Status:        s.Status,
+			IntentContext: intentMap[s.StepID],
+			CreatedAt:     s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:     s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	common.ReplyOK(w, map[string]any{"steps": out})
@@ -501,6 +559,19 @@ func PatchSessionSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	s, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if s.Dismissed {
+		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
+		return
+	}
 	// Deselect all, then select the target revision.
 	if err := db.WithContext(ctx).Model(&orm.PluginSlotRevision{}).
 		Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true).
@@ -570,6 +641,13 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, map[string]any{"session": nil})
 		return
 	}
+
+	// Self-healing: if the session appears active but no steps are still running
+	// (e.g. the server crashed before updating statuses), repair the state so
+	// the frontend doesn't get stuck on "executing".
+	if s.Status == SessionStatusActive {
+		healStaleActiveSession(r.Context(), db, s)
+	}
 	dto := toSessionDTO(s)
 	revisions, _ := LoadSelectedSlots(r.Context(), db, s.ID)
 	for i := range revisions {
@@ -577,6 +655,438 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 	}
 	enrichSlots(r.Context(), db, s.ID, dto.Slots)
 	common.ReplyOK(w, map[string]any{"session": dto})
+}
+
+// artifactSummaryItem is one entry in the per-step artifact summary list.
+type artifactSummaryItem struct {
+	ArtifactKey string `json:"artifact_key"`
+	ContentType string `json:"content_type"`
+	Preview     string `json:"preview"` // text snippet (≤30 chars) or filename
+}
+
+// stepAttemptDTO represents one execution attempt of a step.
+type stepAttemptDTO struct {
+	Attempt       int     `json:"attempt"`
+	Status        string  `json:"status"`
+	DurationSec   float64 `json:"duration_sec"`   // -1 if not finished
+	ArtifactCount int     `json:"artifact_count"` // slot-revision count for this attempt
+	StartedAt     string  `json:"started_at"`
+}
+
+// stateGraphNodeDTO is one node in the StateGraph response.
+type stateGraphNodeDTO struct {
+	ID            string                `json:"id"`
+	Label         string                `json:"label"`
+	StepIndex     int                   `json:"step_index"` // 1-based; 0 for terminal nodes
+	Status        string                `json:"status"`
+	IsCurrent     bool                  `json:"is_current"`
+	ArtifactItems []artifactSummaryItem `json:"artifact_items"` // latest-attempt artifacts
+	StepAttempts  []stepAttemptDTO      `json:"step_attempts"`
+}
+
+// stateGraphEdgeDTO is one directed edge in the StateGraph response.
+type stateGraphEdgeDTO struct {
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Condition string `json:"condition"`
+	// EdgeType: "executed" | "current_direct" | "current_reachable" | "skipped"
+	// Computed server-side from execution history and current step.
+	EdgeType string `json:"edge_type"`
+}
+
+// stateGraphResponse is the full response for GET /plugin-sessions/{session_id}/state-graph.
+type stateGraphResponse struct {
+	Nodes         []stateGraphNodeDTO `json:"nodes"`
+	Edges         []stateGraphEdgeDTO `json:"edges"`
+	Initial       string              `json:"initial"`
+	CurrentStepID string              `json:"current_step_id"`
+}
+
+// pluginStateTransitionEdge matches one entry in state.transitions[from][].
+type pluginStateTransitionEdge struct {
+	To        string `json:"to"`
+	Condition string `json:"condition"`
+}
+
+// pluginStateSpec is the relevant subset of the Python /api/plugins/{id} response.
+// state.steps is a map[step_id]→{label,...}; state.transitions is map[from]→[]{to, condition}.
+type pluginStateSpec struct {
+	State struct {
+		Initial     string                                 `json:"initial"`
+		Steps       map[string]map[string]any              `json:"steps"`
+		Transitions map[string][]pluginStateTransitionEdge `json:"transitions"`
+	} `json:"state"`
+}
+
+// buildArtifactPreview extracts a human-readable preview from a raw artifact value JSON.
+// text: first 30 runes of the "text" field.
+// image: filename (with extension) from "path" or "url"; middle-truncated to 30 chars.
+// other content types: empty string.
+func buildArtifactPreview(contentType string, raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	switch contentType {
+	case "text":
+		text, _ := m["text"].(string)
+		runes := []rune(text)
+		if len(runes) > 30 {
+			return string(runes[:30]) + "…"
+		}
+		return text
+	case "image":
+		pathVal, _ := m["path"].(string)
+		if pathVal == "" {
+			pathVal, _ = m["url"].(string)
+		}
+		if pathVal == "" {
+			return ""
+		}
+		// Extract filename from path.
+		parts := strings.Split(strings.ReplaceAll(pathVal, "\\", "/"), "/")
+		name := parts[len(parts)-1]
+		// Strip query params.
+		if idx := strings.Index(name, "?"); idx >= 0 {
+			name = name[:idx]
+		}
+		// Middle-truncate to 30 chars: keep first N and last M chars.
+		runes := []rune(name)
+		if len(runes) > 30 {
+			return string(runes[:13]) + "…" + string(runes[len(runes)-14:])
+		}
+		return name
+	default:
+		return ""
+	}
+}
+
+// GetStateGraph handles GET /plugin-sessions/{session_id}/state-graph.
+// Combines the plugin state machine topology from Python with live step statuses from DB.
+func GetStateGraph(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	ctx := r.Context()
+
+	// 1. Load plugin session.
+	sess, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if sess.Dismissed {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	// 2. Fetch plugin spec from Python to get state machine topology.
+	upstream := common.ChatServiceEndpoint() + "/api/plugins/" + sess.PluginID
+	upCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(upCtx, http.MethodGet, upstream, nil)
+	if err != nil {
+		common.ReplyErr(w, "build upstream request failed", http.StatusInternalServerError)
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		common.ReplyErr(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		common.ReplyErr(w, "upstream error", http.StatusBadGateway)
+		return
+	}
+	var spec pluginStateSpec
+	if decErr := json.NewDecoder(resp.Body).Decode(&spec); decErr != nil {
+		common.ReplyErr(w, "decode plugin spec failed", http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Query all step attempts with timing + artifact count.
+	type stepRow struct {
+		StepID        string    `gorm:"column:step_id"`
+		Attempt       int       `gorm:"column:attempt"`
+		Status        string    `gorm:"column:status"`
+		TaskID        string    `gorm:"column:task_id"`
+		CreatedAt     time.Time `gorm:"column:created_at"`
+		UpdatedAt     time.Time `gorm:"column:updated_at"`
+		ArtifactCount int       `gorm:"column:artifact_count"`
+	}
+	var stepRows []stepRow
+	if stepQueryErr := db.WithContext(ctx).Raw(`
+		SELECT
+			s.step_id,
+			s.attempt,
+			s.status,
+			s.task_id,
+			s.created_at,
+			s.updated_at,
+			COALESCE(a.artifact_count, 0) AS artifact_count
+		FROM plugin_session_steps s
+		LEFT JOIN (
+			SELECT step_id, attempt, COUNT(*) AS artifact_count
+			FROM plugin_slot_revisions
+			WHERE session_id = ?
+			GROUP BY step_id, attempt
+		) a ON a.step_id = s.step_id AND a.attempt = s.attempt
+		WHERE s.session_id = ?
+		ORDER BY s.step_id, s.attempt ASC
+	`, sessionID, sessionID).Scan(&stepRows).Error; stepQueryErr != nil {
+		common.ReplyErr(w, "query step rows failed", http.StatusInternalServerError)
+		return
+	}
+	type stepInfo struct {
+		latestStatus  string
+		latestAttempt int
+		attempts      []stepAttemptDTO
+	}
+	stepMap := make(map[string]*stepInfo)
+	for _, r := range stepRows {
+		si, ok := stepMap[r.StepID]
+		if !ok {
+			si = &stepInfo{}
+			stepMap[r.StepID] = si
+		}
+		// Use updated_at - created_at as duration for completed steps.
+		dur := -1.0
+		terminalStatuses := map[string]bool{"succeeded": true, "failed": true, "interrupted": true, "canceled": true}
+		if terminalStatuses[r.Status] {
+			dur = r.UpdatedAt.Sub(r.CreatedAt).Seconds()
+		}
+		si.attempts = append(si.attempts, stepAttemptDTO{
+			Attempt:       r.Attempt,
+			Status:        r.Status,
+			DurationSec:   dur,
+			ArtifactCount: r.ArtifactCount,
+			StartedAt:     r.CreatedAt.UTC().Format("2006-01-02 15:04:05"),
+		})
+		if r.Attempt >= si.latestAttempt {
+			si.latestAttempt = r.Attempt
+			si.latestStatus = r.Status
+		}
+	}
+
+	// 4. Query artifacts for the latest attempt of each step.
+	//    For text artifacts: take first 30 runes of the "text" field.
+	//    For image artifacts: take the filename from the "path" or "url" field.
+	//    De-duplicate by artifact_key, keeping the row with the highest seq.
+	type artifactRow struct {
+		StepID      string `gorm:"column:step_id"`
+		Attempt     int    `gorm:"column:attempt"`
+		ArtifactKey string `gorm:"column:artifact_key"`
+		ContentType string `gorm:"column:content_type"`
+		Value       []byte `gorm:"column:value"`
+	}
+	var artifactRows []artifactRow
+	if artifactQueryErr := db.WithContext(ctx).Raw(`
+		SELECT a.artifact_key, a.content_type, a.value, s.step_id, s.attempt
+		FROM sub_agent_artifacts a
+		JOIN plugin_session_steps s ON s.task_id = a.task_id
+		WHERE s.session_id = ?
+		  AND a.hidden = false
+		  AND a.seq = (
+			SELECT MAX(a2.seq)
+			FROM sub_agent_artifacts a2
+			WHERE a2.task_id = a.task_id
+			  AND a2.artifact_key = a.artifact_key
+		  )
+		  AND s.attempt = (
+			SELECT MAX(s2.attempt)
+			FROM plugin_session_steps s2
+			WHERE s2.session_id = s.session_id
+			  AND s2.step_id = s.step_id
+		  )
+		ORDER BY s.step_id, a.artifact_key
+	`, sessionID).Scan(&artifactRows).Error; artifactQueryErr != nil {
+		common.ReplyErr(w, "query artifact rows failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Group artifact items by step_id, de-dup by artifact_key.
+	stepArtifacts := make(map[string][]artifactSummaryItem)
+	seen := make(map[string]bool) // "step_id:artifact_key"
+	for _, r := range artifactRows {
+		k := r.StepID + ":" + r.ArtifactKey
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		preview := buildArtifactPreview(r.ContentType, r.Value)
+		stepArtifacts[r.StepID] = append(stepArtifacts[r.StepID], artifactSummaryItem{
+			ArtifactKey: r.ArtifactKey,
+			ContentType: r.ContentType,
+			Preview:     preview,
+		})
+	}
+
+	// 5. Build nodes — __start__ + all declared steps (in transition order) + __end__.
+	// Use BFS from initial to enumerate steps in topological order.
+	startNode := stateGraphNodeDTO{
+		ID:        "__start__",
+		Label:     "__start__",
+		Status:    "succeeded",
+		IsCurrent: false,
+	}
+
+	endStatus := "pending"
+	if sess.Status == "completed" {
+		endStatus = "succeeded"
+	}
+	endNode := stateGraphNodeDTO{
+		ID:        "__end__",
+		Label:     "__end__",
+		Status:    endStatus,
+		IsCurrent: false,
+	}
+
+	// BFS to produce a stable step ordering from the state machine topology.
+	visited := map[string]bool{"__start__": true, "__end__": true}
+	queue := []string{"__start__"}
+	orderedStepIDs := []string{}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, edge := range spec.State.Transitions[cur] {
+			if !visited[edge.To] && edge.To != "__end__" {
+				visited[edge.To] = true
+				orderedStepIDs = append(orderedStepIDs, edge.To)
+				queue = append(queue, edge.To)
+			}
+		}
+	}
+
+	nodes := []stateGraphNodeDTO{startNode}
+	for i, stepID := range orderedStepIDs {
+		stepData, hasStep := spec.State.Steps[stepID]
+		label := stepID
+		if hasStep {
+			if lv, ok := stepData["label"].(string); ok && lv != "" {
+				label = lv
+			}
+		}
+		status := "pending"
+		var attempts []stepAttemptDTO
+		if si, ok := stepMap[stepID]; ok {
+			status = si.latestStatus
+			attempts = si.attempts
+		}
+		nodes = append(nodes, stateGraphNodeDTO{
+			ID:            stepID,
+			Label:         label,
+			StepIndex:     i + 1,
+			Status:        status,
+			IsCurrent:     stepID == sess.CurrentStepID,
+			StepAttempts:  attempts,
+			ArtifactItems: stepArtifacts[stepID],
+		})
+	}
+	nodes = append(nodes, endNode)
+
+	// 6. Build edges with edge_type based on execution history.
+	//
+	// edge_type rules:
+	//   "executed"         — both from and to have been executed (status != pending)
+	//   "current_direct"   — from == current step (direct successor)
+	//   "current_reachable"— reachable from current via BFS (not direct)
+	//   "skipped"          — neither executed nor reachable from current
+	//
+	// Treat __start__ as always executed; __end__ as executed when session is completed.
+	executedNodes := map[string]bool{"__start__": true}
+	if sess.Status == "completed" || sess.Status == "failed" {
+		executedNodes["__end__"] = true
+	}
+	for nodeID, si := range stepMap {
+		if si.latestStatus != "" && si.latestStatus != "pending" {
+			executedNodes[nodeID] = true
+		}
+	}
+
+	// BFS from current step to find all reachable nodes (direct + indirect).
+	directSuccessors := map[string]bool{}
+	reachableFromCurrent := map[string]bool{}
+	if sess.CurrentStepID != "" {
+		for _, e := range spec.State.Transitions[sess.CurrentStepID] {
+			directSuccessors[e.To] = true
+			reachableFromCurrent[e.To] = true
+		}
+		bfsQueue := []string{}
+		for id := range directSuccessors {
+			bfsQueue = append(bfsQueue, id)
+		}
+		bfsVisited := map[string]bool{sess.CurrentStepID: true}
+		for _, id := range bfsQueue {
+			bfsVisited[id] = true
+		}
+		for len(bfsQueue) > 0 {
+			cur2 := bfsQueue[0]
+			bfsQueue = bfsQueue[1:]
+			for _, e := range spec.State.Transitions[cur2] {
+				if !bfsVisited[e.To] {
+					bfsVisited[e.To] = true
+					reachableFromCurrent[e.To] = true
+					bfsQueue = append(bfsQueue, e.To)
+				}
+			}
+		}
+	}
+
+	edges := make([]stateGraphEdgeDTO, 0)
+	for fromID, edgeList := range spec.State.Transitions {
+		for _, edge := range edgeList {
+			// Skip self-loops.
+			if fromID == edge.To {
+				continue
+			}
+			var edgeType string
+			switch {
+			case executedNodes[fromID] && executedNodes[edge.To]:
+				edgeType = "executed"
+			case fromID == sess.CurrentStepID && directSuccessors[edge.To]:
+				edgeType = "current_direct"
+			case reachableFromCurrent[edge.To] && !executedNodes[edge.To]:
+				edgeType = "current_reachable"
+			default:
+				edgeType = "skipped"
+			}
+			edges = append(edges, stateGraphEdgeDTO{
+				From:      fromID,
+				To:        edge.To,
+				Condition: edge.Condition,
+				EdgeType:  edgeType,
+			})
+		}
+	}
+
+	// 7. Determine initial node id.
+	initial := spec.State.Initial
+	if initial == "" {
+		initial = "__start__"
+	}
+
+	out := stateGraphResponse{
+		Nodes:         nodes,
+		Edges:         edges,
+		Initial:       initial,
+		CurrentStepID: sess.CurrentStepID,
+	}
+	common.ReplyOK(w, out)
 }
 
 // GetPluginInfo handles GET /plugins/{plugin_id}.
@@ -659,123 +1169,6 @@ func ListPlugins(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// AdvanceSession handles POST /plugin-sessions/{session_id}:advance.
-// This is the §5.5 manual-mode resume path: the frontend calls this after
-// the user confirms they want to proceed or retry the current step.
-//
-// Body (optional): {"action": "continue"|"retry"}  — defaults to "continue".
-//   - "continue": proceed to the next step after the current one succeeds.
-//   - "retry":    re-run the current step from scratch (full retry via self-loop).
-func AdvanceSession(w http.ResponseWriter, r *http.Request) {
-	sessionID := common.PathVar(r, "session_id")
-	if sessionID == "" {
-		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
-		return
-	}
-
-	var body struct {
-		Action string `json:"action"` // "continue" | "retry"; default "continue"
-	}
-	// Ignore decode errors — body is optional; default action is "continue".
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	if body.Action == "" {
-		body.Action = "continue"
-	}
-	if body.Action != "continue" && body.Action != "retry" {
-		common.ReplyErr(w, `action must be "continue" or "retry"`, http.StatusBadRequest)
-		return
-	}
-
-	db := store.DB()
-	stateStore := store.State()
-	if db == nil {
-		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
-		return
-	}
-	ctx := r.Context()
-
-	session, err := GetSession(ctx, db, sessionID)
-	if err != nil {
-		if IsNotFound(err) {
-			common.ReplyErr(w, "session not found", http.StatusNotFound)
-			return
-		}
-		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
-		return
-	}
-	// completed sessions can be retried (re-run a step), but not continued.
-	if session.Status == SessionStatusCompleted {
-		if body.Action != "retry" {
-			common.ReplyErr(w, "completed sessions can only be retried, not continued", http.StatusConflict)
-			return
-		}
-		// Reset to active so the state machine can proceed.
-		if err := UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive); err != nil {
-			common.ReplyErr(w, "reset session status failed", http.StatusInternalServerError)
-			return
-		}
-		session.Status = SessionStatusActive
-	} else if session.Status != SessionStatusWaiting && session.Status != SessionStatusActive {
-		// Under the current state machine only active/waiting/completed are valid states,
-		// so this branch should never be reached. Guard retained for safety.
-		common.ReplyErr(w, "session is not in a resumable state", http.StatusConflict)
-		return
-	}
-
-	// Find the latest step for the current step_id.
-	step, err := GetLatestStep(ctx, db, sessionID, session.CurrentStepID)
-	if err != nil || step == nil {
-		common.ReplyErr(w, "no step found for current_step_id", http.StatusInternalServerError)
-		return
-	}
-
-	userID := store.UserID(r)
-
-	switch step.Status {
-	case StepStatusInterrupted:
-		// Resume the interrupted SubAgent directly, bypassing ChatAgent.
-		_ = UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive)
-		task, tErr := subagent.GetTask(ctx, db, step.TaskID)
-		if tErr != nil {
-			common.ReplyErr(w, "fetch task failed", http.StatusInternalServerError)
-			return
-		}
-		var params PluginStepParams
-		if len(task.Params) > 0 {
-			_ = json.Unmarshal(task.Params, &params)
-		}
-		// LLMConfig is not persisted on the task; subagent runner uses its default model on resume.
-		// input_artifact_keys, output_artifact_keys, and tools are read by the Python runner from DB.
-		go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
-			TaskID:        task.ID,
-			AgentType:     "plugin_step",
-			Params:        params.asMap(),
-			WorkspacePath: task.WorkspacePath,
-			Resume:        true,
-		})
-		common.ReplyOK(w, map[string]any{"action": "resumed", "task_id": task.ID})
-
-	case StepStatusSucceeded:
-		_ = UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive)
-		var syntheticMsg string
-		if body.Action == "retry" {
-			// User wants to redo the current step (full retry via state-machine self-loop).
-			syntheticMsg = fmt.Sprintf("Step %s completed but user wants to retry it. Please re-run step %s from scratch.", session.CurrentStepID, session.CurrentStepID)
-		} else {
-			// Default: user confirmed, proceed to next step.
-			syntheticMsg = fmt.Sprintf("Step %s completed. User confirmed. Please proceed.", session.CurrentStepID)
-		}
-		go triggerNextChatTurn(
-			session.ConversationID, sessionID, session.PluginID,
-			session.CurrentStepID, userID, syntheticMsg, nil,
-		)
-		common.ReplyOK(w, map[string]any{"action": body.Action, "message": syntheticMsg})
-
-	default:
-		common.ReplyErr(w, fmt.Sprintf("step status %q is not resumable", step.Status), http.StatusConflict)
-	}
-}
-
 // ReorderSlotItems handles PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order.
 // Body: {"order": [1,0,2], "version": N}
 // order is the desired new sequence expressed as list_index values.
@@ -800,6 +1193,19 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	reorderSess, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if reorderSess.Dismissed {
+		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
+		return
+	}
 
 	if err := ReorderSlot(ctx, db, sessionID, slotID, body.Order, body.Version); err != nil {
 		if err == ErrConflict {
@@ -833,7 +1239,21 @@ func GetSlotOrderHandler(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
 	}
-	row, err := GetSlotOrder(r.Context(), db, sessionID, slotID)
+	ctx := r.Context()
+	slotOrderSess, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if slotOrderSess.Dismissed {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
+	row, err := GetSlotOrder(ctx, db, sessionID, slotID)
 	if err != nil {
 		common.ReplyErr(w, "query order failed", http.StatusInternalServerError)
 		return
@@ -882,6 +1302,19 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	createItemSess, siErr := GetSession(ctx, db, sessionID)
+	if siErr != nil {
+		if IsNotFound(siErr) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if createItemSess.Dismissed {
+		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
+		return
+	}
 	// Get an existing selected revision to borrow its artifact_key and step info.
 	var anyRev orm.PluginSlotRevision
 	if err := db.WithContext(ctx).
@@ -985,6 +1418,10 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "session not found", http.StatusNotFound)
 		return
 	}
+	if sess.Dismissed {
+		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
+		return
+	}
 
 	// Resolve slot binding for the artifact_key via Python plugin API.
 	slotID, cardinality := resolveSlotBinding(sess.PluginID, body.ArtifactKey)
@@ -1032,4 +1469,82 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 		"artifact_key": body.ArtifactKey,
 		"revision":     rev.Revision,
 	})
+}
+
+// DismissSessionHandler handles POST /plugin-sessions/{session_id}:dismiss.
+// Marks the session as dismissed, hiding it from all active-session lookups.
+func DismissSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	if err := DismissSession(r.Context(), db, sessionID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == "session not found or already dismissed" {
+			common.ReplyErr(w, "session not found or already dismissed", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "dismiss failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"session_id": sessionID, "dismissed": true})
+}
+
+// RestoreSessionHandler handles POST /plugin-sessions/{session_id}:restore.
+// Un-dismisses a previously dismissed session, subject to no active/waiting session existing.
+func RestoreSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	if err := RestoreSession(r.Context(), db, sessionID); err != nil {
+		msg := err.Error()
+		if msg == "session not found or not dismissed" {
+			common.ReplyErr(w, msg, http.StatusNotFound)
+			return
+		}
+		if msg == "another active or waiting session exists for this conversation" {
+			common.ReplyErr(w, msg, http.StatusConflict)
+			return
+		}
+		common.ReplyErr(w, "restore failed: "+msg, http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"session_id": sessionID, "dismissed": false})
+}
+
+// ListDismissedSessionsHandler handles GET /conversations/{conversation_id}/dismissed-plugin-sessions.
+// Returns sessions the user has dismissed, so they can be restored via the UI.
+func ListDismissedSessionsHandler(w http.ResponseWriter, r *http.Request) {
+	convID := common.PathVar(r, "conversation_id")
+	if convID == "" {
+		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	sessions, err := ListDismissedSessions(r.Context(), db, convID)
+	if err != nil {
+		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+	out := make([]sessionDTO, 0, len(sessions))
+	for i := range sessions {
+		out = append(out, toSessionDTO(&sessions[i]))
+	}
+	common.ReplyOK(w, map[string]any{"sessions": out})
 }
