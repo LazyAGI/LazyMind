@@ -186,19 +186,16 @@ def test_user_preference_prompt_requires_yaml_frontmatter():
     assert 'agent_persona' in prompt
     assert 'preferred_name' in prompt
     assert 'response_style' in prompt
-    assert '智能体角色' in prompt  # still present in Chinese parenthetical notes
-    assert '用户称谓' in prompt
-    assert '回复风格' in prompt
+    assert '智能体身份、职责和边界' in prompt
+    assert '对用户的称呼方式' in prompt
+    assert '表达习惯、篇幅和结构偏好' in prompt
     assert 'legacy/free-form' in prompt
     assert 'frontmatter-plus-body format' in prompt
-    assert 'role the user wants the agent to play' in prompt
-    assert 'how the user wants the agent to address them' in prompt
-    assert 'display/use exactly one of 简洁, 详细, 幽默, 正式' in prompt
-    assert '简洁, 详细, 幽默, 正式' in prompt
-    assert 'concise, detailed, humorous, formal' in prompt
-    assert 'existing valid response_style in either language' in prompt
-    assert 'Do not put language preferences' in prompt
-    assert 'verbs, or full instructions' in prompt
+    assert 'identity, responsibilities, and boundaries' in prompt
+    assert 'how replies should address the user' in prompt
+    assert 'expression habits, length preference, and structure preference' in prompt
+    assert '100 characters or less' in prompt
+    assert 'keep existing frontmatter values unchanged' in prompt
     assert 'response_style is unknown' in prompt
     assert 'use ""' in prompt
     assert 'never use generic acknowledgement text' in prompt
@@ -240,13 +237,26 @@ def test_user_preference_validation_requires_yaml_frontmatter():
             '- Prefer manual git commits.'
         ),
     )
+    assert _validate_generated_content(
+        'user_preference',
+        (
+            '---\n'
+            'agent_persona: "algorithm collaborator"\n'
+            'preferred_name: ""\n'
+            'response_style: "先结论后解释，分点回答"\n'
+            '---\n'
+            '- Prefer manual git commits.'
+        ),
+    )
 
+    too_long = 'x' * 101
     invalid_cases = [
         'agent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n\nbody',
         '---\nagent_persona: "x"\nresponse_style: "concise"\n---\nbody',
-        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n---\n',
-        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise, direct"\n---\nbody',
-        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "轻松"\n---\nbody',
+        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\nwork_email: "me@example.com"\n---\nbody',
+        f'---\nagent_persona: "{too_long}"\npreferred_name: ""\nresponse_style: ""\n---\nbody',
+        f'---\nagent_persona: ""\npreferred_name: "{too_long}"\nresponse_style: ""\n---\nbody',
+        f'---\nagent_persona: ""\npreferred_name: ""\nresponse_style: "{too_long}"\n---\nbody',
         '- not: a mapping',
     ]
     for invalid in invalid_cases:
