@@ -339,6 +339,7 @@ interface ChatInputProps {
   onRemoveCiteMessage?: (index: number) => void;
   onClearCiteMessage?: () => void;
   skillDepositStats?: SkillDepositStats;
+  skillDepositDisabledReason?: string;
   onSkillDeposit?: () => void;
 }
 
@@ -437,6 +438,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onRemoveCiteMessage,
       onClearCiteMessage,
       skillDepositStats,
+      skillDepositDisabledReason,
       onSkillDeposit,
       onPluginSettingsChange,
       initialPluginSettings,
@@ -678,8 +680,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       0,
       SKILL_DEPOSIT_MIN_TOOL_CALL_TURNS - skillDepositToolCallTurns,
     );
+    const isSkillDepositBlocked = Boolean(skillDepositDisabledReason);
     const isSkillDepositReady =
-      missingSkillDepositUserTurns === 0 && missingSkillDepositToolTurns === 0;
+      missingSkillDepositUserTurns === 0 &&
+      missingSkillDepositToolTurns === 0 &&
+      !isSkillDepositBlocked;
     const isSkillDepositDisabled =
       !isSkillDepositReady ||
       disabled ||
@@ -687,6 +692,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       isStreaming ||
       !onSkillDeposit;
     const skillDepositTooltip = useMemo(() => {
+      if (skillDepositDisabledReason) {
+        return skillDepositDisabledReason;
+      }
       if (isSkillDepositReady) {
         return t("chat.skillDepositReadyTooltip");
       }

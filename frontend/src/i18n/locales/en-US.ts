@@ -824,6 +824,8 @@ const enUS = {
     skillDepositMissingToolTurns: "{{count}} tool call turn(s)",
     skillDepositReminder:
       "This conversation has formed reusable experience. You can save it as a skill for future use.",
+    skillDepositAlreadyRequestedTooltip:
+      "The last turn already requested saving experience.",
     skillDepositPrompt:
       "Deposit the current conversation as a skill.\n\n" +
       "- If suitable: you must call skill_editor to create or update a skill. Do not only summarize in text.\n" +

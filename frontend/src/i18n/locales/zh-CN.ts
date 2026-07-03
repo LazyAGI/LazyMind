@@ -789,6 +789,8 @@ const zhCN = {
     skillDepositMissingToolTurns: "{{count}} 个工具调用轮次",
     skillDepositReminder:
       "这次会话已经形成了一些可复用经验，可以沉淀为 skill，方便以后复用。",
+    skillDepositAlreadyRequestedTooltip:
+      "上一轮已发起沉淀经验，无需重复沉淀",
     skillDepositPrompt:
       "请把当前会话沉淀为 skill。\n\n" +
       "- 适合沉淀：必须调用 skill_editor 创建或更新 skill，不要只口头总结。\n" +

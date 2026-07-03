@@ -30,6 +30,10 @@ import type { ChatContainerProps, ChatImperativeProps } from "./types";
 export type { ChatImperativeProps, ChatMessage } from "./types";
 
 const SKILL_DEPOSIT_REMINDER_KEY_PREFIX = "skill-deposit-reminded:";
+const SKILL_DEPOSIT_PROMPT_PREFIXES = [
+  "请把当前会话沉淀为 skill。",
+  "Deposit the current conversation as a skill.",
+];
 
 function getSkillDepositStats(messageList: any[]): SkillDepositStats {
   return messageList.reduce<SkillDepositStats>(
@@ -50,6 +54,25 @@ function getSkillDepositStats(messageList: any[]): SkillDepositStats {
       return stats;
     },
     { userTurns: 0, toolCallTurns: 0 },
+  );
+}
+
+function isSkillDepositPromptMessage(item: any, currentPrompt: string) {
+  if (!item || item.role !== RoleTypes.USER) {
+    return false;
+  }
+
+  const text = String(
+    item.display_delta ||
+      item.delta ||
+      item.inputs?.find((input: any) => input?.input_type === "text")?.text ||
+      "",
+  ).trim();
+  const prompt = currentPrompt.trim();
+  return (
+    Boolean(text) &&
+    (text === prompt ||
+      SKILL_DEPOSIT_PROMPT_PREFIXES.some((prefix) => text.startsWith(prefix)))
   );
 }
 
@@ -139,9 +162,19 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       () => getSkillDepositStats(conversation.messageList),
       [conversation.messageList],
     );
+    const isLastUserMessageSkillDepositPrompt = useMemo(() => {
+      const lastUserMessage = conversation.messageList.findLast(
+        (item) => item?.role === RoleTypes.USER,
+      );
+      return isSkillDepositPromptMessage(
+        lastUserMessage,
+        t("chat.skillDepositPrompt"),
+      );
+    }, [conversation.messageList, t]);
     const canSkillDeposit =
       skillDepositStats.userTurns >= SKILL_DEPOSIT_MIN_USER_TURNS &&
-      skillDepositStats.toolCallTurns >= SKILL_DEPOSIT_MIN_TOOL_CALL_TURNS;
+      skillDepositStats.toolCallTurns >= SKILL_DEPOSIT_MIN_TOOL_CALL_TURNS &&
+      !isLastUserMessageSkillDepositPrompt;
     const isSkillDepositTurnFinished = useMemo(() => {
       const lastAssistantMessage = conversation.messageList.findLast(
         (item) => item?.role === RoleTypes.ASSISTANT,
@@ -314,6 +347,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
             onRemoveCiteMessage={handleRemoveCiteMessage}
             onClearCiteMessage={clearCiteMessages}
             skillDepositStats={skillDepositStats}
+            skillDepositDisabledReason={
+              isLastUserMessageSkillDepositPrompt
+                ? t("chat.skillDepositAlreadyRequestedTooltip")
+                : undefined
+            }
             onSkillDeposit={handleSkillDeposit}
             onPluginSettingsChange={onPluginSettingsChange}
             initialPluginSettings={initialPluginSettings}
