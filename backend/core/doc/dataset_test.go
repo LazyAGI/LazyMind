@@ -145,6 +145,63 @@ func TestListDatasetsKeywordMatchesTags(t *testing.T) {
 	}
 }
 
+func TestGetDatasetReturnsCreatedByDataSource(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "ds-source", "user-1")
+	seedDocumentListDataset(t, db, "ds-manual", "user-1")
+
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected method %s for %q", r.Method, r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+		switch r.URL.Path {
+		case "/api/scan/internal/sources/by-dataset/ds-source":
+			return testJSONResponse(http.StatusOK, `{"source":{"source_id":"source-1"}}`), nil
+		case "/api/scan/internal/sources/by-dataset/ds-manual":
+			return testJSONResponse(http.StatusNotFound, `{"message":"source not found"}`), nil
+		default:
+			t.Errorf("unexpected get path %q", r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
+
+	cases := []struct {
+		datasetID string
+		want      bool
+	}{
+		{datasetID: "ds-source", want: true},
+		{datasetID: "ds-manual", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.datasetID, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/core/datasets/"+tc.datasetID, nil)
+			req = mux.SetURLVars(req, map[string]string{"dataset": tc.datasetID})
+			req.Header.Set("X-User-Id", "user-1")
+			rec := httptest.NewRecorder()
+
+			GetDataset(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			var resp Dataset
+			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if resp.CreatedByDataSource == nil {
+				t.Fatalf("expected created_by_data_source field to be present")
+			}
+			if got := *resp.CreatedByDataSource; got != tc.want {
+				t.Fatalf("expected created_by_data_source=%v, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
 func TestCreateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	db := newDocumentTestDB(t)
 	if err := db.AutoMigrate(&orm.DefaultDataset{}, &orm.ACLModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); err != nil {
@@ -630,6 +687,9 @@ func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	var got kbUpdateRequest
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/api/scan/internal/sources/by-dataset/ds-update" {
+			return testJSONResponse(http.StatusNotFound, `{"message":"source not found"}`), nil
+		}
 		if r.URL.Path != "/v1/kbs/kb-update" {
 			t.Errorf("unexpected algo request path %q", r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil

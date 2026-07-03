@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone as datetime_timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from .guidance import (
     ATTACHED_FILES_GUIDANCE,
     DEFAULT_SYSTEM_PROMPT,
@@ -11,6 +14,25 @@ from .guidance import (
 _KNOWLEDGE_EVIDENCE_GROUPS = {'kb', 'temp_kb'}
 
 
+def _format_user_time(time_now: object, timezone: object) -> str:
+    raw_time = str(time_now).strip()
+    if not raw_time:
+        return ''
+
+    timezone_name = str(timezone).strip() if timezone is not None else ''
+    try:
+        normalized_time = raw_time[:-1] + '+00:00' if raw_time.endswith('Z') else raw_time
+        parsed_time = datetime.fromisoformat(normalized_time)
+        if parsed_time.tzinfo is None:
+            parsed_time = parsed_time.replace(tzinfo=datetime_timezone.utc)
+        if timezone_name:
+            user_time = parsed_time.astimezone(ZoneInfo(timezone_name))
+            return f'{user_time:%Y-%m-%d %H:%M:%S} ({timezone_name})'
+        return parsed_time.isoformat()
+    except (ValueError, TypeError, ZoneInfoNotFoundError):
+        return raw_time
+
+
 def _build_environment_context_prompt(environment_context: dict | None = None) -> str:
     time_now = None
     timezone = None
@@ -20,21 +42,11 @@ def _build_environment_context_prompt(environment_context: dict | None = None) -
             time_now = time_info.get('now')
             timezone = time_info.get('timezone')
 
-    lines = []
-    if time_now and str(time_now).strip():
-        lines.append(f'Current user time: {str(time_now).strip()}')
-    if timezone and str(timezone).strip():
-        lines.append(f'User timezone: {str(timezone).strip()}')
-    if not lines:
+    user_time = _format_user_time(time_now, timezone) if time_now else ''
+    if not user_time:
         return ''
 
-    return (
-        '## Environment Context\n'
-        + '\n'.join(lines)
-        + '\n\n'
-        + 'Use this context to interpret relative time expressions such as today, tomorrow, now, '
-        + 'this morning, tonight, 本周, 今天, 明天, 现在. Do not assume the server timezone is the user timezone.'
-    )
+    return f'## Environment Context\nCurrent user time: {user_time}'
 
 
 def _build_attached_files_prompt(files: list | None = None) -> str:

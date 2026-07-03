@@ -46,22 +46,16 @@ type WrappedMcpListResponse = ListServersResponse & {
 
 export type ToolListOptions = {
   keyword?: string;
-  page?: number;
-  pageSize?: number;
 };
 
 export type ToolAssetListResult = {
   records: StructuredAsset[];
   total: number;
-  page: number;
-  pageSize: number;
 };
 
 export type McpServerListResult = {
   records: McpServerAsset[];
   total: number;
-  page: number;
-  pageSize: number;
 };
 
 const toolsApi = ToolsApiFactory(
@@ -158,33 +152,23 @@ const unwrapResponsePayload = <T>(payload: T | { data?: T }): T => {
 };
 
 const buildListParams = (options: ToolListOptions = {}) => {
-  const params: Record<string, string | number> = {};
+  const params: Record<string, string> = {};
   const keyword = options.keyword?.trim();
   if (keyword) {
     params.keyword = keyword;
   }
-  if (options.page) {
-    params.page = options.page;
-  }
-  if (options.pageSize) {
-    params.page_size = options.pageSize;
-  }
   return params;
 };
 
-const readListMetadata = (
+const readListTotal = (
   payload: Record<string, unknown> | null,
   raw: Record<string, unknown> | null,
   fallbackCount: number,
-  options: ToolListOptions = {},
-) => ({
-  total: toNumberValue(payload?.total ?? raw?.total ?? payload?.total_size ?? raw?.total_size, fallbackCount),
-  page: toNumberValue(payload?.page ?? raw?.page, options.page ?? 1),
-  pageSize: toNumberValue(
-    payload?.page_size ?? raw?.page_size ?? payload?.pageSize ?? raw?.pageSize,
-    options.pageSize ?? fallbackCount,
-  ),
-});
+) =>
+  toNumberValue(
+    payload?.total ?? raw?.total ?? payload?.total_size ?? raw?.total_size,
+    fallbackCount,
+  );
 
 const toRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -229,7 +213,7 @@ export async function listToolAssetsPage(
   const records = toolGroups.map(normalizeToolGroup);
   return {
     records,
-    ...readListMetadata(rawPayload, rawResponse, records.length, options),
+    total: readListTotal(rawPayload, rawResponse, records.length),
   };
 }
 
@@ -291,7 +275,7 @@ export async function listMcpServersPage(
   const records = (payload.mcp_servers || []).map(normalizeMcpServer);
   return {
     records,
-    ...readListMetadata(rawPayload, rawResponse, records.length, options),
+    total: readListTotal(rawPayload, rawResponse, records.length),
   };
 }
 

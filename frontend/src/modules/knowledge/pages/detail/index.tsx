@@ -66,8 +66,17 @@ import {
 } from "@/utils/developerMode";
 
 import { DetailPageHeader } from "@/components/ui";
+import KnowledgeBaseSyncNow from "@/modules/knowledge/components/KnowledgeBaseSyncNow";
 
 import "./index.scss";
+
+type DatasetWithDataSourceFlag = Dataset & {
+  created_by_data_source?: boolean;
+};
+
+function isDatasetCreatedByDataSource(dataset?: DatasetWithDataSourceFlag) {
+  return Boolean(dataset?.created_by_data_source);
+}
 
 const { Search } = Input;
 
@@ -344,6 +353,15 @@ const Detail = () => {
     state.hasUploadPermission(),
   );
   const canImport = hasUploadPermission || hasWritePermission;
+  const showDataSourceSync = isDatasetCreatedByDataSource(
+    detail as DatasetWithDataSourceFlag | undefined,
+  );
+
+  const refreshKnowledgeAfterSync = useCallback(() => {
+    getDetail();
+    getImportingTotal();
+    knowledgeListRef.current?.getTableData();
+  }, [getDetail]);
 
   return (
     <div
@@ -488,6 +506,12 @@ const Detail = () => {
         />
         {canImport && (
           <div className="toolbar-actions">
+            {showDataSourceSync && detail?.dataset_id ? (
+              <KnowledgeBaseSyncNow
+                datasetId={detail.dataset_id}
+                onSyncComplete={refreshKnowledgeAfterSync}
+              />
+            ) : null}
             {hasWritePermission && (
               <Button
                 color="primary"

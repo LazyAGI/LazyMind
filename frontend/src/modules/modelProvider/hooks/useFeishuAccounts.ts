@@ -3,23 +3,23 @@ import { Form, Modal, message } from "antd";
 import { useTranslation } from "react-i18next";
 import type { CloudConnectionUpdateBody } from "@/api/generated/auth-client";
 import { getLocalizedErrorMessage } from "@/components/request";
-import { dataSourceCloudOauthApi } from "../api/clients";
+import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   consumeFeishuDataSourceOAuthResult,
   getFeishuDataSourceCallbackUrl,
   type FeishuDataSourceOAuthMessage,
-} from "../common/feishuOAuth";
+} from "@/modules/dataSource/common/feishuOAuth";
 import {
   createFeishuAccountId,
   type FeishuAccountFormValues,
   type FeishuAuthAccount,
-} from "../common/feishuAccounts";
+} from "@/modules/dataSource/common/feishuAccounts";
 import {
   getCloudConnectionItems,
   mapCloudConnectionToFeishuAccount,
-} from "../mappers/cloudConnection";
-import { isFeishuAccountAuthValid } from "../utils/feishuAccount";
+} from "@/modules/dataSource/mappers/cloudConnection";
+import { isFeishuAccountAuthValid } from "@/modules/dataSource/utils/feishuAccount";
 import { useFeishuOAuthFlow } from "./useFeishuOAuthFlow";
 
 export function useFeishuAccounts() {

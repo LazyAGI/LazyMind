@@ -32,6 +32,16 @@ import type { DataSourceSaveMode, ManagementContext } from "./context";
 export function createSaveActions(ctx: ManagementContext) {
   const { t, form, scanAgents } = ctx;
 
+  const getSaveSuccessMessage = () => {
+    if (ctx.editingId) {
+      return t("admin.dataSourceConfigUpdated");
+    }
+    if (ctx.createSuccessMessageKey) {
+      return t(ctx.createSuccessMessageKey);
+    }
+    return t("admin.dataSourceCreated");
+  };
+
   const markKnowledgeBaseNameDuplicated = () => {
     form.setFields([
       {
@@ -129,9 +139,7 @@ export function createSaveActions(ctx: ManagementContext) {
 
       ctx.setValidatedAgentId(selectedAgent?.agent_id || ctx.validatedAgentId);
       await ctx.refreshSources(false);
-      message.success(
-        ctx.editingId ? t("admin.dataSourceConfigUpdated") : t("admin.dataSourceCreated"),
-      );
+      message.success(getSaveSuccessMessage());
       ctx.handleCloseWizard();
     } catch (error) {
       if (isKnowledgeBaseNameDuplicatedError(error)) {
@@ -278,9 +286,7 @@ export function createSaveActions(ctx: ManagementContext) {
 
       ctx.setValidatedAgentId(selectedAgent?.agent_id || ctx.validatedAgentId);
       await ctx.refreshSources(false);
-      message.success(
-        ctx.editingId ? t("admin.dataSourceConfigUpdated") : t("admin.dataSourceCreated"),
-      );
+      message.success(getSaveSuccessMessage());
       ctx.handleCloseWizard();
     } catch (error) {
       if (isKnowledgeBaseNameDuplicatedError(error)) {
@@ -409,9 +415,7 @@ export function createSaveActions(ctx: ManagementContext) {
 
       ctx.setValidatedAgentId(selectedAgent?.agent_id || ctx.validatedAgentId);
       await ctx.refreshSources(false);
-      message.success(
-        ctx.editingId ? t("admin.dataSourceConfigUpdated") : t("admin.dataSourceCreated"),
-      );
+      message.success(getSaveSuccessMessage());
       ctx.handleCloseWizard();
     } catch (error) {
       message.error(

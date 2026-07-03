@@ -48,6 +48,7 @@ type Components struct {
 	LocalFSDefaultAgentID             string
 	LocalFSPublicRoot                 string
 	AuthConnectionClient              feishu.AuthConnectionClient
+	AdminVerifier                     access.AdminVerifier
 	FeishuClient                      feishu.FeishuClient
 	TempObjectStore                   worker.TempObjectStore
 	JobQueue                          taskengine.JobQueue
@@ -206,6 +207,10 @@ func buildAdapters(cfg config.Config) (Components, error) {
 	if err != nil {
 		return Components{}, err
 	}
+	adminVerifier, err := newAuthServiceAdminVerifier(cfg.AuthServiceBaseURL, nil)
+	if err != nil {
+		return Components{}, fmt.Errorf("configure auth service admin verifier: %w", err)
+	}
 	targetSearchCacheStore, err := buildTargetSearchCacheStore(cfg)
 	if err != nil {
 		return Components{}, err
@@ -221,6 +226,7 @@ func buildAdapters(cfg config.Config) (Components, error) {
 		LocalFSDefaultAgentID:             cfg.LocalFSDefaultAgentID,
 		LocalFSPublicRoot:                 cfg.LocalFSPublicRoot,
 		AuthConnectionClient:              auth,
+		AdminVerifier:                     adminVerifier,
 		FeishuClient:                      feishuClient,
 		TempObjectStore:                   temp,
 		TargetSearchCacheStore:            targetSearchCacheStore,
@@ -303,6 +309,7 @@ func newHandlerWithComponents(built Components) http.Handler {
 		server.WithAccessChecker(access.NewDefaultChecker(
 			repo,
 			access.WithAuthConnectionVerifier(newAuthConnectionVerifier(built.AuthConnectionClient)),
+			access.WithAdminVerifier(built.AdminVerifier),
 		)),
 		server.WithAgentStore(repo),
 		server.WithScheduleEngine(scheduler),

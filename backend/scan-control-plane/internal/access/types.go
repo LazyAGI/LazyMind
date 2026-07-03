@@ -8,21 +8,33 @@ import (
 )
 
 type Actor struct {
-	UserID   string
-	TenantID string
-	Role     string
+	UserID        string
+	TenantID      string
+	Role          string
+	Authorization string
 }
 
 type BindingTargetRequest struct {
 	SourceID         string
 	BindingID        string
 	ConnectorType    connector.ConnectorType
+	TargetType       connector.TargetType
 	AgentID          string
 	AuthConnectionID string
 }
 
+type LocalSourceAccessRequest struct {
+	SourceID       string
+	SourceOptions  map[string]any
+	BindingTargets []BindingTargetRequest
+}
+
 type AuthConnectionVerifier interface {
 	VerifyAuthConnection(ctx context.Context, actor Actor, authConnectionID string) error
+}
+
+type AdminVerifier interface {
+	IsAdmin(ctx context.Context, actor Actor) (bool, error)
 }
 
 type SourceAction string
@@ -53,11 +65,13 @@ type Checker interface {
 	CanAccessBindingTarget(ctx context.Context, actor Actor, req BindingTargetRequest) error
 	CanUseAgent(ctx context.Context, actor Actor, agentID string) error
 	CanUseAuthConnection(ctx context.Context, actor Actor, authConnectionID string) error
+	ShouldBlockLocalSourceAccess(ctx context.Context, actor Actor, req LocalSourceAccessRequest) bool
 }
 
 type SourceStore interface {
 	GetSource(ctx context.Context, sourceID string) (store.Source, error)
 	GetBinding(ctx context.Context, sourceID, bindingID string) (store.Binding, error)
+	ListBindings(ctx context.Context, sourceID string) ([]store.Binding, error)
 	GetParseTask(ctx context.Context, taskID string) (store.ParseTaskWithRefs, error)
 	ListSourceAccess(ctx context.Context, tenantID string) ([]store.Source, error)
 	GetAgent(ctx context.Context, agentID string) (store.Agent, error)

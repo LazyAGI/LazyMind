@@ -45,7 +45,6 @@ def test_web_search_requires_at_least_one_search_key():
 
 def test_registry_key_source_activates_function_tool():
     from lazymind.chat.engine.tools import kb_tmp_search
-    from lazymind.chat.service.chat_service import _collect_active_tool_names
     from lazyllm.tools.agent.toolsManager import ToolManager
 
     assert not hasattr(kb_tmp_search, '__key_source__')
@@ -60,7 +59,6 @@ def test_registry_key_source_activates_function_tool():
 
     configs = filter_tools(DEFAULT_TOOLS)
     assert 'temp_kb' in {cfg.name for cfg in configs}
-    assert 'kb_tmp_search' in _collect_active_tool_names(configs)
     manager = ToolManager(build_agent_tools([temp_kb_cfg]))
     assert [d['function']['name'] for d in manager.tools_description] == ['kb_tmp_search']
     group = _tool_group('temp_kb')

@@ -1,8 +1,8 @@
 import { Form, Input, Modal } from "antd";
 import type { FormInstance } from "antd";
 import type { TFunction } from "i18next";
-import type { FeishuAccountFormValues } from "../../common/feishuAccounts";
-import { FeishuCredentialHintAlertFromForm } from "../../common/FeishuCredentialHintAlert";
+import type { FeishuAccountFormValues } from "@/modules/dataSource/common/feishuAccounts";
+import { FeishuCredentialHintAlertFromForm } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 
 export interface FeishuAccountFormModalProps {
   t: TFunction;

@@ -12,8 +12,9 @@ import {
 import { QuestionCircleOutlined } from "@ant-design/icons";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import { useMemoryManagementOutletContext } from "../../context";
-import type { ExperienceAsset, StructuredAsset } from "../../shared";
+import type { ExperienceAsset } from "../../shared";
 import GlossaryListSection from "../../components/GlossaryListSection";
+import SkillManagementSection from "../../components/SkillManagementSection";
 
 const defaultMemoryListPageSize = 6;
 const memoryListPageSizeOptions = [6, 12, 20, 50];
@@ -27,8 +28,6 @@ export default function MemoryManagementListPage() {
   const {
     t,
     activeTab,
-    openSkillShareCenter,
-    incomingPendingCount,
     glossaryChangeProposals,
     openModal,
     currentTabMeta,
@@ -46,17 +45,9 @@ export default function MemoryManagementListPage() {
     setSearchInput,
     query,
     setQuery,
-    category,
-    setCategory,
-    tag,
-    setTag,
     glossarySource,
     setGlossarySource,
     availableGlossarySourceOptions,
-    availableCategories,
-    availableTags,
-    skillCategoriesLoading,
-    skillTagsLoading,
     selectedGlossaryAssets,
     glossaryAssets,
     glossaryLoading,
@@ -77,54 +68,29 @@ export default function MemoryManagementListPage() {
     setGlossaryListPage,
     setGlossaryListPageSize,
     setSelectedGlossaryAssetIds,
-    skillLoading,
-    skillListPage,
-    skillListPageSize,
-    skillListTotal,
-    setSkillListPage,
-    setSkillListPageSize,
-    skillAssets,
-    filteredSkillTree,
-    filteredStructuredItems,
-    genericColumns,
   } = useMemoryManagementOutletContext();
 
   const activeListTotal = useMemo(() => {
     if (activeTab === "experience") {
       return filteredExperienceItems.length;
     }
-    if (activeTab === "skills") {
-      return skillListTotal;
-    }
     return 0;
-  }, [
-    activeTab,
-    filteredExperienceItems.length,
-    skillListTotal,
-  ]);
+  }, [activeTab, filteredExperienceItems.length]);
 
   useEffect(() => {
-    if (activeTab === "skills") {
-      setSkillListPage(1);
-      return;
-    }
     setCurrentPage(1);
-  }, [activeTab, category, query, setSkillListPage, tag]);
+  }, [activeTab, query]);
 
-  const activePage = activeTab === "skills" ? skillListPage : currentPage;
-  const activePageSize = activeTab === "skills" ? skillListPageSize : pageSize;
+  const activePage = currentPage;
+  const activePageSize = pageSize;
 
   useEffect(() => {
     const maxPage = Math.max(1, Math.ceil(activeListTotal / activePageSize));
     if (activePage <= maxPage) {
       return;
     }
-    if (activeTab === "skills") {
-      setSkillListPage(maxPage);
-    } else {
-      setCurrentPage(maxPage);
-    }
-  }, [activeListTotal, activePage, activePageSize, activeTab, setSkillListPage]);
+    setCurrentPage(maxPage);
+  }, [activeListTotal, activePage, activePageSize]);
 
   const memoryListPagination = getLocalizedTablePagination(
     {
@@ -135,20 +101,10 @@ export default function MemoryManagementListPage() {
       pageSizeOptions: memoryListPageSizeOptions,
       showTotal: (total) => t("common.totalItems", { total }),
       onChange: (page, nextPageSize) => {
-        if (activeTab === "skills") {
-          setSkillListPage(page);
-          setSkillListPageSize(nextPageSize);
-          return;
-        }
         setCurrentPage(page);
         setPageSize(nextPageSize);
       },
       onShowSizeChange: (_current, nextPageSize) => {
-        if (activeTab === "skills") {
-          setSkillListPage(1);
-          setSkillListPageSize(nextPageSize);
-          return;
-        }
         setCurrentPage(1);
         setPageSize(nextPageSize);
       },
@@ -160,7 +116,7 @@ export default function MemoryManagementListPage() {
     : { x: 980 };
 
   useEffect(() => {
-    if (activeTab === "glossary") {
+    if (activeTab === "glossary" || activeTab === "skills") {
       return undefined;
     }
 
@@ -198,7 +154,11 @@ export default function MemoryManagementListPage() {
   }, [activeListTotal, activePageSize, activeTab]);
 
   return (
-    <div className={`memory-list-page ${activeTab === "glossary" ? "is-glossary-tab" : ""}`}>
+    <div
+      className={`memory-list-page ${
+        activeTab === "glossary" ? "is-glossary-tab" : ""
+      } ${activeTab === "skills" ? "is-skills-tab" : ""}`}
+    >
       <div className="memory-page-header">
         <div>
           <div className="memory-page-title-row">
@@ -218,13 +178,6 @@ export default function MemoryManagementListPage() {
           </p>
         </div>
         <Space>
-          {activeTab === "skills" ? (
-            <Button onClick={() => openSkillShareCenter("incoming")}>
-              {t("admin.memorySkillShareInboxButton", {
-                count: incomingPendingCount,
-              })}
-            </Button>
-          ) : null}
           {showGlossaryInboxUi && activeTab === "glossary" ? (
             <Button onClick={() => setGlossaryInboxOpen(true)}>
               {t("admin.memoryGlossaryInboxButton", {
@@ -304,7 +257,7 @@ export default function MemoryManagementListPage() {
         </div>
       ) : null}
 
-      {activeTab !== "experience" ? (
+      {activeTab !== "experience" && activeTab !== "skills" ? (
         <div className="memory-filter-bar">
           <Input.Search
             allowClear
@@ -314,34 +267,7 @@ export default function MemoryManagementListPage() {
             placeholder={t("admin.memorySearchPlaceholder")}
             className="memory-filter-search"
           />
-          {activeTab === "skills" ? (
-            <>
-              <Select
-                allowClear
-                value={category}
-                placeholder={t("admin.memoryAllCategories")}
-                loading={skillCategoriesLoading}
-                options={availableCategories.map((item: string) => ({
-                  label: item,
-                  value: item,
-                }))}
-                className="memory-filter-select"
-                onChange={(value) => setCategory(value)}
-              />
-              <Select
-                allowClear
-                value={tag}
-                placeholder={t("admin.memoryAllTags")}
-                loading={skillTagsLoading}
-                options={availableTags.map((item: string) => ({
-                  label: item,
-                  value: item,
-                }))}
-                className="memory-filter-select"
-                onChange={(value) => setTag(value)}
-              />
-            </>
-          ) : activeTab === "glossary" ? (
+          {activeTab === "glossary" ? (
             <Select
               allowClear
               value={glossarySource}
@@ -355,8 +281,13 @@ export default function MemoryManagementListPage() {
         </div>
       ) : null}
 
-      <div className="memory-list-content" ref={listContentRef}>
-        {activeTab === "experience" ? (
+      <div
+        className={`memory-list-content ${activeTab === "skills" ? "is-skill-management" : ""}`}
+        ref={activeTab === "skills" ? undefined : listContentRef}
+      >
+        {activeTab === "skills" ? (
+          <SkillManagementSection />
+        ) : activeTab === "experience" ? (
           <Table<ExperienceAsset>
             className="admin-page-table memory-table"
             rowKey="id"
@@ -398,39 +329,7 @@ export default function MemoryManagementListPage() {
             setGlossaryListPageSize={setGlossaryListPageSize}
             setSelectedGlossaryAssetIds={setSelectedGlossaryAssetIds}
           />
-        ) : (
-          <Table<StructuredAsset>
-            className="admin-page-table memory-table"
-            rowKey="id"
-            loading={activeTab === "skills" ? skillLoading : false}
-            dataSource={activeTab === "skills" ? filteredSkillTree : filteredStructuredItems}
-            columns={genericColumns}
-            rowClassName={(record) =>
-              activeTab === "skills" && record.isBuiltinTemplate
-                ? "memory-builtin-template-row"
-                : ""
-            }
-            expandable={
-              activeTab === "skills"
-                ? {
-                    defaultExpandAllRows: true,
-                    rowExpandable: (record) =>
-                      skillAssets.some((item: StructuredAsset) => item.parentId === record.id),
-                  }
-                : undefined
-            }
-            pagination={memoryListPagination}
-            locale={{
-              emptyText: (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={t("admin.memoryEmpty")}
-                />
-              ),
-            }}
-            scroll={memoryTableScroll}
-          />
-        )}
+        ) : null}
       </div>
     </div>
   );

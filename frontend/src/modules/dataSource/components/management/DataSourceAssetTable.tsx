@@ -5,7 +5,6 @@ import {
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
-  PlusOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import type { DataSourceItem, SourceType } from "../../constants/types";
@@ -25,7 +24,6 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
     t,
     assetSearchValue,
     setAssetSearchValue,
-    setCreateProviderModalOpen,
     sources,
     scanLoading,
     sourceListPage,
@@ -46,7 +44,9 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
       render: (_value, record) => (
         <div className="data-source-table-name">
           <span className={`data-source-icon data-source-icon-${record.type}`}>
-            {sourceTypeOptions.find((item) => item.type === record.type)?.icon}
+            {record.type === "database"
+              ? <DatabaseOutlined />
+              : sourceTypeOptions.find((item) => item.type === record.type)?.icon}
           </span>
           <div className="data-source-table-copy">
             <Button
@@ -199,13 +199,6 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
           placeholder={t("admin.dataSourceAssetSearchPlaceholder")}
           className="data-source-asset-search"
         />
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => setCreateProviderModalOpen(true)}
-        >
-          {t("admin.dataSourceCreateKnowledgeSource")}
-        </Button>
       </div>
       <div className="data-source-asset-table-wrap">
         <Table<DataSourceItem>

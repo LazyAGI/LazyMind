@@ -16,12 +16,18 @@ import moment from "moment";
 import { EditFilled } from "@ant-design/icons";
 
 import ListPageHeader from "@/modules/knowledge/components/ListPageHeader";
+import SyncKnowledgeBaseCreationFlow, {
+  useSyncKnowledgeBaseCreation,
+} from "@/modules/knowledge/components/SyncKnowledgeBaseCreationFlow";
 import TypedConfirmModal, {
   type TypedConfirmModalRef,
-} from '@/components/ui/TypedConfirmModal';
+} from "@/components/ui/TypedConfirmModal";
 import CreateUpdateModal, {
   UpdateImperativeProps,
 } from "@/modules/knowledge/components/UpdateModal";
+import CreateKnowledgeBaseModal, {
+  CreateKnowledgeBaseModalRef,
+} from "@/modules/knowledge/components/CreateKnowledgeBaseModal";
 import UIUtils from "@/modules/knowledge/utils/ui";
 import {
   DocumentServiceApi,
@@ -85,13 +91,18 @@ const KnowledgePage: FC = () => {
     [DocDocumentStageEnum.DocumentUploaded]: t("knowledge.stageUploaded"),
     [DocDocumentStageEnum.DocumentQueued]: t("knowledge.stageParsing"),
     [DocDocumentStageEnum.DocumentParsing]: t("knowledge.stageParsing"),
-    [DocDocumentStageEnum.DocumentParseSuccessfully]: t("knowledge.stageParsed"),
+    [DocDocumentStageEnum.DocumentParseSuccessfully]: t(
+      "knowledge.stageParsed",
+    ),
     [DocDocumentStageEnum.DocumentParsingFailed]: t("knowledge.stageFailed"),
-    [DocDocumentStageEnum.DocumentParsingCancelled]: t("knowledge.stageCanceled"),
+    [DocDocumentStageEnum.DocumentParsingCancelled]: t(
+      "knowledge.stageCanceled",
+    ),
   };
 
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
+  const createKnowledgeRef = useRef<CreateKnowledgeBaseModalRef>(null);
 
   const [loading, setLoading] = useState(false);
   const [pagination, setPagination] = useState<TablePaginationConfig>({
@@ -106,8 +117,38 @@ const KnowledgePage: FC = () => {
   const [showTagEditModal, setShowTagEditModal] = useState(false);
   const [tagEditRecord, setTagEditRecord] = useState<DocRow | null>(null);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
-  const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<boolean | null>(null);
-  const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
+  const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
+    boolean | null
+  >(null);
+  const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
+  const syncCreateVm = useSyncKnowledgeBaseCreation({
+    onSuccess: () => {
+      getTableData();
+    },
+  });
+  const createActionDisabled =
+    embeddingReady === false || multimodalEmbeddingReady === false;
+  const createActionDisabledTooltip = isAdmin ? (
+    <span>
+      {embeddingReady === false
+        ? t("knowledge.embeddingNotReadyBannerAdmin")
+        : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
+      <a
+        href="/model-providers"
+        style={{ marginLeft: 8, color: "#fff", textDecoration: "underline" }}
+        onClick={(e: MouseEvent<HTMLAnchorElement>) => {
+          e.preventDefault();
+          navigate("/model-providers");
+        }}
+      >
+        {t("knowledge.goToConfig")}
+      </a>
+    </span>
+  ) : embeddingReady === false ? (
+    t("knowledge.embeddingNotReadyBanner")
+  ) : (
+    t("knowledge.multimodalEmbeddingNotReadyBanner")
+  );
 
   useEffect(() => {
     getTags();
@@ -125,7 +166,10 @@ const KnowledgePage: FC = () => {
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      window.removeEventListener(MODEL_FEATURES_CHANGED_EVENT, onFeaturesChanged);
+      window.removeEventListener(
+        MODEL_FEATURES_CHANGED_EVENT,
+        onFeaturesChanged,
+      );
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
@@ -136,25 +180,32 @@ const KnowledgePage: FC = () => {
       const imageEmbedRequired = isImageEmbedRequired(features);
 
       const [embResp, multiResp] = await Promise.all([
-        axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`
-        ).catch(() => null),
+        axiosInstance
+          .get<
+            { data?: { ready: boolean } } | { ready: boolean }
+          >(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`)
+          .catch(() => null),
         imageEmbedRequired
-          ? axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
-              `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`
-            ).catch(() => null)
+          ? axiosInstance
+              .get<
+                { data?: { ready: boolean } } | { ready: boolean }
+              >(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`)
+              .catch(() => null)
           : Promise.resolve(null),
       ]);
       const unwrap = (resp: typeof embResp): boolean | null => {
         if (!resp) return null;
-        const d = resp.data && typeof resp.data === 'object' && 'data' in resp.data
-          ? (resp.data as { data?: { ready: boolean } }).data
-          : resp.data as { ready: boolean };
+        const d =
+          resp.data && typeof resp.data === "object" && "data" in resp.data
+            ? (resp.data as { data?: { ready: boolean } }).data
+            : (resp.data as { ready: boolean });
         return d?.ready ?? null;
       };
       setEmbeddingReady(unwrap(embResp));
       // null means "not applicable" — does not trigger disabled state.
-      setMultimodalEmbeddingReady(imageEmbedRequired ? unwrap(multiResp) : null);
+      setMultimodalEmbeddingReady(
+        imageEmbedRequired ? unwrap(multiResp) : null,
+      );
     } catch {
       setEmbeddingReady(null);
       setMultimodalEmbeddingReady(null);
@@ -296,7 +347,8 @@ const KnowledgePage: FC = () => {
               type="link"
               danger
               onClick={() => {
-                const knowledgeName = data.display_name || data.dataset_id || "";
+                const knowledgeName =
+                  data.display_name || data.dataset_id || "";
                 confirmRef.current?.onOpen({
                   id: data.dataset_id || "",
                   title: t("knowledge.deleteTitle", { name: knowledgeName }),
@@ -467,7 +519,10 @@ const KnowledgePage: FC = () => {
         if (type === DocTypeEnum.Folder) {
           return t("knowledge.folder");
         }
-        return FileUtils.getSuffix(record.display_name || "") || t("knowledge.unknown");
+        return (
+          FileUtils.getSuffix(record.display_name || "") ||
+          t("knowledge.unknown")
+        );
       },
     },
     {
@@ -495,7 +550,9 @@ const KnowledgePage: FC = () => {
     KnowledgeBaseServiceApi()
       .datasetServiceAllDatasetTags()
       .then((res) => {
-        const uniqueTags = Array.from(new Set((res.data.tags || []).filter(Boolean)));
+        const uniqueTags = Array.from(
+          new Set((res.data.tags || []).filter(Boolean)),
+        );
         setTags([ALL_TAGS, ...uniqueTags.filter((tag) => tag !== ALL_TAGS)]);
       })
       .catch(() => {
@@ -618,7 +675,11 @@ const KnowledgePage: FC = () => {
           dataset: data,
         })
         .then(() => {
-          message.success(data.dataset_id ? t("knowledge.editSuccess") : t("knowledge.createSuccess"));
+          message.success(
+            data.dataset_id
+              ? t("knowledge.editSuccess")
+              : t("knowledge.createSuccess"),
+          );
           getTags();
           getTableData();
         });
@@ -637,7 +698,9 @@ const KnowledgePage: FC = () => {
 
   return (
     <div className="knowledge-list-page">
-      <h2 className="knowledge-title admin-page-title">{t("layout.knowledgeBase")}</h2>
+      <h2 className="knowledge-title admin-page-title">
+        {t("layout.knowledgeBase")}
+      </h2>
       {embeddingReady === false ? (
         <Alert
           banner
@@ -649,12 +712,17 @@ const KnowledgePage: FC = () => {
                 <a
                   href="/model-providers"
                   style={{ marginLeft: 8, fontWeight: 500 }}
-                  onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+                  onClick={(e: MouseEvent<HTMLAnchorElement>) => {
+                    e.preventDefault();
+                    navigate("/model-providers");
+                  }}
                 >
                   {t("knowledge.goToConfig")}
                 </a>
               </span>
-            ) : t("knowledge.embeddingNotReadyBanner")
+            ) : (
+              t("knowledge.embeddingNotReadyBanner")
+            )
           }
           showIcon
           type="warning"
@@ -671,12 +739,17 @@ const KnowledgePage: FC = () => {
                 <a
                   href="/model-providers"
                   style={{ marginLeft: 8, fontWeight: 500 }}
-                  onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+                  onClick={(e: MouseEvent<HTMLAnchorElement>) => {
+                    e.preventDefault();
+                    navigate("/model-providers");
+                  }}
                 >
                   {t("knowledge.goToConfig")}
                 </a>
               </span>
-            ) : t("knowledge.multimodalEmbeddingNotReadyBanner")
+            ) : (
+              t("knowledge.multimodalEmbeddingNotReadyBanner")
+            )
           }
           showIcon
           type="warning"
@@ -691,29 +764,10 @@ const KnowledgePage: FC = () => {
           }
           searchKey="keyword"
           btnText={t("knowledge.createKnowledgeBase")}
-          btnDisabled={embeddingReady === false || multimodalEmbeddingReady === false}
-          btnDisabledTooltip={
-            isAdmin ? (
-              <span>
-                {embeddingReady === false
-                  ? t("knowledge.embeddingNotReadyBannerAdmin")
-                  : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
-                <a
-                  href="/model-providers"
-                  style={{ marginLeft: 8, color: '#fff', textDecoration: 'underline' }}
-                  onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
-                >
-                  {t("knowledge.goToConfig")}
-                </a>
-              </span>
-            ) : (
-              embeddingReady === false
-                ? t("knowledge.embeddingNotReadyBanner")
-                : t("knowledge.multimodalEmbeddingNotReadyBanner")
-            )
-          }
+          btnDisabled={createActionDisabled}
+          btnDisabledTooltip={createActionDisabledTooltip}
           onClick={() => {
-            createUpdateRef.current?.onOpen();
+            createKnowledgeRef.current?.onOpen();
           }}
           onSearch={() => {
             getTableData();
@@ -768,7 +822,9 @@ const KnowledgePage: FC = () => {
           knowledgeType === "knowledgeBase" ? "dataset_id" : "document_id"
         }
         columns={
-          (knowledgeType === "knowledgeBase" ? columns : knowledgeColumns) as ColumnsType<any>
+          (knowledgeType === "knowledgeBase"
+            ? columns
+            : knowledgeColumns) as ColumnsType<any>
         }
         loading={loading}
         dataSource={dataSource}
@@ -787,6 +843,12 @@ const KnowledgePage: FC = () => {
       <TypedConfirmModal ref={confirmRef} onClick={onDelete} />
 
       <CreateUpdateModal ref={createUpdateRef} onUpdate={onUpdate} />
+      <CreateKnowledgeBaseModal
+        ref={createKnowledgeRef}
+        syncCreateVm={syncCreateVm}
+        onCreate={onUpdate}
+      />
+      <SyncKnowledgeBaseCreationFlow vm={syncCreateVm} hideProviderModal />
       <EditTags
         open={showTagEditModal}
         record={tagEditRecord as TreeNode | null}

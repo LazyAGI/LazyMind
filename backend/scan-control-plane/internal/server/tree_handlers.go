@@ -176,6 +176,7 @@ func targetAccessFromChildren(req tree.TargetTreeChildrenRequest) access.Binding
 		SourceID:         stringOption(req.ProviderOptions, "source_id"),
 		BindingID:        stringOption(req.ProviderOptions, "binding_id"),
 		ConnectorType:    req.ConnectorType,
+		TargetType:       req.TargetType,
 		AgentID:          req.AgentID,
 		AuthConnectionID: req.AuthConnectionID,
 	}
@@ -207,6 +208,7 @@ func targetAccessFromSearch(req tree.TargetTreeSearchRequest) access.BindingTarg
 		SourceID:         stringOption(req.ProviderOptions, "source_id"),
 		BindingID:        stringOption(req.ProviderOptions, "binding_id"),
 		ConnectorType:    req.ConnectorType,
+		TargetType:       req.TargetType,
 		AgentID:          req.AgentID,
 		AuthConnectionID: req.AuthConnectionID,
 	}

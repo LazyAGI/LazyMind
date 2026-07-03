@@ -1,10 +1,11 @@
-import { Typography } from "antd";
+import { Alert, Typography } from "antd";
+import { Link } from "react-router-dom";
 import TypedConfirmModal from '@/components/ui/TypedConfirmModal';
 import DataSourceWizardModal from "./DataSourceWizardModal";
 import DataSourceAssetTable from "./management/DataSourceAssetTable";
-import DataSourceProviderPanel from "./management/DataSourceProviderPanel";
-import DataSourceManagementModals from "./management/DataSourceManagementModals";
+import DatabaseConnectionModal from "../database/DatabaseConnectionModal";
 import type { DataSourceManagementVm } from "../hooks/useDataSourceManagement";
+import { CLOUD_DOCUMENTS_PATH } from "@/modules/modelProvider/utils/cloudDocumentUrls";
 
 const { Paragraph } = Typography;
 
@@ -12,8 +13,6 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
   const {
     t,
     form,
-    activeView,
-    setActiveView,
     wizardOpen,
     wizardStep,
     setWizardStep,
@@ -39,6 +38,10 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
     handleCloseWizard,
     handleNextStep,
     requestSaveWithSyncConfirm,
+    databaseEditingConnection,
+    databaseEditSaving,
+    closeDatabaseConnectionConfig,
+    handleSaveDatabaseConnectionConfig,
     confirmRef,
     handleTypedConfirm,
     handleSelectType,
@@ -59,32 +62,29 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
         </div>
       </div>
 
-      <div className="data-source-view-tabs">
-        <button
-          type="button"
-          className={activeView === "assets" ? "selected" : ""}
-          onClick={() => setActiveView("assets")}
-        >
-          {t("admin.dataSourceListTitle")}
-        </button>
-        <button
-          type="button"
-          className={activeView === "connectors" ? "selected" : ""}
-          onClick={() => setActiveView("connectors")}
-        >
-          {t("admin.dataSourceProviderTitle")}
-        </button>
-      </div>
+      <Alert
+        showIcon
+        type="info"
+        className="data-source-cloud-doc-link-alert"
+        message={
+          <>
+            {t("modelProvider.cloudDocuments.linkFromDataSource")}{" "}
+            <Link to={CLOUD_DOCUMENTS_PATH}>{t("modelProvider.tabs.cloudDocuments")}</Link>
+          </>
+        }
+      />
 
       <section className="data-source-workbench">
-        {activeView === "assets" ? (
-          <DataSourceAssetTable vm={vm} />
-        ) : (
-          <DataSourceProviderPanel vm={vm} />
-        )}
+        <DataSourceAssetTable vm={vm} />
       </section>
 
-      <DataSourceManagementModals vm={vm} />
+      <DatabaseConnectionModal
+        open={Boolean(databaseEditingConnection)}
+        editing={databaseEditingConnection}
+        saving={databaseEditSaving}
+        onCancel={closeDatabaseConnectionConfig}
+        onSubmit={handleSaveDatabaseConnectionConfig}
+      />
 
       <DataSourceWizardModal
         t={t}

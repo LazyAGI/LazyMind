@@ -46,6 +46,11 @@ interface ToolManagementSectionProps {
 const DEFAULT_TOOL_PAGE_SIZE = 6;
 const TOOL_PAGE_SIZE_OPTIONS = [6, 12, 20, 50];
 
+const paginateRecords = <T,>(records: T[], page: number, pageSize: number) => {
+  const start = (page - 1) * pageSize;
+  return records.slice(start, start + pageSize);
+};
+
 const getMcpActionKey = (action: string, id: string) => `${action}:${id}`;
 const getMcpToolId = (tool: McpToolAsset) => tool.id || tool.name;
 const normalizeMcpTransportValue = (value?: string) =>
@@ -90,9 +95,16 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
   const [mcpToolSaving, setMcpToolSaving] = useState(false);
   const [mcpForm] = Form.useForm<McpServerDraft>();
 
-  const listOptions = useMemo(
-    () => ({ keyword: query, page: currentPage, pageSize }),
-    [currentPage, pageSize, query],
+  const listOptions = useMemo(() => ({ keyword: query }), [query]);
+
+  const displayedToolAssets = useMemo(
+    () => paginateRecords(toolAssets, currentPage, pageSize),
+    [currentPage, pageSize, toolAssets],
+  );
+
+  const displayedMcpServers = useMemo(
+    () => paginateRecords(mcpServers, currentPage, pageSize),
+    [currentPage, mcpServers, pageSize],
   );
 
   const markToolActionLoading = useCallback((key: string, loading: boolean) => {
@@ -619,8 +631,8 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
         ) : (
           <div className="model-provider-service-grid model-provider-managed-tool-grid">
             {view === "mcp"
-              ? mcpServers.map((server) => renderMcpServerCard(server))
-              : toolAssets.map((tool) => renderBuiltInToolCard(tool))}
+              ? displayedMcpServers.map((server) => renderMcpServerCard(server))
+              : displayedToolAssets.map((tool) => renderBuiltInToolCard(tool))}
           </div>
         )}
       </Spin>
