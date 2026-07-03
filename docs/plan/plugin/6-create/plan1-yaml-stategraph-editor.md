@@ -115,7 +115,7 @@ x-layout:
   step_generate:     { x: 520, y: 200 }
 
 artifacts:
-  doc_draft:        { type: document }
+  doc_draft:        { type: file }
   review_comments:  { type: text }
 
 steps:
