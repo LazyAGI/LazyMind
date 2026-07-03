@@ -118,7 +118,7 @@ export default function SkillManagementSection() {
         setMarketCatalogAssets(Array.from(deduped.values()));
       } catch (error) {
         if (!ignore) {
-          console.error("Load skill market catalog failed:", error);
+          console.error("Load skill plaza catalog failed:", error);
           setMarketCatalogAssets([]);
         }
       } finally {

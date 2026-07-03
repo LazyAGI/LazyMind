@@ -2639,7 +2639,7 @@ const zhCN = {
     memoryBuiltinSkillEnableFailed: "启用内置技能失败",
     memorySkillViewBarLabel: "技能管理页面切换",
     memorySkillViewInstalled: "我的技能",
-    memorySkillViewMarket: "技能市场",
+    memorySkillViewMarket: "技能广场",
     memorySkillViewMarketHelp:
       "只包含平台预置和管理员上架的团队技能；用户自行上传的技能不在这里展示。",
     memorySkillViewUpload: "技能上传",
@@ -2689,13 +2689,13 @@ const zhCN = {
     memorySkillMarketUninstall: "卸载",
     memorySkillMarketEmpty: "暂无匹配技能，请调整搜索或筛选条件。",
     memorySkillMarketMockBanner:
-      "当前展示为演示数据。接入后端内置技能目录后，将自动切换为真实技能市场。",
+      "当前展示为演示数据。接入后端内置技能目录后，将自动切换为真实技能广场。",
     memorySkillMarketMockInstallSuccess:
       "「{{name}}」已安装（演示），可在「我的技能」中查看。",
-    memorySkillMarketMockUninstallHint: "演示技能请返回技能市场点击「卸载」移除。",
+    memorySkillMarketMockUninstallHint: "演示技能请返回技能广场点击「卸载」移除。",
     memorySkillMarketNotInstalled: "该技能尚未安装",
     memorySkillMarketUninstallTitle: "确认卸载",
-    memorySkillMarketUninstallContent: "卸载后可在技能市场中重新安装「{{name}}」。",
+    memorySkillMarketUninstallContent: "卸载后可在技能广场中重新安装「{{name}}」。",
     memorySkillMarketUninstallSuccess: "「{{name}}」已卸载",
     memorySkillInstalledBadge: "已安装",
     memorySkillInstalledSourceAll: "所有来源",
@@ -2704,7 +2704,7 @@ const zhCN = {
     memorySkillSourcePersonal: "个人上传",
     memorySkillUploadTitle: "技能上传",
     memorySkillUploadHelp:
-      "给出 GitHub 链接，或选择本地技能包上传。上传完成后只进入「我的技能」，不会上架到团队技能市场。",
+      "给出 GitHub 链接，或选择本地技能包上传。上传完成后只进入「我的技能」，不会上架到团队技能广场。",
     memorySkillUploadSourceTitle: "导入方式",
     memorySkillUploadSourceHelp:
       "可填写 GitHub/内部仓库链接，也可选择本地技能包。上传成功后来源标记为个人上传。",
@@ -2724,7 +2724,7 @@ const zhCN = {
     memorySkillUploadFailed: "技能上传失败",
     memorySkillAdminPublishButton: "管理员上架技能",
     memorySkillAdminPublishTitle: "管理员上架技能",
-    memorySkillAdminPublishDesc: "上架到技能市场，供团队成员查看和安装。",
+    memorySkillAdminPublishDesc: "上架到技能广场，供团队成员查看和安装。",
     memorySkillAdminPublishSubmit: "上架技能",
     memorySkillAdminPublishMissing: "请先填写仓库链接，或选择一个本地技能包。",
     memorySkillAdminPublishFileTitle: "从本地包上架",
@@ -2732,7 +2732,7 @@ const zhCN = {
       "管理员上架的团队技能，等待补充说明、版本和适用场景。",
     memorySkillAdminPublishDefaultName: "新上架技能",
     memorySkillAdminPublishUrlPlaceholderContent: "请补充该技能的说明与适用场景。",
-    memorySkillAdminPublishSuccess: "「{{name}}」已进入技能市场",
+    memorySkillAdminPublishSuccess: "「{{name}}」已进入技能广场",
     memorySkillAdminPublishFailed: "技能上架失败",
     memorySkillParent: "主技能",
     memorySkillChild: "细分技能",

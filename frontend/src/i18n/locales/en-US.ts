@@ -2782,7 +2782,7 @@ const enUS = {
     memoryBuiltinSkillEnableFailed: "Failed to enable built-in skill",
     memorySkillViewBarLabel: "Skill management views",
     memorySkillViewInstalled: "My Skills",
-    memorySkillViewMarket: "Skill Market",
+    memorySkillViewMarket: "Skill Plaza",
     memorySkillViewMarketHelp:
       "Only platform built-in and admin-published team skills are shown here. Personally uploaded skills are not listed.",
     memorySkillViewUpload: "Upload Skill",
@@ -2833,15 +2833,15 @@ const enUS = {
     memorySkillMarketUninstall: "Uninstall",
     memorySkillMarketEmpty: "No matching skills. Try adjusting search or filters.",
     memorySkillMarketMockBanner:
-      "Showing demo data. Once the built-in skill catalog is connected, the real market will appear automatically.",
+      "Showing demo data. Once the built-in skill catalog is connected, the real skill plaza will appear automatically.",
     memorySkillMarketMockInstallSuccess:
       '"{{name}}" has been installed (demo). View it under My Skills.',
     memorySkillMarketMockUninstallHint:
-      "Remove demo skills from the Skill Market using Uninstall.",
+      "Remove demo skills from the Skill Plaza using Uninstall.",
     memorySkillMarketNotInstalled: "This skill is not installed yet",
     memorySkillMarketUninstallTitle: "Confirm uninstall",
     memorySkillMarketUninstallContent:
-      'After uninstalling, you can reinstall "{{name}}" from the skill market.',
+      'After uninstalling, you can reinstall "{{name}}" from the skill plaza.',
     memorySkillMarketUninstallSuccess: '"{{name}}" has been uninstalled',
     memorySkillInstalledBadge: "Installed",
     memorySkillInstalledSourceAll: "All sources",
@@ -2850,7 +2850,7 @@ const enUS = {
     memorySkillSourcePersonal: "Personal upload",
     memorySkillUploadTitle: "Upload Skill",
     memorySkillUploadHelp:
-      "Provide a GitHub link or upload a local skill package. Uploaded skills are added to My Skills only and are not published to the team market.",
+      "Provide a GitHub link or upload a local skill package. Uploaded skills are added to My Skills only and are not published to the team skill plaza.",
     memorySkillUploadSourceTitle: "Import method",
     memorySkillUploadSourceHelp:
       "Use either a GitHub/internal repo link or a local package. Uploaded skills are marked as personal uploads.",
@@ -2872,9 +2872,9 @@ const enUS = {
     memorySkillUploadSuccess: '"{{name}}" has been added to My Skills',
     memorySkillUploadFailed: "Failed to upload skill",
     memorySkillAdminPublishButton: "Publish skill (admin)",
-    memorySkillAdminPublishTitle: "Publish skill to market",
+    memorySkillAdminPublishTitle: "Publish skill to plaza",
     memorySkillAdminPublishDesc:
-      "Publish to the skill market so team members can browse and install it.",
+      "Publish to the skill plaza so team members can browse and install it.",
     memorySkillAdminPublishSubmit: "Publish skill",
     memorySkillAdminPublishMissing: "Provide a repository link or choose a local package first.",
     memorySkillAdminPublishFileTitle: "Publish from local package",
@@ -2883,7 +2883,7 @@ const enUS = {
     memorySkillAdminPublishDefaultName: "New published skill",
     memorySkillAdminPublishUrlPlaceholderContent:
       "Add the skill description and applicable scenarios here.",
-    memorySkillAdminPublishSuccess: '"{{name}}" has been added to the skill market',
+    memorySkillAdminPublishSuccess: '"{{name}}" has been added to the skill plaza',
     memorySkillAdminPublishFailed: "Failed to publish skill",
     memorySkillParent: "Primary Skill",
     memorySkillChild: "Subskill",
