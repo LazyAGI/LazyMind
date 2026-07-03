@@ -198,6 +198,28 @@ export interface SkillReviewRunRecord {
   requestId: string;
 }
 
+export interface SkillReviewTaskStatusRecord {
+  task: ResourceUpdateTaskRecord | null;
+  requestId: string;
+  status: string;
+  runStatus: string;
+  resultCount: number;
+}
+
+export interface SkillReviewTaskListResult {
+  records: SkillReviewTaskStatusRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ListSkillReviewTaskOptions {
+  status?: string;
+  requestId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 export interface SkillReviewResultRecord {
   id: string;
   skillName: string;
@@ -391,6 +413,30 @@ const normalizeSkillReviewSummary = (payload: unknown): SkillReviewSummaryRecord
     windowEnd: toStringValue(raw?.window_end, ""),
     runningTask: normalizeResourceUpdateTask(raw?.running_task) || undefined,
     runningRequestId: toStringValue(raw?.running_requestid, ""),
+  };
+};
+
+const normalizeSkillReviewTaskStatus = (
+  payload: unknown,
+): SkillReviewTaskStatusRecord | null => {
+  const raw = toRawObject(payload);
+  if (!raw) {
+    return null;
+  }
+
+  const task = normalizeResourceUpdateTask(raw?.task);
+  const requestId = toStringValue(raw?.requestid, "");
+  const status = toStringValue(raw?.status, "");
+  if (!task && !requestId && !status) {
+    return null;
+  }
+
+  return {
+    task,
+    requestId,
+    status,
+    runStatus: toStringValue(raw?.run_status, ""),
+    resultCount: toNumberValue(raw?.result_count, 0),
   };
 };
 
@@ -1054,6 +1100,30 @@ export async function getResourceUpdateTask(
   );
   const payload = unwrapEnvelope<unknown>(response.data);
   return normalizeResourceUpdateTask(payload);
+}
+
+export async function listSkillReviewTasks(
+  options: ListSkillReviewTaskOptions = {},
+): Promise<SkillReviewTaskListResult> {
+  const response = await axiosInstance.get(`${coreBasePath}/skill-review/tasks`, {
+    params: {
+      status: options.status,
+      requestid: options.requestId,
+      page: options.page ?? 1,
+      page_size: options.pageSize ?? 20,
+    },
+  });
+  const payload = unwrapEnvelope<unknown>(response.data);
+  const raw = toRawObject(payload);
+  const items = Array.isArray(raw?.items) ? raw.items : [];
+  return {
+    records: items
+      .map((item) => normalizeSkillReviewTaskStatus(item))
+      .filter((item): item is SkillReviewTaskStatusRecord => Boolean(item)),
+    total: toNumberValue(raw?.total, items.length),
+    page: toNumberValue(raw?.page, options.page ?? 1),
+    pageSize: toNumberValue(raw?.page_size ?? raw?.pageSize, options.pageSize ?? 20),
+  };
 }
 
 export async function listSkillReviewResultsByRequest(

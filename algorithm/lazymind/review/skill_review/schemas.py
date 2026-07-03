@@ -13,7 +13,6 @@ class SkillReviewRequest(BaseModel):
     start_time: datetime
     end_time: datetime
     user_id: Optional[str] = None
-    trigger_reason: str = ''
     min_user_turns: int = Field(default=2, ge=0)
     min_tool_turns: int = Field(default=5, ge=0)
     artifact_dir: Optional[str] = None

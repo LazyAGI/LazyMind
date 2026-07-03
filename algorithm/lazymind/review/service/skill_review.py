@@ -214,7 +214,6 @@ def _run_user_skill_review(
             qualified_trajectories,
             llm,
             pending_records=pending_records,
-            force_extract=request.trigger_reason.strip().lower() == 'manual',
             artifact_dir=base_work_dir,
         )
         state.stage_reports.append(draft_report)

@@ -195,6 +195,7 @@ func TestReviewResultActionRoutesRegistered(t *testing.T) {
 		{http.MethodPost, "/skill-review-results/review-1:reject", "/skill-review-results/{review_result_id}:reject", "review-1"},
 		{http.MethodGet, "/skill-review:summary", "/skill-review:summary", ""},
 		{http.MethodPost, "/skill-review:run", "/skill-review:run", ""},
+		{http.MethodGet, "/skill-review/tasks", "/skill-review/tasks", ""},
 		{http.MethodPost, "/memory-review-results/review-2:accept", "/memory-review-results/{review_result_id}:accept", "review-2"},
 		{http.MethodGet, "/evolution/tasks/task-1", "/evolution/tasks/{task_id}", "task-1"},
 	}

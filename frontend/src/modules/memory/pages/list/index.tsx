@@ -174,12 +174,19 @@ export default function MemoryManagementListPage() {
     ? { x: 980, y: memoryTableBodyHeight }
     : { x: 980 };
   const manualSkillReviewCount = manualSkillReviewSummary?.qualifiedSessionCount ?? 0;
+  const manualSkillReviewHasRunningTask =
+    manualSkillReviewSummary?.runningTask?.status === "pending" ||
+    manualSkillReviewSummary?.runningTask?.status === "running";
+  const manualSkillReviewButtonBusy =
+    manualSkillReviewRunning || manualSkillReviewHasRunningTask;
   const manualSkillReviewButtonDisabled =
-    manualSkillReviewLoading || manualSkillReviewRunning || manualSkillReviewCount <= 0;
+    manualSkillReviewLoading || manualSkillReviewButtonBusy || manualSkillReviewCount <= 0;
   const manualSkillReviewButtonTip =
-    manualSkillReviewCount <= 0
-      ? t("admin.memoryManualSkillReviewNoContent")
-      : t("admin.memoryManualSkillReviewReady");
+    manualSkillReviewButtonBusy
+      ? t("admin.memoryManualSkillReviewStarted")
+      : manualSkillReviewCount <= 0
+        ? t("admin.memoryManualSkillReviewNoContent")
+        : t("admin.memoryManualSkillReviewReady");
   const manualSkillReviewStatusText =
     manualSkillReviewCount > 0
       ? t("admin.memoryManualSkillReviewCount", {
@@ -380,7 +387,7 @@ export default function MemoryManagementListPage() {
                   type="primary"
                   icon={<BulbOutlined />}
                   disabled={manualSkillReviewButtonDisabled}
-                  loading={manualSkillReviewRunning}
+                  loading={manualSkillReviewButtonBusy}
                   onClick={() => void handleRunManualSkillReview()}
                 >
                   {t("admin.memoryManualSkillReviewRun")}

@@ -59,14 +59,13 @@ def build_skill_drafts(
     llm: AutoModel,
     *,
     pending_records: list[dict] | None = None,
-    force_extract: bool = False,
     max_workers: int = DEFAULT_STAGE_WORKERS,
     artifact_dir: Path | None = None,
 ) -> tuple[list[SkillDraft], dict]:
     """Build drafts from trajectories and pending skill-review records."""
     started_at = start_stage()
     pending_records = pending_records or []
-    jobs = _draft_jobs(trajectories, pending_records, llm, force_extract=force_extract)
+    jobs = _draft_jobs(trajectories, pending_records, llm)
     results: list[SkillDraft | None] = [None] * len(jobs)
     errors: list[dict] = []
 
@@ -107,22 +106,12 @@ def build_skill_drafts(
     return drafts, report
 
 
-def _draft_jobs(
-    trajectories: list[Trajectory],
-    pending_records: list[dict],
-    llm: AutoModel,
-    *,
-    force_extract: bool = False,
-) -> list[dict]:
+def _draft_jobs(trajectories: list[Trajectory], pending_records: list[dict], llm: AutoModel) -> list[dict]:
     jobs = [
         {
             'kind': 'trajectory',
             'item_id': trajectory.session_id,
-            'build': lambda trajectory=trajectory: _build_trajectory_draft(
-                trajectory,
-                llm,
-                force_extract=force_extract,
-            ),
+            'build': lambda trajectory=trajectory: _build_trajectory_draft(trajectory, llm),
         }
         for trajectory in trajectories
     ]
@@ -158,20 +147,14 @@ def _draft_report_metadata(
     return metadata
 
 
-def _build_trajectory_draft(
-    trajectory: Trajectory,
-    llm: AutoModel,
-    *,
-    force_extract: bool = False,
-) -> SkillDraft | None:
+def _build_trajectory_draft(trajectory: Trajectory, llm: AutoModel) -> SkillDraft | None:
     try:
         trajectory_text = trajectory.steps_text
 
-        if not force_extract:
-            gate = _build_skill_extraction_gate(trajectory, llm)
-            if not gate.get('should_extract'):
-                LOG.info(f'[SkillReview] skip skill draft for trajectory {trajectory.session_id}')
-                return None
+        gate = _build_skill_extraction_gate(trajectory, llm)
+        if not gate.get('should_extract'):
+            LOG.info(f'[SkillReview] skip skill draft for trajectory {trajectory.session_id}')
+            return None
 
         contextual_description = _build_contextual_description(trajectory, llm)
         refined_trajectory = _build_refined_trajectory(trajectory, llm)

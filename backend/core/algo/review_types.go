@@ -5,7 +5,6 @@ type SkillReviewRequest struct {
 	UserID          string         `json:"user_id"`
 	StartTime       string         `json:"start_time"`
 	EndTime         string         `json:"end_time"`
-	TriggerReason   string         `json:"trigger_reason,omitempty"`
 	MinUserTurns    int            `json:"min_user_turns,omitempty"`
 	MinToolTurns    int            `json:"min_tool_turns,omitempty"`
 	PendingSkillIDs []string       `json:"pending_skill_ids,omitempty"`

@@ -23,70 +23,31 @@ def shutdown_background_executor() -> None:
 @router.post('/api/chat/skill_review', summary='Run skill review for chat histories in a time range')
 async def skill_review(payload: SkillReviewRequest):
     loop = asyncio.get_running_loop()
-    if payload.trigger_reason.strip().lower() != 'manual':
-        try:
-            future = loop.run_in_executor(
-                background_executor,
-                run_skill_review,
-                payload,
-            )
-        except Exception as exc:
-            LOG.exception(f'[SkillReview] failed to submit skill review task: {exc}')
-            return JSONResponse(
-                status_code=500,
-                content={
-                    'code': 500,
-                    'msg': f'skill review submit failed: {exc}',
-                    'data': {'requestid': payload.requestid},
-                },
-            )
-
-        LOG.info(f'[SkillReview] skill review accepted: {payload.requestid} for user {payload.user_id}')
-        future.add_done_callback(lambda item: _log_skill_review_result(payload, item))
-        return JSONResponse(
-            status_code=200,
-            content={
-                'code': 0,
-                'msg': 'skill review accepted',
-                'data': {'status': 'running', 'requestid': payload.requestid},
-            },
-        )
-
     try:
-        result = await loop.run_in_executor(
+        future = loop.run_in_executor(
             background_executor,
             run_skill_review,
             payload,
         )
     except Exception as exc:
-        LOG.exception(f'[SkillReview] skill review failed: {exc}')
+        LOG.exception(f'[SkillReview] failed to submit skill review task: {exc}')
         return JSONResponse(
             status_code=500,
             content={
                 'code': 500,
-                'msg': f'skill review failed: {exc}',
-                'data': {'status': 'failed', 'requestid': payload.requestid},
+                'msg': f'skill review submit failed: {exc}',
+                'data': {'requestid': payload.requestid},
             },
         )
 
-    LOG.info(f'[SkillReview] skill review completed: {payload.requestid} for user {payload.user_id}')
-    LOG.info(f'[SkillReview] skill review result: {result.model_dump()}')
-    if not result.success:
-        return JSONResponse(
-            status_code=500,
-            content={
-                'code': 500,
-                'msg': result.error or 'skill review failed',
-                'data': {'status': 'failed', 'requestid': payload.requestid},
-            },
-        )
-
+    LOG.info(f'[SkillReview] skill review accepted: {payload.requestid} for user {payload.user_id}')
+    future.add_done_callback(lambda item: _log_skill_review_result(payload, item))
     return JSONResponse(
         status_code=200,
         content={
             'code': 0,
-            'msg': 'skill review completed',
-            'data': {'status': 'completed', 'requestid': payload.requestid},
+            'msg': 'skill review accepted',
+            'data': {'status': 'running', 'requestid': payload.requestid},
         },
     )
 

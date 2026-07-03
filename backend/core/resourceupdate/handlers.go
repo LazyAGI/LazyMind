@@ -46,7 +46,6 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 		UserID:          request.UserID,
 		StartTime:       request.StartTime,
 		EndTime:         request.EndTime,
-		TriggerReason:   skillReviewTriggerReason(request),
 		MinUserTurns:    w.cfg.MinUserTurns,
 		MinToolTurns:    w.cfg.MinToolTurns,
 		PendingSkillIDs: pendingSkillIDs,
@@ -88,13 +87,6 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 		Int("expired_pending_skill_count", len(pendingSkillIDs)).
 		Msg(logEventSkillReviewAccepted)
 	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone}
-}
-
-func skillReviewTriggerReason(request skillGenerateRequestJSON) string {
-	if strings.TrimSpace(request.StartTriggerReason) != "" {
-		return strings.TrimSpace(request.StartTriggerReason)
-	}
-	return strings.TrimSpace(request.TriggerReason)
 }
 
 func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdateTask) (skillGenerateRequestJSON, taskOutcome) {

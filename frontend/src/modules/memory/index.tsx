@@ -46,11 +46,11 @@ import {
   discardSkillDraft,
   enableBuiltinSkill,
   generateSkillDraft,
-  getResourceUpdateTask,
   getSkillAssetDetail,
   getSkillReviewSummary,
   listIncomingSkillShares,
   listOutgoingSkillShares,
+  listSkillReviewTasks,
   listSkillReviewResultsByRequest,
   listSkillShareTargets,
   listSkillAssetsPage,
@@ -212,6 +212,7 @@ const isResourceUpdateTaskRunning = (status?: string) => {
 const MANUAL_SKILL_REVIEW_RESULT_ATTEMPTS = 5;
 const MANUAL_SKILL_REVIEW_SKILL_READY_ATTEMPTS = 8;
 const MANUAL_SKILL_REVIEW_RETRY_DELAY_MS = 1200;
+const MANUAL_SKILL_REVIEW_RUNNING_TASK_PAGE_SIZE = 1000;
 const waitManualSkillReviewRetry = () =>
   new Promise((resolve) => window.setTimeout(resolve, MANUAL_SKILL_REVIEW_RETRY_DELAY_MS));
 const getManualSkillReviewCreatedSkillNames = (results: SkillReviewResultRecord[]) =>
@@ -923,27 +924,33 @@ export default function MemoryManagement() {
     [],
   );
 
-  const pollManualSkillReviewTask = useCallback(
-    (taskId: string, requestId: string) => {
-      const normalizedTaskId = taskId.trim();
-      if (!normalizedTaskId) {
+  const pollManualSkillReviewTasks = useCallback(
+    (requestId: string) => {
+      const normalizedRequestId = requestId.trim();
+      if (!normalizedRequestId) {
+        return;
+      }
+      const pollingKey = `manual-skill-review:${normalizedRequestId}`;
+      if (manualSkillReviewPollingKeyRef.current === pollingKey) {
         return;
       }
 
       clearManualSkillReviewPollTimer();
+      manualSkillReviewPollingKeyRef.current = pollingKey;
       setManualSkillReviewRunning(true);
 
       const tick = async () => {
         try {
-          const task = await getResourceUpdateTask(normalizedTaskId);
-          if (!task) {
-            manualSkillReviewPollingKeyRef.current = "";
-            setManualSkillReviewRunning(false);
-            await refreshManualSkillReviewSummary({ silent: true });
+          const runningTasks = await listSkillReviewTasks({
+            status: "running",
+            requestId: normalizedRequestId,
+            page: 1,
+            pageSize: MANUAL_SKILL_REVIEW_RUNNING_TASK_PAGE_SIZE,
+          });
+          if (manualSkillReviewPollingKeyRef.current !== pollingKey) {
             return;
           }
-
-          if (isResourceUpdateTaskRunning(task.status)) {
+          if (runningTasks.records.length > 0) {
             manualSkillReviewPollTimerRef.current = window.setTimeout(tick, 2000);
             return;
           }
@@ -951,42 +958,31 @@ export default function MemoryManagement() {
           manualSkillReviewPollingKeyRef.current = "";
           clearManualSkillReviewPollTimer();
 
-          if (task.status === "done") {
-            const results = await loadManualSkillReviewResults(requestId);
-            try {
-              await waitForManualSkillReviewCreatedSkills(results);
-            } catch (error) {
-              console.warn("Wait manual skill review skills failed:", error);
-            }
-            await Promise.all([
-              refreshSkillAssets({ page: 1, preserveChangeProposals: true }),
-              refreshManualSkillReviewSummary({ silent: true }),
-            ]);
-            setManualSkillReviewResults(results);
-            setManualSkillReviewResultStatus(results.length > 0 ? "done" : "empty");
-            setManualSkillReviewRunning(false);
-            if (results.length > 0) {
-              message.success(t("admin.memoryManualSkillReviewDone"));
-            } else {
-              message.info(t("admin.memoryManualSkillReviewNoResult"));
-            }
-            return;
+          const results = await loadManualSkillReviewResults(normalizedRequestId);
+          try {
+            await waitForManualSkillReviewCreatedSkills(results);
+          } catch (error) {
+            console.warn("Wait manual skill review skills failed:", error);
           }
-
+          await Promise.all([
+            refreshSkillAssets({ page: 1, preserveChangeProposals: true }),
+            refreshManualSkillReviewSummary({ silent: true }),
+          ]);
+          setManualSkillReviewResults(results);
+          setManualSkillReviewResultStatus(results.length > 0 ? "done" : "empty");
           setManualSkillReviewRunning(false);
-          setManualSkillReviewResults([]);
-          setManualSkillReviewResultStatus(task.status || "failed");
-          message.warning(
-            task.status === "skipped"
-              ? t("admin.memoryManualSkillReviewSkipped")
-              : t("admin.memoryManualSkillReviewFailed"),
-          );
-          await refreshManualSkillReviewSummary({ silent: true });
+          if (results.length > 0) {
+            message.success(t("admin.memoryManualSkillReviewDone"));
+          } else {
+            message.info(t("admin.memoryManualSkillReviewNoResult"));
+          }
         } catch (error) {
-          manualSkillReviewPollingKeyRef.current = "";
+          if (manualSkillReviewPollingKeyRef.current === pollingKey) {
+            manualSkillReviewPollingKeyRef.current = "";
+          }
           clearManualSkillReviewPollTimer();
           setManualSkillReviewRunning(false);
-          console.error("Poll manual skill review task failed:", error);
+          console.error("Poll manual skill review tasks failed:", error);
           message.error(
             getLocalizedErrorMessage(error, t("admin.memoryManualSkillReviewRunFailed")) ||
               t("admin.memoryManualSkillReviewRunFailed"),
@@ -1016,16 +1012,18 @@ export default function MemoryManagement() {
       const result = await runSkillReview();
       setManualSkillReviewSummary(result.summary);
       message.success(t("admin.memoryManualSkillReviewStarted"));
-      if (result.task) {
-        pollManualSkillReviewTask(
-          result.task.id,
-          result.requestId || result.summary.runningRequestId,
-        );
+      const requestId = result.requestId || result.summary.runningRequestId;
+      if (requestId) {
+        pollManualSkillReviewTasks(requestId);
       } else {
         setManualSkillReviewRunning(false);
         await refreshManualSkillReviewSummary({ silent: true });
       }
     } catch (error) {
+      if ((error as { response?: { status?: number } })?.response?.status === 409) {
+        await refreshManualSkillReviewSummary({ silent: true });
+        return;
+      }
       setManualSkillReviewRunning(false);
       console.error("Run manual skill review failed:", error);
       message.error(
@@ -1034,7 +1032,7 @@ export default function MemoryManagement() {
       );
       await refreshManualSkillReviewSummary({ silent: true });
     }
-  }, [pollManualSkillReviewTask, refreshManualSkillReviewSummary, t]);
+  }, [pollManualSkillReviewTasks, refreshManualSkillReviewSummary, t]);
 
   useEffect(
     () => () => {
@@ -1057,20 +1055,16 @@ export default function MemoryManagement() {
       return;
     }
     const runningTask = manualSkillReviewSummary?.runningTask;
-    if (!runningTask || !isResourceUpdateTaskRunning(runningTask.status)) {
+    const runningRequestId = manualSkillReviewSummary?.runningRequestId || "";
+    if (!runningTask || !runningRequestId || !isResourceUpdateTaskRunning(runningTask.status)) {
       return;
     }
-    const pollingKey = `${runningTask.id}:${manualSkillReviewSummary.runningRequestId}`;
-    if (manualSkillReviewPollingKeyRef.current === pollingKey) {
-      return;
-    }
-    manualSkillReviewPollingKeyRef.current = pollingKey;
-    pollManualSkillReviewTask(runningTask.id, manualSkillReviewSummary.runningRequestId);
+    pollManualSkillReviewTasks(runningRequestId);
   }, [
     activeTab,
     manualSkillReviewSummary?.runningRequestId,
     manualSkillReviewSummary?.runningTask,
-    pollManualSkillReviewTask,
+    pollManualSkillReviewTasks,
   ]);
 
   const refreshParentSkillAssets = useCallback(async () => {
