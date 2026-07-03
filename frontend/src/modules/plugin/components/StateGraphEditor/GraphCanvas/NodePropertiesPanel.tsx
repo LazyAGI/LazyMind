@@ -1,7 +1,10 @@
 import { Button, Form, Input, Select, Divider } from 'antd';
 import { CloseOutlined, PlusOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { StepNode, GraphModel } from '../core/model';
 import './NodePropertiesPanel.scss';
+
+const STEP_ID_REGEX = /^[a-zA-Z0-9_]+$/;
 
 interface Props {
   node: StepNode;
@@ -12,17 +15,18 @@ interface Props {
 }
 
 export default function NodePropertiesPanel({ node, model, onClose, onChange, onDelete }: Props) {
-  const slotOptions = Object.keys(model.slots).map((id) => ({ label: id, value: id }));
-
-  // Slots produced by topology-prior nodes (simplified: all slots not in own outputs)
-  const availableInputSlots = slotOptions.filter((o) => !node.outputs.includes(o.value));
+  const { t } = useTranslation();
+  const slotOptions = Object.keys(model.slots).map((id) => ({
+    label: model.slots[id].label ? `${id} (${model.slots[id].label})` : id,
+    value: id,
+  }));
 
   const update = (patch: Partial<StepNode>) => {
     onChange({ ...node, ...patch });
   };
 
   return (
-    <div className="node-props-panel" role="complementary" aria-label="节点属性">
+    <div className="node-props-panel" role="complementary" aria-label="节点属性" onDoubleClick={(e) => e.stopPropagation()}>
       <div className="node-props-panel-header">
         <span className="node-props-panel-title">节点属性</span>
         <Button
@@ -36,7 +40,11 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
 
       <div className="node-props-panel-body">
         <Form layout="vertical" size="small">
-          <Form.Item label="步骤 ID">
+          <Form.Item
+            label="步骤 ID"
+            validateStatus={node.id && !STEP_ID_REGEX.test(node.id) ? 'error' : ''}
+            help={node.id && !STEP_ID_REGEX.test(node.id) ? '步骤 ID 只能包含英文字母、数字和下划线' : undefined}
+          >
             <Input
               value={node.id}
               onChange={(e) => update({ id: e.target.value })}
@@ -52,12 +60,12 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
             />
           </Form.Item>
 
-          <Form.Item label="执行模式">
+          <Form.Item label={t('selfEvolutionRun.stateGraphExecutionMode')}>
             <Select
               value={node.mode}
               options={[
-                { label: 'human（人工）', value: 'human' },
-                { label: 'auto（自动）', value: 'auto' },
+                { label: t('selfEvolutionRun.stateGraphModeHumanDesc'), value: 'human' },
+                { label: t('selfEvolutionRun.stateGraphModeAutoDesc'), value: 'auto' },
               ]}
               onChange={(val) => update({ mode: val })}
             />
@@ -65,25 +73,33 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
 
           <Divider style={{ margin: '8px 0' }} />
 
-          <Form.Item label="输入 Slots">
+          <Form.Item
+            label="输入成果"
+            extra={Object.keys(model.slots).length === 0 ? <span style={{ fontSize: 11, color: '#bfbfbf' }}>请先在工具栏添加成果</span> : undefined}
+          >
             <Select
               mode="multiple"
               value={node.inputs}
-              options={availableInputSlots}
+              options={slotOptions}
               onChange={(val) => update({ inputs: val })}
-              placeholder="选择输入 slot"
+              placeholder="选择输入成果"
               allowClear
+              notFoundContent={<span style={{ fontSize: 12, color: '#bfbfbf' }}>暂无成果，请先添加</span>}
             />
           </Form.Item>
 
-          <Form.Item label="输出 Slots">
+          <Form.Item
+            label="输出成果"
+            extra={Object.keys(model.slots).length === 0 ? <span style={{ fontSize: 11, color: '#bfbfbf' }}>请先在工具栏添加成果</span> : undefined}
+          >
             <Select
               mode="multiple"
               value={node.outputs}
               options={slotOptions}
               onChange={(val) => update({ outputs: val })}
-              placeholder="选择输出 slot"
+              placeholder="选择输出成果"
               allowClear
+              notFoundContent={<span style={{ fontSize: 12, color: '#bfbfbf' }}>暂无成果，请先添加</span>}
             />
           </Form.Item>
 

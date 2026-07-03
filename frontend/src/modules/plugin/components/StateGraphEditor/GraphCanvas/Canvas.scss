@@ -13,7 +13,8 @@
 // Step node card
 .step-node {
   width: 148px;
-  min-height: 72px;
+  height: 80px;
+  min-height: 80px;
   background: #fff;
   border: 1.5px solid #d9d9d9;
   border-radius: 10px;
@@ -75,49 +76,33 @@
   border: 2px solid #fff;
 }
 
-// Terminal nodes
+// Terminal nodes — card style (like step nodes)
 .terminal-node {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  background: transparent;
-  pointer-events: all;
-}
-
-.terminal-node--start .terminal-node-dot {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #1677ff;
-  flex-shrink: 0;
-}
-
-.terminal-node--end .terminal-node-dot {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 3px solid #389e0d;
+  justify-content: center;
+  padding: 8px 18px;
   background: #fff;
-  flex-shrink: 0;
+  border: 1.5px solid #d9d9d9;
+  border-radius: 10px;
+  pointer-events: all;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  min-width: 64px;
+}
 
-  &::after {
-    content: '';
-    display: block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #389e0d;
-    margin: 2px auto;
-  }
+.terminal-node--start {
+  border-color: #1677ff;
+}
+
+.terminal-node--end {
+  border-color: #389e0d;
 }
 
 .terminal-node-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: #595959;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: #1f1f1f;
+  letter-spacing: 0.02em;
 }
 
 // Transition edge label

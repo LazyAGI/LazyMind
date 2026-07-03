@@ -35,18 +35,33 @@ function TransitionEdgeComponent({
     targetPosition,
   });
 
-  const strokeColor = edgeData?.hasError ? '#ff4d4f' : selected ? '#1677ff' : '#8c8c8c';
+  const [hovered, setHovered] = useState(false);
+  const strokeColor = edgeData?.hasError ? '#ff4d4f' : selected ? '#1677ff' : hovered ? '#555' : '#8c8c8c';
+  const strokeWidth = selected ? 2.5 : hovered ? 2.5 : 1.5;
 
   return (
     <>
+      {/* Wide invisible hit area for easier selection */}
+      <path
+        d={edgePath}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={16}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{ cursor: 'pointer' }}
+      />
       <path
         id={id}
         className="react-flow__edge-path"
         d={edgePath}
         stroke={strokeColor}
-        strokeWidth={selected ? 2.5 : 1.5}
+        strokeWidth={strokeWidth}
         fill="none"
         markerEnd="url(#arrow)"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{ transition: 'stroke-width 0.1s, stroke 0.1s', pointerEvents: 'none' }}
       />
       <EdgeLabelRenderer>
         <div

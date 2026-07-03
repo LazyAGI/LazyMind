@@ -1,5 +1,6 @@
 import jsYaml from 'js-yaml';
 import type { GraphModel, SlotDef, StepNode, Transition } from './model';
+import { VIRTUAL_START, VIRTUAL_END } from './model';
 
 // Raw YAML shape after js-yaml.load
 interface RawTransition {
@@ -91,7 +92,10 @@ export function parseYaml(yamlText: string): GraphModel | null {
     for (const step of raw.steps) {
       if (step !== null && typeof step === 'object') {
         const parsed = parseStep(step as RawStep);
-        if (parsed) nodes.push(parsed);
+        // Skip virtual terminal nodes — they are always rendered as built-in terminals
+        if (parsed && parsed.id !== VIRTUAL_START && parsed.id !== VIRTUAL_END) {
+          nodes.push(parsed);
+        }
       }
     }
   }

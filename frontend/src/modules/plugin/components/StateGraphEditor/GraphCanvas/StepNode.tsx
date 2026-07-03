@@ -29,7 +29,7 @@ function StepNodeComponent({ data, selected }: NodeProps) {
         className={`step-node ${selected ? 'is-selected' : ''} ${hasError ? 'has-error' : ''}`}
         aria-label={`步骤节点: ${String(label)}`}
       >
-        <Handle type="target" position={Position.Left} className="step-node-handle" />
+        <Handle type="target" position={Position.Left} className="step-node-handle" connectableStart={false} />
 
         <div className="step-node-header">
           <span className="step-node-id">{String(id)}</span>
@@ -37,9 +37,7 @@ function StepNodeComponent({ data, selected }: NodeProps) {
             className="step-node-mode-tag"
             icon={mode === 'auto' ? <RobotOutlined /> : <UserOutlined />}
             color={mode === 'auto' ? 'blue' : 'orange'}
-          >
-            {mode === 'auto' ? 'auto' : 'human'}
-          </Tag>
+          />
         </div>
         <div className="step-node-label">{String(label)}</div>
 
@@ -51,15 +49,15 @@ function StepNodeComponent({ data, selected }: NodeProps) {
 
 export const StepNodeRenderer = memo(StepNodeComponent);
 
-// Virtual terminal node: __start__ or __end__
+// Virtual terminal node: __start__ or __end__ — rendered as a card (not a dot)
 export function TerminalNode({ data }: NodeProps) {
-  const nodeData = data as unknown as { type: 'start' | 'end'; label: string };
+  const nodeData = data as unknown as { type: 'start' | 'end' };
   const isStart = nodeData.type === 'start';
+  const label = isStart ? '开始' : '结束';
   return (
-    <div className={`terminal-node terminal-node--${nodeData.type}`} aria-label={nodeData.label}>
+    <div className={`terminal-node terminal-node--${nodeData.type}`} aria-label={label}>
       {!isStart && <Handle type="target" position={Position.Left} className="step-node-handle" />}
-      <div className="terminal-node-dot" />
-      <span className="terminal-node-label">{nodeData.label}</span>
+      <span className="terminal-node-label">{label}</span>
       {isStart && <Handle type="source" position={Position.Right} className="step-node-handle" />}
     </div>
   );

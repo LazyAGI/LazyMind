@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -7,11 +7,15 @@ import {
   addEdge,
   useNodesState,
   useEdgesState,
+  useReactFlow,
+  ReactFlowProvider,
   type Node,
   type Edge,
   type Connection,
   type NodeTypes,
   type EdgeTypes,
+  type NodeChange,
+  type EdgeChange,
   MarkerType,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -24,10 +28,14 @@ import { TransitionEdge } from './TransitionEdge';
 import NodePropertiesPanel from './NodePropertiesPanel';
 import './Canvas.scss';
 
-const NODE_WIDTH = 160;
+const NODE_WIDTH = 148;
 const NODE_HEIGHT = 80;
 const DEFAULT_SPACING_X = 200;
 const DEFAULT_SPACING_Y = 100;
+
+export interface CanvasHandle {
+  addNode: () => void;
+}
 
 interface Props {
   model: GraphModel;
@@ -118,7 +126,8 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
   return edges;
 }
 
-export default function Canvas({ model, errors, onModelChange }: Props) {
+function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<CanvasHandle>) {
+  const { screenToFlowPosition } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
 
   const handleConditionChange = useCallback(
@@ -152,6 +161,43 @@ export default function Canvas({ model, errors, onModelChange }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
+  // Intercept ReactFlow's own selection changes to keep our state in sync.
+  // This is more reliable than onNodeClick/onPaneClick which have drag-protection delays.
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      onNodesChange(changes);
+      for (const change of changes) {
+        if (change.type === 'select') {
+          if (change.selected) {
+            setSelectedNodeId(change.id);
+            setSelectedEdgeId(null);
+          } else if (change.id === selectedNodeId) {
+            setSelectedNodeId(null);
+          }
+        }
+      }
+    },
+    [onNodesChange, selectedNodeId],
+  );
+
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      onEdgesChange(changes);
+      for (const change of changes) {
+        if (change.type === 'select') {
+          if (change.selected) {
+            setSelectedEdgeId(change.id);
+            setSelectedNodeId(null);
+          } else if (change.id === selectedEdgeId) {
+            setSelectedEdgeId(null);
+          }
+        }
+      }
+    },
+    [onEdgesChange, selectedEdgeId],
+  );
 
   // Keep nodes/edges in sync when model changes externally
   useEffect(() => {
@@ -163,6 +209,15 @@ export default function Canvas({ model, errors, onModelChange }: Props) {
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
+
+      // __start__ is a virtual node — it has no entry in model.nodes.
+      // Connections from __start__ are represented by which node has no incoming edges (no YAML entry needed),
+      // so we only need to draw the visual edge without mutating the model.
+      if (connection.source === VIRTUAL_START) {
+        setEdges((eds) => addEdge({ ...connection, type: 'transition' }, eds));
+        return;
+      }
+
       const sourceNode = model.nodes.find((n) => n.id === connection.source);
       if (!sourceNode) return;
 
@@ -187,10 +242,27 @@ export default function Canvas({ model, errors, onModelChange }: Props) {
     [model, onModelChange],
   );
 
-  // Handle node deletion via Delete key
+  // Handle node/edge deletion via Delete or Backspace key
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      // Don't intercept when user is typing in an input/textarea
+      const tag = (event.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      // Delete selected edge first
+      if (selectedEdgeId) {
+        // Edge id format: "sourceId->targetId"
+        const [srcId, tgtId] = selectedEdgeId.split('->');
+        const updatedNodes = model.nodes.map((n) => {
+          if (n.id !== srcId) return n;
+          return { ...n, transitions: n.transitions.filter((t) => t.to !== tgtId) };
+        });
+        onModelChange({ ...model, nodes: updatedNodes });
+        setSelectedEdgeId(null);
+        return;
+      }
+
       if (!selectedNodeId) return;
       if (selectedNodeId === VIRTUAL_START || selectedNodeId === VIRTUAL_END) return;
 
@@ -204,17 +276,38 @@ export default function Canvas({ model, errors, onModelChange }: Props) {
       onModelChange({ ...model, nodes: updatedNodesWithEdges, layout: newLayout });
       setSelectedNodeId(null);
     },
-    [model, onModelChange, selectedNodeId],
+    [model, onModelChange, selectedEdgeId, selectedNodeId],
   );
+
+  // Add a new node — places it at the current viewport center
+  const addNodeAtCenter = useCallback(() => {
+    const container = document.querySelector('.graph-canvas-container');
+    const rect = container?.getBoundingClientRect();
+    const screenCx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const screenCy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+    const pos = screenToFlowPosition({ x: screenCx, y: screenCy });
+    const newId = `step_${uuidv4().slice(0, 6)}`;
+    const newNode: StepNode = {
+      id: newId,
+      label: '新步骤',
+      mode: 'human',
+      inputs: [],
+      outputs: [],
+      transitions: [],
+    };
+    const newLayout = { ...model.layout, [newId]: { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 } };
+    onModelChange({ ...model, nodes: [...model.nodes, newNode], layout: newLayout });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, onModelChange, screenToFlowPosition]);
+
+  useImperativeHandle(ref, () => ({ addNode: addNodeAtCenter }), [addNodeAtCenter]);
 
   // Add a new node on canvas double-click
   const onDoubleClick = useCallback(
     (event: React.MouseEvent) => {
       const target = event.target as HTMLElement;
       if (target.closest('.react-flow__node')) return;
-      const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-      const x = event.clientX - bounds.left - NODE_WIDTH / 2;
-      const y = event.clientY - bounds.top - NODE_HEIGHT / 2;
+      const pos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
 
       const newId = `step_${uuidv4().slice(0, 6)}`;
       const newNode: StepNode = {
@@ -225,10 +318,10 @@ export default function Canvas({ model, errors, onModelChange }: Props) {
         outputs: [],
         transitions: [],
       };
-      const newLayout = { ...model.layout, [newId]: { x, y } };
+      const newLayout = { ...model.layout, [newId]: { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 } };
       onModelChange({ ...model, nodes: [...model.nodes, newNode], layout: newLayout });
     },
-    [model, onModelChange],
+    [model, onModelChange, screenToFlowPosition],
   );
 
   const selectedNode = selectedNodeId
@@ -283,12 +376,13 @@ export default function Canvas({ model, errors, onModelChange }: Props) {
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        onNodesChange={handleNodesChange}
+        onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
         onNodeDragStop={onNodeDragStop}
-        onNodeClick={(_evt, node) => setSelectedNodeId(node.id)}
-        onPaneClick={() => setSelectedNodeId(null)}
+        onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
+        selectNodesOnDrag={false}
+        elevateEdgesOnSelect
         fitView
         attributionPosition="bottom-right"
       >
@@ -321,5 +415,16 @@ export default function Canvas({ model, errors, onModelChange }: Props) {
         />
       )}
     </div>
+  );
+}
+
+const CanvasWithRef = forwardRef<CanvasHandle, Props>(CanvasInner);
+
+export default function Canvas(props: Props & { canvasRef?: React.Ref<CanvasHandle> }) {
+  const { canvasRef, ...rest } = props;
+  return (
+    <ReactFlowProvider>
+      <CanvasWithRef {...rest} ref={canvasRef} />
+    </ReactFlowProvider>
   );
 }
