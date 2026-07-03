@@ -11,7 +11,7 @@ GraphModel 是 YAML 和 React Flow 之间的中间表示，所有操作都通过
 ```typescript
 // core/model.ts
 
-export interface ArtifactDef {
+export interface SlotDef {
   type: 'document' | 'text' | 'image' | 'json' | string;
 }
 
@@ -24,8 +24,8 @@ export interface StepNode {
   id: string;
   label: string;
   mode: 'human' | 'auto';
-  inputs: string[];       // artifact-key 列表（引用前序节点产出）
-  outputs: string[];      // artifact-key 列表（本节点产出）
+  inputs: string[];       // slot 列表（引用前序节点产出）
+  outputs: string[];      // slot 列表（本节点产出）
   transitions: Transition[];
 }
 
@@ -35,8 +35,8 @@ export interface Layout {
 }
 
 export interface GraphModel {
-  /** 插件级 artifact 集中定义 */
-  artifacts: Record<string, ArtifactDef>;
+  /** 插件级 slot 集中定义 */
+  slots: Record<string, SlotDef>;
   /** 业务步骤节点（不含 __start__ / __end__） */
   steps: StepNode[];
   /** 画布布局坐标 */
@@ -67,7 +67,7 @@ import type { GraphModel, StepNode } from './model';
 
 interface RawYaml {
   'x-layout'?: Record<string, { x: number; y: number }>;
-  artifacts?: Record<string, { type: string }>;
+  slots?: Record<string, { type: string }>;
   steps?: Array<{
     id: string;
     label?: string;
@@ -94,9 +94,9 @@ export function parseYaml(text: string): GraphModel {
   }
 
   const layout = raw['x-layout'] ?? {};
-  const artifacts: GraphModel['artifacts'] = {};
-  for (const [key, def] of Object.entries(raw.artifacts ?? {})) {
-    artifacts[key] = { type: def.type ?? 'text' };
+  const slots: GraphModel['slots'] = {};
+  for (const [key, def] of Object.entries(raw.slots ?? {})) {
+    slots[key] = { type: def.type ?? 'text' };
   }
 
   const steps: StepNode[] = (raw.steps ?? []).map((s) => ({
@@ -111,7 +111,7 @@ export function parseYaml(text: string): GraphModel {
     })),
   }));
 
-  return { artifacts, steps, layout };
+  return { slots, steps, layout };
 }
 ```
 
@@ -147,7 +147,7 @@ export function serializeYaml(model: GraphModel): string {
     doc['x-layout'] = model.layout;
   }
 
-  doc['artifacts'] = model.artifacts;
+  doc['slots'] = model.slots;
 
   doc['steps'] = model.steps.map((s) => {
     const step: Record<string, unknown> = { id: s.id, label: s.label, mode: s.mode };
@@ -179,7 +179,7 @@ import type { GraphModel, ValidationError } from './model';
 
 export function validateStateGraph(model: GraphModel): ValidationError[] {
   const errors: ValidationError[] = [];
-  const { steps, artifacts } = model;
+  const { steps, slots } = model;
 
   // 构建完整节点 id 集合（含虚拟终端节点）
   const allIds = new Set(['__start__', '__end__', ...steps.map((s) => s.id)]);
@@ -249,36 +249,36 @@ export function validateStateGraph(model: GraphModel): ValidationError[] {
     }
   }
 
-  // V6: 输出边必须指定 artifact-key（outputs 不能为空，或 transition 没有对应产出）
+  // V6: 输出边必须指定 slot（outputs 不能为空，或 transition 没有对应产出）
   // 此规则在 model 层面检查：outputs 不为空
   // （如果业务上允许某些节点无产出，可放宽）
 
-  // V7: 输入引用的 artifact-key 必须由拓扑前序节点产出
+  // V7: 输入引用的 slot 必须由拓扑前序节点产出
   // 拓扑排序后逐节点检查
   const topoOrder = topoSort(steps);
-  const availableArtifacts = new Set<string>();
+  const availableSlots = new Set<string>();
   for (const nodeId of topoOrder) {
     const node = steps.find((s) => s.id === nodeId);
     if (!node) continue;
     for (const key of node.inputs) {
-      if (!availableArtifacts.has(key)) {
+      if (!availableSlots.has(key)) {
         errors.push({
           rule: 'V7',
-          message: `节点 "${nodeId}" 引用了 artifact "${key}"，但该 artifact 不由任何前序节点产出`,
+          message: `节点 "${nodeId}" 引用了 slot "${key}"，但该 slot 不由任何前序节点产出`,
           nodeId,
         });
       }
     }
-    for (const key of node.outputs) availableArtifacts.add(key);
+    for (const key of node.outputs) availableSlots.add(key);
   }
 
-  // V8: artifact-key 类型与集中定义一致
+  // V8: slot 类型与集中定义一致
   for (const s of steps) {
     for (const key of [...s.inputs, ...s.outputs]) {
-      if (key && !artifacts[key]) {
+      if (key && !slots[key]) {
         errors.push({
           rule: 'V8',
-          message: `artifact "${key}" 在节点 "${s.id}" 中使用，但未在 artifacts 集中定义`,
+          message: `slot "${key}" 在节点 "${s.id}" 中使用，但未在 slots 集中定义`,
           nodeId: s.id,
         });
       }
@@ -538,7 +538,7 @@ function flowToModel(
     }
   }
 
-  return { artifacts: prevModel.artifacts, steps, layout };
+  return { slots: prevModel.slots, steps, layout };
 }
 
 interface Props {
@@ -813,7 +813,7 @@ export default function StepNode({ data, selected }: NodeProps) {
           {d.label || d.id}
         </div>
 
-        {/* artifact 输出标签 */}
+{/* slot 输出标签 */}
         {d.outputs.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
             {d.outputs.map((key) => (

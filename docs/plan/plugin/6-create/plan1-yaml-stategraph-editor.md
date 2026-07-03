@@ -114,7 +114,7 @@ x-layout:
   step_review:       { x: 320, y: 80 }
   step_generate:     { x: 520, y: 200 }
 
-artifacts:
+slots:
   doc_draft:        { type: file }
   review_comments:  { type: text }
 
@@ -152,7 +152,7 @@ steps:
 
 ```
 YAML text
-  └─ parse()      ──► GraphModel { nodes[], edges[], layout{}, artifacts{} }
+  └─ parse()      ──► GraphModel { nodes[], edges[], layout{}, slots{} }
                           └─ serialize() ──► YAML text
 ```
 
@@ -179,9 +179,9 @@ YAML text
 | V3 | 不允许有向环（DFS 检测）| 条目 7 |
 | V4 | 每个节点至少一条输出边（`__end__` 除外）| 条目 8 |
 | V5 | 除 `__start__` 外每个节点至少一条输入边 | 条目 8 |
-| V6 | 输出边必须指定 `artifact-key` | 条目 8 |
-| V7 | 输入引用的 `artifact-key` 必须由拓扑前序节点产出 | 条目 8 |
-| V8 | `artifact-key` 类型与插件级集中定义一致 | 条目 9 |
+| V6 | 输出边必须指定 `slot` | 条目 8 |
+| V7 | 输入引用的 `slot` 必须由拓扑前序节点产出 | 条目 8 |
+| V8 | `slot` 类型与插件级集中定义一致 | 条目 9 |
 | V9 | 转移边 `condition` 字段不得为空 | 条目 10 |
 | V10 | YAML 语法合法（能被解析器解析）| 基础前提 |
 
@@ -216,8 +216,8 @@ React Flow 支持完全自定义节点组件。编辑态节点卡片在视觉上
 | 编辑步骤 ID | 属性面板 → id 字段（唯一性实时校验）|
 | 编辑显示标签 | 属性面板 → label 字段 |
 | 编辑 human/auto 模式 | 属性面板 → mode 切换 |
-| 配置输出 artifact-key | 属性面板 → 从 artifacts 列表选择或新建 |
-| 配置输入 artifact-key | 属性面板 → 仅列出拓扑前序节点产出的 key |
+| 配置输出 slot | 属性面板 → 从 slots 列表选择或新建 |
+| 配置输入 slot | 属性面板 → 仅列出拓扑前序节点产出的 slot |
 
 ### 5.3 边编辑（对应 target 条目 13）
 
