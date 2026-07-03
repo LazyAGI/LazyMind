@@ -52,7 +52,6 @@ ui:
           label: Subject Analysis
           type: text
           cardinality: single
-          artifact_key: subject_analysis
           summary_max_chars: 300
 
     - id: materials
@@ -63,7 +62,6 @@ ui:
           label: Reference Materials
           type: image
           cardinality: list
-          artifact_key: material_image
           ordered: true
           caption_key: material_image_caption
 
@@ -75,7 +73,6 @@ ui:
           label: Optimized Prompt
           type: text
           cardinality: single
-          artifact_key: optimized_prompt
 
     - id: result
       label: Result
@@ -85,14 +82,12 @@ ui:
           label: Enhanced Images
           type: image
           cardinality: list
-          artifact_key: enhanced_image_url
           ordered: true
 
         - id: image_output
           label: Raw Image
           type: image
           cardinality: single
-          artifact_key: generated_image_url
 
 i18n:
   zh-CN:

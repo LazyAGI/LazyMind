@@ -418,7 +418,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 	var finalListIndex *int
 
 	// Resolve artifact_seq: find the task_id for this step attempt, then pick
-	// the latest seq from sub_agent_artifacts for (task_id, artifact_key).
+	// the latest seq from sub_agent_artifacts for (task_id, slot).
 	// This is best-effort; a nil artifactSeq causes enrichSlots to fall back
 	// to content_snapshot (written later by OnSubAgentDoneSnapshot).
 	var artifactSeq *int
@@ -428,7 +428,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 		First(&step).Error == nil {
 		var art orm.SubAgentArtifact
 		if db.WithContext(ctx).
-			Where("task_id = ? AND artifact_key = ?", step.TaskID, artifactKey).
+			Where("task_id = ? AND slot = ?", step.TaskID, artifactKey).
 			Order("seq DESC").
 			First(&art).Error == nil {
 			seq := art.Seq
@@ -497,7 +497,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 			Selected:     true,
 			ChangeSource: "ai",
 			ArtifactSeq:  artifactSeq,
-			ArtifactKey:  artifactKey,
+			Slot:         artifactKey,
 			StepID:       stepID,
 			Attempt:      attempt,
 			CreatedAt:    now,
@@ -601,7 +601,7 @@ func WriteSlotRevisionWithSnapshot(ctx context.Context, db *gorm.DB,
 			Selected:        true,
 			ChangeSource:    src,
 			ContentSnapshot: contentSnapshot,
-			ArtifactKey:     artifactKey,
+			Slot:            artifactKey,
 			StepID:          stepID,
 			Attempt:         attempt,
 			CreatedAt:       now,
@@ -731,7 +731,7 @@ func ReorderSlot(ctx context.Context, db *gorm.DB,
 }
 
 // HideSlotItem logically deletes the revision at list_index and removes it from order_list.
-// It sets hidden=TRUE on all sub_agent_artifacts rows that share the same (task_id, artifact_key)
+// It sets hidden=TRUE on all sub_agent_artifacts rows that share the same (task_id, slot)
 // and are associated with this session/slot/list_index, and deselects all plugin_slot_revisions rows.
 func HideSlotItem(ctx context.Context, db *gorm.DB, sessionID, slotID string, listIndex int) error {
 	now := time.Now().UTC()
@@ -745,14 +745,14 @@ func HideSlotItem(ctx context.Context, db *gorm.DB, sessionID, slotID string, li
 
 		// Mark the corresponding sub_agent_artifacts rows as hidden.
 		// We collect the artifact_seq values recorded in plugin_slot_revisions for this
-		// list_index, then hide exactly those sub_agent_artifacts rows by (task_id, artifact_key, seq).
+		// list_index, then hide exactly those sub_agent_artifacts rows by (task_id, slot, seq).
 		// This avoids the old value-JSON matching approach which could incorrectly hide artifacts
 		// whose value happened to carry the same list_index number (a write-time ordinal, not the
 		// stable DB list_index).
 		type artifactRef struct {
-			taskID      string
-			artifactKey string
-			seq         int
+			taskID string
+			slot   string
+			seq    int
 		}
 		var refs []artifactRef
 		var revRows []orm.PluginSlotRevision
@@ -777,11 +777,11 @@ func HideSlotItem(ctx context.Context, db *gorm.DB, sessionID, slotID string, li
 			if tid == "" {
 				continue
 			}
-			refs = append(refs, artifactRef{taskID: tid, artifactKey: rev.ArtifactKey, seq: *rev.ArtifactSeq})
+			refs = append(refs, artifactRef{taskID: tid, slot: rev.Slot, seq: *rev.ArtifactSeq})
 		}
 		for _, ref := range refs {
 			if err := tx.Model(&orm.SubAgentArtifact{}).
-				Where("task_id = ? AND artifact_key = ? AND seq = ?", ref.taskID, ref.artifactKey, ref.seq).
+				Where("task_id = ? AND slot = ? AND seq = ?", ref.taskID, ref.slot, ref.seq).
 				Updates(map[string]any{"hidden": true}).Error; err != nil {
 				return err
 			}
@@ -1063,7 +1063,7 @@ func WriteSlotRevisionWithHumanArtifact(
 	humanArt := &orm.PluginHumanArtifact{
 		ID:          artifactID,
 		SessionID:   sessionID,
-		ArtifactKey: artifactKey,
+		Slot:        artifactKey,
 		ContentType: contentType,
 		Value:       value,
 		Caption:     caption,
@@ -1128,7 +1128,7 @@ func WriteSlotRevisionWithHumanArtifact(
 			Selected:        true,
 			ChangeSource:    "human",
 			HumanArtifactID: &artifactID,
-			ArtifactKey:     artifactKey,
+			Slot:            artifactKey,
 			StepID:          stepID,
 			Attempt:         attempt,
 			CreatedAt:       now,

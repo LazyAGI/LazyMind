@@ -40,7 +40,7 @@ type PluginStepParams struct {
 	// back to state.yml — it only affects the current execution.
 	RetryHint string `json:"retry_hint,omitempty"`
 
-	// PartialIndices maps artifact_key → list of list_index values that should be
+	// PartialIndices maps slot → list of list_index values that should be
 	// overwritten (not appended) when the SubAgent saves those artifacts.
 	// Nil / empty means full write (append for list, overwrite for single).
 	// Example: {"material_images": [1]} — only slot entry at list_index=1 is replaced.
@@ -237,18 +237,18 @@ func HandlePluginStepCreated(
 	inputJSON, _ := json.Marshal(inputKeys)
 	outputJSON, _ := json.Marshal(outputKeys)
 	task, cErr := subagent.CreateTask(ctx, db, subagent.CreateTaskInput{
-		TaskID:             taskID,
-		ConversationID:     convID,
-		TriggerHistoryID:   historyID,
-		AgentType:          "plugin_step",
-		Title:              pluginID + ":" + stepID,
-		Objective:          enrichedObjective,
-		Mode:               "manual",
-		Params:             rawParams,
-		InputArtifactKeys:  inputJSON,
-		OutputArtifactKeys: outputJSON,
-		WorkspacePath:      subagent.WorkspacePath(userID, taskID),
-		CreateUserID:       userID,
+		TaskID:           taskID,
+		ConversationID:   convID,
+		TriggerHistoryID: historyID,
+		AgentType:        "plugin_step",
+		Title:            pluginID + ":" + stepID,
+		Objective:        enrichedObjective,
+		Mode:             "manual",
+		Params:           rawParams,
+		InputSlots:       inputJSON,
+		OutputSlots:      outputJSON,
+		WorkspacePath:    subagent.WorkspacePath(userID, taskID),
+		CreateUserID:     userID,
 	})
 	if cErr != nil {
 		return "", sessionID, false, fmt.Errorf("plugin: create sub_agent_task: %w", cErr)
@@ -266,7 +266,7 @@ func HandlePluginStepCreated(
 	})
 
 	// Launch SubAgent goroutine.
-	// input_artifact_keys, output_artifact_keys, and tools are NOT forwarded here:
+	// input_slots, output_slots, and tools are NOT forwarded here:
 	// the Python runner reads them from the DB task record and plugin_loader respectively.
 	runParams := map[string]any{
 		"plugin_id":  pluginID,
@@ -580,13 +580,13 @@ func checkAndFallbackIfStuck(
 func OnArtifactEvent(
 	ctx context.Context,
 	db *gorm.DB,
-	taskID, artifactKey string,
+	taskID, slot string,
 	pctx *PluginChatContext,
 ) {
 	if pctx == nil {
 		return
 	}
-	slotID, cardinality := resolveSlotBinding(pctx.PluginID, artifactKey)
+	slotID, cardinality := resolveSlotBinding(pctx.PluginID, slot)
 	if slotID == "" {
 		return
 	}
@@ -599,26 +599,26 @@ func OnArtifactEvent(
 	// For list slots, extract list_index from the artifact value if present.
 	var listIndex *int
 	if cardinality == "list" {
-		listIndex = extractListIndex(ctx, db, taskID, artifactKey)
+		listIndex = extractListIndex(ctx, db, taskID, slot)
 	}
 
 	// Extract caption from artifact value and write it to sub_agent_artifacts.caption.
 	// PostgreSQL does not support UPDATE with ORDER BY/LIMIT, so we first fetch the
-	// target row's primary key (task_id + artifact_key + seq), then update by PK.
-	if caption := extractCaption(ctx, db, taskID, artifactKey); caption != "" {
+	// target row's primary key (task_id + slot + seq), then update by PK.
+	if caption := extractCaption(ctx, db, taskID, slot); caption != "" {
 		var target orm.SubAgentArtifact
 		if db.WithContext(ctx).
-			Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+			Where("task_id = ? AND slot = ?", taskID, slot).
 			Order("seq DESC").
 			First(&target).Error == nil {
 			_ = db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
-				Where("task_id = ? AND artifact_key = ? AND seq = ?", target.TaskID, target.ArtifactKey, target.Seq).
+				Where("task_id = ? AND slot = ? AND seq = ?", target.TaskID, target.Slot, target.Seq).
 				Update("caption", caption).Error
 		}
 	}
 
 	rev, err := WriteSlotRevision(ctx, db,
-		pctx.SessionID, slotID, artifactKey, pctx.StepID, attempt, cardinality, listIndex)
+		pctx.SessionID, slotID, slot, pctx.StepID, attempt, cardinality, listIndex)
 	if err != nil {
 		fmt.Printf("[Plugin] WriteSlotRevision failed: %v\n", err)
 		return
@@ -629,7 +629,7 @@ func OnArtifactEvent(
 	// This is needed for append-mode artifacts where Python does not yet know
 	// the list_index assigned by Go (sort_order was not passed to save_artifact).
 	if cardinality == "list" && rev != nil && rev.ListIndex != nil {
-		backfillArtifactListIndex(ctx, db, taskID, artifactKey, *rev.ListIndex)
+		backfillArtifactListIndex(ctx, db, taskID, slot, *rev.ListIndex)
 	}
 }
 
@@ -670,7 +670,7 @@ func OnSubAgentDoneSnapshot(
 		if rev.ListIndex != nil {
 			var candidates []orm.SubAgentArtifact
 			db.WithContext(ctx).
-				Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
+				Where("task_id = ? AND slot = ?", step.TaskID, rev.Slot).
 				Order("seq DESC").
 				Find(&candidates)
 			for _, c := range candidates {
@@ -697,7 +697,7 @@ func OnSubAgentDoneSnapshot(
 			}
 		} else {
 			if err := db.WithContext(ctx).
-				Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
+				Where("task_id = ? AND slot = ?", step.TaskID, rev.Slot).
 				Order("seq DESC").
 				First(&art).Error; err != nil {
 				continue
@@ -713,12 +713,12 @@ func OnSubAgentDoneSnapshot(
 	}
 }
 
-// extractListIndex reads the most recent artifact value for the given (taskID, artifactKey)
+// extractListIndex reads the most recent artifact value for the given (taskID, slot)
 // and returns the list_index embedded in the JSON value, or nil if absent.
-func extractListIndex(ctx context.Context, db *gorm.DB, taskID, artifactKey string) *int {
+func extractListIndex(ctx context.Context, db *gorm.DB, taskID, slot string) *int {
 	var a orm.SubAgentArtifact
 	err := db.WithContext(ctx).
-		Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+		Where("task_id = ? AND slot = ?", taskID, slot).
 		Order("seq DESC").
 		First(&a).Error
 	if err != nil {
@@ -742,12 +742,12 @@ func extractListIndex(ctx context.Context, db *gorm.DB, taskID, artifactKey stri
 	return nil
 }
 
-// extractCaption reads the most recent artifact value for the given (taskID, artifactKey)
+// extractCaption reads the most recent artifact value for the given (taskID, slot)
 // and returns the caption string embedded in the JSON value, or "" if absent.
-func extractCaption(ctx context.Context, db *gorm.DB, taskID, artifactKey string) string {
+func extractCaption(ctx context.Context, db *gorm.DB, taskID, slot string) string {
 	var a orm.SubAgentArtifact
 	err := db.WithContext(ctx).
-		Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+		Where("task_id = ? AND slot = ?", taskID, slot).
 		Order("seq DESC").
 		First(&a).Error
 	if err != nil {
@@ -763,11 +763,11 @@ func extractCaption(ctx context.Context, db *gorm.DB, taskID, artifactKey string
 	return ""
 }
 
-// resolveSlotBinding looks up (slotID, cardinality) for an artifact key from the Python plugin API.
-func resolveSlotBinding(pluginID, artifactKey string) (slotID, cardinality string) {
+// resolveSlotBinding looks up (slotID, cardinality) for a slot from the Python plugin API.
+func resolveSlotBinding(pluginID, slot string) (slotID, cardinality string) {
 	endpoint := common.ChatServiceEndpoint()
-	url := fmt.Sprintf("%s/api/plugin/slot-binding?plugin_id=%s&artifact_key=%s",
-		endpoint, pluginID, artifactKey)
+	url := fmt.Sprintf("%s/api/plugin/slot-binding?plugin_id=%s&slot=%s",
+		endpoint, pluginID, slot)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -876,17 +876,17 @@ func buildPluginArtifactsSummary(ctx context.Context, db *gorm.DB, sessionID, st
 	}
 	// Gather all sub_agent_artifacts for completed steps in this session.
 	type artifactRow struct {
-		ArtifactKey string `gorm:"column:artifact_key"`
-		Value       []byte `gorm:"column:value"`
-		TaskID      string `gorm:"column:task_id"`
+		Slot   string `gorm:"column:slot"`
+		Value  []byte `gorm:"column:value"`
+		TaskID string `gorm:"column:task_id"`
 	}
 	var rows []artifactRow
 	err := db.WithContext(ctx).Raw(`
-		SELECT sa.artifact_key, sa.value, sa.task_id
+		SELECT sa.slot, sa.value, sa.task_id
 		FROM sub_agent_artifacts sa
 		JOIN plugin_session_steps pss ON pss.task_id = sa.task_id
 		WHERE pss.session_id = ? AND pss.status = 'succeeded'
-		ORDER BY sa.task_id, sa.artifact_key, sa.seq
+		ORDER BY sa.task_id, sa.slot, sa.seq
 	`, sessionID).Scan(&rows).Error
 	if err != nil || len(rows) == 0 {
 		return "", err
@@ -897,24 +897,24 @@ func buildPluginArtifactsSummary(ctx context.Context, db *gorm.DB, sessionID, st
 		var v map[string]any
 		if json.Unmarshal(r.Value, &v) == nil {
 			if val, ok := v["value"]; ok {
-				sb.WriteString(fmt.Sprintf("- %s: %v\n", r.ArtifactKey, val))
+				sb.WriteString(fmt.Sprintf("- %s: %v\n", r.Slot, val))
 				continue
 			}
 		}
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", r.ArtifactKey, string(r.Value)))
+		sb.WriteString(fmt.Sprintf("- %s: %s\n", r.Slot, string(r.Value)))
 	}
 	return sb.String(), nil
 }
 
 // backfillArtifactListIndex patches the most-recent sub_agent_artifacts row for
-// (taskID, artifactKey) to embed {"list_index": listIndex} inside its value JSON.
+// (taskID, slot) to embed {"list_index": listIndex} inside its value JSON.
 // This ensures HideSlotItem can match artifacts by list_index even when the AI
 // wrote the artifact in append-mode (no sort_order → no list_index in value at write time).
 // Skipped silently if the row already contains the correct list_index.
-func backfillArtifactListIndex(ctx context.Context, db *gorm.DB, taskID, artifactKey string, listIndex int) {
+func backfillArtifactListIndex(ctx context.Context, db *gorm.DB, taskID, slot string, listIndex int) {
 	var art orm.SubAgentArtifact
 	if err := db.WithContext(ctx).
-		Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+		Where("task_id = ? AND slot = ?", taskID, slot).
 		Order("seq DESC").
 		First(&art).Error; err != nil {
 		return
@@ -942,6 +942,6 @@ func backfillArtifactListIndex(ctx context.Context, db *gorm.DB, taskID, artifac
 		return
 	}
 	_ = db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
-		Where("task_id = ? AND artifact_key = ? AND seq = ?", art.TaskID, art.ArtifactKey, art.Seq).
+		Where("task_id = ? AND slot = ? AND seq = ?", art.TaskID, art.Slot, art.Seq).
 		Update("value", newVal).Error
 }

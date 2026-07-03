@@ -128,16 +128,16 @@ type LazyChatData struct {
 // TaskCreatedEvent is emitted by create_subagent (via translator) on the main SSE.
 // seq_in_conversation is NOT included; Go allocates it when creating the record.
 type TaskCreatedEvent struct {
-	TaskID             string         `json:"task_id"`
-	Title              string         `json:"title"`
-	AgentType          string         `json:"agent_type"`
-	Mode               string         `json:"mode"`
-	Objective          string         `json:"objective"`
-	Params             map[string]any `json:"params,omitempty"`
-	InputArtifactKeys  []string       `json:"input_artifact_keys"`
-	OutputArtifactKeys []string       `json:"output_artifact_keys"`
-	Tools              []string       `json:"tools,omitempty"`
-	Resume             bool           `json:"resume,omitempty"`
+	TaskID      string         `json:"task_id"`
+	Title       string         `json:"title"`
+	AgentType   string         `json:"agent_type"`
+	Mode        string         `json:"mode"`
+	Objective   string         `json:"objective"`
+	Params      map[string]any `json:"params,omitempty"`
+	InputSlots  []string       `json:"input_slots"`
+	OutputSlots []string       `json:"output_slots"`
+	Tools       []string       `json:"tools,omitempty"`
+	Resume      bool           `json:"resume,omitempty"`
 }
 
 // AskQuestion is a single question within an AskPendingEvent.

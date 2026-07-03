@@ -49,7 +49,7 @@ func (PluginSessionStep) TableName() string { return "plugin_session_steps" }
 //
 // Value resolution (read path):
 //   - AI revision:    ArtifactSeq != nil → value comes from sub_agent_artifacts at
-//     (task_id via plugin_session_steps, artifact_key, seq=ArtifactSeq).
+//     (task_id via plugin_session_steps, slot, seq=ArtifactSeq).
 //   - Human revision: HumanArtifactID != nil → value comes from plugin_human_artifacts.
 //   - Legacy fallback: both nil → value comes from ContentSnapshot (pre-migration rows).
 type PluginSlotRevision struct {
@@ -71,7 +71,7 @@ type PluginSlotRevision struct {
 	ContentSnapshot json.RawMessage `gorm:"column:content_snapshot;type:jsonb"`
 	// ChangeSource distinguishes AI-generated ('ai') from human-edited ('human') revisions.
 	ChangeSource string    `gorm:"column:change_source;type:varchar(16);not null;default:'ai'"`
-	ArtifactKey  string    `gorm:"column:artifact_key;type:varchar(255);not null"`
+	Slot         string    `gorm:"column:slot;type:varchar(255);not null"`
 	StepID       string    `gorm:"column:step_id;type:varchar(64);not null"`
 	Attempt      int       `gorm:"column:attempt;not null"`
 	CreatedAt    time.Time `gorm:"column:created_at;not null"`

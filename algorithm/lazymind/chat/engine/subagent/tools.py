@@ -106,7 +106,7 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     a new item and leaves the original untouched, which is wrong.
 
     Args:
-        key (str): Artifact key. Must be one of the declared output_artifact_keys.
+        key (str): Artifact key. Must be one of the declared output_slots.
         value (Any): The artifact value. For text: a string. For json: a dict/list.
             For image/file: a local absolute path. For file_list: a list of absolute paths.
         content_type (str): One of text, json, image, file, file_list. Default text.
@@ -142,7 +142,7 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     ctx.record_local_artifact(key, actual_ct, built, seq)
     ctx.emit({
         'type': 'artifact',
-        'artifact_key': key,
+        'slot': key,
         'content_type': actual_ct,
         'seq': seq,
         'value': built,
@@ -189,7 +189,7 @@ def _write_artifact_draft(
 
 
 def _resolve_list_index_from_sort_order(
-    artifact_key: str, sort_order: int
+    slot: str, sort_order: int
 ) -> tuple[Optional[int], Optional[str]]:
     """Query Go core to translate sort_order → list_index for a list-slot artifact.
 
@@ -209,7 +209,7 @@ def _resolve_list_index_from_sort_order(
         session_id: str = cfg.get('plugin_session_id', '')
         if not session_id:
             return None, None
-        # Look up slot_id from plugin_loader via artifact_key.
+        # Look up slot_id from plugin_loader via slot.
         plugin_id: str = cfg.get('plugin_id', '')
         if not plugin_id:
             return None, None
@@ -217,7 +217,7 @@ def _resolve_list_index_from_sort_order(
         spec = plugin_loader.get_plugin(plugin_id)
         if not spec:
             return None, None
-        slot_def = spec.get_slot_for_artifact_key(artifact_key)
+        slot_def = spec.get_slot(slot)
         if not slot_def:
             return None, None
         slot_id = slot_def.get('id', '')
@@ -482,7 +482,7 @@ def _get_plugin_artifact_by_sort_order(
         'key': key,
         'sort_order': sort_order,
         'content_type': content_type,
-        'artifacts': [{'artifact_key': key, 'content_type': content_type, 'value': value, 'sort_order': sort_order}],
+        'artifacts': [{'slot': key, 'content_type': content_type, 'value': value, 'sort_order': sort_order}],
     })
 
 
@@ -491,13 +491,13 @@ def _get_plugin_artifact_all(ctx: Any, key: str, session_id: str) -> Dict[str, A
     resolved_rows = ctx.db.load_selected_slot_artifacts_resolved_with_order(session_id)
     artifacts = [
         {
-            'artifact_key': r['artifact_key'],
+            'slot': r['slot'],
             'content_type': r.get('content_type'),
             'value': r['value'],
             'sort_order': r.get('sort_order'),
         }
         for r in resolved_rows
-        if r.get('artifact_key') == key
+        if r.get('slot') == key
     ]
     if not artifacts:
         return tool_success('get_artifact', {
@@ -799,7 +799,7 @@ def list_artifacts(task_ref: Optional[str] = None) -> Dict[str, Any]:
     rows = ctx.local_artifacts() or ctx.db.load_artifacts(ctx.task_id)
     summary: Dict[str, str] = {}
     for r in rows:
-        summary[r['artifact_key']] = r['content_type']
+        summary[r['slot']] = r['content_type']
     parts = [f'{k} ({v})' for k, v in summary.items()]
     msg = '可用成果：' + ('、'.join(parts) if parts else '（暂无）')
     return tool_success('list_artifacts', {'status': 'ok', 'keys': summary, 'message': msg})
@@ -1070,14 +1070,14 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     return tool_success('find_user_attachment', result)
 
 
-def find_artifact(artifact_key: str, sort_order: Optional[int] = None) -> Dict[str, Any]:
+def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]:
     """Return the accessible URL or local path of a plugin artifact.
 
     Analogous to find_user_attachment but for plugin step outputs.
     Reads session_id and plugin_id from agentic_config (same as save_artifact / get_artifact).
 
     Args:
-        artifact_key (str): The artifact key to look up (e.g. 'generated_image_url').
+        slot (str): The slot id to look up (e.g. 'image_output').
         sort_order (int): Optional 1-based display position for list-slot artifacts.
             Omit for single-slot artifacts.
 
@@ -1101,9 +1101,9 @@ def find_artifact(artifact_key: str, sort_order: Optional[int] = None) -> Dict[s
     ctx = require_context()
 
     if sort_order is not None:
-        result_dict = _get_plugin_artifact_by_sort_order(ctx, artifact_key, session_id, sort_order)
+        result_dict = _get_plugin_artifact_by_sort_order(ctx, slot, session_id, sort_order)
     else:
-        result_dict = _get_plugin_artifact_all(ctx, artifact_key, session_id)
+        result_dict = _get_plugin_artifact_all(ctx, slot, session_id)
 
     # Unwrap inner result to extract the path.
     inner = result_dict.get('result', result_dict)
@@ -1114,7 +1114,7 @@ def find_artifact(artifact_key: str, sort_order: Optional[int] = None) -> Dict[s
     if not artifacts:
         return tool_success('find_artifact', {
             'status': 'error',
-            'message': f"No artifact found for key '{artifact_key}'.",
+            'message': f"No artifact found for slot '{slot}'.",
         })
 
     # Use the first (or only) artifact to resolve the path.
@@ -1131,7 +1131,7 @@ def find_artifact(artifact_key: str, sort_order: Optional[int] = None) -> Dict[s
     if not path or not isinstance(path, str):
         return tool_success('find_artifact', {
             'status': 'error',
-            'message': f"Artifact '{artifact_key}' has no resolvable path.",
+            'message': f"Artifact '{slot}' has no resolvable path.",
         })
 
     # Try to get a signed URL from Go /static-files:sign.
@@ -1152,7 +1152,7 @@ def find_artifact(artifact_key: str, sort_order: Optional[int] = None) -> Dict[s
 
     out: Dict[str, Any] = {
         'status': 'ok',
-        'artifact_key': artifact_key,
+        'slot': slot,
         'path': path,
     }
     if sort_order is not None:

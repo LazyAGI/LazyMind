@@ -45,7 +45,7 @@ ALTER TABLE sub_agent_artifacts
   ADD COLUMN hidden     BOOLEAN   NOT NULL DEFAULT FALSE,
   ADD COLUMN caption    TEXT;            -- 图片/文件的文字描述，供 ChatAgent 上下文使用
 
-CREATE INDEX idx_saa_task_visible ON sub_agent_artifacts(task_id, artifact_key, hidden, seq);
+CREATE INDEX idx_saa_task_visible ON sub_agent_artifacts(task_id, slot, hidden, seq);
 ```
 
 - `hidden`：逻辑删除标志，前端不展示，`list_index` 不变、不复用。
@@ -117,7 +117,6 @@ ui:
         - id: material_images
           type: image
           cardinality: list
-          artifact_key: material_image
           ordered: true     # NEW: true 时支持前端拖拽调序（写回 sort_order）
           caption_key: material_image_caption  # NEW: 同步写入描述的 artifact key（可选）
 ```
@@ -126,7 +125,7 @@ ui:
 
 - `layout`：Tab 布局模式。`list` 为垂直堆叠（默认），`grid` 为网格，`composite` 为跨 slot 联合渲染（见 §7.4）。
 - `ordered`：声明该 slot 的顺序是否有意义；`true` 时前端渲染拖拽手柄，调序结果写回 `sort_order`。
-- `caption_key`：~~与图片/文件 slot 配对的描述 artifact key；Go 在处理 artifact 事件时将两者关联写入。~~ **已废弃**：caption 直接通过 `save_artifact(caption=...)` 写入主 artifact 的 value JSON，Go 的 `extractCaption` 从 value JSON 中读取并写入 `sub_agent_artifacts.caption` 列，无需额外 artifact key。
+- `caption_key`：~~与图片/文件 slot 配对的描述 artifact key；Go 在处理 artifact 事件时将两者关联写入。~~ **已废弃**：caption 直接通过 `save_artifact(caption=...)` 写入主 artifact 的 value JSON，Go 的 `extractCaption` 从 value JSON 中读取并写入 `sub_agent_artifacts.caption` 列，无需额外 slot。
 - `i18n`：多语言覆盖字段，详见 §7.5。
 
 ### 2.5 Artifact 类型系统
@@ -269,7 +268,7 @@ def save_artifact(key, value, content_type='text',
 > **新增工具（已落地）**：除 `save_artifact` 外，工具层还新增了以下工具供 SubAgent 使用：
 > - `patch_artifact(key, patch, ...)` — 局部编辑 artifact 草稿（不直接提交），支持 str_replace / json_merge / json_patch；配合 `save_artifact` 两步提交
 > - `discard_draft(key, sort_order?)` — 丢弃 `patch_artifact` 写入的草稿
-> - `find_artifact(artifact_key, sort_order?)` — 按 key 和 sort_order 查找当前选中版本的 URL/path
+> - `find_artifact(slot, sort_order?)` — 按 slot 名和 sort_order 查找当前选中版本的 URL/path
 > - `find_user_attachment(filename, turn?)` — 查找用户上传附件，返回 url 和 path
 >
 > Python 工具层内部做 `sort_order → list_index` 查找（通过 `GET /order` 接口），`list_index` 仍不对外暴露给 AI。
@@ -314,11 +313,11 @@ SubAgent 调用 `web_search_tool` / `image_search_tool` 后，通过现有 `save
   "focused_sort_order": 2,
   "artifact_summary": {
     "subject_analysis": "赛博朋克城市，霓虹灯，夜景，高密度建筑",
-    "material_image": ["ref1.jpg（街景）", "ref2.jpg（灯光）"],
-    "optimized_prompt": "cyberpunk city at night, neon lights..."
+    "material_images": ["ref1.jpg（街景）", "ref2.jpg（灯光）"],
+    "prompt_used": "cyberpunk city at night, neon lights..."
   },
   "visible_sort_order_map": {
-    "material_image": [1, 2]
+    "material_images": [1, 2]
   }
 }
 ```
@@ -421,9 +420,9 @@ GET /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index
 {
   "type": "artifact_ref",
   "session_id": "...",
-  "slot_id": "material_image",
+  "slot_id": "material_images",
   "sort_order": 2,
-  "artifact_key": "material_image",
+  "slot": "material_images",
   "caption": "ref2.jpg（灯光参考）",
   "content_type": "image"
 }
@@ -432,7 +431,7 @@ GET /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index
 前端在 `ChatInput` 的 `files` 列表中展示预览缩略图，同时在消息 body 中携带 `artifact_refs` 数组（与 `files` 并列）。Go 在构造 Step objective 时将 `artifact_refs` 拼入 prompt，格式为：
 
 ```
-[引用的素材] slot: material_image, sort_order: 2, 描述: ref2.jpg（灯光参考）
+[引用的素材] slot: material_images, sort_order: 2, 描述: ref2.jpg（灯光参考）
 ```
 
 这样 SubAgent 在重新生成时能理解"用户引用的是哪个素材、在哪个位置"，可据此调用 `save_artifact(sort_order=2)` 精确覆盖目标项。
@@ -524,7 +523,7 @@ ui:
 
 ```yaml
 composite_layout:
-  - [material_image, generated_image]
+  - [material_images, image_output]
 ```
 
 **带列宽权重的复杂场景**：
@@ -610,7 +609,7 @@ GET /api/core/plugin-sessions/{session_id}/slots
 
 POST /api/core/conversations:chat（前端新增字段）
   body 新增 plugin_ui_state: {focused_tab, focused_sort_order}  ✅ 已实现
-  body 新增 artifact_refs: [{artifact_key, slot_id, sort_order}]  ✅ 已实现
+  body 新增 artifact_refs: [{slot, slot_id, sort_order}]  ✅ 已实现
   → Go 读取后合并进 plugin_context 下发 Python
 
 GET /api/core/plugins/{plugin_id}

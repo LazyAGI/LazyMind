@@ -25,7 +25,7 @@ const subagentRunTimeout = 2 * time.Hour
 // RunRequest is the body posted to the algorithm layer /api/subagent/run.
 // task_id doubles as the request sid (independent FileSystemQueue bucket).
 //
-// objective, input_artifact_keys, and output_artifact_keys are intentionally
+// objective, input_slots, and output_slots are intentionally
 // omitted: the Python runner reads those from the sub_agent_tasks DB record.
 // tools is still forwarded for non-plugin_step agent types; plugin_step tasks
 // resolve their tools from plugin_loader at execution time.
@@ -48,7 +48,7 @@ type TaskEvent struct {
 	Progress     int             `json:"progress,omitempty"`
 	CurrentPhase string          `json:"current_phase,omitempty"`
 	EstimatedSec int             `json:"estimated_sec,omitempty"`
-	ArtifactKey  string          `json:"artifact_key,omitempty"`
+	ArtifactKey  string          `json:"slot,omitempty"`
 	ContentType  string          `json:"content_type,omitempty"`
 	Seq          int             `json:"seq,omitempty"`
 	Value        json.RawMessage `json:"value,omitempty"`
@@ -225,8 +225,8 @@ func routePluginStepStatus(ctx context.Context, db *gorm.DB, stateStore state.St
 	}
 }
 
-func routePluginArtifact(ctx context.Context, db *gorm.DB, taskID, artifactKey string) {
+func routePluginArtifact(ctx context.Context, db *gorm.DB, taskID, slot string) {
 	if EventHooks.onArtifact != nil {
-		EventHooks.onArtifact(ctx, db, taskID, artifactKey)
+		EventHooks.onArtifact(ctx, db, taskID, slot)
 	}
 }

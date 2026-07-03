@@ -142,7 +142,7 @@ export interface SlotRevision {
   /** Optimistic-lock version of the slot order row; present on list-slot items. */
   order_version?: number;
   selected: boolean;
-  artifact_key: string;
+  slot: string;
   created_at: string;
   /** Artifact content type returned by the backend (e.g. 'text', 'image', 'file'). */
   content_type?: string;
@@ -202,11 +202,9 @@ export interface SlotDef {
   label: string;
   type: "image" | "text" | "file";
   cardinality?: "single" | "list";
-  /** The artifact_key written by the SubAgent. If absent, falls back to id. */
-  artifact_key?: string;
   /** Whether this list slot supports drag-reorder. */
   ordered?: boolean;
-  /** The artifact_key used for the caption of this slot's items. */
+  /** The slot key used for the caption of this slot's items. */
   caption_key?: string;
   /** Maximum characters shown in the artifact summary injected into the AI prompt. */
   summary_max_chars?: number;

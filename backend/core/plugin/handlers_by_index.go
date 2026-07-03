@@ -142,7 +142,7 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		slotType = "list"
 	}
 	newRev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
-		sessionID, slotID, existing.ArtifactKey, existing.StepID, existing.Attempt,
+		sessionID, slotID, existing.Slot, existing.StepID, existing.Attempt,
 		slotType,
 		liPtr,
 		body.ContentType, resolveValuePaths(body.Value), body.Caption,
@@ -208,7 +208,7 @@ func PatchSlotCaptionByIndex(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
-			Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
+			Where("task_id = ? AND slot = ?", step.TaskID, rev.Slot).
 			Update("caption", &cap).Error; err != nil {
 			common.ReplyErr(w, "update caption failed", http.StatusInternalServerError)
 			return
@@ -276,7 +276,7 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 			if tid != "" {
 				var art orm.SubAgentArtifact
 				if db.WithContext(ctx).
-					Where("task_id = ? AND artifact_key = ? AND seq = ?", tid, rev.ArtifactKey, *rev.ArtifactSeq).
+					Where("task_id = ? AND slot = ? AND seq = ?", tid, rev.Slot, *rev.ArtifactSeq).
 					First(&art).Error == nil {
 					ct := resolveContentType(art.ContentType, art.Value)
 					item["content_snapshot"] = signArtifactImagePath(art.Value, ct)
@@ -330,7 +330,7 @@ func RollbackSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "slot revision not found", http.StatusNotFound)
 		return
 	}
-	newRev, err := RollbackSlotRevision(ctx, db, sessionID, slotID, liPtr, body.Revision, anyRev.ArtifactKey)
+	newRev, err := RollbackSlotRevision(ctx, db, sessionID, slotID, liPtr, body.Revision, anyRev.Slot)
 	if err != nil {
 		if IsNotFound(err) {
 			common.ReplyErr(w, "target revision not found", http.StatusNotFound)

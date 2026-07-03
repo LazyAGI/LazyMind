@@ -246,20 +246,12 @@ class PluginSpec:
                     return dict(slot)
         return None
 
-    def get_slot_for_artifact(self, artifact_id: str) -> Optional[str]:
-        """Return the slot_id bound to artifact_id in any step output, or None."""
-        for step_cfg in self._steps.values():
-            for out in step_cfg.get('outputs', []):
-                if out.get('artifact_id') == artifact_id:
-                    return out.get('slot_id')
-        return None
-
-    def get_slot_for_artifact_key(self, artifact_key: str) -> Optional[Dict[str, Any]]:
-        """Return the slot definition (id, cardinality, ordered, caption_key …) for an artifact_key."""
+    def get_slot(self, slot: str) -> Optional[Dict[str, Any]]:
+        """Return the slot definition (id, cardinality, ordered, caption_key …) for a slot id."""
         for tab in (self.yaml.get('ui') or {}).get('tabs', []):
-            for slot in tab.get('slots', []):
-                if slot.get('artifact_key') == artifact_key:
-                    return dict(slot)
+            for s in tab.get('slots', []):
+                if s.get('id') == slot:
+                    return dict(s)
         return None
 
     def get_i18n_label(self, lang: str, key_path: str, fallback: str = '') -> str:
@@ -430,14 +422,14 @@ def get_plugin_yaml(plugin_id: str) -> Dict[str, Any]:
     return spec.yaml if spec else {}
 
 
-def find_producer_step(plugin_id: str, artifact_id: str) -> Optional[str]:
-    """Return the step_id that produces artifact_id, or None."""
+def find_producer_step(plugin_id: str, slot: str) -> Optional[str]:
+    """Return the step_id that produces slot, or None."""
     spec = get_plugin(plugin_id)
     if not spec:
         return None
     for step_id, step_cfg in spec._steps.items():
         for out in step_cfg.get('outputs', []):
-            if out.get('artifact_id') == artifact_id:
+            if out.get('slot') == slot:
                 return step_id
     return None
 
