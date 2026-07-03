@@ -513,7 +513,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_EVO_LLM_ROLE=" + envText("LAZYMIND_EVO_LLM_ROLE", "evo_llm"),
 		"LAZYMIND_EVO_KB_BASE_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.DocPort),
 		"LAZYMIND_EVO_CHUNK_BASE_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.DocPort),
-		"LAZYMIND_EVO_TARGET_CHAT_URL=" + fmt.Sprintf("http://127.0.0.1:%d/api/chat/stream", cfg.Algorithm.ChatPort),
+		"LAZYMIND_EVO_ROUTER_CHAT_URL=" + fmt.Sprintf("http://127.0.0.1:%d/api/chat/stream", cfg.Algorithm.ChatPort),
 		"LAZYMIND_WORD_GROUP_APPLY_URL=" + envText("LAZYMIND_WORD_GROUP_APPLY_URL", ""),
 	}
 	if service == docServerProcessName {

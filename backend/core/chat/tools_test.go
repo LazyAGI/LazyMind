@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/mcp"
 	"lazymind/core/store"
@@ -108,11 +109,27 @@ func seedRuntimeModelConfig(t *testing.T, db *orm.DB, userID string) {
 	}
 }
 
+func seedSelectedOCRProvider(t *testing.T, db *gorm.DB, userID string) {
+	t.Helper()
+	seedSelectedToolProvider(
+		t,
+		db,
+		userID,
+		"MinerU",
+		"ocr-group",
+		"mineru-key",
+		"ocr",
+		"ocr",
+		false,
+	)
+}
+
 func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 	db := newToolsTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	seedRuntimeModelConfig(t, db, "u1")
+	seedSelectedOCRProvider(t, db.DB, "u1")
 	seedSelectedSearchTool(t, db.DB, "u1", "Bing", "search-group", "bing-key", false)
 	if err := disableToolForUser(context.Background(), db.DB, "u1", "User 1", "bing"); err != nil {
 		t.Fatalf("disable tool: %v", err)
@@ -162,6 +179,10 @@ func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 	toolConfig, _ := upstreamBody["tool_config"].(map[string]any)
 	if toolConfig["bing"] != "bing-key" {
 		t.Fatalf("expected bing tool_config, got %#v", upstreamBody["tool_config"])
+	}
+	ocrConfig, _ := upstreamBody["ocr_config"].(map[string]any)
+	if ocrConfig["ocr_type"] != "mineru" {
+		t.Fatalf("expected ocr_config forwarded, got %#v", upstreamBody["ocr_config"])
 	}
 	if _, ok := upstreamBody["mcp_config"]; ok {
 		t.Fatalf("list tools should not forward mcp_config, got %#v", upstreamBody["mcp_config"])

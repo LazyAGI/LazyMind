@@ -578,6 +578,10 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 		"llm_config": map[string]any{
 			"llm": map[string]any{"source": "openai", "model": "gpt-4o"},
 		},
+		"ocr_config": map[string]any{
+			"ocr_type": "mineru",
+			"ocr_url":  "https://mineru.net/api/v4/",
+		},
 		"tool_config": map[string]any{
 			"bing": "token-1",
 		},
@@ -654,6 +658,9 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	}
 	if req.Runtime.LLMConfig == nil || req.Runtime.LLMConfig["llm"] == nil {
 		t.Fatalf("expected llm_config to be forwarded, got %#v", req.Runtime.LLMConfig)
+	}
+	if req.Runtime.OCRConfig == nil || req.Runtime.OCRConfig["ocr_type"] != "mineru" {
+		t.Fatalf("expected ocr_config to be forwarded, got %#v", req.Runtime.OCRConfig)
 	}
 	if req.Runtime.ToolConfig == nil || req.Runtime.ToolConfig["bing"] != "token-1" {
 		t.Fatalf("expected tool_config to be forwarded, got %#v", req.Runtime.ToolConfig)

@@ -85,14 +85,19 @@ func DeleteThreadHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	flowStatus, err := fetchThreadFlowStatus(r.Context(), r, threadID)
+	upstreamMissing := false
 	if err != nil {
-		common.ReplyErrWithData(w, "fetch thread flow status failed", map[string]any{"detail": err.Error()}, http.StatusBadGateway)
-		return
+		if isThreadFlowNotFound(err) {
+			upstreamMissing = true
+		} else {
+			common.ReplyErrWithData(w, "fetch thread flow status failed", map[string]any{"detail": err.Error()}, http.StatusBadGateway)
+			return
+		}
 	}
 
 	cancelRequested := false
-	if isThreadFlowRunning(flowStatus) {
-		if _, statusCode, err := postUpstreamProxy(r.Context(), r, threadActionURL(threadID, "cancel"), nil); err != nil {
+	if !upstreamMissing && isThreadFlowRunning(flowStatus) {
+		if _, statusCode, err := newEvoClient(forwardedUpstreamHeaders(r)).PostCommand(r.Context(), threadID, "cancel", map[string]any{}); err != nil {
 			common.ReplyErrWithData(w, "cancel running thread failed", map[string]any{
 				"detail":      err.Error(),
 				"flow_status": flowStatus,
@@ -115,9 +120,15 @@ func DeleteThreadHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var upstreamDelete map[string]any
-	if err := common.ApiDelete(r.Context(), threadDeleteURL(threadID), forwardedUpstreamHeaders(r), &upstreamDelete, 30*time.Second); err != nil {
-		common.ReplyErrWithData(w, "delete upstream thread failed", map[string]any{"detail": err.Error()}, http.StatusBadGateway)
-		return
+	if upstreamMissing {
+		upstreamDelete = map[string]any{"missing": true}
+	} else if err := newEvoClient(forwardedUpstreamHeaders(r)).DeleteThread(r.Context(), threadID, &upstreamDelete); err != nil {
+		if isThreadFlowNotFound(err) {
+			upstreamDelete = map[string]any{"missing": true}
+		} else {
+			common.ReplyErrWithData(w, "delete upstream thread failed", map[string]any{"detail": err.Error()}, http.StatusBadGateway)
+			return
+		}
 	}
 	result, err := deleteThreadHistory(db, threadID)
 	if err != nil {

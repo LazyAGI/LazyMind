@@ -176,17 +176,17 @@ func loadStepsForPluginSession(ctx context.Context, db *gorm.DB, sessionID strin
 	artifactByTask := map[string]string{}
 	if len(taskIDs) > 0 {
 		type artRow struct {
-			TaskID      string `gorm:"column:task_id"`
-			ArtifactKey string `gorm:"column:artifact_key"`
+			TaskID string `gorm:"column:task_id"`
+			Slot   string `gorm:"column:slot"`
 		}
 		var arts []artRow
 		_ = db.WithContext(ctx).
 			Table("sub_agent_artifacts").
-			Select("task_id, artifact_key").
+			Select("task_id, slot").
 			Where("task_id IN ? AND seq = (SELECT MAX(seq) FROM sub_agent_artifacts sa2 WHERE sa2.task_id = sub_agent_artifacts.task_id)", taskIDs).
 			Find(&arts).Error
 		for _, a := range arts {
-			artifactByTask[a.TaskID] = a.ArtifactKey
+			artifactByTask[a.TaskID] = a.Slot
 		}
 	}
 	steps := make([]stepInfo, 0, len(rows))
@@ -203,14 +203,14 @@ func loadStepsForPluginSession(ctx context.Context, db *gorm.DB, sessionID strin
 // loadStepsForConversation loads steps from sub_agent_tasks for a given conversation (no plugin).
 func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) []stepInfo {
 	type satRow struct {
-		Title              string `gorm:"column:title"`
-		Status             string `gorm:"column:status"`
-		OutputArtifactKeys string `gorm:"column:output_artifact_keys"`
+		Title       string `gorm:"column:title"`
+		Status      string `gorm:"column:status"`
+		OutputSlots string `gorm:"column:output_slots"`
 	}
 	var rows []satRow
 	if err := db.WithContext(ctx).
 		Table("sub_agent_tasks").
-		Select("title, status, output_artifact_keys").
+		Select("title, status, output_slots").
 		Where("conversation_id = ?", convID).
 		Order("seq_in_conversation ASC").
 		Find(&rows).Error; err != nil {
@@ -220,7 +220,7 @@ func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) [
 	for _, r := range rows {
 		s := stepInfo{StepID: r.Title, Status: r.Status}
 		var keys []string
-		if json.Unmarshal([]byte(r.OutputArtifactKeys), &keys) == nil && len(keys) > 0 {
+		if json.Unmarshal([]byte(r.OutputSlots), &keys) == nil && len(keys) > 0 {
 			s.Artifact = &keys[0]
 		}
 		steps = append(steps, s)

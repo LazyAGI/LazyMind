@@ -162,6 +162,13 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 	if len(toolConfig) > 0 {
 		body["tool_config"] = toolConfig
 	}
+	ocrConfig, err := modelconfig.LoadOCRConfig(ctx, db, userID)
+	if err != nil {
+		return err
+	}
+	if len(ocrConfig) > 0 {
+		body["ocr_config"] = ocrConfig
+	}
 	agentConfig := loadUserAgentConfig(ctx, db, userID, body)
 	if len(agentConfig) > 0 {
 		// Merge into existing agentic_config body key, or set it.

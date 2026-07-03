@@ -67,7 +67,7 @@ func TestStatusAndArtifactLifecycle(t *testing.T) {
 	if _, err := CreateTask(ctx, db.DB, CreateTaskInput{
 		TaskID: "task-x", ConversationID: "conv-x", AgentType: "image_generation",
 		Title: "生图", Mode: "auto",
-		OutputArtifactKeys: json.RawMessage(`["images"]`),
+		OutputSlots: json.RawMessage(`["images"]`),
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}

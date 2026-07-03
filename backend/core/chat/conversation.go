@@ -301,6 +301,15 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
 	}
 	historyExt := buildChatHistoryExt(raw, query)
+	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
+		return
+	}
+	if err := applyChatAttachmentConversion(r.Context(), reqBody); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "prepare chat attachments failed", err), http.StatusBadGateway)
+		return
+	}
+	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
 	baseURL := chatServiceURL()
 	reqCtx := r.Context()
 	stateStore := store.State()

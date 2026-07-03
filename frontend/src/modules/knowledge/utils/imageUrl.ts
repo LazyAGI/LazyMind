@@ -7,6 +7,48 @@ const UPLOAD_ROOT_MARKER = '/var/lib/lazymind/uploads/';
 const signCache = new Map<string, string>();
 const signInflight = new Map<string, Promise<string>>();
 
+function extractStaticFilesPath(raw: string): string {
+  const trimmed = (raw || '').trim();
+  const marker = '/static-files/';
+  const idx = trimmed.indexOf(marker);
+  if (idx < 0) {
+    return '';
+  }
+  return trimmed.slice(idx).split('#')[0];
+}
+
+function staticFilesStorageKey(staticPath: string): string {
+  return staticPath.split('?')[0];
+}
+
+function cacheKeyForUploadPath(uploadPath: string): string {
+  if (uploadPath.startsWith('/static-files/')) {
+    return staticFilesStorageKey(uploadPath);
+  }
+  return uploadPath;
+}
+
+function signRequestPath(uploadPath: string): string {
+  return cacheKeyForUploadPath(uploadPath);
+}
+
+function parseExpires(url: string): number {
+  const match = (url || '').match(/[?&]expires=(\d+)/);
+  if (!match) {
+    return 0;
+  }
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function isExpiredSignedUrl(url: string): boolean {
+  const expires = parseExpires(url);
+  if (!expires) {
+    return false;
+  }
+  return Date.now() >= (expires - 30) * 1000;
+}
+
 export function basenameFromPath(path: string): string {
   const withoutQuery = path.split('?')[0] || path;
   const parts = withoutQuery.split('/');
@@ -18,15 +60,16 @@ function extractUploadPath(raw: string): string {
   if (!trimmed) {
     return '';
   }
-  if (trimmed.startsWith('/static-files/')) {
-    return trimmed;
+  const staticPath = extractStaticFilesPath(trimmed);
+  if (staticPath) {
+    return staticPath;
   }
   const markerIndex = trimmed.indexOf(UPLOAD_ROOT_MARKER);
   if (markerIndex >= 0) {
-    return trimmed.slice(markerIndex);
+    return trimmed.slice(markerIndex).split('?', 1)[0];
   }
   if (trimmed.startsWith(UPLOAD_ROOT_MARKER)) {
-    return trimmed;
+    return trimmed.split('?', 1)[0];
   }
   return trimmed;
 }
@@ -57,9 +100,12 @@ export function resolveCoreAssetUrl(path?: string): string {
 }
 
 async function signUploadPaths(paths: string[]): Promise<Record<string, string>> {
-  const pending = paths.filter((path) => path && !signCache.has(path));
+  const requestPaths = paths.map((path) => signRequestPath(path));
+  const pending = requestPaths.filter((path) => path && !signCache.has(path));
   if (!pending.length) {
-    return Object.fromEntries(paths.map((path) => [path, signCache.get(path) || '']));
+    return Object.fromEntries(
+      paths.map((path) => [path, signCache.get(signRequestPath(path)) || '']),
+    );
   }
 
   const headers: Record<string, string> = {
@@ -94,12 +140,11 @@ export async function resolveMarkdownImageUrlAsync(
   if (!trimmed || trimmed.startsWith('data:')) {
     return trimmed;
   }
-
-  if (trimmed.startsWith('/static-files/')) {
-    return resolveCoreAssetUrl(trimmed);
-  }
-
-  if (/^https?:\/\//i.test(trimmed) && !trimmed.includes(UPLOAD_ROOT_MARKER)) {
+  if (
+    /^https?:\/\//i.test(trimmed) &&
+    !trimmed.includes(UPLOAD_ROOT_MARKER) &&
+    !trimmed.includes('/static-files/')
+  ) {
     return normalizeProxyableUrl(trimmed);
   }
 
@@ -108,22 +153,27 @@ export async function resolveMarkdownImageUrlAsync(
     return trimmed;
   }
 
-  if (signCache.has(uploadPath)) {
-    return resolveCoreAssetUrl(signCache.get(uploadPath));
+  const cacheKey = cacheKeyForUploadPath(uploadPath);
+  if (signCache.has(cacheKey)) {
+    const cached = signCache.get(cacheKey) || '';
+    if (cached && !isExpiredSignedUrl(cached)) {
+      return resolveCoreAssetUrl(cached);
+    }
+    signCache.delete(cacheKey);
   }
 
-  if (!signInflight.has(uploadPath)) {
+  if (!signInflight.has(cacheKey)) {
     signInflight.set(
-      uploadPath,
+      cacheKey,
       signUploadPaths([uploadPath])
-        .then((urls) => urls[uploadPath] || '')
+        .then((urls) => urls[cacheKey] || '')
         .finally(() => {
-          signInflight.delete(uploadPath);
+          signInflight.delete(cacheKey);
         }),
     );
   }
 
-  const signed = await signInflight.get(uploadPath);
+  const signed = await signInflight.get(cacheKey);
   if (signed) {
     return resolveCoreAssetUrl(signed);
   }
@@ -162,12 +212,16 @@ export function resolveMarkdownImageUrl(
     return trimmed;
   }
 
-  if (trimmed.startsWith('/static-files/')) {
+  if (trimmed.includes('/static-files/')) {
     return resolveCoreAssetUrl(trimmed);
   }
 
   const matchedKey = findMatchingImageKey(trimmed, imageKeys);
   if (matchedKey) {
+    if (isExpiredSignedUrl(matchedKey)) {
+      signCache.delete(cacheKeyForUploadPath(extractUploadPath(matchedKey)));
+      return trimmed;
+    }
     return resolveCoreAssetUrl(matchedKey);
   }
 

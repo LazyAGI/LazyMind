@@ -1189,7 +1189,7 @@ export function SlotFile({ slot, sessionId, slotId, onRefresh }: SlotFileProps) 
   const raw = slot.artifact_value;
   const rawPath: string = raw?.url ?? raw?.path ?? '';
   const url: string = rawPath ? resolveCoreAssetUrl(rawPath) : '';
-  const name: string = raw?.filename ?? raw?.name ?? slot.artifact_key;
+  const name: string = raw?.filename ?? raw?.name ?? slot.slot;
   const size: number | undefined = raw?.size;
   const { deleteSlotItem, patchSlotCaption } = usePluginStore();
   const [previewOpen, setPreviewOpen] = useState(false);

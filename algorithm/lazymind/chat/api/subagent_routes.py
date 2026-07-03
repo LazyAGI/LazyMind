@@ -17,10 +17,10 @@ async def run_subagent(
     agent_type: Annotated[Optional[str], Body(description='Agent type')] = None,
     objective: Annotated[Optional[str], Body(description='Task objective')] = None,
     params: Annotated[Optional[Dict[str, Any]], Body(description='Task parameters')] = None,
-    input_artifact_keys: Annotated[Optional[List[str]], Body(description='Input artifact keys')] = None,
-    output_artifact_keys: Annotated[
+    input_slots: Annotated[Optional[List[str]], Body(description='Input slot ids')] = None,
+    output_slots: Annotated[
         Optional[List[str]],
-        Body(description='Output artifact keys (fixed declaration)'),
+        Body(description='Output slot ids (fixed declaration)'),
     ] = None,
     workspace_path: Annotated[Optional[str], Body(description='Workspace directory for this task')] = None,
     tools: Annotated[

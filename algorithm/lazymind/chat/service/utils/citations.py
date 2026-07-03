@@ -91,6 +91,15 @@ def split_citation_index(index: Any) -> tuple[int | None, int | None]:
 def file_name_from_item(item: dict[str, Any]) -> str:
     metadata = item.get('metadata') if isinstance(item.get('metadata'), dict) else {}
     global_md = item.get('global_metadata') if isinstance(item.get('global_metadata'), dict) else {}
+    group = item.get('group') or item.get('group_name') or ''
+    if group == 'image':
+        return (
+            global_md.get('file_name')
+            or item.get('file_name')
+            or metadata.get('file_name')
+            or metadata.get('source')
+            or 'title_example'
+        )
     return (
         item.get('file_name')
         or global_md.get('file_name')

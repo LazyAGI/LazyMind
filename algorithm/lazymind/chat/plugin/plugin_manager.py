@@ -128,7 +128,7 @@ def _trigger_plugin_step(
             objective for this execution only.  Used for retries where the user
             wants to refine or partially regenerate the output.
             Not persisted to session state.
-        partial_indices: Maps artifact_key → list_index values that should overwrite
+        partial_indices: Maps slot → list_index values that should overwrite
             existing list-slot entries rather than appending. None means full write.
     """
     cfg = _agentic_config()
@@ -187,22 +187,22 @@ def _trigger_plugin_step(
                     if isinstance(s, dict)
                 }
                 for inp in inputs:
-                    artifact_id = inp['artifact_id']
+                    slot = inp['slot']
                     required = inp.get('required', True)
-                    producer_step = plugin_loader.find_producer_step(plugin_id, artifact_id)
+                    producer_step = plugin_loader.find_producer_step(plugin_id, slot)
                     if not producer_step:
                         continue
                     step_status = steps_data.get(producer_step)
                     if step_status is None:
                         if required:
                             return (
-                                f'Error: required artifact {artifact_id!r} not available. '
+                                f'Error: required artifact {slot!r} not available. '
                                 f'Please trigger {producer_step!r} first.'
                             )
                         continue
                     if step_status in ('running', 'failed', 'interrupted'):
                         return (
-                            f'Error: artifact {artifact_id!r} not ready '
+                            f'Error: artifact {slot!r} not ready '
                             f'(producer step {producer_step!r} status: {step_status!r}).'
                         )
         except Exception:
@@ -210,8 +210,8 @@ def _trigger_plugin_step(
 
     # --- Emit task_created signal ---
     task_id = str(uuid.uuid4())
-    output_keys = [o['artifact_id'] for o in step_config.get('outputs', [])]
-    input_keys = [i['artifact_id'] for i in inputs]
+    output_keys = [o['slot'] for o in step_config.get('outputs', [])]
+    input_keys = [i['slot'] for i in inputs]
 
     # Framework tools are always present regardless of plugin declaration.
     declared_tools: List[str] = step_config.get('tools', [])
@@ -253,8 +253,8 @@ def _trigger_plugin_step(
         mode='manual',          # Plugin steps always async; Go controls auto-advance
         objective=_render_step_objective(step_config, user_input, enriched_instruction),
         params=params,
-        input_artifact_keys=input_keys,
-        output_artifact_keys=output_keys,
+        input_slots=input_keys,
+        output_slots=output_keys,
         tools=merged_tools,
         resume=False,
     )
@@ -287,8 +287,8 @@ def _trigger_plugin_end(plugin_id: str) -> str:
             'user_input': '',
             'is_cold_start': False,
         },
-        input_artifact_keys=[],
-        output_artifact_keys=[],
+        input_slots=[],
+        output_slots=[],
         tools=[],
         resume=False,
     )
@@ -458,7 +458,7 @@ def build_advance_step_and_hand_off_tool(
         '    user_input (str): Concise goal statement for the SubAgent — synthesise intent\n'
         '        from the conversation.  Do NOT pass vague phrases like "继续" or "continue".\n'
         '    runtime_instruction (str, optional): Ephemeral directive for this run only.\n'
-        '    partial_indices (dict, optional): Maps artifact_key → list_index values to\n'
+        '    partial_indices (dict, optional): Maps slot → list_index values to\n'
         '        overwrite (list-cardinality slots only).\n\n'
         'Returns:\n'
         '    Confirmation that the step was queued. Exits ReAct immediately after.'

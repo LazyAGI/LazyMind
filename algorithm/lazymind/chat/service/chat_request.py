@@ -35,6 +35,7 @@ class ChatRuntimeOptions(BaseModel):
     trace: Optional[bool] = False
     environment_context: Optional[Dict[str, Any]] = None
     llm_config: Optional[Dict[str, Any]] = None
+    ocr_config: Optional[Dict[str, Any]] = None
     tool_config: Optional[Dict[str, Union[str, List[str]]]] = None
     mcp_config: Optional[List[Dict[str, Any]]] = None
 

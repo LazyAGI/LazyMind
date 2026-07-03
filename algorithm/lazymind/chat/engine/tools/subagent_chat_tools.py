@@ -80,8 +80,8 @@ def create_subagent(
     title: str,
     objective: str,
     params: Optional[Dict[str, Any]] = None,
-    input_artifact_keys: Optional[List[str]] = None,
-    output_artifact_keys: Optional[List[str]] = None,
+    input_slots: Optional[List[str]] = None,
+    output_slots: Optional[List[str]] = None,
     tools: Optional[List[str]] = None,
     resume: bool = False,
 ) -> Dict[str, Any]:
@@ -109,8 +109,8 @@ def create_subagent(
         title (str): A short human-readable task title, e.g. 'generate image'.
         objective (str): A clear description of what the SubAgent must accomplish.
         params (dict): Optional parameters for the task, e.g. {"count": 4}.
-        input_artifact_keys (list): Artifact keys this SubAgent may read from prior tasks.
-        output_artifact_keys (list): Artifact keys this SubAgent must produce (fixed declaration).
+        input_slots (list): Slot ids this SubAgent may read from prior tasks.
+        output_slots (list): Slot ids this SubAgent must produce (fixed declaration).
         tools (list): Optional explicit tool names; defaults to the agent_type tool set.
         resume (bool): Set to True when the user explicitly asks to continue or retry a
             FAILED or interrupted task. Pass the failed task's title so the agent can locate
@@ -123,8 +123,8 @@ def create_subagent(
     """
     mode = _mode()
     params = params or {}
-    input_artifact_keys = input_artifact_keys or []
-    output_artifact_keys = output_artifact_keys or []
+    input_slots = input_slots or []
+    output_slots = output_slots or []
 
     task_id = str(uuid.uuid4())
     if resume:
@@ -140,8 +140,8 @@ def create_subagent(
         mode=mode,
         objective=objective,
         params=params,
-        input_artifact_keys=input_artifact_keys,
-        output_artifact_keys=output_artifact_keys,
+        input_slots=input_slots,
+        output_slots=output_slots,
         tools=tools or [],
         resume=bool(resume),
     )
@@ -182,7 +182,7 @@ def create_subagent(
                 msg = (
                     f"Task '{title}' completed."
                     + (f' Summary: {summary}' if summary
-                       else f" Output keys: {', '.join(output_artifact_keys) or '(none)'}.")
+                       else f" Output slots: {', '.join(output_slots) or '(none)'}.")
                 )
             result['message'] = msg
         else:
@@ -205,7 +205,7 @@ def create_subagent(
 
 def _describe_artifact(a: Dict[str, Any]) -> str:
     """Return a one-line human-readable description of an artifact for the ChatAgent."""
-    key = a.get('artifact_key') or '?'
+    key = a.get('slot') or a.get('artifact_key') or '?'
     ct = a.get('content_type') or 'text'
     value = a.get('value') or {}
     if isinstance(value, str):
@@ -295,7 +295,7 @@ def _resolve_task(task_ref: str, tasks: List[Dict[str, Any]]) -> Optional[Dict[s
 
 
 def save_plugin_artifact(
-    artifact_key: str,
+    slot: str,
     value: Any,
     content_type: str = 'text',
     sort_order: Optional[int] = None,
@@ -310,7 +310,7 @@ def save_plugin_artifact(
     Calls Go core POST /plugin-sessions/{session_id}/artifacts to write a slot revision.
 
     Args:
-        artifact_key (str): The artifact key to write (must have a slot binding in the plugin).
+        slot (str): The slot id to write (must have a slot binding in the plugin).
         value (Any): The artifact value.
             - text: a plain string.
             - json: a dict or list.
@@ -347,9 +347,6 @@ def save_plugin_artifact(
     elif ct == 'json':
         value_payload = {'data': value}
     elif ct in ('image', 'file'):
-        # Resolve signed URLs or relative paths to local absolute paths.
-        # find_user_attachment returns both 'url' (signed /static-files/...) and 'path'
-        # (local absolute). The LLM should pass path, but may pass url by mistake.
         resolved_path = _resolve_file_path_for_artifact(str(value), cfg)
         value_payload = {'path': resolved_path}
     elif ct == 'file_list':
@@ -361,7 +358,7 @@ def save_plugin_artifact(
         value_payload['caption'] = str(caption)
 
     body: Dict[str, Any] = {
-        'artifact_key': artifact_key,
+        'slot': slot,
         'value': value_payload,
         'content_type': ct,
     }
@@ -385,7 +382,7 @@ def save_plugin_artifact(
                 'message': f'Go core returned {resp.status_code}: {resp.text[:200]}',
             })
         data = resp.json()
-        msg = f"Artifact '{artifact_key}' saved to plugin session {session_id}."
+        msg = f"Artifact '{slot}' saved to plugin session {session_id}."
         return tool_success('save_plugin_artifact', {
             'status': 'ok',
             'message': msg,
@@ -459,7 +456,7 @@ def list_subagent_artifacts(task_ref: str) -> Dict[str, Any]:
     arts = task.get('artifacts') or []
     summary: Dict[str, str] = {}
     for a in arts:
-        summary[a.get('artifact_key')] = a.get('content_type')
+        summary[a.get('slot') or a.get('artifact_key')] = a.get('content_type')
     parts = [f'{k} ({v})' for k, v in summary.items()]
     msg = f"Task '{task.get('title')}' has {len(summary)} artifact(s): " + (', '.join(parts) if parts else '(none)')
     return tool_success('list_subagent_artifacts', {'status': 'ok', 'message': msg, 'keys': summary})
@@ -482,5 +479,5 @@ def get_subagent_artifacts(task_ref: str, keys: Optional[List[str]] = None) -> D
     arts = task.get('artifacts') or []
     if keys:
         keyset = set(keys)
-        arts = [a for a in arts if a.get('artifact_key') in keyset]
+        arts = [a for a in arts if a.get('slot') or a.get('artifact_key') in keyset]
     return tool_success('get_subagent_artifacts', {'status': 'ok', 'artifacts': arts, 'task_title': task.get('title')})

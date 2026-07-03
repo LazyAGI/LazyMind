@@ -239,27 +239,17 @@ class PluginSpec:
         return dict(self._steps.get(step_id, {}))
 
     def get_slot_def(self, slot_id: str) -> Optional[Dict[str, Any]]:
-        """Find a slot definition in plugin.yaml ui.tabs by slot_id."""
-        for tab in (self.yaml.get('ui') or {}).get('tabs', []):
-            for slot in tab.get('slots', []):
-                if slot.get('id') == slot_id:
-                    return dict(slot)
+        """Find a slot definition by slot_id from the top-level slots list."""
+        for slot in self.yaml.get('slots', []):
+            if slot.get('id') == slot_id:
+                return dict(slot)
         return None
 
-    def get_slot_for_artifact(self, artifact_id: str) -> Optional[str]:
-        """Return the slot_id bound to artifact_id in any step output, or None."""
-        for step_cfg in self._steps.values():
-            for out in step_cfg.get('outputs', []):
-                if out.get('artifact_id') == artifact_id:
-                    return out.get('slot_id')
-        return None
-
-    def get_slot_for_artifact_key(self, artifact_key: str) -> Optional[Dict[str, Any]]:
-        """Return the slot definition (id, cardinality, ordered, caption_key …) for an artifact_key."""
-        for tab in (self.yaml.get('ui') or {}).get('tabs', []):
-            for slot in tab.get('slots', []):
-                if slot.get('artifact_key') == artifact_key:
-                    return dict(slot)
+    def get_slot(self, slot: str) -> Optional[Dict[str, Any]]:
+        """Return the slot definition (id, type, cardinality, ordered …) for a slot id."""
+        for s in self.yaml.get('slots', []):
+            if s.get('id') == slot:
+                return dict(s)
         return None
 
     def get_i18n_label(self, lang: str, key_path: str, fallback: str = '') -> str:
@@ -343,13 +333,34 @@ def get_plugin_with_i18n(plugin_id: str, lang: str = '') -> Optional[Dict[str, A
     if not spec:
         return None
 
+    import copy
+
+    # Build a slot lookup from the top-level slots[] definition.
+    top_slots: Dict[str, Dict[str, Any]] = {
+        s['id']: s for s in spec.yaml.get('slots', []) if s.get('id')
+    }
+
+    # Expand ui.tabs[].slots[] from id-only references to full slot defs.
+    # Each tab slot entry is merged: top-level slot attrs first, then any
+    # tab-local overrides (currently only 'id' is present, but kept for
+    # forward-compatibility).
+    raw_ui = copy.deepcopy(spec.yaml.get('ui', {}))
+    for tab in raw_ui.get('tabs', []):
+        expanded = []
+        for slot_ref in tab.get('slots', []):
+            slot_id = slot_ref.get('id', '')
+            base = dict(top_slots.get(slot_id, {}))
+            base.update(slot_ref)  # tab-local keys win if ever added
+            expanded.append(base)
+        tab['slots'] = expanded
+
     raw: Dict[str, Any] = {
         'id': spec.plugin_id,
         'name': spec.yaml.get('name', spec.plugin_id),
         'description': spec.yaml.get('description', ''),
         'when_to_use': spec.yaml.get('when_to_use', ''),
         'steps': list(spec.yaml.get('steps', [])),
-        'ui': spec.yaml.get('ui', {}),
+        'ui': raw_ui,
         'i18n': spec.yaml.get('i18n', {}),
     }
 
@@ -357,7 +368,6 @@ def get_plugin_with_i18n(plugin_id: str, lang: str = '') -> Optional[Dict[str, A
         return raw
 
     # Apply i18n overrides to a deep copy so the registry cache is untouched.
-    import copy
     raw = copy.deepcopy(raw)
 
     name_i18n = spec.get_i18n_label(lang, 'name', '')
@@ -430,14 +440,14 @@ def get_plugin_yaml(plugin_id: str) -> Dict[str, Any]:
     return spec.yaml if spec else {}
 
 
-def find_producer_step(plugin_id: str, artifact_id: str) -> Optional[str]:
-    """Return the step_id that produces artifact_id, or None."""
+def find_producer_step(plugin_id: str, slot: str) -> Optional[str]:
+    """Return the step_id that produces slot, or None."""
     spec = get_plugin(plugin_id)
     if not spec:
         return None
     for step_id, step_cfg in spec._steps.items():
         for out in step_cfg.get('outputs', []):
-            if out.get('artifact_id') == artifact_id:
+            if out.get('slot') == slot:
                 return step_id
     return None
 

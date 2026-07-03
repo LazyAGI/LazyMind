@@ -35,6 +35,11 @@ def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     such as the user explicitly saying that A means B, that A should be remembered as B, or that two
     terms should be treated as the same concept in their domain. Do not use it for vague paraphrases,
     general world-knowledge synonyms, temporary nicknames, or one-off wording choices.
+    Do not use it for stable user profile fields or personal contact/account data, even when the
+    user phrases them as "A is B" mappings. Examples include common or work email addresses, phone
+    numbers, usernames/accounts, mailing addresses, legal names, job titles, employers, and other
+    identity or profile attributes; those belong in user profile/preferences when such a memory tool
+    is available.
 
     Prefer this tool over memory when the user asks to remember a mapping in a vocabulary,
     glossary, domain terminology, or synonym list, or says that one term means, equals,

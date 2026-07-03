@@ -201,17 +201,14 @@ def test_memory_review_prompt_excludes_preferences_and_workflows():
     assert 'agent_persona' in prompt
     assert 'preferred_name' in prompt
     assert 'response_style' in prompt
-    assert '智能体角色' in prompt  # still present in Chinese parenthetical notes
-    assert '用户称谓' in prompt
-    assert '回复风格' in prompt
-    assert 'role the user wants the agent to play' in prompt
-    assert 'how the user wants the agent to address them' in prompt
-    assert 'display/use exactly one of 简洁, 详细, 幽默, 正式' in prompt
-    assert '简洁, 详细, 幽默, 正式' in prompt
-    assert 'concise, detailed, humorous, formal' in prompt
-    assert 'existing valid response_style in either language' in prompt
-    assert 'Do not put language preferences' in prompt
-    assert 'verbs, or full instructions' in prompt
+    assert '智能体身份、职责和边界' in prompt
+    assert '对用户的称呼方式' in prompt
+    assert '表达习惯、篇幅和结构偏好' in prompt
+    assert 'identity, responsibilities, and boundaries' in prompt
+    assert 'how replies should address the user' in prompt
+    assert 'expression habits, length preference, and structure preference' in prompt
+    assert '100 characters or less' in prompt
+    assert 'keep existing frontmatter values unchanged' in prompt
     assert 'response_style is unknown' in prompt
     assert 'use ""' in prompt
     assert 'never use generic acknowledgement text' in prompt

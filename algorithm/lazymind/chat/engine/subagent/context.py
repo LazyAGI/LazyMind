@@ -31,8 +31,8 @@ class SubAgentContext:
     objective: str
     params: Dict[str, Any]
     workspace_path: str
-    input_artifact_keys: List[str]
-    output_artifact_keys: List[str]
+    input_slots: List[str]
+    output_slots: List[str]
     db: SubAgentDB
     emit: Callable[[Dict[str, Any]], None]
     # artifact seq counters and local cache (Go persists to DB; this serves intra-task reads).
@@ -45,14 +45,14 @@ class SubAgentContext:
 
     def record_local_artifact(self, key: str, content_type: str, value: Dict[str, Any], seq: int) -> None:
         self._local_artifacts.append({
-            'artifact_key': key, 'content_type': content_type, 'value': value, 'seq': seq,
+            'slot': key, 'content_type': content_type, 'value': value, 'seq': seq,
         })
 
     def local_artifacts(self, keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         if keys is None:
             return list(self._local_artifacts)
         keyset = set(keys)
-        return [a for a in self._local_artifacts if a['artifact_key'] in keyset]
+        return [a for a in self._local_artifacts if a['slot'] in keyset]
 
     def saved_keys(self) -> List[str]:
         return list(self._artifact_counts.keys())

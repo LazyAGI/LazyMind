@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import os
 from typing import Any
 
 
@@ -37,7 +36,4 @@ def _activate_session(session_id: str, llm_config: Mapping[str, Any]) -> None:
 
 
 def _model_role(llm_config: Mapping[str, Any], model: str | None) -> str:
-    preferred = str(model or os.getenv('LAZYMIND_EVO_LLM_ROLE') or 'evo_llm').strip() or 'evo_llm'
-    if model or not llm_config or preferred in llm_config:
-        return preferred
-    return 'llm' if 'llm' in llm_config else preferred
+    return str(model or 'evo_llm').strip() or 'evo_llm'

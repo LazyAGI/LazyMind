@@ -91,9 +91,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		}
 	}
 
-	config := BuildLLMConfig(rows)
-	fmt.Printf("[Core] [LLM_CONFIG_LOADED] [user_id=%s] [%s]\n", strings.TrimSpace(userID), SummarizeLLMConfigForLog(config))
-	return config, nil
+	return BuildLLMConfig(rows), nil
 }
 
 func LoadOCRConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {

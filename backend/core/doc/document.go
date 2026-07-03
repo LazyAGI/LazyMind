@@ -161,9 +161,42 @@ func staticFileURLFromFullPath(fullPath string) string {
 	if rel == "" {
 		return ""
 	}
+	return staticFileURLFromRelativePath(rel)
+}
+
+func staticFileURLFromRelativePath(rel string) string {
+	rel = strings.TrimSpace(filepath.ToSlash(rel))
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "../") {
+		return ""
+	}
 	expires := time.Now().UTC().Unix() + signedFileExpireSeconds()
 	sig := signStaticFile(rel, expires)
 	return fmt.Sprintf("/static-files/%s?expires=%d&sig=%s", encodeStaticFilePath(rel), expires, sig)
+}
+
+func refreshStaticFileURL(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if idx := strings.Index(path, "/static-files/"); idx >= 0 {
+		path = path[idx:]
+	}
+	if !strings.HasPrefix(path, "/static-files/") {
+		return ""
+	}
+	rel := strings.TrimPrefix(strings.Split(path, "?")[0], "/static-files/")
+	parts := strings.Split(rel, "/")
+	for i, part := range parts {
+		if decoded, err := url.PathUnescape(part); err == nil {
+			parts[i] = decoded
+		}
+	}
+	rel = strings.Join(parts, "/")
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "../") {
+		return ""
+	}
+	return staticFileURLFromRelativePath(rel)
 }
 
 // UploadRoot returns the configured local root used by the signed static file service.
@@ -282,9 +315,11 @@ func SignStaticFiles(w http.ResponseWriter, r *http.Request) {
 		if path == "" {
 			continue
 		}
-		if strings.HasPrefix(path, "/static-files/") {
-			urls[path] = path
-			continue
+		if strings.Contains(path, "/static-files/") {
+			if refreshed := refreshStaticFileURL(path); refreshed != "" {
+				urls[path] = refreshed
+				continue
+			}
 		}
 		if signed := staticFileURLFromFullPath(path); signed != "" {
 			urls[path] = signed

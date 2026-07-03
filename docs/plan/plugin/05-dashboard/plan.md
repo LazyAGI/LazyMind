@@ -134,7 +134,7 @@ interface StateGraphModalProps {
 
 ### 3.2 布局与视觉设计
 
-参考 [`status-board.png`](./status-board.png) 中 TaskCenter 步骤 tooltip 的样式风格（深色背景、绿色 succeeded badge、步骤名 + artifact_key 组合展示）。
+参考 [`status-board.png`](./status-board.png) 中 TaskCenter 步骤 tooltip 的样式风格（深色背景、绿色 succeeded badge、步骤名 + slot 组合展示）。
 
 StateGraph Modal 内容区：
 
@@ -235,7 +235,7 @@ image-plugin  [等待确认 ← 可点击]   ① 用户意图  ×  ∨
 
 「步骤」列的 step Tag 区域（`+N` tooltip）改为整体可点击，点击弹出 `StateGraphModal`。
 
-参考 [`status-board.png`](./status-board.png) 中的步骤 tooltip 样式：深色背景 popover 展示各步骤状态（succeeded badge + step_id + artifact_key）。
+参考 [`status-board.png`](./status-board.png) 中的步骤 tooltip 样式：深色背景 popover 展示各步骤状态（succeeded badge + step_id + slot）。
 
 - 仅 `task.plugin_session_id` 存在（即 `task_type=plugin_run`）时才可点击
 - 点击后 `setStateGraphTarget({ sessionId: task.plugin_session_id, pluginId: task.plugin_id })`

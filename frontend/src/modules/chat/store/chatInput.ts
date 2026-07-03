@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export interface ArtifactRef {
-  artifact_key: string;
+  slot: string;
   slot_id: string;
   sort_order?: number;
   content_type: string;
@@ -19,7 +19,7 @@ interface ChatInputStore {
   clearInputContent: (conversationId: string) => void;
   clearAllInputContents: () => void;
   addArtifactRef: (conversationId: string, ref: ArtifactRef) => void;
-  removeArtifactRef: (conversationId: string, artifactKey: string, sortOrder?: number) => void;
+  removeArtifactRef: (conversationId: string, slot: string, sortOrder?: number) => void;
   clearArtifactRefs: (conversationId: string) => void;
   getArtifactRefs: (conversationId: string) => ArtifactRef[];
 }
@@ -54,7 +54,7 @@ export const useChatInputStore = create<ChatInputStore>()(
         set((state) => {
           const existing = state.artifactRefs[conversationId] ?? [];
           const filtered = existing.filter(
-            (r) => !(r.artifact_key === ref.artifact_key && r.sort_order === ref.sort_order),
+            (r) => !(r.slot === ref.slot && r.sort_order === ref.sort_order),
           );
           return {
             artifactRefs: {
@@ -64,14 +64,14 @@ export const useChatInputStore = create<ChatInputStore>()(
           };
         });
       },
-      removeArtifactRef: (conversationId: string, artifactKey: string, sortOrder?: number) => {
+      removeArtifactRef: (conversationId: string, slot: string, sortOrder?: number) => {
         set((state) => {
           const existing = state.artifactRefs[conversationId] ?? [];
           return {
             artifactRefs: {
               ...state.artifactRefs,
               [conversationId]: existing.filter(
-                (r) => !(r.artifact_key === artifactKey && r.sort_order === sortOrder),
+                (r) => !(r.slot === slot && r.sort_order === sortOrder),
               ),
             },
           };

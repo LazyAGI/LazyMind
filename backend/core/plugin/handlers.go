@@ -122,7 +122,7 @@ type slotDTO struct {
 	ListIndex     *int            `json:"list_index,omitempty"`
 	SortOrder     *int            `json:"sort_order,omitempty"`
 	Selected      bool            `json:"selected"`
-	ArtifactKey   string          `json:"artifact_key"`
+	Slot          string          `json:"slot"`
 	CreatedAt     time.Time       `json:"created_at"`
 	ContentType   string          `json:"content_type,omitempty"`
 	ArtifactValue json.RawMessage `json:"artifact_value,omitempty"`
@@ -184,7 +184,7 @@ func toSlotDTO(r *orm.PluginSlotRevision) slotDTO {
 		Revision:        r.Revision,
 		ListIndex:       r.ListIndex,
 		Selected:        r.Selected,
-		ArtifactKey:     r.ArtifactKey,
+		Slot:            r.Slot,
 		ArtifactSeq:     r.ArtifactSeq,
 		HumanArtifactID: r.HumanArtifactID,
 		StepID:          r.StepID,
@@ -199,7 +199,7 @@ func toSlotDTO(r *orm.PluginSlotRevision) slotDTO {
 // and OrderVersion on each slotDTO by querying sub_agent_artifacts, plugin_slot_revisions,
 // and plugin_slot_order.
 // For each revision: look up plugin_session_steps → task_id, then query
-// sub_agent_artifacts(task_id, artifact_key) ordered by seq ASC and pick the
+// sub_agent_artifacts(task_id, slot) ordered by seq ASC and pick the
 // row at position list_index (0-based); for single slots take the latest (seq DESC).
 func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slotDTO) {
 	// Step 1: build a map (step_id, attempt) → task_id
@@ -232,10 +232,10 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 		var arts []orm.SubAgentArtifact
 		db.WithContext(ctx).
 			Where("task_id IN ? AND hidden = ?", ids, false).
-			Order("task_id ASC, artifact_key ASC, seq ASC").
+			Order("task_id ASC, slot ASC, seq ASC").
 			Find(&arts)
 		for _, a := range arts {
-			k := a.TaskID + "#" + a.ArtifactKey
+			k := a.TaskID + "#" + a.Slot
 			artifactsByTask[k] = append(artifactsByTask[k], a)
 		}
 	}
@@ -302,7 +302,7 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 				fmt.Printf("[enrichSlots] WARN: no task_id for step_id=%s attempt=%d slot_id=%s\n",
 					slot.StepID, slot.Attempt, slot.SlotID)
 			} else {
-				k := tid + "#" + slot.ArtifactKey
+				k := tid + "#" + slot.Slot
 				for j := range artifactsByTask[k] {
 					if artifactsByTask[k][j].Seq == *slot.ArtifactSeq {
 						a := &artifactsByTask[k][j]
@@ -313,8 +313,8 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 					}
 				}
 				if resolved == nil {
-					fmt.Printf("[enrichSlots] WARN: ArtifactSeq=%d not found in task=%s key=%s slot_id=%s\n",
-						*slot.ArtifactSeq, tid, slot.ArtifactKey, slot.SlotID)
+					fmt.Printf("[enrichSlots] WARN: ArtifactSeq=%d not found in task=%s slot=%s slot_id=%s\n",
+						*slot.ArtifactSeq, tid, slot.Slot, slot.SlotID)
 				}
 			}
 		} else {
@@ -659,7 +659,7 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 
 // artifactSummaryItem is one entry in the per-step artifact summary list.
 type artifactSummaryItem struct {
-	ArtifactKey string `json:"artifact_key"`
+	Slot        string `json:"slot"`
 	ContentType string `json:"content_type"`
 	Preview     string `json:"preview"` // text snippet (≤30 chars) or filename
 }
@@ -886,17 +886,17 @@ func GetStateGraph(w http.ResponseWriter, r *http.Request) {
 	// 4. Query artifacts for the latest attempt of each step.
 	//    For text artifacts: take first 30 runes of the "text" field.
 	//    For image artifacts: take the filename from the "path" or "url" field.
-	//    De-duplicate by artifact_key, keeping the row with the highest seq.
+	//    De-duplicate by slot, keeping the row with the highest seq.
 	type artifactRow struct {
 		StepID      string `gorm:"column:step_id"`
 		Attempt     int    `gorm:"column:attempt"`
-		ArtifactKey string `gorm:"column:artifact_key"`
+		Slot        string `gorm:"column:slot"`
 		ContentType string `gorm:"column:content_type"`
 		Value       []byte `gorm:"column:value"`
 	}
 	var artifactRows []artifactRow
 	if artifactQueryErr := db.WithContext(ctx).Raw(`
-		SELECT a.artifact_key, a.content_type, a.value, s.step_id, s.attempt
+		SELECT a.slot, a.content_type, a.value, s.step_id, s.attempt
 		FROM sub_agent_artifacts a
 		JOIN plugin_session_steps s ON s.task_id = a.task_id
 		WHERE s.session_id = ?
@@ -905,7 +905,7 @@ func GetStateGraph(w http.ResponseWriter, r *http.Request) {
 			SELECT MAX(a2.seq)
 			FROM sub_agent_artifacts a2
 			WHERE a2.task_id = a.task_id
-			  AND a2.artifact_key = a.artifact_key
+			  AND a2.slot = a.slot
 		  )
 		  AND s.attempt = (
 			SELECT MAX(s2.attempt)
@@ -913,24 +913,24 @@ func GetStateGraph(w http.ResponseWriter, r *http.Request) {
 			WHERE s2.session_id = s.session_id
 			  AND s2.step_id = s.step_id
 		  )
-		ORDER BY s.step_id, a.artifact_key
+		ORDER BY s.step_id, a.slot
 	`, sessionID).Scan(&artifactRows).Error; artifactQueryErr != nil {
 		common.ReplyErr(w, "query artifact rows failed", http.StatusInternalServerError)
 		return
 	}
 
-	// Group artifact items by step_id, de-dup by artifact_key.
+	// Group artifact items by step_id, de-dup by slot.
 	stepArtifacts := make(map[string][]artifactSummaryItem)
-	seen := make(map[string]bool) // "step_id:artifact_key"
+	seen := make(map[string]bool) // "step_id:slot"
 	for _, r := range artifactRows {
-		k := r.StepID + ":" + r.ArtifactKey
+		k := r.StepID + ":" + r.Slot
 		if seen[k] {
 			continue
 		}
 		seen[k] = true
 		preview := buildArtifactPreview(r.ContentType, r.Value)
 		stepArtifacts[r.StepID] = append(stepArtifacts[r.StepID], artifactSummaryItem{
-			ArtifactKey: r.ArtifactKey,
+			Slot:        r.Slot,
 			ContentType: r.ContentType,
 			Preview:     preview,
 		})
@@ -1315,18 +1315,18 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
 		return
 	}
-	// Get an existing selected revision to borrow its artifact_key and step info.
+	// Get an existing selected revision to borrow its slot and step info.
 	var anyRev orm.PluginSlotRevision
 	if err := db.WithContext(ctx).
 		Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true).
 		First(&anyRev).Error; err != nil {
-		common.ReplyErr(w, "slot has no existing items; cannot infer artifact_key", http.StatusBadRequest)
+		common.ReplyErr(w, "slot has no existing items; cannot infer slot", http.StatusBadRequest)
 		return
 	}
 	// Write new list revision via WriteSlotRevisionWithHumanArtifact so that
 	// content_type is persisted correctly (required for image rendering).
 	newRev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
-		sessionID, slotID, anyRev.ArtifactKey, anyRev.StepID, anyRev.Attempt,
+		sessionID, slotID, anyRev.Slot, anyRev.StepID, anyRev.Attempt,
 		"list", nil,
 		body.ContentType, resolveValuePaths(body.Value), body.Caption,
 	)
@@ -1361,7 +1361,7 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 			First(&step).Error; err == nil {
 			cap := *body.Caption
 			db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
-				Where("task_id = ? AND artifact_key = ?", step.TaskID, anyRev.ArtifactKey).
+				Where("task_id = ? AND slot = ?", step.TaskID, anyRev.Slot).
 				Update("caption", &cap)
 		}
 	}
@@ -1374,10 +1374,10 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // SaveArtifactByKey handles POST /plugin-sessions/{session_id}/artifacts.
-// Allows ChatAgent to write a plugin artifact directly by artifact_key without
+// Allows ChatAgent to write a plugin artifact directly by slot without
 // going through a SubAgent task. Looks up the slot binding via the Python API,
-// then writes a new AI slot revision for the given artifact_key.
-// Body: { artifact_key: string, value: {...}, content_type?: string,
+// then writes a new AI slot revision for the given slot.
+// Body: { slot: string, value: {...}, content_type?: string,
 //
 //	sort_order?: int, caption?: string, step_id?: string }
 func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
@@ -1387,15 +1387,15 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ArtifactKey string          `json:"artifact_key"`
+		Slot        string          `json:"slot"`
 		Value       json.RawMessage `json:"value"`
 		ContentType string          `json:"content_type,omitempty"`
 		SortOrder   *int            `json:"sort_order,omitempty"`
 		Caption     *string         `json:"caption,omitempty"`
 		StepID      string          `json:"step_id,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ArtifactKey == "" {
-		common.ReplyErr(w, "invalid body: artifact_key and value required", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Slot == "" {
+		common.ReplyErr(w, "invalid body: slot and value required", http.StatusBadRequest)
 		return
 	}
 	if len(body.Value) == 0 {
@@ -1423,10 +1423,10 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve slot binding for the artifact_key via Python plugin API.
-	slotID, cardinality := resolveSlotBinding(sess.PluginID, body.ArtifactKey)
+	// Resolve slot binding for the slot via Python plugin API.
+	slotID, cardinality := resolveSlotBinding(sess.PluginID, body.Slot)
 	if slotID == "" {
-		common.ReplyErr(w, fmt.Sprintf("no slot binding for artifact_key %q in plugin %q", body.ArtifactKey, sess.PluginID), http.StatusBadRequest)
+		common.ReplyErr(w, fmt.Sprintf("no slot binding for slot %q in plugin %q", body.Slot, sess.PluginID), http.StatusBadRequest)
 		return
 	}
 
@@ -1456,18 +1456,18 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
-		sessionID, slotID, body.ArtifactKey, stepID, attempt, cardinality, listIndex,
+		sessionID, slotID, body.Slot, stepID, attempt, cardinality, listIndex,
 		body.ContentType, body.Value, body.Caption)
 	if err != nil {
 		common.ReplyErr(w, "write slot revision failed", http.StatusInternalServerError)
 		return
 	}
 	common.ReplyJSON(w, map[string]any{
-		"status":       "ok",
-		"session_id":   sessionID,
-		"slot_id":      slotID,
-		"artifact_key": body.ArtifactKey,
-		"revision":     rev.Revision,
+		"status":     "ok",
+		"session_id": sessionID,
+		"slot_id":    slotID,
+		"slot":       body.Slot,
+		"revision":   rev.Revision,
 	})
 }
 
