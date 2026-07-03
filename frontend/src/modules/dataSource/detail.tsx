@@ -1,11 +1,7 @@
-import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import "./detail.scss";
-import TypedConfirmModal, {
-  type TypedConfirmModalRef,
-} from '@/components/ui/TypedConfirmModal';
 import DataSourceDetailView from "@/modules/dataSource/common/components/DataSourceDetailView";
 import DataSourceSyncPickerModal from "@/modules/dataSource/common/components/DataSourceSyncPickerModal";
 import { useDataSourceDetail } from "./hooks/useDataSourceDetail";
@@ -15,8 +11,6 @@ import { buildDetailColumns } from "./components/detail/detailColumns";
 export default function DataSourceDetail() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const confirmRef = useRef<TypedConfirmModalRef>(null);
-  const pendingSyncDocIdsRef = useRef<string[]>([]);
 
   const {
     id,
@@ -76,14 +70,13 @@ export default function DataSourceDetail() {
   const columns = buildDetailColumns(t, sourceNameForPath);
 
   const handleSyncConfirm = async () => {
-    const finished = await runSyncPipeline(pendingSyncDocIdsRef.current);
+    const finished = await runSyncPipeline(syncSelectedDocIds);
     if (finished) {
       setSyncPickerOpen(false);
     }
   };
 
   return (
-    <>
     <DataSourceDetailView
       t={t}
       detailSource={detailSource ?? null}
@@ -123,22 +116,10 @@ export default function DataSourceDetail() {
             }
           }}
           onOk={() => {
-            const sourceName = detailSource?.name || t("admin.dataSourceFallbackName");
-            pendingSyncDocIdsRef.current = syncSelectedDocIds;
-            confirmRef.current?.onOpen({
-              id: detailSource?.id || "",
-              title: t("admin.dataSourceSyncConfirmTitle", { name: sourceName }),
-              content: t("admin.dataSourceSyncConfirmContent", {
-                count: syncSelectedDocIds.length,
-              }),
-              confirmText: t("admin.dataSourceSyncConfirmText", { name: sourceName }),
-            });
+            void handleSyncConfirm();
           }}
         />
       }
     />
-
-      <TypedConfirmModal ref={confirmRef} onClick={() => void handleSyncConfirm()} />
-    </>
   );
 }

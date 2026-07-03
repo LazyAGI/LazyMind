@@ -1,26 +1,52 @@
-import { Alert, Button, Form, Input, Modal, Space, Tag, Typography } from "antd";
+import { Alert, Button, Input, Modal, Space, Tag, Typography } from "antd";
 import { ArrowRightOutlined, FileTextOutlined } from "@ant-design/icons";
-import { FeishuCredentialHintAlertFromForm } from "../../common/FeishuCredentialHintAlert";
-import {
-  getSourceTypeDescription,
-  getSourceTypeTitle,
-} from "../../utils/status";
 import type { DataSourceManagementVm } from "../../hooks/useDataSourceManagement";
+import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
+import DataSourceProviderPicker from "./DataSourceProviderPicker";
+
+type SourceCreationModalsVm = Pick<
+  DataSourceManagementVm,
+  | "t"
+  | "createProviderModalOpen"
+  | "setCreateProviderModalOpen"
+  | "creatableSourceTypeOptions"
+  | "handleCreateProviderSelect"
+  | "isFeishuAuthValid"
+  | "isNotionAuthValid"
+  | "isFeishuSetupReady"
+  | "isNotionSetupReady"
+  | "authSelectModalOpen"
+  | "setAuthSelectModalOpen"
+  | "handleOpenFeishuGuideFromAuthSelect"
+  | "validFeishuAccounts"
+  | "handleSelectFeishuAuthConnection"
+  | "manualOauthModalOpen"
+  | "setManualOauthModalOpen"
+  | "manualOauthCallbackValue"
+  | "setManualOauthCallbackValue"
+  | "manualOauthSubmitting"
+  | "handleSubmitManualOauthCallback"
+>;
+
+interface DataSourceManagementModalsProps {
+  vm: SourceCreationModalsVm | SyncKnowledgeBaseCreationVm;
+  titleKey?: string;
+  introKey?: string;
+  hideProviderModal?: boolean;
+}
 
 const { Paragraph } = Typography;
 
-export default function DataSourceManagementModals({ vm }: { vm: DataSourceManagementVm }) {
+export default function DataSourceManagementModals({
+  vm,
+  titleKey = "admin.dataSourceCreateKnowledgeSource",
+  introKey = "admin.dataSourceCreateProviderIntro",
+  hideProviderModal = false,
+}: DataSourceManagementModalsProps) {
   const {
     t,
-    feishuSetupForm,
     createProviderModalOpen,
     setCreateProviderModalOpen,
-    creatableSourceTypeOptions,
-    handleCreateProviderSelect,
-    isFeishuAuthValid,
-    isNotionAuthValid,
-    isFeishuSetupReady,
-    isNotionSetupReady,
     authSelectModalOpen,
     setAuthSelectModalOpen,
     handleOpenFeishuGuideFromAuthSelect,
@@ -32,95 +58,25 @@ export default function DataSourceManagementModals({ vm }: { vm: DataSourceManag
     setManualOauthCallbackValue,
     manualOauthSubmitting,
     handleSubmitManualOauthCallback,
-    cloudSetupProvider,
-    feishuSetupModalOpen,
-    setFeishuSetupModalOpen,
-    feishuSetupIntent,
-    setFeishuSetupIntent,
-    feishuSetupSubmitting,
-    handleSaveFeishuSetup,
   } = vm;
 
   return (
     <>
-      <Modal
-        title={t("admin.dataSourceCreateKnowledgeSource")}
-        open={createProviderModalOpen}
-        footer={null}
-        width={720}
-        destroyOnHidden
-        onCancel={() => setCreateProviderModalOpen(false)}
-      >
-        <Paragraph className="data-source-create-provider-intro">
-          {t("admin.dataSourceCreateProviderIntro")}
-        </Paragraph>
-        <div className="data-source-create-provider-grid">
-          {creatableSourceTypeOptions.map((item) => {
-            const isFeishu = item.type === "feishu";
-            const isNotion = item.type === "notion";
-            const isCloudProvider = isFeishu || isNotion;
-            const isAuthValid = isFeishu ? isFeishuAuthValid : isNotion ? isNotionAuthValid : false;
-            const isSetupReady = isFeishu ? isFeishuSetupReady : isNotion ? isNotionSetupReady : true;
-            const isProviderLocked = isCloudProvider && !isAuthValid && !isSetupReady;
-            const authStatusText = isAuthValid
-              ? t("admin.dataSourceProviderAuthValid")
-              : isSetupReady
-                ? t("admin.dataSourceProviderAuthPending")
-                : t("admin.dataSourceProviderCredentialMissing");
-            return (
-              <button
-                key={item.type}
-                type="button"
-                className={`data-source-create-provider-card ${
-                  isProviderLocked ? "locked" : ""
-                }`}
-                onClick={() => handleCreateProviderSelect(item.type)}
-              >
-                <span className={`data-source-provider-logo data-source-icon-${item.type}`}>
-                  {item.logoUrl ? (
-                    <img
-                      alt=""
-                      aria-hidden="true"
-                      loading="lazy"
-                      src={item.logoUrl}
-                      onError={(event) => {
-                        event.currentTarget.style.display = "none";
-                      }}
-                    />
-                  ) : (
-                    item.icon
-                  )}
-                </span>
-                <span className="data-source-provider-card-copy">
-                  <span className="data-source-provider-title-row">
-                    <span className="data-source-provider-name">
-                      {getSourceTypeTitle(item.type, t)}
-                    </span>
-                    {item.adminOnly ? (
-                      <Tag color="orange">{t("admin.dataSourceAdminOnly")}</Tag>
-                    ) : null}
-                    {isCloudProvider ? (
-                      <Tag color={isAuthValid ? "success" : isSetupReady ? "processing" : "default"}>
-                        {authStatusText}
-                      </Tag>
-                    ) : null}
-                  </span>
-                  <span className="data-source-provider-desc">
-                    {isProviderLocked
-                      ? isFeishu
-                        ? t("admin.dataSourceCreateFeishuAuthRequiredHint")
-                        : t("admin.dataSourceNotionSetupRequiredForCreate")
-                      : getSourceTypeDescription(item.type, t)}
-                  </span>
-                </span>
-                <span className="data-source-provider-card-arrow" aria-hidden="true">
-                  <ArrowRightOutlined />
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </Modal>
+      {!hideProviderModal ? (
+        <Modal
+          title={t(titleKey)}
+          open={createProviderModalOpen}
+          footer={null}
+          width={720}
+          destroyOnHidden
+          onCancel={() => setCreateProviderModalOpen(false)}
+        >
+          <Paragraph className="data-source-create-provider-intro">
+            {t(introKey)}
+          </Paragraph>
+          <DataSourceProviderPicker vm={vm} />
+        </Modal>
+      ) : null}
 
       <Modal
         title={
@@ -174,13 +130,18 @@ export default function DataSourceManagementModals({ vm }: { vm: DataSourceManag
                   <span className="data-source-provider-name">
                     {account.connection?.accountName || account.name}
                   </span>
-                  <Tag color="success">{t("admin.dataSourceProviderAuthValid")}</Tag>
+                  <Tag color="success">
+                    {t("admin.dataSourceProviderAuthValid")}
+                  </Tag>
                 </span>
                 <span className="data-source-provider-desc">
                   {account.connection?.connectionId}
                 </span>
               </span>
-              <span className="data-source-provider-card-arrow" aria-hidden="true">
+              <span
+                className="data-source-provider-card-arrow"
+                aria-hidden="true"
+              >
                 <ArrowRightOutlined />
               </span>
             </button>
@@ -210,83 +171,13 @@ export default function DataSourceManagementModals({ vm }: { vm: DataSourceManag
           />
           <Input.TextArea
             value={manualOauthCallbackValue}
-            onChange={(event) => setManualOauthCallbackValue(event.target.value)}
+            onChange={(event) =>
+              setManualOauthCallbackValue(event.target.value)
+            }
             placeholder={t("admin.dataSourceOauthManualCallbackPlaceholder")}
             autoSize={{ minRows: 3, maxRows: 6 }}
           />
         </Space>
-      </Modal>
-
-      <Modal
-        title={
-          cloudSetupProvider === "feishu"
-            ? t("admin.dataSourceFeishuCredentialModalTitle")
-            : t("admin.dataSourceNotionCredentialModalTitle")
-        }
-        open={feishuSetupModalOpen}
-        destroyOnHidden
-        onCancel={() => {
-          if (feishuSetupSubmitting) {
-            return;
-          }
-          setFeishuSetupModalOpen(false);
-          setFeishuSetupIntent(null);
-        }}
-        onOk={handleSaveFeishuSetup}
-        okText={
-          feishuSetupIntent
-            ? cloudSetupProvider === "feishu"
-              ? t("admin.dataSourceFeishuCredentialSaveAndSelect")
-              : t("admin.dataSourceNotionCredentialSaveAndSelect")
-            : t("common.save")
-        }
-        okButtonProps={{ loading: feishuSetupSubmitting }}
-        cancelButtonProps={{ disabled: feishuSetupSubmitting }}
-        cancelText={t("common.cancel")}
-      >
-        <Form form={feishuSetupForm} layout="vertical">
-          <Form.Item
-            label={t("admin.dataSourceFeishuAccountName")}
-            name="name"
-          >
-            <Input placeholder={t("admin.dataSourceFeishuAccountNamePlaceholder")} />
-          </Form.Item>
-          <Form.Item
-            label={t("admin.dataSourceAppId")}
-            name="appId"
-            rules={[{ required: true, message: t("admin.dataSourceAppIdRequired") }]}
-          >
-            <Input placeholder={t("admin.dataSourceAppIdPlaceholder")} />
-          </Form.Item>
-          <Form.Item
-            label={t("admin.dataSourceAppSecret")}
-            name="appSecret"
-            rules={[{ required: true, message: t("admin.dataSourceAppSecretRequired") }]}
-          >
-            <Input.Password placeholder={t("admin.dataSourceAppSecretPlaceholder")} />
-          </Form.Item>
-          {cloudSetupProvider === "feishu" ? (
-            <FeishuCredentialHintAlertFromForm form={feishuSetupForm} />
-          ) : (
-            <Alert
-              showIcon
-              type="info"
-              message={t("admin.dataSourceNotionCredentialHint")}
-            />
-          )}
-          {cloudSetupProvider !== "feishu" && (
-            <Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
-              <a
-                href="/data-sources/docs/notion-setup?from=create-source"
-                target="_blank"
-                rel="noreferrer"
-              >
-                {t("admin.dataSourceNotionSetupGuideAction")}
-              </a>
-              {t("admin.dataSourceNotionSetupGuideHint")}
-            </Paragraph>
-          )}
-        </Form>
       </Modal>
     </>
   );

@@ -35,8 +35,6 @@ import type {
 import { type ScanV2AgentHint } from "../utils/scanAccessors";
 import { pickScanAgent } from "../utils/cloudSync";
 import { isAdminRole } from "../utils/role";
-import { resolveSourceTypeFromValues } from "../utils/feishuTarget";
-import { getSourceTypeTitle } from "../utils/status";
 import { loadNotionAppSetup } from "../utils/notionSetup";
 import { sourceTypeOptions } from "../constants/sourceTypeOptions";
 import { useLocalPathTree } from "./useLocalPathTree";
@@ -44,7 +42,6 @@ import { useFeishuTargetTree } from "./useFeishuTargetTree";
 import type {
   CloudSetupIntent,
   DataSourceSaveMode,
-  DataSourceView,
   ManagementContext,
 } from "./management/context";
 import { createListActions } from "./management/createListActions";
@@ -60,11 +57,6 @@ export function useDataSourceManagement() {
   const navigate = useNavigate();
   const [form] = Form.useForm<SourceFormValues>();
   const [sources, setSources] = useState<DataSourceItem[]>([]);
-  const [activeView, setActiveView] = useState<DataSourceView>(() =>
-    new URLSearchParams(window.location.search).get("view") === "connectors"
-      ? "connectors"
-      : "assets",
-  );
   const [assetSearchValue, setAssetSearchValue] = useState("");
   const [sourceListPage, setSourceListPage] = useState(1);
   const [sourceListPageSize, setSourceListPageSize] = useState(
@@ -140,7 +132,6 @@ export function useDataSourceManagement() {
   const isNotionAuthValid =
     notionOauthConnection?.status === "connected" &&
     Boolean(notionOauthConnection.connectionId);
-  const localSourceCount = sources.filter((item) => item.type === "local").length;
 
   const getPreferredLocalAgentId = () => {
     const currentLocalSource =
@@ -194,8 +185,8 @@ export function useDataSourceManagement() {
     feishuSetupForm,
     sources,
     setSources,
-    activeView,
-    setActiveView,
+    activeView: "assets" as const,
+    setActiveView: () => undefined,
     assetSearchValue,
     setAssetSearchValue,
     sourceListPage,
@@ -283,10 +274,9 @@ export function useDataSourceManagement() {
     const draft = consumeFeishuDataSourceWizardDraft();
     if (draft) {
       const normalizedWizardStep = Math.min(Math.max(draft.wizardStep, 0), 1);
-      if (draft.activeView) {
-        setActiveView(draft.activeView);
+      if (draft.authSelectModalOpen !== undefined) {
+        setAuthSelectModalOpen(Boolean(draft.authSelectModalOpen));
       }
-      setAuthSelectModalOpen(Boolean(draft.authSelectModalOpen));
       setWizardMode(draft.wizardMode);
       setWizardOpen(draft.wizardOpen);
       setWizardStep(normalizedWizardStep);
@@ -362,15 +352,6 @@ export function useDataSourceManagement() {
   }, []);
 
   useEffect(() => {
-    if (activeView !== "connectors" || feishuAuthAccountsLoadedRef.current) {
-      return;
-    }
-    void ctx.refreshFeishuAuthAccounts();
-    void ctx.refreshNotionAuthConnection();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView]);
-
-  useEffect(() => {
     if (!assetSearchInitializedRef.current) {
       assetSearchInitializedRef.current = true;
       return;
@@ -409,32 +390,7 @@ export function useDataSourceManagement() {
   };
 
   const requestSaveWithSyncConfirm = (mode: DataSourceSaveMode) => {
-    if (mode !== "createAndSync") {
-      void ctx.handleSave(mode);
-      return;
-    }
-
-    const values = form.getFieldsValue(true);
-    const effectiveSourceType = resolveSourceTypeFromValues(selectedType, values);
-    const fallbackType = effectiveSourceType || selectedType || "local";
-    const kbName = `${values.knowledgeBase || getSourceTypeTitle(fallbackType, t)}`.trim();
-    const isEditMode = wizardMode === "edit";
-
-    pendingConfirmActionRef.current = () => ctx.handleSave(mode);
-    confirmRef.current?.onOpen({
-      id: mode,
-      title: t(
-        isEditMode ? "admin.dataSourceSaveSyncTitle" : "admin.dataSourceCreateSyncTitle",
-        { name: kbName },
-      ),
-      content: t(
-        isEditMode ? "admin.dataSourceSaveSyncContent" : "admin.dataSourceCreateSyncContent",
-      ),
-      confirmText: t(
-        isEditMode ? "admin.dataSourceSaveSyncConfirmText" : "admin.dataSourceCreateSyncConfirmText",
-        { name: kbName },
-      ),
-    });
+    void ctx.handleSave(mode);
   };
 
   return {
@@ -442,8 +398,6 @@ export function useDataSourceManagement() {
     form,
     feishuSetupForm,
     sources,
-    activeView,
-    setActiveView,
     assetSearchValue,
     setAssetSearchValue,
     sourceListPage,
@@ -478,9 +432,6 @@ export function useDataSourceManagement() {
     notionOauthConnection,
     canCreateLocalSource,
     creatableSourceTypeOptions,
-    localScanChatEnabled,
-    localScanChatSaving,
-    localSourceCount,
     isFeishuSetupReady,
     isNotionSetupReady,
     isFeishuAuthValid,
@@ -498,15 +449,11 @@ export function useDataSourceManagement() {
     handleSearchFeishuTargetOptions,
     handleLoadFeishuTargetChildren,
     resetFeishuTargetBrowseOptions,
-    handleToggleLocalScanChat: ctx.handleToggleLocalScanChat,
-    handleManageFeishuAuth: ctx.handleManageFeishuAuth,
     openSourceCreateWizard: ctx.openSourceCreateWizard,
-    openCloudSetupModal: ctx.openCloudSetupModal,
     handleCreateProviderSelect: ctx.handleCreateProviderSelect,
     handleOpenFeishuGuideFromAuthSelect: ctx.handleOpenFeishuGuideFromAuthSelect,
     handleSelectFeishuAuthConnection: ctx.handleSelectFeishuAuthConnection,
     handleSubmitManualOauthCallback: ctx.handleSubmitManualOauthCallback,
-    handleSaveFeishuSetup: ctx.handleSaveFeishuSetup,
     handleCloseWizard: ctx.handleCloseWizard,
     handleNextStep: ctx.handleNextStep,
     handleSave: ctx.handleSave,

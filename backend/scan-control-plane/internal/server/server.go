@@ -120,6 +120,10 @@ func (unavailableAccessChecker) CanUseAuthConnection(context.Context, access.Act
 	return access.NewError(access.ErrCodeForbidden, "access checker is not configured")
 }
 
+func (unavailableAccessChecker) ShouldBlockLocalSourceAccess(context.Context, access.Actor, access.LocalSourceAccessRequest) bool {
+	return false
+}
+
 func WithConnectorRegistry(registry connector.ConnectorRegistry) Option {
 	return func(h *Handler) {
 		h.registry = registry
@@ -257,6 +261,7 @@ func (h *Handler) registerRoutes(mux *http.ServeMux) {
 	// Sources CRUD.
 	routeAPI(mux, "POST", "/api/scan/sources", []string{"scan.write"}, h.createSource)
 	routeAPI(mux, "GET", "/api/scan/sources", []string{"scan.read"}, h.listSources)
+	routeAPI(mux, "GET", "/api/scan/internal/sources/by-dataset/{dataset_id}", nil, h.getSourceByDataset)
 	routeAPI(mux, "DELETE", "/api/scan/internal/sources/by-dataset/{dataset_id}", nil, h.deleteSourceByDataset)
 	routeAPI(mux, "GET", "/api/scan/sources/{source_id}", []string{"scan.read"}, h.getSource)
 	routeAPI(mux, "PUT", "/api/scan/sources/{source_id}", []string{"scan.write"}, h.updateSource)
@@ -295,9 +300,10 @@ func (h *Handler) registerRoutes(mux *http.ServeMux) {
 
 func actorFromRequest(r *http.Request) (access.Actor, error) {
 	actor := access.Actor{
-		UserID:   strings.TrimSpace(r.Header.Get("X-User-ID")),
-		TenantID: strings.TrimSpace(r.Header.Get("X-Tenant-ID")),
-		Role:     strings.TrimSpace(r.Header.Get("X-User-Role")),
+		UserID:        strings.TrimSpace(r.Header.Get("X-User-ID")),
+		TenantID:      strings.TrimSpace(r.Header.Get("X-Tenant-ID")),
+		Role:          strings.TrimSpace(r.Header.Get("X-User-Role")),
+		Authorization: strings.TrimSpace(r.Header.Get("Authorization")),
 	}
 	if actor.TenantID == "" {
 		actor.TenantID = strings.TrimSpace(r.URL.Query().Get("tenant_id"))

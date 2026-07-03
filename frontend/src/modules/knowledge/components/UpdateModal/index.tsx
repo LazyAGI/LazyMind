@@ -69,7 +69,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
           }
         })
         .catch((err) => {
-          console.error('Failed to load algorithm list:', err);
+          console.error("Failed to load algorithm list:", err);
         });
     }
 
@@ -112,9 +112,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
         form.setFields([
           {
             name: "tags",
-            errors: hasError
-              ? [t("knowledge.knowledgeTagMaxLength")]
-              : [],
+            errors: hasError ? [t("knowledge.knowledgeTagMaxLength")] : [],
           },
         ]);
       },
@@ -131,9 +129,11 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
       form.validateFields().then(async (values) => {
         const params = { ...values };
         const selectedAlgoId =
-          params.algo_id || (algorithm.length === 1 ? algorithm[0]?.algo_id : undefined);
+          params.algo_id ||
+          (algorithm.length === 1 ? algorithm[0]?.algo_id : undefined);
         params.algo =
-          algorithm.find((item) => item.algo_id === selectedAlgoId) || data?.algo;
+          algorithm.find((item) => item.algo_id === selectedAlgoId) ||
+          data?.algo;
         if (selectedAlgoId) {
           params.algo_id = selectedAlgoId;
         }
@@ -173,7 +173,10 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
             label={t("knowledge.knowledgeBaseName")}
             required
             rules={[
-              { required: true, message: t("knowledge.inputKnowledgeBaseName") },
+              {
+                required: true,
+                message: t("knowledge.inputKnowledgeBaseName"),
+              },
 
               {
                 pattern: KNOWLEDGE_BASE_NAME_PATTERN,
@@ -182,16 +185,11 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
             ]}
           >
             <Input
-              placeholder={
-                t("knowledge.knowledgeNameRule")
-              }
+              placeholder={t("knowledge.knowledgeNameRule")}
               maxLength={KNOWLEDGE_BASE_NAME_MAX_LENGTH}
             />
           </Form.Item>
-          <Form.Item
-            name="desc"
-            label={t("knowledge.knowledgeDesc")}
-          >
+          <Form.Item name="desc" label={t("knowledge.knowledgeDesc")}>
             <TextArea
               placeholder={t("knowledge.maxLength300Chars")}
               showCount
@@ -204,7 +202,12 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
               name="algo_id"
               label={t("knowledge.parseAlgorithm")}
               initialValue={null}
-              rules={[{ required: true, message: t("knowledge.selectParseAlgorithm") }]}
+              rules={[
+                {
+                  required: true,
+                  message: t("knowledge.selectParseAlgorithm"),
+                },
+              ]}
             >
               <Select
                 options={algorithm.map((item) => ({

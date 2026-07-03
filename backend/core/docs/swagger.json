@@ -1,389 +1,389 @@
 {
-  "openapi": "3.0.3",
-  "info": {
-    "title": "Backend Core API",
-    "version": "0.1.0",
-    "description": "LazyMind Go backend core API - proxies to algorithm services"
-  },
-  "servers": [{ "url": "/api/core", "description": "Kong gateway (strip_path text core text)" }],
-  "paths": {
-    "/health": {
-      "get": {
-        "summary": "Health check",
-        "responses": { "200": { "description": "OK" } }
-      }
+    "openapi": "3.0.3",
+    "info": {
+      "title": "Backend Core API",
+      "version": "0.1.0",
+      "description": "LazyMind Go backend core API - proxies to algorithm services"
     },
-    "/hello": {
-      "get": {
-        "summary": "Hello (requires user.read)",
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/admin": {
-      "get": {
-        "summary": "Admin (requires document.write)",
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/upload_files": {
-      "post": {
-        "summary": "Upload files to knowledge base",
-        "description": "Proxies to parsing service. Multipart form with files.",
-        "parameters": [
-          { "name": "override", "in": "query", "schema": { "type": "boolean", "default": false } },
-          { "name": "metadatas", "in": "query", "schema": { "type": "string" } },
-          { "name": "user_path", "in": "query", "schema": { "type": "string" } }
-        ],
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": { "type": "object", "properties": { "files": { "type": "array", "items": { "type": "string", "format": "binary" } } } }
+    "servers": [{ "url": "/api/core", "description": "Kong gateway (strip_path text core text)" }],
+    "paths": {
+      "/health": {
+        "get": {
+          "summary": "Health check",
+          "responses": { "200": { "description": "OK" } }
+        }
+      },
+      "/hello": {
+        "get": {
+          "summary": "Hello (requires user.read)",
+          "responses": { "200": { "description": "OK" } }
+        }
+      },
+      "/admin": {
+        "get": {
+          "summary": "Admin (requires document.write)",
+          "responses": { "200": { "description": "OK" } }
+        }
+      },
+      "/upload_files": {
+        "post": {
+          "summary": "Upload files to knowledge base",
+          "description": "Proxies to parsing service. Multipart form with files.",
+          "parameters": [
+            { "name": "override", "in": "query", "schema": { "type": "boolean", "default": false } },
+            { "name": "metadatas", "in": "query", "schema": { "type": "string" } },
+            { "name": "user_path", "in": "query", "schema": { "type": "string" } }
+          ],
+          "requestBody": {
+            "content": {
+              "multipart/form-data": {
+                "schema": { "type": "object", "properties": { "files": { "type": "array", "items": { "type": "string", "format": "binary" } } } }
+              }
             }
-          }
-        },
-        "responses": { "200": { "description": "Returns [ids, results]" } }
-      }
-    },
-    "/add_files_to_group": {
-      "post": {
-        "summary": "Upload files and add to knowledge base group",
-        "description": "Proxies to parsing service. Multipart form with files.",
-        "parameters": [
-          { "name": "group_name", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "override", "in": "query", "schema": { "type": "boolean", "default": false } }
-        ],
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": { "type": "object", "properties": { "files": { "type": "array", "items": { "type": "string", "format": "binary" } } } }
+          },
+          "responses": { "200": { "description": "Returns [ids, results]" } }
+        }
+      },
+      "/add_files_to_group": {
+        "post": {
+          "summary": "Upload files and add to knowledge base group",
+          "description": "Proxies to parsing service. Multipart form with files.",
+          "parameters": [
+            { "name": "group_name", "in": "query", "required": true, "schema": { "type": "string" } },
+            { "name": "override", "in": "query", "schema": { "type": "boolean", "default": false } }
+          ],
+          "requestBody": {
+            "content": {
+              "multipart/form-data": {
+                "schema": { "type": "object", "properties": { "files": { "type": "array", "items": { "type": "string", "format": "binary" } } } }
+              }
             }
-          }
-        },
-        "responses": { "200": { "description": "Returns file ids" } }
-      }
-    },
-    "/list_files": {
-      "get": {
-        "summary": "List files in knowledge base",
-        "description": "Proxies to parsing service.",
-        "parameters": [
-          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
-          { "name": "details", "in": "query", "schema": { "type": "boolean", "default": true } },
-          { "name": "alive", "in": "query", "schema": { "type": "boolean" } }
-        ],
-        "responses": { "200": { "description": "Returns file list with status" } }
-      }
-    },
-    "/list_files_in_group": {
-      "get": {
-        "summary": "List files in a knowledge base group",
-        "parameters": [
-          { "name": "group_name", "in": "query", "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "schema": { "type": "integer" } },
-          { "name": "alive", "in": "query", "schema": { "type": "boolean" } }
-        ],
-        "responses": { "200": { "description": "Returns file list" } }
-      }
-    },
-    "/list_kb_groups": {
-      "get": {
-        "summary": "List knowledge base groups",
-        "responses": { "200": { "description": "Returns group names" } }
-      }
-    },
-    "/chat": {
-      "post": {
-        "summary": "Chat with knowledge base",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "query": { "type": "string" },
-                  "history": { "type": "array" },
-                  "session_id": { "type": "string" },
-                  "filters": { "type": "object" },
-                  "files": { "type": "array", "items": { "type": "string" } }
+          },
+          "responses": { "200": { "description": "Returns file ids" } }
+        }
+      },
+      "/list_files": {
+        "get": {
+          "summary": "List files in knowledge base",
+          "description": "Proxies to parsing service.",
+          "parameters": [
+            { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+            { "name": "details", "in": "query", "schema": { "type": "boolean", "default": true } },
+            { "name": "alive", "in": "query", "schema": { "type": "boolean" } }
+          ],
+          "responses": { "200": { "description": "Returns file list with status" } }
+        }
+      },
+      "/list_files_in_group": {
+        "get": {
+          "summary": "List files in a knowledge base group",
+          "parameters": [
+            { "name": "group_name", "in": "query", "schema": { "type": "string" } },
+            { "name": "limit", "in": "query", "schema": { "type": "integer" } },
+            { "name": "alive", "in": "query", "schema": { "type": "boolean" } }
+          ],
+          "responses": { "200": { "description": "Returns file list" } }
+        }
+      },
+      "/list_kb_groups": {
+        "get": {
+          "summary": "List knowledge base groups",
+          "responses": { "200": { "description": "Returns group names" } }
+        }
+      },
+      "/chat": {
+        "post": {
+          "summary": "Chat with knowledge base",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "query": { "type": "string" },
+                    "history": { "type": "array" },
+                    "session_id": { "type": "string" },
+                    "filters": { "type": "object" },
+                    "files": { "type": "array", "items": { "type": "string" } }
+                  }
                 }
               }
             }
-          }
-        },
-        "responses": { "200": { "description": "Chat response" } }
-      }
-    },
-    "/chat/stream": {
-      "post": {
-        "summary": "Chat with knowledge base (streaming)",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "query": { "type": "string" },
-                  "history": { "type": "array" },
-                  "session_id": { "type": "string" }
+          },
+          "responses": { "200": { "description": "Chat response" } }
+        }
+      },
+      "/chat/stream": {
+        "post": {
+          "summary": "Chat with knowledge base (streaming)",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "query": { "type": "string" },
+                    "history": { "type": "array" },
+                    "session_id": { "type": "string" }
+                  }
                 }
               }
             }
-          }
-        },
-        "responses": { "200": { "description": "Streaming response" } }
-      }
-    },
-    "/conversations:chat": {
-      "post": {
-        "summary": "Conversationtext (requires qa.read)",
-        "description": "textConversationtext",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
-        "responses": { "200": { "description": "Chat response" } }
-      }
-    },
-    "/conversations:resumeChat": {
-      "post": {
-        "summary": "Resume conversation stream (requires qa.read)",
-        "description": "Resumetext",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["conversation_id"],
-                "properties": {
-                  "conversation_id": { "type": "string", "description": "Conversation ID" },
-                  "history_id": { "type": "string", "description": "text，textResumetext ID" }
+          },
+          "responses": { "200": { "description": "Streaming response" } }
+        }
+      },
+      "/conversations:chat": {
+        "post": {
+          "summary": "Conversationtext (requires qa.read)",
+          "description": "textConversationtext",
+          "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+          "responses": { "200": { "description": "Chat response" } }
+        }
+      },
+      "/conversations:resumeChat": {
+        "post": {
+          "summary": "Resume conversation stream (requires qa.read)",
+          "description": "Resumetext",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["conversation_id"],
+                  "properties": {
+                    "conversation_id": { "type": "string", "description": "Conversation ID" },
+                    "history_id": { "type": "string", "description": "text，textResumetext ID" }
+                  }
                 }
               }
             }
-          }
-        },
-        "responses": { "200": { "description": "Resume stream response" } }
-      }
-    },
-    "/conversations:stopChatGeneration": {
-      "post": {
-        "summary": "Stop conversation generation (requires qa.read)",
-        "description": "textConversationtext",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["conversation_id"],
-                "properties": {
-                  "conversation_id": { "type": "string", "description": "Conversation ID" },
-                  "history_id": { "type": "string", "description": "text，text ID" }
+          },
+          "responses": { "200": { "description": "Resume stream response" } }
+        }
+      },
+      "/conversations:stopChatGeneration": {
+        "post": {
+          "summary": "Stop conversation generation (requires qa.read)",
+          "description": "textConversationtext",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["conversation_id"],
+                  "properties": {
+                    "conversation_id": { "type": "string", "description": "Conversation ID" },
+                    "history_id": { "type": "string", "description": "text，text ID" }
+                  }
                 }
               }
             }
-          }
-        },
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/conversations/{conversation_id}:status": {
-      "get": {
-        "summary": "Get conversation status (requires qa.read)",
-        "parameters": [{ "name": "conversation_id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Chat status" } }
-      }
-    },
-    "/conversations/{name}": {
-      "get": {
-        "summary": "Get conversation (requires qa.read)",
-        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Conversation" } }
+          },
+          "responses": { "200": { "description": "OK" } }
+        }
       },
-      "delete": {
-        "summary": "Delete conversation (requires qa.read)",
-        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/conversations/{name}:detail": {
-      "get": {
-        "summary": "Get conversation metadata (requires qa.read)",
-        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Conversation metadata (no chat history)" } }
-      }
-    },
-    "/conversations/{name}:history": {
-      "get": {
-        "summary": "List conversation history paginated (requires qa.read)",
-        "parameters": [
-          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "page_size", "in": "query", "schema": { "type": "integer" } },
-          { "name": "page_token", "in": "query", "schema": { "type": "string" } }
-        ],
-        "responses": { "200": { "description": "Paginated chat history" } }
-      }
-    },
-    "/conversations": {
-      "get": {
-        "summary": "Conversation list (requires qa.read)",
-        "parameters": [
-          { "name": "page_size", "in": "query", "schema": { "type": "integer" } },
-          { "name": "page_token", "in": "query", "schema": { "type": "string" } }
-        ],
-        "responses": { "200": { "description": "List of conversations" } }
-      }
-    },
-    "/conversations:setChatHistory": {
-      "post": {
-        "summary": "Set conversation history (requires qa.read)",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["set_history_id", "deleted_history_id"],
-                "properties": {
-                  "set_history_id": { "type": "string", "description": "text ID" },
-                  "deleted_history_id": { "type": "string", "description": "textDeletetext ID" }
+      "/conversations/{conversation_id}:status": {
+        "get": {
+          "summary": "Get conversation status (requires qa.read)",
+          "parameters": [{ "name": "conversation_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "Chat status" } }
+        }
+      },
+      "/conversations/{name}": {
+        "get": {
+          "summary": "Get conversation (requires qa.read)",
+          "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "Conversation" } }
+        },
+        "delete": {
+          "summary": "Delete conversation (requires qa.read)",
+          "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "OK" } }
+        }
+      },
+      "/conversations/{name}:detail": {
+        "get": {
+          "summary": "Get conversation metadata (requires qa.read)",
+          "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "Conversation metadata (no chat history)" } }
+        }
+      },
+      "/conversations/{name}:history": {
+        "get": {
+          "summary": "List conversation history paginated (requires qa.read)",
+          "parameters": [
+            { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } },
+            { "name": "page_size", "in": "query", "schema": { "type": "integer" } },
+            { "name": "page_token", "in": "query", "schema": { "type": "string" } }
+          ],
+          "responses": { "200": { "description": "Paginated chat history" } }
+        }
+      },
+      "/conversations": {
+        "get": {
+          "summary": "Conversation list (requires qa.read)",
+          "parameters": [
+            { "name": "page_size", "in": "query", "schema": { "type": "integer" } },
+            { "name": "page_token", "in": "query", "schema": { "type": "string" } }
+          ],
+          "responses": { "200": { "description": "List of conversations" } }
+        }
+      },
+      "/conversations:setChatHistory": {
+        "post": {
+          "summary": "Set conversation history (requires qa.read)",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["set_history_id", "deleted_history_id"],
+                  "properties": {
+                    "set_history_id": { "type": "string", "description": "text ID" },
+                    "deleted_history_id": { "type": "string", "description": "textDeletetext ID" }
+                  }
                 }
               }
             }
-          }
-        },
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/conversations:feedBackChatHistory": {
-      "post": {
-        "summary": "Feedback conversation history (requires qa.read)",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["history_id", "type"],
-                "properties": {
-                  "history_id": { "type": "string", "description": "text ID" },
-                  "type": { "type": "integer", "format": "int32", "description": "text" },
-                  "reason": { "type": "string", "description": "text" },
-                  "expected_answer": { "type": "string", "description": "text" }
+          },
+          "responses": { "200": { "description": "OK" } }
+        }
+      },
+      "/conversations:feedBackChatHistory": {
+        "post": {
+          "summary": "Feedback conversation history (requires qa.read)",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["history_id", "type"],
+                  "properties": {
+                    "history_id": { "type": "string", "description": "text ID" },
+                    "type": { "type": "integer", "format": "int32", "description": "text" },
+                    "reason": { "type": "string", "description": "text" },
+                    "expected_answer": { "type": "string", "description": "text" }
+                  }
                 }
               }
             }
-          }
+          },
+          "responses": { "200": { "description": "OK" } }
+        }
+      },
+      "/conversation:switchStatus": {
+        "get": {
+          "summary": "Get multi-answer switch status (requires qa.read)",
+          "responses": { "200": { "description": "Switch status" } }
         },
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/conversation:switchStatus": {
-      "get": {
-        "summary": "Get multi-answer switch status (requires qa.read)",
-        "responses": { "200": { "description": "Switch status" } }
+        "post": {
+          "summary": "SetMulti-answer switch status (requires qa.read)",
+          "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+          "responses": { "200": { "description": "OK" } }
+        }
       },
-      "post": {
-        "summary": "SetMulti-answer switch status (requires qa.read)",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/prompts": {
-      "get": {
-        "summary": "Prompt list (requires document.read)",
-        "responses": { "200": { "description": "List of prompts" } }
+      "/prompts": {
+        "get": {
+          "summary": "Prompt list (requires document.read)",
+          "responses": { "200": { "description": "List of prompts" } }
+        },
+        "post": {
+          "summary": "Create prompt (requires document.write)",
+          "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+          "responses": { "200": { "description": "Created prompt" } }
+        }
       },
-      "post": {
-        "summary": "Create prompt (requires document.write)",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
-        "responses": { "200": { "description": "Created prompt" } }
-      }
-    },
-    "/prompts/{name}": {
-      "get": {
-        "summary": "Get prompt (requires document.read)",
-        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Prompt" } }
+      "/prompts/{name}": {
+        "get": {
+          "summary": "Get prompt (requires document.read)",
+          "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "Prompt" } }
+        },
+        "patch": {
+          "summary": "Update prompt (requires document.write)",
+          "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+          "responses": { "200": { "description": "OK" } }
+        },
+        "delete": {
+          "summary": "Delete prompt (requires document.write)",
+          "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "OK" } }
+        }
       },
-      "patch": {
-        "summary": "Update prompt (requires document.write)",
-        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
-        "responses": { "200": { "description": "OK" } }
+      "/prompts/{name}:setDefault": {
+        "post": {
+          "summary": "Set as default prompt (requires document.write)",
+          "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "OK" } }
+        }
       },
-      "delete": {
-        "summary": "Delete prompt (requires document.write)",
-        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/prompts/{name}:setDefault": {
-      "post": {
-        "summary": "Set as default prompt (requires document.write)",
-        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/prompts/{name}:unsetDefault": {
-      "post": {
-        "summary": "Unset default prompt (requires document.write)",
-        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/kb/list": {
-      "get": {
-        "summary": "Knowledge base list (requires document.read)",
-        "responses": { "200": { "description": "List of KB" } }
-      }
-    },
-    "/kb/{kb_id}/permission": {
-      "get": {
-        "summary": "Knowledge basePermission (requires document.read)",
-        "parameters": [{ "name": "kb_id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Permission" } }
-      }
-    },
-    "/kb/{kb_id}/acl": {
-      "get": {
-        "summary": "ACL list (requires document.read)",
-        "parameters": [{ "name": "kb_id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "ACL list" } }
+      "/prompts/{name}:unsetDefault": {
+        "post": {
+          "summary": "Unset default prompt (requires document.write)",
+          "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "OK" } }
+        }
       },
-      "post": {
-        "summary": "Add ACL (requires document.write)",
-        "parameters": [{ "name": "kb_id", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/datasets": {
-      "get": {
-        "summary": "Dataset list (requires document.read)",
-        "responses": { "200": { "description": "List of datasets" } }
+      "/kb/list": {
+        "get": {
+          "summary": "Knowledge base list (requires document.read)",
+          "responses": { "200": { "description": "List of KB" } }
+        }
       },
-      "post": {
-        "summary": "Create dataset (requires document.write)",
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
-        "responses": { "200": { "description": "Created dataset" } }
-      }
-    },
-    "/datasets/{dataset}": {
-      "get": {
-        "summary": "Get dataset (requires document.read)",
-        "parameters": [{ "name": "dataset", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Dataset" } }
+      "/kb/{kb_id}/permission": {
+        "get": {
+          "summary": "Knowledge basePermission (requires document.read)",
+          "parameters": [{ "name": "kb_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "Permission" } }
+        }
       },
-      "delete": {
-        "summary": "Delete dataset (requires document.write)",
-        "parameters": [{ "name": "dataset", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "OK" } }
+      "/kb/{kb_id}/acl": {
+        "get": {
+          "summary": "ACL list (requires document.read)",
+          "parameters": [{ "name": "kb_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "ACL list" } }
+        },
+        "post": {
+          "summary": "Add ACL (requires document.write)",
+          "parameters": [{ "name": "kb_id", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+          "responses": { "200": { "description": "OK" } }
+        }
       },
-      "patch": {
-        "summary": "Update dataset (requires document.write)",
-        "parameters": [{ "name": "dataset", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
-        "responses": { "200": { "description": "OK" } }
+      "/datasets": {
+        "get": {
+          "summary": "Dataset list (requires document.read)",
+          "responses": { "200": { "description": "List of datasets" } }
+        },
+        "post": {
+          "summary": "Create dataset (requires document.write)",
+          "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+          "responses": { "200": { "description": "Created dataset" } }
+        }
+      },
+      "/datasets/{dataset}": {
+        "get": {
+          "summary": "Get dataset (requires document.read)",
+          "parameters": [{ "name": "dataset", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "Dataset" } }
+        },
+        "delete": {
+          "summary": "Delete dataset (requires document.write)",
+          "parameters": [{ "name": "dataset", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "OK" } }
+        },
+        "patch": {
+          "summary": "Update dataset (requires document.write)",
+          "parameters": [{ "name": "dataset", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+          "responses": { "200": { "description": "OK" } }
+        }
       }
     }
   }
-}

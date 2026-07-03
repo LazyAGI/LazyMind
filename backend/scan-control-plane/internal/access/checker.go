@@ -4,12 +4,16 @@ import (
 	"context"
 	"strings"
 
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector/localfs"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
+
+const localSourceAccessDeniedMessage = "local data sources can only be accessed by administrators"
 
 type DefaultChecker struct {
 	store              SourceStore
 	authVerifier       AuthConnectionVerifier
+	adminVerifier      AdminVerifier
 	permissionVerifier SourcePermissionVerifier
 }
 
@@ -26,6 +30,12 @@ func NewDefaultChecker(store SourceStore, options ...Option) *DefaultChecker {
 func WithAuthConnectionVerifier(verifier AuthConnectionVerifier) Option {
 	return func(c *DefaultChecker) {
 		c.authVerifier = verifier
+	}
+}
+
+func WithAdminVerifier(verifier AdminVerifier) Option {
+	return func(c *DefaultChecker) {
+		c.adminVerifier = verifier
 	}
 }
 
@@ -103,6 +113,11 @@ func (c *DefaultChecker) CanAccessBindingTarget(ctx context.Context, actor Actor
 	if err := validateActor(actor); err != nil {
 		return err
 	}
+	if c.ShouldBlockLocalSourceAccess(ctx, actor, LocalSourceAccessRequest{
+		BindingTargets: []BindingTargetRequest{req},
+	}) {
+		return forbidden(localSourceAccessDeniedMessage)
+	}
 	if req.BindingID != "" {
 		if strings.TrimSpace(req.SourceID) == "" {
 			return forbidden("access denied")
@@ -164,6 +179,13 @@ func (c *DefaultChecker) CanUseAuthConnection(ctx context.Context, actor Actor, 
 	return nil
 }
 
+func (c *DefaultChecker) ShouldBlockLocalSourceAccess(ctx context.Context, actor Actor, req LocalSourceAccessRequest) bool {
+	if c == nil || !c.localSourceAccessRequestIsLocal(ctx, req) {
+		return false
+	}
+	return !c.actorRealtimeAdmin(ctx, actor)
+}
+
 func (c *DefaultChecker) canAccessBinding(ctx context.Context, actor Actor, sourceID, bindingID string, action SourceAction) error {
 	if err := c.canAccessSource(ctx, actor, sourceID, action); err != nil {
 		return err
@@ -207,10 +229,102 @@ func (c *DefaultChecker) checkSourceAction(ctx context.Context, actor Actor, sou
 	if strings.TrimSpace(source.TenantID) != actor.TenantID {
 		return forbidden("access denied")
 	}
+	local, err := c.sourceIsLocal(ctx, source)
+	if err != nil {
+		return internal(err)
+	}
+	if local && !c.actorRealtimeAdmin(ctx, actor) {
+		return forbidden(localSourceAccessDeniedMessage)
+	}
 	if c.permissionVerifier != nil {
 		return c.permissionVerifier.CanAccessSource(ctx, actor, source, action)
 	}
 	return OwnerSourcePermissionVerifier{}.CanAccessSource(ctx, actor, source, action)
+}
+
+func (c *DefaultChecker) localSourceAccessRequestIsLocal(ctx context.Context, req LocalSourceAccessRequest) bool {
+	if sourceOptionsAreLocal(req.SourceOptions) {
+		return true
+	}
+	for _, target := range req.BindingTargets {
+		if bindingTargetIsLocal(string(target.ConnectorType), string(target.TargetType)) {
+			return true
+		}
+	}
+	sourceID := strings.TrimSpace(req.SourceID)
+	if sourceID == "" || c.store == nil {
+		return false
+	}
+	source, err := c.store.GetSource(ctx, sourceID)
+	if err != nil {
+		return false
+	}
+	local, err := c.sourceIsLocal(ctx, source)
+	return err == nil && local
+}
+
+func (c *DefaultChecker) sourceIsLocal(ctx context.Context, source store.Source) (bool, error) {
+	if sourceOptionsAreLocal(source.SourceOptions) {
+		return true, nil
+	}
+	if c.store == nil {
+		return false, nil
+	}
+	bindings, err := c.store.ListBindings(ctx, source.SourceID)
+	if err != nil {
+		return false, err
+	}
+	for _, binding := range bindings {
+		if strings.EqualFold(strings.TrimSpace(binding.Status), "DELETING") {
+			continue
+		}
+		if bindingTargetIsLocal(binding.ConnectorType, binding.TargetType) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (c *DefaultChecker) actorRealtimeAdmin(ctx context.Context, actor Actor) bool {
+	if c == nil || c.adminVerifier == nil {
+		return false
+	}
+	ok, err := c.adminVerifier.IsAdmin(ctx, actor)
+	return err == nil && ok
+}
+
+func sourceOptionsAreLocal(options map[string]any) bool {
+	sourceType, ok := stringMapValue(options, "source_type")
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(sourceType) {
+	case "local", "local_fs", "localfs":
+		return true
+	default:
+		return false
+	}
+}
+
+func bindingTargetIsLocal(connectorType, targetType string) bool {
+	return strings.EqualFold(strings.TrimSpace(connectorType), string(localfs.ConnectorType)) ||
+		strings.EqualFold(strings.TrimSpace(targetType), string(localfs.TargetTypeLocalPath))
+}
+
+func stringMapValue(values map[string]any, key string) (string, bool) {
+	if len(values) == 0 {
+		return "", false
+	}
+	value, ok := values[key]
+	if !ok {
+		return "", false
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	text = strings.TrimSpace(text)
+	return text, text != ""
 }
 
 type OwnerSourcePermissionVerifier struct{}

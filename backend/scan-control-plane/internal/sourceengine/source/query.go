@@ -191,6 +191,14 @@ func (e *DefaultEngine) GetSource(ctx context.Context, req GetSourceRequest) (Ge
 	return resp, nil
 }
 
+func (e *DefaultEngine) GetSourceByDatasetID(ctx context.Context, datasetID string) (GetSourceResponse, error) {
+	src, err := e.repo.GetSourceByDatasetID(ctx, datasetID)
+	if err != nil {
+		return GetSourceResponse{}, mapStoreError(err)
+	}
+	return GetSourceResponse{Source: sourceToResponse(src)}, nil
+}
+
 func (e *DefaultEngine) TriggerSourceSync(ctx context.Context, req TriggerSourceSyncRequest) (TriggerSourceSyncResponse, error) {
 	if req.SourceID == "" {
 		return TriggerSourceSyncResponse{}, FieldError("source_id", "required")

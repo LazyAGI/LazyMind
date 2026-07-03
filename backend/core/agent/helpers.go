@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -53,86 +52,6 @@ func sha256Hex(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func agentServiceEndpoint() string {
-	return common.EvoServiceEndpoint()
-}
-
-func threadCreateURL() string {
-	return common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads")
-}
-
-func threadStatusesURL() string {
-	return common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/statuses")
-}
-
-func threadMessagesURL(threadID string) string {
-	return common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/"+url.PathEscape(threadID)+"/messages")
-}
-
-func threadActionURL(threadID, action string) string {
-	return common.JoinURL(
-		agentServiceEndpoint(),
-		"/v1/evo/threads/"+url.PathEscape(threadID)+"/"+strings.Trim(strings.TrimSpace(action), "/"),
-	)
-}
-
-func threadDeleteURL(threadID string) string {
-	return common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/"+url.PathEscape(threadID))
-}
-
-func threadFlowStatusURL(threadID string) string {
-	return common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/"+url.PathEscape(threadID)+"/flow-status")
-}
-
-func threadEventsURL(threadID string) string {
-	return common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/"+url.PathEscape(threadID)+"/events")
-}
-
-func threadStepEventsURL(threadID, stepID string) string {
-	return common.JoinURL(
-		agentServiceEndpoint(),
-		"/v1/evo/threads/"+url.PathEscape(threadID)+"/events/"+url.PathEscape(stepID),
-	)
-}
-
-func threadArtifactURL(threadID, artifactID string) string {
-	return common.JoinURL(
-		agentServiceEndpoint(),
-		"/v1/evo/threads/"+url.PathEscape(threadID)+"/artifacts/"+url.PathEscape(artifactID),
-	)
-}
-
-func threadResultsURL(threadID, resultKind string) string {
-	return common.JoinURL(
-		agentServiceEndpoint(),
-		"/v1/evo/threads/"+url.PathEscape(threadID)+"/results/"+strings.Trim(strings.TrimSpace(resultKind), "/"),
-	)
-}
-
-func threadResultTraceURL(threadID, traceID string) string {
-	return common.JoinURL(
-		agentServiceEndpoint(),
-		"/v1/evo/threads/"+url.PathEscape(threadID)+"/results/traces/"+url.PathEscape(traceID),
-	)
-}
-
-func threadResultTraceCompareURL(threadID, aTraceID, bTraceID string) string {
-	base := common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/"+url.PathEscape(threadID)+"/results/traces-compare")
-	return base + "?a=" + url.QueryEscape(aTraceID) + "&b=" + url.QueryEscape(bTraceID)
-}
-
-func reportContentURL(reportID, format string) string {
-	base := common.JoinURL(agentServiceEndpoint(), "/v1/evo/reports/"+url.PathEscape(reportID)+"/content")
-	if strings.TrimSpace(format) == "" {
-		return base
-	}
-	return base + "?fmt=" + url.QueryEscape(format)
-}
-
-func diffContentURL(applyID, filename string) string {
-	return common.JoinURL(agentServiceEndpoint(), "/v1/evo/diffs/"+url.PathEscape(applyID)+"/"+url.PathEscape(filename))
-}
-
 func forwardedUpstreamHeaders(r *http.Request) map[string]string {
 	headers := map[string]string{
 		"Accept": "application/json",
@@ -159,19 +78,219 @@ func attachThreadModelConfig(ctx context.Context, db *gorm.DB, userID string, pa
 	return nil
 }
 
-func hasThreadEvoLLMConfig(payload map[string]any) bool {
+func hasThreadRequiredLLMConfig(payload map[string]any) bool {
 	llmConfig, ok := payload["llm_config"].(map[string]any)
 	if !ok {
 		return false
 	}
-	for key, value := range llmConfig {
-		if !strings.EqualFold(strings.TrimSpace(key), "evo_llm") {
+	for _, key := range []string{"eval_policy", "repair_policy", "candidate_config", "abtest_candidate_config"} {
+		if _, ok := llmConfig[key]; ok {
+			return false
+		}
+	}
+	for _, role := range []string{"llm", "evo_llm"} {
+		found := false
+		for key, value := range llmConfig {
+			if !strings.EqualFold(strings.TrimSpace(key), role) {
+				continue
+			}
+			roleConfig, ok := value.(map[string]any)
+			found = ok
+			for _, field := range []string{"source", "model", "base_url", "api_key"} {
+				found = found && strings.TrimSpace(fmt.Sprint(roleConfig[field])) != ""
+			}
+			break
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func buildEvoThreadCreatePayload(payload map[string]any) map[string]any {
+	inputs, _ := payload["inputs"].(map[string]any)
+	if inputs == nil {
+		inputs = map[string]any{}
+	}
+	numCase := firstPositiveInt(
+		inputs["num_case"],
+		inputs["num_cases"],
+		payload["num_case"],
+		payload["num_cases"],
+	)
+	if numCase <= 0 {
+		numCase = 1
+	}
+	deadlineSeconds := firstPositiveFloat(
+		inputs["case_deadline_seconds"],
+		payload["case_deadline_seconds"],
+	)
+	if deadlineSeconds <= 0 {
+		deadlineSeconds = 300
+	}
+
+	routerChatURL := strings.TrimSpace(agentScalarString(inputs["router_chat_url"]))
+	if routerChatURL == "" {
+		routerChatURL = common.JoinURL(common.ChatServiceEndpoint(), "/api/chat/stream")
+	}
+	routerAdminURL := strings.TrimSpace(agentScalarString(inputs["router_admin_url"]))
+	if routerAdminURL == "" {
+		routerAdminURL = common.ChatServiceEndpoint()
+	}
+	algorithmID := strings.TrimSpace(agentScalarString(inputs["algorithm_id"]))
+	if algorithmID == "" {
+		algorithmID = "default"
+	}
+
+	return map[string]any{
+		"mode":       firstNonEmptyScalar(payload["mode"], "auto"),
+		"title":      firstNonEmptyScalar(payload["title"]),
+		"llm_config": payload["llm_config"],
+		"inputs": map[string]any{
+			"kb_id":                 stringListFromAny(firstNonNilAny(inputs["kb_id"], inputs["knowledge_base_id"], inputs["dataset_id"])),
+			"csv_data":              csvDataListFromAny(inputs["csv_data"]),
+			"router_chat_url":       routerChatURL,
+			"router_admin_url":      routerAdminURL,
+			"algorithm_id":          algorithmID,
+			"num_case":              numCase,
+			"case_deadline_seconds": deadlineSeconds,
+		},
+	}
+}
+
+func cloneJSONMap(payload map[string]any) map[string]any {
+	if payload == nil {
+		return map[string]any{}
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return map[string]any{}
+	}
+	var copied map[string]any
+	if err := json.Unmarshal(raw, &copied); err != nil {
+		return map[string]any{}
+	}
+	return copied
+}
+
+func firstNonNilAny(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func firstNonEmptyScalar(values ...any) string {
+	for _, value := range values {
+		if text := strings.TrimSpace(agentScalarString(value)); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func stringListFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(agentScalarString(item)); text != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	case []string:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(item); text != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		if text := strings.TrimSpace(agentScalarString(value)); text != "" {
+			return []string{text}
+		}
+		return []string{}
+	}
+}
+
+func csvDataListFromAny(value any) []map[string]string {
+	items, ok := value.([]any)
+	if !ok {
+		return []map[string]string{}
+	}
+	result := make([]map[string]string, 0, len(items))
+	for _, item := range items {
+		row, ok := item.(map[string]any)
+		if !ok || len(row) == 0 {
 			continue
 		}
-		roleConfig, ok := value.(map[string]any)
-		return ok && len(roleConfig) > 0
+		out := map[string]string{}
+		for key, raw := range row {
+			text := strings.TrimSpace(agentScalarString(raw))
+			if strings.TrimSpace(key) != "" && text != "" {
+				out[strings.TrimSpace(key)] = text
+			}
+		}
+		if len(out) > 0 {
+			result = append(result, out)
+		}
 	}
-	return false
+	return result
+}
+
+func firstPositiveInt(values ...any) int {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case int:
+			if typed > 0 {
+				return typed
+			}
+		case int64:
+			if typed > 0 {
+				return int(typed)
+			}
+		case float64:
+			if typed > 0 {
+				return int(typed)
+			}
+		case string:
+			parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+			if err == nil && parsed > 0 {
+				return parsed
+			}
+		}
+	}
+	return 0
+}
+
+func firstPositiveFloat(values ...any) float64 {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case int:
+			if typed > 0 {
+				return float64(typed)
+			}
+		case int64:
+			if typed > 0 {
+				return float64(typed)
+			}
+		case float64:
+			if typed > 0 {
+				return typed
+			}
+		case string:
+			parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+			if err == nil && parsed > 0 {
+				return parsed
+			}
+		}
+	}
+	return 0
 }
 
 func parseRecordLimit(raw string) int {
@@ -194,6 +313,13 @@ func parseAfterID(r *http.Request) string {
 		return value
 	}
 	return strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+}
+
+func parseUpstreamThreadEventID(r *http.Request) string {
+	if value := strings.TrimSpace(r.Header.Get("Last-Event-ID")); value != "" {
+		return value
+	}
+	return strings.TrimSpace(r.URL.Query().Get("since"))
 }
 
 func parseThreadPageSize(raw string) int {
@@ -625,7 +751,7 @@ func updateThreadStepFromEvent(db *gorm.DB, threadID, stepID string, event fetch
 	if title == "" {
 		title = stepID
 	}
-	status := normalizeThreadStepStatus(extractStringByExactKeys(payload, "step_status", "status", "state"), event.EventName)
+	status := normalizeThreadStepStatus(extractStringByExactKeys(payload, "step_status", "status", "state", "action"), event.EventName)
 	active := !isTerminalThreadStepStatus(status)
 	var endedAt *time.Time
 	if !active {
@@ -663,7 +789,7 @@ func updateThreadStepFromEvent(db *gorm.DB, threadID, stepID string, event fetch
 	if hasOrder {
 		updates["order_index"] = orderIndex
 	}
-	if nextStepRunID := extractStringByExactKeys(payload, "next_step_run_id"); nextStepRunID != "" {
+	if nextStepRunID := extractStringByExactKeys(payload, "next_step_id", "next_step_run_id"); nextStepRunID != "" {
 		step.NextStepRunID = nextStepRunID
 		updates["next_step_run_id"] = gorm.Expr(
 			"CASE WHEN agent_thread_steps.next_step_run_id = ? THEN ? ELSE agent_thread_steps.next_step_run_id END",
@@ -682,6 +808,68 @@ func updateThreadStepFromEvent(db *gorm.DB, threadID, stepID string, event fetch
 			DoUpdates: clause.Assignments(updates),
 		}).Create(&step).Error
 	})
+}
+
+func normalizeThreadEventRawData(rawData, frameEvent string) string {
+	rawData = strings.TrimSpace(rawData)
+	if rawData == "" || rawData == "[DONE]" {
+		return rawData
+	}
+	payload, ok := parseJSONValue(rawData).(map[string]any)
+	if !ok {
+		return rawData
+	}
+	changed := false
+	setAlias := func(key string, value any) {
+		if _, exists := payload[key]; exists || value == nil {
+			return
+		}
+		if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
+			return
+		}
+		payload[key] = value
+		changed = true
+	}
+
+	eventType := firstNonEmptyScalar(payload["event_type"])
+	if eventType == "" {
+		upstreamEvent := strings.TrimSpace(frameEvent)
+		if upstreamEvent != "" && !strings.EqualFold(upstreamEvent, "message") {
+			eventType = upstreamEvent
+			setAlias("event_type", eventType)
+		}
+	}
+	if eventType != "" {
+		setAlias("type", eventType)
+		setAlias("event", eventType)
+		setAlias("flow_kind", eventType)
+	}
+	if stepID := firstNonEmptyScalar(payload["step_id"]); stepID != "" {
+		setAlias("step_run_id", stepID)
+	}
+	if nextStepID := firstNonEmptyScalar(payload["next_step_id"]); nextStepID != "" {
+		setAlias("next_step_run_id", nextStepID)
+	}
+	if child, ok := payload["case"].(map[string]any); ok {
+		setAlias("case_id", firstNonEmptyScalar(child["id"]))
+		setAlias("case_index", firstNonNilAny(child["index"]))
+	}
+	if _, exists := payload["case_index"]; !exists {
+		if progress, ok := payload["progress"].(map[string]any); ok {
+			setAlias("case_index", firstNonNilAny(progress["current"]))
+		}
+	}
+	if artifact, ok := payload["artifact"].(map[string]any); ok {
+		setAlias("artifact_id", firstNonEmptyScalar(artifact["id"]))
+	}
+	if !changed {
+		return rawData
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return rawData
+	}
+	return string(encoded)
 }
 
 func markOtherThreadStepsInactive(db *gorm.DB, threadID, stepID string, now time.Time) error {

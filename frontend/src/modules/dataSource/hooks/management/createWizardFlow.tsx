@@ -15,6 +15,10 @@ import type {
 } from "../../constants/types";
 import { parseFeishuOAuthCallbackInput } from "../../utils/feishuAccount";
 import { mapScanSyncDetail } from "../../mappers/scanDocument";
+import {
+  CLOUD_DOCUMENTS_FEISHU_SETUP_PATH,
+  CLOUD_DOCUMENTS_PATH,
+} from "@/modules/modelProvider/utils/cloudDocumentUrls";
 import type { ManagementContext } from "./context";
 
 export function createWizardFlow(ctx: ManagementContext) {
@@ -42,11 +46,11 @@ export function createWizardFlow(ctx: ManagementContext) {
       return;
     }
     if (type === "feishu" && !ctx.isFeishuSetupReady) {
-      ctx.openFeishuSetupModal("create");
+      navigate(CLOUD_DOCUMENTS_PATH);
       return;
     }
     if (type === "notion" && !ctx.isNotionSetupReady) {
-      ctx.openCloudSetupModal("notion", "create");
+      navigate(CLOUD_DOCUMENTS_PATH);
       return;
     }
     ctx.applySourceType(type);
@@ -111,11 +115,11 @@ export function createWizardFlow(ctx: ManagementContext) {
     setWizardStep(1);
 
     if (type === "feishu" && !ctx.isFeishuAuthValid) {
-      ctx.openCloudSetupModal("feishu", "create");
+      navigate(CLOUD_DOCUMENTS_PATH);
       return;
     }
     if (type === "notion" && !ctx.isNotionAuthValid) {
-      ctx.openCloudSetupModal("notion", "create");
+      navigate(CLOUD_DOCUMENTS_PATH);
       return;
     }
   };
@@ -128,12 +132,11 @@ export function createWizardFlow(ctx: ManagementContext) {
   };
 
   const handleManageFeishuAuth = () => {
-    navigate("/data-sources/providers/feishu");
+    navigate(CLOUD_DOCUMENTS_PATH);
   };
 
   const handleOpenFeishuGuideFromAuthSelect = () => {
     saveFeishuDataSourceWizardDraft({
-      activeView: ctx.activeView,
       authSelectModalOpen: true,
       wizardOpen: false,
       wizardStep: ctx.wizardStep,
@@ -146,7 +149,7 @@ export function createWizardFlow(ctx: ManagementContext) {
       oauthConnection: ctx.oauthConnection,
       formValues: form.getFieldsValue(true),
     });
-    navigate("/data-sources/docs/feishu-setup?from=create-source");
+    navigate(`${CLOUD_DOCUMENTS_FEISHU_SETUP_PATH}?from=create-source`);
   };
 
   const handleSubmitManualOauthCallback = async () => {

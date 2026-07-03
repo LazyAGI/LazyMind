@@ -1,0 +1,496 @@
+.memory-skill-management {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+.memory-skill-view-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.memory-skill-view-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.memory-skill-view-tab {
+  position: relative;
+  height: 42px;
+  border: 0;
+  background: transparent;
+  color: #667085;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 2px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover {
+    color: #175cd3;
+  }
+
+  &.is-active {
+    color: #175cd3;
+
+    &::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -1px;
+      height: 2px;
+      border-radius: 999px;
+      background: #2f6bff;
+    }
+  }
+}
+
+.memory-skill-bar-actions {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.memory-skill-tooltip-help {
+  width: 18px;
+  height: 18px;
+  border: 1px solid #d0d5dd;
+  border-radius: 50%;
+  background: #fff;
+  color: #667085;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 12px;
+  cursor: help;
+}
+
+.memory-skill-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-skill-filter-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memory-skill-filter-controls,
+.memory-skill-installed-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #edf1f5;
+  border-radius: 12px;
+  background: #fbfcff;
+}
+
+.memory-skill-market-search,
+.memory-skill-installed-search {
+  flex: 1 1 320px;
+  min-width: 220px;
+}
+
+.memory-skill-market-source,
+.memory-skill-installed-select {
+  min-width: 132px;
+}
+
+.memory-skill-filter-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px;
+}
+
+.memory-skill-category-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.memory-skill-category-pill {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #475467;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+
+  &:hover {
+    border-color: #e5eaf2;
+    background: #f8fafc;
+    color: #175cd3;
+  }
+
+  &.is-active {
+    border-color: #bfd2ff;
+    background: #eef4ff;
+    color: #175cd3;
+  }
+}
+
+.memory-skill-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #edf1f5;
+  padding: 2px 0 10px;
+}
+
+.memory-skill-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+
+  h3 {
+    margin: 0;
+    color: #101828;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+}
+
+.memory-skill-section-count {
+  color: #667085;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.memory-skill-market {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.memory-skill-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memory-skill-recommend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.memory-skill-tile {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid #edf1f5;
+  border-radius: 12px;
+  background: #fff;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+
+  &:hover {
+    border-color: #d0dfff;
+    background: #fbfcff;
+    box-shadow: 0 4px 14px rgba(16, 24, 40, 0.04);
+  }
+
+  &.is-installed {
+    border-color: #abefc6;
+    background: linear-gradient(135deg, #f6fef9 0%, #ffffff 72%);
+  }
+}
+
+.memory-skill-tile-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #eef4ff;
+  color: #175cd3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
+.memory-skill-tile-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.memory-skill-tile-title-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.memory-skill-tile-name {
+  min-width: 0;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-skill-tile-badges {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.memory-skill-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.memory-skill-badge-source {
+  &.is-builtin {
+    background: #eef4ff;
+    color: #175cd3;
+  }
+
+  &.is-admin {
+    background: #fff7ed;
+    color: #c2410c;
+  }
+
+  &.is-personal {
+    background: #f2f4f7;
+    color: #344054;
+  }
+}
+
+.memory-skill-tile-desc {
+  margin: 0;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.55;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.memory-skill-tile-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-skill-tile-category {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.memory-skill-tile-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  align-self: center;
+  flex-shrink: 0;
+  gap: 8px;
+  padding-left: 4px;
+}
+
+.memory-skill-badge-installed {
+  background: #d1fadf;
+  color: #027a48;
+}
+
+.memory-skill-market-demo-banner {
+  padding: 10px 12px;
+  border: 1px solid #bfd2ff;
+  border-radius: 10px;
+  background: #eef4ff;
+  color: #175cd3;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.memory-skill-market-empty,
+.memory-skill-market-loading {
+  border: 1px dashed #d0d5dd;
+  border-radius: 12px;
+  padding: 28px;
+  text-align: center;
+  color: #667085;
+  background: #fbfcff;
+}
+
+.memory-skill-installed {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+.memory-skill-installed-table {
+  flex: 1;
+}
+
+.memory-skill-upload-view {
+  display: grid;
+  gap: 12px;
+}
+
+.memory-skill-upload-head {
+  padding: 8px 0 0;
+
+  h2 {
+    margin: 0;
+    font-size: 20px;
+  }
+}
+
+.memory-skill-upload-panel {
+  border: 1px solid #edf1f5;
+  border-radius: 10px;
+  background: #fff;
+  padding: 16px;
+
+  h3 {
+    margin: 0 0 14px;
+    font-size: 16px;
+  }
+}
+
+.memory-skill-upload-form,
+.memory-skill-admin-publish-form {
+  display: grid;
+  gap: 12px;
+}
+
+.memory-skill-field {
+  label {
+    display: block;
+    margin-bottom: 6px;
+    color: #344054;
+    font-size: 13px;
+    font-weight: 600;
+  }
+}
+
+.memory-skill-file-drop {
+  .ant-upload-drag {
+    min-height: 150px;
+    border-color: #b8c4d4;
+    border-radius: 12px;
+    background: #fbfcff;
+  }
+}
+
+.memory-skill-upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.memory-skill-admin-publish-desc {
+  margin: 0;
+  color: #667085;
+  line-height: 1.6;
+}
+
+.memory-list-content.is-skill-management {
+  overflow: hidden;
+}
+
+.memory-list-page.is-skills-tab {
+  .memory-list-content.is-skill-management {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 1180px) {
+  .memory-skill-filter-controls,
+  .memory-skill-installed-filters {
+    flex-wrap: wrap;
+  }
+
+  .memory-skill-recommend-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .memory-skill-tile {
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .memory-skill-tile-actions {
+    grid-column: 1 / -1;
+    align-self: stretch;
+    justify-content: flex-end;
+    padding-left: 58px;
+  }
+
+  .memory-skill-tile-title-line {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .memory-skill-tile-badges {
+    justify-content: flex-start;
+  }
+}

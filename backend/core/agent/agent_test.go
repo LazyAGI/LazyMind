@@ -9,12 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -197,7 +193,7 @@ func TestBuildThreadCreateTitleFallsBackToPayloadTitle(t *testing.T) {
 	}
 }
 
-func TestCreateThreadRequiresConfiguredEvoLLM(t *testing.T) {
+func TestCreateThreadRequiresConfiguredThreadLLMs(t *testing.T) {
 	db := newAgentTestDB(t)
 	if err := db.DB.AutoMigrate(&orm.Dataset{}); err != nil {
 		t.Fatalf("auto migrate dataset: %v", err)
@@ -222,10 +218,10 @@ func TestCreateThreadRequiresConfiguredEvoLLM(t *testing.T) {
 	CreateThread(rec, req)
 
 	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected missing evo_llm to return 422, status=%d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected missing thread llm config to return 422, status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "evo_llm") {
-		t.Fatalf("expected response to mention evo_llm, body=%s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "llm") || !strings.Contains(rec.Body.String(), "evo_llm") {
+		t.Fatalf("expected response to mention llm and evo_llm, body=%s", rec.Body.String())
 	}
 	var activeCount int64
 	if err := db.DB.Model(&orm.AgentUserActiveThread{}).Count(&activeCount).Error; err != nil {
@@ -236,16 +232,17 @@ func TestCreateThreadRequiresConfiguredEvoLLM(t *testing.T) {
 	}
 }
 
-func TestAttachThreadModelConfigProvidesEvoLLM(t *testing.T) {
+func TestAttachThreadModelConfigProvidesRequiredThreadLLMs(t *testing.T) {
 	db := newAgentTestDB(t)
+	seedAgentRuntimeModelConfig(t, db, "user-1", "llm")
 	seedAgentRuntimeModelConfig(t, db, "user-1", "evo_llm")
 
 	payload := map[string]any{}
 	if err := attachThreadModelConfig(context.Background(), db.DB, "user-1", payload); err != nil {
 		t.Fatalf("attach thread model config: %v", err)
 	}
-	if !hasThreadEvoLLMConfig(payload) {
-		t.Fatalf("expected attached payload to satisfy evo_llm requirement: %#v", payload)
+	if !hasThreadRequiredLLMConfig(payload) {
+		t.Fatalf("expected attached payload to satisfy thread llm requirement: %#v", payload)
 	}
 	llmConfig, ok := payload["llm_config"].(map[string]any)
 	if !ok {
@@ -255,64 +252,171 @@ func TestAttachThreadModelConfigProvidesEvoLLM(t *testing.T) {
 	if !ok || evoConfig["model"] != "gpt-evo-llm" {
 		t.Fatalf("expected evo_llm config, got %#v", llmConfig["evo_llm"])
 	}
+	chatConfig, ok := llmConfig["llm"].(map[string]any)
+	if !ok || chatConfig["model"] != "gpt-llm" {
+		t.Fatalf("expected llm config, got %#v", llmConfig["llm"])
+	}
 }
 
-func assertSignedStaticFileExists(t *testing.T, uploadRoot string, file *caseCSVFile) {
-	t.Helper()
-	if file == nil {
-		t.Fatalf("expected csv file metadata")
+func TestBuildEvoThreadCreatePayloadForwardsRouterTarget(t *testing.T) {
+	payload := map[string]any{
+		"mode":       "interactive",
+		"title":      "eval",
+		"llm_config": map[string]any{"llm": map[string]any{}},
+		"inputs": map[string]any{
+			"kb_id":            "kb-1",
+			"router_admin_url": "http://chat:8046",
+			"algorithm_id":     "default",
+			"num_cases":        2,
+		},
 	}
-	parsed, err := url.Parse(file.FileURL)
-	if err != nil {
-		t.Fatalf("parse file url: %v", err)
-	}
-	rel, ok := strings.CutPrefix(parsed.Path, "/static-files/")
+
+	got := buildEvoThreadCreatePayload(payload)
+	inputs, ok := got["inputs"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected static file url, got %q", file.FileURL)
+		t.Fatalf("expected inputs map, got %#v", got["inputs"])
 	}
-	rel, err = url.PathUnescape(rel)
-	if err != nil {
-		t.Fatalf("unescape static file path: %v", err)
+	if inputs["router_admin_url"] != "http://chat:8046" || inputs["algorithm_id"] != "default" {
+		t.Fatalf("expected router target to be sent to Evo ThreadInputs: %#v", inputs)
 	}
-	expectedPath := filepath.Clean(filepath.Join(uploadRoot, filepath.FromSlash(rel)))
-	if filepath.Clean(file.StoredPath) != expectedPath {
-		t.Fatalf("file url points to %q, but csv was stored at %q", expectedPath, file.StoredPath)
+	if inputs["router_chat_url"] == "" {
+		t.Fatalf("expected router_chat_url to be sent to Evo ThreadInputs: %#v", inputs)
 	}
-	stat, err := os.Stat(expectedPath)
-	if err != nil {
-		t.Fatalf("expected csv file behind file_url to exist: %v", err)
-	}
-	if stat.Size() != file.FileSize {
-		t.Fatalf("unexpected csv file size: metadata=%d actual=%d", file.FileSize, stat.Size())
-	}
-	raw, err := os.ReadFile(expectedPath)
-	if err != nil {
-		t.Fatalf("read csv file behind file_url: %v", err)
-	}
-	if !bytes.HasPrefix(raw, []byte{0xEF, 0xBB, 0xBF}) {
-		t.Fatalf("expected csv file to start with UTF-8 BOM for Excel compatibility")
+	if fmt.Sprint(inputs["kb_id"]) != "[kb-1]" || inputs["num_case"] != 2 {
+		t.Fatalf("unexpected Evo inputs: %#v", inputs)
 	}
 }
 
-func assertOnlyTopLevelFileURL(t *testing.T, payload any) {
-	t.Helper()
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal payload: %v", err)
+func TestPostThreadActionForwardsOnlyCommandFields(t *testing.T) {
+	db := newAgentTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID:     "thr_1",
+		Status:       "created",
+		CreateUserID: "u1",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("seed thread: %v", err)
 	}
-	body := string(raw)
-	if count := strings.Count(body, `"file_url"`); count != 1 {
-		t.Fatalf("expected exactly one file_url in response payload, got %d: %s", count, body)
-	}
-	for _, key := range []string{`"content_url"`, `"preview_url"`, `"download_url"`, `"download_file_url"`} {
-		if strings.Contains(body, key) {
-			t.Fatalf("unexpected extra url field %s in response payload: %s", key, body)
+
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/threads/thr_1/start" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-	}
-	for _, key := range []string{`"case_csv_file"`, `"case_details_csv_file"`, `"csv_file"`} {
-		if strings.Contains(body, key) {
-			t.Fatalf("unexpected generated metadata field %s in response payload: %s", key, body)
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
 		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "accepted"})
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	body := `{"command_id":"cmd_1","until_step":"eval","llm_config":{"llm":{}},"extra":true}`
+	req := httptest.NewRequest(http.MethodPost, "/api/core/agent/threads/thr_1/start", strings.NewReader(body))
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1"})
+	rec := httptest.NewRecorder()
+
+	postThreadAction(rec, req, "start")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected ok, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(got) != 2 || got["command_id"] != "cmd_1" || got["until_step"] != "eval" {
+		t.Fatalf("unexpected upstream command body: %#v", got)
+	}
+}
+
+func TestPostThreadActionForwardsOnlyEmptyCommandFields(t *testing.T) {
+	db := newAgentTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID:     "thr_1",
+		Status:       "created",
+		CreateUserID: "u1",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("seed thread: %v", err)
+	}
+
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/threads/thr_1/pause" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "accepted"})
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	body := `{"command_id":"cmd_2","llm_config":{"llm":{}},"until_step":"eval","extra":true}`
+	req := httptest.NewRequest(http.MethodPost, "/api/core/agent/threads/thr_1/pause", strings.NewReader(body))
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1"})
+	rec := httptest.NewRecorder()
+
+	postThreadAction(rec, req, "pause")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected ok, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(got) != 1 || got["command_id"] != "cmd_2" {
+		t.Fatalf("unexpected upstream empty command body: %#v", got)
+	}
+}
+
+func TestStreamThreadMessagesForwardsOnlyMessageFields(t *testing.T) {
+	db := newAgentTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID:     "thr_1",
+		Status:       "created",
+		CreateUserID: "u1",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("seed thread: %v", err)
+	}
+
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/threads/thr_1/messages" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"assistant_response\",\"content\":\"ok\"}\n\n")
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	body := `{"message_id":"m1","content":"继续","llm_config":{"llm":{}},"extra":true}`
+	req := httptest.NewRequest(http.MethodPost, "/api/core/agent/threads/thr_1/messages", strings.NewReader(body))
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1"})
+	rec := httptest.NewRecorder()
+
+	StreamThreadMessages(rec, req)
+
+	if got["message_id"] != "m1" || got["content"] != "继续" || len(got) != 2 {
+		t.Fatalf("unexpected upstream message body: %#v", got)
 	}
 }
 
@@ -341,33 +445,390 @@ func TestDecodeJSONArrayObjectsAllowsEmptyBody(t *testing.T) {
 	}
 }
 
-func TestThreadEventsURLDoesNotForceSince(t *testing.T) {
+func TestEvoClientEventsStreamURLDoesNotForceSince(t *testing.T) {
 	t.Setenv("LAZYMIND_EVO_SERVICE_URL", "http://evo-service:8048/")
 
-	got := threadEventsURL("thr/1")
-	want := "http://evo-service:8048/v1/evo/threads/thr%2F1/events"
+	got := newEvoClient(nil).EventsStreamURL("thr/1", "")
+	want := "http://evo-service:8048/threads/thr%2F1/events:stream"
 	if got != want {
 		t.Fatalf("unexpected thread events URL:\nwant: %q\ngot:  %q", want, got)
 	}
 }
 
-func TestThreadStepEventsURLUsesStepEventsEndpoint(t *testing.T) {
+func TestEvoClientEventsStreamURLUsesStepQuery(t *testing.T) {
 	t.Setenv("LAZYMIND_EVO_SERVICE_URL", "http://evo-service:8048/")
 
-	got := threadStepEventsURL("thr/1", "step/collect")
-	want := "http://evo-service:8048/v1/evo/threads/thr%2F1/events/step%2Fcollect"
+	got := newEvoClient(nil).EventsStreamURL("thr/1", "step/collect")
+	want := "http://evo-service:8048/threads/thr%2F1/events:stream?step_id=step%2Fcollect"
 	if got != want {
 		t.Fatalf("unexpected thread step events URL:\nwant: %q\ngot:  %q", want, got)
 	}
 }
 
-func TestThreadArtifactURLUsesEvoArtifactRoute(t *testing.T) {
-	t.Setenv("LAZYMIND_EVO_SERVICE_URL", "http://evo-service:8048/")
+func TestParseArtifactRefSupportsVersionOnly(t *testing.T) {
+	ref := parseArtifactRef("eval.dataset@v7")
+	if ref.Base != "eval.dataset" || ref.Version != 7 {
+		t.Fatalf("unexpected parsed artifact ref: %#v", ref)
+	}
+	encoded := parseArtifactRef("analysis.summary%40v3")
+	if encoded.Base != "analysis.summary" || encoded.Version != 3 {
+		t.Fatalf("unexpected parsed encoded artifact ref: %#v", encoded)
+	}
+	legacyCase := parseArtifactRef("eval.dataset[case_0001]@v7")
+	if legacyCase.Base != "eval.dataset[case_0001]" || legacyCase.Version != 7 {
+		t.Fatalf("case selector should remain part of unsupported artifact id: %#v", legacyCase)
+	}
+}
 
-	got := threadArtifactURL("thr/1", "eval.case[case_0001]")
-	want := "http://evo-service:8048/v1/evo/threads/thr%2F1/artifacts/eval.case%5Bcase_0001%5D"
-	if got != want {
-		t.Fatalf("unexpected thread artifact URL:\nwant: %q\ngot:  %q", want, got)
+func TestFetchThreadArtifactProxyReturnsGateContentDirectly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/gates":
+			_ = json.NewEncoder(w).Encode(evoGateList{
+				ThreadID: "thr_1",
+				Gates: []evoGate{{
+					Step:       "dataset",
+					ArtifactID: "eval.dataset",
+					Versions:   []int{1},
+				}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/gates/dataset/versions/1":
+			_ = json.NewEncoder(w).Encode(evoGateContent{
+				ThreadID: "thr_1",
+				Step:     "dataset",
+				Version:  1,
+				Content: map[string]any{
+					"cases": []any{
+						map[string]any{"case_id": "case_0001", "question": "q1"},
+						map[string]any{"case_id": "case_0002", "question": "q2"},
+					},
+				},
+			})
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr_1/artifacts/eval.dataset@v1", nil)
+	proxy, statusCode, err := fetchThreadArtifactProxy(context.Background(), req, "thr_1", "eval.dataset@v1")
+	if err != nil {
+		t.Fatalf("fetchThreadArtifactProxy returned error: %v", err)
+	}
+	if statusCode != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", statusCode)
+	}
+	body, ok := proxy.Body.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map body, got %#v", proxy.Body)
+	}
+	cases, ok := body["cases"].([]any)
+	if !ok || len(cases) != 2 {
+		t.Fatalf("expected full evo artifact content, got %#v", body)
+	}
+	for _, forbidden := range []string{"data", "runtime_artifact_id", "source_artifact_id", "artifact_id", "schema"} {
+		if _, ok := body[forbidden]; ok {
+			t.Fatalf("artifact response should not include old envelope field %q: %#v", forbidden, body)
+		}
+	}
+}
+
+func TestFetchThreadArtifactProxyRejectsCaseSelector(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unsupported artifact selector should not call evo, got %s %s", r.Method, r.URL.RequestURI())
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr_1/artifacts/eval.dataset%5Bcase_0002%5D@v1", nil)
+	proxy, statusCode, err := fetchThreadArtifactProxy(context.Background(), req, "thr_1", "eval.dataset[case_0002]@v1")
+	if err == nil {
+		t.Fatalf("expected unsupported artifact selector error")
+	}
+	if proxy != nil {
+		t.Fatalf("expected nil proxy, got %#v", proxy)
+	}
+	if statusCode != http.StatusNotFound {
+		t.Fatalf("unexpected status code: %d", statusCode)
+	}
+}
+
+func TestFetchThreadArtifactProxyRejectsResultKindAlias(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unsupported artifact id should not call evo, got %s %s", r.Method, r.URL.RequestURI())
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr_1/artifacts/datasets", nil)
+	proxy, statusCode, err := fetchThreadArtifactProxy(context.Background(), req, "thr_1", "datasets")
+	if err == nil {
+		t.Fatalf("expected unsupported artifact error")
+	}
+	if proxy != nil {
+		t.Fatalf("expected nil proxy, got %#v", proxy)
+	}
+	if statusCode != http.StatusNotFound {
+		t.Fatalf("unexpected status code: %d", statusCode)
+	}
+}
+
+func TestFetchThreadResultProxyReturnsGateContentDirectly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/gates":
+			latest := 2
+			_ = json.NewEncoder(w).Encode(evoGateList{
+				ThreadID: "thr_1",
+				Gates: []evoGate{{
+					Step:             "eval",
+					ArtifactID:       "eval.summary",
+					Versions:         []int{1, 2},
+					EffectiveVersion: &latest,
+				}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/gates/eval/versions/2":
+			_ = json.NewEncoder(w).Encode(evoGateContent{
+				ThreadID: "thr_1",
+				Step:     "eval",
+				Version:  2,
+				Content: map[string]any{
+					"correct_rate": 0.5,
+					"cases":        []any{map[string]any{"case_id": "case_1"}},
+				},
+			})
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr_1/results/eval-reports", nil)
+	proxy, statusCode, err := fetchThreadResultProxy(context.Background(), req, "thr_1", "eval-reports", 0)
+	if err != nil {
+		t.Fatalf("fetchThreadResultProxy returned error: %v", err)
+	}
+	if statusCode != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", statusCode)
+	}
+	body, ok := proxy.Body.(map[string]any)
+	if !ok {
+		t.Fatalf("expected direct content map, got %#v", proxy.Body)
+	}
+	if body["correct_rate"] != 0.5 {
+		t.Fatalf("expected evo content metrics to be returned directly: %#v", body)
+	}
+	for _, forbidden := range []string{"artifact_id", "runtime_artifact_id", "source_artifact_id", "schema", "data", "file_url"} {
+		if _, ok := body[forbidden]; ok {
+			t.Fatalf("result response should not include old envelope field %q: %#v", forbidden, body)
+		}
+	}
+}
+
+func TestFetchThreadResultProxyReturnsNotFoundWhenGateHasNoContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/gates":
+			_ = json.NewEncoder(w).Encode(evoGateList{
+				ThreadID: "thr_1",
+				Gates: []evoGate{{
+					Step:       "analysis",
+					ArtifactID: "analysis.summary",
+				}},
+			})
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr_1/results/analysis-reports", nil)
+	proxy, statusCode, err := fetchThreadResultProxy(context.Background(), req, "thr_1", "analysis-reports", 0)
+	if err == nil {
+		t.Fatalf("expected missing gate content error")
+	}
+	if proxy != nil {
+		t.Fatalf("expected nil proxy, got %#v", proxy)
+	}
+	if statusCode != http.StatusNotFound {
+		t.Fatalf("unexpected status code: %d", statusCode)
+	}
+}
+
+func TestGetThreadResultReturnsNotFoundWhenGateHasNoContent(t *testing.T) {
+	db := newAgentTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID:       "thr_1",
+		Status:         "completed",
+		CreateUserID:   "u1",
+		CreateUserName: "tester",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}).Error; err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/gates":
+			_ = json.NewEncoder(w).Encode(evoGateList{
+				ThreadID: "thr_1",
+				Gates: []evoGate{{
+					Step:       "analysis",
+					ArtifactID: "analysis.summary",
+				}},
+			})
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/agent/threads/thr_1/results/analysis-reports", nil)
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1"})
+	rec := httptest.NewRecorder()
+
+	GetThreadResultAnalysisReports(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected result endpoint to return 404, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetThreadResultReturnsUpstreamNotFoundForBadVersion(t *testing.T) {
+	db := newAgentTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID:       "thr_1",
+		Status:         "completed",
+		CreateUserID:   "u1",
+		CreateUserName: "tester",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}).Error; err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/gates":
+			_ = json.NewEncoder(w).Encode(evoGateList{
+				ThreadID: "thr_1",
+				Gates: []evoGate{{
+					Step:       "dataset",
+					ArtifactID: "eval.dataset",
+					Versions:   []int{1},
+				}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/gates/dataset/versions/999":
+			http.Error(w, `{"detail":"version not found"}`, http.StatusNotFound)
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/agent/threads/thr_1/results/datasets?version=999", nil)
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1"})
+	rec := httptest.NewRecorder()
+
+	GetThreadResultDatasets(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected upstream version 404 to stay 404, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDownloadThreadResultCSVUsesGateContentOnlyOnDownloadPath(t *testing.T) {
+	db := newAgentTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID:       "thr_1",
+		Status:         "completed",
+		CreateUserID:   "u1",
+		CreateUserName: "tester",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}).Error; err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/gates":
+			_ = json.NewEncoder(w).Encode(evoGateList{
+				ThreadID: "thr_1",
+				Gates: []evoGate{{
+					Step:       "abtest",
+					ArtifactID: "abtest.comparison",
+					Versions:   []int{3},
+				}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/gates/abtest/versions/3":
+			_ = json.NewEncoder(w).Encode(evoGateContent{
+				ThreadID: "thr_1",
+				Step:     "abtest",
+				Version:  3,
+				Content: map[string]any{
+					"case_deltas": []any{
+						map[string]any{
+							"case_id": "case_1",
+							"outcome": "improved",
+							"before":  0.2,
+							"after":   0.8,
+							"delta":   0.6,
+						},
+					},
+				},
+			})
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/agent/threads/thr_1/results/abtests:download", nil)
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1", "kind": "abtests"})
+	rec := httptest.NewRecorder()
+
+	DownloadThreadResult(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected download ok, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "text/csv") {
+		t.Fatalf("expected csv content type, got %q", got)
+	}
+	if got := rec.Header().Get("Content-Disposition"); !strings.Contains(got, "attachment") || !strings.Contains(got, "thr_1_abtests_v3.csv") {
+		t.Fatalf("unexpected content disposition: %q", got)
+	}
+	raw := rec.Body.Bytes()
+	if !bytes.HasPrefix(raw, []byte{0xEF, 0xBB, 0xBF}) {
+		t.Fatalf("expected utf-8 bom")
+	}
+	reader := csv.NewReader(bytes.NewReader(raw[3:]))
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
+	}
+	if len(records) != 2 || strings.Join(records[0], ",") != "after,before,case_id,delta,outcome" || records[1][2] != "case_1" {
+		t.Fatalf("unexpected csv records: %#v", records)
 	}
 }
 
@@ -474,7 +935,6 @@ func TestShouldKeepThreadFlowStreamAliveKeepsRunningAndPending(t *testing.T) {
 	}{
 		{status: "running", want: true},
 		{status: "pending", want: true},
-		{status: "waiting_checkpoint", want: true},
 		{status: "paused", want: true},
 		{status: "RUNNING", want: true},
 		{status: "not_found", want: false},
@@ -534,29 +994,34 @@ func TestReadThreadEventSSEFrameAcceptsLineDelimitedData(t *testing.T) {
 	}
 }
 
-func TestBuildCaseCSVBytesJoinsListValues(t *testing.T) {
-	csvBytes, rowCount, err := buildCaseCSVBytes([]any{
-		map[string]any{
-			"question":      "q1",
-			"reference_doc": []any{"a.pdf", "b.pdf"},
-			"score":         1.5,
-			"meta":          map[string]any{"source": "doc"},
-		},
-		map[string]any{
-			"question":      "q2",
-			"reference_doc": []any{"c.pdf"},
-			"score":         2,
-			"extra":         true,
+func TestBuildGateCSVUsesKnownRowsAndStableHeaders(t *testing.T) {
+	csvBytes, rowCount, err := buildGateCSV("datasets", map[string]any{
+		"cases": []any{
+			map[string]any{
+				"question":      "q1",
+				"reference_doc": []any{"a.pdf", "b.pdf"},
+				"score":         1.5,
+				"meta":          map[string]any{"source": "doc"},
+			},
+			map[string]any{
+				"question":      "q2",
+				"reference_doc": []any{"c.pdf"},
+				"score":         2,
+				"extra":         true,
+			},
 		},
 	})
 	if err != nil {
-		t.Fatalf("buildCaseCSVBytes returned error: %v", err)
+		t.Fatalf("buildGateCSV returned error: %v", err)
 	}
 	if rowCount != 2 {
 		t.Fatalf("expected row count 2, got %d", rowCount)
 	}
+	if !bytes.HasPrefix(csvBytes, []byte{0xEF, 0xBB, 0xBF}) {
+		t.Fatalf("expected utf-8 bom")
+	}
 
-	reader := csv.NewReader(bytes.NewReader(csvBytes))
+	reader := csv.NewReader(bytes.NewReader(csvBytes[3:]))
 	reader.FieldsPerRecord = -1
 	records, err := reader.ReadAll()
 	if err != nil {
@@ -577,15 +1042,17 @@ func TestBuildCaseCSVBytesJoinsListValues(t *testing.T) {
 	}
 }
 
-func TestBuildCaseCSVBytesNormalizesMultilineCells(t *testing.T) {
-	csvBytes, rowCount, err := buildCaseCSVBytes([]any{
-		map[string]any{
-			"answer":   "line 1\r\nline 2\n\nline 3\x00\x01",
-			"segments": []any{"chunk 1\nchunk 2", "chunk 3"},
+func TestBuildGateCSVNormalizesMultilineCells(t *testing.T) {
+	csvBytes, rowCount, err := buildGateCSV("eval-reports", map[string]any{
+		"rows": []any{
+			map[string]any{
+				"answer":   "line 1\r\nline 2\n\nline 3\x00\x01",
+				"segments": []any{"chunk 1\nchunk 2", "chunk 3"},
+			},
 		},
 	})
 	if err != nil {
-		t.Fatalf("buildCaseCSVBytes returned error: %v", err)
+		t.Fatalf("buildGateCSV returned error: %v", err)
 	}
 	if rowCount != 1 {
 		t.Fatalf("expected row count 1, got %d", rowCount)
@@ -594,7 +1061,7 @@ func TestBuildCaseCSVBytesNormalizesMultilineCells(t *testing.T) {
 		t.Fatalf("expected csv to contain record separators only and no control characters, got %q", string(csvBytes))
 	}
 
-	reader := csv.NewReader(bytes.NewReader(csvBytes))
+	reader := csv.NewReader(bytes.NewReader(csvBytes[3:]))
 	records, err := reader.ReadAll()
 	if err != nil {
 		t.Fatalf("read csv: %v", err)
@@ -607,518 +1074,165 @@ func TestBuildCaseCSVBytesNormalizesMultilineCells(t *testing.T) {
 	}
 }
 
-func TestAttachCaseCSVFileURLAddsDownloadableAttachment(t *testing.T) {
-	uploadRoot := t.TempDir()
-	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
-	payload := map[string]any{
-		"data": map[string]any{
-			"cases": []any{
-				map[string]any{
-					"question":      "q1",
-					"reference_doc": []any{"a.pdf", "b.pdf"},
-				},
+func TestBuildGateCSVProtectsFormulaCells(t *testing.T) {
+	csvBytes, rowCount, err := buildGateCSV("datasets", map[string]any{
+		"cases": []any{
+			map[string]any{
+				"answer":  "=HYPERLINK(\"http://example.com\")",
+				"comment": "  @SUM(1,2)",
+				"score":   -1,
 			},
 		},
-	}
-
-	file, found, err := attachCaseCSVFileURL(context.Background(), payload, caseCSVOptions{
-		ThreadID:   "thr/1",
-		ResultKind: "datasets",
 	})
 	if err != nil {
-		t.Fatalf("attachCaseCSVFileURL returned error: %v", err)
-	}
-	if !found {
-		t.Fatalf("expected cases field to be found")
-	}
-	if file == nil || file.RowCount != 1 {
-		t.Fatalf("unexpected attachment: %#v", file)
-	}
-	if _, err := os.Stat(file.StoredPath); err != nil {
-		t.Fatalf("expected csv file to exist: %v", err)
-	}
-	assertSignedStaticFileExists(t, uploadRoot, file)
-	if !strings.Contains(file.FileURL, "/static-files/agent-results/thr_1/datasets/") || !strings.Contains(file.FileURL, "sig=") {
-		t.Fatalf("unexpected file url: %q", file.FileURL)
-	}
-	if !strings.Contains(file.DownloadURL, "download=1") || file.DownloadURL == file.FileURL {
-		t.Fatalf("unexpected download url: %q", file.DownloadURL)
-	}
-	data := payload["data"].(map[string]any)
-	if _, ok := data[defaultCaseCSVField]; ok {
-		t.Fatalf("expected only file_url to be attached to data payload")
-	}
-	assertOnlyTopLevelFileURL(t, data)
-}
-
-func TestAttachCaseCSVFileURLReadsCasesFromJSONPath(t *testing.T) {
-	uploadRoot := t.TempDir()
-	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
-	tmpDir := t.TempDir()
-	jsonPath := filepath.Join(tmpDir, "eval_data.json")
-	if err := os.WriteFile(jsonPath, []byte(`{"data":[{"question":"q1","answer":"a1"}]}`), 0o644); err != nil {
-		t.Fatalf("write eval data json: %v", err)
-	}
-	item := map[string]any{
-		"case_count": float64(1),
-		"dataset_id": "eval_1",
-		"path":       jsonPath,
-	}
-	payload := []any{item}
-
-	file, found, err := attachCaseCSVFileURL(context.Background(), payload, caseCSVOptions{
-		ThreadID:   "thr-1",
-		ResultKind: "datasets",
-		FieldNames: []string{"case", "cases", "eval_data", "data", "items", "records"},
-	})
-	if err != nil {
-		t.Fatalf("attachCaseCSVFileURL returned error: %v", err)
-	}
-	if !found || file == nil || file.RowCount != 1 {
-		t.Fatalf("expected csv attachment from json path, got file=%#v found=%v", file, found)
-	}
-	if item["file_url"] != file.FileURL {
-		t.Fatalf("expected top-level file_url to point at csv file, got %#v", item["file_url"])
-	}
-	if _, ok := item[defaultCaseCSVField]; ok {
-		t.Fatalf("expected only file_url to be attached to result item")
-	}
-	assertSignedStaticFileExists(t, uploadRoot, file)
-	if !strings.Contains(file.FileURL, "/static-files/agent-results/thr-1/datasets/") || !strings.Contains(file.FileURL, "sig=") {
-		t.Fatalf("unexpected file url: %q", file.FileURL)
-	}
-	assertOnlyTopLevelFileURL(t, item)
-}
-
-func TestBuildCaseDetailsCSVBytesUsesChineseHeadersAndQuestionTypeNames(t *testing.T) {
-	csvBytes, rowCount, err := buildCaseDetailsCSVBytes([]any{
-		map[string]any{
-			"case_id":            "case-1",
-			"question":           "q1",
-			"question_type":      1,
-			"key_points":         []any{"要点一", "要点二"},
-			"context_recall":     1.0,
-			"answer_correctness": 0.5,
-		},
-	})
-	if err != nil {
-		t.Fatalf("buildCaseDetailsCSVBytes returned error: %v", err)
+		t.Fatalf("buildGateCSV returned error: %v", err)
 	}
 	if rowCount != 1 {
 		t.Fatalf("expected row count 1, got %d", rowCount)
 	}
-	reader := csv.NewReader(bytes.NewReader(csvBytes))
-	reader.FieldsPerRecord = -1
+	reader := csv.NewReader(bytes.NewReader(csvBytes[3:]))
 	records, err := reader.ReadAll()
 	if err != nil {
 		t.Fatalf("read csv: %v", err)
 	}
-	expectedHeader := []string{"案例ID", "问题", "问题类型", "关键点", "上下文召回率", "答案正确性"}
-	if strings.Join(records[0], ",") != strings.Join(expectedHeader, ",") {
-		t.Fatalf("unexpected case details header: %#v", records[0])
+	if records[1][0] != `'=HYPERLINK("http://example.com")` {
+		t.Fatalf("expected formula cell to be prefixed, got %#v", records)
 	}
-	if records[1][2] != "单跳" {
-		t.Fatalf("expected question_type to be mapped to 单跳, got %q", records[1][2])
+	if records[1][1] != "'@SUM(1,2)" {
+		t.Fatalf("expected trimmed formula cell to be prefixed, got %#v", records)
 	}
-	if records[1][3] != "要点一; 要点二" {
-		t.Fatalf("expected list value to be joined inline, got %q", records[1][3])
+	if records[1][2] != "'-1" {
+		t.Fatalf("expected numeric formula prefix to be prefixed, got %#v", records)
 	}
 }
 
-func TestAttachCaseDetailsReportResultAddsSummaryAndCSVFile(t *testing.T) {
-	uploadRoot := t.TempDir()
-	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
-	payload := map[string]any{
-		"data": map[string]any{
-			"case_details": []any{
-				map[string]any{
-					"question_type":      1,
-					"context_recall":     1.0,
-					"doc_recall":         1.0,
-					"answer_correctness": 0.5,
-					"faithfulness":       1.0,
-				},
-				map[string]any{
-					"question_type":      1,
-					"context_recall":     0.5,
-					"doc_recall":         1.0,
-					"answer_correctness": 1.0,
-					"faithfulness":       0.5,
-				},
-				map[string]any{
-					"question_type":      2,
-					"context_recall":     0.25,
-					"doc_recall":         0.5,
-					"answer_correctness": 1.0,
-					"faithfulness":       1.0,
-				},
+func TestBuildGateCSVUsesAbtestCaseDeltas(t *testing.T) {
+	csvBytes, rowCount, err := buildGateCSV("abtests", map[string]any{
+		"case_deltas": []any{
+			map[string]any{
+				"case_id":           "case_1",
+				"outcome":           "improved",
+				"before":            0.2,
+				"after":             0.7,
+				"delta":             0.5,
+				"baseline_quality":  "bad",
+				"candidate_quality": "good",
 			},
 		},
-	}
-
-	summary, found, err := attachCaseDetailsReportResult(context.Background(), payload, caseDetailsReportOptions{
-		ThreadID:   "thr/1",
-		ResultKind: "eval-reports",
 	})
 	if err != nil {
-		t.Fatalf("attachCaseDetailsReportResult returned error: %v", err)
+		t.Fatalf("buildGateCSV returned error: %v", err)
 	}
-	if !found {
-		t.Fatalf("expected case_details field to be found")
+	if rowCount != 1 {
+		t.Fatalf("expected row count 1, got %d", rowCount)
 	}
-	if summary == nil || summary.TotalCount != 3 || summary.CSVFile == nil {
-		t.Fatalf("unexpected summary: %#v", summary)
+	reader := csv.NewReader(bytes.NewReader(csvBytes[3:]))
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
 	}
-	if _, err := os.Stat(summary.CSVFile.StoredPath); err != nil {
-		t.Fatalf("expected csv file to exist: %v", err)
+	wantHeader := "after,baseline_quality,before,candidate_quality,case_id,delta,outcome"
+	if strings.Join(records[0], ",") != wantHeader {
+		t.Fatalf("unexpected abtest header: %#v", records[0])
 	}
-	assertSignedStaticFileExists(t, uploadRoot, summary.CSVFile)
-	if !strings.Contains(summary.CSVFile.FileURL, "/static-files/agent-results/thr_1/eval-reports/") {
-		t.Fatalf("unexpected file url: %q", summary.CSVFile.FileURL)
+	if strings.Join(records[1], ",") != "0.7,bad,0.2,good,case_1,0.5,improved" {
+		t.Fatalf("unexpected abtest row: %#v", records[1])
 	}
-	if len(summary.QuestionTypes) != 2 {
-		t.Fatalf("expected 2 question type stats, got %#v", summary.QuestionTypes)
-	}
-	first := summary.QuestionTypes[0]
-	if first.QuestionType != 1 || first.QuestionTypeKey != "single_hop" || first.QuestionTypeName != "单跳" || first.Count != 2 {
-		t.Fatalf("unexpected first question type stat: %#v", first)
-	}
-	if first.Averages.ContextRecall == nil || math.Abs(*first.Averages.ContextRecall-0.75) > 0.000001 {
-		t.Fatalf("unexpected context_recall average: %#v", first.Averages.ContextRecall)
-	}
-	if first.Averages.AnswerCorrectness == nil || math.Abs(*first.Averages.AnswerCorrectness-0.75) > 0.000001 {
-		t.Fatalf("unexpected answer_correctness average: %#v", first.Averages.AnswerCorrectness)
-	}
-	data := payload["data"].(map[string]any)
-	if _, ok := data[caseDetailsCSVFileField]; ok {
-		t.Fatalf("expected only file_url to be attached to payload")
-	}
-	responseSummary, ok := data[caseDetailsSummaryField].(*caseDetailsSummary)
-	if !ok || responseSummary == nil {
-		t.Fatalf("expected summary with averages to remain in response payload")
-	}
-	if responseSummary.CSVFile != nil {
-		t.Fatalf("expected summary to omit csv file metadata")
-	}
-	if responseSummary.TotalCount != summary.TotalCount || len(responseSummary.QuestionTypes) != len(summary.QuestionTypes) {
-		t.Fatalf("unexpected response summary: %#v", responseSummary)
-	}
-	assertOnlyTopLevelFileURL(t, data)
 }
 
-func TestAttachEvalReportSummaryResultAddsSummaryFields(t *testing.T) {
-	payload := []any{
-		map[string]any{
-			"artifact_id":   "eval_report",
-			"ref":           "eval.summary@v2",
-			"schema":        "EvalReport",
-			"case_count":    float64(0),
-			"unrelated_key": "keep-me",
-			"data": map[string]any{
-				"id":               "eval.summary",
-				"eval_dataset_ref": "eval_dataset@v1",
-				"metrics":          map[string]any{"correct_rate": 0.4},
-				"bad_cases": []any{
-					map[string]any{"case_id": "case_0001", "trace_id": "trace-1"},
-					map[string]any{"case_id": "case_0002", "trace_id": ""},
-					map[string]any{"case_id": "case_0003"},
-				},
-			},
+func TestBuildGateCSVUsesRepairDiffMap(t *testing.T) {
+	csvBytes, rowCount, err := buildGateCSV("diffs", map[string]any{
+		"run_id":              "run_1",
+		"algo_id":             "base",
+		"candidate_algo_id":   "candidate",
+		"status":              "verified",
+		"diff":                map[string]any{"b.go": "patch b", "a.go": "patch a"},
+		"ignored_for_csv_row": true,
+	})
+	if err != nil {
+		t.Fatalf("buildGateCSV returned error: %v", err)
+	}
+	if rowCount != 2 {
+		t.Fatalf("expected row count 2, got %d", rowCount)
+	}
+	reader := csv.NewReader(bytes.NewReader(csvBytes[3:]))
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
+	}
+	wantHeader := "algo_id,candidate_algo_id,diff,file,run_id,status"
+	if strings.Join(records[0], ",") != wantHeader {
+		t.Fatalf("unexpected repair diff header: %#v", records[0])
+	}
+	if strings.Join(records[1], ",") != "base,candidate,patch a,a.go,run_1,verified" {
+		t.Fatalf("unexpected first repair diff row: %#v", records[1])
+	}
+}
+
+func TestBuildGateCSVFallsBackToTopLevelObject(t *testing.T) {
+	csvBytes, rowCount, err := buildGateCSV("diffs", map[string]any{
+		"patch":  "diff --git a/a b/a",
+		"status": "verified",
+	})
+	if err != nil {
+		t.Fatalf("buildGateCSV returned error: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("expected row count 1, got %d", rowCount)
+	}
+	reader := csv.NewReader(bytes.NewReader(csvBytes[3:]))
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
+	}
+	if strings.Join(records[0], ",") != "patch,status" {
+		t.Fatalf("unexpected fallback header: %#v", records[0])
+	}
+}
+
+func TestBuildGateCSVPreservesHeaderWhitespaceForCellLookup(t *testing.T) {
+	csvBytes, rowCount, err := buildGateCSV("datasets", map[string]any{
+		"cases": []any{
+			map[string]any{" case_id ": "case_1", "question": "q1"},
 		},
-	}
-
-	found, err := attachEvalReportSummaryResult(payload, "thr-1")
+	})
 	if err != nil {
-		t.Fatalf("attachEvalReportSummaryResult returned error: %v", err)
+		t.Fatalf("buildGateCSV returned error: %v", err)
 	}
-	if !found {
-		t.Fatalf("expected eval report row to be found")
+	if rowCount != 1 {
+		t.Fatalf("expected row count 1, got %d", rowCount)
 	}
-	row := payload[0].(map[string]any)
-	if row[evalReportIDField] != "eval.summary" {
-		t.Fatalf("expected report_id from inline data id, got %#v", row[evalReportIDField])
+	reader := csv.NewReader(bytes.NewReader(csvBytes[3:]))
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
 	}
-	coverage, ok := row[evalReportTraceCoverageField].(evalReportTraceCoverage)
-	if !ok {
-		t.Fatalf("expected trace coverage, got %#v", row[evalReportTraceCoverageField])
-	}
-	if coverage.CoveredCount != 1 || coverage.TotalCount != 3 || math.Abs(coverage.Rate-1.0/3.0) > 0.000001 {
-		t.Fatalf("unexpected trace coverage: %#v", coverage)
-	}
-	if row[evalReportBadCaseCountField] != 3 {
-		t.Fatalf("expected bad_case_count from bad_cases length, got %#v", row[evalReportBadCaseCountField])
-	}
-	if _, ok := row["eval_dataset_ref"]; ok {
-		t.Fatalf("did not expect eval_dataset_ref to be duplicated at result row")
-	}
-	if _, ok := row["accuracy"]; ok {
-		t.Fatalf("did not expect accuracy to be duplicated at result row")
-	}
-	data := row["data"].(map[string]any)
-	if data["eval_dataset_ref"] != "eval_dataset@v1" {
-		t.Fatalf("expected original dataset ref to remain in data")
-	}
-	if data["metrics"].(map[string]any)["correct_rate"] != 0.4 {
-		t.Fatalf("expected original metrics to remain in data")
-	}
-	if badCases, ok := data["bad_cases"].([]any); !ok || len(badCases) != 3 {
-		t.Fatalf("expected inline bad_cases to remain in summary response, got %#v", data["bad_cases"])
+	if records[0][0] != " case_id " || records[1][0] != "case_1" {
+		t.Fatalf("expected spaced header to preserve cell value, got %#v", records)
 	}
 }
 
-func TestListEvalReportBadCasesFiltersAndPaginates(t *testing.T) {
-	payload := []any{
-		map[string]any{
-			"artifact_id": "eval_report",
-			"ref":         "eval.summary@v1",
-			"data": map[string]any{
-				"id": "eval.summary",
-				"bad_cases": []any{
-					map[string]any{"case_id": "case_1", "Defect": "答案缺少合同条款", "Reason": "没有覆盖退款条款", "failure_type": "missing_answer"},
-					map[string]any{"case_id": "case_2", "Defect": "引用错误", "Reason": "检索片段错误", "failure_type": "wrong_context"},
-					map[string]any{"case_id": "case_3", "defect": "合同金额错误", "reason": "金额计算错误", "failure_type": "missing_answer"},
-					map[string]any{"case_id": "case_4", "Defect": "格式问题", "Reason": "输出冗余", "failure_type": "format"},
-				},
-			},
+func TestBuildGateCSVSkipsEmptyObjectArrayFallback(t *testing.T) {
+	csvBytes, rowCount, err := buildGateCSV("analysis-reports", map[string]any{
+		"empty": []any{},
+		"items": []any{
+			map[string]any{"case_id": "case_1", "label": "hard"},
 		},
-	}
-
-	result, err := listEvalReportBadCases(payload, "eval.summary", evalReportBadCaseListQuery{
-		PageSize:    1,
-		Offset:      0,
-		Keyword:     "合同",
-		FailureType: "missing_answer",
 	})
 	if err != nil {
-		t.Fatalf("listEvalReportBadCases returned error: %v", err)
+		t.Fatalf("buildGateCSV returned error: %v", err)
 	}
-	if result.TotalSize != 2 {
-		t.Fatalf("expected total_size 2 after filtering, got %d", result.TotalSize)
+	if rowCount != 1 {
+		t.Fatalf("expected row count 1, got %d", rowCount)
 	}
-	if result.NextPageToken != "1" {
-		t.Fatalf("expected next_page_token=1, got %q", result.NextPageToken)
-	}
-	if len(result.Items) != 1 || result.Items[0]["case_id"] != "case_1" {
-		t.Fatalf("unexpected first page items: %#v", result.Items)
-	}
-
-	secondPage, err := listEvalReportBadCases(payload, "eval.summary", evalReportBadCaseListQuery{
-		PageSize:    10,
-		Offset:      1,
-		Keyword:     "合同",
-		FailureType: "missing_answer",
-	})
+	reader := csv.NewReader(bytes.NewReader(csvBytes[3:]))
+	records, err := reader.ReadAll()
 	if err != nil {
-		t.Fatalf("listEvalReportBadCases second page returned error: %v", err)
+		t.Fatalf("read csv: %v", err)
 	}
-	if secondPage.NextPageToken != "" {
-		t.Fatalf("expected empty next_page_token, got %q", secondPage.NextPageToken)
+	if strings.Join(records[0], ",") != "empty,items" || !strings.Contains(records[1][1], "case_1") {
+		t.Fatalf("unexpected contract fallback records: %#v", records)
 	}
-	if len(secondPage.Items) != 1 || secondPage.Items[0]["case_id"] != "case_3" {
-		t.Fatalf("unexpected second page items: %#v", secondPage.Items)
-	}
-}
-
-func TestParseEvalReportBadCaseListQueryDefaultsPageSizeToTen(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/core/agent/threads/thr-1/results/eval-reports/v0001/bad-cases", nil)
-
-	query, err := parseEvalReportBadCaseListQuery(req)
-	if err != nil {
-		t.Fatalf("parseEvalReportBadCaseListQuery returned error: %v", err)
-	}
-	if query.PageSize != 10 {
-		t.Fatalf("expected default page_size 10, got %d", query.PageSize)
-	}
-}
-
-func TestListABTestCaseDetailsFiltersAndPaginates(t *testing.T) {
-	payload := []any{
-		map[string]any{
-			"artifact_id":         "abtest_comparison",
-			"runtime_artifact_id": "abtest.comparison",
-			"ref":                 "abtest.comparison@v1",
-			"data": map[string]any{
-				"id":        "abtest_comparison",
-				"abtest_id": "abtest_comparison",
-				"case_details": []any{
-					map[string]any{"case_id": "case_1", "query": "退款怎么处理", "outcome": "regressed"},
-					map[string]any{"case_id": "case_2", "query": "账号怎么处理", "outcome": "improved"},
-					map[string]any{"case_id": "case_3", "question": "退款状态怎么查", "outcome": "regressed"},
-				},
-			},
-		},
-	}
-
-	result, err := listABTestCaseDetails(payload, "abtest.comparison", abtestCaseDetailListQuery{
-		PageSize: 1,
-		Offset:   0,
-		Keyword:  "退款",
-		Outcome:  "regressed",
-	})
-	if err != nil {
-		t.Fatalf("listABTestCaseDetails returned error: %v", err)
-	}
-	if result.TotalSize != 2 {
-		t.Fatalf("expected total_size 2 after filtering, got %d", result.TotalSize)
-	}
-	if result.NextPageToken != "1" {
-		t.Fatalf("expected next_page_token=1, got %q", result.NextPageToken)
-	}
-	if len(result.Items) != 1 || result.Items[0]["case_id"] != "case_1" {
-		t.Fatalf("unexpected first page items: %#v", result.Items)
-	}
-
-	secondPage, err := listABTestCaseDetails(payload, "abtest_comparison", abtestCaseDetailListQuery{
-		PageSize: 10,
-		Offset:   1,
-		Keyword:  "退款",
-		Outcome:  "regressed",
-	})
-	if err != nil {
-		t.Fatalf("listABTestCaseDetails second page returned error: %v", err)
-	}
-	if secondPage.NextPageToken != "" {
-		t.Fatalf("expected empty next_page_token, got %q", secondPage.NextPageToken)
-	}
-	if len(secondPage.Items) != 1 || secondPage.Items[0]["case_id"] != "case_3" {
-		t.Fatalf("unexpected second page items: %#v", secondPage.Items)
-	}
-}
-
-func TestListABTestCaseDetailsFallsBackToSummaryCaseDeltas(t *testing.T) {
-	payload := []any{
-		map[string]any{
-			"artifact_id": "abtest_comparison",
-			"ref":         "abtest.comparison@v1",
-			"data": map[string]any{
-				"id": "abtest_comparison",
-				"summary": map[string]any{
-					"case_deltas": []any{
-						map[string]any{
-							"case_id": "case_1",
-							"query":   "合同金额是否正确",
-							"outcome": "regressed",
-							"delta":   map[string]any{"answer_correctness": -0.2},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	result, err := listABTestCaseDetails(payload, "abtest.comparison", abtestCaseDetailListQuery{
-		PageSize: 10,
-		Keyword:  "合同",
-	})
-	if err != nil {
-		t.Fatalf("listABTestCaseDetails returned error: %v", err)
-	}
-	if result.TotalSize != 1 || len(result.Items) != 1 || result.Items[0]["case_id"] != "case_1" {
-		t.Fatalf("unexpected summary case_deltas result: %#v", result)
-	}
-}
-
-func TestParseABTestCaseDetailListQueryDefaultsPageSizeToTen(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/core/agent/threads/thr-1/results/abtests/abtest.comparison/case-details", nil)
-
-	query, err := parseABTestCaseDetailListQuery(req)
-	if err != nil {
-		t.Fatalf("parseABTestCaseDetailListQuery returned error: %v", err)
-	}
-	if query.PageSize != 10 {
-		t.Fatalf("expected default page_size 10, got %d", query.PageSize)
-	}
-}
-
-func TestAttachCaseDetailsReportResultReadsCaseDetailsFromJSONPath(t *testing.T) {
-	uploadRoot := t.TempDir()
-	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
-	tmpDir := t.TempDir()
-	jsonPath := filepath.Join(tmpDir, "eval_report.json")
-	if err := os.WriteFile(jsonPath, []byte(`{"case_details":[{"question":"q1","question_type":1,"context_recall":1}]}`), 0o644); err != nil {
-		t.Fatalf("write eval report json: %v", err)
-	}
-	item := map[string]any{
-		"report_id": "report_1",
-		"path":      jsonPath,
-	}
-	payload := []any{item}
-
-	summary, found, err := attachCaseDetailsReportResult(context.Background(), payload, caseDetailsReportOptions{
-		ThreadID:   "thr-1",
-		ResultKind: "eval-reports",
-	})
-	if err != nil {
-		t.Fatalf("attachCaseDetailsReportResult returned error: %v", err)
-	}
-	if !found || summary == nil || summary.TotalCount != 1 || summary.CSVFile == nil {
-		t.Fatalf("expected case details summary from json path, got summary=%#v found=%v", summary, found)
-	}
-	if item["file_url"] != summary.CSVFile.FileURL {
-		t.Fatalf("expected top-level file_url to point at csv file, got %#v", item["file_url"])
-	}
-	if _, ok := item[caseDetailsCSVFileField]; ok {
-		t.Fatalf("expected only file_url to be attached to result item")
-	}
-	responseSummary, ok := item[caseDetailsSummaryField].(*caseDetailsSummary)
-	if !ok || responseSummary == nil {
-		t.Fatalf("expected summary with averages to remain in response item")
-	}
-	if responseSummary.CSVFile != nil {
-		t.Fatalf("expected summary to omit csv file metadata")
-	}
-	if responseSummary.TotalCount != summary.TotalCount || len(responseSummary.QuestionTypes) != len(summary.QuestionTypes) {
-		t.Fatalf("unexpected response summary: %#v", responseSummary)
-	}
-	assertSignedStaticFileExists(t, uploadRoot, summary.CSVFile)
-	if !strings.Contains(summary.CSVFile.FileURL, "/static-files/agent-results/thr-1/eval-reports/") || !strings.Contains(summary.CSVFile.FileURL, "sig=") {
-		t.Fatalf("unexpected file url: %q", summary.CSVFile.FileURL)
-	}
-	assertOnlyTopLevelFileURL(t, item)
-}
-
-func TestAttachCaseDetailsReportResultReadsABTestCaseDetailsFromJSONPath(t *testing.T) {
-	uploadRoot := t.TempDir()
-	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
-	tmpDir := t.TempDir()
-	jsonPath := filepath.Join(tmpDir, "abtest_report.json")
-	if err := os.WriteFile(jsonPath, []byte(`{"case_details":[{"question":"q1","question_type":2,"doc_recall":0.5,"answer_correctness":1}]}`), 0o644); err != nil {
-		t.Fatalf("write abtest report json: %v", err)
-	}
-	item := map[string]any{
-		"abtest_id": "abtest_1",
-		"path":      jsonPath,
-	}
-	payload := []any{item}
-
-	summary, found, err := attachCaseDetailsReportResult(context.Background(), payload, caseDetailsReportOptions{
-		ThreadID:   "thr-1",
-		ResultKind: "abtests",
-	})
-	if err != nil {
-		t.Fatalf("attachCaseDetailsReportResult returned error: %v", err)
-	}
-	if !found || summary == nil || summary.TotalCount != 1 || summary.CSVFile == nil {
-		t.Fatalf("expected abtest case details summary from json path, got summary=%#v found=%v", summary, found)
-	}
-	if item["file_url"] != summary.CSVFile.FileURL {
-		t.Fatalf("expected top-level file_url to point at csv file, got %#v", item["file_url"])
-	}
-	responseSummary, ok := item[caseDetailsSummaryField].(*caseDetailsSummary)
-	if !ok || responseSummary == nil {
-		t.Fatalf("expected summary with averages to remain in abtest response item")
-	}
-	if responseSummary.CSVFile != nil {
-		t.Fatalf("expected summary to omit csv file metadata")
-	}
-	if responseSummary.TotalCount != 1 || len(responseSummary.QuestionTypes) != 1 {
-		t.Fatalf("unexpected abtest response summary: %#v", responseSummary)
-	}
-	assertSignedStaticFileExists(t, uploadRoot, summary.CSVFile)
-	if !strings.Contains(summary.CSVFile.FileURL, "/static-files/agent-results/thr-1/abtests/") || !strings.Contains(summary.CSVFile.FileURL, "sig=") {
-		t.Fatalf("unexpected abtest file url: %q", summary.CSVFile.FileURL)
-	}
-	assertOnlyTopLevelFileURL(t, item)
 }
 
 func TestSaveThreadRecordKeepsDuplicateThreadEventFrames(t *testing.T) {
@@ -1610,6 +1724,31 @@ func TestStreamUpstreamThreadEventsFiltersRequestedStep(t *testing.T) {
 	}
 }
 
+func TestStreamUpstreamThreadEventsAssignsRequestedStepWhenFrameOmitsStep(t *testing.T) {
+	db := newAgentTestDB(t)
+	rec := httptest.NewRecorder()
+	body := strings.NewReader("id: 2\nevent: message\ndata: {\"type\":\"eval.start\",\"status\":\"running\"}\n\n")
+
+	var lastUpstreamEventID string
+	if err := streamUpstreamThreadEvents(context.Background(), rec, rec, db.DB, "thr_1", "step_2", body, &lastUpstreamEventID, nil); err != nil {
+		t.Fatalf("streamUpstreamThreadEvents returned error: %v", err)
+	}
+	if lastUpstreamEventID != "2" {
+		t.Fatalf("unexpected last upstream event id: %q", lastUpstreamEventID)
+	}
+	if got := rec.Body.String(); !strings.Contains(got, `"step_id":"step_2"`) || !strings.Contains(got, `"step_run_id":"step_2"`) {
+		t.Fatalf("expected requested step id to be injected into downstream event, got %q", got)
+	}
+
+	var record orm.AgentThreadRecord
+	if err := db.DB.Where("thread_id = ? AND step_id = ?", "thr_1", "step_2").First(&record).Error; err != nil {
+		t.Fatalf("load step_2 record: %v", err)
+	}
+	if !strings.Contains(record.PayloadText, `"step_id":"step_2"`) {
+		t.Fatalf("expected persisted payload to include step_id, got %q", record.PayloadText)
+	}
+}
+
 func TestStreamThreadStepEventsDoesNotCreateStepBeforeEvents(t *testing.T) {
 	db := newAgentTestDB(t)
 	store.Init(db.DB, nil, nil)
@@ -1630,14 +1769,14 @@ func TestStreamThreadStepEventsDoesNotCreateStepBeforeEvents(t *testing.T) {
 	calls := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		calls = append(calls, r.Method+" "+r.URL.Path)
+		calls = append(calls, r.Method+" "+r.URL.RequestURI())
 		mu.Unlock()
 
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/events/step_1":
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1/events:stream" && r.URL.Query().Get("step_id") == "step_1":
 			http.Error(w, `{"detail":"closed"}`, http.StatusNotFound)
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/flow-status":
-			_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_1", Status: "ended"})
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1":
+			_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_1", Status: "ended"})
 		default:
 			http.Error(w, "unexpected request", http.StatusNotFound)
 		}
@@ -1666,8 +1805,8 @@ func TestStreamThreadStepEventsDoesNotCreateStepBeforeEvents(t *testing.T) {
 	gotCalls := append([]string(nil), calls...)
 	mu.Unlock()
 	wantCalls := []string{
-		"GET /v1/evo/threads/thr_1/events/step_1",
-		"GET /v1/evo/threads/thr_1/flow-status",
+		"GET /threads/thr_1/events:stream?step_id=step_1",
+		"GET /threads/thr_1",
 	}
 	if fmt.Sprint(gotCalls) != fmt.Sprint(wantCalls) {
 		t.Fatalf("unexpected upstream calls: want %v got %v", wantCalls, gotCalls)
@@ -1707,6 +1846,7 @@ func TestStreamUpstreamThreadEventsContinuesAfterRunCompletedUntilDone(t *testin
 	db := newAgentTestDB(t)
 	rec := httptest.NewRecorder()
 	completed := `{"type":"artifact.run.completed","event_type":"run.completed","payload":{"event_type":"run.completed","raw_event":{"event_type":"run.completed"}}}`
+	normalizedCompleted := `{"event":"run.completed","event_type":"run.completed","flow_kind":"run.completed","payload":{"event_type":"run.completed","raw_event":{"event_type":"run.completed"}},"type":"artifact.run.completed"}`
 	done := `{"type":"done","status":"success"}`
 	body := strings.NewReader(strings.Join([]string{
 		"id: 41\nevent: message\ndata: {\"kind\":\"task.running\",\"task_id\":\"task_1\"}\n\n",
@@ -1723,7 +1863,7 @@ func TestStreamUpstreamThreadEventsContinuesAfterRunCompletedUntilDone(t *testin
 	}
 
 	want := "data: {\"kind\":\"task.running\",\"task_id\":\"task_1\"}\n\n" +
-		"data: " + completed + "\n\n" +
+		"data: " + normalizedCompleted + "\n\n" +
 		"data: {\"kind\":\"task.after\",\"task_id\":\"task_1\"}\n\n" +
 		"data: " + done + "\n\n"
 	if got := rec.Body.String(); got != want {
@@ -1910,10 +2050,10 @@ func TestStreamThreadMessagesReturnsSSEActiveThreadError(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/evo/threads/thr_old/flow-status") {
+		if r.URL.Path != "/threads/thr_old" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_old", Status: "running"})
+		_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_old", Status: "running"})
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
@@ -2031,120 +2171,6 @@ func TestBuildThreadRoundResponsesOmitsHistoryInternalsAndBuildsAssistantMessage
 		if strings.Contains(string(raw), forbidden) {
 			t.Fatalf("history response must not include %q: %s", forbidden, raw)
 		}
-	}
-}
-
-func TestBuildAnalysisMarkdownResultReadsMarkdownPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	mdPath := filepath.Join(tmpDir, "analysis.md")
-	if err := os.WriteFile(mdPath, []byte("# 分析报告\n\nhello"), 0o644); err != nil {
-		t.Fatalf("write markdown: %v", err)
-	}
-	payload := map[string]any{"data": map[string]any{"analysis_report_path": mdPath}}
-
-	body, found, err := buildAnalysisMarkdownResult(payload)
-	if err != nil {
-		t.Fatalf("buildAnalysisMarkdownResult returned error: %v", err)
-	}
-	if !found {
-		t.Fatalf("expected markdown path to be found")
-	}
-	result := body.(map[string]any)
-	if result["markdown"] != "# 分析报告\n\nhello" {
-		t.Fatalf("unexpected markdown content: %#v", result["markdown"])
-	}
-	if result["markdown_path"] != mdPath {
-		t.Fatalf("unexpected markdown path: %#v", result["markdown_path"])
-	}
-}
-
-func TestFindClassificationReportResultReturnsWholeRow(t *testing.T) {
-	classificationReport := map[string]any{
-		"artifact_id":         "classification_report",
-		"runtime_artifact_id": "analysis.summary",
-		"source_artifact_id":  "analysis.summary",
-		"ref":                 "analysis.summary@v1",
-		"schema":              "analysis.summary",
-		"data": map[string]any{
-			"cases": []any{
-				map[string]any{
-					"case_id":       "case_0002",
-					"question":      "What does sample.md state about # Reader Test Markdown?",
-					"reference_doc": []any{"sample.md"},
-				},
-			},
-		},
-	}
-	payload := []any{
-		map[string]any{"artifact_id": "repair_loop_plan", "data": map[string]any{}},
-		classificationReport,
-	}
-
-	body, found := findClassificationReportResult(payload)
-	if !found {
-		t.Fatalf("expected classification_report to be found")
-	}
-	result := body.(map[string]any)
-	if result["artifact_id"] != "classification_report" {
-		t.Fatalf("unexpected artifact_id: %#v", result["artifact_id"])
-	}
-	data, ok := result["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected classification_report data to be preserved, got %#v", result["data"])
-	}
-	cases, ok := data["cases"].([]any)
-	if !ok || len(cases) != 1 {
-		t.Fatalf("unexpected cases: %#v", data["cases"])
-	}
-	firstCase, ok := cases[0].(map[string]any)
-	if !ok {
-		t.Fatalf("unexpected case row: %#v", cases[0])
-	}
-	referenceDocs, ok := firstCase["reference_doc"].([]any)
-	if !ok || len(referenceDocs) != 1 || referenceDocs[0] != "sample.md" {
-		t.Fatalf("unexpected reference_doc: %#v", firstCase["reference_doc"])
-	}
-}
-
-func TestBuildDiffJSONResultReadsJSONPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	jsonPath := filepath.Join(tmpDir, "diffs.json")
-	if err := os.WriteFile(jsonPath, []byte(`{"files":[{"path":"pipelines/naive.py","status":"modified"}]}`), 0o644); err != nil {
-		t.Fatalf("write json: %v", err)
-	}
-	payload := map[string]any{"diff_json_path": jsonPath}
-
-	body, found, err := buildDiffJSONResult(payload)
-	if err != nil {
-		t.Fatalf("buildDiffJSONResult returned error: %v", err)
-	}
-	if !found {
-		t.Fatalf("expected json path to be found")
-	}
-	result := body.(map[string]any)
-	files, ok := result["files"].([]any)
-	if !ok || len(files) != 1 {
-		t.Fatalf("unexpected decoded json result: %#v", result)
-	}
-	if result["json_path"] != jsonPath {
-		t.Fatalf("unexpected json path: %#v", result["json_path"])
-	}
-}
-
-func TestBuildAgentFileContentResultReturnsDiffContentDict(t *testing.T) {
-	tmpDir := t.TempDir()
-	diffPath := filepath.Join(tmpDir, "naive.py.diff")
-	diffContent := "diff --git a/pipelines/naive.py b/pipelines/naive.py\n+hello\n"
-	if err := os.WriteFile(diffPath, []byte(diffContent), 0o644); err != nil {
-		t.Fatalf("write diff: %v", err)
-	}
-
-	result, err := buildAgentFileContentResult(diffPath)
-	if err != nil {
-		t.Fatalf("buildAgentFileContentResult returned error: %v", err)
-	}
-	if result.Path != diffPath || result.Filename != "naive.py.diff" || result.Content != diffContent {
-		t.Fatalf("unexpected file content result: %#v", result)
 	}
 }
 
@@ -2291,15 +2317,11 @@ func TestDeleteThreadHistoryCancelsRunningFlowBeforeDeleting(t *testing.T) {
 		mu.Unlock()
 
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/flow-status":
-			_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{
-				ThreadID:      "thr_1",
-				Status:        "running",
-				ActiveTaskIDs: []string{"task_1"},
-			})
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/evo/threads/thr_1/cancel":
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1":
+			_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_1", Status: "running", CurrentStep: "task_1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/threads/thr_1/cancel":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "cancelled"})
-		case r.Method == http.MethodDelete && r.URL.Path == "/v1/evo/threads/thr_1":
+		case r.Method == http.MethodDelete && r.URL.Path == "/threads/thr_1":
 			_ = json.NewEncoder(w).Encode(map[string]any{"deleted_run": true, "deleted_thread": true})
 		default:
 			http.Error(w, "unexpected request", http.StatusNotFound)
@@ -2321,9 +2343,9 @@ func TestDeleteThreadHistoryCancelsRunningFlowBeforeDeleting(t *testing.T) {
 	gotCalls := append([]string(nil), calls...)
 	mu.Unlock()
 	wantCalls := []string{
-		"GET /v1/evo/threads/thr_1/flow-status",
-		"POST /v1/evo/threads/thr_1/cancel",
-		"DELETE /v1/evo/threads/thr_1",
+		"GET /threads/thr_1",
+		"POST /threads/thr_1/cancel",
+		"DELETE /threads/thr_1",
 	}
 	if fmt.Sprint(gotCalls) != fmt.Sprint(wantCalls) {
 		t.Fatalf("unexpected upstream calls: want %v got %v", wantCalls, gotCalls)
@@ -2354,11 +2376,11 @@ func TestDeleteThreadHistoryDoesNotCancelEndedFlow(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/flow-status" {
-			_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_1", Status: "ended"})
+		if r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1" {
+			_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_1", Status: "ended"})
 			return
 		}
-		if r.Method == http.MethodDelete && r.URL.Path == "/v1/evo/threads/thr_1" {
+		if r.Method == http.MethodDelete && r.URL.Path == "/threads/thr_1" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"deleted_run": true, "deleted_thread": true})
 			return
 		}
@@ -2382,6 +2404,103 @@ func TestDeleteThreadHistoryDoesNotCancelEndedFlow(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected thread to be deleted, found %d rows", count)
+	}
+}
+
+func TestDeleteThreadHistoryDeletesLocalRowsWhenUpstreamStatusNotFound(t *testing.T) {
+	db := newAgentTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID:       "thr_1",
+		Status:         "completed",
+		CreateUserID:   "u1",
+		CreateUserName: "tester",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}).Error; err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1" {
+			http.Error(w, `{"detail":"thread not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, "unexpected request", http.StatusNotFound)
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/core/agent/threads/thr_1:history", nil)
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1"})
+	rec := httptest.NewRecorder()
+	DeleteThreadHistory(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected delete ok, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"missing":true`) {
+		t.Fatalf("expected upstream missing marker, body=%s", rec.Body.String())
+	}
+	var count int64
+	if err := db.DB.Model(&orm.AgentThread{}).Where("thread_id = ?", "thr_1").Count(&count).Error; err != nil {
+		t.Fatalf("count thread: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected local thread to be deleted, found %d rows", count)
+	}
+}
+
+func TestDeleteThreadHistoryDeletesLocalRowsWhenUpstreamDeleteNotFound(t *testing.T) {
+	db := newAgentTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID:       "thr_1",
+		Status:         "completed",
+		CreateUserID:   "u1",
+		CreateUserName: "tester",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}).Error; err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1":
+			_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_1", Status: "ended"})
+		case r.Method == http.MethodDelete && r.URL.Path == "/threads/thr_1":
+			http.Error(w, `{"detail":"thread not found"}`, http.StatusNotFound)
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/core/agent/threads/thr_1:history", nil)
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1"})
+	rec := httptest.NewRecorder()
+	DeleteThreadHistory(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected delete ok, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"missing":true`) {
+		t.Fatalf("expected upstream missing marker, body=%s", rec.Body.String())
+	}
+	var count int64
+	if err := db.DB.Model(&orm.AgentThread{}).Where("thread_id = ?", "thr_1").Count(&count).Error; err != nil {
+		t.Fatalf("count thread: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected local thread to be deleted, found %d rows", count)
 	}
 }
 
@@ -2418,9 +2537,9 @@ func TestDeleteThreadHistoryCancelsRunningFlowBeforeActiveStreamConflict(t *test
 	cancelCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/flow-status":
-			_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_1", Status: "running"})
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/evo/threads/thr_1/cancel":
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1":
+			_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_1", Status: "running"})
+		case r.Method == http.MethodPost && r.URL.Path == "/threads/thr_1/cancel":
 			mu.Lock()
 			cancelCalled = true
 			mu.Unlock()
@@ -2474,9 +2593,9 @@ func TestDeleteThreadHistoryKeepsLocalRowsWhenCancelFails(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/flow-status":
-			_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_1", Status: "running"})
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/evo/threads/thr_1/cancel":
+		case r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1":
+			_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_1", Status: "running"})
+		case r.Method == http.MethodPost && r.URL.Path == "/threads/thr_1/cancel":
 			http.Error(w, `{"message":"cancel failed"}`, http.StatusInternalServerError)
 		default:
 			http.Error(w, "unexpected request", http.StatusNotFound)
@@ -2580,17 +2699,18 @@ func TestListThreadsFiltersByUserAndPaginates(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/v1/evo/threads/statuses" {
+		if r.Method != http.MethodGet {
 			http.Error(w, "unexpected request", http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(threadStatusesResponse{
-			Threads: []threadFlowStatusResponse{
-				{ThreadID: "thr_new", Status: "running"},
-				{ThreadID: "thr_old", Status: "failed"},
-				{ThreadID: "thr_other_user", Status: "cancelled"},
-			},
-		})
+		switch r.URL.Path {
+		case "/threads/thr_new":
+			_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_new", Status: "running"})
+		case "/threads/thr_old":
+			_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_old", Status: "failed"})
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
@@ -2740,10 +2860,10 @@ func TestReserveUserActiveThreadCreationRejectsRunningThread(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/evo/threads/thr_old/flow-status") {
+		if r.URL.Path != "/threads/thr_old" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_old", Status: "running"})
+		_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_old", Status: "running"})
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
@@ -2775,10 +2895,10 @@ func TestEnsureUserCanActivateThreadRejectsDifferentRunningThread(t *testing.T) 
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/evo/threads/thr_old/flow-status") {
+		if r.URL.Path != "/threads/thr_old" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_old", Status: "running"})
+		_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_old", Status: "running"})
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
@@ -2798,7 +2918,7 @@ func TestEnsureUserCanActivateThreadRejectsDifferentRunningThread(t *testing.T) 
 	}
 }
 
-func TestReserveUserActiveThreadCreationRejectsCheckpointThread(t *testing.T) {
+func TestReserveUserActiveThreadCreationRejectsPausedThread(t *testing.T) {
 	db := newAgentTestDB(t)
 	now := time.Now().UTC()
 	if err := db.DB.Create(&orm.AgentUserActiveThread{
@@ -2813,10 +2933,10 @@ func TestReserveUserActiveThreadCreationRejectsCheckpointThread(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/evo/threads/thr_old/flow-status") {
+		if r.URL.Path != "/threads/thr_old" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_old", Status: "waiting_checkpoint"})
+		_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_old", Status: "paused"})
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
@@ -2825,7 +2945,7 @@ func TestReserveUserActiveThreadCreationRejectsCheckpointThread(t *testing.T) {
 	req.Header.Set("X-User-Id", "u1")
 	guard, err := reserveUserActiveThreadCreation(context.Background(), db.DB, req)
 	if guard != nil {
-		t.Fatalf("expected no guard for waiting checkpoint thread")
+		t.Fatalf("expected no guard for paused thread")
 	}
 	var activeErr *userActiveThreadError
 	if !errors.As(err, &activeErr) || activeErr.statusCode != http.StatusConflict {
@@ -2848,10 +2968,10 @@ func TestReserveUserActiveThreadCreationReplacesEndedThread(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/evo/threads/thr_old/flow-status") {
+		if r.URL.Path != "/threads/thr_old" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_old", Status: "completed"})
+		_ = json.NewEncoder(w).Encode(evoThread{ThreadID: "thr_old", Status: "completed"})
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
@@ -2888,7 +3008,7 @@ func TestReserveUserActiveThreadCreationReplacesMissingThread(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/evo/threads/thr_missing/flow-status") {
+		if r.URL.Path != "/threads/thr_missing" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		http.Error(w, `{"detail":"thread thr_missing not found"}`, http.StatusNotFound)

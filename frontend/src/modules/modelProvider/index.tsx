@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { ApiOutlined, ControlOutlined, FilePdfOutlined, ToolOutlined } from "@ant-design/icons";
+import { ApiOutlined, CloudOutlined, ControlOutlined, FilePdfOutlined, ToolOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
 
@@ -23,6 +23,11 @@ const modelProviderTabs = [
     key: "/model-providers/tools",
     labelKey: "modelProvider.tabs.tools",
     icon: <ToolOutlined />,
+  },
+  {
+    key: "/model-providers/cloud-documents",
+    labelKey: "modelProvider.tabs.cloudDocuments",
+    icon: <CloudOutlined />,
   },
 ];
 

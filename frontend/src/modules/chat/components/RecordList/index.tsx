@@ -1,20 +1,31 @@
-import { CloseOutlined, CloudDownloadOutlined, FilterOutlined, PlusCircleOutlined } from "@ant-design/icons";
+import {
+  CloseOutlined,
+  CloudDownloadOutlined,
+  DeleteOutlined,
+  DownOutlined,
+  FilterOutlined,
+  PlusCircleOutlined,
+} from "@ant-design/icons";
 import classnames from "classnames";
 import {
   Button,
   Checkbox,
   Col,
+  Dropdown,
   Input,
   message,
+  Modal,
   Popover,
   Row,
   Spin,
   Tooltip,
 } from "antd";
+import type { MenuProps } from "antd";
 import { Conversation } from "@/api/generated/chatbot-client";
 import {
   Configuration as CoreConfiguration,
   ConversationsApiFactory,
+  DefaultApiFactory,
 } from "@/api/generated/core-client";
 import {
   useEffect,
@@ -47,6 +58,11 @@ import { downloadStream } from "@/modules/chat/utils/download";
 const EXPORT_FILE_TYPE_XLSX = "EXPORT_FILE_TYPE_XLSX";
 const SIDEBAR_SEARCH_DEBOUNCE_MS = 300;
 const conversationsClient = ConversationsApiFactory(
+  new CoreConfiguration({ basePath: BASE_URL }),
+  BASE_URL,
+  axiosInstance,
+);
+const defaultCoreClient = DefaultApiFactory(
   new CoreConfiguration({ basePath: BASE_URL }),
   BASE_URL,
   axiosInstance,
@@ -134,6 +150,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       : "scrollableDiv";
     const deleteHistoryInFlightRef = useRef(false);
     const deleteHistoryLastInvokeRef = useRef(0);
+    const batchDeleteInFlightRef = useRef(false);
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
 
@@ -317,6 +334,84 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       onRemove(data);
     }
 
+    function batchDeleteHistory() {
+      if (!checkedList.length) {
+        message.warning(t("chat.selectConversationToDelete"));
+        return;
+      }
+      if (batchDeleteInFlightRef.current) {
+        return;
+      }
+      Modal.confirm({
+        title: t("chat.batchDeleteConversationTitle", {
+          count: checkedList.length,
+        }),
+        content: t("chat.batchDeleteConversationContent"),
+        okText: t("common.delete"),
+        cancelText: t("common.cancel"),
+        okButtonProps: { danger: true },
+        onOk: () => {
+          batchDeleteInFlightRef.current = true;
+          return defaultCoreClient
+            .apiCoreConversationsBatchDeletePost({
+              conversationBatchDeleteRequest: {
+                conversation_ids: checkedList,
+              },
+            })
+            .then((res) => {
+              const deletedCount = res.data?.deleted_count ?? checkedList.length;
+              message.success(
+                t("chat.batchDeleteConversationSuccess", { count: deletedCount }),
+              );
+              if (checkedList.includes(currentSessionId)) {
+                const removed = historyList.find(
+                  (item) => item.conversation_id === currentSessionId,
+                );
+                if (removed) {
+                  onRemove(removed);
+                }
+              }
+              setCheckedList([]);
+              setShowBatchExport(false);
+              getHistory({ isFirst: true });
+              document.getElementById(scrollableTargetId)?.scrollTo({ top: 0 });
+            })
+            .finally(() => {
+              batchDeleteInFlightRef.current = false;
+            });
+        },
+      });
+    }
+
+    function exitBatchMode() {
+      setShowBatchExport(false);
+      setCheckedList([]);
+    }
+
+    const batchActionMenuItems: MenuProps["items"] = [
+      {
+        key: "export",
+        label: t("chat.export"),
+        icon: <CloudDownloadOutlined />,
+        disabled: !checkedList.length,
+        onClick: () => {
+          if (checkedList?.length) {
+            exportHistoryFn();
+          } else {
+            message.warning(t("chat.selectConversationToExport"));
+          }
+        },
+      },
+      {
+        key: "delete",
+        label: t("common.delete"),
+        icon: <DeleteOutlined />,
+        danger: true,
+        disabled: !checkedList.length,
+        onClick: () => batchDeleteHistory(),
+      },
+    ];
+
     function exportHistoryFn() {
       conversationsClient
         .apiCoreConversationExportPost({
@@ -359,6 +454,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           key={item.conversation_id}
           onClick={(e) => {
             e.preventDefault();
+            if (showBatchExport) {
+              return;
+            }
             if (selected) {
               return;
             }
@@ -373,38 +471,42 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           <span className="update-time">
             {dayjs(item.update_time).format("MM/DD")}
           </span>
-          <CloseOutlined
-            className="close"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              deleteHistory(item);
-            }}
-          />
-          <Tooltip title={taskConvIds.has(item.conversation_id ?? '') ? "已在任务中心" : "加入任务中心"}>
-            <PlusCircleOutlined
-              className="add-to-task"
-              style={{
-                marginLeft: 4,
-                fontSize: 12,
-                color: taskConvIds.has(item.conversation_id ?? '') ? '#ccc' : '#888',
-                cursor: taskConvIds.has(item.conversation_id ?? '') ? 'default' : 'pointer',
-              }}
-              onClick={async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const convId = item.conversation_id ?? '';
-                if (taskConvIds.has(convId)) return;
-                try {
-                  await addTask(convId, item.display_name ?? '');
-                  setTaskConvIds((prev) => new Set([...prev, convId]));
-                  message.success('已加入任务中心');
-                } catch {
-                  message.error('加入任务中心失败');
-                }
-              }}
-            />
-          </Tooltip>
+          {!showBatchExport && (
+            <>
+              <CloseOutlined
+                className="close"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  deleteHistory(item);
+                }}
+              />
+              <Tooltip title={taskConvIds.has(item.conversation_id ?? '') ? "已在任务中心" : "加入任务中心"}>
+                <PlusCircleOutlined
+                  className="add-to-task"
+                  style={{
+                    marginLeft: 4,
+                    fontSize: 12,
+                    color: taskConvIds.has(item.conversation_id ?? '') ? '#ccc' : '#888',
+                    cursor: taskConvIds.has(item.conversation_id ?? '') ? 'default' : 'pointer',
+                  }}
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const convId = item.conversation_id ?? '';
+                    if (taskConvIds.has(convId)) return;
+                    try {
+                      await addTask(convId, item.display_name ?? '');
+                      setTaskConvIds((prev) => new Set([...prev, convId]));
+                      message.success('已加入任务中心');
+                    } catch {
+                      message.error('加入任务中心失败');
+                    }
+                  }}
+                />
+              </Tooltip>
+            </>
+          )}
         </div>
       );
     }
@@ -476,25 +578,17 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                   <div className="record-toolbar-actions">
                     {showBatchExport ? (
                       <>
-                        <Button
-                          size="small"
-                          type="link"
-                          icon={<CloudDownloadOutlined />}
-                          onClick={() => {
-                            if (checkedList?.length) {
-                              exportHistoryFn();
-                            } else {
-                              message.warning(t("chat.selectConversationToExport"));
-                            }
-                          }}
+                        <Dropdown
+                          menu={{ items: batchActionMenuItems }}
+                          trigger={["click"]}
+                          placement="bottomRight"
                         >
-                          {t("chat.export")}
-                        </Button>
-                        <Button
-                          size="small"
-                          type="text"
-                          onClick={() => setShowBatchExport(false)}
-                        >
+                          <Button size="small" type="link" className="record-batch-actions-trigger">
+                            {t("common.actions")}
+                            <DownOutlined className="record-batch-actions-caret" />
+                          </Button>
+                        </Dropdown>
+                        <Button size="small" type="text" onClick={exitBatchMode}>
                           {t("common.cancel")}
                         </Button>
                       </>

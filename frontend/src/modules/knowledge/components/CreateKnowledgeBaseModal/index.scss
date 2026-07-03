@@ -1,0 +1,31 @@
+.knowledge-create-modal {
+  .ant-modal-body {
+    min-height: 360px;
+  }
+}
+
+.knowledge-create-modal-tabs {
+  min-height: 360px;
+
+  .ant-tabs-nav {
+    margin-bottom: 16px;
+  }
+}
+
+.knowledge-create-modal-cloud {
+  .data-source-create-provider-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.knowledge-create-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.knowledge-create-modal-footer-spacer {
+  display: block;
+  width: 100%;
+  height: 32px;
+}

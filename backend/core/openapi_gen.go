@@ -19,17 +19,26 @@ const (
 // text/Requesttext，text /docs、/openapi.json、/openapi.yaml
 // text。
 func buildOpenAPISpecFromRouter(r *mux.Router) ([]byte, error) {
+	registeredRoutes, err := collectOpenAPIRouteMethods(r)
+	if err != nil {
+		return nil, err
+	}
+
 	spec := loadBaseOpenAPISpec()
 	mergeOpenAPISpec(spec, prefixOpenAPIPaths(manualOpenAPISpec()))
-	overlayOpenAPISpec(spec, prefixOpenAPIPaths(operationRegistryOpenAPISpec()))
+	operationSpec := prefixOpenAPIPaths(operationRegistryOpenAPISpec())
+	removeOpenAPIOperations(spec, operationSpec)
+	overlayOpenAPISpec(spec, operationSpec)
+	pruneUnregisteredOpenAPIPaths(spec, registeredRoutes)
+	removeAgentLegacyOpenAPISchemas(spec)
 	paths := getOrCreateObject(spec, "paths")
 
-	err := r.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
+	err = r.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
 		path, err := route.GetPathTemplate()
 		if err != nil || path == "" {
 			return nil
 		}
-		if strings.HasPrefix(path, "/openapi") || path == "/docs" {
+		if skipOpenAPIRoute(path) {
 			return nil
 		}
 
@@ -73,6 +82,143 @@ func buildOpenAPISpecFromRouter(r *mux.Router) ([]byte, error) {
 	spec["paths"] = paths
 
 	return json.MarshalIndent(spec, "", "  ")
+}
+
+func collectOpenAPIRouteMethods(r *mux.Router) (map[string]map[string]struct{}, error) {
+	routes := map[string]map[string]struct{}{}
+	err := r.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
+		path, err := route.GetPathTemplate()
+		if err != nil || path == "" {
+			return nil
+		}
+		if skipOpenAPIRoute(path) {
+			return nil
+		}
+		methods, err := route.GetMethods()
+		if err != nil {
+			return nil
+		}
+		fullPath := apiPrefix + path
+		methodSet := routes[fullPath]
+		if methodSet == nil {
+			methodSet = map[string]struct{}{}
+			routes[fullPath] = methodSet
+		}
+		for _, method := range methods {
+			methodSet[strings.ToLower(method)] = struct{}{}
+		}
+		return nil
+	})
+	return routes, err
+}
+
+func skipOpenAPIRoute(path string) bool {
+	return strings.HasPrefix(path, "/openapi") || path == "/docs"
+}
+
+func pruneUnregisteredOpenAPIPaths(spec map[string]any, registeredRoutes map[string]map[string]struct{}) {
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		return
+	}
+	for path, item := range paths {
+		registeredMethods := registeredRoutes[path]
+		if len(registeredMethods) == 0 {
+			delete(paths, path)
+			continue
+		}
+		pathItem, ok := item.(map[string]any)
+		if !ok {
+			delete(paths, path)
+			continue
+		}
+		for key := range pathItem {
+			lowerKey := strings.ToLower(key)
+			if !isOpenAPIHTTPMethod(lowerKey) {
+				continue
+			}
+			if _, ok := registeredMethods[lowerKey]; !ok {
+				delete(pathItem, key)
+			}
+		}
+		if !openAPIPathHasOperation(pathItem) {
+			delete(paths, path)
+		}
+	}
+}
+
+func removeOpenAPIOperations(dst, src map[string]any) {
+	dstPaths, ok := dst["paths"].(map[string]any)
+	if !ok {
+		return
+	}
+	srcPaths, ok := src["paths"].(map[string]any)
+	if !ok {
+		return
+	}
+	for path, item := range srcPaths {
+		dstPathItem, ok := dstPaths[path].(map[string]any)
+		if !ok {
+			continue
+		}
+		srcPathItem, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		for key := range srcPathItem {
+			if isOpenAPIHTTPMethod(strings.ToLower(key)) {
+				delete(dstPathItem, key)
+			}
+		}
+	}
+}
+
+func removeAgentLegacyOpenAPISchemas(spec map[string]any) {
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		return
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		return
+	}
+	for _, name := range []string{
+		"agentABTestCaseDetailListItemOpenAPIResponse",
+		"agentABTestCaseDetailListOpenAPIResponse",
+		"agentABTestResultOpenAPIResponse",
+		"agentCaseDetailsMetricAveragesOpenAPIResponse",
+		"agentCaseDetailsQuestionTypeOpenAPIResponse",
+		"agentCaseDetailsSummaryOpenAPIResponse",
+		"agentEvalReportBadCaseListItemOpenAPIResponse",
+		"agentEvalReportBadCaseListOpenAPIResponse",
+		"agentEvalReportResultOpenAPIResponse",
+		"agentEvalReportTraceCoverageOpenAPIResponse",
+		"agentFileContentOpenAPIRequest",
+		"agentFileContentOpenAPIResponse",
+		"agentTraceCompareOpenAPIResponse",
+		"agentTraceDetailOpenAPIResponse",
+		"agentTraceSummaryOpenAPIResponse",
+	} {
+		delete(schemas, name)
+	}
+}
+
+func openAPIPathHasOperation(pathItem map[string]any) bool {
+	for key := range pathItem {
+		if isOpenAPIHTTPMethod(strings.ToLower(key)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isOpenAPIHTTPMethod(method string) bool {
+	switch method {
+	case "get", "put", "post", "delete", "options", "head", "patch", "trace":
+		return true
+	default:
+		return false
+	}
 }
 
 func loadBaseOpenAPISpec() map[string]any {

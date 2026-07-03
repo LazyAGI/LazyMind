@@ -68,6 +68,17 @@
     .ant-btn {
       padding-inline: 6px;
     }
+
+    .record-batch-actions-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .record-batch-actions-caret {
+      font-size: 10px;
+      margin-left: 2px;
+    }
   }
 
   .record-batch-select-row {
@@ -197,6 +208,11 @@
     }
 
     .list-title {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       font-size: 12px;
       color: #9ca3af;
       font-weight: 600;

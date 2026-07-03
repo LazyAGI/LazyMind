@@ -8,7 +8,6 @@ import {
   AppstoreOutlined,
   DatabaseOutlined,
   ApiOutlined,
-  ApartmentOutlined,
   UserOutlined,
   TeamOutlined,
   GlobalOutlined,
@@ -149,11 +148,6 @@ export default function MainLayout() {
       key: "/lib/knowledge",
       label: t("layout.knowledgeBase"),
       icon: <AppstoreOutlined />,
-    },
-    {
-      key: "/data-sources",
-      label: t("layout.dataSourceManagement"),
-      icon: <ApartmentOutlined />,
     },
     {
       key: "/dataset-management",

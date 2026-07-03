@@ -41,28 +41,29 @@ type ParserConfig struct {
 }
 
 type Dataset struct {
-	Name           string         `json:"name"`
-	DatasetID      string         `json:"dataset_id"`
-	DisplayName    string         `json:"display_name"`
-	Desc           string         `json:"desc"`
-	CoverImage     string         `json:"cover_image"`
-	State          string         `json:"state"`
-	IsEmpty        bool           `json:"is_empty"`
-	DocumentCount  int64          `json:"document_count"`
-	DocumentSize   int64          `json:"document_size"`
-	SegmentCount   int64          `json:"segment_count"`
-	TokenCount     int64          `json:"token_count"`
-	Parsers        []ParserConfig `json:"parsers"`
-	Algo           Algo           `json:"algo"`
-	Creator        string         `json:"creator"`
-	IsOwner        bool           `json:"is_owner"`
-	CreateTime     time.Time      `json:"create_time"`
-	UpdateTime     time.Time      `json:"update_time"`
-	Acl            []string       `json:"acl"`
-	ShareType      string         `json:"share_type"`
-	Type           string         `json:"type"`
-	Tags           []string       `json:"tags"`
-	DefaultDataset bool           `json:"default_dataset"`
+	Name                string         `json:"name"`
+	DatasetID           string         `json:"dataset_id"`
+	DisplayName         string         `json:"display_name"`
+	Desc                string         `json:"desc"`
+	CoverImage          string         `json:"cover_image"`
+	State               string         `json:"state"`
+	IsEmpty             bool           `json:"is_empty"`
+	DocumentCount       int64          `json:"document_count"`
+	DocumentSize        int64          `json:"document_size"`
+	SegmentCount        int64          `json:"segment_count"`
+	TokenCount          int64          `json:"token_count"`
+	Parsers             []ParserConfig `json:"parsers"`
+	Algo                Algo           `json:"algo"`
+	Creator             string         `json:"creator"`
+	IsOwner             bool           `json:"is_owner"`
+	CreateTime          time.Time      `json:"create_time"`
+	UpdateTime          time.Time      `json:"update_time"`
+	Acl                 []string       `json:"acl"`
+	ShareType           string         `json:"share_type"`
+	Type                string         `json:"type"`
+	Tags                []string       `json:"tags"`
+	DefaultDataset      bool           `json:"default_dataset"`
+	CreatedByDataSource *bool          `json:"created_by_data_source,omitempty"`
 }
 
 type ListAlgosResponse struct {
@@ -782,6 +783,23 @@ func isDefaultDatasetForUser(ctx context.Context, userID, datasetID string) bool
 	return n > 0
 }
 
+func isDatasetCreatedByDataSource(ctx context.Context, datasetID string) bool {
+	datasetID = strings.TrimSpace(datasetID)
+	if datasetID == "" {
+		return false
+	}
+	scanURL := common.JoinURL(common.ScanControlPlaneEndpoint(), "/api/scan/internal/sources/by-dataset/"+url.PathEscape(datasetID))
+	var resp struct {
+		Source struct {
+			SourceID string `json:"source_id"`
+		} `json:"source"`
+	}
+	if err := common.ApiGet(ctx, scanURL, nil, &resp, 3*time.Second); err != nil {
+		return false
+	}
+	return strings.TrimSpace(resp.Source.SourceID) != ""
+}
+
 func algoDatasetDisplayName(userID, displayName string) string {
 	return fmt.Sprintf("user@%s@%s", strings.TrimSpace(userID), strings.TrimSpace(displayName))
 }
@@ -1030,29 +1048,31 @@ func GetDataset(w http.ResponseWriter, r *http.Request) {
 	algo := parseDatasetAlgo(ds.Ext)
 	parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), fetchParsersByAlgoID(r.Context(), algo.AlgoID))
 	stats := calcDatasetStats(r.Context(), ds.ID)
+	createdByDataSource := isDatasetCreatedByDataSource(r.Context(), ds.ID)
 	common.ReplyJSON(w, Dataset{
-		Name:           "datasets/" + ds.ID,
-		DatasetID:      ds.ID,
-		DisplayName:    ds.DisplayName,
-		Desc:           ds.Desc,
-		CoverImage:     ds.CoverImage,
-		State:          stateToPB(ds.DatasetState),
-		IsEmpty:        stats.DocumentCount == 0,
-		DocumentCount:  stats.DocumentCount,
-		DocumentSize:   stats.DocumentSize,
-		SegmentCount:   0,
-		TokenCount:     0,
-		Parsers:        parsers,
-		Algo:           algo,
-		Creator:        ds.CreateUserName,
-		IsOwner:        ds.CreateUserID == userID,
-		CreateTime:     ds.CreatedAt,
-		UpdateTime:     ds.UpdatedAt,
-		Acl:            datasetACL,
-		ShareType:      shareTypeToPB(ds.ShareType),
-		Type:           datasetTypeToPB(ds.Type),
-		Tags:           parseDatasetTags(ds.Ext),
-		DefaultDataset: isDefaultDatasetForUser(r.Context(), userID, ds.ID),
+		Name:                "datasets/" + ds.ID,
+		DatasetID:           ds.ID,
+		DisplayName:         ds.DisplayName,
+		Desc:                ds.Desc,
+		CoverImage:          ds.CoverImage,
+		State:               stateToPB(ds.DatasetState),
+		IsEmpty:             stats.DocumentCount == 0,
+		DocumentCount:       stats.DocumentCount,
+		DocumentSize:        stats.DocumentSize,
+		SegmentCount:        0,
+		TokenCount:          0,
+		Parsers:             parsers,
+		Algo:                algo,
+		Creator:             ds.CreateUserName,
+		IsOwner:             ds.CreateUserID == userID,
+		CreateTime:          ds.CreatedAt,
+		UpdateTime:          ds.UpdatedAt,
+		Acl:                 datasetACL,
+		ShareType:           shareTypeToPB(ds.ShareType),
+		Type:                datasetTypeToPB(ds.Type),
+		Tags:                parseDatasetTags(ds.Ext),
+		DefaultDataset:      isDefaultDatasetForUser(r.Context(), userID, ds.ID),
+		CreatedByDataSource: &createdByDataSource,
 	})
 }
 func DeleteDataset(w http.ResponseWriter, r *http.Request) {
@@ -1360,28 +1380,30 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 
 	datasetACL := datasetACLForUser(&ds, userID)
 	stats := calcDatasetStats(r.Context(), ds.ID)
+	createdByDataSource := isDatasetCreatedByDataSource(r.Context(), ds.ID)
 	common.ReplyJSON(w, Dataset{
-		Name:           "datasets/" + ds.ID,
-		DatasetID:      ds.ID,
-		DisplayName:    ds.DisplayName,
-		Desc:           ds.Desc,
-		CoverImage:     ds.CoverImage,
-		State:          stateToPB(ds.DatasetState),
-		IsEmpty:        stats.DocumentCount == 0,
-		DocumentCount:  stats.DocumentCount,
-		DocumentSize:   stats.DocumentSize,
-		SegmentCount:   0,
-		TokenCount:     0,
-		Parsers:        parseDatasetParsers(ds.Ext),
-		Algo:           parseDatasetAlgo(ds.Ext),
-		Creator:        ds.CreateUserName,
-		CreateTime:     ds.CreatedAt,
-		UpdateTime:     ds.UpdatedAt,
-		Acl:            datasetACL,
-		ShareType:      shareTypeToPB(ds.ShareType),
-		Type:           datasetTypeToPB(ds.Type),
-		Tags:           parseDatasetTags(ds.Ext),
-		DefaultDataset: isDefaultDatasetForUser(r.Context(), userID, ds.ID),
+		Name:                "datasets/" + ds.ID,
+		DatasetID:           ds.ID,
+		DisplayName:         ds.DisplayName,
+		Desc:                ds.Desc,
+		CoverImage:          ds.CoverImage,
+		State:               stateToPB(ds.DatasetState),
+		IsEmpty:             stats.DocumentCount == 0,
+		DocumentCount:       stats.DocumentCount,
+		DocumentSize:        stats.DocumentSize,
+		SegmentCount:        0,
+		TokenCount:          0,
+		Parsers:             parseDatasetParsers(ds.Ext),
+		Algo:                parseDatasetAlgo(ds.Ext),
+		Creator:             ds.CreateUserName,
+		CreateTime:          ds.CreatedAt,
+		UpdateTime:          ds.UpdatedAt,
+		Acl:                 datasetACL,
+		ShareType:           shareTypeToPB(ds.ShareType),
+		Type:                datasetTypeToPB(ds.Type),
+		Tags:                parseDatasetTags(ds.Ext),
+		DefaultDataset:      isDefaultDatasetForUser(r.Context(), userID, ds.ID),
+		CreatedByDataSource: &createdByDataSource,
 	})
 }
 func SetDefault(w http.ResponseWriter, r *http.Request) {
