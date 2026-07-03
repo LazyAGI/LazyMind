@@ -42,6 +42,35 @@ steps:
   - id: enhance_image
     label: Enhance Image
 
+slots:
+  - id: subject_analysis
+    label: Subject Analysis
+    type: text
+    cardinality: single
+    summary_max_chars: 300
+
+  - id: material_images
+    label: Reference Materials
+    type: image
+    cardinality: list
+    ordered: true
+
+  - id: prompt_used
+    label: Optimized Prompt
+    type: text
+    cardinality: single
+
+  - id: enhanced_image_output
+    label: Enhanced Images
+    type: image
+    cardinality: list
+    ordered: true
+
+  - id: image_output
+    label: Raw Image
+    type: image
+    cardinality: single
+
 ui:
   tabs:
     - id: analysis
@@ -49,45 +78,25 @@ ui:
       layout: list
       slots:
         - id: subject_analysis
-          label: Subject Analysis
-          type: text
-          cardinality: single
-          summary_max_chars: 300
 
     - id: materials
       label: Materials
       layout: grid
       slots:
         - id: material_images
-          label: Reference Materials
-          type: image
-          cardinality: list
-          ordered: true
-          caption_key: material_image_caption
 
     - id: prompt
       label: Prompt
       layout: list
       slots:
         - id: prompt_used
-          label: Optimized Prompt
-          type: text
-          cardinality: single
 
     - id: result
       label: Result
       layout: horizontal
       slots:
         - id: enhanced_image_output
-          label: Enhanced Images
-          type: image
-          cardinality: list
-          ordered: true
-
         - id: image_output
-          label: Raw Image
-          type: image
-          cardinality: single
 
 i18n:
   zh-CN:
