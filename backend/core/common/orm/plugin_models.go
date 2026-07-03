@@ -103,3 +103,16 @@ type PluginStepIntent struct {
 }
 
 func (PluginStepIntent) TableName() string { return "plugin_step_intents" }
+
+// PluginDraft stores user-created plugin draft content (YAML state machine definition).
+// Each draft is owned by the creating user and represents a work-in-progress plugin.
+type PluginDraft struct {
+	ID        string    `gorm:"column:id;type:varchar(36);primaryKey"`
+	Name      string    `gorm:"column:name;type:varchar(255);not null;default:''"`
+	Content   string    `gorm:"column:content;type:text;not null;default:''"`
+	CreatedBy string    `gorm:"column:created_by;type:varchar(255);not null;default:''"`
+	CreatedAt time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (PluginDraft) TableName() string { return "plugin_drafts" }

@@ -1,0 +1,62 @@
+.plugin-detail-loading,
+.plugin-detail-error {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 300px;
+  color: #8c8c8c;
+}
+
+.plugin-detail-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+}
+
+.plugin-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.plugin-detail-back {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #595959;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: background 0.15s;
+
+  &:hover {
+    background: #f5f5f5;
+  }
+}
+
+.plugin-detail-name {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #1f1f1f;
+  font-size: 13px;
+
+  &:hover {
+    text-decoration: underline;
+    color: #1677ff;
+  }
+}
+
+.plugin-detail-editor {
+  flex: 1;
+  overflow: hidden;
+  padding: 16px 20px;
+  min-height: 0;
+}

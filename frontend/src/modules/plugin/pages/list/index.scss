@@ -1,0 +1,30 @@
+.plugin-list-page {
+  padding: 24px;
+  max-width: 900px;
+}
+
+.plugin-list-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.plugin-list-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1f1f1f;
+  margin: 0 0 4px;
+}
+
+.plugin-list-subtitle {
+  font-size: 13px;
+  color: #8c8c8c;
+  margin: 0;
+}
+
+.plugin-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

@@ -34,6 +34,7 @@ import MemoryReviewPage from "@/modules/memory/pages/review";
 import MemoryGlossaryDetailPage from "@/modules/memory/pages/glossaryDetail";
 import MemorySkillDetailPage from "@/modules/memory/pages/skillDetail";
 import MemoryExperienceDetailPage from "@/modules/memory/pages/experienceDetail";
+import PluginDetailPage from "@/modules/plugin/pages/detail";
 import ModelProviderPage from "@/modules/modelProvider";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
 import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
@@ -156,6 +157,8 @@ export default function AppRouter() {
             />
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
+          <Route path="memory-management/plugins" element={<Navigate to="/memory-management/skills" replace />} />
+          <Route path="memory-management/plugins/:pluginId" element={<PluginDetailPage />} />
           {runtimeFeatures.hideEvo ? (
             <Route
               path="self-evolution/*"

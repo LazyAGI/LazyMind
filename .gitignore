@@ -105,3 +105,5 @@ api/backend/auth-service/openapi.yml
 api/backend/auth-service/swagger.json
 api/backend/core/openapi.yml
 api/backend/core/swagger.json
+
+.pnpm-store/

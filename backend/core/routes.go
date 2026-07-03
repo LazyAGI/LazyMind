@@ -190,6 +190,13 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/plugins", []string{"qa.read"}, plugin.ListPlugins)
 	handleAPI(r, "GET", "/plugins/{plugin_id}", []string{"qa.read"}, plugin.GetPluginInfo)
 
+	// ----- Plugin Drafts (user-created plugin authoring) -----
+	handleAPI(r, "GET", "/plugin-drafts", []string{"qa.read"}, plugin.ListPluginDrafts)
+	handleAPI(r, "POST", "/plugin-drafts", []string{"qa.write"}, plugin.CreatePluginDraft)
+	handleAPI(r, "GET", "/plugin-drafts/{draft_id}", []string{"qa.read"}, plugin.GetPluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:save", []string{"qa.write"}, plugin.SavePluginDraft)
+	handleAPI(r, "DELETE", "/plugin-drafts/{draft_id}", []string{"qa.write"}, plugin.DeletePluginDraft)
+
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
 	handleAPI(r, "POST", "/task-center/tasks", []string{"qa.write"}, taskcenter.AddTaskHandler)

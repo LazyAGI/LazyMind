@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Modal, Tooltip, message } from "antd";
-import { QuestionCircleOutlined } from "@ant-design/icons";
+import { Button, Input, Modal, Tooltip, message } from "antd";
+import { PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { useNavigate } from "react-router-dom";
+import { createPluginDraft } from "@/modules/plugin/pluginDraftApi";
+import PluginInstalledView from "./PluginInstalledView";
 import { AgentAppsAuth } from "@/components/auth";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
 import { useMemoryManagementOutletContext } from "../../context";
@@ -24,6 +27,10 @@ import "./index.scss";
 
 export default function SkillManagementSection() {
   const listContentRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const [newPluginOpen, setNewPluginOpen] = useState(false);
+  const [newPluginName, setNewPluginName] = useState('');
+  const [newPluginCreating, setNewPluginCreating] = useState(false);
   const [memoryTableBodyHeight, setMemoryTableBodyHeight] = useState<number>();
   const [marketKeyword, setMarketKeyword] = useState("");
   const [adminPublishOpen, setAdminPublishOpen] = useState(false);
@@ -243,6 +250,25 @@ export default function SkillManagementSection() {
     resetFilters();
   };
 
+  const handleNewPlugin = async () => {
+    if (!newPluginName.trim()) {
+      message.warning('请输入插件名称');
+      return;
+    }
+    setNewPluginCreating(true);
+    try {
+      const draft = await createPluginDraft({ name: newPluginName.trim(), content: '' });
+      message.success('插件草稿已创建');
+      setNewPluginOpen(false);
+      setNewPluginName('');
+      navigate(`/memory-management/plugins/${draft.id}`);
+    } catch {
+      message.error('创建失败，请重试');
+    } finally {
+      setNewPluginCreating(false);
+    }
+  };
+
   const handleMarketReset = () => {
     setMarketKeyword("");
     setMarketSkillSource("all");
@@ -414,6 +440,15 @@ export default function SkillManagementSection() {
           >
             {t("admin.memorySkillViewUpload")}
           </button>
+          <button
+            type="button"
+            role="tab"
+            className={`memory-skill-view-tab ${skillView === "plugins" ? "is-active" : ""}`}
+            aria-selected={skillView === "plugins"}
+            onClick={() => setSkillView("plugins")}
+          >
+            我的插件
+          </button>
         </div>
 
         <div className="memory-skill-bar-actions">
@@ -427,6 +462,15 @@ export default function SkillManagementSection() {
           {skillView === "market" && isAdmin ? (
             <Button type="primary" onClick={() => setAdminPublishOpen(true)}>
               {t("admin.memorySkillAdminPublishButton")}
+            </Button>
+          ) : null}
+          {skillView === "plugins" ? (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setNewPluginOpen(true)}
+            >
+              新建插件
             </Button>
           ) : null}
         </div>
@@ -508,6 +552,28 @@ export default function SkillManagementSection() {
           setMarketCatalogAssets([]);
         }}
       />
+
+      {skillView === "plugins" ? (
+        <PluginInstalledView t={t} onNewPlugin={() => setNewPluginOpen(true)} />
+      ) : null}
+
+      <Modal
+        title="新建插件草稿"
+        open={newPluginOpen}
+        onOk={() => void handleNewPlugin()}
+        onCancel={() => { setNewPluginOpen(false); setNewPluginName(''); }}
+        confirmLoading={newPluginCreating}
+        okText="创建"
+        cancelText="取消"
+      >
+        <Input
+          autoFocus
+          value={newPluginName}
+          onChange={(e) => setNewPluginName(e.target.value)}
+          placeholder="插件名称（如：我的审阅工作流）"
+          onPressEnter={() => void handleNewPlugin()}
+        />
+      </Modal>
     </div>
   );
 }
