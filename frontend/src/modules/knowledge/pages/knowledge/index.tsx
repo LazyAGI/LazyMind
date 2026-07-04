@@ -1,14 +1,16 @@
-import { message, Tag, Row, Col } from "antd";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { Button, message, Tag, Tooltip, Row, Col } from "antd";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
-import { CopyOutlined } from "@ant-design/icons";
+import { CopyOutlined, FileImageOutlined } from "@ant-design/icons";
 import moment from "moment";
 import { Doc, Segment } from "@/api/generated/knowledge-client";
 
 import { TIME_FORMAT } from "@/modules/knowledge/constants/common";
 import FileUtils from "@/modules/knowledge/utils/file";
-import FileViewer from "@/modules/knowledge/components/FileViewer";
+import FileViewer, {
+  type FileViewerRef,
+} from "@/modules/knowledge/components/FileViewer";
 import KnowledgeTabs from "./components/KnowledgeTabs";
 import {
   DocumentServiceApi,
@@ -38,6 +40,9 @@ const Detail = () => {
   const navigate = useNavigate();
   const [segmentDetail, setSegmentDetail] = useState<Segment>();
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
+  const fileViewerRef = useRef<FileViewerRef>(null);
+  const [canExportImagePdf, setCanExportImagePdf] = useState(false);
+  const [exportingImagePdf, setExportingImagePdf] = useState(false);
 
   const {
     getDatasetDetail: getKbDetail,
@@ -134,6 +139,63 @@ const Detail = () => {
     return normalizeProxyableUrl(fileUrl);
   }, [knowledgeDetail?.download_file_url, knowledgeDetail?.file_url]);
 
+  const handleExportImagePdf = useCallback(async () => {
+    if (!canExportImagePdf || exportingImagePdf) {
+      return;
+    }
+    setExportingImagePdf(true);
+    try {
+      await fileViewerRef.current?.exportImagePdf();
+      message.success("已导出图片 PDF");
+    } catch (err) {
+      message.error(
+        `导出失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setExportingImagePdf(false);
+    }
+  }, [canExportImagePdf, exportingImagePdf]);
+
+  const pageTitle = useMemo(() => {
+    const displayName = knowledgeDetail?.display_name;
+    if (!displayName) {
+      return displayName;
+    }
+    if (!canExportImagePdf) {
+      return displayName;
+    }
+    return (
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          minWidth: 0,
+          maxWidth: "100%",
+        }}
+      >
+        <Tooltip title={displayName}>
+          <span className="detail-title-text">{displayName}</span>
+        </Tooltip>
+        <Tooltip title="导出成图片pdf">
+          <Button
+            type="text"
+            size="small"
+            icon={<FileImageOutlined />}
+            loading={exportingImagePdf}
+            onClick={handleExportImagePdf}
+            style={{ flexShrink: 0 }}
+          />
+        </Tooltip>
+      </span>
+    );
+  }, [
+    canExportImagePdf,
+    exportingImagePdf,
+    handleExportImagePdf,
+    knowledgeDetail?.display_name,
+  ]);
+
   return (
     <div className="knowledge-container !h-full !items-start">
       <DetailPageHeader
@@ -145,7 +207,7 @@ const Detail = () => {
           },
           { title: knowledgeDetail?.display_name },
         ]}
-        title={knowledgeDetail?.display_name}
+        title={pageTitle}
         onBack={() => {
           const bool = ["aiwrite", "aireview", "chat"].includes(
             searchParams.get("from") ?? "",
@@ -231,9 +293,11 @@ const Detail = () => {
         <Col span={15} className="min-h-0">
           <div className="flex h-full min-h-0 flex-col overflow-hidden">
             <FileViewer
+              ref={fileViewerRef}
               file={previewFile}
               fileName={knowledgeDetail?.display_name || ""}
               segment={segmentDetail}
+              onExportReadyChange={setCanExportImagePdf}
             />
           </div>
         </Col>
