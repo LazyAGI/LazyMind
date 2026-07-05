@@ -1,4 +1,5 @@
 import lazyllm
+from copy import deepcopy
 from lazyllm.tracing import set_trace_context
 from lazyllm import AutoModel
 from lazyllm.tools.rag import AdaptiveTransform, CodeSplitter, Document, LLMParser, TransformArgs
@@ -49,10 +50,29 @@ def get_algo_server_port() -> int:
     return _cfg['document_server_port']
 
 
+def _milvus_lite_index_kwargs(index_kwargs):
+    lite_kwargs = deepcopy(index_kwargs)
+    for item in lite_kwargs:
+        item['index_type'] = 'FLAT'
+        item.setdefault('metric_type', 'COSINE')
+        item['params'] = {}
+    return lite_kwargs
+
+
 def _build_store_config(index_kwargs):
     milvus_uri = _cfg['milvus_uri']
     if not milvus_uri:
         raise ValueError('LAZYMIND_MILVUS_URI is required')
+    if (_cfg['local_milvus_mode'] or '').lower() == 'lite':
+        index_kwargs = _milvus_lite_index_kwargs(index_kwargs)
+    milvus_kwargs = {
+        'uri': milvus_uri,
+        'index_kwargs': index_kwargs,
+    }
+    if (_cfg['local_milvus_mode'] or '').lower() == 'lite':
+        # Milvus Lite 2.4 does not implement the database-management API.
+        # Empty db_name keeps LazyLLM on the default database and skips create_database().
+        milvus_kwargs['db_name'] = ''
 
     store_type = _cfg['segment_store_type']
     uri_or_path = _cfg['segment_store_uri_or_path']
@@ -82,10 +102,7 @@ def _build_store_config(index_kwargs):
     return {
         'vector_store': {
             'type': 'milvus',
-            'kwargs': {
-                'uri': milvus_uri,
-                'index_kwargs': index_kwargs,
-            },
+            'kwargs': milvus_kwargs,
         },
         'segment_store': segment_store,
     }

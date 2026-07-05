@@ -40,6 +40,7 @@ type RuntimeManager struct {
 	fileWatcher    *FileWatcherManager
 	frontend       *FrontendManager
 	algorithm      *AlgorithmServiceManager
+	milvusLite     *MilvusLiteManager
 }
 
 func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
@@ -69,6 +70,7 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		fileWatcher:    NewFileWatcherManager(r),
 		frontend:       NewFrontendManager(r),
 		algorithm:      NewAlgorithmServiceManager(r),
+		milvusLite:     NewMilvusLiteManager(r),
 	}
 }
 
@@ -341,31 +343,32 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		defer cancel()
 		downErr = m.processCompose.Down(downCtx, cfg, paths)
 	}
-	if downErr != nil || !apiAlive {
-		if downErr != nil {
-			_ = m.killStaleRuntimeProcesses(context.Background(), paths.RepoRoot)
-		}
-		if err := m.frontend.Down(ctx, cfg, paths); err != nil && downErr == nil {
-			downErr = err
-		}
-		if err := m.localProxy.Down(ctx, cfg, paths); err != nil && downErr == nil {
-			downErr = err
-		}
-		if fallbackErr := m.compose.ComposeDown(ctx, paths.RepoRoot, cfg.Profile); fallbackErr != nil {
-			state = newStateWithServiceStatus(state, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			if downErr != nil {
-				return fmt.Errorf("process-compose down failed: %w; docker compose down fallback failed: %v", downErr, fallbackErr)
-			}
-			return fallbackErr
-		}
-		downErr = nil
+	if downErr != nil {
+		_ = m.killStaleRuntimeProcesses(context.Background(), paths.RepoRoot)
 	}
+	if err := m.frontend.Down(ctx, cfg, paths); err != nil && downErr == nil {
+		downErr = err
+	}
+	if err := m.localProxy.Down(ctx, cfg, paths); err != nil && downErr == nil {
+		downErr = err
+	}
+	if fallbackErr := m.compose.ComposeDown(ctx, paths.RepoRoot, cfg.Profile); fallbackErr != nil {
+		state = newStateWithServiceStatus(state, "failed")
+		state.OverallStatus = "failed"
+		_ = writeRuntimeState(paths.StateFile, state)
+		if downErr != nil {
+			return fmt.Errorf("process-compose down failed: %w; docker compose down fallback failed: %v", downErr, fallbackErr)
+		}
+		return fallbackErr
+	}
+	downErr = nil
 	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
 		if err := m.algorithm.Down(ctx, paths, spec.Name); err != nil && downErr == nil {
 			downErr = err
 		}
+	}
+	if err := m.milvusLite.Down(ctx, paths); err != nil && downErr == nil {
+		downErr = err
 	}
 	if err := m.coreService.Down(ctx, cfg, paths); err != nil && downErr == nil {
 		downErr = err
@@ -476,6 +479,9 @@ func (m *RuntimeManager) checkRuntimeReady(ctx context.Context, cfg RuntimeConfi
 			return false
 		}
 	}
+	if cfg.Algorithm.MilvusMode == "lite" && !tcpOK(ctx, "127.0.0.1", cfg.Algorithm.MilvusPort, 500*time.Millisecond) {
+		return false
+	}
 	return true
 }
 
@@ -579,7 +585,11 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 		if _, statErr := os.Stat(paths.AuthServicePIDFile); statErr == nil && cfg.AuthService.Port > 0 {
 			authAlive = m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond)
 		}
-		if err == nil && !apiAlive && !hasContainers && !authAlive {
+		milvusAlive := false
+		if _, statErr := os.Stat(paths.MilvusLitePIDFile); statErr == nil && cfg.Algorithm.MilvusMode == "lite" && cfg.Algorithm.MilvusPort > 0 {
+			milvusAlive = tcpOK(ctx, "127.0.0.1", cfg.Algorithm.MilvusPort, 500*time.Millisecond)
+		}
+		if err == nil && !apiAlive && !hasContainers && !authAlive && !milvusAlive {
 			return nil
 		}
 		select {
@@ -736,6 +746,14 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			Status: "unknown",
 		}
 	}
+	if cfg.Algorithm.MilvusMode == "lite" {
+		if _, ok := resp.Services[milvusLiteProcessName]; !ok {
+			resp.Services[milvusLiteProcessName] = RuntimeServiceState{
+				Kind:   "host-process",
+				Status: "unknown",
+			}
+		}
+	}
 	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
 		if _, ok := resp.Services[spec.Name]; !ok {
 			resp.Services[spec.Name] = RuntimeServiceState{
@@ -783,6 +801,20 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			hostHealthy = false
 		}
 		resp.Services[coreProcessName] = core
+		if cfg.Algorithm.MilvusMode == "lite" {
+			milvus := resp.Services[milvusLiteProcessName]
+			milvus.Kind = "host-process"
+			if tcpOK(ctx, "127.0.0.1", cfg.Algorithm.MilvusPort, 500*time.Millisecond) {
+				milvus.Status = "running"
+			} else if milvus.Status == "running" || milvus.Status == "starting" {
+				milvus.Status = "stale"
+				hostHealthy = false
+			} else if milvus.Status == "" || milvus.Status == "unknown" {
+				milvus.Status = "stopped"
+				hostHealthy = false
+			}
+			resp.Services[milvusLiteProcessName] = milvus
+		}
 		for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
 			svc := resp.Services[spec.Name]
 			svc.Kind = "host-process"

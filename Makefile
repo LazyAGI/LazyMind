@@ -12,6 +12,7 @@ LAZYMIND_LOCAL_PROFILE ?= linux-browser
 LAZYMIND_LOCAL_BIN ?= local/local-runtime-manager/lazymind-local
 LAZYMIND_LOCAL_GOCACHE ?= $(CURDIR)/.codex-gocache/go-build
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
+export LAZYMIND_LOCAL_MILVUS_DB_PATH ?= $(CURDIR)/.lazymind-local/stores/milvus/lazymind.db
 PROCESS_COMPOSE_BIN ?= local/bin/process-compose
 PROCESS_COMPOSE_PKG ?= github.com/f1bonacc1/process-compose@v1.116.0
 comma := ,
@@ -592,6 +593,8 @@ reset-kb:
 	done
 	@echo "🗑  Removing local KB caches and segment stores..."
 	@rm -rf $(_RESET_KB_LOCAL_PATHS) 2>/dev/null || true
+	@echo "🗑  Removing local Milvus Lite data..."
+	@rm -rf "$(dir $(LAZYMIND_LOCAL_MILVUS_DB_PATH))" 2>/dev/null || true
 	@echo "✅ KB data cleared."
 
 # ---------------------------------------------------------------------------

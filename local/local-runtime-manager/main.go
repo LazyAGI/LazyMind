@@ -158,6 +158,10 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		return manager.frontend.Run(ctx, cfg, paths)
 	case "frontend-down":
 		return manager.frontend.Down(ctx, cfg, paths)
+	case "milvus-lite-run":
+		return manager.milvusLite.Run(ctx, cfg, paths)
+	case "milvus-lite-down":
+		return manager.milvusLite.Down(ctx, paths)
 	default:
 		return fmt.Errorf("unknown internal command: %s", sub)
 	}
@@ -215,5 +219,5 @@ func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "  lazymind-local up --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local down --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local status --json\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|scan-control-plane-run|scan-control-plane-down|file-watcher-run|file-watcher-down|frontend-run|frontend-down|algorithm-run|algorithm-down --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|scan-control-plane-run|scan-control-plane-down|file-watcher-run|file-watcher-down|frontend-run|frontend-down|milvus-lite-run|milvus-lite-down|algorithm-run|algorithm-down --profile <profile>\n")
 }

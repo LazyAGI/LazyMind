@@ -4,6 +4,7 @@ python-multipart
 opensearch-py
 pymilvus==2.4.14
 milvus-lite==2.4.10
+setuptools<81
 # openai-whisper
 # pydub
 

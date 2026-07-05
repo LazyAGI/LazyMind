@@ -53,7 +53,8 @@ func derivedComposeProfileArgs() []string {
 	if enabledFromEnv("LAZYMIND_DEPLOY_MINERU") {
 		profiles = append(profiles, "mineru")
 	}
-	if isBuiltInServiceURI("LAZYMIND_MILVUS_URI", "http://milvus:19530") {
+	if normalizeMilvusMode(envText(localMilvusModeEnvVar, defaultLocalMilvusMode)) == "container" &&
+		isBuiltInServiceURI("LAZYMIND_MILVUS_URI", "http://milvus:19530") {
 		profiles = append(profiles, "milvus")
 	}
 	if localSegmentStoreUsesBuiltInOpenSearch() {

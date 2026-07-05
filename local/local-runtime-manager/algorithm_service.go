@@ -221,7 +221,9 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths Runti
 		stamp = filepath.Join(filepath.Dir(paths.AlgorithmVenv), "algorithm-evo.ready")
 	}
 	if _, err := os.Stat(stamp); err == nil {
-		return nil
+		if m.pythonModuleAvailable(ctx, paths, "pkg_resources") {
+			return nil
+		}
 	}
 	if _, err := os.Stat(paths.AlgorithmPython); os.IsNotExist(err) {
 		if err := m.createVenv(ctx, paths, false); err != nil {
@@ -250,6 +252,14 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths Runti
 		}
 	}
 	return os.WriteFile(stamp, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644)
+}
+
+func (m *AlgorithmServiceManager) pythonModuleAvailable(ctx context.Context, paths RuntimePaths, module string) bool {
+	if _, err := os.Stat(paths.AlgorithmPython); err != nil {
+		return false
+	}
+	res, err := m.runner.Run(ctx, Command{Name: paths.AlgorithmPython, Args: []string{"-c", "import " + module}, Dir: paths.RepoRoot})
+	return err == nil && strings.TrimSpace(res.Stderr) == ""
 }
 
 func (m *AlgorithmServiceManager) createVenv(ctx context.Context, paths RuntimePaths, clear bool) error {
@@ -350,7 +360,7 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 		if err := waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute); err != nil {
 			return err
 		}
-		if isBuiltInServiceURI("LAZYMIND_MILVUS_URI", "http://milvus:19530") {
+		if cfg.Algorithm.MilvusMode != "external" {
 			if err := waitForTCP(ctx, "127.0.0.1", cfg.Algorithm.MilvusPort, "Milvus", 5*time.Minute); err != nil {
 				return err
 			}
@@ -423,6 +433,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 	dbURL := fmt.Sprintf("postgresql+psycopg://app:app@127.0.0.1:%d/app", cfg.Algorithm.PostgresPort)
 	noProxy := envText("no_proxy", "127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
 	noProxyUpper := envText("NO_PROXY", noProxy)
+	routerPoolStart, routerPoolEnd := localRouterPortPool(cfg)
 	env := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"PYTHONPATH=" + pythonPath,
@@ -490,7 +501,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_USE_INNER_MODEL=true",
 		"LAZYMIND_RESET_ALGO_ON_STARTUP=" + envText("LAZYMIND_RESET_ALGO_ON_STARTUP", "false"),
 		"LAZYMIND_RESET_ALL_ON_STARTUP=" + envText("LAZYMIND_RESET_ALL_ON_STARTUP", "false"),
-		"LAZYMIND_MILVUS_URI=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.MilvusPort),
+		"LAZYMIND_MILVUS_URI=" + localMilvusURI(cfg),
 		"LAZYMIND_OPENSEARCH_URI=" + envText("LAZYMIND_OPENSEARCH_URI", fmt.Sprintf("https://127.0.0.1:%d", cfg.Algorithm.OpenSearchPort)),
 		"LAZYMIND_OPENSEARCH_USER=" + envText("LAZYMIND_OPENSEARCH_USER", "admin"),
 		"LAZYMIND_OPENSEARCH_PASSWORD=" + envText("LAZYMIND_OPENSEARCH_PASSWORD", "LazyRAG_OpenSearch123!"),
@@ -511,9 +522,9 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_MAX_CONCURRENCY=" + envText("LAZYMIND_MAX_CONCURRENCY", "10"),
 		"LAZYMIND_LLM_PRIORITY=" + envText("LAZYMIND_LLM_PRIORITY", "0"),
 		"LAZYMIND_ENABLE_ROUTER=" + envText("LAZYMIND_ENABLE_ROUTER", "true"),
-		"LAZYMIND_ROUTER_PORT_POOL_START=18100",
-		"LAZYMIND_ROUTER_PORT_POOL_END=18999",
-		"LAZYMIND_ROUTER_PORTS_PER_INSTANCE=100",
+		routerPortPoolStartEnvVar + "=" + strconv.Itoa(routerPoolStart),
+		routerPortPoolEndEnvVar + "=" + strconv.Itoa(routerPoolEnd),
+		routerPortsPerInstanceEnvVar + "=" + strconv.Itoa(defaultRouterPortsPerInstance),
 		"LAZYMIND_ROUTER_DEFAULT_ALGO_PATH=" + filepath.Join(paths.RepoRoot, "algorithm", "lazymind", "chat"),
 		"LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT=1",
 		"LAZYMIND_PLUGINS_DIR=" + filepath.Join(paths.RepoRoot, "plugins"),
@@ -533,6 +544,31 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		env = append(env, "LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.DocPort)+"/v1/internal/callbacks/tasks")
 	}
 	return env
+}
+
+func localRouterPortPool(cfg RuntimeConfig) (int, int) {
+	if strings.TrimSpace(os.Getenv(routerPortPoolStartEnvVar)) != "" {
+		start := envPort(routerPortPoolStartEnvVar, defaultRouterPortPoolStart)
+		end := envPort(routerPortPoolEndEnvVar, start+defaultRouterPortsPerInstance-1)
+		return start, end
+	}
+	offset := cfg.ProcessComposePort - defaultProcessComposePort
+	start := defaultRouterPortPoolStart + offset*defaultRouterPortsPerInstance
+	if start < 1024 || start+defaultRouterPortsPerInstance-1 >= 65536 {
+		start = defaultRouterPortPoolStart
+	}
+	end := start + defaultRouterPortsPerInstance - 1
+	if strings.TrimSpace(os.Getenv(routerPortPoolEndEnvVar)) != "" {
+		end = envPort(routerPortPoolEndEnvVar, end)
+	}
+	return start, end
+}
+
+func localMilvusURI(cfg RuntimeConfig) string {
+	if cfg.Algorithm.MilvusMode == "external" {
+		return envText("LAZYMIND_MILVUS_URI", "")
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.MilvusPort)
 }
 
 func algorithmPIDFile(paths RuntimePaths, service string) string {
@@ -665,6 +701,17 @@ func waitForTCP(ctx context.Context, host string, port int, label string, timeou
 		case <-ticker.C:
 		}
 	}
+}
+
+func tcpOK(ctx context.Context, host string, port int, timeout time.Duration) bool {
+	address := net.JoinHostPort(host, strconv.Itoa(port))
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func processAlive(pid int) bool {

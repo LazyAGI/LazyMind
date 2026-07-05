@@ -59,6 +59,8 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 	commandForFileWatcherDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-down --profile "+profile)
 	commandForFrontendRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-run --profile "+profile)
 	commandForFrontendDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-down --profile "+profile)
+	commandForMilvusLiteRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-run --profile "+profile)
+	commandForMilvusLiteDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-down --profile "+profile)
 
 	pcCfg := processComposeConfig{
 		Version:         "0.5",
@@ -137,6 +139,18 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 			},
 		},
 	}
+	if cfg.Algorithm.MilvusMode == "lite" {
+		pcCfg.Processes[milvusLiteProcessName] = processComposeProcess{
+			WorkingDir: repoRoot,
+			Command:    commandForMilvusLiteRun,
+			Shutdown: processComposeShutdown{
+				Command:        commandForMilvusLiteDown,
+				TimeoutSeconds: 20,
+			},
+			LogLocation: paths.MilvusLiteLog,
+			Namespace:   "host",
+		}
+	}
 	for _, svc := range algorithmProcessSpecs(cfg.Algorithm) {
 		run := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-run --service "+svc.Name+" --profile "+profile)
 		down := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-down --service "+svc.Name+" --profile "+profile)
@@ -181,6 +195,8 @@ func runtimeCommandEnv(cfg RuntimeConfig) []string {
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
 		authServicePortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
 		localFileWatcherPortEnvVar+"="+strconv.Itoa(cfg.FileWatcher.Port),
+		localMilvusModeEnvVar+"="+cfg.Algorithm.MilvusMode,
+		localMilvusDBPathEnvVar+"="+cfg.Algorithm.MilvusDBPath,
 	)
 	return env
 }
