@@ -499,6 +499,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_SEGMENT_STORE_USER=" + envText("LAZYMIND_SEGMENT_STORE_USER", "admin"),
 		"LAZYMIND_SEGMENT_STORE_PASSWORD=" + envText("LAZYMIND_SEGMENT_STORE_PASSWORD", "LazyRAG_OpenSearch123!"),
 		"LAZYMIND_DOCUMENT_SERVER_URL=" + fmt.Sprintf("http://127.0.0.1:%d,general_algo", cfg.Algorithm.AlgoPort),
+		"LAZYMIND_AGENTIC_KB_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.AlgoPort),
 		"LAZYMIND_DEFAULT_CHAT_DATASET=algo",
 		"LAZYMIND_CORE_API_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_CORE_SERVICE_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.LocalProxy.CoreHostPort),

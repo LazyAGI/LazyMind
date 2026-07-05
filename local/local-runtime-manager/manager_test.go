@@ -355,6 +355,7 @@ func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {
 		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH=" + filepath.Join(paths.AlgorithmHome, "sqlite", "segment-store.db"),
 		"LAZYMIND_SEGMENT_STORE_USER=admin",
 		"LAZYMIND_SEGMENT_STORE_PASSWORD=LazyRAG_OpenSearch123!",
+		"LAZYMIND_AGENTIC_KB_URL=http://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.AlgoPort),
 		"LAZYMIND_EVO_CODE_TIMEOUT_S=900",
 		"LAZYMIND_EVO_LLM_ROLE=evo_llm",
 		"LAZYMIND_WORD_GROUP_APPLY_URL=",
