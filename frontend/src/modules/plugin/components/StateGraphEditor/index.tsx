@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Segmented, message } from 'antd';
-import { SaveOutlined, PlusOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, LoadingOutlined, PlusOutlined, AppstoreOutlined } from '@ant-design/icons';
 import type { GraphModel } from './core/model';
 import { createEmptyModel } from './core/model';
 import { parseYaml } from './core/parser';
@@ -15,16 +15,19 @@ import ValidationPanel from './ValidationPanel';
 import './index.scss';
 
 type ViewMode = 'canvas' | 'yaml';
+type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
 const EMPTY_YAML = `slots: {}
 
 steps: []
 `;
 
+const AUTO_SAVE_DELAY_MS = 1500;
+
 interface Props {
   /** Initial YAML content. If omitted, starts with an empty model. */
   initialYaml?: string;
-  /** Called when user clicks "Save Draft" with valid (or user-confirmed) YAML */
+  /** Called automatically when model changes (auto-save). Also called on manual save. */
   onSave?: (yaml: string) => Promise<void>;
   /** Called when user clicks "Close" */
   onClose?: () => void;
@@ -32,7 +35,7 @@ interface Props {
 
 export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props) {
   const [view, setView] = useState<ViewMode>('canvas');
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [showArtifacts, setShowArtifacts] = useState(false);
 
   // GraphModel is the single source of truth in memory
@@ -57,6 +60,35 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
     validateStateGraph(modelRef.current),
   );
 
+  // Auto-save: debounced timer fires after model changes
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onSaveRef = useRef(onSave);
+  useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
+
+  const doSave = useCallback(async (m: GraphModel) => {
+    const fn = onSaveRef.current;
+    if (!fn) return;
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    setSaveStatus('saving');
+    try {
+      await fn(serializeModel(m, true));
+      setSaveStatus('saved');
+    } catch {
+      setSaveStatus('error');
+      message.error('保存失败，请重试');
+    }
+  }, []);
+
+  const triggerAutoSave = useCallback((m: GraphModel) => {
+    if (!onSaveRef.current) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    setSaveStatus('pending');
+    autoSaveTimerRef.current = setTimeout(() => void doSave(m), AUTO_SAVE_DELAY_MS);
+  }, [doSave]);
+
   // Undo on Ctrl+Z / Cmd+Z
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -69,11 +101,16 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
         setModelState(prev);
         setErrors(validateStateGraph(prev));
         setYamlText(serializeModel(prev, false));
+        triggerAutoSave(prev);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        void doSave(modelRef.current);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [triggerAutoSave, doSave]);
 
   // Debounce timer ref for YAML editing
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,7 +126,8 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
     setModelState(nextModel);
     setErrors(validateStateGraph(nextModel));
     setYamlText(serializeModel(nextModel, false));
-  }, []);
+    triggerAutoSave(nextModel);
+  }, [triggerAutoSave]);
 
   // Handle YAML text change from Monaco
   const handleYamlChange = useCallback(
@@ -107,6 +145,7 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
           modelRef.current = mergedModel;
           setModelState(mergedModel);
           setErrors(validateStateGraph(mergedModel));
+          triggerAutoSave(mergedModel);
         }
         // If parse fails, keep the last valid model but mark a syntax error
         else {
@@ -119,27 +158,13 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
         }
       }, 500);
     },
-    [],
+    [triggerAutoSave],
   );
 
   // Add a new step node from toolbar — delegates to canvas for viewport-aware placement
   const handleAddNode = useCallback(() => {
     canvasRef.current?.addNode();
   }, []);
-
-  const handleSave = useCallback(async () => {
-    if (!onSave) return;
-    const finalYaml = serializeModel(modelRef.current, true);
-    setSaving(true);
-    try {
-      await onSave(finalYaml);
-      message.success('草稿已保存');
-    } catch (err) {
-      message.error('保存失败，请重试');
-    } finally {
-      setSaving(false);
-    }
-  }, [onSave]);
 
   const handleSelectNode = useCallback((_nodeId: string) => {
     setView('canvas');
@@ -186,15 +211,12 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
             <span className="sge-toolbar-error-badge">{errors.length} 个错误</span>
           )}
           {onSave && (
-            <Button
-              type="primary"
-              size="small"
-              icon={<SaveOutlined />}
-              loading={saving}
-              onClick={() => void handleSave()}
-            >
-              保存草稿
-            </Button>
+            <span className="sge-autosave-status">
+              {saveStatus === 'pending' && <span className="sge-autosave-pending">待保存…</span>}
+              {saveStatus === 'saving' && <span className="sge-autosave-saving"><LoadingOutlined /> 保存中…</span>}
+              {saveStatus === 'saved' && <span className="sge-autosave-saved"><CheckCircleOutlined /> 已保存</span>}
+              {saveStatus === 'error' && <span className="sge-autosave-error">保存失败</span>}
+            </span>
           )}
           {onClose && (
             <Button size="small" onClick={onClose}>

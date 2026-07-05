@@ -58,6 +58,33 @@
   line-height: 1;
 }
 
+.sge-autosave-status {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 72px;
+  justify-content: flex-end;
+}
+
+.sge-autosave-pending {
+  color: #8c8c8c;
+}
+
+.sge-autosave-saving {
+  color: #1677ff;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sge-autosave-saved {
+  color: #52c41a;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .sge-content {
   flex: 1;
   overflow: hidden;

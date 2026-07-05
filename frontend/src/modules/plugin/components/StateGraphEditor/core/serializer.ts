@@ -18,6 +18,14 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
     doc['x-layout'] = layoutBlock;
   }
 
+  // start_transitions (conditional entry points)
+  if (model.startTransitions.length > 0) {
+    doc['start_transitions'] = model.startTransitions.map((t) => ({
+      to: t.to,
+      condition: t.condition,
+    }));
+  }
+
   // slots block
   if (Object.keys(model.slots).length > 0) {
     const slotsBlock: Record<string, unknown> = {};

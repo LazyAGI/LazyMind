@@ -33,6 +33,13 @@ export interface GraphModel {
   slots: Record<string, SlotDef>;
   /** layout positions per node id */
   layout: Record<string, NodeLayout>;
+  /**
+   * Conditional transitions out of the virtual __start__ node.
+   * Allows multiple possible entry points selected by condition
+   * (e.g. "user provided outline" → write_body, else → write_outline).
+   * Empty array means no explicit start is configured.
+   */
+  startTransitions: Transition[];
 }
 
 export const VIRTUAL_START = '__start__';
@@ -42,4 +49,5 @@ export const createEmptyModel = (): GraphModel => ({
   nodes: [],
   slots: {},
   layout: {},
+  startTransitions: [],
 });

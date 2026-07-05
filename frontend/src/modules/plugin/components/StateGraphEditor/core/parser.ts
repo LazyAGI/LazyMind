@@ -21,6 +21,7 @@ interface RawYaml {
   'x-layout'?: Record<string, { x?: number; y?: number }>;
   slots?: Record<string, { type?: unknown; label?: unknown }>;
   steps?: unknown[];
+  start_transitions?: unknown;
 }
 
 function parseTransitions(raw: unknown): Transition[] {
@@ -100,5 +101,7 @@ export function parseYaml(yamlText: string): GraphModel | null {
     }
   }
 
-  return { nodes, slots, layout };
+  const startTransitions = parseTransitions(raw.start_transitions);
+
+  return { nodes, slots, layout, startTransitions };
 }

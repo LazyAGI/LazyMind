@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -104,6 +104,18 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
     [...nodeErrorMap.entries()].flatMap(([, msgs]) => msgs.filter((m) => m.includes('->'))),
   );
 
+  // Render __start__ → target edges for each startTransition
+  for (const t of model.startTransitions) {
+    edges.push({
+      id: `${VIRTUAL_START}->${t.to}`,
+      source: VIRTUAL_START,
+      target: t.to,
+      type: 'transition',
+      markerEnd: { type: MarkerType.ArrowClosed },
+      data: { condition: t.condition, hasError: false, onConditionChange },
+    });
+  }
+
   for (const node of model.nodes) {
     for (const t of node.transitions) {
       const edgeKey = `${node.id}->${t.to}`;
@@ -130,9 +142,25 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
   const { screenToFlowPosition } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
 
+  // Keep latest model/onModelChange in refs so callbacks below don't need them
+  // as deps (avoids re-creating callbacks on every model change).
+  const modelRef = useRef(model);
+  const onModelChangeRef = useRef(onModelChange);
+  useEffect(() => { modelRef.current = model; }, [model]);
+  useEffect(() => { onModelChangeRef.current = onModelChange; }, [onModelChange]);
+
+  // Stable callback — never changes reference, reads from refs.
   const handleConditionChange = useCallback(
     (sourceId: string, targetId: string, condition: string) => {
-      const updatedNodes = model.nodes.map((n) => {
+      const m = modelRef.current;
+      if (sourceId === VIRTUAL_START) {
+        const updatedTransitions = m.startTransitions.map((t) =>
+          t.to === targetId ? { ...t, condition } : t,
+        );
+        onModelChangeRef.current({ ...m, startTransitions: updatedTransitions });
+        return;
+      }
+      const updatedNodes = m.nodes.map((n) => {
         if (n.id !== sourceId) return n;
         return {
           ...n,
@@ -141,14 +169,13 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
           ),
         };
       });
-      onModelChange({ ...model, nodes: updatedNodes });
+      onModelChangeRef.current({ ...m, nodes: updatedNodes });
     },
-    [model, onModelChange],
+    [], // stable — intentionally no deps
   );
 
   const initialNodes = useMemo(
     () => modelToFlowNodes(model, nodeErrorMap),
-    // We intentionally keep stale deps here; synced via useEffect below
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -162,6 +189,11 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
+  // When a canvas-internal operation calls onModelChange, we set this flag so
+  // the sync useEffect below knows NOT to re-derive nodes/edges from the model
+  // (the canvas already has the correct visual state from the operation itself).
+  const skipSyncRef = useRef(false);
 
   // Intercept ReactFlow's own selection changes to keep our state in sync.
   // This is more reliable than onNodeClick/onPaneClick which have drag-protection delays.
@@ -199,10 +231,18 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
     [onEdgesChange, selectedEdgeId],
   );
 
-  // Keep nodes/edges in sync when model changes externally
+  // Keep nodes/edges in sync when model changes from OUTSIDE the canvas
+  // (e.g. YAML editor, undo). Internal canvas operations use skipSyncRef to
+  // opt out, since they already have the correct ReactFlow visual state.
   useEffect(() => {
+    if (skipSyncRef.current) {
+      skipSyncRef.current = false;
+      return;
+    }
     setNodes(modelToFlowNodes(model, nodeErrorMap));
     setEdges(modelToFlowEdges(model, nodeErrorMap, handleConditionChange));
+  // handleConditionChange is stable (no deps), nodeErrorMap changes only when
+  // errors change — both are safe in this dep array.
   }, [model, nodeErrorMap, handleConditionChange, setNodes, setEdges]);
 
   // When a new edge is drawn in the canvas, add a transition to the model
@@ -210,55 +250,87 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
 
-      // __start__ is a virtual node — it has no entry in model.nodes.
-      // Connections from __start__ are represented by which node has no incoming edges (no YAML entry needed),
-      // so we only need to draw the visual edge without mutating the model.
+      const m = modelRef.current;
+
       if (connection.source === VIRTUAL_START) {
-        setEdges((eds) => addEdge({ ...connection, type: 'transition' }, eds));
+        // Prevent duplicate edges to the same target
+        const target = connection.target;
+        if (m.startTransitions.some((t) => t.to === target)) return;
+        const newTransition = { to: target, condition: '' };
+        const edgeId = `${VIRTUAL_START}->${target}`;
+        setEdges((eds) =>
+          addEdge(
+            {
+              ...connection,
+              id: edgeId,
+              type: 'transition',
+              markerEnd: { type: MarkerType.ArrowClosed },
+              data: { condition: '', hasError: false, onConditionChange: handleConditionChange },
+            },
+            eds,
+          ),
+        );
+        skipSyncRef.current = true;
+        onModelChangeRef.current({ ...m, startTransitions: [...m.startTransitions, newTransition] });
         return;
       }
 
-      const sourceNode = model.nodes.find((n) => n.id === connection.source);
+      const sourceNode = m.nodes.find((n) => n.id === connection.source);
       if (!sourceNode) return;
 
       const newTransition = { to: connection.target, condition: '' };
-      const updatedNodes = model.nodes.map((n) =>
+      const updatedNodes = m.nodes.map((n) =>
         n.id === connection.source
           ? { ...n, transitions: [...n.transitions, newTransition] }
           : n,
       );
-      onModelChange({ ...model, nodes: updatedNodes });
+      skipSyncRef.current = true;
+      onModelChangeRef.current({ ...m, nodes: updatedNodes });
       setEdges((eds) => addEdge({ ...connection, type: 'transition' }, eds));
     },
-    [model, onModelChange, setEdges],
+    [setEdges, handleConditionChange],
   );
 
   // Sync drag-stop positions back to the model layout
   const onNodeDragStop = useCallback(
     (_event: React.MouseEvent, node: Node) => {
-      const newLayout = { ...model.layout, [node.id]: { x: node.position.x, y: node.position.y } };
-      onModelChange({ ...model, layout: newLayout });
+      const m = modelRef.current;
+      const newLayout = { ...m.layout, [node.id]: { x: node.position.x, y: node.position.y } };
+      skipSyncRef.current = true;
+      onModelChangeRef.current({ ...m, layout: newLayout });
     },
-    [model, onModelChange],
+    [],
   );
 
   // Handle node/edge deletion via Delete or Backspace key
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
-      // Don't intercept when user is typing in an input/textarea
       const tag = (event.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
-      // Delete selected edge first
+      const m = modelRef.current;
+
       if (selectedEdgeId) {
-        // Edge id format: "sourceId->targetId"
         const [srcId, tgtId] = selectedEdgeId.split('->');
-        const updatedNodes = model.nodes.map((n) => {
+        // Deleting a __start__ edge removes the corresponding startTransition
+        if (srcId === VIRTUAL_START) {
+          setEdges((eds) => eds.filter((e) => e.id !== selectedEdgeId));
+          skipSyncRef.current = true;
+          onModelChangeRef.current({
+            ...m,
+            startTransitions: m.startTransitions.filter((t) => t.to !== tgtId),
+          });
+          setSelectedEdgeId(null);
+          return;
+        }
+        const updatedNodes = m.nodes.map((n) => {
           if (n.id !== srcId) return n;
           return { ...n, transitions: n.transitions.filter((t) => t.to !== tgtId) };
         });
-        onModelChange({ ...model, nodes: updatedNodes });
+        setEdges((eds) => eds.filter((e) => e.id !== selectedEdgeId));
+        skipSyncRef.current = true;
+        onModelChangeRef.current({ ...m, nodes: updatedNodes });
         setSelectedEdgeId(null);
         return;
       }
@@ -266,17 +338,22 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
       if (!selectedNodeId) return;
       if (selectedNodeId === VIRTUAL_START || selectedNodeId === VIRTUAL_END) return;
 
-      const updatedNodes = model.nodes.filter((n) => n.id !== selectedNodeId);
+      const updatedNodes = m.nodes.filter((n) => n.id !== selectedNodeId);
       const updatedNodesWithEdges = updatedNodes.map((n) => ({
         ...n,
         transitions: n.transitions.filter((t) => t.to !== selectedNodeId),
       }));
-      const newLayout = { ...model.layout };
+      const newLayout = { ...m.layout };
       delete newLayout[selectedNodeId];
-      onModelChange({ ...model, nodes: updatedNodesWithEdges, layout: newLayout });
+      const removedId = selectedNodeId;
+      const newStartTransitions = m.startTransitions.filter((t) => t.to !== removedId);
+      setNodes((nds) => nds.filter((n) => n.id !== removedId));
+      setEdges((eds) => eds.filter((e) => e.source !== removedId && e.target !== removedId));
+      skipSyncRef.current = true;
+      onModelChangeRef.current({ ...m, nodes: updatedNodesWithEdges, layout: newLayout, startTransitions: newStartTransitions });
       setSelectedNodeId(null);
     },
-    [model, onModelChange, selectedEdgeId, selectedNodeId],
+    [selectedEdgeId, selectedNodeId, setEdges, setNodes],
   );
 
   // Add a new node — places it at the current viewport center
@@ -295,10 +372,24 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
       outputs: [],
       transitions: [],
     };
-    const newLayout = { ...model.layout, [newId]: { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 } };
-    onModelChange({ ...model, nodes: [...model.nodes, newNode], layout: newLayout });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, onModelChange, screenToFlowPosition]);
+    const m = modelRef.current;
+    const flowPos = { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 };
+    const newLayout = { ...m.layout, [newId]: flowPos };
+    // Update ReactFlow nodes state directly so the node appears immediately
+    setNodes((nds) => [
+      ...nds,
+      {
+        id: newId,
+        type: 'step',
+        position: flowPos,
+        data: { ...newNode, hasError: false, errorMessages: [] },
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+      },
+    ]);
+    skipSyncRef.current = true;
+    onModelChangeRef.current({ ...m, nodes: [...m.nodes, newNode], layout: newLayout });
+  }, [screenToFlowPosition, setNodes]);
 
   useImperativeHandle(ref, () => ({ addNode: addNodeAtCenter }), [addNodeAtCenter]);
 
@@ -318,10 +409,24 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
         outputs: [],
         transitions: [],
       };
-      const newLayout = { ...model.layout, [newId]: { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 } };
-      onModelChange({ ...model, nodes: [...model.nodes, newNode], layout: newLayout });
+      const m = modelRef.current;
+      const flowPos = { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 };
+      const newLayout = { ...m.layout, [newId]: flowPos };
+      setNodes((nds) => [
+        ...nds,
+        {
+          id: newId,
+          type: 'step',
+          position: flowPos,
+          data: { ...newNode, hasError: false, errorMessages: [] },
+          width: NODE_WIDTH,
+          height: NODE_HEIGHT,
+        },
+      ]);
+      skipSyncRef.current = true;
+      onModelChangeRef.current({ ...m, nodes: [...m.nodes, newNode], layout: newLayout });
     },
-    [model, onModelChange, screenToFlowPosition],
+    [screenToFlowPosition, setNodes],
   );
 
   const selectedNode = selectedNodeId
@@ -329,8 +434,8 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
     : null;
 
   const handleNodePropertyChange = (updated: StepNode) => {
-    const updatedNodes = model.nodes.map((n) => (n.id === selectedNodeId ? updated : n));
-    // If id changed, we need to remap
+    const m = modelRef.current;
+    const updatedNodes = m.nodes.map((n) => (n.id === selectedNodeId ? updated : n));
     if (updated.id !== selectedNodeId) {
       const remaId = updated.id;
       const remappedNodes = updatedNodes.map((n) => ({
@@ -339,26 +444,34 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
           t.to === selectedNodeId ? { ...t, to: remaId } : t,
         ),
       }));
-      const newLayout = { ...model.layout };
+      const newLayout = { ...m.layout };
       if (selectedNodeId && newLayout[selectedNodeId]) {
         newLayout[remaId] = newLayout[selectedNodeId];
         delete newLayout[selectedNodeId];
       }
-      onModelChange({ ...model, nodes: remappedNodes, layout: newLayout });
+      // Node id changed: let useEffect re-sync so ReactFlow picks up the new id
+      onModelChangeRef.current({ ...m, nodes: remappedNodes, layout: newLayout });
       setSelectedNodeId(remaId);
     } else {
-      onModelChange({ ...model, nodes: updatedNodes });
+      // Only data changed — skip useEffect re-sync to avoid visual flicker
+      skipSyncRef.current = true;
+      onModelChangeRef.current({ ...m, nodes: updatedNodes });
     }
   };
 
   const handleNodeDelete = (nodeId: string) => {
-    const updatedNodes = model.nodes.filter((n) => n.id !== nodeId).map((n) => ({
+    const m = modelRef.current;
+    const updatedNodes = m.nodes.filter((n) => n.id !== nodeId).map((n) => ({
       ...n,
       transitions: n.transitions.filter((t) => t.to !== nodeId),
     }));
-    const newLayout = { ...model.layout };
+    const newLayout = { ...m.layout };
     delete newLayout[nodeId];
-    onModelChange({ ...model, nodes: updatedNodes, layout: newLayout });
+    const newStartTransitions = m.startTransitions.filter((t) => t.to !== nodeId);
+    setNodes((nds) => nds.filter((n) => n.id !== nodeId));
+    setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
+    skipSyncRef.current = true;
+    onModelChangeRef.current({ ...m, nodes: updatedNodes, layout: newLayout, startTransitions: newStartTransitions });
     setSelectedNodeId(null);
   };
 
