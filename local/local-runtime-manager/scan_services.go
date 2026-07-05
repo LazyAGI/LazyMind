@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -122,7 +123,11 @@ func (m *ScanControlPlaneManager) waitForDatabase(ctx context.Context, cfg Runti
 			Dir: paths.RepoRoot,
 		})
 		if err == nil {
-			return nil
+			if err := postgresHostPortReady(ctx, cfg.Algorithm.PostgresPort); err == nil {
+				return nil
+			} else {
+				lastErr = err
+			}
 		}
 		if err != nil {
 			lastErr = err
@@ -140,6 +145,16 @@ func (m *ScanControlPlaneManager) waitForDatabase(ctx context.Context, cfg Runti
 		case <-ticker.C:
 		}
 	}
+}
+
+func postgresHostPortReady(ctx context.Context, port int) error {
+	dialer := net.Dialer{Timeout: time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		return err
+	}
+	_ = conn.Close()
+	return nil
 }
 
 func (m *ScanControlPlaneManager) Down(ctx context.Context, paths RuntimePaths) error {

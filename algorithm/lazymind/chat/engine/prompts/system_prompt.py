@@ -8,7 +8,9 @@ from .guidance import (
     DEFAULT_SYSTEM_PROMPT,
     IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
     KNOWLEDGE_EVIDENCE_CITATION_GUIDANCE,
+    SEARCH_GUIDANCE,
     TOOL_CALL_STATUS_GUIDANCE,
+    WEB_SEARCH_GUIDANCE,
 )
 
 _KNOWLEDGE_EVIDENCE_GROUPS = {'kb', 'temp_kb'}
@@ -108,7 +110,10 @@ def build_system_prompt(
     if active_groups:
         prompt_parts.append(TOOL_CALL_STATUS_GUIDANCE)
     if active_groups & _KNOWLEDGE_EVIDENCE_GROUPS:
+        prompt_parts.append(SEARCH_GUIDANCE)
         prompt_parts.append(KNOWLEDGE_EVIDENCE_CITATION_GUIDANCE)
+    if 'web_search' in active_groups:
+        prompt_parts.append(WEB_SEARCH_GUIDANCE)
     if (
         files
         or 'image_generator' in active_groups

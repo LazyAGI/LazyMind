@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -29,6 +31,9 @@ func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
 
 	if err := manager.buildCore(context.Background(), paths); err != nil {
 		t.Fatalf("build core: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, coreSourceDirName, "docs", "swagger.json")); err != nil {
+		t.Fatalf("expected local swagger embed placeholder: %v", err)
 	}
 	runner.assertCommandCount(1)
 }
@@ -59,6 +64,20 @@ func TestCoreServiceWaitForDatabaseUsesPsql(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split host port: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse port: %v", err)
+	}
+	cfg.Algorithm.PostgresPort = port
 	runner := &fakeRunner{t: t}
 	manager := NewCoreServiceManager(runner)
 	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
