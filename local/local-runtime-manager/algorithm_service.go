@@ -235,6 +235,7 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths Runti
 	lazyllm := filepath.Join(paths.AlgorithmVenv, "bin", "lazyllm")
 	installSteps := []Command{
 		{Name: paths.AlgorithmPython, Args: []string{"-m", "pip", "install", "--upgrade", "pip"}, Dir: paths.RepoRoot},
+		{Name: pip, Args: []string{"install", "setuptools<81"}, Dir: paths.RepoRoot},
 		{Name: pip, Args: []string{"install", "lazyllm"}, Dir: paths.RepoRoot},
 		{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot},
 		{Name: pip, Args: []string{"install", "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")}, Dir: paths.RepoRoot},
