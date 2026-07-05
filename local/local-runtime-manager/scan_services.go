@@ -126,10 +126,9 @@ func (m *ScanControlPlaneManager) waitForDatabase(ctx context.Context, cfg Runti
 			if err := postgresHostPortReady(ctx, cfg.Algorithm.PostgresPort); err == nil {
 				return nil
 			} else {
-		if err == nil {
-			return nil
-		}
-		if stderr := strings.TrimSpace(res.Stderr); stderr != "" {
+				lastErr = err
+			}
+		} else if stderr := strings.TrimSpace(res.Stderr); stderr != "" {
 			lastErr = fmt.Errorf("%w: %s", err, stderr)
 		} else {
 			lastErr = err

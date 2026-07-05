@@ -243,11 +243,10 @@ func (m *CoreServiceManager) waitForCoreDatabase(ctx context.Context, cfg Runtim
 			} else {
 				lastErr = err
 			}
-		}
-		if err != nil {
-			lastErr = err
 		} else if stderr := strings.TrimSpace(res.Stderr); stderr != "" {
-			lastErr = fmt.Errorf("%s", stderr)
+			lastErr = fmt.Errorf("%w: %s", err, stderr)
+		} else {
+			lastErr = err
 		}
 		select {
 		case <-ctx.Done():
