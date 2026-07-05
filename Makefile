@@ -11,6 +11,7 @@ GO ?= go
 LAZYMIND_LOCAL_PROFILE ?= linux-browser
 LAZYMIND_LOCAL_BIN ?= local/local-runtime-manager/lazymind-local
 LAZYMIND_LOCAL_GOCACHE ?= $(CURDIR)/.codex-gocache/go-build
+LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 90s
 PROCESS_COMPOSE_BIN ?= local/bin/process-compose
 PROCESS_COMPOSE_PKG ?= github.com/f1bonacc1/process-compose@v1.116.0
 comma := ,
@@ -412,7 +413,8 @@ up:
 down:
 	@$(MAKE) --no-print-directory file-watcher-stop
 	@if [ -x "$(LAZYMIND_LOCAL_BIN)" ]; then \
-		"$(LAZYMIND_LOCAL_BIN)" down --profile "$(LAZYMIND_LOCAL_PROFILE)" || true; \
+		timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LAZYMIND_LOCAL_BIN)" down --profile "$(LAZYMIND_LOCAL_PROFILE)" || \
+			echo "⚠️  Local Runtime manager down timed out or failed; continuing cleanup"; \
 	else \
 		echo "ℹ️  No Local Runtime manager found; skipping"; \
 	fi
@@ -423,6 +425,7 @@ down:
 	@echo "🛑 Stopping default Cloud/Kong compose stack, if present..."
 	@$(_COMPOSE_DEFAULT) $(_CLEANUP_COMPOSE_PROFILES) $(_COMPOSE_DOWN_ACTION) \
 		$(_COMPOSE_DOWN_SERVICES) || true
+	@rm -f .lazymind-local/run/*.pid .lazymind-local/run/algorithm/*.pid .lazymind-local/run/pc-token 2>/dev/null || true
 
 up-build:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
@@ -467,7 +470,8 @@ clear:
 # ---------------------------------------------------------------------------
 # reset-kb: wipe knowledge-base data only (Milvus, OpenSearch, uploads, and
 #           KB-related PostgreSQL tables).  User accounts, auth tokens, Redis,
-#           conversations, and prompts are preserved.
+#           conversations, and prompts are preserved. Conversation KB selectors
+#           are cleared so old chats do not keep pointing at deleted KB ids.
 #
 # PostgreSQL tables cleared (core DB):
 #   datasets, default_datasets, documents, tasks, upload_sessions,
@@ -479,6 +483,29 @@ clear:
 # After this, run: make up LAZYMIND_RESET_ALGO_ON_STARTUP=true
 # ---------------------------------------------------------------------------
 _KB_VOLUMES := milvus-etcd milvus-minio milvus-data opensearch-data rag-uploads
+_RESET_KB_LOCAL_PATHS := \
+	data/core/uploads \
+	data/scan/staging \
+	.lazymind-local/home/sqlite \
+	.lazymind-local/tmp/scan-control-plane \
+	.lazymind-local/stores/scan/file-watcher/staging \
+	.lazymind-local/stores/scan/file-watcher/snapshots
+_RESET_ALL_LOCAL_PATHS := \
+	data/core \
+	data/evo \
+	data/scan \
+	data/state/postgres \
+	data/state/redis \
+	data/subagent \
+	data/traces \
+	.lazymind-local/generated \
+	.lazymind-local/home \
+	.lazymind-local/logs \
+	.lazymind-local/run \
+	.lazymind-local/state \
+	.lazymind-local/stores \
+	.lazymind-local/tmp
+_ALL_VOLUMES := $(_KB_VOLUMES) pgdata redisdata sqlite-data
 
 # SQL run inside the running db container (or via docker run if db is stopped).
 # TRUNCATE … CASCADE handles FK dependencies automatically.
@@ -494,6 +521,13 @@ TRUNCATE TABLE
 CASCADE;
 endef
 export _RESET_KB_SQL_CORE
+
+define _RESET_KB_SQL_CONVERSATIONS
+UPDATE public.conversations
+SET search_config = '{}'
+WHERE search_config IS NOT NULL AND search_config::text <> '{}';
+endef
+export _RESET_KB_SQL_CONVERSATIONS
 
 # Drop all lazyllm-managed tables so SqlManager recreates them with the
 # latest schema on next startup.  Must be done via psql BEFORE processor-server
@@ -523,17 +557,29 @@ reset-kb:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 	fi
-	@echo "⏹  Stopping all services (keeping db running for SQL cleanup)..."
-	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) stop \
-		lazyllm-algo lazyllm-doc-server lazyllm-parse-server lazyllm-parse-worker \
-		chat core frontend kong 2>/dev/null || true
+	@if [ -x "$(LAZYMIND_LOCAL_BIN)" ]; then \
+		echo "⏹  Stopping Local Runtime before cleanup..."; \
+		timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LAZYMIND_LOCAL_BIN)" down --profile "$(LAZYMIND_LOCAL_PROFILE)" || \
+			echo "⚠️  Local Runtime manager down timed out or failed; continuing reset"; \
+	fi
+	@echo "⏫ Starting PostgreSQL only for SQL cleanup..."
+	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) up -d db >/dev/null
+	@for i in $$(seq 1 30); do \
+		if $(_COMPOSE_LOCAL) exec -T db psql -U root -d postgres -c 'SELECT 1' >/dev/null 2>&1; then exit 0; fi; \
+		sleep 1; \
+	done; \
+	echo "⚠️  db did not become ready; SQL cleanup may be skipped"
 	@echo "🗑  Clearing KB tables in PostgreSQL (core DB)..."
-	@$(_COMPOSE) exec -T db psql -U root -d core -c "$$_RESET_KB_SQL_CORE" 2>&1 || \
+	@$(_COMPOSE_LOCAL) exec -T db psql -U root -d core -c "$$_RESET_KB_SQL_CORE" 2>&1 || \
 		echo "⚠️  core DB not running or tables not found — skipping"
+	@echo "🧹 Clearing stale KB selectors from conversations..."
+	@$(_COMPOSE_LOCAL) exec -T db psql -U root -d core -c "$$_RESET_KB_SQL_CONVERSATIONS" 2>&1 || \
+		echo "⚠️  conversations table not available — skipping"
 	@echo "🗑  Dropping lazyllm schema tables in PostgreSQL (app DB)..."
-	@$(_COMPOSE) exec -T db psql -U root -d app -c "$$_RESET_KB_SQL_APP" 2>&1 || \
+	@$(_COMPOSE_LOCAL) exec -T db psql -U root -d app -c "$$_RESET_KB_SQL_APP" 2>&1 || \
 		echo "⚠️  app DB not running or tables not found — skipping"
 	@echo "⏹  Stopping remaining services..."
+	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) down 2>/dev/null || true
 	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down 2>/dev/null || true
 	@echo "🗑  Removing KB volumes: $(_KB_VOLUMES)..."
 	@for vol in $(_KB_VOLUMES); do \
@@ -544,8 +590,8 @@ reset-kb:
 			echo "  skip $$vol (not found)"; \
 		fi; \
 	done
-	@echo "🗑  Removing local upload cache..."
-	@rm -rf data/core/uploads 2>/dev/null || true
+	@echo "🗑  Removing local KB caches and segment stores..."
+	@rm -rf $(_RESET_KB_LOCAL_PATHS) 2>/dev/null || true
 	@echo "✅ KB data cleared."
 
 # ---------------------------------------------------------------------------
@@ -554,7 +600,20 @@ reset-kb:
 # ---------------------------------------------------------------------------
 reset-all: reset-kb
 	@echo "🗑  Removing all remaining persistent volumes (pgdata, redisdata, caches)..."
+	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) down -v 2>/dev/null || true
 	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down -v 2>/dev/null || true
+	@for vol in $(_ALL_VOLUMES); do \
+		for full in $$(docker volume ls -q | grep -E "(^|_)$${vol}$$"); do \
+			docker volume rm "$$full" >/dev/null 2>&1 && echo "  removed $$full" || true; \
+		done; \
+	done
+	@echo "🗑  Removing local persistent data paths..."
+	@rm -rf $(_RESET_ALL_LOCAL_PATHS) 2>/dev/null || true
+	@if [ -e data/core ] || [ -e data/evo ] || [ -e data/scan ] || [ -e data/state/postgres ] || [ -e data/state/redis ] || [ -e data/subagent ] || [ -e data/traces ]; then \
+		echo "🗑  Removing container-owned state paths..."; \
+		docker run --rm -v "$(CURDIR):/work" -w /work $${POSTGRES_IMAGE:-postgres:16} \
+			bash -lc 'rm -rf data/core data/evo data/scan data/state/postgres data/state/redis data/subagent data/traces' >/dev/null; \
+	fi
 	@echo "🧹 Clearing Python cache..."
 	@find . -type d -name '__pycache__' ! -path '*/\.git/*' -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name '*.pyc' ! -path '*/\.git/*' -delete 2>/dev/null || true

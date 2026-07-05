@@ -114,13 +114,14 @@ func (m *ScanControlPlaneManager) waitForDatabase(ctx context.Context, cfg Runti
 				"exec",
 				"-T",
 				"db",
-				"pg_isready",
+				"psql",
 				"-U", "root",
 				"-d", "scan_control_plane",
+				"-c", "SELECT 1",
 			},
 			Dir: paths.RepoRoot,
 		})
-		if err == nil && strings.Contains(res.Stdout+res.Stderr, "accepting connections") {
+		if err == nil {
 			return nil
 		}
 		if err != nil {

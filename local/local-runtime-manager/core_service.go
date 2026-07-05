@@ -214,13 +214,14 @@ func (m *CoreServiceManager) waitForCoreDatabase(ctx context.Context, cfg Runtim
 				"exec",
 				"-T",
 				"db",
-				"pg_isready",
+				"psql",
 				"-U", "root",
 				"-d", "core",
+				"-c", "SELECT 1",
 			},
 			Dir: paths.RepoRoot,
 		})
-		if err == nil && strings.Contains(res.Stdout+res.Stderr, "accepting connections") {
+		if err == nil {
 			return nil
 		}
 		if err != nil {

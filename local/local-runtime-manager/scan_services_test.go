@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestScanControlPlaneWaitForDatabaseUsesPgIsReady(t *testing.T) {
+func TestScanControlPlaneWaitForDatabaseUsesPsql(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
@@ -22,14 +22,15 @@ func TestScanControlPlaneWaitForDatabaseUsesPgIsReady(t *testing.T) {
 			"exec",
 			"-T",
 			"db",
-			"pg_isready",
+			"psql",
 			"-U", "root",
 			"-d", "scan_control_plane",
+			"-c", "SELECT 1",
 		)
 		if cmd.Dir != repo {
-			t.Fatalf("unexpected pg_isready dir %q", cmd.Dir)
+			t.Fatalf("unexpected psql dir %q", cmd.Dir)
 		}
-		return CommandResult{Stdout: "db:5432 - accepting connections\n"}, nil
+		return CommandResult{Stdout: " ?column?\n----------\n        1\n"}, nil
 	})
 
 	if err := manager.waitForDatabase(context.Background(), cfg, paths); err != nil {
