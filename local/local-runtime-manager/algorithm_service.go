@@ -258,7 +258,7 @@ func (m *AlgorithmServiceManager) pythonModuleAvailable(ctx context.Context, pat
 	if _, err := os.Stat(paths.AlgorithmPython); err != nil {
 		return false
 	}
-	res, err := m.runner.Run(ctx, Command{Name: paths.AlgorithmPython, Args: []string{"-c", "import " + module}, Dir: paths.RepoRoot})
+	_, err := m.runner.Run(ctx, Command{Name: paths.AlgorithmPython, Args: []string{"-c", "import " + module}, Dir: paths.RepoRoot})
 	return err == nil
 }
 
