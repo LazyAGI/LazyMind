@@ -48,9 +48,9 @@ func Connect(driver, dsn string) (*DB, error) {
 		}
 		sqlDB.SetMaxOpenConns(4)
 		for _, stmt := range []string{
+			"PRAGMA busy_timeout=30000",
 			"PRAGMA journal_mode=WAL",
 			"PRAGMA synchronous=NORMAL",
-			"PRAGMA busy_timeout=30000",
 			"PRAGMA foreign_keys=ON",
 		} {
 			if _, err := sqlDB.Exec(stmt); err != nil && !strings.Contains(strings.ToLower(err.Error()), "database is locked") {
