@@ -24,16 +24,12 @@ func Validate(ctx context.Context, db *sql.DB, specs []TableSpec) error {
 		if table == "" {
 			continue
 		}
-		if schema == "" {
-			schema = "public"
-		}
-
 		ok, err := tableExists(ctx, db, schema, table)
 		if err != nil {
-			return fmt.Errorf("validate %s.%s: %w", schema, table, err)
+			return fmt.Errorf("validate %s: %w", Table(schema, table), err)
 		}
 		if !ok {
-			return fmt.Errorf("missing table %s.%s", schema, table)
+			return fmt.Errorf("missing table %s", Table(schema, table))
 		}
 
 		if len(s.RequiredColumns) == 0 {
@@ -41,10 +37,10 @@ func Validate(ctx context.Context, db *sql.DB, specs []TableSpec) error {
 		}
 		missing, err := missingColumns(ctx, db, schema, table, s.RequiredColumns)
 		if err != nil {
-			return fmt.Errorf("validate columns %s.%s: %w", schema, table, err)
+			return fmt.Errorf("validate columns %s: %w", Table(schema, table), err)
 		}
 		if len(missing) > 0 {
-			return fmt.Errorf("table %s.%s missing columns: %s", schema, table, strings.Join(missing, ","))
+			return fmt.Errorf("table %s missing columns: %s", Table(schema, table), strings.Join(missing, ","))
 		}
 	}
 	return nil

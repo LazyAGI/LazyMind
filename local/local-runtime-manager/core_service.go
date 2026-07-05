@@ -171,14 +171,15 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 	tempDir := filepath.Join(uploads, ".lazyllm_temp")
 	imageCache := filepath.Join(uploads, ".image_cache")
 	endpoints := serviceEndpointsFromConfig(cfg)
-	databaseDSN := coreDatabaseDSN(cfg.Algorithm.PostgresPort, "core", "root", "123456")
-	readonlyDSN := coreDatabaseDSN(cfg.Algorithm.PostgresPort, "app", "app", "app")
+	coreDSN := sqliteDSN(paths.CoreDBPath)
+	coreURL := sqliteURL(paths.CoreDBPath)
 	return []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_CORE_HOST=127.0.0.1",
 		"LAZYMIND_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
-		"ACL_DB_DRIVER=postgres",
-		"ACL_DB_DSN=" + databaseDSN,
+		"ACL_DB_DRIVER=sqlite",
+		"ACL_DB_DSN=" + coreDSN,
+		"LAZYMIND_CORE_DATABASE_URL=" + coreURL,
 		"MIGRATIONS_DIR=" + filepath.Join(paths.RepoRoot, coreSourceDirName, "migrations"),
 		"LAZYMIND_REDIS_URL=",
 		"LAZYMIND_STATE_BACKEND=sqlite",
@@ -203,62 +204,26 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_OFFICE_CONVERT_URL=" + endpoints.Host.OfficeConvertURL,
 		"LAZYMIND_OFFICE_CONVERT_WORKERS=" + envText("LAZYMIND_OFFICE_CONVERT_WORKERS", "4"),
 		"LAZYMIND_SUBAGENT_WORKSPACE=" + filepath.Join(paths.RepoRoot, "data", "subagent"),
-		"LAZYMIND_SUBAGENT_DB_DSN=" + databaseDSN,
+		"LAZYMIND_SUBAGENT_DB_DSN=" + coreURL,
 		"LAZYMIND_READONLY_VALIDATE=0",
-		"LAZYMIND_READONLY_DB_DRIVER=postgres",
-		"LAZYMIND_READONLY_DB_DSN=" + readonlyDSN,
-		"LAZYMIND_READONLY_SCHEMA=public",
-		"LAZYMIND_READONLY_TABLES=public.lazyllm_documents,public.lazyllm_doc_service_tasks,public.lazyllm_kb_documents",
+		"LAZYMIND_READONLY_DB_DRIVER=sqlite",
+		"LAZYMIND_READONLY_DB_DSN=" + paths.LazyLLMDBPath,
+		"LAZYMIND_READONLY_SCHEMA=",
+		"LAZYMIND_READONLY_TABLES=lazyllm_documents,lazyllm_doc_service_tasks,lazyllm_kb_documents",
 		"LAZYMIND_RESOURCE_UPDATE_ENABLED=" + envText("LAZYMIND_RESOURCE_UPDATE_ENABLED", "true"),
 		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + envText("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "dev-internal-service-token"),
 	}
 }
 
 func (m *CoreServiceManager) waitForCoreDatabase(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	deadline := time.NewTimer(coreServiceDBWaitTimeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	var lastErr error
-	for {
-		res, err := m.runner.Run(ctx, Command{
-			Name: "docker",
-			Args: []string{
-				"compose",
-				"-f", repoComposeFileName,
-				"-f", localComposeOverrideName,
-				"exec",
-				"-T",
-				"db",
-				"psql",
-				"-U", "root",
-				"-d", "core",
-				"-c", "SELECT 1",
-			},
-			Dir: paths.RepoRoot,
-		})
-		if err == nil {
-			if err := postgresHostPortReady(ctx, cfg.Algorithm.PostgresPort); err == nil {
-				return nil
-			} else {
-				lastErr = err
-			}
-		} else if stderr := strings.TrimSpace(res.Stderr); stderr != "" {
-			lastErr = fmt.Errorf("%w: %s", err, stderr)
-		} else {
-			lastErr = err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline.C:
-			if lastErr != nil {
-				return fmt.Errorf("core database did not become ready: %w", lastErr)
-			}
-			return fmt.Errorf("core database did not become ready at %s", serviceEndpointsFromConfig(cfg).Host.PostgresAddress)
-		case <-ticker.C:
+	_ = ctx
+	_ = cfg
+	for _, path := range []string{paths.CoreDBPath, paths.LazyLLMDBPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
 func waitForCoreServiceHealth(ctx context.Context, port int, timeout time.Duration, waitErr <-chan error) error {

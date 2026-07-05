@@ -31,6 +31,7 @@ func TestBuildSelectsSQLRepositoryAndHTTPAdapters(t *testing.T) {
 	cfg := config.Config{
 		Address:                           "127.0.0.1",
 		Port:                              18080,
+		DBDriver:                          "postgres",
 		DBDSN:                             "postgres://scan-control-plane",
 		CoreBaseURL:                       "http://core.test",
 		DefaultDatasetAlgoID:              "general_algo",
@@ -107,6 +108,7 @@ func TestBuildRequiresSQLBoundariesBeforeOpeningDB(t *testing.T) {
 	_, err := Build(config.Config{
 		Address:                           "127.0.0.1",
 		Port:                              18080,
+		DBDriver:                          "postgres",
 		DBDSN:                             "postgres://scan-control-plane",
 		CoreBaseURL:                       "://bad-url",
 		DefaultDatasetAlgoID:              "general_algo",
@@ -171,6 +173,7 @@ func TestBuildMissingRequiredValueReturnsError(t *testing.T) {
 	_, err := Build(config.Config{
 		Address:                           "127.0.0.1",
 		Port:                              18080,
+		DBDriver:                          "postgres",
 		DBDSN:                             "postgres://scan-control-plane",
 		CoreBaseURL:                       "http://core.test",
 		DefaultDatasetAlgoID:              "general_algo",

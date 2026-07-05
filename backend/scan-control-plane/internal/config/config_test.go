@@ -75,6 +75,7 @@ func validConfigForTest() Config {
 	return Config{
 		Address:                           "127.0.0.1",
 		Port:                              18080,
+		DBDriver:                          "postgres",
 		DBDSN:                             "postgres://scan-control-plane",
 		CoreBaseURL:                       "http://core.test",
 		DefaultDatasetAlgoID:              "general_algo",
@@ -142,6 +143,7 @@ func TestValidateRequiresSQLBoundaries(t *testing.T) {
 	base := Config{
 		Address:                           "127.0.0.1",
 		Port:                              18080,
+		DBDriver:                          "postgres",
 		DBDSN:                             "postgres://scan-control-plane",
 		CoreBaseURL:                       "http://core.test",
 		DefaultDatasetAlgoID:              "general_algo",

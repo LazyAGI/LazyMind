@@ -23,6 +23,8 @@ def normalize_postgres_sqlalchemy_url(
 
     parts = urlsplit(normalized)
     scheme = (parts.scheme or '').lower()
+    if scheme.startswith('sqlite'):
+        return normalized
     postgres_scheme = 'postgresql' if canonicalize_postgres_alias else scheme
     if scheme in {'postgresql', 'postgres'}:
         return urlunsplit((f'{postgres_scheme}+{driver}', parts.netloc, parts.path, parts.query, parts.fragment))
@@ -90,6 +92,8 @@ def normalize_postgres_connection_url(
     canonicalize_postgres_alias: bool = True,
 ) -> str:
     if dsn and dsn.strip():
+        if '://' in dsn and urlsplit(dsn.strip()).scheme.startswith('sqlite'):
+            return dsn.strip()
         return postgres_dsn_to_sqlalchemy_url(
             dsn,
             driver=driver,

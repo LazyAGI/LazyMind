@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -216,9 +218,9 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths Runti
 		return err
 	}
 	defer release()
-	stamp := filepath.Join(filepath.Dir(paths.AlgorithmVenv), "algorithm.ready")
-	if includeEvo {
-		stamp = filepath.Join(filepath.Dir(paths.AlgorithmVenv), "algorithm-evo.ready")
+	stamp, err := algorithmReadyStamp(paths, includeEvo)
+	if err != nil {
+		return err
 	}
 	if _, err := os.Stat(stamp); err == nil {
 		return nil
@@ -231,6 +233,21 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths Runti
 	if err := m.ensurePip(ctx, paths); err != nil {
 		return err
 	}
+	if err := m.installAlgorithmPythonDeps(ctx, paths, includeEvo); err != nil {
+		if rebuildErr := m.createVenv(ctx, paths, true); rebuildErr != nil {
+			return fmt.Errorf("prepare algorithm python failed and venv rebuild failed: %w (original install error: %v)", rebuildErr, err)
+		}
+		if pipErr := m.ensurePip(ctx, paths); pipErr != nil {
+			return fmt.Errorf("prepare algorithm python failed and rebuilt venv pip bootstrap failed: %w (original install error: %v)", pipErr, err)
+		}
+		if retryErr := m.installAlgorithmPythonDeps(ctx, paths, includeEvo); retryErr != nil {
+			return fmt.Errorf("prepare algorithm python failed after venv rebuild: %w (original install error: %v)", retryErr, err)
+		}
+	}
+	return os.WriteFile(stamp, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644)
+}
+
+func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
 	pip := filepath.Join(paths.AlgorithmVenv, "bin", "pip")
 	lazyllm := filepath.Join(paths.AlgorithmVenv, "bin", "lazyllm")
 	installSteps := []Command{
@@ -249,7 +266,29 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths Runti
 			return fmt.Errorf("prepare algorithm python failed at %s %s: %w (%s)", step.Name, strings.Join(step.Args, " "), err, strings.TrimSpace(res.Stderr))
 		}
 	}
-	return os.WriteFile(stamp, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644)
+	return nil
+}
+
+func algorithmReadyStamp(paths RuntimePaths, includeEvo bool) (string, error) {
+	hash := sha256.New()
+	files := []string{filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")}
+	prefix := "algorithm"
+	if includeEvo {
+		files = append(files, filepath.Join(paths.RepoRoot, "evo", "requirements.txt"))
+		prefix = "algorithm-evo"
+	}
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		_, _ = hash.Write([]byte(filepath.ToSlash(path)))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write(data)
+		_, _ = hash.Write([]byte{0})
+	}
+	digest := hex.EncodeToString(hash.Sum(nil))[:16]
+	return filepath.Join(filepath.Dir(paths.AlgorithmVenv), prefix+"-"+digest+".ready"), nil
 }
 
 func (m *AlgorithmServiceManager) createVenv(ctx context.Context, paths RuntimePaths, clear bool) error {
@@ -269,7 +308,12 @@ func (m *AlgorithmServiceManager) createVenv(ctx context.Context, paths RuntimeP
 		}
 		return nil
 	}
-	if res, err := m.runner.Run(ctx, Command{Name: python, Args: []string{"-m", "venv", paths.AlgorithmVenv}, Dir: paths.RepoRoot}); err != nil {
+	args := []string{"-m", "venv"}
+	if clear {
+		args = append(args, "--clear")
+	}
+	args = append(args, paths.AlgorithmVenv)
+	if res, err := m.runner.Run(ctx, Command{Name: python, Args: args, Dir: paths.RepoRoot}); err != nil {
 		return fmt.Errorf("create algorithm venv failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
 	return nil
@@ -343,7 +387,7 @@ func acquireAlgorithmPythonLock(ctx context.Context, paths RuntimePaths) (func()
 func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg RuntimeConfig, service string) error {
 	switch service {
 	case processorServerProcessName:
-		return waitForTCP(ctx, "127.0.0.1", cfg.Algorithm.PostgresPort, "PostgreSQL", 3*time.Minute)
+		return nil
 	case processorWorkerProcessName:
 		return waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute)
 	case algoProcessName:
@@ -420,15 +464,17 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		filepath.Join(paths.RepoRoot, "algorithm"),
 		paths.RepoRoot,
 	}, string(os.PathListSeparator))
-	dbURL := fmt.Sprintf("postgresql+psycopg://app:app@127.0.0.1:%d/app", cfg.Algorithm.PostgresPort)
+	lazyLLMDBURL := sqliteURL(paths.LazyLLMDBPath)
+	coreDBURL := sqliteURL(paths.CoreDBPath)
 	noProxy := envText("no_proxy", "127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
 	noProxyUpper := envText("NO_PROXY", noProxy)
 	env := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"PYTHONPATH=" + pythonPath,
 		"LAZYMIND_HOME=" + paths.AlgorithmHome,
-		"LAZYMIND_DATABASE_URL=" + dbURL,
-		"LAZYMIND_CORE_DATABASE_URL=" + fmt.Sprintf("postgresql+psycopg://root:123456@127.0.0.1:%d/core", cfg.Algorithm.PostgresPort),
+		"LAZYMIND_DATABASE_URL=" + lazyLLMDBURL,
+		"LAZYMIND_CORE_DATABASE_URL=" + coreDBURL,
+		"LAZYMIND_ACL_DB_DSN=" + coreDBURL,
 		"LAZYMIND_SHARED_UPLOAD_DIR=" + uploads,
 		"LAZYMIND_UPLOAD_DIR=" + uploads,
 		"LAZYMIND_UPLOAD_ROOT=" + uploads,

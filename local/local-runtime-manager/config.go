@@ -40,6 +40,7 @@ const (
 	authServiceUVEnvVar           = "LAZYMIND_AUTH_SERVICE_UV"
 	authServiceDatabaseURLEnvVar  = "LAZYMIND_AUTH_SERVICE_DATABASE_URL"
 	authServiceInstallDepsEnvVar  = "LAZYMIND_AUTH_SERVICE_INSTALL_DEPS"
+	localSQLiteDirEnvVar          = "LAZYMIND_LOCAL_SQLITE_DIR"
 	caddyBinEnvVar                = "LAZYMIND_CADDY_BIN"
 	caddyVersionEnvVar            = "LAZYMIND_CADDY_VERSION"
 	defaultProfile                = "linux-browser"
@@ -115,10 +116,14 @@ type RuntimePaths struct {
 	AuthServicePIDFile       string
 	AuthServiceVenvDir       string
 	AuthServiceStateDir      string
+	AuthServiceDBPath        string
 	CoreLog                  string
 	CorePIDFile              string
 	CoreBin                  string
 	CoreStateDir             string
+	CoreDBPath               string
+	LazyLLMDBPath            string
+	ScanDBPath               string
 	ScanControlPlaneLog      string
 	ScanControlPlanePIDFile  string
 	ScanControlPlaneBin      string
@@ -404,14 +409,19 @@ func defaultLocalProxyAuthHostPortValue() int {
 	return defaultLocalProxyAuthHostPort
 }
 
-func authServiceDatabaseURL(postgresPort int) string {
+func sqliteURL(path string) string {
+	return "sqlite:///" + filepath.ToSlash(path)
+}
+
+func sqliteDSN(path string) string {
+	return "file:" + filepath.ToSlash(path) + "?_journal_mode=WAL&_busy_timeout=30000&_foreign_keys=on"
+}
+
+func authServiceDatabaseURL(path string) string {
 	if v := strings.TrimSpace(os.Getenv(authServiceDatabaseURLEnvVar)); v != "" {
 		return v
 	}
-	if postgresPort <= 0 {
-		postgresPort = defaultLocalPostgresPort
-	}
-	return "postgresql+psycopg://root:123456@127.0.0.1:" + strconv.Itoa(postgresPort) + "/authservice"
+	return sqliteURL(path)
 }
 
 func serviceEndpointsFromConfig(cfg RuntimeConfig) ServiceEndpoints {
@@ -476,6 +486,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 
 	root := filepath.Clean(resolved)
 	runtimeRoot := filepath.Join(root, ".lazymind-local")
+	sqliteRoot := envText(localSQLiteDirEnvVar, filepath.Join(runtimeRoot, "stores", "sqlite"))
 	p := RuntimePaths{
 		RepoRoot:                 root,
 		RuntimeRoot:              runtimeRoot,
@@ -493,10 +504,14 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		AuthServicePIDFile:       filepath.Join(runtimeRoot, "run", "auth-service.pid"),
 		AuthServiceVenvDir:       filepath.Join(runtimeRoot, "venvs", "auth-service"),
 		AuthServiceStateDir:      filepath.Join(runtimeRoot, "stores", "sqlite", "auth-state"),
+		AuthServiceDBPath:        filepath.Join(sqliteRoot, "auth", "authservice.db"),
 		CoreLog:                  filepath.Join(runtimeRoot, "logs", coreLogFileName),
 		CorePIDFile:              filepath.Join(runtimeRoot, "run", "core.pid"),
 		CoreBin:                  filepath.Join(runtimeRoot, "bin", "core"),
 		CoreStateDir:             filepath.Join(runtimeRoot, "stores", "sqlite", "core-state"),
+		CoreDBPath:               filepath.Join(sqliteRoot, "core", "core.db"),
+		LazyLLMDBPath:            filepath.Join(sqliteRoot, "lazyllm", "app.db"),
+		ScanDBPath:               filepath.Join(sqliteRoot, "scan", "scan_control_plane.db"),
 		ScanControlPlaneLog:      filepath.Join(runtimeRoot, "logs", scanControlPlaneProcessName+".log"),
 		ScanControlPlanePIDFile:  filepath.Join(runtimeRoot, "run", scanControlPlaneProcessName+".pid"),
 		ScanControlPlaneBin:      filepath.Join(runtimeRoot, "bin", scanControlPlaneProcessName),
@@ -574,7 +589,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		AuthService: AuthServiceConfig{
 			Port:        authHostPort,
 			Python:      envText(authServicePythonEnvVar, "python3"),
-			DatabaseURL: authServiceDatabaseURL(postgresPort),
+			DatabaseURL: authServiceDatabaseURL(p.AuthServiceDBPath),
 			InstallDeps: envBool(authServiceInstallDepsEnvVar, true),
 		},
 		FileWatcher: FileWatcherConfig{
@@ -596,7 +611,11 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		p.BinDir,
 		filepath.Dir(p.AuthServicePIDFile),
 		p.AuthServiceStateDir,
+		filepath.Dir(p.AuthServiceDBPath),
 		p.CoreStateDir,
+		filepath.Dir(p.CoreDBPath),
+		filepath.Dir(p.LazyLLMDBPath),
+		filepath.Dir(p.ScanDBPath),
 		p.ScanControlPlaneStateDir,
 		p.ScanControlPlaneTempDir,
 		p.FileWatcherBaseRoot,
@@ -607,6 +626,17 @@ func (p RuntimePaths) EnsureAllDirs() error {
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {
+			return err
+		}
+	}
+	for _, d := range []string{
+		filepath.Dir(filepath.Dir(p.AuthServiceDBPath)),
+		filepath.Dir(p.AuthServiceDBPath),
+		filepath.Dir(p.CoreDBPath),
+		filepath.Dir(p.LazyLLMDBPath),
+		filepath.Dir(p.ScanDBPath),
+	} {
+		if err := os.Chmod(d, 0o777); err != nil {
 			return err
 		}
 	}
