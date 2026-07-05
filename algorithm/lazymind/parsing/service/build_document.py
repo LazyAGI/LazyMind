@@ -229,10 +229,10 @@ def drop_lazyllm_tables() -> None:
     try:
         import sqlalchemy
         engine = sqlalchemy.create_engine(sa_url)
-        table_list = ', '.join(f'"{t}"' for t in _LAZYLLM_TABLES)
         cascade = '' if engine.dialect.name == 'sqlite' else ' CASCADE'
         with engine.connect() as conn:
-            conn.execute(sqlalchemy.text(f'DROP TABLE IF EXISTS {table_list}{cascade}'))
+            for table in _LAZYLLM_TABLES:
+                conn.execute(sqlalchemy.text(f'DROP TABLE IF EXISTS "{table}"{cascade}'))
             conn.commit()
         engine.dispose()
         LOG.warning(f'[build_document] Dropped {len(_LAZYLLM_TABLES)} lazyllm tables — will be recreated on startup')

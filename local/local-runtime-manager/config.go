@@ -636,9 +636,7 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		filepath.Dir(p.LazyLLMDBPath),
 		filepath.Dir(p.ScanDBPath),
 	} {
-		if err := os.Chmod(d, 0o777); err != nil {
-			return err
-		}
+		_ = os.Chmod(d, 0o777)
 	}
 	return nil
 }

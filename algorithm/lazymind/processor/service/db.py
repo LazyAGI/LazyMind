@@ -16,6 +16,11 @@ def parse_db_url(url: Optional[str]) -> Optional[Dict[str, Any]]:
         db_type = (u.scheme or 'postgresql').split('+')[0]
         if db_type == 'sqlite':
             db_name = unquote(u.path or '')
+            raw_url = url.strip()
+            if raw_url.startswith('sqlite:////'):
+                db_name = '/' + db_name.lstrip('/')
+            elif raw_url.startswith('sqlite:///') and db_name.startswith('/'):
+                db_name = db_name[1:]
             if db_name.startswith('/') and u.netloc:
                 db_name = f'/{u.netloc}{db_name}'
             if not db_name:
