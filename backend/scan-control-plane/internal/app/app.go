@@ -193,7 +193,11 @@ func openConfiguredDB(cfg config.Config, opener DBOpener) (*sql.DB, error) {
 		if err := os.MkdirAll(filepath.Dir(cfg.DBDSN), 0o755); err != nil {
 			return nil, err
 		}
-		db, err := opener("sqlite", cfg.DBDSN+"?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)")
+		dsn := cfg.DBDSN
+		if !strings.HasPrefix(dsn, "file:") {
+			dsn = "file:" + filepath.ToSlash(dsn)
+		}
+		db, err := opener("sqlite", dsn+"?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)")
 		if err != nil {
 			return nil, err
 		}
