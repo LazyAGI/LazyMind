@@ -259,7 +259,7 @@ func (m *AlgorithmServiceManager) pythonModuleAvailable(ctx context.Context, pat
 		return false
 	}
 	res, err := m.runner.Run(ctx, Command{Name: paths.AlgorithmPython, Args: []string{"-c", "import " + module}, Dir: paths.RepoRoot})
-	return err == nil && strings.TrimSpace(res.Stderr) == ""
+	return err == nil
 }
 
 func (m *AlgorithmServiceManager) createVenv(ctx context.Context, paths RuntimePaths, clear bool) error {
