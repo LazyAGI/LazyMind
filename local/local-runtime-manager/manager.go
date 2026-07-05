@@ -806,12 +806,13 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			milvus.Kind = "host-process"
 			if tcpOK(ctx, "127.0.0.1", cfg.Algorithm.MilvusPort, 500*time.Millisecond) {
 				milvus.Status = "running"
-			} else if milvus.Status == "running" || milvus.Status == "starting" {
-				milvus.Status = "stale"
+			} else {
 				hostHealthy = false
-			} else if milvus.Status == "" || milvus.Status == "unknown" {
-				milvus.Status = "stopped"
-				hostHealthy = false
+				if milvus.Status == "running" || milvus.Status == "starting" {
+					milvus.Status = "stale"
+				} else if milvus.Status == "" || milvus.Status == "unknown" {
+					milvus.Status = "stopped"
+				}
 			}
 			resp.Services[milvusLiteProcessName] = milvus
 		}
