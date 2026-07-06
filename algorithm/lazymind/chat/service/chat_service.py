@@ -181,6 +181,33 @@ def _build_schedule_tools() -> list:
     return [build_schedule_tool_group()]
 
 
+def _collect_active_tool_names(configs: list) -> set[str]:
+    # Build a per-request callable allowlist from filtered tool configs.
+    # This is consumed by tool_runtime guard to prevent accidental execution
+    # when the model tries to call a tool that is not active in this session.
+    names: set[str] = set()
+    for cfg in configs:
+        inst = getattr(cfg, 'instance', None)
+        if inst is None:
+            continue
+        if callable(inst):
+            tool_name = str(getattr(inst, '__name__', '')).strip()
+            if tool_name:
+                names.add(tool_name)
+        public_apis = getattr(inst, '__public_apis__', None)
+        if isinstance(public_apis, (list, tuple)):
+            group_name = inst.__class__.__name__
+            if group_name:
+                names.add(f'get_{group_name}_methods')
+            for method_name in public_apis:
+                method = str(method_name).strip()
+                if method:
+                    names.add(method)
+                    if group_name:
+                        names.add(f'{group_name}_{method}')
+    return names
+
+
 def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]],
                                    current_turn_seq: Optional[int] = None) -> str:
     """Build the '## User Uploaded Files' context section from history_files_per_turn.

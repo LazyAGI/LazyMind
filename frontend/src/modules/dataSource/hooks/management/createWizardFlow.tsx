@@ -2,6 +2,10 @@ import { message } from "antd";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { dataSourceScanApi } from "../../api/clients";
 import {
+  deleteDatabaseConnection,
+  updateDatabaseConnection,
+} from "../../api/databaseConnections";
+import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   finishFeishuDataSourceOAuth,
   saveFeishuDataSourceWizardDraft,
@@ -185,6 +189,11 @@ export function createWizardFlow(ctx: ManagementContext) {
   };
 
   const openDetailPage = (record: DataSourceItem) => {
+    if (record.type === "database") {
+      navigate("/data-sources/database-connections");
+      return;
+    }
+
     const detailDocuments: DetailDocumentItem[] =
       record.detailDocuments ||
       record.fileCandidates.map((item) => ({
@@ -232,6 +241,61 @@ export function createWizardFlow(ctx: ManagementContext) {
         },
       },
     });
+  };
+
+  const getDatabaseConnectionId = (record: DataSourceItem) => (
+    record.databaseConnectionId || record.id.replace(/^database:/, "")
+  );
+
+  const openDatabaseConnectionConfig = (record: DataSourceItem) => {
+    if (!record.databaseConnection) {
+      message.error(t("admin.dataSourceDatabaseConfigMissing"));
+      return;
+    }
+    ctx.setDatabaseEditingConnection(record.databaseConnection);
+  };
+
+  const closeDatabaseConnectionConfig = () => {
+    if (ctx.databaseEditSaving) {
+      return;
+    }
+    ctx.setDatabaseEditingConnection(null);
+  };
+
+  const handleSaveDatabaseConnectionConfig = async (
+    payload: Parameters<typeof updateDatabaseConnection>[1],
+  ) => {
+    if (!ctx.databaseEditingConnection || ctx.databaseEditSaving) {
+      return;
+    }
+    ctx.setDatabaseEditSaving(true);
+    try {
+      await updateDatabaseConnection(ctx.databaseEditingConnection.id, payload);
+      message.success(t("admin.dataSourceDatabaseUpdated"));
+      ctx.setDatabaseEditingConnection(null);
+      await ctx.refreshSources(false, { page: ctx.sourceListPage });
+    } catch (error) {
+      message.error(
+        getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseSaveFailed")) ||
+          t("admin.dataSourceDatabaseSaveFailed"),
+      );
+    } finally {
+      ctx.setDatabaseEditSaving(false);
+    }
+  };
+
+  const executeDeleteDatabaseConnection = async (record: DataSourceItem) => {
+    try {
+      await deleteDatabaseConnection(getDatabaseConnectionId(record));
+      message.success(t("admin.dataSourceDatabaseDeleted"));
+      await ctx.refreshSources(false, { page: ctx.sourceListPage });
+    } catch (error) {
+      message.error(
+        getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseDeleteFailed")) ||
+          t("admin.dataSourceDatabaseDeleteFailed"),
+      );
+      throw error;
+    }
   };
 
   const executeDeleteSource = async (record: DataSourceItem) => {
@@ -305,7 +369,11 @@ export function createWizardFlow(ctx: ManagementContext) {
     handleOpenFeishuGuideFromAuthSelect,
     handleSubmitManualOauthCallback,
     openDetailPage,
+    openDatabaseConnectionConfig,
+    closeDatabaseConnectionConfig,
+    handleSaveDatabaseConnectionConfig,
     executeDeleteSource,
+    executeDeleteDatabaseConnection,
     handleNextStep,
   };
 }

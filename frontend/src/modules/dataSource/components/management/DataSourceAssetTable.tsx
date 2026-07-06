@@ -44,7 +44,9 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
       render: (_value, record) => (
         <div className="data-source-table-name">
           <span className={`data-source-icon data-source-icon-${record.type}`}>
-            {sourceTypeOptions.find((item) => item.type === record.type)?.icon}
+            {record.type === "database"
+              ? <DatabaseOutlined />
+              : sourceTypeOptions.find((item) => item.type === record.type)?.icon}
           </span>
           <div className="data-source-table-copy">
             <Button
@@ -86,7 +88,7 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
       },
       render: (knowledgeBase: string) => (
         <Tooltip title={knowledgeBase} placement="topLeft">
-          <span className="data-source-ellipsis">{knowledgeBase}</span>
+          <span className="data-source-ellipsis">{knowledgeBase || "-"}</span>
         </Tooltip>
       ),
     },
@@ -95,10 +97,12 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
       key: "syncMode",
       width: 205,
       render: (_value, record) => (
-        <div className="data-source-sync-cell">
-          <Text strong>{getSyncModeLabel(record.syncMode, t)}</Text>
-          <Text type="secondary">{record.scheduleLabel}</Text>
-        </div>
+        record.type === "database" ? <Text type="secondary">-</Text> : (
+          <div className="data-source-sync-cell">
+            <Text strong>{getSyncModeLabel(record.syncMode, t)}</Text>
+            <Text type="secondary">{record.scheduleLabel}</Text>
+          </div>
+        )
       ),
     },
     {
@@ -121,10 +125,12 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
       key: "lastSync",
       width: 190,
       render: (_value, record) => (
-        <div className="data-source-sync-cell">
-          <Text>{record.lastSync}</Text>
-          <Text type="secondary">{record.nextSync}</Text>
-        </div>
+        record.type === "database" ? <Text type="secondary">-</Text> : (
+          <div className="data-source-sync-cell">
+            <Text>{record.lastSync}</Text>
+            <Text type="secondary">{record.nextSync}</Text>
+          </div>
+        )
       ),
     },
     {
@@ -132,15 +138,17 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
       key: "summary",
       width: 150,
       render: (_value, record) => (
-        <div className="data-source-sync-cell">
-          <Text type="secondary">
-            {t("admin.dataSourceSummaryChanges", {
-              add: record.addCount,
-              change: record.changeCount,
-              del: record.deleteCount,
-            })}
-          </Text>
-        </div>
+        record.type === "database" ? <Text type="secondary">-</Text> : (
+          <div className="data-source-sync-cell">
+            <Text type="secondary">
+              {t("admin.dataSourceSummaryChanges", {
+                add: record.addCount,
+                change: record.changeCount,
+                del: record.deleteCount,
+              })}
+            </Text>
+          </div>
+        )
       ),
     },
     {
@@ -154,7 +162,17 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
           <Button type="link" icon={<EyeOutlined />} onClick={() => openDetailPage(record)}>
             {t("admin.dataSourceActionDetail")}
           </Button>
-          <Button type="link" icon={<EditOutlined />} onClick={() => openEditWizard(record)}>
+          <Button
+            type="link"
+            icon={<EditOutlined />}
+            onClick={() => {
+              if (record.type === "database") {
+                vm.openDatabaseConnectionConfig(record);
+                return;
+              }
+              openEditWizard(record);
+            }}
+          >
             {t("admin.dataSourceActionConfig")}
           </Button>
           <Button

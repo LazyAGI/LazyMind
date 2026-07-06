@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import TypedConfirmModal from '@/components/ui/TypedConfirmModal';
 import DataSourceWizardModal from "./DataSourceWizardModal";
 import DataSourceAssetTable from "./management/DataSourceAssetTable";
+import DatabaseConnectionModal from "../database/DatabaseConnectionModal";
 import type { DataSourceManagementVm } from "../hooks/useDataSourceManagement";
 import { CLOUD_DOCUMENTS_PATH } from "@/modules/modelProvider/utils/cloudDocumentUrls";
 
@@ -37,6 +38,10 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
     handleCloseWizard,
     handleNextStep,
     requestSaveWithSyncConfirm,
+    databaseEditingConnection,
+    databaseEditSaving,
+    closeDatabaseConnectionConfig,
+    handleSaveDatabaseConnectionConfig,
     confirmRef,
     handleTypedConfirm,
     handleSelectType,
@@ -72,6 +77,14 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
       <section className="data-source-workbench">
         <DataSourceAssetTable vm={vm} />
       </section>
+
+      <DatabaseConnectionModal
+        open={Boolean(databaseEditingConnection)}
+        editing={databaseEditingConnection}
+        saving={databaseEditSaving}
+        onCancel={closeDatabaseConnectionConfig}
+        onSubmit={handleSaveDatabaseConnectionConfig}
+      />
 
       <DataSourceWizardModal
         t={t}

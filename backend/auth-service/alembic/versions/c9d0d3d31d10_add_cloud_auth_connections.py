@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column('auth_state_ciphertext', sa.Text(), nullable=False, server_default=''),
         sa.Column('status', sa.String(length=32), nullable=False, server_default='ACTIVE'),
         sa.Column('last_error', sa.Text(), nullable=False, server_default=''),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('CURRENT_TIMESTAMP')),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('connection_id'),
     )

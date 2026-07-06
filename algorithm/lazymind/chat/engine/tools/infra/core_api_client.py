@@ -2,9 +2,22 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+import lazyllm
 import requests
 
 from lazymind.config import config as _cfg
+
+
+def _current_user_headers() -> Dict[str, str]:
+    agentic_config = lazyllm.globals.get('agentic_config') or {}
+    user_id = str(agentic_config.get('user_id') or '').strip()
+    headers: Dict[str, str] = {}
+    if user_id:
+        headers['X-User-Id'] = user_id
+    internal_token = str(_cfg['core_internal_token'] or '').strip()
+    if internal_token:
+        headers['X-LazyMind-Internal-Token'] = internal_token
+    return headers
 
 
 def post_core_api(
@@ -19,7 +32,7 @@ def post_core_api(
     timeout = int(_cfg['core_api_timeout'])
     with requests.sessions.Session() as session:
         session.trust_env = False
-        response = session.post(url, json=payload, timeout=timeout)
+        response = session.post(url, json=payload, headers=_current_user_headers(), timeout=timeout)
 
     try:
         body = response.json()
@@ -45,7 +58,7 @@ def post_core_api(
     }
 
 
-def get_core_api(path: str) -> Dict[str, Any]:
+def get_core_api(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
     base_url = str(_cfg['core_api_url'] or '').strip().rstrip('/')
     if not base_url:
         raise RuntimeError("'core_api_url' is required in config.")
@@ -54,7 +67,7 @@ def get_core_api(path: str) -> Dict[str, Any]:
     timeout = int(_cfg['core_api_timeout'])
     with requests.sessions.Session() as session:
         session.trust_env = False
-        response = session.get(url, timeout=timeout)
+        response = session.get(url, params=params, headers=_current_user_headers(), timeout=timeout)
 
     try:
         body = response.json()

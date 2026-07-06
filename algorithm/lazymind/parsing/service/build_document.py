@@ -1,4 +1,6 @@
 import lazyllm
+from copy import deepcopy
+from typing import NamedTuple, Optional
 from lazyllm.tracing import set_trace_context
 from lazyllm import AutoModel
 from lazyllm.tools.rag import AdaptiveTransform, CodeSplitter, Document, LLMParser, TransformArgs
@@ -42,6 +44,11 @@ def _quiet_trace(kbs):
     return call
 
 
+class _VectorStoreProfile(NamedTuple):
+    db_name_override: Optional[str]
+    index_type_override: Optional[str]
+
+
 def get_algo_server_port() -> int:
     port = _cfg['algo_server_port']
     if port:
@@ -49,10 +56,46 @@ def get_algo_server_port() -> int:
     return _cfg['document_server_port']
 
 
+# Static mode profiles. None means the profile keeps LazyLLM's default behavior.
+_VECTOR_STORE_PROFILE_BY_MODE = {
+    'cloud': _VectorStoreProfile(db_name_override=None, index_type_override=None),
+    'local': _VectorStoreProfile(db_name_override='', index_type_override='FLAT'),
+}
+
+
+def _runtime_mode() -> str:
+    mode = (_cfg['runtime_mode'] or 'cloud').strip().lower()
+    if mode not in _VECTOR_STORE_PROFILE_BY_MODE:
+        return 'cloud'
+    return mode
+
+
+def _runtime_index_kwargs(index_kwargs, mode: str):
+    index_type_override = _VECTOR_STORE_PROFILE_BY_MODE[mode].index_type_override
+    if not index_type_override:
+        return index_kwargs
+    runtime_kwargs = deepcopy(index_kwargs)
+    for item in runtime_kwargs:
+        item['index_type'] = index_type_override
+        item.setdefault('metric_type', 'COSINE')
+        item['params'] = {}
+    return runtime_kwargs
+
+
 def _build_store_config(index_kwargs):
     milvus_uri = _cfg['milvus_uri']
     if not milvus_uri:
         raise ValueError('LAZYMIND_MILVUS_URI is required')
+    mode = _runtime_mode()
+    profile = _VECTOR_STORE_PROFILE_BY_MODE[mode]
+    milvus_kwargs = {
+        'uri': milvus_uri,
+        'index_kwargs': _runtime_index_kwargs(index_kwargs, mode),
+    }
+    if profile.db_name_override is not None:
+        # Profiles without overrides keep LazyLLM's default vector-store behavior.
+        # Passing an empty name opts into the default database and skips creation.
+        milvus_kwargs['db_name'] = profile.db_name_override
 
     store_type = _cfg['segment_store_type']
     uri_or_path = _cfg['segment_store_uri_or_path']
@@ -82,10 +125,7 @@ def _build_store_config(index_kwargs):
     return {
         'vector_store': {
             'type': 'milvus',
-            'kwargs': {
-                'uri': milvus_uri,
-                'index_kwargs': index_kwargs,
-            },
+            'kwargs': milvus_kwargs,
         },
         'segment_store': segment_store,
     }
@@ -224,14 +264,15 @@ def drop_lazyllm_tables() -> None:
     if not db_url:
         LOG.warning('[build_document] database_url not set — skipping lazyllm table drop')
         return
-    # Normalise psycopg3 URL to psycopg2 for SQLAlchemy (lazyllm uses psycopg2 internally)
+    # Normalise psycopg3 URL to psycopg2 for SQLAlchemy (lazyllm uses psycopg2 internally).
     sa_url = db_url.replace('postgresql+psycopg://', 'postgresql+psycopg2://', 1)
     try:
         import sqlalchemy
         engine = sqlalchemy.create_engine(sa_url)
-        table_list = ', '.join(f'"{t}"' for t in _LAZYLLM_TABLES)
+        cascade = '' if engine.dialect.name == 'sqlite' else ' CASCADE'
         with engine.connect() as conn:
-            conn.execute(sqlalchemy.text(f'DROP TABLE IF EXISTS {table_list} CASCADE'))
+            for table in _LAZYLLM_TABLES:
+                conn.execute(sqlalchemy.text(f'DROP TABLE IF EXISTS "{table}"{cascade}'))
             conn.commit()
         engine.dispose()
         LOG.warning(f'[build_document] Dropped {len(_LAZYLLM_TABLES)} lazyllm tables — will be recreated on startup')

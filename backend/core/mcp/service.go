@@ -2,15 +2,10 @@ package mcp
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"sort"
@@ -21,6 +16,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/common/secretcrypto"
 )
 
 var (
@@ -344,15 +340,7 @@ func encodeHeaders(headers map[string]any) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	nonce, ciphertext, err := encryptHeaderBytes(raw)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(map[string]any{
-		"enc":   "aes-gcm",
-		"nonce": base64.StdEncoding.EncodeToString(nonce),
-		"v":     base64.StdEncoding.EncodeToString(ciphertext),
-	})
+	return secretcrypto.EncodeAESGCM(raw, encryptionKey())
 }
 
 func decodeHeaders(raw json.RawMessage) (map[string]any, error) {
@@ -364,19 +352,11 @@ func decodeHeaders(raw json.RawMessage) (map[string]any, error) {
 		Nonce string `json:"nonce"`
 		V     string `json:"v"`
 	}
-	if json.Unmarshal(raw, &wrapper) == nil && wrapper.Enc == "aes-gcm" && wrapper.V != "" {
-		nonce, err := base64.StdEncoding.DecodeString(wrapper.Nonce)
+	if decoded, ok, err := secretcrypto.DecodeAESGCM(raw, encryptionKey()); ok {
 		if err != nil {
 			return nil, err
 		}
-		ciphertext, err := base64.StdEncoding.DecodeString(wrapper.V)
-		if err != nil {
-			return nil, err
-		}
-		raw, err = decryptHeaderBytes(nonce, ciphertext)
-		if err != nil {
-			return nil, err
-		}
+		raw = decoded
 	} else if json.Unmarshal(raw, &wrapper) == nil && wrapper.Enc == "base64" && wrapper.V != "" {
 		decoded, err := base64.StdEncoding.DecodeString(wrapper.V)
 		if err != nil {
@@ -399,35 +379,6 @@ func encryptionKey() string {
 		return key
 	}
 	return "lazymind-core-mcp-default-secret"
-}
-
-func headerAEAD() (cipher.AEAD, error) {
-	sum := sha256.Sum256([]byte(encryptionKey()))
-	block, err := aes.NewCipher(sum[:])
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(block)
-}
-
-func encryptHeaderBytes(plaintext []byte) ([]byte, []byte, error) {
-	aead, err := headerAEAD()
-	if err != nil {
-		return nil, nil, err
-	}
-	nonce := make([]byte, aead.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, nil, err
-	}
-	return nonce, aead.Seal(nil, nonce, plaintext, nil), nil
-}
-
-func decryptHeaderBytes(nonce, ciphertext []byte) ([]byte, error) {
-	aead, err := headerAEAD()
-	if err != nil {
-		return nil, err
-	}
-	return aead.Open(nil, nonce, ciphertext, nil)
 }
 
 func apiKeyPreview(raw json.RawMessage) string {

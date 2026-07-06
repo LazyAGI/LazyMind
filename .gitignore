@@ -107,3 +107,7 @@ api/backend/core/openapi.yml
 api/backend/core/swagger.json
 
 .pnpm-store/
+backend/core/openapi.json
+backend/core/swagger.json
+backend/core/docs/swagger.json
+openapi-export/

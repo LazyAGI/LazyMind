@@ -363,6 +363,9 @@ export function getSourceTypeTitle(type: SourceType, t: TFunction) {
   if (type === "notion") {
     return t("admin.dataSourceTypeNotion");
   }
+  if (type === "database") {
+    return t("admin.dataSourceTypeDatabase");
+  }
   return type;
 }
 
@@ -375,6 +378,9 @@ export function getSourceTypeDescription(type: SourceType, t: TFunction) {
   }
   if (type === "notion") {
     return t("admin.dataSourceTypeNotionDesc");
+  }
+  if (type === "database") {
+    return t("admin.dataSourceTypeDatabaseDesc");
   }
   return "";
 }

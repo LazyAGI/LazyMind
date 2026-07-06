@@ -1,6 +1,7 @@
 """Infrastructure helpers for chat engine tools."""
 
 from .core_api_client import (
+    get_core_api,
     post_core_api,
 )
 from .calculator_eval import (
@@ -68,6 +69,7 @@ from .vocab_registry import (
     get_vocab_manager,
 )
 from .tool_runtime import (
+    handle_tool_errors,
     tool_error,
     tool_failure,
     tool_success,
@@ -90,7 +92,9 @@ __all__ = [
     'fetch_chat_histories_for_session',
     'fetch_url_content',
     'fetch_vocab_groups_for_user_id',
+    'get_core_api',
     'get_vocab_manager',
+    'handle_tool_errors',
     'is_writable_skill_source',
     'list_all_skill_entries',
     'list_all_skills_with_category',

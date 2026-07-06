@@ -2,6 +2,7 @@ package orm
 
 import (
 	"fmt"
+	"strings"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -39,6 +40,23 @@ func Connect(driver, dsn string) (*DB, error) {
 	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
 		return nil, err
+	}
+	if driver == DriverSQLite {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return nil, err
+		}
+		sqlDB.SetMaxOpenConns(4)
+		for _, stmt := range []string{
+			"PRAGMA busy_timeout=30000",
+			"PRAGMA journal_mode=WAL",
+			"PRAGMA synchronous=NORMAL",
+			"PRAGMA foreign_keys=ON",
+		} {
+			if _, err := sqlDB.Exec(stmt); err != nil && !strings.Contains(strings.ToLower(err.Error()), "database is locked") {
+				return nil, err
+			}
+		}
 	}
 	return &DB{DB: db}, nil
 }

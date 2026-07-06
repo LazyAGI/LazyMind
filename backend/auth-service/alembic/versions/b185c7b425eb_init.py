@@ -37,7 +37,7 @@ def upgrade() -> None:
         sa.Column(
             'created_at',
             sa.DateTime(timezone=True),
-            server_default=sa.text('now()'),
+            server_default=sa.text('CURRENT_TIMESTAMP'),
             nullable=False,
             comment='Created at',
         ),
@@ -54,7 +54,7 @@ def upgrade() -> None:
         sa.Column(
             'created_at',
             sa.DateTime(timezone=True),
-            server_default=sa.text('now()'),
+            server_default=sa.text('CURRENT_TIMESTAMP'),
             nullable=False,
             comment='Created at',
         ),
@@ -70,7 +70,7 @@ def upgrade() -> None:
         sa.Column(
             'created_at',
             sa.DateTime(timezone=True),
-            server_default=sa.text('now()'),
+            server_default=sa.text('CURRENT_TIMESTAMP'),
             nullable=False,
             comment='Created at',
         ),
@@ -102,7 +102,7 @@ def upgrade() -> None:
         sa.Column(
             'created_at',
             sa.DateTime(timezone=True),
-            server_default=sa.text('now()'),
+            server_default=sa.text('CURRENT_TIMESTAMP'),
             nullable=False,
             comment='Created at',
         ),
@@ -129,7 +129,7 @@ def upgrade() -> None:
         sa.Column(
             'created_at',
             sa.DateTime(timezone=True),
-            server_default=sa.text('now()'),
+            server_default=sa.text('CURRENT_TIMESTAMP'),
             nullable=False,
             comment='Created at',
         ),
@@ -149,7 +149,7 @@ def upgrade() -> None:
         sa.Column(
             'created_at',
             sa.DateTime(timezone=True),
-            server_default=sa.text('now()'),
+            server_default=sa.text('CURRENT_TIMESTAMP'),
             nullable=False,
             comment='Created at',
         ),
@@ -177,7 +177,7 @@ def upgrade() -> None:
         sa.Column(
             'created_at',
             sa.DateTime(timezone=True),
-            server_default=sa.text('now()'),
+            server_default=sa.text('CURRENT_TIMESTAMP'),
             nullable=False,
             comment='Created at',
         ),

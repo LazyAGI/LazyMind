@@ -1565,6 +1565,9 @@ const enUS = {
     dataSourceTypeNotion: "Notion",
     dataSourceTypeNotionDesc:
       "Connect Notion pages or databases, sync by authorization scope and serve chat.",
+    dataSourceTypeDatabase: "External Database",
+    dataSourceTypeDatabaseDesc:
+      "Connect MySQL or PostgreSQL with a read-only account for direct chat queries.",
     dataSourceTypeStepIntro:
       "Currently supports local files / directories, Feishu, and Notion data source access. Select one to continue.",
     dataSourceAdminOnly: "Admin",
@@ -1630,6 +1633,77 @@ const enUS = {
     dataSourceNotionTargetLabel: "Notion page or database",
     dataSourceNotionSetupGuideHint:
       ": View detailed Notion OAuth setup steps, required credentials, and Redirect URI instructions.",
+    dataSourceDatabaseTitle: "External Database",
+    dataSourceDatabaseSubtitle:
+      "Configure MySQL and PostgreSQL database connections for read-only chat queries.",
+    dataSourceDatabaseSectionTitle: "Database",
+    dataSourceDatabaseReadonlyTag: "Read-only Query",
+    dataSourceDatabaseProviderDesc:
+      "Manage MySQL and PostgreSQL connections for external data queries in chat.",
+    dataSourceDatabaseCreateAction: "New Connection",
+    dataSourceDatabaseGuideAction: "Setup Guide",
+    dataSourceDatabaseCreateTitle: "New External Database Connection",
+    dataSourceDatabaseEditTitle: "Edit External Database Connection",
+    dataSourceDatabaseName: "Name",
+    dataSourceDatabaseNameRequired: "Please enter a name",
+    dataSourceDatabaseDescription: "Description",
+    dataSourceDatabaseType: "Type",
+    dataSourceDatabaseAddress: "Address",
+    dataSourceDatabaseHost: "Host",
+    dataSourceDatabaseHostRequired: "Please enter host",
+    dataSourceDatabasePort: "Port",
+    dataSourceDatabaseDatabaseName: "Database",
+    dataSourceDatabaseDatabaseNameRequired: "Please enter database name",
+    dataSourceDatabaseUsername: "Username",
+    dataSourceDatabaseUsernameRequired: "Please enter username",
+    dataSourceDatabasePassword: "Password",
+    dataSourceDatabasePasswordRequired: "Please enter password",
+    dataSourceDatabasePasswordEditPlaceholder: "Leave blank to keep unchanged",
+    dataSourceDatabaseOptionsJson: "Connection Options JSON",
+    dataSourceDatabaseOptionsJsonInvalid: "Connection options must be a valid JSON object",
+    dataSourceDatabaseStatus: "Status",
+    dataSourceDatabaseVerified: "Verified",
+    dataSourceDatabaseUnverified: "Unverified",
+    dataSourceDatabasePending: "Pending",
+    dataSourceDatabaseConnectionError: "Connection Error",
+    dataSourceDatabaseTestAction: "Test",
+    dataSourceDatabaseLoadFailed: "Failed to load external database connections",
+    dataSourceDatabaseSaveFailed: "Failed to save external database connection",
+    dataSourceDatabaseCreated: "Connection created",
+    dataSourceDatabaseUpdated: "Connection updated",
+    dataSourceDatabaseDeleted: "Connection deleted",
+    dataSourceDatabaseDeleteTitle: "Delete external database connection",
+    dataSourceDatabaseDeleteContent: "Delete {{name}}?",
+    dataSourceDatabaseDeleteFailed: "Failed to delete external database connection",
+    dataSourceDatabaseCheckSuccess: "Connection succeeded, found {{count}} tables",
+    dataSourceDatabaseCheckFailed: "Connection test failed",
+    dataSourceDatabaseConfigMissing: "External database connection config was not found",
+    dataSourceDatabaseReadonlyQueryLog:
+      "External database connections are used for read-only chat queries and do not participate in file sync.",
+    dataSourceDatabaseListHint:
+      "External databases are also shown in the data source list; they do not belong to a knowledge base or participate in file sync.",
+    dataSourceDatabaseEmptyTitle: "No external database connections",
+    dataSourceDatabaseEmptyDesc:
+      "Create a connection to add a database available for read-only chat queries.",
+    dataSourceDatabaseGuideTitle: "External Database Setup Guide",
+    dataSourceDatabaseGuideClose: "Got it",
+    dataSourceDatabaseGuideIntro:
+      "External databases are for chat queries only. They do not sync files or create a knowledge base. Prepare a read-only account first, then test the connection to verify network, permissions, and database name.",
+    dataSourceDatabaseGuideReadOnlyTitle: "Prepare a read-only account",
+    dataSourceDatabaseGuideReadOnlyDesc:
+      "Create a dedicated MySQL or PostgreSQL account and grant only SELECT permissions for the required schemas and tables. Avoid administrator accounts.",
+    dataSourceDatabaseGuideNetworkTitle: "Allow network access",
+    dataSourceDatabaseGuideNetworkDesc:
+      "Allow the LazyMind deployment egress IP to access the database port in your cloud database allowlist or security group. For RDS, also confirm public or private network access is enabled.",
+    dataSourceDatabaseGuideConfigTitle: "Enter connection details",
+    dataSourceDatabaseGuideConfigDesc:
+      "Create a connection and enter host, port, database name, username, and password. For PostgreSQL SSL, set {\"sslmode\":\"require\"} in connection options. MySQL usually needs no extra options.",
+    dataSourceDatabaseGuideTestTitle: "Test connection",
+    dataSourceDatabaseGuideTestDesc:
+      "After saving, run Test. Once verified, LazyMind can inspect schemas and execute read-only SELECT/WITH queries in chat.",
+    dataSourceDatabaseGuideUseTitle: "Use from data source list and chat",
+    dataSourceDatabaseGuideUseDesc:
+      "The connection appears in the data source list automatically. Because external databases do not need sync strategy or a knowledge base, those columns show a dash. In chat, mention the database and question directly.",
     dataSourceAppIdRequired: "Please enter App ID",
     dataSourceAppSecretRequired: "Please enter App Secret",
     dataSourceAppId: "App ID",

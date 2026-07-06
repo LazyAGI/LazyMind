@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"lazymind/core/chat"
+	"lazymind/core/datasource"
 	"lazymind/core/doc"
 	"lazymind/core/evalset"
 	"lazymind/core/mcp"
@@ -410,6 +411,14 @@ type datasetPathParams struct {
 type documentPathParams struct {
 	Dataset  string `path:"dataset"`
 	Document string `path:"document"`
+}
+
+type databaseConnectionPathParams struct {
+	Connection string `path:"connection"`
+}
+
+type deleteDatabaseConnectionOpenAPIResponse struct {
+	Deleted bool `json:"deleted"`
 }
 
 type taskPathParams struct {
@@ -1387,6 +1396,62 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Updated local filesystem chat setting", localFSChatSettingOpenAPIResponse{})},
 		},
 		{
+			Method:    "GET",
+			Path:      "/data-sources/database-connections",
+			Summary:   "List database connections",
+			Tags:      []string{"data-sources"},
+			Responses: map[int]openAPIResponse{200: resp("Database connection list", datasource.ListDatabaseConnectionsResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/data-sources/database-connections",
+			Summary:     "Create database connection",
+			Tags:        []string{"data-sources"},
+			RequestBody: jsonBodyOf(datasource.DatabaseConnectionRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Created database connection", datasource.DatabaseConnectionResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/data-sources/database-connections/{connection}",
+			Summary:    "Get database connection",
+			Tags:       []string{"data-sources"},
+			PathParams: databaseConnectionPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Database connection", datasource.DatabaseConnectionResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/data-sources/database-connections/{connection}",
+			Summary:     "Update database connection",
+			Tags:        []string{"data-sources"},
+			PathParams:  databaseConnectionPathParams{},
+			RequestBody: jsonBodyOf(datasource.UpdateDatabaseConnectionRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated database connection", datasource.DatabaseConnectionResponse{})},
+		},
+		{
+			Method:     "DELETE",
+			Path:       "/data-sources/database-connections/{connection}",
+			Summary:    "Delete database connection",
+			Tags:       []string{"data-sources"},
+			PathParams: databaseConnectionPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Deleted database connection", deleteDatabaseConnectionOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/data-sources/database-connections/{connection}:check",
+			Summary:    "Check database connection",
+			Tags:       []string{"data-sources"},
+			PathParams: databaseConnectionPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Database connection check result", datasource.CheckDatabaseConnectionResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/data-sources/database-connections/{connection}:secret",
+			Summary:    "Get database connection secret",
+			Tags:       []string{"data-sources"},
+			PathParams: databaseConnectionPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Database connection secret", datasource.DatabaseConnectionSecretResponse{})},
+		},
+		{
 			Method:      "GET",
 			Path:        "/eval-sets",
 			Summary:     "List eval sets",
@@ -1617,6 +1682,14 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"documents"},
 			RequestBody: jsonBodyOf(doc.SearchDocumentsRequest{}, false),
 			Responses:   map[int]openAPIResponse{200: resp("textDocument search results", doc.ListDocumentsResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/system-query/documents:aggregate",
+			Summary:     "Aggregate documents",
+			Tags:        []string{"documents"},
+			RequestBody: jsonBodyOf(doc.AggregateDocumentsRequest{}, false),
+			Responses:   map[int]openAPIResponse{200: resp("Document aggregate results", doc.AggregateDocumentsResponse{})},
 		},
 		{
 			Method:      "POST",

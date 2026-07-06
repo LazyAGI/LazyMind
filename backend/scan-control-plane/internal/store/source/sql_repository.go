@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -17,14 +18,45 @@ type SQLRepository struct {
 }
 
 func NewSQLRepository(db *sql.DB) *SQLRepository {
+	return NewSQLRepositoryWithDriver("postgres", db)
+}
+
+func NewSQLRepositoryWithDriver(driver string, db *sql.DB) *SQLRepository {
 	if db == nil {
 		return &SQLRepository{}
 	}
-	orm, err := gorm.Open(postgres.New(postgres.Config{Conn: db}), &gorm.Config{DisableAutomaticPing: true})
+	var dialector gorm.Dialector
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "sqlite":
+		dialector = sqlite.Dialector{Conn: db}
+	default:
+		dialector = postgres.New(postgres.Config{Conn: db})
+	}
+	orm, err := gorm.Open(dialector, &gorm.Config{DisableAutomaticPing: true})
 	if err != nil {
 		return &SQLRepository{db: db}
 	}
 	return &SQLRepository{db: db, orm: orm}
+}
+
+func (r *SQLRepository) AutoMigrate() error {
+	if r.orm == nil {
+		return NewStoreError(ErrCodeInternal, "orm repository is not initialized")
+	}
+	return r.orm.AutoMigrate(
+		&ormSource{},
+		&ormBinding{},
+		&ormSourceObject{},
+		&ormDocumentState{},
+		&ormDocument{},
+		&ormParseTask{},
+		&ormSyncCheckpoint{},
+		&ormSyncRun{},
+		&ormCreateOperation{},
+		&ormAgent{},
+		&ormAgentCommand{},
+		&ormParseTaskDeadLetter{},
+	)
 }
 
 func (r *SQLRepository) ormDB(ctx context.Context) *gorm.DB {

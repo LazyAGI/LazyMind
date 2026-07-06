@@ -22,6 +22,10 @@ type ComposeServiceStatus struct {
 	ExitCode int
 }
 
+type ComposeStartupPlan struct {
+	Services []string
+}
+
 type composeReadinessState int
 
 const (
@@ -53,10 +57,7 @@ func derivedComposeProfileArgs() []string {
 	if enabledFromEnv("LAZYMIND_DEPLOY_MINERU") {
 		profiles = append(profiles, "mineru")
 	}
-	if isBuiltInServiceURI("LAZYMIND_MILVUS_URI", "http://milvus:19530") {
-		profiles = append(profiles, "milvus")
-	}
-	if isBuiltInServiceURI("LAZYMIND_OPENSEARCH_URI", "https://opensearch:9200") {
+	if localSegmentStoreUsesBuiltInOpenSearch() {
 		profiles = append(profiles, "opensearch")
 	}
 	if enabledFromEnv("LAZYMIND_ENABLE_MILVUS_DASHBOARD") && containsProfile(profiles, "milvus") {
@@ -88,6 +89,15 @@ func isBuiltInServiceURI(envName, fallback string) bool {
 		v = fallback
 	}
 	return v == fallback || v == fallback+"/"
+}
+
+func localSegmentStoreType() string {
+	return strings.TrimSpace(envText("LAZYMIND_SEGMENT_STORE_TYPE", "SQLiteStore"))
+}
+
+func localSegmentStoreUsesBuiltInOpenSearch() bool {
+	return strings.EqualFold(localSegmentStoreType(), "opensearch") &&
+		isBuiltInServiceURI("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", "https://opensearch:9200")
 }
 
 func containsProfile(profiles []string, want string) bool {
@@ -145,30 +155,41 @@ func (m *ComposeManager) ComposeHasContainers(ctx context.Context, repoRoot stri
 	return len(statuses) > 0, nil
 }
 
-func (m *ComposeManager) ComposeUp(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	repoRoot := paths.RepoRoot
+func (m *ComposeManager) ComposeStartupPlan(ctx context.Context, repoRoot string) (ComposeStartupPlan, error) {
 	services, err := m.ComposeServices(ctx, repoRoot)
 	if err != nil {
-		return err
+		return ComposeStartupPlan{}, err
 	}
 	disabled, err := parseRuntimeOverlay(filepath.Join(repoRoot, localComposeOverrideName))
-	if err != nil && !os.IsNotExist(err) {
-		return err
+	disabledContainerTypes := []string{}
+	if err == nil {
+		disabledContainerTypes = disabled.DisabledContainerTypes
+	} else if !os.IsNotExist(err) {
+		return ComposeStartupPlan{}, err
 	}
 
-	remaining, err := filterRemainingServices(services, disabled.DisabledContainerTypes)
+	remaining, err := filterRemainingServices(services, disabledContainerTypes)
+	if err != nil {
+		return ComposeStartupPlan{}, err
+	}
+	return ComposeStartupPlan{Services: remaining}, nil
+}
+
+func (m *ComposeManager) ComposeUp(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	repoRoot := paths.RepoRoot
+	plan, err := m.ComposeStartupPlan(ctx, repoRoot)
 	if err != nil {
 		return err
 	}
-	if len(remaining) == 0 {
-		_ = cfg.Profile
+	if len(plan.Services) == 0 {
+		return nil
 	}
-	if err := m.BuildEnabledServices(ctx, repoRoot, remaining); err != nil {
+	if err := m.BuildEnabledServices(ctx, repoRoot, plan.Services); err != nil {
 		return err
 	}
 
 	args := append(m.composeArgs(repoRoot), "up", "--no-build", "--detach", "--no-deps")
-	args = append(args, remaining...)
+	args = append(args, plan.Services...)
 	env := localComposeEnv(cfg)
 	if streamer, ok := m.runner.(CommandStreamer); ok {
 		err := streamer.Stream(ctx, Command{Name: "docker", Args: args, Dir: repoRoot, Env: env}, os.Stdout, os.Stderr)
@@ -252,13 +273,17 @@ func (m *ComposeManager) ComposeConfigJSON(ctx context.Context, repoRoot string)
 func localComposeEnv(cfg RuntimeConfig) []string {
 	return []string{
 		"LAZYMIND_FRONTEND_PORT=" + strconv.Itoa(cfg.FrontendPort),
+		"LAZYMIND_LOCAL_NETWORK_PROFILE=" + cfg.NetworkProfile,
 		"LAZYMIND_LOCAL_PROXY_PORT=" + strconv.Itoa(cfg.LocalProxy.Port),
+		"LAZYMIND_LOCAL_AUTH_PORT=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
 		"LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
+		"LAZYMIND_AUTH_SERVICE_PORT=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
 		"LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_LOCAL_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.ChatHostPort),
 		"LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
 		"LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.EvoHostPort),
+		"LAZYMIND_LOCAL_FILE_WATCHER_PORT=" + strconv.Itoa(cfg.FileWatcher.Port),
 		"LAZYMIND_LOCAL_POSTGRES_PORT=" + strconv.Itoa(cfg.Algorithm.PostgresPort),
 		"LAZYMIND_LOCAL_DOC_PORT=" + strconv.Itoa(cfg.Algorithm.DocPort),
 		"LAZYMIND_LOCAL_PROCESSOR_PORT=" + strconv.Itoa(cfg.Algorithm.ProcessorPort),
@@ -266,7 +291,7 @@ func localComposeEnv(cfg RuntimeConfig) []string {
 		"LAZYMIND_LOCAL_WORKER_PORT=" + strconv.Itoa(cfg.Algorithm.WorkerPort),
 		"LAZYMIND_LOCAL_CHAT_PORT=" + strconv.Itoa(cfg.Algorithm.ChatPort),
 		"LAZYMIND_LOCAL_EVO_PORT=" + strconv.Itoa(cfg.Algorithm.EvoPort),
-		"LAZYMIND_LOCAL_MILVUS_PORT=" + strconv.Itoa(cfg.Algorithm.MilvusPort),
+		"LAZYMIND_LOCAL_MILVUS_PORT=" + strconv.Itoa(cfg.ModeProfile.VectorStore.Port),
 		"LAZYMIND_LOCAL_OPENSEARCH_PORT=" + strconv.Itoa(cfg.Algorithm.OpenSearchPort),
 	}
 }
@@ -393,4 +418,25 @@ func classifyComposeReadiness(statuses []ComposeServiceStatus) (composeReadiness
 		}
 	}
 	return composeReadinessReady, "all services ready"
+}
+
+func filterComposeStatuses(statuses []ComposeServiceStatus, services []string) []ComposeServiceStatus {
+	if len(services) == 0 {
+		return nil
+	}
+	wanted := make(map[string]struct{}, len(services))
+	for _, service := range services {
+		wanted[service] = struct{}{}
+	}
+	filtered := make([]ComposeServiceStatus, 0, len(statuses))
+	for _, st := range statuses {
+		service := st.Service
+		if service == "" {
+			service = st.Name
+		}
+		if _, ok := wanted[service]; ok {
+			filtered = append(filtered, st)
+		}
+	}
+	return filtered
 }

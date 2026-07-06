@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -94,6 +95,34 @@ func TestRuntimePathsEnsureAllDirsCreatesOnlyV1Directories(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigDefaultsFileWatcherBaseRootUnderRuntimeRoot(t *testing.T) {
+	t.Setenv("LAZYMIND_FILE_WATCHER_BASE_ROOT", "")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	want := filepath.Join(repo, ".lazymind-local", "stores", "scan", "file-watcher")
+	if paths.FileWatcherBaseRoot != want {
+		t.Fatalf("file watcher base root = %q, want %q", paths.FileWatcherBaseRoot, want)
+	}
+}
+
+func TestRuntimeConfigAllowsFileWatcherBaseRootOverride(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	override := filepath.Join(repo, "data", "scan")
+	t.Setenv("LAZYMIND_FILE_WATCHER_BASE_ROOT", override)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if paths.FileWatcherBaseRoot != override {
+		t.Fatalf("file watcher base root = %q, want %q", paths.FileWatcherBaseRoot, override)
+	}
+}
+
 func TestRuntimeConfigAllocatesAvailableLocalPorts(t *testing.T) {
 	for _, envName := range []string{
 		processComposePortEnvVar,
@@ -179,6 +208,49 @@ func TestRuntimeConfigMovesDefaultFrontendPortWhenOccupied(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigMovesExplicitUnpinnedAuthPortWhenOccupied(t *testing.T) {
+	t.Setenv(localAuthPortEnvVar, strconv.Itoa(defaultLocalProxyAuthHostPort))
+	ln := occupyLocalPorts(t, defaultLocalProxyAuthHostPort)
+	defer func() {
+		for _, existing := range ln {
+			_ = existing.Close()
+		}
+	}()
+
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.AuthService.Port == defaultLocalProxyAuthHostPort {
+		t.Fatalf("expected auth port to move when explicit unpinned port is occupied")
+	}
+	env := strings.Join(localComposeEnv(cfg), "\n")
+	for _, want := range []string{
+		"LAZYMIND_LOCAL_AUTH_PORT=" + strconv.Itoa(cfg.AuthService.Port),
+		"LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT=" + strconv.Itoa(cfg.AuthService.Port),
+		"LAZYMIND_AUTH_SERVICE_PORT=" + strconv.Itoa(cfg.AuthService.Port),
+	} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("compose env missing %q in %s", want, env)
+		}
+	}
+	if len(cfg.PortResolutions) == 0 {
+		t.Fatalf("expected a port resolution note")
+	}
+	found := false
+	for _, resolution := range cfg.PortResolutions {
+		if resolution.Name == "auth-service" && resolution.EnvName == localAuthPortEnvVar {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected auth-service resolution note, got %#v", cfg.PortResolutions)
+	}
+}
+
 func TestRuntimeConfigKeepsPinnedFrontendPortWhenOccupied(t *testing.T) {
 	t.Setenv(frontendPortEnvVar, strconv.Itoa(defaultFrontendPort))
 	t.Setenv(localPortsPinnedEnvVar, "1")
@@ -200,6 +272,97 @@ func TestRuntimeConfigKeepsPinnedFrontendPortWhenOccupied(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigDefaultsToLocalhostNetworkProfile(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "")
+	t.Setenv(localProxyAddressEnvVar, "")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.NetworkProfile != "localhost" {
+		t.Fatalf("network profile = %q, want localhost", cfg.NetworkProfile)
+	}
+	if cfg.LocalProxy.Address != "127.0.0.1" {
+		t.Fatalf("local proxy address = %q, want 127.0.0.1", cfg.LocalProxy.Address)
+	}
+}
+
+func TestRuntimeConfigAllowsLANNetworkProfile(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "lan")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.NetworkProfile != "lan" {
+		t.Fatalf("network profile = %q, want lan", cfg.NetworkProfile)
+	}
+}
+
+func TestRuntimeConfigLANFrontendPortAvoidsWildcardOccupiedDefault(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "lan")
+	t.Setenv(frontendPortEnvVar, "")
+	ln := occupyPortsOn(t, "0.0.0.0", defaultFrontendPort)
+	defer func() {
+		for _, existing := range ln {
+			_ = existing.Close()
+		}
+	}()
+
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.FrontendPort == defaultFrontendPort {
+		t.Fatalf("expected LAN frontend port to avoid wildcard-occupied default")
+	}
+}
+
+func TestRuntimeConfigRejectsUnknownNetworkProfile(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "public")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	if _, _, err := NewRuntimeConfig(defaultProfileValue(), repo); err == nil {
+		t.Fatal("expected invalid network profile error")
+	}
+}
+
+func TestRuntimeManagerUpFailsFastWhenPinnedPortIsOccupied(t *testing.T) {
+	t.Setenv(frontendPortEnvVar, strconv.Itoa(defaultFrontendPort))
+	t.Setenv(localPortsPinnedEnvVar, "1")
+	ln := occupyLocalPorts(t, defaultFrontendPort)
+	defer func() {
+		for _, existing := range ln {
+			_ = existing.Close()
+		}
+	}()
+
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return false }
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	err = manager.Up(context.Background(), cfg, paths)
+	if err == nil {
+		t.Fatal("expected pinned port conflict")
+	}
+	if !strings.Contains(err.Error(), "frontend port") || !strings.Contains(err.Error(), localPortsPinnedEnvVar) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("expected no process-compose or docker calls before pinned port failure, got %d", len(runner.calls))
+	}
+}
+
 func TestFrontendBuildEnvIncludesLocalViteOverrides(t *testing.T) {
 	t.Setenv("VITE_LAZYMIND_MODE", "")
 	t.Setenv("VITE_HIDE_EVO", "true")
@@ -214,6 +377,72 @@ func TestFrontendBuildEnvIncludesLocalViteOverrides(t *testing.T) {
 		"VITE_APP_LOGO=/logo.svg",
 		"VITE_APP_CHAT_TITLE=Local Chat",
 	})
+}
+
+func TestWriteCaddyfileBindsLocalhostByDefault(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	if err := writeCaddyfile(paths, cfg); err != nil {
+		t.Fatalf("write caddyfile: %v", err)
+	}
+	raw, err := os.ReadFile(paths.CaddyConfig)
+	if err != nil {
+		t.Fatalf("read caddyfile: %v", err)
+	}
+	content := string(raw)
+	for _, want := range []string{
+		"http://localhost:" + strconv.Itoa(cfg.FrontendPort),
+		"http://127.0.0.1:" + strconv.Itoa(cfg.FrontendPort),
+		"bind 127.0.0.1",
+		"reverse_proxy http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.Port),
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("caddyfile missing %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "bind 0.0.0.0") {
+		t.Fatalf("default caddyfile should not bind all interfaces:\n%s", content)
+	}
+}
+
+func TestWriteCaddyfileBindsLANFrontendOnly(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "lan")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	if err := writeCaddyfile(paths, cfg); err != nil {
+		t.Fatalf("write caddyfile: %v", err)
+	}
+	raw, err := os.ReadFile(paths.CaddyConfig)
+	if err != nil {
+		t.Fatalf("read caddyfile: %v", err)
+	}
+	content := string(raw)
+	for _, want := range []string{
+		"http://:" + strconv.Itoa(cfg.FrontendPort),
+		"bind 0.0.0.0",
+		"reverse_proxy http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.Port),
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("caddyfile missing %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "http://localhost:") || strings.Contains(content, "http://127.0.0.1:"+strconv.Itoa(cfg.FrontendPort)+" {") {
+		t.Fatalf("lan caddyfile should use wildcard host matching:\n%s", content)
+	}
 }
 
 func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {
@@ -260,8 +489,14 @@ func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {
 		"LAZYMIND_OPENSEARCH_URI",
 		"LAZYMIND_OPENSEARCH_USER",
 		"LAZYMIND_OPENSEARCH_PASSWORD",
+		"LAZYMIND_SEGMENT_STORE_TYPE",
+		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH",
+		"LAZYMIND_SEGMENT_STORE_USER",
+		"LAZYMIND_SEGMENT_STORE_PASSWORD",
 		"LAZYMIND_EVO_CODE_TIMEOUT_S",
 		"LAZYMIND_EVO_LLM_ROLE",
+		routerPortPoolStartEnvVar,
+		routerPortPoolEndEnvVar,
 	} {
 		t.Setenv(name, "")
 	}
@@ -275,6 +510,7 @@ func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {
 	env := algorithmServiceEnv(cfg, paths, algoProcessName)
 	uploads := filepath.Join(paths.RepoRoot, "data", "core", "uploads")
 	noProxy := "127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+	routerPoolStart, routerPoolEnd := localRouterPortPool(cfg)
 	for _, want := range []string{
 		"LAZYLLM_INIT_DOC=True",
 		"LAZYMIND_MOUNT_BASE_DIR=" + uploads,
@@ -313,15 +549,67 @@ func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {
 		"LAZYLLM_PADDLE_API_KEY=",
 		"LAZYMIND_RESET_ALGO_ON_STARTUP=false",
 		"LAZYMIND_RESET_ALL_ON_STARTUP=false",
+		"LAZYMIND_MILVUS_URI=" + cfg.ModeProfile.VectorStore.Endpoint,
 		"LAZYMIND_MAX_RETRIES=20",
 		"LAZYMIND_REVIEW_MAX_RETRIES=5",
 		"LAZYMIND_SKILL_REVIEW_DEBUG=false",
 		"LAZYMIND_OPENSEARCH_URI=https://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.OpenSearchPort),
 		"LAZYMIND_OPENSEARCH_USER=admin",
 		"LAZYMIND_OPENSEARCH_PASSWORD=LazyRAG_OpenSearch123!",
+		"LAZYMIND_SEGMENT_STORE_TYPE=SQLiteStore",
+		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH=" + filepath.Join(paths.AlgorithmHome, "sqlite", "segment-store.db"),
+		"LAZYMIND_SEGMENT_STORE_USER=admin",
+		"LAZYMIND_SEGMENT_STORE_PASSWORD=LazyRAG_OpenSearch123!",
+		"LAZYMIND_AGENTIC_KB_URL=http://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.AlgoPort),
 		"LAZYMIND_EVO_CODE_TIMEOUT_S=900",
 		"LAZYMIND_EVO_LLM_ROLE=evo_llm",
 		"LAZYMIND_WORD_GROUP_APPLY_URL=",
+		routerPortPoolStartEnvVar + "=" + strconv.Itoa(routerPoolStart),
+		routerPortPoolEndEnvVar + "=" + strconv.Itoa(routerPoolEnd),
+		routerPortsPerInstanceEnvVar + "=" + strconv.Itoa(defaultRouterPortsPerInstance),
+	} {
+		if !containsString(env, want) {
+			t.Fatalf("algorithm env missing %q in %v", want, env)
+		}
+	}
+	for _, item := range env {
+		if strings.HasPrefix(item, "LAZYMIND_MILVUS_URI=") && strings.Contains(item, ".lazymind-local/stores/milvus") {
+			t.Fatalf("algorithm env must use Milvus endpoint, not Lite DB file: %q", item)
+		}
+	}
+}
+
+func TestAlgorithmServiceEnvOffsetsRouterPoolWithProcessComposePort(t *testing.T) {
+	t.Setenv(routerPortPoolStartEnvVar, "")
+	t.Setenv(routerPortPoolEndEnvVar, "")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	cfg.ProcessComposePort = defaultProcessComposePort + 2
+
+	env := algorithmServiceEnv(cfg, paths, chatProcessName)
+	start := defaultRouterPortPoolStart + 2*defaultRouterPortsPerInstance
+	assertEnvContains(t, env, routerPortPoolStartEnvVar+"="+strconv.Itoa(start))
+	assertEnvContains(t, env, routerPortPoolEndEnvVar+"="+strconv.Itoa(start+defaultRouterPortsPerInstance-1))
+}
+
+func TestAlgorithmServiceEnvUsesOpenSearchSegmentStoreWhenRequested(t *testing.T) {
+	t.Setenv("LAZYMIND_SEGMENT_STORE_TYPE", "opensearch")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", "")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+
+	env := algorithmServiceEnv(cfg, paths, algoProcessName)
+	for _, want := range []string{
+		"LAZYMIND_SEGMENT_STORE_TYPE=opensearch",
+		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH=https://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.OpenSearchPort),
 	} {
 		if !containsString(env, want) {
 			t.Fatalf("algorithm env missing %q in %v", want, env)
@@ -466,8 +754,6 @@ func TestBuildEnabledServicesUsesDockerComposeBuild(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--format", "json",
 		)
 		return CommandResult{Stdout: `{
@@ -482,8 +768,6 @@ func TestBuildEnabledServicesUsesDockerComposeBuild(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"build",
 			"auth-service",
 			"web",
@@ -509,6 +793,18 @@ func TestClassifyComposeReadinessReportsFatalBeforePending(t *testing.T) {
 	}
 }
 
+func TestFilterComposeStatusesIgnoresDisabledStaleContainers(t *testing.T) {
+	statuses := []ComposeServiceStatus{
+		{Service: "auth-service", State: "exited", ExitCode: 1},
+		{Service: "core", State: "running", Health: "healthy"},
+	}
+	filtered := filterComposeStatuses(statuses, []string{"core"})
+	state, reason := classifyComposeReadiness(filtered)
+	if state != composeReadinessReady {
+		t.Fatalf("expected ready state for enabled core only, got %v: %s", state, reason)
+	}
+}
+
 func TestComposeUpCommandIsCanonical(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -520,8 +816,6 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 		expected := []string{"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--services",
 		}
 		assertCommand(t, cmd, "docker", expected...)
@@ -532,8 +826,6 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--format", "json",
 		)
 		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
@@ -543,8 +835,6 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"up",
 			"--no-build",
 			"--detach",
@@ -583,8 +873,6 @@ func TestComposeUpOmitsDisabledServices(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--format", "json",
 		})
 		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
@@ -593,8 +881,6 @@ func TestComposeUpOmitsDisabledServices(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"up",
 			"--no-build",
 			"--detach",
@@ -623,6 +909,38 @@ func TestComposeUpOmitsDisabledServices(t *testing.T) {
 	}
 	if err := manager.compose.ComposeUp(context.Background(), cfg, paths); err != nil {
 		t.Fatalf("compose up: %v", err)
+	}
+}
+
+func TestComposeUpSkipsDockerComposeWhenAllServicesDisabled(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	overlay := filepath.Join(repo, localComposeOverrideName)
+	if err := os.WriteFile(overlay, []byte("x-lazymind-local:\n  mode: local\n  disabled_container_services:\n    - auth-service\n    - core\n"), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"config", "--services",
+		})
+		return CommandResult{Stdout: "auth-service\ncore\n"}, nil
+	})
+
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := manager.compose.ComposeUp(context.Background(), cfg, paths); err != nil {
+		t.Fatalf("compose up: %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected only compose config call, got %d calls: %#v", len(runner.calls), runner.calls)
 	}
 }
 
@@ -719,6 +1037,60 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	if authService.Namespace != "host" {
 		t.Fatalf("unexpected auth-service namespace %q", authService.Namespace)
 	}
+	scanControl, ok := parsed.Processes[scanControlPlaneProcessName]
+	if !ok {
+		t.Fatal("missing scan-control-plane process")
+	}
+	if !strings.Contains(scanControl.Command, "internal scan-control-plane-run --profile "+profile) {
+		t.Fatalf("missing scan-control-plane-run command: %q", scanControl.Command)
+	}
+	if !strings.Contains(scanControl.Shutdown.Command, "internal scan-control-plane-down --profile "+profile) {
+		t.Fatalf("missing scan-control-plane-down command: %q", scanControl.Shutdown.Command)
+	}
+	if scanControl.LogLocation != paths.ScanControlPlaneLog {
+		t.Fatalf("unexpected scan-control-plane log location %q", scanControl.LogLocation)
+	}
+	if scanControl.Namespace != "host" {
+		t.Fatalf("unexpected scan-control-plane namespace %q", scanControl.Namespace)
+	}
+	fileWatcher, ok := parsed.Processes[fileWatcherProcessName]
+	if !ok {
+		t.Fatal("missing file-watcher process")
+	}
+	if !strings.Contains(fileWatcher.Command, "internal file-watcher-run --profile "+profile) {
+		t.Fatalf("missing file-watcher-run command: %q", fileWatcher.Command)
+	}
+	if !strings.Contains(fileWatcher.Command, "LAZYMIND_LOCAL_FILE_WATCHER_PORT="+strconv.Itoa(cfg.FileWatcher.Port)) {
+		t.Fatalf("file-watcher command missing port env: %q", fileWatcher.Command)
+	}
+	if !strings.Contains(fileWatcher.Shutdown.Command, "internal file-watcher-down --profile "+profile) {
+		t.Fatalf("missing file-watcher-down command: %q", fileWatcher.Shutdown.Command)
+	}
+	if fileWatcher.LogLocation != paths.FileWatcherLog {
+		t.Fatalf("unexpected file-watcher log location %q", fileWatcher.LogLocation)
+	}
+	if fileWatcher.Namespace != "host" {
+		t.Fatalf("unexpected file-watcher namespace %q", fileWatcher.Namespace)
+	}
+	milvusLite, ok := parsed.Processes[milvusLiteProcessName]
+	if !ok {
+		t.Fatal("missing milvus-lite process")
+	}
+	if !strings.Contains(milvusLite.Command, "internal milvus-lite-run --profile "+profile) {
+		t.Fatalf("missing milvus-lite-run command: %q", milvusLite.Command)
+	}
+	if !strings.Contains(milvusLite.Command, localMilvusLiteDBPathEnvVar+"="+cfg.ModeProfile.VectorStore.DBPath) {
+		t.Fatalf("milvus-lite command missing db path env: %q", milvusLite.Command)
+	}
+	if !strings.Contains(milvusLite.Shutdown.Command, "internal milvus-lite-down --profile "+profile) {
+		t.Fatalf("missing milvus-lite-down command: %q", milvusLite.Shutdown.Command)
+	}
+	if milvusLite.LogLocation != paths.MilvusLiteLog {
+		t.Fatalf("unexpected milvus-lite log location %q", milvusLite.LogLocation)
+	}
+	if milvusLite.Namespace != "host" {
+		t.Fatalf("unexpected milvus-lite namespace %q", milvusLite.Namespace)
+	}
 	for _, service := range []string{docServerProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, chatProcessName} {
 		proc, ok := parsed.Processes[service]
 		if !ok {
@@ -746,8 +1118,18 @@ func TestDerivedComposeProfilesUseBuiltInStoresByDefault(t *testing.T) {
 	t.Setenv("LAZYMIND_ENABLE_MILVUS_DASHBOARD", "")
 	t.Setenv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD", "")
 
+	assertStringSlicesEqual(t, derivedComposeProfileArgs(), nil)
+}
+
+func TestDerivedComposeProfilesUseOpenSearchWhenSegmentStoreRequiresBuiltInOpenSearch(t *testing.T) {
+	t.Setenv("LAZYMIND_DEPLOY_MINERU", "")
+	t.Setenv("LAZYMIND_MILVUS_URI", "")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_TYPE", "opensearch")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", "")
+	t.Setenv("LAZYMIND_ENABLE_MILVUS_DASHBOARD", "")
+	t.Setenv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD", "")
+
 	assertStringSlicesEqual(t, derivedComposeProfileArgs(), []string{
-		"--profile", "milvus",
 		"--profile", "opensearch",
 	})
 }
@@ -755,7 +1137,8 @@ func TestDerivedComposeProfilesUseBuiltInStoresByDefault(t *testing.T) {
 func TestDerivedComposeProfilesSkipExternalStores(t *testing.T) {
 	t.Setenv("LAZYMIND_DEPLOY_MINERU", "")
 	t.Setenv("LAZYMIND_MILVUS_URI", "http://127.0.0.1:19530")
-	t.Setenv("LAZYMIND_OPENSEARCH_URI", "https://search.example.test:9200")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_TYPE", "opensearch")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", "https://search.example.test:9200")
 	t.Setenv("LAZYMIND_ENABLE_MILVUS_DASHBOARD", "")
 	t.Setenv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD", "")
 
@@ -772,8 +1155,6 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--services",
 		)
 		return CommandResult{Stdout: "auth-service\ncore\n"}, nil
@@ -782,8 +1163,6 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--format", "json",
 		)
 		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
@@ -793,8 +1172,6 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"up",
 			"--no-build",
 			"--detach",
@@ -825,6 +1202,8 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 	manager.probeAPI = func(port int, timeout time.Duration) bool { return true }
 	manager.probeAuth = func(port int, timeout time.Duration) bool { return true }
 	manager.probeCore = func(port int, timeout time.Duration) bool { return true }
+	manager.probeScan = func(port int, timeout time.Duration) bool { return true }
+	manager.probeFileWatch = func(port int, timeout time.Duration) bool { return true }
 	manager.waitHostReady = func(context.Context, RuntimeConfig) error { return nil }
 	manager.pollInterval = time.Millisecond
 	manager.upTimeout = time.Second
@@ -846,8 +1225,14 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
+			"config", "--services",
+		})
+		return CommandResult{Stdout: "auth-service\ncore\ndb-bootstrap\n"}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
 			"ps",
 			"-a",
 			"--format",
@@ -944,6 +1329,14 @@ func TestRuntimeManagerUpFailsWhenHostAlgorithmsDoNotBecomeReady(t *testing.T) {
 	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
 		return CommandResult{}, nil
 	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"config", "--services",
+		})
+		return CommandResult{Stdout: "auth-service\ncore\ndb-bootstrap\n"}, nil
+	}, func(cmd Command) (CommandResult, error) {
 		return CommandResult{Stdout: readyComposeStatusJSON()}, nil
 	})
 	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
@@ -991,8 +1384,6 @@ func TestRuntimeManagerUpReusesRunningProcessCompose(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
-			"--profile", "opensearch",
 			"ps",
 			"-a",
 		})
@@ -1030,8 +1421,15 @@ func TestRuntimeManagerUpFailsOnExitedService(t *testing.T) {
 				"compose",
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
-				"--profile", "milvus",
-				"--profile", "opensearch",
+				"config", "--services",
+			})
+			return CommandResult{Stdout: "lazyllm-parse-server\n"}, nil
+		},
+		func(cmd Command) (CommandResult, error) {
+			assertCommandContainsInOrder(t, cmd, "docker", []string{
+				"compose",
+				"-f", filepath.Join(repo, repoComposeFileName),
+				"-f", filepath.Join(repo, localComposeOverrideName),
 				"ps",
 				"-a",
 				"--format",
@@ -1044,8 +1442,6 @@ func TestRuntimeManagerUpFailsOnExitedService(t *testing.T) {
 				"compose",
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
-				"--profile", "milvus",
-				"--profile", "opensearch",
 				"ps",
 				"-a",
 			})
@@ -1099,6 +1495,8 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
 	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	var output bytes.Buffer
+	manager.SetOutput(&output, io.Discard)
 	probeCalls := 0
 	manager.probeAPI = func(port int, timeout time.Duration) bool {
 		probeCalls++
@@ -1131,7 +1529,7 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 			return CommandResult{}, fmt.Errorf("process-compose failure")
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, "pkill", "-f", regexp.QuoteMeta(repo)+"/(local/bin/process-compose|\\.lazymind-local/bin/local-proxy|\\.lazymind-local/python/\\.venv/bin/python|\\.lazymind-local/venvs/auth-service/bin/python|local/local-runtime-manager/lazymind-local internal)")
+			assertCommand(t, cmd, "pkill", "-f", regexp.QuoteMeta(repo)+"/(local/bin/process-compose|\\.lazymind-local/bin/local-proxy|\\.lazymind-local/bin/scan-control-plane|\\.lazymind-local/bin/file-watcher|\\.lazymind-local/python/\\.venv/bin/python|\\.lazymind-local/venvs/auth-service/bin/python|local/local-runtime-manager/lazymind-local internal)")
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
@@ -1149,8 +1547,6 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 				"compose",
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
-				"--profile", "milvus",
-				"--profile", "opensearch",
 				"down",
 				"--remove-orphans",
 			})
@@ -1161,8 +1557,6 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 				"compose",
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
-				"--profile", "milvus",
-				"--profile", "opensearch",
 				"ps",
 				"-a",
 				"--format",
@@ -1184,6 +1578,17 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 	}
 	if got := state.Services[processComposeServiceName].Status; got != "stopped" {
 		t.Fatalf("unexpected service status %s", got)
+	}
+	for _, want := range []string{
+		"stopping process-compose",
+		"process-compose down failed; killing stale local runtime processes",
+		"stopping Docker Compose fallback services",
+		"stopping auth-service",
+		"waiting up to",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("expected down progress output to contain %q, got:\n%s", want, output.String())
+		}
 	}
 	if len(runner.calls) != 6 {
 		t.Fatalf("expected 6 commands got %d", len(runner.calls))
@@ -1322,15 +1727,19 @@ func writeComposeFixture(t *testing.T, repo string) {
 }
 
 func occupyLocalPorts(t *testing.T, ports ...int) []net.Listener {
+	return occupyPortsOn(t, "127.0.0.1", ports...)
+}
+
+func occupyPortsOn(t *testing.T, address string, ports ...int) []net.Listener {
 	t.Helper()
 	listeners := make([]net.Listener, 0, len(ports))
 	for _, port := range ports {
-		ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		ln, err := net.Listen("tcp", net.JoinHostPort(address, strconv.Itoa(port)))
 		if err != nil {
 			for _, existing := range listeners {
 				_ = existing.Close()
 			}
-			t.Skipf("port %d is already in use on this test host: %v", port, err)
+			t.Skipf("port %d is already in use on %s on this test host: %v", port, address, err)
 		}
 		listeners = append(listeners, ln)
 	}

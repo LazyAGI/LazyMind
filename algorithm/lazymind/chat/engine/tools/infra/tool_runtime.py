@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import wraps
 from typing import Any, Dict
 
 import lazyllm
@@ -53,3 +54,13 @@ def tool_failure(tool_name: str, exc: Exception) -> Dict[str, Any]:
         error_type=type(exc).__name__,
         detail=str(exc),
     )
+
+
+def handle_tool_errors(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as exc:
+            return tool_failure(func.__name__, exc)
+    return wrapper

@@ -53,8 +53,14 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 	commandForAuthServiceDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-down --profile "+profile)
 	commandForCoreRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-run --profile "+profile)
 	commandForCoreDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-down --profile "+profile)
+	commandForScanControlPlaneRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-run --profile "+profile)
+	commandForScanControlPlaneDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-down --profile "+profile)
+	commandForFileWatcherRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-run --profile "+profile)
+	commandForFileWatcherDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-down --profile "+profile)
 	commandForFrontendRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-run --profile "+profile)
 	commandForFrontendDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-down --profile "+profile)
+	commandForMilvusLiteRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-run --profile "+profile)
+	commandForMilvusLiteDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-down --profile "+profile)
 
 	pcCfg := processComposeConfig{
 		Version:         "0.5",
@@ -101,6 +107,26 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 				LogLocation: paths.CoreLog,
 				Namespace:   "host",
 			},
+			scanControlPlaneProcessName: {
+				WorkingDir: repoRoot,
+				Command:    commandForScanControlPlaneRun,
+				Shutdown: processComposeShutdown{
+					Command:        commandForScanControlPlaneDown,
+					TimeoutSeconds: 15,
+				},
+				LogLocation: paths.ScanControlPlaneLog,
+				Namespace:   "host",
+			},
+			fileWatcherProcessName: {
+				WorkingDir: repoRoot,
+				Command:    commandForFileWatcherRun,
+				Shutdown: processComposeShutdown{
+					Command:        commandForFileWatcherDown,
+					TimeoutSeconds: 15,
+				},
+				LogLocation: paths.FileWatcherLog,
+				Namespace:   "host",
+			},
 			frontendProcessName: {
 				WorkingDir: repoRoot,
 				Command:    commandForFrontendRun,
@@ -112,6 +138,18 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 				Namespace:   "host",
 			},
 		},
+	}
+	if cfg.ModeProfile.VectorStore.ManagedProcess {
+		pcCfg.Processes[milvusLiteProcessName] = processComposeProcess{
+			WorkingDir: repoRoot,
+			Command:    commandForMilvusLiteRun,
+			Shutdown: processComposeShutdown{
+				Command:        commandForMilvusLiteDown,
+				TimeoutSeconds: 20,
+			},
+			LogLocation: paths.MilvusLiteLog,
+			Namespace:   "host",
+		}
 	}
 	for _, svc := range algorithmProcessSpecs(cfg.Algorithm) {
 		run := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-run --service "+svc.Name+" --profile "+profile)
@@ -155,7 +193,10 @@ func runtimeCommandEnv(cfg RuntimeConfig) []string {
 	env = append(env,
 		localPortsPinnedEnvVar+"=1",
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
+		localAuthPortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
 		authServicePortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
+		localFileWatcherPortEnvVar+"="+strconv.Itoa(cfg.FileWatcher.Port),
+		localMilvusLiteDBPathEnvVar+"="+cfg.ModeProfile.VectorStore.DBPath,
 	)
 	return env
 }

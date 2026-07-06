@@ -16,9 +16,13 @@ services:
       - "127.0.0.1:${LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT:-18080}:18080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ${LAZYMIND_LOCAL_SQLITE_DIR:-./.lazymind-local/stores/sqlite}:/data/sqlite
     environment:
       LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL: "http://host.docker.internal:${LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT:-18000}"
       LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL: "http://host.docker.internal:${LAZYMIND_LOCAL_CORE_PORT:-${LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT:-18001}}"
+      LAZYMIND_SCAN_CONTROL_PLANE_DB_DRIVER: sqlite
+      LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN: /data/sqlite/scan/scan_control_plane.db
       LAZYMIND_REDIS_URL: ""
       LAZYMIND_STATE_BACKEND: sqlite
       LAZYMIND_STATE_SQLITE_PATH: /tmp/scan-control-plane/state/scan_state.db
@@ -104,11 +108,15 @@ services:
 x-lazymind-local:
   mode: local
   disabled_container_services:
+    - db
+    - db-bootstrap
     - redis
     - kong
     - auth-service
     - core
     - core-dev
+    - scan-control-plane
+    - file-watcher
     - lazyllm-doc-server
     - lazyllm-parse-server
     - lazyllm-parse-worker

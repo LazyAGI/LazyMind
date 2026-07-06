@@ -3,7 +3,9 @@ httpx>=0.24.0
 python-multipart
 opensearch-py
 pymilvus==2.4.14
+setuptools>=69.0.0,<80.0.0
 milvus-lite==2.4.10
+setuptools<81
 # openai-whisper
 # pydub
 
@@ -32,6 +34,7 @@ pandas==2.3.3
 opentelemetry-sdk>=1.27.0,<2.0.0
 opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0
 psycopg[binary]>=3,<4
+aiosqlite>=0.20.0,<1.0.0
 
 dashscope>=1.20.0
 nbconvert==7.17.1
