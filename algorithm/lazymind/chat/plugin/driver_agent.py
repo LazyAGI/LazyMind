@@ -108,8 +108,8 @@ def _init_driver_artifact_context(
             objective='',
             params={'session_id': session_id, 'plugin_id': plugin_id, 'step_id': step_id},
             workspace_path=tempfile.mkdtemp(prefix='driver_'),
-            input_artifact_keys=[],
-            output_artifact_keys=[],
+            input_slots=[],
+            output_slots=[],
             db=db,
             emit=lambda _ev: None,
         )

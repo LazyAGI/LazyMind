@@ -129,47 +129,29 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
     return TaskCancelResponse(ok=True)
 
 
-@router.get('/api/plugin/slot-binding', summary='Lookup slot binding for artifact key')
+@router.get('/api/plugin/slot-binding', summary='Lookup slot binding for slot')
 async def slot_binding(
     plugin_id: str = Query(..., description='Plugin identifier'),  # noqa: B008
-    artifact_key: str = Query(..., description='Artifact key to look up'),  # noqa: B008
+    slot: str = Query(..., description='Slot id to look up'),  # noqa: B008
 ) -> Dict[str, Any]:
-    """Return the slot_id and cardinality bound to an artifact key, if any.
+    """Return the slot_id and cardinality bound to a slot, if any.
 
-    Priority:
-    1. Direct lookup via plugin.yaml ui.tabs[].slots[].artifact_key (new in Phase 3).
-    2. Legacy: search step outputs in state.yml.
+    Direct lookup via plugin.yaml ui.tabs[].slots[].id.
     """
     spec = plugin_loader.get_plugin(plugin_id)
     if spec is None:
         raise HTTPException(status_code=404, detail=f'Plugin {plugin_id!r} not found')
 
-    # Fast path: direct artifact_key → slot lookup via plugin.yaml ui.tabs.
-    slot_def = spec.get_slot_for_artifact_key(artifact_key)
+    slot_def = spec.get_slot(slot)
     if slot_def:
         return {
             'slot_id': slot_def.get('id', ''),
             'cardinality': slot_def.get('cardinality', 'single'),
         }
 
-    # Fallback: legacy state.yml output mapping.
-    slot_id: Optional[str] = None
-    cardinality = 'single'
-    for step_cfg in spec._steps.values():
-        for out in step_cfg.get('outputs', []):
-            if out.get('artifact_id') == artifact_key:
-                slot_id = out.get('slot_id')
-                if slot_id:
-                    slot_def2 = spec.get_slot_def(slot_id)
-                    if slot_def2:
-                        cardinality = slot_def2.get('cardinality', 'single')
-                break
-        if slot_id:
-            break
-
     return {
-        'slot_id': slot_id or '',
-        'cardinality': cardinality,
+        'slot_id': '',
+        'cardinality': 'single',
     }
 
 

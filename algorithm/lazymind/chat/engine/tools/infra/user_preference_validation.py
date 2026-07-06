@@ -4,13 +4,9 @@ import re
 from typing import Any, Optional
 
 _FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*(\n(.*))?$', re.DOTALL)
-_RESPONSE_STYLES_ZH = ('简洁', '详细', '幽默', '正式')
-_RESPONSE_STYLES_EN = ('concise', 'detailed', 'humorous', 'formal')
-_RESPONSE_STYLES = (
-    *_RESPONSE_STYLES_ZH,
-    *_RESPONSE_STYLES_EN,
-    '',
-)
+_FRONTMATTER_KEYS = ('agent_persona', 'preferred_name', 'response_style')
+_FRONTMATTER_KEY_SET = set(_FRONTMATTER_KEYS)
+_FRONTMATTER_FIELD_MAX_CHARS = 100
 
 
 def parse_user_preference_frontmatter(content: str) -> tuple[dict[str, Any], str]:
@@ -35,18 +31,21 @@ def validate_user_preference_content(content: str) -> Optional[str]:
     if not content or not content.strip():
         return "user_preference requires a non-empty 'content'."
 
-    frontmatter, body = parse_user_preference_frontmatter(content)
+    frontmatter, _ = parse_user_preference_frontmatter(content)
     if not frontmatter:
         return 'user_preference must contain YAML frontmatter.'
-    if 'agent_persona' not in frontmatter:
-        return "Frontmatter must include 'agent_persona'."
-    if 'preferred_name' not in frontmatter:
-        return "Frontmatter must include 'preferred_name'."
-    if 'response_style' not in frontmatter:
-        return "Frontmatter must include 'response_style'."
-    if frontmatter.get('response_style') not in _RESPONSE_STYLES:
+    extra_keys = sorted(str(key) for key in frontmatter if key not in _FRONTMATTER_KEY_SET)
+    if extra_keys:
         return (
-            "Frontmatter 'response_style' must be one of: "
-            '简洁/详细/幽默/正式 or concise/detailed/humorous/formal or "".'
+            'Frontmatter only supports agent_persona, preferred_name, and response_style; '
+            f'move other fields to the Markdown body: {", ".join(extra_keys)}.'
         )
+    for key in _FRONTMATTER_KEYS:
+        if key not in frontmatter:
+            return f"Frontmatter must include '{key}'."
+        value = frontmatter.get(key)
+        if not isinstance(value, str):
+            return f"Frontmatter '{key}' must be a string."
+        if len(value.strip()) > _FRONTMATTER_FIELD_MAX_CHARS:
+            return f"Frontmatter '{key}' must be {_FRONTMATTER_FIELD_MAX_CHARS} characters or less."
     return None

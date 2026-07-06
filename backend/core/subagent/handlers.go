@@ -13,25 +13,25 @@ import (
 
 // taskDTO is the JSON shape returned to the frontend for a task.
 type taskDTO struct {
-	TaskID             string          `json:"task_id"`
-	ConversationID     string          `json:"conversation_id"`
-	TriggerHistoryID   string          `json:"trigger_history_id"`
-	Seq                int             `json:"seq_in_conversation"`
-	AgentType          string          `json:"agent_type"`
-	Title              string          `json:"title"`
-	Objective          string          `json:"objective"`
-	Mode               string          `json:"mode"`
-	Status             string          `json:"status"`
-	Progress           int             `json:"progress_pct"`
-	CurrentPhase       string          `json:"current_phase"`
-	EstimatedSec       int             `json:"estimated_sec"`
-	Summary            string          `json:"summary"`
-	InputArtifactKeys  json.RawMessage `json:"input_artifact_keys"`
-	OutputArtifactKeys json.RawMessage `json:"output_artifact_keys"`
-	CreatedAt          time.Time       `json:"created_at"`
-	UpdatedAt          time.Time       `json:"updated_at"`
-	Artifacts          []artifactDTO   `json:"artifacts,omitempty"`
-	Steps              []stepDTO       `json:"steps,omitempty"`
+	TaskID           string          `json:"task_id"`
+	ConversationID   string          `json:"conversation_id"`
+	TriggerHistoryID string          `json:"trigger_history_id"`
+	Seq              int             `json:"seq_in_conversation"`
+	AgentType        string          `json:"agent_type"`
+	Title            string          `json:"title"`
+	Objective        string          `json:"objective"`
+	Mode             string          `json:"mode"`
+	Status           string          `json:"status"`
+	Progress         int             `json:"progress_pct"`
+	CurrentPhase     string          `json:"current_phase"`
+	EstimatedSec     int             `json:"estimated_sec"`
+	Summary          string          `json:"summary"`
+	InputSlots       json.RawMessage `json:"input_slots"`
+	OutputSlots      json.RawMessage `json:"output_slots"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	Artifacts        []artifactDTO   `json:"artifacts,omitempty"`
+	Steps            []stepDTO       `json:"steps,omitempty"`
 }
 
 type stepDTO struct {
@@ -41,7 +41,7 @@ type stepDTO struct {
 }
 
 type artifactDTO struct {
-	ArtifactKey string          `json:"artifact_key"`
+	Slot        string          `json:"slot"`
 	ContentType string          `json:"content_type"`
 	Seq         int             `json:"seq"`
 	Value       json.RawMessage `json:"value"`
@@ -50,29 +50,29 @@ type artifactDTO struct {
 
 func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 	return taskDTO{
-		TaskID:             t.ID,
-		ConversationID:     t.ConversationID,
-		TriggerHistoryID:   t.TriggerHistoryID,
-		Seq:                t.SeqInConversation,
-		AgentType:          t.AgentType,
-		Title:              t.Title,
-		Objective:          t.Objective,
-		Mode:               t.Mode,
-		Status:             t.Status,
-		Progress:           t.ProgressPct,
-		CurrentPhase:       t.CurrentPhase,
-		EstimatedSec:       t.EstimatedSec,
-		Summary:            t.Summary,
-		InputArtifactKeys:  normalizeJSON(t.InputArtifactKeys, "[]"),
-		OutputArtifactKeys: normalizeJSON(t.OutputArtifactKeys, "[]"),
-		CreatedAt:          t.CreatedAt,
-		UpdatedAt:          t.UpdatedAt,
+		TaskID:           t.ID,
+		ConversationID:   t.ConversationID,
+		TriggerHistoryID: t.TriggerHistoryID,
+		Seq:              t.SeqInConversation,
+		AgentType:        t.AgentType,
+		Title:            t.Title,
+		Objective:        t.Objective,
+		Mode:             t.Mode,
+		Status:           t.Status,
+		Progress:         t.ProgressPct,
+		CurrentPhase:     t.CurrentPhase,
+		EstimatedSec:     t.EstimatedSec,
+		Summary:          t.Summary,
+		InputSlots:       normalizeJSON(t.InputSlots, "[]"),
+		OutputSlots:      normalizeJSON(t.OutputSlots, "[]"),
+		CreatedAt:        t.CreatedAt,
+		UpdatedAt:        t.UpdatedAt,
 	}
 }
 
 func toArtifactDTO(a *orm.SubAgentArtifact) artifactDTO {
 	return artifactDTO{
-		ArtifactKey: a.ArtifactKey,
+		Slot:        a.Slot,
 		ContentType: a.ContentType,
 		Seq:         a.Seq,
 		Value:       normalizeJSON(a.Value, "{}"),

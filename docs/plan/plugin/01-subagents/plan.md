@@ -101,8 +101,8 @@ CREATE TABLE sub_agent_tasks (
     estimated_sec        INT,
     last_heartbeat       TIMESTAMP    NOT NULL DEFAULT NOW(),
     workspace_path       VARCHAR(512) NOT NULL,
-    input_artifact_keys  JSONB        NOT NULL DEFAULT '[]',  -- key 名列表，不含 task_id
-    output_artifact_keys JSONB        NOT NULL DEFAULT '[]',
+    input_slots          JSONB        NOT NULL DEFAULT '[]',  -- slot 名列表，不含 task_id
+    output_slots         JSONB        NOT NULL DEFAULT '[]',
     create_user_id       VARCHAR(255),
     created_at           TIMESTAMP    NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMP    NOT NULL DEFAULT NOW()
@@ -150,7 +150,7 @@ CREATE INDEX idx_sas_task ON sub_agent_steps(task_id, seq);
 CREATE TABLE sub_agent_artifacts (
     id            VARCHAR(36)  PRIMARY KEY,
     task_id       VARCHAR(36)  NOT NULL REFERENCES sub_agent_tasks(id),
-    artifact_key  VARCHAR(64)  NOT NULL,
+    slot          VARCHAR(64)  NOT NULL,
     content_type  VARCHAR(32)  NOT NULL,
     -- content_type 取值：
     --   text      → value: {"text": "..."}
@@ -159,18 +159,18 @@ CREATE TABLE sub_agent_artifacts (
     --   file      → value: {"filename": "x.pdf", "path": "...", "size": 1024}
     --   file_list → value: {"paths": ["a.jpg", "b.jpg"]}  （均为 workspace 相对路径）
     value         JSONB        NOT NULL,
-    seq           INT          NOT NULL DEFAULT 1,  -- 同一 key 多次追加时递增（如逐张生图）
+    seq           INT          NOT NULL DEFAULT 1,  -- 同一 slot 多次追加时递增（如逐张生图）
     created_at    TIMESTAMP    NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_saa_task_key ON sub_agent_artifacts(task_id, artifact_key, seq);
+CREATE INDEX idx_saa_task_slot ON sub_agent_artifacts(task_id, slot, seq);
 ```
 
-**Key 固定、数量不定（重要约定）**：`output_artifact_keys` 创建时即固定声明（如 `["images", "style_keywords"]`），**LLM 不会在执行中临时新增 key**。单 key 的产出数量事先不确定，通过两种方式表达：
+**Key 固定、数量不定（重要约定）**：`output_slots` 创建时即固定声明（如 `["images", "style_keywords"]`），**LLM 不会在执行中临时新增 slot**。单 slot 的产出数量事先不确定，通过两种方式表达：
 
-1. **多行追加**：同一 `artifact_key` 多次 `save_artifact`，每次插一行、`seq` 递增（适合逐条产出、希望前端流式追加，如逐张生图）。
+1. **多行追加**：同一 `slot` 多次 `save_artifact`，每次插一行、`seq` 递增（适合逐条产出、希望前端流式追加，如逐张生图）。
 2. **list 型 value**：`content_type=file_list` 时 `value.paths` 是变长列表（适合一次性产出一批文件）。
 
-二者可组合。done 前完整性校验只检查"每个声明的 key 是否至少产出过 1 行"，**不检查具体条数**（见 4.x 框架职责）。
+二者可组合。done 前完整性校验只检查"每个声明的 slot 是否至少产出过 1 行"，**不检查具体条数**（见 4.x 框架职责）。
 
 **路径约定**：所有 `path` 字段存相对于 `workspace_path` 的相对路径。Go 访问文件时拼接完整路径；前端通过文件服务接口读取。
 
@@ -205,7 +205,7 @@ CREATE INDEX idx_saa_task_key ON sub_agent_artifacts(task_id, artifact_key, seq)
 
 **Task SSE 重连协议（DB 补历史 → 再订阅 Redis）**——前端订阅 `:stream` 或断线重连时，服务端：
 
-1. **先查 DB 补历史**：读 `sub_agent_tasks`（状态/进度）+ `sub_agent_artifacts`（成果，ORDER BY artifact_key, seq），合成 `task_start` + 历史 `progress` + 历史 `artifact` 先行下发，保证完整快照。
+1. **先查 DB 补历史**：读 `sub_agent_tasks`（状态/进度）+ `sub_agent_artifacts`（成果，ORDER BY slot, seq），合成 `task_start` + 历史 `progress` + 历史 `artifact` 先行下发，保证完整快照。
 2. **若已终态**（succeeded/failed/interrupted）：补完后发 `done`/`error` + `[DONE]`，不订阅 Redis。
 3. **若仍 running**：补完快照后从 Redis 流当前尾部 tail 增量；Redis key 不存在（过期/重启）则退化为对 DB 轮询直到终态。
 
@@ -224,7 +224,7 @@ SubAgent 的**完整执行步骤**持久化到 `sub_agent_steps`，无需额外 
 | 工具 | 输入 | 输出 |
 | --- | --- | --- |
 | `todo_writer` | `todos: list[{title, description}]` | `"Plan saved (N steps). Proceeding with step 1."` |
-| `create_subagent` | `agent_type`, `title`, `objective`, `params`, `input_artifact_keys`, `output_artifact_keys`（可选 `tools`、`resume`） | auto：阻塞至终态返回摘要串（含 artifacts 描述）；manual：立即返回后台执行提示。详见 4.3 与 [code.md C1](./code.md#c1) |
+| `create_subagent` | `agent_type`, `title`, `objective`, `params`, `input_slots`, `output_slots`（可选 `tools`、`resume`） | auto：阻塞至终态返回摘要串（含 artifacts 描述）；manual：立即返回后台执行提示。详见 4.3 与 [code.md C1](./code.md#c1) |
 | `list_subagents` | `status: str = None`（过滤 pending/running/succeeded/failed/interrupted） | 自然语言列表，如 `"1. 任务指令优化（task_optimization, succeeded）\n2. 素材收集（…, running, 60%）"` |
 | `get_subagent_status` | `task_ref: str`（标题 / "第N个" / 类型名） | 状态摘要，如 `"素材收集（running）：已完成 60%，正在分析风格特征，预计还需 30 秒。"` |
 | `list_subagent_artifacts` | `task_ref: str` | key 摘要，如 `"Task '素材收集' has 2 artifact(s): style_refs (file_list), style_keywords (json)."` |
@@ -286,7 +286,7 @@ POST /api/subagent/run
 → SSE 流（task_start / progress / text / think / tool_calls / tool_results / artifact / done / error）
 ```
 
-框架启动时通过 `db_dsn` 建立 `SubAgentDB` 连接，调用 `load_task(task_id)` 从 `sub_agent_tasks` 读取 `objective` / `params` / `workspace_path` / `input_artifact_keys` / `output_artifact_keys` 等参数，**这些字段无需在请求体中重复传递**。
+框架启动时通过 `db_dsn` 建立 `SubAgentDB` 连接，调用 `load_task(task_id)` 从 `sub_agent_tasks` 读取 `objective` / `params` / `workspace_path` / `input_slots` / `output_slots` 等参数，**这些字段无需在请求体中重复传递**。
 
 ### 5.2 Python SubAgent 框架层职责
 
@@ -296,7 +296,7 @@ POST /api/subagent/run
    - `'tool'`：存带 `tool_call_id` 的 tool_results（`{"tool_results": [...]}`）
    - `'think'`：存 LLM 推理内容（`{"content": "..."}`，在 tool_calls 前 flush）
    - `'text'`：存 LLM 输出文本（`{"content": "..."}`，在 tool_calls 前或最终 flush）
-3. **`done` 前完整性校验（含 LLM 兜底）**：先检查 `output_artifact_keys` 每个 key 是否至少产出过 1 行 artifact；有 key 缺失时，调用 `_evaluate_completion` 让 LLM 结合执行 trace 和最终输出判断任务是否实质完成：判定成功则自动补存缺失 key 的文本 artifact 并 emit `done`；判定失败则 emit `error`（含缺失 key 列表），不发 `done`。
+3. **`done` 前完整性校验（含 LLM 兜底）**：先检查 `output_slots` 每个 slot 是否至少产出过 1 行 artifact；有 slot 缺失时，调用 `_evaluate_completion` 让 LLM 结合执行 trace 和最终输出判断任务是否实质完成：判定成功则自动补存缺失 slot 的文本 artifact 并 emit `done`；判定失败则 emit `error`（含缺失 slot 列表），不发 `done`。
 4. **断点恢复**：`resume=true` 时查 `sub_agent_steps ORDER BY seq`，按 `tool_call_id` 校验配对后重建 LLM messages，从断点继续，已完成步骤不重复执行。`_rebuild_history_from_steps` 还会校验 function arguments JSON 合法性，遇到截断/损坏的参数则截止到上一个完整 assistant 边界重放。
 5. **Task SSE 新增 text/think/tool_calls/tool_results 帧**：SubAgent 的 LLM 推理文本和工具调用均通过 Task SSE 实时输出（`type=text`/`think`/`tool_calls`/`tool_results`），与 ChatAgent 主 SSE 帧结构对称，供前端 Task Center 面板展示执行过程。
 
@@ -326,7 +326,7 @@ GET  /api/core/tasks/{task_id}
      → 任务详情 + 已完成 sub_agent_steps 步数
 
 GET  /api/core/tasks/{task_id}/artifacts
-     → sub_agent_artifacts WHERE task_id=? ORDER BY artifact_key, seq（支持分页）
+     → sub_agent_artifacts WHERE task_id=? ORDER BY slot, seq（支持分页）
 
 GET  /api/core/tasks/{task_id}:stream   （重连协议：DB 补历史 → Redis tail，见 3.3）
      → 1. 先查 DB 合成 task_start + 历史 progress + 历史 artifact 先行下发（完整快照）

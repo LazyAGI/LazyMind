@@ -133,6 +133,8 @@ config.add('mineru_backend', str, 'pipeline', 'MINERU_BACKEND', description='Min
 config.add('mineru_server_port', int, 8000, 'MINERU_SERVER_PORT', description='MinerU server port.')
 config.add('ocr_cache_dir', str, os.path.join(config['shared_upload_dir'], '.image_cache'), 'OCR_CACHE_DIR',
            description='OCR cache root for parsed results and images.')
+config.add('reader_use_cache', bool, True, 'READER_USE_CACHE',
+           description='Reader ModuleBase cache; forwarded to LAZYLLM_READER_USE_CACHE.')
 config.add('document_parse_profile', str, 'cloud', 'DOCUMENT_PARSE_PROFILE',
            description='Document parsing profile: cloud or local.')
 config.add('document_processor_url', str, 'http://localhost:8000', 'DOCUMENT_PROCESSOR_URL',
@@ -209,3 +211,5 @@ config.add('evo_data_dir', str, None, 'EVO_DATA_DIR', description='Evo static da
 config.add('evo_base_dir', str, None, 'EVO_BASE_DIR', description='Evo runtime storage directory.')
 config.add('evo_code_map', str, None, 'EVO_CODE_MAP', description='Evo code map path.')
 config.add('evo_chat_source', str, None, 'EVO_CHAT_SOURCE', description='Evo chat source directory.')
+
+os.environ.setdefault('LAZYLLM_READER_USE_CACHE', str(bool(config['reader_use_cache'])).lower())

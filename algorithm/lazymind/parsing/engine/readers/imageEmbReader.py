@@ -26,7 +26,11 @@ class ImageEmbReader(LazyLLMReaderBase):
         return normalize_image_file(image_path=image_path, normalized_root=self._normalized_root())
 
     @retry(stop_after_attempt=RETRY_TIMES)
-    def _load_data(self, file: Path, fs: Optional['fsspec.AbstractFileSystem'] = None) -> List[ImageDocNode]:
+    def _load_data(
+        self,
+        file: Path,
+        fs: Optional['fsspec.AbstractFileSystem'] = None,
+    ) -> List[ImageDocNode]:
         if not isinstance(file, Path):
             file = Path(file)
 

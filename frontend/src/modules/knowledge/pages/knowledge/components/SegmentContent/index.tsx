@@ -2,7 +2,7 @@ import MarkdownViewer from "@/modules/knowledge/components/MarkdownViewer";
 import { Segment } from "@/api/generated/knowledge-client";
 
 import CustomImage from "../CustomImage";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { SegmentServiceApi } from "@/modules/knowledge/utils/request";
 import MdxEditor from "@/modules/knowledge/components/mdxeditor";
 import { replaceImagesWithKeys } from "@/modules/knowledge/components/mdxeditor/util";
@@ -20,12 +20,11 @@ interface IProps {
 
 const SegmentContent = (props: IProps) => {
   const { segment, group, editable = false, contentReadOnly = false } = props;
-  const [content, setContent] = useState<string>();
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
-    const raw = segment.display_content || "";
-    setContent(expandImagesInMarkdown(raw, segment?.image_keys ?? []));
+  const content = useMemo(() => {
+    const raw = segment.display_content || segment.content || "";
+    return expandImagesInMarkdown(raw, segment?.image_keys ?? []);
   }, [segment]);
 
   const debounceUpdate = (data: string) => {

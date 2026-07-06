@@ -36,9 +36,9 @@ def _build_artifact_context_section(
       Reads from plugin_slot_revisions with sort_order from plugin_slot_order.
       Resolves human vs AI revision for each row, then builds per-key ordered summaries.
 
-    Ordinary SubAgent (no session_id, but has input_artifact_keys):
+    Ordinary SubAgent (no session_id, but has input_slots):
       Reads from sub_agent_artifacts of succeeded steps in the same session.
-      sort_order = seq within the same artifact_key group.
+      sort_order = seq within the same slot group.
     """
     params = ctx.params
     session_id: str = params.get('session_id', '')
@@ -46,7 +46,7 @@ def _build_artifact_context_section(
     if session_id:
         return db.format_plugin_session_artifacts(session_id)
 
-    if ctx.input_artifact_keys:
+    if ctx.input_slots:
         steps = db.load_plugin_session_steps(session_id) if session_id else []
         succeeded_task_ids = [
             s['task_id'] for s in steps
@@ -191,8 +191,8 @@ def _build_partial_sort_order_hints(session_id: str, partial_indices: 'Dict[str,
             return ''
 
         hints: List[str] = []
-        for artifact_key, list_indexes in partial_indices.items():
-            slot_def = spec.get_slot_for_artifact_key(artifact_key)
+        for slot, list_indexes in partial_indices.items():
+            slot_def = spec.get_slot(slot)
             if not slot_def:
                 continue
             slot_id = slot_def.get('id', '')
@@ -214,7 +214,7 @@ def _build_partial_sort_order_hints(session_id: str, partial_indices: 'Dict[str,
             if sort_orders:
                 so_str = ', '.join(str(s) for s in sort_orders)
                 hints.append(
-                    f'For artifact key "{artifact_key}": overwrite the item(s) at '
+                    f'For slot "{slot}": overwrite the item(s) at '
                     f'sort_order={so_str} — pass sort_order=N when calling save_artifact '
                     f'so that only those position(s) are replaced.'
                 )
@@ -278,8 +278,12 @@ def _build_attachment_context_for_subagent(history_files_per_turn: 'Dict[str, Li
     lines.append('')
     lines.append('Turn numbers are 1-based integers matching the "Turn N" labels above.')
     lines.append('Omit the turn parameter to search the current turn first, then historical turns.')
-    lines.append("To read a file's content, call read_user_attachment(filename, turn=N).")
-    lines.append("To get a file's accessible URL/path, call find_user_attachment(filename, turn=N).")
+    lines.append(
+        'Do not parse attachments by default. '
+        'find_user_attachment for path/url (image tools, plugins); '
+        'read_user_attachment only when extracted text is required.'
+    )
+    lines.append('find_user_attachment(filename, turn=N) returns path/url without parsing.')
     return '\n'.join(lines)
 
 
@@ -332,12 +336,12 @@ def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -
     # ordinary SubAgent reads from sub_agent_artifacts of prior succeeded steps.
     session_id: str = ctx.params.get('session_id', '')
     step_id: str = ctx.params.get('step_id', '')
-    if session_id or ctx.input_artifact_keys:
+    if session_id or ctx.input_slots:
         artifact_section = _build_artifact_context_section(ctx, db) if db else []
         if artifact_section:
             lines.extend(artifact_section)
-        elif ctx.input_artifact_keys:
-            lines.append(f'Input artifact keys you may read: {", ".join(ctx.input_artifact_keys)}')
+        elif ctx.input_slots:
+            lines.append(f'Input slots you may read: {", ".join(ctx.input_slots)}')
     # Inject intent/constraints from the plugin session so SubAgent respects user preferences.
     if session_id and db:
         intent_lines = _build_intent_context_section(db, session_id, step_id)
@@ -361,7 +365,7 @@ def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -
     lines.append(
         'You MUST call save_artifact for EACH of the following keys before you finish — '
         'do NOT skip this step even if you have already written the results in plain text: '
-        + ', '.join(ctx.output_artifact_keys)
+        + ', '.join(ctx.output_slots)
     )
     lines.append(
         'IMPORTANT: Writing results in your reply text does NOT count as saving an artifact. '
@@ -503,8 +507,8 @@ async def run_subagent_stream(
             yield 'data: [DONE]\n\n'
             return
 
-        output_keys = _coerce_str_list(task.get('output_artifact_keys'))
-        input_keys = _coerce_str_list(task.get('input_artifact_keys'))
+        output_keys = _coerce_str_list(task.get('output_slots'))
+        input_keys = _coerce_str_list(task.get('input_slots'))
         params = _coerce_dict(task.get('params'))
 
         ctx = SubAgentContext(
@@ -514,20 +518,20 @@ async def run_subagent_stream(
             objective=str(task.get('objective') or ''),
             params=params,
             workspace_path=str(task.get('workspace_path') or ''),
-            input_artifact_keys=input_keys,
-            output_artifact_keys=output_keys,
+            input_slots=input_keys,
+            output_slots=output_keys,
             db=db,
             emit=_emit,
         )
         ctx.ensure_workspace()
 
-        # For plugin_step tasks: remove {{artifact_key}} placeholders from the objective
+        # For plugin_step tasks: remove {{slot}} placeholders from the objective
         # (artifact context is now injected as a summary section in _objective_prompt instead).
         # Also resolve tools from plugin_loader when no explicit list was provided.
         # Go no longer forwards the tools list for plugin_step tasks.
         effective_agent_type = str(task.get('agent_type') or agent_type or '')
         if effective_agent_type == 'plugin_step':
-            # Strip any remaining {{artifact_key}} placeholders so they don't confuse the LLM.
+            # Strip any remaining {{slot}} placeholders so they don't confuse the LLM.
             ctx.objective = re.sub(r'\{\{[^}]+\}\}', '', ctx.objective).strip()
             if not tools:
                 tools = _resolve_plugin_step_tools(params)
@@ -916,7 +920,7 @@ def _evaluate_completion(
                     seq = ctx.next_artifact_seq(key)
                     ctx.record_local_artifact(key, 'text', {'text': content}, seq)
                     ctx.db.save_artifact(ctx.task_id, key, 'text', {'text': content}, seq)
-                    ctx.emit({'type': 'artifact', 'artifact_key': key,
+                    ctx.emit({'type': 'artifact', 'slot': key,
                               'content_type': 'text', 'seq': seq, 'value': {'text': content}})
                     LOG.info(f'[SubAgent] auto-saved missing artifact key={key!r} for task={ctx.task_id}')
                 except Exception as save_err:

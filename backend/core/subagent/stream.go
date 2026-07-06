@@ -87,7 +87,7 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 	for i := range arts {
 		writeTaskSSE(w, flusher, TaskEvent{
 			Type: "artifact", TaskID: taskID,
-			ArtifactKey: arts[i].ArtifactKey, ContentType: arts[i].ContentType,
+			ArtifactKey: arts[i].Slot, ContentType: arts[i].ContentType,
 			Seq: arts[i].Seq, Value: normalizeJSON(arts[i].Value, "{}"),
 		})
 	}
@@ -253,7 +253,7 @@ func pollDBUntilTerminal(ctx context.Context, db *gorm.DB, w http.ResponseWriter
 			sentArtifacts[key] = true
 			writeTaskSSE(w, flusher, TaskEvent{
 				Type: "artifact", TaskID: taskID,
-				ArtifactKey: arts[i].ArtifactKey, ContentType: arts[i].ContentType,
+				ArtifactKey: arts[i].Slot, ContentType: arts[i].ContentType,
 				Seq: arts[i].Seq, Value: normalizeJSON(arts[i].Value, "{}"),
 			})
 		}
@@ -268,5 +268,5 @@ func pollDBUntilTerminal(ctx context.Context, db *gorm.DB, w http.ResponseWriter
 }
 
 func artifactDedupKey(a *orm.SubAgentArtifact) string {
-	return a.ArtifactKey + "#" + strconv.Itoa(a.Seq)
+	return a.Slot + "#" + strconv.Itoa(a.Seq)
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -642,14 +643,33 @@ func mapChunkToSegment(datasetID, documentID string, item map[string]any) Segmen
 	tableContent := firstAnyStringWithFallbackMaps(item, meta, globalMetaMap, "", "table_content")
 	imageKey := firstAnyStringWithFallbackMaps(item, meta, globalMetaMap, "", "image_key")
 	imageURI := firstAnyStringWithFallbackMaps(item, meta, globalMetaMap, "", "image_uri")
-	displayContent := firstAnyStringWithFallbackMaps(item, meta, globalMetaMap, "", "display_content")
-	if displayContent == "" {
-		displayContent = content
+	sourcePath := firstAnyStringWithMeta(item, meta, "", "source_path")
+	var displayContent string
+	if sourcePath != "" {
+		imageKeys = []string{sourcePath}
+	} else {
+		displayContent = firstAnyStringWithFallbackMaps(item, meta, globalMetaMap, "", "display_content")
+		if displayContent == "" {
+			displayContent = content
+		}
 	}
 	if len(imageKeys) == 0 {
 		imageKeys = []string{}
 	}
 	imageKeys = signSegmentImageKeys(imageKeys)
+	if sourcePath != "" {
+		fileName := firstAnyStringWithMeta(item, meta, "", "file_name")
+		if strings.TrimSpace(fileName) == "" {
+			fileName = filepath.Base(sourcePath)
+		}
+		imgURL := sourcePath
+		if len(imageKeys) > 0 {
+			if signed := strings.TrimSpace(imageKeys[0]); signed != "" {
+				imgURL = signed
+			}
+		}
+		displayContent = fmt.Sprintf("![%s](%s)", fileName, imgURL)
+	}
 	if len(excludedEmbedMetadataKeys) == 0 {
 		excludedEmbedMetadataKeys = []string{}
 	}

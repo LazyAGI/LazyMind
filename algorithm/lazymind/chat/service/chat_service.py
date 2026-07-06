@@ -37,6 +37,7 @@ from lazymind.chat.service.utils import (
 )
 from lazyllm.tools.fs.client import FS
 from lazymind.model_config import inject_model_config, summarize_model_config_for_log
+from lazyllm.tools.rag import inject_reader_config
 from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
@@ -293,10 +294,17 @@ def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]],
         'Only fall back to historical turns when the user explicitly references a past turn '
         'or when the current turn has no attachments.'
     )
-    lines.append("To read a file's content, call read_user_attachment(filename, turn=N).")
-    lines.append("To get a file's accessible path, call find_user_attachment(filename, turn=N).")
-    lines.append('When passing an attachment path to save_plugin_artifact, always use the `path` field '
-                 '(local absolute path) from find_user_attachment, NOT the `url` field.')
+    lines.append(
+        'Do not parse attachments by default. '
+        'Use find_user_attachment(filename, turn=N) to get path/url for image tools, plugins, '
+        'or vision_extractor (visual/edit tasks). '
+        'Use read_user_attachment only when you need extracted text (documents, or textual '
+        'Q&A about image content). Supported: png, jpg, jpeg, pdf, doc, docx, pptx.'
+    )
+    lines.append(
+        'find_user_attachment returns `path` (local) and `url` (signed); '
+        'prefer `path` for save_plugin_artifact.'
+    )
 
     return '\n'.join(lines)
 
@@ -421,6 +429,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     lazyllm.locals._init_sid(sid=conversation.session_id)
     inject_model_config(runtime.llm_config)
     inject_tool_config(runtime.tool_config)
+    inject_reader_config(ocr_config=runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
     plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context = \

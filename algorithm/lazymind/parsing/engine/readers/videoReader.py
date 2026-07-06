@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import hashlib
 import tempfile
 from pathlib import Path
 from typing import List, Optional
@@ -13,7 +14,7 @@ from lazyllm.tools.rag.readers.readerBase import LazyLLMReaderBase, get_default_
 from lazymind.config import config as _cfg
 from lazymind.parsing.engine.readers.imageEmbReader import ImageEmbReader
 
-FRAME_DIR = Path(tempfile.gettempdir()) / 'lazymind_video_frames'
+FRAME_DIR = Path(_cfg['shared_upload_dir']) / '.video_frame_cache'
 
 
 class _WhisperMediaReader(LazyLLMReaderBase):
@@ -235,7 +236,8 @@ class VideoReader(LazyLLMReaderBase):
     def _get_frame_dir(self, video_path: str) -> Path:
         src = Path(video_path).resolve()
         FRAME_DIR.mkdir(parents=True, exist_ok=True)
-        frame_dir = FRAME_DIR / self._safe_name(src.stem)
+        digest = hashlib.sha1(str(src).encode('utf-8')).hexdigest()[:12]
+        frame_dir = FRAME_DIR / f'{self._safe_name(src.stem)}_{digest}'
         frame_dir.mkdir(parents=True, exist_ok=True)
         return frame_dir
 
@@ -337,12 +339,20 @@ class VideoReader(LazyLLMReaderBase):
     def _load_frame_nodes(self, video_path: str, fs: Optional['fsspec.AbstractFileSystem']) -> List[ImageDocNode]:
         frame_paths = self._extract_frames(video_path)
         nodes: List[ImageDocNode] = []
+        video_name = Path(video_path).name
         for idx, frame_path in enumerate(frame_paths):
             frame_nodes = self._image_reader._load_data(Path(frame_path), fs=fs)
             frame_time_seconds = idx * self._frame_interval
             for node in frame_nodes:
+                local_source_path = str(node.metadata.get('source_path', '')).strip()
+                normalized_source_path = str(node.metadata.get('normalized_source_path', '')).strip()
+                if normalized_source_path:
+                    node.metadata['source_path'] = normalized_source_path
+                if local_source_path:
+                    node.metadata['frame_local_path'] = local_source_path
                 node.metadata['video_source_path'] = video_path
-                node.metadata['frame_path'] = frame_path
+                node.metadata['frame_path'] = str(node.metadata.get('source_path', frame_path))
+                node.metadata['file_name'] = video_name
                 node.metadata['frame_index'] = idx
                 node.metadata['frame_interval_seconds'] = self._frame_interval
                 node.metadata['frame_time_seconds'] = frame_time_seconds

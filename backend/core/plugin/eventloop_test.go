@@ -318,8 +318,8 @@ func TestCheckAndFallbackIfStuck_DemotesWhenIdle(t *testing.T) {
 func TestResolveSlotBinding_FoundBinding(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pluginID := r.URL.Query().Get("plugin_id")
-		artifactKey := r.URL.Query().Get("artifact_key")
-		if pluginID != "image-plugin" || artifactKey != "enhanced_image_url" {
+		slot := r.URL.Query().Get("slot")
+		if pluginID != "image-plugin" || slot != "enhanced_image_url" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

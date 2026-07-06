@@ -228,7 +228,7 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
             <Image.PreviewGroup>
               {images.map((a) => (
                 <Image
-                  key={`img-${a.artifact_key}-${a.seq}`}
+                  key={`img-${a.slot}-${a.seq}`}
                   src={imageUrlOf(a.value)}
                   width={64}
                   height={64}
@@ -248,16 +248,16 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
           </div>
         )}
         {files.map((a) => (
-          <div className="task-artifact-file" key={`file-${a.artifact_key}-${a.seq}`}>
+          <div className="task-artifact-file" key={`file-${a.slot}-${a.seq}`}>
             <FileTextOutlined />
             <span className="task-artifact-file-name">
-              {a.value?.filename || a.artifact_key}
+              {a.value?.filename || a.slot}
             </span>
           </div>
         ))}
         {texts.map((a) => (
-          <div className="task-artifact-text" key={`txt-${a.artifact_key}-${a.seq}`}>
-            <div className="task-artifact-text-key">{a.artifact_key}</div>
+          <div className="task-artifact-text" key={`txt-${a.slot}-${a.seq}`}>
+            <div className="task-artifact-text-key">{a.slot}</div>
             <div className="task-artifact-text-body">
               {a.content_type === "json"
                 ? JSON.stringify(a.value?.data ?? a.value)

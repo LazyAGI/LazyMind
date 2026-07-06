@@ -75,11 +75,14 @@ def memory_editor(
             For ``'user_preference'``, the edited full text must start with YAML
             frontmatter delimited by ``---`` containing ``agent_persona``,
             ``preferred_name``, and ``response_style``, followed by Markdown body
-            content. ``response_style`` must be empty or exactly one of
-            ``简洁``, ``详细``, ``幽默``, ``正式``, ``concise``, ``detailed``,
-            ``humorous``, or ``formal``; use the Chinese values for Chinese
-            user language and the English values otherwise. Write language,
-            formatting, and workflow preferences in the Markdown body.
+            content. These are the only supported frontmatter fields; put any
+            other user profile data, such as email addresses, account names,
+            roles, habits, or preferences, in the Markdown body. ``agent_persona``
+            describes the identity, responsibilities, and boundaries the agent
+            should maintain when replying. ``preferred_name`` is how replies
+            should address the user. ``response_style`` is a short text
+            describing expression habits, length preference, and structure
+            preference. Each frontmatter value must be 100 characters or less.
             The Markdown body must NOT repeat information already captured
             in the frontmatter fields (agent_persona, preferred_name,
             response_style).

@@ -8,7 +8,55 @@ import (
 	"testing"
 )
 
-func TestSignSegmentImageKeys(t *testing.T) {
+func TestMapChunkToSegmentBuildsSignedDisplayContent(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+
+	sourcePath := filepath.Join(root, ".image_cache", "doc-1", "images", "demo.jpg")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatalf("create dir: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("img"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	seg := mapChunkToSegment("dataset-1", "doc-1", map[string]any{
+		"uid":     "chunk-1",
+		"content": "demo.jpg",
+		"metadata": map[string]any{
+			"source_path": sourcePath,
+			"file_name":   "report.pdf",
+		},
+	})
+
+	if !strings.HasPrefix(seg.DisplayContent, "![report.pdf](/static-files/") {
+		t.Fatalf("expected signed markdown display content, got %q", seg.DisplayContent)
+	}
+	if len(seg.ImageKeys) != 1 || !strings.HasPrefix(seg.ImageKeys[0], "/static-files/") {
+		t.Fatalf("expected signed image key, got %#v", seg.ImageKeys)
+	}
+}
+
+func TestRefreshStaticFileURL(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+
+	rel := "tenants/root/normalized_images/demo.jpg"
+	fullPath := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("create dir: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("img"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	expired := "/static-files/" + rel + "?expires=1&sig=deadbeef"
+	refreshed := refreshStaticFileURL(expired)
+	if !strings.HasPrefix(refreshed, "/static-files/") || strings.Contains(refreshed, "expires=1") {
+		t.Fatalf("expected refreshed signed url, got %q", refreshed)
+	}
+}
+
 	root := t.TempDir()
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
 

@@ -45,16 +45,16 @@ def _build_user_preference_prompt(
         '\n'
         '[Format requirements]\n'
         '- Must start with YAML frontmatter delimited by `---`, containing at least agent_persona, preferred_name, and response_style fields, followed by a blank line and Markdown body content.\n'  # noqa: E501
-        '- agent_persona（智能体角色）means the role the user wants the agent to play, such as secretary, engineer, reviewer, or research assistant.\n'  # noqa: E501
-        '- preferred_name（用户称谓）means the user preferred name or how the user wants the agent to address them, such as a preferred name, title, or pronoun.\n'  # noqa: E501
-        '- When creating response_style（回复风格）or explicitly changing it, display/use exactly one of 简洁, 详细, 幽默, 正式 when the user language is Chinese; otherwise display/use exactly one of concise, detailed, humorous, formal.\n'  # noqa: E501
-        '- Do not put language preferences, formatting rules, citation rules, workflow constraints, task procedures, verbs, or full instructions in response_style; write those details in the Markdown body.\n'  # noqa: E501
+        '- agent_persona（智能体身份、职责和边界）describes the identity, responsibilities, and boundaries the agent should maintain when replying.\n'  # noqa: E501
+        '- preferred_name（对用户的称呼方式）means how replies should address the user.\n'
+        '- response_style（表达习惯、篇幅和结构偏好）is a short text describing expression habits, length preference, and structure preference.\n'  # noqa: E501
+        '- Each YAML frontmatter value must be a string of 100 characters or less. Use "" when agent_persona, preferred_name, or response_style is unknown.\n'  # noqa: E501
         '- The YAML frontmatter field names (keys) are FIXED. You may ONLY change their values; NEVER add, remove, or rename a frontmatter key. When user_instruct asks to record new information that does not fit an existing frontmatter field, write it in the Markdown body, not as a new frontmatter field.\n'  # noqa: E501
-        '- Use "" when agent_persona, preferred_name, or response_style is unknown. If response_style is missing or invalid during format repair and the user did not specify one, use "".\n'  # noqa: E501
+        '- If response_style is missing or invalid during format repair and the user did not specify one, use "".\n'  # noqa: E501
         '- Modify agent_persona, preferred_name, or response_style only when user_instruct explicitly asks to change that specific field or clearly states the corresponding stable preference.\n'  # noqa: E501
-        '- If user_instruct only adds ordinary profile/preferences, keep existing frontmatter values unchanged, including an existing valid response_style in either language, and write the new information in the Markdown body.\n'  # noqa: E501
+        '- If user_instruct only adds ordinary profile/preferences, keep existing frontmatter values unchanged and write the new information in the Markdown body.\n'  # noqa: E501
         '- Write concrete user profile/preference entries in the Markdown body after the closing `---`.\n'
-        '- The Markdown body must NOT repeat information already captured in the frontmatter fields (agent_persona, preferred_name, response_style). For example, do not write "角色：技术助理", "用户希望被称呼为老师", or "回复风格：简洁" in the body when those values are already in the frontmatter.\n'  # noqa: E501
+        '- The Markdown body must NOT repeat information already captured in the frontmatter fields (agent_persona, preferred_name, response_style). For example, do not write "智能体身份：技术助理", "称呼方式：老师", or "表达结构：先结论后解释" in the body when those values are already in the frontmatter.\n'  # noqa: E501
         '\n'
         '[Writing and merging rules]\n'
         '- You do NOT output final user_preference text directly unless you must use replace_all. Normally you output edit operations that will be applied to the existing user_preference inside the generate endpoint.\n'  # noqa: E501

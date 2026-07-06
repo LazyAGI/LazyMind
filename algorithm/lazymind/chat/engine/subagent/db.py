@@ -51,7 +51,7 @@ class SubAgentDB:
             row = conn.execute(
                 text(
                     'SELECT id, conversation_id, agent_type, title, objective, params, mode, '
-                    'status, workspace_path, input_artifact_keys, output_artifact_keys '
+                    'status, workspace_path, input_slots, output_slots '
                     'FROM sub_agent_tasks WHERE id = :id'
                 ),
                 {'id': task_id},
@@ -109,7 +109,7 @@ class SubAgentDB:
             row = conn.execute(
                 text(
                     'SELECT COALESCE(MAX(seq), 0) AS m FROM sub_agent_artifacts '
-                    'WHERE task_id = :task_id AND artifact_key = :key'
+                    'WHERE task_id = :task_id AND slot = :key'
                 ),
                 {'task_id': task_id, 'key': key},
             ).mappings().first()
@@ -119,7 +119,7 @@ class SubAgentDB:
         with self._conn() as conn:
             conn.execute(
                 text(
-                    'INSERT INTO sub_agent_artifacts (id, task_id, artifact_key, content_type, value, seq, created_at) '
+                    'INSERT INTO sub_agent_artifacts (id, task_id, slot, content_type, value, seq, created_at) '
                     'VALUES (:id, :task_id, :key, :ct, :value, :seq, :created_at)'
                 ),
                 {
@@ -135,14 +135,14 @@ class SubAgentDB:
 
     def load_artifacts(self, task_id: str, keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         sql = (
-            'SELECT artifact_key, content_type, value, seq FROM sub_agent_artifacts '
+            'SELECT slot, content_type, value, seq FROM sub_agent_artifacts '
             'WHERE task_id = :task_id'
         )
         params: Dict[str, Any] = {'task_id': task_id}
         if keys:
-            sql += ' AND artifact_key IN :keys'
+            sql += ' AND slot IN :keys'
             params['keys'] = tuple(keys)
-        sql += ' ORDER BY artifact_key ASC, seq ASC'
+        sql += ' ORDER BY slot ASC, seq ASC'
         with self._conn() as conn:
             stmt = text(sql)
             if keys:
@@ -157,20 +157,20 @@ class SubAgentDB:
                 except ValueError:
                     value = {}
             out.append({
-                'artifact_key': r['artifact_key'],
+                'slot': r['slot'],
                 'content_type': r['content_type'],
                 'value': value,
                 'seq': r['seq'],
             })
         return out
 
-    def saved_artifact_keys(self, task_id: str) -> List[str]:
+    def saved_slots(self, task_id: str) -> List[str]:
         with self._conn() as conn:
             rows = conn.execute(
-                text('SELECT DISTINCT artifact_key FROM sub_agent_artifacts WHERE task_id = :task_id'),
+                text('SELECT DISTINCT slot FROM sub_agent_artifacts WHERE task_id = :task_id'),
                 {'task_id': task_id},
             ).mappings().all()
-        return [r['artifact_key'] for r in rows]
+        return [r['slot'] for r in rows]
 
     def load_plugin_session_steps(self, session_id: str) -> List[Dict[str, Any]]:
         """Return plugin_session_steps rows for a session, ordered by attempt ASC.
@@ -204,10 +204,10 @@ class SubAgentDB:
             with self._conn() as conn:
                 rows = conn.execute(
                     text(
-                        'SELECT task_id, artifact_key, content_type, value, seq '
+                        'SELECT task_id, slot, content_type, value, seq '
                         'FROM sub_agent_artifacts '
                         'WHERE task_id IN :ids AND hidden = FALSE '
-                        'ORDER BY task_id, artifact_key, seq ASC'
+                        'ORDER BY task_id, slot, seq ASC'
                     ).bindparams(bindparam('ids', expanding=True)),
                     {'ids': task_ids},
                 ).mappings().all()
@@ -221,7 +221,7 @@ class SubAgentDB:
                         value = {}
                 out.append({
                     'task_id': r['task_id'],
-                    'artifact_key': r['artifact_key'],
+                    'slot': r['slot'],
                     'content_type': r['content_type'],
                     'value': value,
                     'seq': r['seq'],
@@ -237,7 +237,7 @@ class SubAgentDB:
         Falls back to list_index + 1 when no order row exists for the slot.
 
         Returns a list of dicts with keys:
-          artifact_key, list_index, artifact_seq, human_artifact_id,
+          slot, list_index, artifact_seq, human_artifact_id,
           content_snapshot, change_source, task_id, sort_order
         Returns empty list on any error.
         """
@@ -246,12 +246,13 @@ class SubAgentDB:
                 rows = conn.execute(
                     text(
                         'SELECT '
-                        '  psr.artifact_key, '
+                        '  psr.slot, '
                         '  psr.list_index, '
                         '  psr.artifact_seq, '
                         '  psr.human_artifact_id, '
                         '  psr.content_snapshot, '
                         '  psr.change_source, '
+                        '  psr.revision, '
                         '  pss.task_id, '
                         '  COALESCE(pos.sort_order, psr.list_index + 1) AS sort_order '
                         'FROM plugin_slot_revisions psr '
@@ -270,7 +271,7 @@ class SubAgentDB:
                         '      AND pos.list_index = psr.list_index '
                         'WHERE psr.session_id = :session_id '
                         '  AND psr.selected = TRUE '
-                        'ORDER BY psr.artifact_key ASC, '
+                        'ORDER BY psr.slot ASC, '
                         '         COALESCE(pos.sort_order, psr.list_index + 1) ASC'
                     ),
                     {'session_id': session_id},
@@ -280,7 +281,7 @@ class SubAgentDB:
             return []
 
     def load_slot_artifact_by_sort_order(
-        self, session_id: str, artifact_key: str, sort_order: int
+        self, session_id: str, slot: str, sort_order: int
     ) -> Optional[Dict[str, Any]]:
         """Resolve sort_order → list_index for a plugin session slot, then return the
         selected revision metadata (artifact_seq, human_artifact_id, content_snapshot,
@@ -293,7 +294,7 @@ class SubAgentDB:
                 row = conn.execute(
                     text(
                         'SELECT '
-                        '  psr.artifact_key, '
+                        '  psr.slot, '
                         '  psr.list_index, '
                         '  psr.artifact_seq, '
                         '  psr.human_artifact_id, '
@@ -315,14 +316,14 @@ class SubAgentDB:
                         ') pos ON pos.slot_id = psr.slot_id '
                         '      AND pos.list_index = psr.list_index '
                         'WHERE psr.session_id = :session_id '
-                        '  AND psr.artifact_key = :artifact_key '
+                        '  AND psr.slot = :slot '
                         '  AND psr.selected = TRUE '
                         'ORDER BY psr.list_index ASC '
                         'LIMIT 1'
                     ),
                     {
                         'session_id': session_id,
-                        'artifact_key': artifact_key,
+                        'slot': slot,
                         'sort_order': sort_order,
                     },
                 ).mappings().first()
@@ -364,9 +365,9 @@ class SubAgentDB:
                     ar = conn.execute(
                         text(
                             'SELECT value, content_type FROM sub_agent_artifacts '
-                            'WHERE task_id = :tid AND artifact_key = :key AND seq = :seq'
+                            'WHERE task_id = :tid AND slot = :key AND seq = :seq'
                         ),
-                        {'tid': task_id, 'key': row.get('artifact_key', ''), 'seq': artifact_seq},
+                        {'tid': task_id, 'key': row.get('slot', ''), 'seq': artifact_seq},
                     ).mappings().first()
                 if ar is not None:
                     raw = ar['value']
@@ -392,7 +393,7 @@ class SubAgentDB:
         value-resolution logic from resolve_slot_revision_value.
 
         Returns a list of dicts with keys:
-          artifact_key, sort_order, content_type, value, is_human (bool)
+          slot, sort_order, content_type, value, is_human (bool)
         Returns empty list on any error.
         """
         try:
@@ -401,15 +402,16 @@ class SubAgentDB:
                 return []
             out: List[Dict[str, Any]] = []
             for r in raw_rows:
-                artifact_key = r.get('artifact_key', '')
+                artifact_key = r.get('slot', '')
                 sort_order = r.get('sort_order') or 1
                 is_human = bool(r.get('human_artifact_id'))
                 value, content_type = self.resolve_slot_revision_value(r)
                 if value is None:
                     continue
                 out.append({
-                    'artifact_key': artifact_key,
+                    'slot': artifact_key,
                     'sort_order': sort_order,
+                    'revision': r.get('revision') or 1,
                     'content_type': content_type,
                     'value': value,
                     'is_human': is_human,
@@ -434,7 +436,7 @@ class SubAgentDB:
                 rows = conn.execute(
                     text(
                         'SELECT '
-                        '  psr.artifact_key, '
+                        '  psr.slot, '
                         '  psr.list_index, '
                         '  psr.artifact_seq, '
                         '  psr.human_artifact_id, '
@@ -447,7 +449,7 @@ class SubAgentDB:
                         '  AND pss.attempt   = psr.attempt '
                         'WHERE psr.session_id = :session_id '
                         '  AND psr.selected = TRUE '
-                        'ORDER BY psr.artifact_key ASC, COALESCE(psr.list_index, -1) ASC'
+                        'ORDER BY psr.slot ASC, COALESCE(psr.list_index, -1) ASC'
                     ),
                     {'session_id': session_id},
                 ).mappings().all()
@@ -486,9 +488,9 @@ class SubAgentDB:
                         art_row = conn2.execute(
                             text(
                                 'SELECT value, content_type FROM sub_agent_artifacts '
-                                'WHERE task_id = :tid AND artifact_key = :key AND seq = :seq'
+                                'WHERE task_id = :tid AND slot = :key AND seq = :seq'
                             ),
-                            {'tid': task_id, 'key': r['artifact_key'], 'seq': artifact_seq},
+                            {'tid': task_id, 'key': r['slot'], 'seq': artifact_seq},
                         ).mappings().first()
                     if art_row is not None:
                         raw = art_row['value']
@@ -516,7 +518,7 @@ class SubAgentDB:
                 if value is None:
                     continue
                 out.append({
-                    'artifact_key': r['artifact_key'],
+                    'slot': r['slot'],
                     'content_type': content_type,
                     'value': value,
                     'list_index': r['list_index'],
@@ -606,7 +608,7 @@ class TaskQueryDB:
 
         Returns the same shape expected by _list_conversation_tasks / _resolve_task:
         task_id, id, title, agent_type, status, progress_pct, current_phase, summary,
-        seq_in_conversation, output_artifact_keys, artifacts (list of artifact dicts).
+        seq_in_conversation, output_slots, artifacts (list of artifact dicts).
         """
         try:
             with self._conn() as conn:
@@ -615,7 +617,7 @@ class TaskQueryDB:
                         'SELECT sat.id, sat.title, sat.agent_type, sat.status, '
                         '       sat.progress_pct, sat.current_phase, '
                         '       sat.summary, sat.seq_in_conversation, '
-                        '       sat.output_artifact_keys, sat.params '
+                        '       sat.output_slots, sat.params '
                         'FROM sub_agent_tasks sat '
                         # Exclude tasks that belong to a dismissed plugin session.
                         # plugin_step tasks are linked via plugin_session_steps;
@@ -641,10 +643,10 @@ class TaskQueryDB:
             with self._conn() as conn:
                 art_rows = conn.execute(
                     text(
-                        'SELECT task_id, artifact_key, content_type, value, seq '
+                        'SELECT task_id, slot, content_type, value, seq '
                         'FROM sub_agent_artifacts '
                         'WHERE task_id IN :ids '
-                        'ORDER BY task_id, artifact_key, seq ASC'
+                        'ORDER BY task_id, slot, seq ASC'
                     ).bindparams(bindparam('ids', expanding=True)),
                     {'ids': task_ids},
                 ).mappings().all()
@@ -660,7 +662,7 @@ class TaskQueryDB:
                 except ValueError:
                     value = {}
             arts_by_task.setdefault(ar['task_id'], []).append({
-                'artifact_key': ar['artifact_key'],
+                'slot': ar['slot'],
                 'content_type': ar['content_type'],
                 'value': value,
                 'seq': ar['seq'],
@@ -668,7 +670,7 @@ class TaskQueryDB:
 
         tasks = []
         for r in task_rows:
-            out_keys = r['output_artifact_keys']
+            out_keys = r['output_slots']
             if isinstance(out_keys, str):
                 try:
                     out_keys = json.loads(out_keys)
@@ -684,7 +686,7 @@ class TaskQueryDB:
                 'current_phase': r['current_phase'],
                 'summary': r['summary'],
                 'seq_in_conversation': r['seq_in_conversation'],
-                'output_artifact_keys': out_keys or [],
+                'output_slots': out_keys or [],
                 'artifacts': arts_by_task.get(r['id'], []),
                 'params': r['params'],
             })
@@ -705,10 +707,10 @@ class TaskQueryDB:
             with self._conn() as conn:
                 rows = conn.execute(
                     text(
-                        'SELECT task_id, artifact_key, content_type, value, seq '
+                        'SELECT task_id, slot, content_type, value, seq '
                         'FROM sub_agent_artifacts '
                         'WHERE task_id IN :ids AND hidden = FALSE '
-                        'ORDER BY task_id, artifact_key, seq ASC'
+                        'ORDER BY task_id, slot, seq ASC'
                     ).bindparams(bindparam('ids', expanding=True)),
                     {'ids': task_ids},
                 ).mappings().all()
@@ -722,7 +724,7 @@ class TaskQueryDB:
                         value = {}
                 out.append({
                     'task_id': r['task_id'],
-                    'artifact_key': r['artifact_key'],
+                    'slot': r['slot'],
                     'content_type': r['content_type'],
                     'value': value,
                     'seq': r['seq'],
@@ -789,7 +791,7 @@ class TaskQueryDB:
         """Return selected slot artifacts for a plugin session, resolved with sort_order.
 
         Returns a list of dicts with keys:
-          artifact_key, sort_order, content_type, value, is_human (bool)
+          slot, sort_order, content_type, value, is_human (bool)
         Returns empty list on any error or when session has no selected artifacts.
 
         Uses the same resolution logic as SubAgentDB.load_selected_slot_artifacts_resolved_with_order
@@ -800,12 +802,13 @@ class TaskQueryDB:
                 rows = conn.execute(
                     text(
                         'SELECT '
-                        '  psr.artifact_key, '
+                        '  psr.slot, '
                         '  psr.list_index, '
                         '  psr.artifact_seq, '
                         '  psr.human_artifact_id, '
                         '  psr.content_snapshot, '
                         '  psr.change_source, '
+                        '  psr.revision, '
                         '  pss.task_id, '
                         '  COALESCE(pos.sort_order, psr.list_index + 1) AS sort_order '
                         'FROM plugin_slot_revisions psr '
@@ -824,7 +827,7 @@ class TaskQueryDB:
                         '      AND pos.list_index = psr.list_index '
                         'WHERE psr.session_id = :session_id '
                         '  AND psr.selected = TRUE '
-                        'ORDER BY psr.artifact_key ASC, '
+                        'ORDER BY psr.slot ASC, '
                         '         COALESCE(pos.sort_order, psr.list_index + 1) ASC'
                     ),
                     {'session_id': session_id},
@@ -834,7 +837,7 @@ class TaskQueryDB:
 
         out: List[Dict[str, Any]] = []
         for r in rows:
-            artifact_key = r.get('artifact_key', '')
+            artifact_key = r.get('slot', '')
             sort_order = r.get('sort_order') or 1
             is_human = bool(r.get('human_artifact_id'))
 
@@ -863,7 +866,7 @@ class TaskQueryDB:
                         ar = conn2.execute(
                             text(
                                 'SELECT value, content_type FROM sub_agent_artifacts '
-                                'WHERE task_id = :tid AND artifact_key = :key AND seq = :seq'
+                                'WHERE task_id = :tid AND slot = :key AND seq = :seq'
                             ),
                             {'tid': task_id, 'key': artifact_key, 'seq': artifact_seq},
                         ).mappings().first()
@@ -880,8 +883,9 @@ class TaskQueryDB:
             if value is None:
                 continue
             out.append({
-                'artifact_key': artifact_key,
+                'slot': artifact_key,
                 'sort_order': sort_order,
+                'revision': r.get('revision') or 1,
                 'content_type': content_type,
                 'value': value,
                 'is_human': is_human,
@@ -954,24 +958,24 @@ class TaskQueryDB:
             return {}
 
     def get_step_artifacts(self, session_id: str, step_id: str) -> Dict[str, Any]:
-        """Return artifact key→value dict for a step (latest seq per key, non-hidden)."""
+        """Return slot→value dict for a step (latest seq per slot, non-hidden)."""
         try:
             with self._conn() as conn:
                 rows = conn.execute(
                     text(
-                        'SELECT sa.artifact_key, sa.content_type, sa.value '
+                        'SELECT sa.slot, sa.content_type, sa.value '
                         'FROM sub_agent_artifacts sa '
                         'JOIN plugin_session_steps pss ON pss.task_id = sa.task_id '
                         'WHERE pss.session_id = :sid AND pss.step_id = :step '
                         '  AND sa.hidden = FALSE '
-                        'ORDER BY sa.artifact_key, sa.seq DESC'
+                        'ORDER BY sa.slot, sa.seq DESC'
                     ),
                     {'sid': session_id, 'step': step_id},
                 ).mappings().all()
             seen: set = set()
             out: Dict[str, Any] = {}
             for r in rows:
-                key = r['artifact_key']
+                key = r['slot']
                 if key in seen:
                     continue
                 seen.add(key)
@@ -1024,7 +1028,7 @@ def format_artifact_summary(
 ) -> List[str]:
     """Format collected artifact items into summary block lines.
 
-    Each tuple in key_items[key] is (sort_order, content_type, value, is_human).
+    Each tuple in key_items[key] is (sort_order, content_type, value, is_human, revision).
     Returns a list of lines starting with an 'Available artifacts' header.
     """
     lines = ['Available artifacts (use get_artifact to retrieve content):']
@@ -1037,12 +1041,19 @@ def format_artifact_summary(
         else:
             header = f'- "{key}" [{ct_label}]:'
         lines.append(header)
-        for sort_order, ct, value, is_human in items:
+        for sort_order, ct, value, is_human, revision in items:
             summary = artifact_summary_line(value, ct, is_human)
+            rev_tag = f'[v{revision}]' if revision and revision > 1 else ''
             if count > 1:
-                lines.append(f'    [{sort_order}] {summary}')
+                prefix = f'[{sort_order}]'
+                if rev_tag:
+                    prefix = f'[{sort_order}]{rev_tag}'
+                lines.append(f'    {prefix} {summary}')
             else:
-                lines.append(f'    {summary}')
+                if rev_tag:
+                    lines.append(f'    {rev_tag} {summary}')
+                else:
+                    lines.append(f'    {summary}')
     return lines
 
 
@@ -1055,14 +1066,15 @@ def _rows_to_artifact_summary(
     key_items: Dict[str, List[tuple]] = defaultdict(list)
     key_content_type: Dict[str, str] = {}
     for r in rows:
-        key = r.get('artifact_key', '')
+        key = r.get('slot', '') or r.get('artifact_key', '')
         if not key:
             continue
         ct = r.get('content_type') or ''
         value = r.get('value') or {}
         order = r.get(order_field) or 1
         is_human = bool(r.get(is_human_field)) if is_human_field else False
-        key_items[key].append((order, ct, value, is_human))
+        revision = r.get('revision') or 1
+        key_items[key].append((order, ct, value, is_human, revision))
         if ct and key not in key_content_type:
             key_content_type[key] = ct
     return format_artifact_summary(key_items, key_content_type)
