@@ -239,6 +239,16 @@ func TestRuntimeConfigMovesExplicitUnpinnedAuthPortWhenOccupied(t *testing.T) {
 	if len(cfg.PortResolutions) == 0 {
 		t.Fatalf("expected a port resolution note")
 	}
+	found := false
+	for _, resolution := range cfg.PortResolutions {
+		if resolution.Name == "auth-service" && resolution.EnvName == localAuthPortEnvVar {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected auth-service resolution note, got %#v", cfg.PortResolutions)
+	}
 }
 
 func TestRuntimeConfigKeepsPinnedFrontendPortWhenOccupied(t *testing.T) {

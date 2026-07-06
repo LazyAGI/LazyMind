@@ -304,22 +304,22 @@ func (a *localPortAllocator) reserve(port int) int {
 }
 
 func (a *localPortAllocator) envOrAvailable(envName string, fallback int) int {
-	return a.firstEnvOrAvailable([]string{envName}, fallback)
+	return a.firstEnvOrAvailable("", []string{envName}, fallback)
 }
 
 func (a *localPortAllocator) envOrAvailableDefaultCanMove(envName string, fallback int) int {
-	return a.firstEnvOrAvailableOn([]string{envName}, fallback, "127.0.0.1")
+	return a.firstEnvOrAvailableOn("", []string{envName}, fallback, "127.0.0.1")
 }
 
 func (a *localPortAllocator) envOrAvailableDefaultCanMoveOn(envName string, fallback int, address string) int {
-	return a.firstEnvOrAvailableOn([]string{envName}, fallback, address)
+	return a.firstEnvOrAvailableOn("", []string{envName}, fallback, address)
 }
 
-func (a *localPortAllocator) firstEnvOrAvailable(envNames []string, fallback int) int {
-	return a.firstEnvOrAvailableOn(envNames, fallback, "127.0.0.1")
+func (a *localPortAllocator) firstEnvOrAvailable(name string, envNames []string, fallback int) int {
+	return a.firstEnvOrAvailableOn(name, envNames, fallback, "127.0.0.1")
 }
 
-func (a *localPortAllocator) firstEnvOrAvailableOn(envNames []string, fallback int, address string) int {
+func (a *localPortAllocator) firstEnvOrAvailableOn(name string, envNames []string, fallback int, address string) int {
 	for _, envName := range envNames {
 		if strings.TrimSpace(os.Getenv(envName)) != "" {
 			requested := envPort(envName, fallback)
@@ -331,6 +331,7 @@ func (a *localPortAllocator) firstEnvOrAvailableOn(envNames []string, fallback i
 			}
 			resolved := a.availableFromOn(requested, 500, address)
 			a.resolutions = append(a.resolutions, PortResolution{
+				Name:          name,
 				EnvName:       envName,
 				RequestedPort: requested,
 				ResolvedPort:  resolved,
@@ -342,6 +343,7 @@ func (a *localPortAllocator) firstEnvOrAvailableOn(envNames []string, fallback i
 	resolved := a.availableFromOn(fallback, 500, address)
 	if resolved != fallback {
 		a.resolutions = append(a.resolutions, PortResolution{
+			Name:          name,
 			RequestedPort: fallback,
 			ResolvedPort:  resolved,
 			Reason:        "default port unavailable",
@@ -377,26 +379,12 @@ func (a *localPortAllocator) portAvailableOn(address string, port int) bool {
 	return localPortAvailableOn(address, port)
 }
 
-func (a *localPortAllocator) setLastResolutionName(name string) {
-	if len(a.resolutions) == 0 {
-		return
-	}
-	last := &a.resolutions[len(a.resolutions)-1]
-	if last.Name == "" {
-		last.Name = name
-	}
-}
-
 func (a *localPortAllocator) resolvedPort(name string, envNames []string, fallback int) int {
-	port := a.firstEnvOrAvailable(envNames, fallback)
-	a.setLastResolutionName(name)
-	return port
+	return a.firstEnvOrAvailable(name, envNames, fallback)
 }
 
 func (a *localPortAllocator) resolvedPortOn(name string, envNames []string, fallback int, address string) int {
-	port := a.firstEnvOrAvailableOn(envNames, fallback, address)
-	a.setLastResolutionName(name)
-	return port
+	return a.firstEnvOrAvailableOn(name, envNames, fallback, address)
 }
 
 func localPortAvailable(port int) bool {

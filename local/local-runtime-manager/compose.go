@@ -161,11 +161,14 @@ func (m *ComposeManager) ComposeStartupPlan(ctx context.Context, repoRoot string
 		return ComposeStartupPlan{}, err
 	}
 	disabled, err := parseRuntimeOverlay(filepath.Join(repoRoot, localComposeOverrideName))
-	if err != nil && !os.IsNotExist(err) {
+	disabledContainerTypes := []string{}
+	if err == nil {
+		disabledContainerTypes = disabled.DisabledContainerTypes
+	} else if !os.IsNotExist(err) {
 		return ComposeStartupPlan{}, err
 	}
 
-	remaining, err := filterRemainingServices(services, disabled.DisabledContainerTypes)
+	remaining, err := filterRemainingServices(services, disabledContainerTypes)
 	if err != nil {
 		return ComposeStartupPlan{}, err
 	}
