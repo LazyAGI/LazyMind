@@ -6,6 +6,7 @@ import { Input } from 'antd';
 export interface TransitionEdgeData extends Record<string, unknown> {
   condition: string;
   hasError: boolean;
+  isParallel?: boolean;
   onConditionChange: (sourceId: string, targetId: string, condition: string) => void;
 }
 
@@ -36,8 +37,10 @@ function TransitionEdgeComponent({
   });
 
   const [hovered, setHovered] = useState(false);
-  const strokeColor = edgeData?.hasError ? '#ff4d4f' : selected ? '#1677ff' : hovered ? '#555' : '#8c8c8c';
+  const isParallel = edgeData?.isParallel ?? false;
+  const strokeColor = edgeData?.hasError ? '#ff4d4f' : selected ? '#1677ff' : hovered ? '#555' : isParallel ? '#1677ff' : '#8c8c8c';
   const strokeWidth = selected ? 2.5 : hovered ? 2.5 : 1.5;
+  const parallelOffset = 3;
 
   // Only show the label area when the edge is selected or hovered
   const showLabel = selected || hovered;
@@ -54,6 +57,21 @@ function TransitionEdgeComponent({
         onMouseLeave={() => setHovered(false)}
         style={{ cursor: 'pointer' }}
       />
+      {/* Parallel second line (offset) — only for parallel edges */}
+      {isParallel && (
+        <path
+          d={edgePath}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth={strokeWidth}
+          strokeDasharray="0"
+          strokeOpacity={0.5}
+          style={{
+            transform: `translate(0, ${parallelOffset}px)`,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
       <path
         id={id}
         className="react-flow__edge-path"

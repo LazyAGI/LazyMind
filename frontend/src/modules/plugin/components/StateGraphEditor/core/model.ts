@@ -19,6 +19,11 @@ export interface StepNode {
   inputs: string[];
   outputs: string[];
   transitions: Transition[];
+  /** How to follow outgoing transitions. 'all' triggers all matching exits simultaneously (default).
+   *  'choice' picks the first matching exit exclusively (conditional routing). */
+  route?: 'all' | 'choice';
+  /** Natural-language condition under which this step is skipped entirely. */
+  skipif?: string;
 }
 
 export interface NodeLayout {

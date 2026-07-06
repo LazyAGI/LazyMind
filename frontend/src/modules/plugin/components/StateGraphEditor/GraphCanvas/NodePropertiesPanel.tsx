@@ -106,6 +106,37 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
 
           <Divider style={{ margin: '8px 0' }} />
 
+          <Form.Item
+            label="后续流程"
+            extra={
+              node.route === 'choice'
+                ? '选择一个：运行时只走第一个满足条件的出口'
+                : '全部触发：同时触发所有满足条件的出口（并行）'
+            }
+          >
+            <Select
+              value={node.route ?? 'all'}
+              options={[
+                { label: '全部触发（并行）', value: 'all' },
+                { label: '选择一个（条件路由）', value: 'choice' },
+              ]}
+              onChange={(val) => update({ route: val })}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="跳过条件"
+            extra="满足此条件时跳过本步骤，直接执行后继节点"
+          >
+            <Input
+              value={node.skipif ?? ''}
+              onChange={(e) => update({ skipif: e.target.value || undefined })}
+              placeholder="例如：用户已提供大纲（留空表示不可跳过）"
+            />
+          </Form.Item>
+
+          <Divider style={{ margin: '8px 0' }} />
+
           <Form.Item label="完成后前往">
             <div className="node-props-transitions">
               {node.transitions.length > 0 && (

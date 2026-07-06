@@ -34,22 +34,140 @@ _PLUGINS_DIR = Path(_cfg['plugins_dir'])
 _registry: Dict[str, 'PluginSpec'] = {}
 
 
+def _join_conditions(c1: str, c2: str) -> str:
+    """Combine two natural-language conditions with AND.
+
+    Returns the non-empty side when one is empty, or 'c1 AND c2' when both present.
+    Pure string concatenation — no LLM involved.
+    """
+    c1, c2 = c1.strip(), c2.strip()
+    if not c1:
+        return c2
+    if not c2:
+        return c1
+    return f'{c1} AND {c2}'
+
+
 class StateMachine:
-    """Minimal state machine parsed from state.yml transitions block."""
+    """Minimal state machine parsed from state.yml transitions block.
+
+    Supports extended control-flow fields on each step:
+      route: 'all' | 'choice'  — how to follow outgoing transitions.
+        'all' (default): all matching exits are triggered simultaneously (parallel).
+        'choice': only the first matching exit is taken (conditional routing).
+      skipif: str  — natural-language condition under which this step is skipped entirely.
+        When set, the step is treated as having an implicit bypass transition that the
+        LLM can evaluate; get_reachable_steps returns it as optional.
+    """
 
     _RESERVED = {'__start__', '__end__'}
 
-    def __init__(self, initial: str, transitions: Dict[str, List[Dict[str, Any]]]) -> None:
+    def __init__(
+        self,
+        initial: str,
+        transitions: Dict[str, List[Dict[str, Any]]],
+        steps: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self.initial = initial
-        self._transitions: Dict[str, List[str]] = {}
+        self._raw_transitions: Dict[str, List[Dict[str, Any]]] = {}
         for src, edges in transitions.items():
-            targets = [e['to'] for e in edges if isinstance(e, dict) and 'to' in e]
-            self._transitions[src] = targets
+            valid = [e for e in edges if isinstance(e, dict) and 'to' in e]
+            self._raw_transitions[src] = valid
+        self._transitions: Dict[str, List[str]] = {
+            src: [e['to'] for e in edges]
+            for src, edges in self._raw_transitions.items()
+        }
+        # Per-step route and skipif metadata, keyed by step id.
+        steps_raw: Dict[str, Any] = steps or {}
+        self._route: Dict[str, str] = {}
+        self._skipif: Dict[str, str] = {}
+        for step_id, step_cfg in steps_raw.items():
+            if not isinstance(step_cfg, dict):
+                continue
+            if step_cfg.get('route') in ('all', 'choice'):
+                self._route[step_id] = step_cfg['route']
+            if step_cfg.get('skipif') and isinstance(step_cfg['skipif'], str):
+                self._skipif[step_id] = step_cfg['skipif']
+
+        # Build expanded transitions: skipif on successors are inlined as bypass conditions.
+        self._expanded_transitions: Dict[str, List[Dict[str, Any]]] = {}
+        self._expand_skipif_transitions()
+
+    # ------------------------------------------------------------------
+    # skipif expansion
+    # ------------------------------------------------------------------
+
+    def _expand_skipif_transitions(self) -> None:
+        """Populate _expanded_transitions by inlining skipif as bypass conditions.
+
+        For each source node, in addition to its direct successors, we also emit
+        bypass edges that skip over any successor with a skipif condition.  This
+        lets the LLM see all reachable targets (and the conditions required) in a
+        single flat list, without needing to reason about the skipif chain itself.
+
+        Example: A -> B(skipif=c1) -> C(skipif=c2) -> D
+          A's expanded exits: B (no extra cond), C (cond=c1), D (cond=c1 AND c2)
+          B's expanded exits: C (no extra cond), D (cond=c2)
+          C's expanded exits: D (no extra cond)
+        """
+        for src in self._raw_transitions:
+            self._expanded_transitions[src] = list(self._expand_from(src, frozenset()))
+
+    def _expand_from(self, src: str, visited: frozenset) -> List[Dict[str, Any]]:
+        """Yield expanded {to, condition} edges reachable from src.
+
+        visited prevents re-entering the same node during recursive bypass traversal,
+        guarding against cycles in the graph.
+        """
+        for edge in self._raw_transitions.get(src, []):
+            tgt = edge['to']
+            base_cond = edge.get('condition', '')
+            yield {'to': tgt, 'condition': base_cond}
+            # Only expand bypass if the target has a skipif and we haven't visited it.
+            if tgt in self._RESERVED or tgt in visited:
+                continue
+            skipif = self._skipif.get(tgt)
+            if skipif:
+                new_visited = visited | {src}
+                for bypass in self._expand_from(tgt, new_visited):
+                    yield {
+                        'to': bypass['to'],
+                        'condition': _join_conditions(skipif, bypass['condition']),
+                    }
+
+    def get_route(self, step_id: str) -> str:
+        """Return 'all' or 'choice' for this step (default: 'all')."""
+        return self._route.get(step_id, 'all')
+
+    def get_skipif(self, step_id: str) -> Optional[str]:
+        """Return the skipif condition string, or None if not set."""
+        return self._skipif.get(step_id)
+
+    def get_expanded_transitions(self, step_id: str) -> List[Dict[str, Any]]:
+        """Return expanded {to, condition} edges for step_id.
+
+        Includes bypass edges generated from skipif on successors.
+        Each item: {'to': str, 'condition': str}.
+        """
+        return list(self._expanded_transitions.get(step_id or '__start__', []))
 
     def get_reachable_steps(self, current_step: str) -> List[str]:
-        """Return step IDs reachable from current_step (excluding reserved states)."""
-        targets = self._transitions.get(current_step or '__start__', [])
-        return [t for t in targets if t not in self._RESERVED]
+        """Return step IDs reachable from current_step (excluding reserved states).
+
+        Uses the expanded transitions so that steps reachable via skipif bypass
+        are included alongside normal successors.  For each reachable target the
+        LLM can read the associated condition (via get_expanded_transitions) to
+        decide whether to advance directly or skip.
+        """
+        edges = self._expanded_transitions.get(current_step or '__start__', [])
+        seen: List[str] = []
+        visited: set = set()
+        for e in edges:
+            tgt = e['to']
+            if tgt not in self._RESERVED and tgt not in visited:
+                visited.add(tgt)
+                seen.append(tgt)
+        return seen
 
     def is_reachable(self, current_step: str, target_step: str) -> bool:
         """Return True if target_step is directly reachable from current_step.
@@ -132,6 +250,7 @@ class PluginSpec:
         self.state_machine = StateMachine(
             initial=str(self.state.get('initial', '__start__')),
             transitions=self.state.get('transitions', {}),
+            steps=self.state.get('steps'),
         )
 
         # Extract step configs from state.yml

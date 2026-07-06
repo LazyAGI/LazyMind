@@ -15,6 +15,8 @@ interface RawStep {
   inputs?: unknown;
   outputs?: unknown;
   transitions?: unknown;
+  route?: unknown;
+  skipif?: unknown;
 }
 
 interface RawYaml {
@@ -39,6 +41,10 @@ function parseStep(raw: RawStep): StepNode | null {
   const mode = raw.mode === 'auto' ? 'auto' : 'human';
   const inputs = Array.isArray(raw.inputs) ? raw.inputs.map(String) : [];
   const outputs = Array.isArray(raw.outputs) ? raw.outputs.map(String) : [];
+  const route: StepNode['route'] = raw.route === 'choice' ? 'choice' : raw.route === 'all' ? 'all' : undefined;
+  const skipif = raw.skipif !== undefined && raw.skipif !== null && String(raw.skipif).trim()
+    ? String(raw.skipif)
+    : undefined;
   return {
     id: String(raw.id),
     label: String(raw.label ?? raw.id),
@@ -46,6 +52,8 @@ function parseStep(raw: RawStep): StepNode | null {
     inputs,
     outputs,
     transitions: parseTransitions(raw.transitions),
+    ...(route !== undefined && { route }),
+    ...(skipif !== undefined && { skipif }),
   };
 }
 

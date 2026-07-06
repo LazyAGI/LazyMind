@@ -121,9 +121,10 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
 
   for (const node of model.nodes) {
     const isMultiExit = node.transitions.length > 1;
+    const isParallel = (node.route === 'all' || !node.route) && isMultiExit;
     for (const t of node.transitions) {
       const edgeKey = `${node.id}->${t.to}`;
-      const hasError = edgeErrorSet.has(edgeKey) || (isMultiExit && !t.condition.trim());
+      const hasError = edgeErrorSet.has(edgeKey) || (node.route === 'choice' && !t.condition.trim());
       edges.push({
         id: edgeKey,
         source: node.id,
@@ -133,6 +134,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
         data: {
           condition: t.condition,
           hasError,
+          isParallel,
           onConditionChange,
         },
       });

@@ -299,8 +299,16 @@ def _build_step_choices_doc(
     forward_steps: List[str],
     rewind_steps: List[str],
     step_labels: Dict[str, str],
+    plugin_id: str = '',
+    current_step: str = '',
 ) -> str:
-    """Return a formatted string listing available step choices for the LLM."""
+    """Return a formatted string listing available step choices for the LLM.
+
+    When plugin_id and current_step are supplied, each forward step is annotated
+    with the condition (if any) under which it should be taken, derived from the
+    expanded transitions (skipif bypass conditions are already inlined).
+    """
+    sm = plugin_loader.get_state_machine(plugin_id) if plugin_id else None
     lines = [
         '## Available steps at this moment (authoritative — state machine computed)',
         '--------------------------------------------------------------------------',
@@ -308,11 +316,32 @@ def _build_step_choices_doc(
         'Do NOT infer step names from scenario descriptions or chat history.',
     ]
     if forward_steps:
+        # Build a condition map from the expanded transitions so each step shows
+        # the condition (if any) under which it should be taken.
+        condition_map: Dict[str, str] = {}
+        if sm and current_step is not None:
+            for edge in sm.get_expanded_transitions(current_step):
+                tgt = edge['to']
+                cond = edge.get('condition', '').strip()
+                if tgt not in condition_map and cond:
+                    condition_map[tgt] = cond
+
         lines.append('Forward (next steps):')
         for s in forward_steps:
             label = step_labels.get(s, '')
-            suffix = f'  ({label})' if label else ''
-            lines.append(f'  - {s}{suffix}')
+            label_suffix = f'  ({label})' if label else ''
+            cond = condition_map.get(s, '')
+            cond_note = f'  [when: {cond}]' if cond else ''
+            lines.append(f'  - {s}{label_suffix}{cond_note}')
+
+        if len(forward_steps) > 1 and sm:
+            lines.append('')
+            lines.append(
+                '  NOTE: If these exits belong to a parallel node (route:all), you MUST trigger\n'
+                '  ALL of them by calling advance_step_and_hand_off once per step_id.\n'
+                '  If they belong to a choice node (route:choice), pick exactly ONE based on conditions.\n'
+                '  For steps annotated with [when: ...], only advance to that step if the condition holds.'
+            )
     if rewind_steps:
         lines.append('Rewind (re-run a past step):')
         for s in rewind_steps:
@@ -388,7 +417,7 @@ def build_advance_step_and_hand_off_tool(
     labels = step_labels or {}
     all_reachable = list(forward) + rewind
 
-    choices_doc = _build_step_choices_doc(forward, rewind, labels)
+    choices_doc = _build_step_choices_doc(forward, rewind, labels, plugin_id=plugin_id, current_step=current_step)
 
     def advance_step_and_hand_off(
         step_id: str,
@@ -484,7 +513,7 @@ def build_advance_step_tool(
     labels = step_labels or {}
     all_reachable = list(forward) + rewind
 
-    choices_doc = _build_step_choices_doc(forward, rewind, labels)
+    choices_doc = _build_step_choices_doc(forward, rewind, labels, plugin_id=plugin_id, current_step=current_step)
 
     def advance_step(
         step_id: str,

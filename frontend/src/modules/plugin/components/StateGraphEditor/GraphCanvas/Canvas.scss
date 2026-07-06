@@ -35,6 +35,11 @@
     border-color: #ff4d4f;
     box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.15);
   }
+
+  &.is-skippable {
+    border-style: dashed;
+    border-color: #faad14;
+  }
 }
 
 .step-node-header {
@@ -58,6 +63,32 @@
   line-height: 1.2;
   padding: 0 4px;
   border-radius: 3px;
+}
+
+.step-node-badges {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.step-node-badge {
+  font-size: 12px;
+  line-height: 1;
+  cursor: default;
+  user-select: none;
+
+  &--choice {
+    color: #722ed1;
+  }
+
+  &--parallel {
+    color: #1677ff;
+  }
+
+  &--skip {
+    color: #faad14;
+  }
 }
 
 .step-node-label {

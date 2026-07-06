@@ -86,15 +86,44 @@ export function validateStateGraph(model: GraphModel): ValidationError[] {
       });
     }
 
-    // V9: condition must not be empty when there are multiple transitions
-    if (node.transitions.length > 1) {
+    const route = node.route ?? 'all';
+
+    // V9 (route:choice): every transition must have a condition
+    if (route === 'choice') {
       for (const t of node.transitions) {
         if (!t.condition.trim()) {
           errors.push({
             code: 'V9_EMPTY_CONDITION',
-            message: `步骤 "${node.id}" 有多个出口时，每条线都需要填写条件`,
+            message: `步骤 "${node.id}" 使用「选择一个」路由时，每条出口必须填写条件`,
             nodeId: node.id,
             edgeKey: `${node.id}->${t.to}`,
+          });
+        }
+      }
+    }
+
+    // V10: mixed conditions (some with, some without) cause semantic ambiguity
+    if (node.transitions.length > 1) {
+      const withCond = node.transitions.filter((t) => t.condition.trim());
+      const withoutCond = node.transitions.filter((t) => !t.condition.trim());
+      if (withCond.length > 0 && withoutCond.length > 0) {
+        errors.push({
+          code: 'V10_MIXED_CONDITIONS',
+          message: `步骤 "${node.id}" 的出口中，部分有条件、部分无条件，语义不明确。请确保所有出口都有条件（route:choice）或都无条件（route:all 默认触发）`,
+          nodeId: node.id,
+        });
+      }
+    }
+
+    // V11 (route:all parallel branches): sub-steps must not have multiple exits
+    if (route === 'all' && node.transitions.length > 1) {
+      for (const t of node.transitions) {
+        const targetNode = nodes.find((n) => n.id === t.to);
+        if (targetNode && targetNode.transitions.length > 1) {
+          errors.push({
+            code: 'V11_PARALLEL_BRANCH_MULTI_EXIT',
+            message: `步骤 "${targetNode.id}" 是并行分支子步骤，不允许再有多个出口（禁止二次分叉）`,
+            nodeId: targetNode.id,
           });
         }
       }

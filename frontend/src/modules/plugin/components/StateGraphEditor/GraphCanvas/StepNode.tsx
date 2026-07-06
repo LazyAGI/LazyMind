@@ -12,13 +12,19 @@ export interface StepNodeData extends Record<string, unknown> {
   inputs: string[];
   outputs: string[];
   transitions: { to: string; condition: string }[];
+  route?: 'all' | 'choice';
+  skipif?: string;
   hasError: boolean;
   errorMessages: string[];
 }
 
 function StepNodeComponent({ data, selected }: NodeProps) {
   const nodeData = data as unknown as StepNodeData;
-  const { hasError, errorMessages, mode, label, id } = nodeData;
+  const { hasError, errorMessages, mode, label, id, route, skipif, transitions } = nodeData;
+
+  const isChoice = route === 'choice';
+  const isParallel = (route === 'all' || !route) && transitions.length > 1;
+  const isSkippable = Boolean(skipif?.trim());
 
   return (
     <Tooltip
@@ -26,18 +32,40 @@ function StepNodeComponent({ data, selected }: NodeProps) {
       placement="top"
     >
       <div
-        className={`step-node ${selected ? 'is-selected' : ''} ${hasError ? 'has-error' : ''}`}
+        className={[
+          'step-node',
+          selected ? 'is-selected' : '',
+          hasError ? 'has-error' : '',
+          isSkippable ? 'is-skippable' : '',
+        ].filter(Boolean).join(' ')}
         aria-label={`步骤节点: ${String(label)}`}
       >
         <Handle type="target" position={Position.Left} className="step-node-handle" connectableStart={false} />
 
         <div className="step-node-header">
           <span className="step-node-id">{String(id)}</span>
-          <Tag
-            className="step-node-mode-tag"
-            icon={mode === 'auto' ? <RobotOutlined /> : <UserOutlined />}
-            color={mode === 'auto' ? 'blue' : 'orange'}
-          />
+          <div className="step-node-badges">
+            {isChoice && (
+              <Tooltip title="条件路由：选择一个出口">
+                <span className="step-node-badge step-node-badge--choice" aria-label="条件路由">◇</span>
+              </Tooltip>
+            )}
+            {isParallel && (
+              <Tooltip title="并行触发：同时触发所有出口">
+                <span className="step-node-badge step-node-badge--parallel" aria-label="并行触发">⑂</span>
+              </Tooltip>
+            )}
+            {isSkippable && (
+              <Tooltip title={`可跳过：${skipif}`}>
+                <span className="step-node-badge step-node-badge--skip" aria-label="可跳过">↷</span>
+              </Tooltip>
+            )}
+            <Tag
+              className="step-node-mode-tag"
+              icon={mode === 'auto' ? <RobotOutlined /> : <UserOutlined />}
+              color={mode === 'auto' ? 'blue' : 'orange'}
+            />
+          </div>
         </div>
         <div className="step-node-label">{String(label)}</div>
 

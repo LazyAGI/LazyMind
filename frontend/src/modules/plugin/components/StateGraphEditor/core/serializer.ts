@@ -44,12 +44,13 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
       label: node.label,
       mode: node.mode,
     };
+    if (node.route && node.route !== 'all') step.route = node.route;
+    if (node.skipif?.trim()) step.skipif = node.skipif;
     if (node.inputs.length > 0) step.inputs = node.inputs;
     if (node.outputs.length > 0) step.outputs = node.outputs;
     if (node.transitions.length > 0) {
       step.transitions = node.transitions.map((t) => {
         const entry: Record<string, unknown> = { to: t.to };
-        // Omit condition when empty (single-exit unconditional flow)
         if (t.condition.trim()) entry.condition = t.condition;
         return entry;
       });
