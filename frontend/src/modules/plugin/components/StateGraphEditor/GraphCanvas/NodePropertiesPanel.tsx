@@ -1,8 +1,16 @@
-import { Button, Form, Input, Select, Divider } from 'antd';
-import { CloseOutlined, PlusOutlined } from '@ant-design/icons';
+import { useState } from 'react';
+import { Button, Checkbox, Input, Select, Tooltip } from 'antd';
+import {
+  CloseOutlined,
+  PlusOutlined,
+  QuestionCircleOutlined,
+  DownOutlined,
+  RightOutlined,
+  DeleteOutlined,
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { StepNode, GraphModel } from '../core/model';
-import { VIRTUAL_END } from '../core/model';
+import { VIRTUAL_END, isHiddenId } from '../core/model';
 import './NodePropertiesPanel.scss';
 
 const STEP_ID_REGEX = /^[a-zA-Z0-9_]+$/;
@@ -13,55 +21,116 @@ interface Props {
   onClose: () => void;
   onChange: (updated: StepNode) => void;
   onDelete: (nodeId: string) => void;
+  /** When true the "添加分支" button is disabled (node is a parallel-fork child). */
+  disableAddTransition?: boolean;
 }
 
-export default function NodePropertiesPanel({ node, model, onClose, onChange, onDelete }: Props) {
+interface SectionProps {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}
+
+function Section({ title, defaultOpen = true, children }: SectionProps) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="npp-section">
+      <button className="npp-section-header" onClick={() => setOpen((v) => !v)}>
+        <span className="npp-section-title">{title}</span>
+        {open ? <DownOutlined className="npp-section-icon" /> : <RightOutlined className="npp-section-icon" />}
+      </button>
+      {open && <div className="npp-section-body">{children}</div>}
+    </div>
+  );
+}
+
+function LabelWithTip({ label, tip }: { label: string; tip: string }) {
+  return (
+    <span className="npp-field-label">
+      {label}
+      <Tooltip title={tip} placement="top">
+        <QuestionCircleOutlined className="npp-tip-icon" />
+      </Tooltip>
+    </span>
+  );
+}
+
+function FieldRow({ label, tip, children }: { label: string; tip: string; children: React.ReactNode }) {
+  return (
+    <div className="npp-field-row">
+      <LabelWithTip label={label} tip={tip} />
+      <div className="npp-field-control">{children}</div>
+    </div>
+  );
+}
+
+export default function NodePropertiesPanel({ node, model, onClose, onChange, onDelete, disableAddTransition }: Props) {
   const { t } = useTranslation();
+  const [allowSkip, setAllowSkip] = useState<boolean>(!!node.skipif);
+  // Display value for the id field: hidden-placeholder ids are shown as empty string.
+  const [idDraft, setIdDraft] = useState<string>(isHiddenId(node.id) ? '' : node.id);
+
+  // Keep draft in sync when node.id changes from outside (e.g. undo, external rename),
+  // but only when the user isn't actively typing.
+  const [idFocused, setIdFocused] = useState(false);
+  const displayedNodeId = isHiddenId(node.id) ? '' : node.id;
+  if (!idFocused && idDraft !== displayedNodeId) {
+    setIdDraft(displayedNodeId);
+  }
+
   const slotOptions = Object.keys(model.slots).map((id) => ({
     label: model.slots[id].label ? `${id} (${model.slots[id].label})` : id,
     value: id,
   }));
 
-  const update = (patch: Partial<StepNode>) => {
-    onChange({ ...node, ...patch });
-  };
+  const update = (patch: Partial<StepNode>) => onChange({ ...node, ...patch });
+
+  // Error: non-empty draft that contains invalid chars, or starts with reserved prefix.
+  const stepIdError = !!(idDraft && (!STEP_ID_REGEX.test(idDraft) || idDraft.startsWith('.hid')));
 
   return (
     <div className="node-props-panel" role="complementary" aria-label="步骤设置" onDoubleClick={(e) => e.stopPropagation()}>
+      {/* header */}
       <div className="node-props-panel-header">
         <span className="node-props-panel-title">步骤设置</span>
-        <Button
-          type="text"
-          icon={<CloseOutlined />}
-          size="small"
-          onClick={onClose}
-          aria-label="关闭属性面板"
-        />
+        <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label="关闭属性面板" />
       </div>
 
+      {/* body */}
       <div className="node-props-panel-body">
-        <Form layout="vertical" size="small">
-          <Form.Item
-            label="步骤 ID"
-            validateStatus={node.id && !STEP_ID_REGEX.test(node.id) ? 'error' : ''}
-            help={node.id && !STEP_ID_REGEX.test(node.id) ? '步骤 ID 只能包含英文字母、数字和下划线' : '用于代码引用，仅支持英文/数字/下划线'}
-          >
+        {/* ── 分组一：基本信息 ── */}
+        <Section title="基本信息">
+          <FieldRow label="步骤标识" tip="用于代码引用，仅支持英文字母、数字和下划线">
             <Input
-              value={node.id}
-              onChange={(e) => update({ id: e.target.value })}
-              placeholder="步骤唯一ID"
+              value={idDraft}
+              status={stepIdError ? 'error' : undefined}
+              onChange={(e) => {
+                const val = e.target.value;
+                setIdDraft(val);
+                // Report upstream immediately; empty string causes Canvas to assign
+                // a hidden placeholder id, keeping the node alive in the model.
+                update({ id: val });
+              }}
+              onFocus={() => setIdFocused(true)}
+              onBlur={() => setIdFocused(false)}
+              placeholder="步骤唯一标识"
+              size="small"
             />
-          </Form.Item>
-
-          <Form.Item label="步骤名称">
+            {stepIdError && (
+              <span className="npp-field-error">
+                {idDraft.startsWith('.hid') ? '不能以 .hid 开头' : '只能包含英文字母、数字和下划线'}
+              </span>
+            )}
+          </FieldRow>
+          <FieldRow label="展示名称" tip="在画布上展示的名称，例如：审核文档">
             <Input
               value={node.label}
               onChange={(e) => update({ label: e.target.value })}
-              placeholder="在画布上展示的名称，例如：审核文档"
+              placeholder="步骤展示名称"
+              size="small"
             />
-          </Form.Item>
-
-          <Form.Item label={t('selfEvolutionRun.stateGraphExecutionMode')}>
+          </FieldRow>
+          <FieldRow label="执行方式" tip="人工审批：需要人工介入确认后才能继续；自动执行：由系统自动完成，无需人工干预">
             <Select
               value={node.mode}
               options={[
@@ -69,138 +138,158 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
                 { label: t('selfEvolutionRun.stateGraphModeAutoDesc'), value: 'auto' },
               ]}
               onChange={(val) => update({ mode: val })}
+              size="small"
+              style={{ width: '100%' }}
             />
-          </Form.Item>
+          </FieldRow>
+        </Section>
 
-          <Divider style={{ margin: '8px 0' }} />
-
-          <Form.Item
-            label={t('selfEvolutionRun.stateGraphArtifactInputs')}
-            extra={Object.keys(model.slots).length === 0 ? <span style={{ fontSize: 11, color: '#bfbfbf' }}>请先在工具栏添加素材</span> : undefined}
-          >
+        {/* ── 分组二：素材 ── */}
+        <Section title="素材">
+          <div className="npp-field-block">
+            <LabelWithTip label="用到的素材" tip="本步骤执行时需要读取的素材" />
             <Select
               mode="multiple"
               value={node.inputs}
               options={slotOptions}
               onChange={(val) => update({ inputs: val })}
-              placeholder="选择用到的素材"
+              placeholder={Object.keys(model.slots).length === 0 ? '请先在工具栏添加素材' : '请选择用到的素材'}
               allowClear
-              notFoundContent={<span style={{ fontSize: 12, color: '#bfbfbf' }}>暂无素材，请先添加</span>}
+              size="small"
+              disabled={Object.keys(model.slots).length === 0}
+              style={{ width: '100%', marginTop: 4 }}
+              notFoundContent={<span className="npp-hint">暂无素材，请先添加</span>}
             />
-          </Form.Item>
-
-          <Form.Item
-            label={t('selfEvolutionRun.stateGraphArtifactOutputs')}
-            extra={Object.keys(model.slots).length === 0 ? <span style={{ fontSize: 11, color: '#bfbfbf' }}>请先在工具栏添加素材</span> : undefined}
-          >
+          </div>
+          <div className="npp-field-block" style={{ marginTop: 10 }}>
+            <LabelWithTip label="产出的素材" tip="本步骤执行完毕后会写入的素材" />
             <Select
               mode="multiple"
               value={node.outputs}
               options={slotOptions}
               onChange={(val) => update({ outputs: val })}
-              placeholder="选择产出的素材"
+              placeholder={Object.keys(model.slots).length === 0 ? '请先在工具栏添加素材' : '请选择产出的素材'}
               allowClear
-              notFoundContent={<span style={{ fontSize: 12, color: '#bfbfbf' }}>暂无素材，请先添加</span>}
+              size="small"
+              disabled={Object.keys(model.slots).length === 0}
+              style={{ width: '100%', marginTop: 4 }}
+              notFoundContent={<span className="npp-hint">暂无素材，请先添加</span>}
             />
-          </Form.Item>
+          </div>
+        </Section>
 
-          <Divider style={{ margin: '8px 0' }} />
-
-          <Form.Item
-            label="后续流程"
-            extra={
-              node.route === 'choice'
-                ? '选择一个：运行时只走第一个满足条件的出口'
-                : '全部触发：同时触发所有满足条件的出口（并行）'
-            }
-          >
-            <Select
-              value={node.route ?? 'all'}
-              options={[
-                { label: '全部触发（并行）', value: 'all' },
-                { label: '选择一个（条件路由）', value: 'choice' },
-              ]}
-              onChange={(val) => update({ route: val })}
-            />
-          </Form.Item>
-
-          <Form.Item
-            label="跳过条件"
-            extra="满足此条件时跳过本步骤，直接执行后继节点"
-          >
-            <Input
-              value={node.skipif ?? ''}
-              onChange={(e) => update({ skipif: e.target.value || undefined })}
-              placeholder="例如：用户已提供大纲（留空表示不可跳过）"
-            />
-          </Form.Item>
-
-          <Divider style={{ margin: '8px 0' }} />
-
-          <Form.Item label="完成后前往">
-            <div className="node-props-transitions">
+        {/* ── 分组三：执行流程 ── */}
+        <Section title="执行流程">
+          {/* 完成后前往：表头与行合并 */}
+          <div className="npp-field-block">
+            <div className="npp-transitions-header-row">
+              <LabelWithTip label="完成后前往" tip="本步骤完成后跳转的下一步骤及条件" />
               {node.transitions.length > 0 && (
-                <div className="node-props-transition-header">
-                  <span className="node-props-transition-col-label col-to">前往</span>
-                  <span className="node-props-transition-col-label col-condition">条件（满足什么情况时）</span>
-                </div>
+                <span className="node-props-transition-col-label col-condition-title">条件（满足什么情况时）</span>
               )}
-              {node.transitions.map((t, idx) => (
+            </div>
+            <div className="npp-transitions" style={{ marginTop: 6 }}>
+              {node.transitions.map((tr, idx) => (
                 <div key={idx} className="node-props-transition-row">
                   <Select
-                    value={t.to}
+                    value={tr.to}
                     options={[
                       ...model.nodes.filter((n) => n.id !== node.id).map((n) => ({ label: n.label, value: n.id })),
                       { label: '结束', value: VIRTUAL_END },
                     ]}
                     onChange={(val) => {
                       const next = [...node.transitions];
-                      next[idx] = { ...t, to: val };
+                      next[idx] = { ...tr, to: val };
                       update({ transitions: next });
                     }}
                     style={{ flex: 1 }}
+                    size="small"
                     placeholder="选择下一步骤"
                   />
                   <Input
-                    value={t.condition}
+                    value={tr.condition}
                     onChange={(e) => {
                       const next = [...node.transitions];
-                      next[idx] = { ...t, condition: e.target.value };
+                      next[idx] = { ...tr, condition: e.target.value };
                       update({ transitions: next });
                     }}
                     style={{ flex: 2, marginLeft: 4 }}
-                    placeholder={node.transitions.length > 1 ? '满足什么情况时进入' : '（选填）满足什么情况时进入'}
+                    size="small"
+                    placeholder="（选填）满足什么情况时进入"
                   />
                   <Button
                     type="text"
                     danger
                     size="small"
                     icon={<CloseOutlined />}
-                    onClick={() => {
-                      update({ transitions: node.transitions.filter((_, i) => i !== idx) });
-                    }}
+                    onClick={() => update({ transitions: node.transitions.filter((_, i) => i !== idx) })}
                     aria-label="删除分支"
                   />
                 </div>
               ))}
-              <Button
-                type="dashed"
-                size="small"
-                icon={<PlusOutlined />}
-                block
-                onClick={() => update({ transitions: [...node.transitions, { to: '', condition: '' }] })}
-              >
-                添加分支
-              </Button>
+              <Tooltip title={disableAddTransition ? '并行分支的子步骤不允许再有多个出口（禁止二次分叉）' : undefined}>
+                <Button
+                  type="dashed"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  block
+                  disabled={disableAddTransition}
+                  onClick={() => update({ transitions: [...node.transitions, { to: '', condition: '' }] })}
+                >
+                  添加分支
+                </Button>
+              </Tooltip>
             </div>
-          </Form.Item>
-        </Form>
+          </div>
 
-        <div className="node-props-panel-footer">
-          <Button danger size="small" block onClick={() => onDelete(node.id)}>
-            删除此步骤
-          </Button>
-        </div>
+          {/* 流程推进方式：仅在有多个后继时显示 */}
+          {node.transitions.length > 1 && (
+            <FieldRow label="流程推进方式" tip="全部触发：同时触发所有满足条件的出口（并行）；选择一个：只走第一个满足条件的出口">
+              <Select
+                value={node.route ?? 'all'}
+                options={[
+                  { label: '全部触发（并行）', value: 'all' },
+                  { label: '选择一个（第一个满足条件的）', value: 'choice' },
+                ]}
+                onChange={(val) => update({ route: val })}
+                size="small"
+                style={{ width: '100%' }}
+              />
+            </FieldRow>
+          )}
+
+          {/* 允许跳过 */}
+          <div className="npp-skip-section">
+            <Checkbox
+              checked={allowSkip}
+              onChange={(e) => {
+                setAllowSkip(e.target.checked);
+                if (!e.target.checked) update({ skipif: undefined });
+              }}
+            >
+              <span className="npp-skip-label">允许跳过</span>
+              <Tooltip title="满足此条件时，跳过本步骤直接执行后继节点" placement="top">
+                <QuestionCircleOutlined className="npp-tip-icon" />
+              </Tooltip>
+            </Checkbox>
+            {allowSkip && (
+              <Input
+                className="npp-skip-input"
+                value={node.skipif ?? ''}
+                onChange={(e) => update({ skipif: e.target.value || undefined })}
+                placeholder="例如：用户已提供大纲"
+                size="small"
+              />
+            )}
+          </div>
+        </Section>
+      </div>
+
+      {/* footer */}
+      <div className="node-props-panel-footer">
+        <Button danger size="small" block icon={<DeleteOutlined />} onClick={() => onDelete(node.id)}>
+          删除此步骤
+        </Button>
       </div>
     </div>
   );

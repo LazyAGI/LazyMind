@@ -50,6 +50,19 @@ export interface GraphModel {
 export const VIRTUAL_START = '__start__';
 export const VIRTUAL_END = '__end__';
 
+/**
+ * Hidden-id prefix. When a user clears the step ID field, we assign a hidden
+ * placeholder id so the node remains valid in the model. The canvas never
+ * displays ids that start with this prefix.
+ */
+export const HID_PREFIX = '.hid-';
+
+/** Returns true when the id is a hidden placeholder (not user-assigned). */
+export const isHiddenId = (id: string) => id.startsWith(HID_PREFIX);
+
+/** Generate a new hidden placeholder id. */
+export const newHiddenId = () => `${HID_PREFIX}${Math.random().toString(36).slice(2, 8)}`;
+
 export const createEmptyModel = (): GraphModel => ({
   nodes: [],
   slots: {},

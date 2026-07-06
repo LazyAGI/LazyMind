@@ -1,5 +1,5 @@
 import { useStore } from '@xyflow/react';
-import type { GuideLine } from './useAlignmentGuides';
+import type { GuideLine, GuideLineHSym, GuideLineVSym } from './useAlignmentGuides';
 
 interface Props {
   guides: GuideLine[];
@@ -37,6 +37,11 @@ export function AlignmentGuides({ guides }: Props) {
       }}
     >
       {guides.map((g, i) => {
+        const isSym = (g as GuideLineHSym | GuideLineVSym).symmetric === true;
+        // Symmetric guides use a distinct color and a longer dash pattern
+        const stroke = isSym ? '#722ed1' : '#f5222d';
+        const dasharray = isSym ? '8 4' : '5 4';
+
         if (g.type === 'horizontal') {
           const { sx: sx1, sy } = toScreen(g.x1, g.y);
           const { sx: sx2 } = toScreen(g.x2, g.y);
@@ -47,9 +52,9 @@ export function AlignmentGuides({ guides }: Props) {
               y1={sy}
               x2={sx2}
               y2={sy}
-              stroke="#f5222d"
+              stroke={stroke}
               strokeWidth={1}
-              strokeDasharray="5 4"
+              strokeDasharray={dasharray}
               opacity={0.9}
             />
           );
@@ -63,9 +68,9 @@ export function AlignmentGuides({ guides }: Props) {
               y1={sy1}
               x2={sx}
               y2={sy2}
-              stroke="#f5222d"
+              stroke={stroke}
               strokeWidth={1}
-              strokeDasharray="5 4"
+              strokeDasharray={dasharray}
               opacity={0.9}
             />
           );

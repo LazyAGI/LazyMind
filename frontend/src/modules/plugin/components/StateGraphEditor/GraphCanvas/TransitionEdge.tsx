@@ -38,9 +38,11 @@ function TransitionEdgeComponent({
 
   const [hovered, setHovered] = useState(false);
   const isParallel = edgeData?.isParallel ?? false;
-  const strokeColor = edgeData?.hasError ? '#ff4d4f' : selected ? '#1677ff' : hovered ? '#555' : isParallel ? '#1677ff' : '#8c8c8c';
+  // Parallel edges use a dashed stroke to indicate simultaneous fan-out,
+  // avoiding the confusing double-line ghost effect.
+  const strokeColor = edgeData?.hasError ? '#ff4d4f' : selected ? '#1677ff' : hovered ? '#555' : '#8c8c8c';
   const strokeWidth = selected ? 2.5 : hovered ? 2.5 : 1.5;
-  const parallelOffset = 3;
+  const strokeDash = isParallel ? '6 3' : undefined;
 
   // Only show the label area when the edge is selected or hovered
   const showLabel = selected || hovered;
@@ -57,27 +59,13 @@ function TransitionEdgeComponent({
         onMouseLeave={() => setHovered(false)}
         style={{ cursor: 'pointer' }}
       />
-      {/* Parallel second line (offset) — only for parallel edges */}
-      {isParallel && (
-        <path
-          d={edgePath}
-          fill="none"
-          stroke={strokeColor}
-          strokeWidth={strokeWidth}
-          strokeDasharray="0"
-          strokeOpacity={0.5}
-          style={{
-            transform: `translate(0, ${parallelOffset}px)`,
-            pointerEvents: 'none',
-          }}
-        />
-      )}
       <path
         id={id}
         className="react-flow__edge-path"
         d={edgePath}
         stroke={strokeColor}
         strokeWidth={strokeWidth}
+        strokeDasharray={strokeDash}
         fill="none"
         markerEnd="url(#arrow)"
         onMouseEnter={() => setHovered(true)}

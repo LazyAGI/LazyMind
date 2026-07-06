@@ -130,7 +130,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
               size="small"
               value={draft.id}
               onChange={(e) => setDraft((d) => ({ ...d, id: e.target.value, idError: undefined }))}
-              placeholder="素材 ID（英文/数字/下划线）"
+              placeholder="素材标识（英文/数字/下划线）"
               status={draft.idError ? 'error' : ''}
               onPressEnter={handleAdd}
               autoFocus

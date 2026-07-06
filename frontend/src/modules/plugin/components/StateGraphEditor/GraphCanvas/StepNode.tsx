@@ -4,6 +4,7 @@ import type { NodeProps } from '@xyflow/react';
 import { Tag, Tooltip } from 'antd';
 import { RobotOutlined, UserOutlined } from '@ant-design/icons';
 import type { ValidationError } from '../core/validator';
+import { isHiddenId } from '../core/model';
 
 export interface StepNodeData extends Record<string, unknown> {
   id: string;
@@ -16,6 +17,8 @@ export interface StepNodeData extends Record<string, unknown> {
   skipif?: string;
   hasError: boolean;
   errorMessages: string[];
+  /** IDs of nodes that have a transition pointing to this node (predecessor set) */
+  predecessorIds: string[];
 }
 
 function StepNodeComponent({ data, selected }: NodeProps) {
@@ -40,10 +43,19 @@ function StepNodeComponent({ data, selected }: NodeProps) {
         ].filter(Boolean).join(' ')}
         aria-label={`步骤节点: ${String(label)}`}
       >
-        <Handle type="target" position={Position.Left} className="step-node-handle" connectableStart={false} />
+        {/*
+          Left handle: can receive incoming connections (reconnect target drop)
+          but cannot be dragged to start a new connection.
+        */}
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="step-node-handle"
+          connectableStart={false}
+        />
 
         <div className="step-node-header">
-          <span className="step-node-id">{String(id)}</span>
+          <span className="step-node-id">{isHiddenId(id) ? '' : String(id)}</span>
           <div className="step-node-badges">
             {isChoice && (
               <Tooltip title="条件路由：选择一个出口">

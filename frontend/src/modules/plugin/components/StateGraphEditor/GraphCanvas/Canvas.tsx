@@ -10,6 +10,7 @@ import {
   useReactFlow,
   useStore,
   ReactFlowProvider,
+  PanOnScrollMode,
   type Node,
   type Edge,
   type Connection,
@@ -22,9 +23,9 @@ import {
 import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
 import type { GraphModel, StepNode, NodeLayout } from '../core/model';
-import { VIRTUAL_END, VIRTUAL_START } from '../core/model';
+import { VIRTUAL_END, VIRTUAL_START, newHiddenId } from '../core/model';
 import type { ValidationError } from '../core/validator';
-import { StepNodeRenderer, TerminalNode, buildNodeErrorMap } from './StepNode';
+import { StepNodeRenderer, TerminalNode, buildNodeErrorMap, type StepNodeData } from './StepNode';
 import { TransitionEdge } from './TransitionEdge';
 import NodePropertiesPanel from './NodePropertiesPanel';
 import { useAlignmentGuides } from './useAlignmentGuides';
@@ -55,9 +56,62 @@ const edgeTypes: EdgeTypes = {
   transition: TransitionEdge as EdgeTypes['transition'],
 };
 
+function buildPredecessorMap(model: GraphModel): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const t of model.startTransitions) {
+    if (!map.has(t.to)) map.set(t.to, []);
+    map.get(t.to)!.push(VIRTUAL_START);
+  }
+  for (const node of model.nodes) {
+    for (const t of node.transitions) {
+      if (!map.has(t.to)) map.set(t.to, []);
+      map.get(t.to)!.push(node.id);
+    }
+  }
+  return map;
+}
+
+/**
+ * V11 guard: returns a rejection message if adding the edge src→tgt would
+ * violate the "parallel sub-steps must not have multiple exits" rule, or null
+ * if the connection is allowed.
+ *
+ * Rule: a node that is a direct child of a parallel fork (route:all, >1 exits)
+ * must not itself have more than one outgoing transition.
+ */
+function v11RejectReason(model: GraphModel, srcId: string, tgtId: string): string | null {
+  // After the new edge is added, src will have (current + 1) outgoing transitions.
+  const srcNode = model.nodes.find((n) => n.id === srcId);
+  if (!srcNode) return null;
+
+  const srcExitsAfter = srcNode.transitions.length + 1; // after adding the new edge
+
+  // Check 1: src's parent is a parallel fork → src must stay at ≤1 exit.
+  if (srcExitsAfter > 1) {
+    for (const n of model.nodes) {
+      const isParallelFork = (n.route === 'all' || !n.route) && n.transitions.length > 1;
+      if (isParallelFork && n.transitions.some((t) => t.to === srcId)) {
+        return `步骤 "${srcId}" 是并行分支子步骤，不允许再有多个出口（禁止二次分叉）`;
+      }
+    }
+  }
+
+  // Check 2: src is itself a parallel fork → tgt must not already have >0 exits.
+  const srcIsParallelForkAfter = (srcNode.route === 'all' || !srcNode.route) && srcExitsAfter > 1;
+  if (srcIsParallelForkAfter) {
+    const tgtNode = model.nodes.find((n) => n.id === tgtId);
+    if (tgtNode && tgtNode.transitions.length > 0) {
+      return `步骤 "${tgtId}" 已有出口，不能作为并行分支的子步骤（禁止二次分叉）`;
+    }
+  }
+
+  return null;
+}
+
 function modelToFlowNodes(model: GraphModel, nodeErrorMap: Map<string, string[]>): Node[] {
   const flowNodes: Node[] = [];
   let autoX = 80;
+  const predMap = buildPredecessorMap(model);
 
   // __start__ virtual node
   flowNodes.push({
@@ -81,6 +135,7 @@ function modelToFlowNodes(model: GraphModel, nodeErrorMap: Map<string, string[]>
         ...node,
         hasError: errMsgs.length > 0,
         errorMessages: errMsgs,
+        predecessorIds: predMap.get(node.id) ?? [],
       },
       selected: false,
       width: NODE_WIDTH,
@@ -114,6 +169,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
       source: VIRTUAL_START,
       target: t.to,
       type: 'transition',
+      reconnectable: 'target' as const,
       markerEnd: { type: MarkerType.ArrowClosed },
       data: { condition: t.condition, hasError: false, onConditionChange },
     });
@@ -130,6 +186,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
         source: node.id,
         target: t.to,
         type: 'transition',
+        reconnectable: 'target' as const,
         markerEnd: { type: MarkerType.ArrowClosed },
         data: {
           condition: t.condition,
@@ -145,7 +202,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
 }
 
 function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<CanvasHandle>) {
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, zoomIn, zoomOut } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
   const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides } = useAlignmentGuides();
 
@@ -204,6 +261,9 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const selectedNodeIdRef = useRef<string | null>(null);
+  // Keep ref in sync so useEffect (model sync) can read current value without deps
+  useEffect(() => { selectedNodeIdRef.current = selectedNodeId; }, [selectedNodeId]);
 
   // When a canvas-internal operation calls onModelChange, we set this flag so
   // the sync useEffect below knows NOT to re-derive nodes/edges from the model
@@ -254,10 +314,14 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
       skipSyncRef.current = false;
       return;
     }
-    setNodes(modelToFlowNodes(model, nodeErrorMap));
+    const newNodes = modelToFlowNodes(model, nodeErrorMap);
+    // Preserve visual selection on the node that was selected before the sync
+    const curSel = selectedNodeIdRef.current;
+    const nodesWithSel = curSel
+      ? newNodes.map((n) => (n.id === curSel ? { ...n, selected: true } : n))
+      : newNodes;
+    setNodes(nodesWithSel);
     setEdges(modelToFlowEdges(model, nodeErrorMap, handleConditionChange));
-  // handleConditionChange is stable (no deps), nodeErrorMap changes only when
-  // errors change — both are safe in this dep array.
   }, [model, nodeErrorMap, handleConditionChange, setNodes, setEdges]);
 
   // When a new edge is drawn in the canvas, add a transition to the model
@@ -293,17 +357,79 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
       const sourceNode = m.nodes.find((n) => n.id === connection.source);
       if (!sourceNode) return;
 
+      // V11 guard: reject if this connection would violate the no-re-fork rule.
+      const reject = v11RejectReason(m, connection.source, connection.target);
+      if (reject) {
+        // Silent rejection — the invalid edge simply doesn't get drawn.
+        return;
+      }
+
       const newTransition = { to: connection.target, condition: '' };
       const updatedNodes = m.nodes.map((n) =>
         n.id === connection.source
           ? { ...n, transitions: [...n.transitions, newTransition] }
           : n,
       );
+      const newModel = { ...m, nodes: updatedNodes };
       skipSyncRef.current = true;
-      onModelChangeRef.current({ ...m, nodes: updatedNodes });
-      setEdges((eds) => addEdge({ ...connection, type: 'transition' }, eds));
+      onModelChangeRef.current(newModel);
+      // Sync the source node's data in ReactFlow so the properties panel reflects
+      // the new transition immediately (without waiting for the parent re-render).
+      const updatedSource = updatedNodes.find((n) => n.id === connection.source)!;
+      const errMsgs = nodeErrorMap.get(connection.source) ?? [];
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === connection.source
+            ? { ...n, data: { ...updatedSource, hasError: errMsgs.length > 0, errorMessages: errMsgs } }
+            : n,
+        ),
+      );
+      setEdges((eds) => addEdge({ ...connection, type: 'transition', markerEnd: { type: MarkerType.ArrowClosed }, data: { condition: '', hasError: false, onConditionChange: handleConditionChange } }, eds));
     },
     [setEdges, handleConditionChange],
+  );
+
+  // Reconnect: user drags the target end of an existing edge to a new node.
+  // Only the target end is reconnectable (controlled by edge.reconnectable = 'target').
+  const onReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      if (!newConnection.source || !newConnection.target) return;
+      const oldSrc = oldEdge.source;
+      const oldTgt = oldEdge.target;
+      const newTgt = newConnection.target;
+      if (oldTgt === newTgt) return;
+
+      const m = modelRef.current;
+
+      if (oldSrc === VIRTUAL_START) {
+        const newStartTransitions = m.startTransitions.map((t) =>
+          t.to === oldTgt ? { ...t, to: newTgt } : t,
+        );
+        setEdges((eds) => eds.map((e) =>
+          e.id === oldEdge.id ? { ...e, id: `${VIRTUAL_START}->${newTgt}`, target: newTgt } : e,
+        ));
+        skipSyncRef.current = true;
+        onModelChangeRef.current({ ...m, startTransitions: newStartTransitions });
+        return;
+      }
+
+      const newNodes = m.nodes.map((n) => {
+        if (n.id !== oldSrc) return n;
+        return {
+          ...n,
+          transitions: n.transitions.map((t) =>
+            t.to === oldTgt ? { ...t, to: newTgt } : t,
+          ),
+        };
+      });
+      const newEdgeId = `${oldSrc}->${newTgt}`;
+      setEdges((eds) => eds.map((e) =>
+        e.id === oldEdge.id ? { ...e, id: newEdgeId, target: newTgt } : e,
+      ));
+      skipSyncRef.current = true;
+      onModelChangeRef.current({ ...m, nodes: newNodes });
+    },
+    [setEdges],
   );
 
   // Sync drag-stop positions back to the model layout
@@ -351,9 +477,23 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
     [computeGuides, allNodesFromStore, setNodes],
   );
 
-  // Handle node/edge deletion via Delete or Backspace key
+  // Handle node/edge deletion via Delete or Backspace key,
+  // and Cmd+/- zoom within the canvas (prevents browser zoom).
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      // Cmd/Ctrl + '=' (Plus) or '-' (Minus) — zoom canvas, block browser zoom
+      if (event.metaKey || event.ctrlKey) {
+        if (event.key === '+' || event.key === '=' || event.key === '-') {
+          event.preventDefault();
+          if (event.key === '-') {
+            zoomOut({ duration: 200 });
+          } else {
+            zoomIn({ duration: 200 });
+          }
+          return;
+        }
+      }
+
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
       const tag = (event.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -402,7 +542,7 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
       onModelChangeRef.current({ ...m, nodes: updatedNodesWithEdges, layout: newLayout, startTransitions: newStartTransitions });
       setSelectedNodeId(null);
     },
-    [selectedEdgeId, selectedNodeId, setEdges, setNodes],
+    [selectedEdgeId, selectedNodeId, setEdges, setNodes, zoomIn, zoomOut],
   );
 
   // Add a new node — places it at the current viewport center
@@ -431,7 +571,7 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
         id: newId,
         type: 'step',
         position: flowPos,
-        data: { ...newNode, hasError: false, errorMessages: [] },
+        data: { ...newNode, hasError: false, errorMessages: [], predecessorIds: [] },
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
       },
@@ -467,7 +607,7 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
           id: newId,
           type: 'step',
           position: flowPos,
-          data: { ...newNode, hasError: false, errorMessages: [] },
+          data: { ...newNode, hasError: false, errorMessages: [], predecessorIds: [] },
           width: NODE_WIDTH,
           height: NODE_HEIGHT,
         },
@@ -478,15 +618,48 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
     [screenToFlowPosition, setNodes],
   );
 
+  // Derive selectedNode from ReactFlow's nodes state (not model prop) so the
+  // panel stays open immediately after an id-rename, before the parent re-renders.
   const selectedNode = selectedNodeId
-    ? model.nodes.find((n) => n.id === selectedNodeId)
+    ? (nodes.find((n) => n.id === selectedNodeId)?.data as unknown as StepNodeData | undefined) ?? null
     : null;
+  // NodePropertiesPanel expects a StepNode (subset of StepNodeData), build it:
+  const selectedStepNode = selectedNode
+    ? {
+        id: selectedNode.id,
+        label: selectedNode.label,
+        mode: selectedNode.mode,
+        inputs: selectedNode.inputs,
+        outputs: selectedNode.outputs,
+        transitions: selectedNode.transitions,
+        route: selectedNode.route,
+        skipif: selectedNode.skipif,
+      }
+    : null;
+
+  // Whether the selected node is a direct child of a parallel fork.
+  // If true, "添加分支" must be disabled to prevent V11 violations.
+  const selectedIsParallelChild = selectedNodeId
+    ? model.nodes.some(
+        (n) =>
+          (n.route === 'all' || !n.route) &&
+          n.transitions.length > 1 &&
+          n.transitions.some((t) => t.to === selectedNodeId),
+      )
+    : false;
 
   const handleNodePropertyChange = (updated: StepNode) => {
     const m = modelRef.current;
-    const updatedNodes = m.nodes.map((n) => (n.id === selectedNodeId ? updated : n));
-    if (updated.id !== selectedNodeId) {
-      const remaId = updated.id;
+    // When the user clears the id, assign a hidden placeholder so the node
+    // stays valid in the model while the panel remains open.
+    const effectiveId = updated.id || newHiddenId();
+    const normalised = updated.id ? updated : { ...updated, id: effectiveId };
+
+    const updatedNodes = m.nodes.map((n) => (n.id === selectedNodeId ? normalised : n));
+
+    if (normalised.id !== selectedNodeId) {
+      // Id changed (non-empty new id, or hidden placeholder replacing old id).
+      const remaId = normalised.id;
       const remappedNodes = updatedNodes.map((n) => ({
         ...n,
         transitions: n.transitions.map((t) =>
@@ -498,11 +671,10 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
         newLayout[remaId] = newLayout[selectedNodeId];
         delete newLayout[selectedNodeId];
       }
-      // Node id changed: let useEffect re-sync so ReactFlow picks up the new id
       onModelChangeRef.current({ ...m, nodes: remappedNodes, layout: newLayout });
       setSelectedNodeId(remaId);
     } else {
-      // Only data changed — update ReactFlow state in-place to avoid full re-sync flicker
+      // Same id, only data changed — update in-place to avoid full re-sync flicker.
       const newModel = { ...m, nodes: updatedNodes };
       skipSyncRef.current = true;
       onModelChangeRef.current(newModel);
@@ -513,7 +685,7 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
           return {
             ...n,
             data: {
-              ...updated,
+              ...normalised,
               hasError: errMsgs.length > 0,
               errorMessages: errMsgs,
             },
@@ -557,6 +729,8 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
+        onReconnect={onReconnect}
+        reconnectRadius={20}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
@@ -564,6 +738,13 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
         elevateEdgesOnSelect
         fitView
         attributionPosition="bottom-right"
+        // Interaction: two-finger swipe to pan, pinch to zoom, no left-drag pan
+        panOnScroll
+        panOnScrollMode={PanOnScrollMode.Free}
+        panOnDrag={false}
+        zoomOnScroll={false}
+        zoomOnPinch
+        zoomOnDoubleClick={false}
       >
         <Background />
         <Controls />
@@ -585,13 +766,14 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
       </ReactFlow>
       <AlignmentGuides guides={guides} />
 
-      {selectedNode && (
+      {selectedStepNode && (
         <NodePropertiesPanel
-          node={selectedNode}
+          node={selectedStepNode}
           model={model}
           onClose={() => setSelectedNodeId(null)}
           onChange={handleNodePropertyChange}
           onDelete={handleNodeDelete}
+          disableAddTransition={selectedIsParallelChild}
         />
       )}
     </div>
