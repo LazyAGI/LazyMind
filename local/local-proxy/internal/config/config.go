@@ -76,6 +76,7 @@ func Load(configPath string) (Config, error) {
 	}
 
 	cfg.applyEnvOverrides()
+	cfg.normalize()
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("invalid config: %w", err)
@@ -172,6 +173,26 @@ func (c *Config) applyEnvOverrides() {
 		}
 		c.Listen.Port = port
 	}
+}
+
+func (c *Config) normalize() {
+	if len(c.CORS.AllowedOrigins) == 0 {
+		return
+	}
+	origins := make([]string, 0, len(c.CORS.AllowedOrigins))
+	seen := make(map[string]struct{}, len(c.CORS.AllowedOrigins))
+	for _, origin := range c.CORS.AllowedOrigins {
+		origin = strings.TrimSpace(origin)
+		if origin == "" {
+			continue
+		}
+		if _, ok := seen[origin]; ok {
+			continue
+		}
+		seen[origin] = struct{}{}
+		origins = append(origins, origin)
+	}
+	c.CORS.AllowedOrigins = origins
 }
 
 func (c Config) ListenAddr() string {

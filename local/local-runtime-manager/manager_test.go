@@ -123,6 +123,46 @@ func TestRuntimeConfigAllowsFileWatcherBaseRootOverride(t *testing.T) {
 	}
 }
 
+func TestParseResetArgsDefaultsToKB(t *testing.T) {
+	scope, profile, repoRoot, err := parseResetArgs([]string{"--repo-root", "/tmp/repo"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parse reset args: %v", err)
+	}
+	if scope != ResetScopeKB {
+		t.Fatalf("scope = %q, want %q", scope, ResetScopeKB)
+	}
+	if profile != defaultProfileValue() {
+		t.Fatalf("profile = %q, want default profile", profile)
+	}
+	if repoRoot != "/tmp/repo" {
+		t.Fatalf("repo root = %q", repoRoot)
+	}
+}
+
+func TestParseResetArgsRejectsUnknownScope(t *testing.T) {
+	if _, _, _, err := parseResetArgs([]string{"--scope", "everything"}, io.Discard); err == nil {
+		t.Fatalf("expected unknown reset scope to fail")
+	}
+}
+
+func TestParseServiceArgsRequiresNameAndAction(t *testing.T) {
+	if _, _, _, _, err := parseServiceArgs([]string{"--name", fileWatcherProcessName}, io.Discard); err == nil {
+		t.Fatalf("expected missing action to fail")
+	}
+	service, action, profile, repoRoot, err := parseServiceArgs([]string{
+		"--name", fileWatcherProcessName,
+		"--action", "build",
+		"--profile", "linux-browser",
+		"--repo-root", "/tmp/repo",
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("parse service args: %v", err)
+	}
+	if service != fileWatcherProcessName || action != "build" || profile != "linux-browser" || repoRoot != "/tmp/repo" {
+		t.Fatalf("unexpected parsed service args: %q %q %q %q", service, action, profile, repoRoot)
+	}
+}
+
 func TestRuntimeConfigAllocatesAvailableLocalPorts(t *testing.T) {
 	for _, envName := range []string{
 		processComposePortEnvVar,
@@ -300,6 +340,19 @@ func TestRuntimeConfigAllowsLANNetworkProfile(t *testing.T) {
 	if cfg.NetworkProfile != "lan" {
 		t.Fatalf("network profile = %q, want lan", cfg.NetworkProfile)
 	}
+}
+
+func TestLocalRuntimeEnvIncludesExplicitFrontendLANOrigin(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "lan")
+	t.Setenv(frontendLANOriginEnvVar, "http://10.0.0.2:8090")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	env := localRuntimeEnv(cfg)
+	assertEnvContains(t, env, frontendLANOriginEnvVar+"=http://10.0.0.2:8090")
 }
 
 func TestRuntimeConfigLANFrontendPortAvoidsWildcardOccupiedDefault(t *testing.T) {
@@ -780,6 +833,162 @@ func TestBuildEnabledServicesUsesDockerComposeBuild(t *testing.T) {
 	runner.assertCommandCount(2)
 }
 
+func TestProcessComposeGOBINUsesAbsolutePath(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	got, err := processComposeGOBIN(filepath.Join("relative", "repo"))
+	if err != nil {
+		t.Fatalf("process compose GOBIN: %v", err)
+	}
+	want := filepath.Join(root, "relative", "repo", "local", "bin")
+	if got != want {
+		t.Fatalf("GOBIN = %q, want %q", got, want)
+	}
+	if !filepath.IsAbs(got) {
+		t.Fatalf("GOBIN should be absolute: %q", got)
+	}
+}
+
+func TestResetKBLocalStateRemovesRuntimePathsAndRunsSQLiteCleanup(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	for _, path := range localKBResetPaths(paths) {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatalf("mkdir reset path %s: %v", path, err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "marker"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write marker in %s: %v", path, err)
+		}
+	}
+
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		if cmd.Name != "python3" {
+			t.Fatalf("expected sqlite cleanup to use python3 got %s", cmd.Name)
+		}
+		if len(cmd.Args) != 4 || cmd.Args[0] != "-c" || cmd.Args[2] != paths.CoreDBPath || cmd.Args[3] != paths.LazyLLMDBPath {
+			t.Fatalf("unexpected sqlite cleanup args: %v", cmd.Args)
+		}
+		if !strings.Contains(cmd.Args[1], "DROP TABLE IF EXISTS") {
+			t.Fatalf("sqlite cleanup script should drop lazyllm tables")
+		}
+		return CommandResult{}, nil
+	})
+
+	if err := manager.resetKBLocalState(context.Background(), paths); err != nil {
+		t.Fatalf("reset KB local state: %v", err)
+	}
+	runner.assertCommandCount(1)
+	for _, path := range localKBResetPaths(paths) {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be removed, err=%v", path, err)
+		}
+	}
+}
+
+func TestResetAllLocalStateRemovesRuntimePersistentPaths(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	for _, path := range localAllResetPaths(paths) {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatalf("mkdir reset path %s: %v", path, err)
+		}
+	}
+
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "lazymind-local"))
+	if err := manager.resetAllLocalState(context.Background(), paths); err != nil {
+		t.Fatalf("reset all local state: %v", err)
+	}
+	for _, path := range localAllResetPaths(paths) {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be removed, err=%v", path, err)
+		}
+	}
+}
+
+func TestRunServiceActionBuildsFileWatcher(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommand(t, cmd, "go", "build", "-buildvcs=false", "-o", paths.FileWatcherBin, "./cmd/main.go")
+		if cmd.Dir != filepath.Join(repo, fileWatcherSourceDirName) {
+			t.Fatalf("file-watcher build dir = %q", cmd.Dir)
+		}
+		return CommandResult{}, nil
+	})
+
+	if err := manager.RunServiceAction(context.Background(), cfg, paths, fileWatcherProcessName, "build"); err != nil {
+		t.Fatalf("run service build: %v", err)
+	}
+	runner.assertCommandCount(1)
+}
+
+func TestRemoveLocalPathWithDockerUsesAbsoluteHostMount(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	repo := "repo"
+	path := filepath.Join(repo, "data", "core")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir path: %v", err)
+	}
+	absRepo, err := filepath.Abs(repo)
+	if err != nil {
+		t.Fatalf("abs repo: %v", err)
+	}
+
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(absRepo, "lazymind-local"))
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"run", "--rm",
+			"-v", absRepo + ":/work",
+			"-w", "/work",
+		})
+		if cmd.Dir != absRepo {
+			t.Fatalf("docker cleanup dir = %q, want %q", cmd.Dir, absRepo)
+		}
+		if got := cmd.Args[len(cmd.Args)-1]; got != "rm -rf data/core" {
+			t.Fatalf("docker cleanup script = %q", got)
+		}
+		return CommandResult{}, nil
+	})
+
+	if err := manager.removeLocalPathWithDocker(context.Background(), repo, path); err != nil {
+		t.Fatalf("remove path with docker: %v", err)
+	}
+	runner.assertCommandCount(1)
+}
+
+func TestRunServiceActionRejectsUnsupportedService(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "lazymind-local"))
+	if err := manager.RunServiceAction(context.Background(), cfg, paths, "core", "build"); err == nil {
+		t.Fatalf("expected unsupported service to fail")
+	}
+}
+
 func TestClassifyComposeReadinessReportsFatalBeforePending(t *testing.T) {
 	state, reason := classifyComposeReadiness([]ComposeServiceStatus{
 		{Service: "chat", State: "created"},
@@ -1200,6 +1409,8 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 	runner := &fakeRunner{t: t}
 	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
 	manager.probeAPI = func(port int, timeout time.Duration) bool { return true }
+	manager.probeLocalProxy = func(port int, timeout time.Duration) bool { return true }
+	manager.probeFrontend = func(port int, timeout time.Duration) bool { return true }
 	manager.probeAuth = func(port int, timeout time.Duration) bool { return true }
 	manager.probeCore = func(port int, timeout time.Duration) bool { return true }
 	manager.probeScan = func(port int, timeout time.Duration) bool { return true }

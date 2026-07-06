@@ -41,6 +41,7 @@ const (
 	routerPortPoolEndEnvVar       = "LAZYMIND_ROUTER_PORT_POOL_END"
 	routerPortsPerInstanceEnvVar  = "LAZYMIND_ROUTER_PORTS_PER_INSTANCE"
 	frontendPortEnvVar            = "LAZYMIND_FRONTEND_PORT"
+	frontendLANOriginEnvVar       = "LAZYMIND_FRONTEND_LAN_ORIGIN"
 	authServicePortEnvVar         = "LAZYMIND_AUTH_SERVICE_PORT"
 	authServicePythonEnvVar       = "LAZYMIND_AUTH_SERVICE_PYTHON"
 	authServiceUVEnvVar           = "LAZYMIND_AUTH_SERVICE_UV"

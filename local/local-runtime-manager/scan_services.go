@@ -100,6 +100,16 @@ func (m *ScanControlPlaneManager) build(ctx context.Context, paths RuntimePaths)
 }
 
 func (m *ScanControlPlaneManager) waitForDatabase(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := os.MkdirAll(filepath.Dir(paths.ScanDBPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(paths.ScanControlPlaneStateDir, 0o755); err != nil {
+		return err
+	}
+	if strings.EqualFold(envText("LAZYMIND_SCAN_CONTROL_PLANE_DB_DRIVER", "sqlite"), "sqlite") {
+		return nil
+	}
+
 	deadline := time.NewTimer(scanControlPlaneDBWaitTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -250,7 +260,8 @@ func scanControlPlaneEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS=127.0.0.1",
 		"LAZYMIND_SCAN_CONTROL_PLANE_PORT=" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
-		"LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN=" + coreDatabaseDSN(cfg.Algorithm.PostgresPort, "scan_control_plane", "root", "123456"),
+		"LAZYMIND_SCAN_CONTROL_PLANE_DB_DRIVER=sqlite",
+		"LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN=" + paths.ScanDBPath,
 		"LAZYMIND_SCAN_CONTROL_PLANE_DB_MIGRATION_FILE=" + filepath.Join(paths.RepoRoot, scanControlPlaneSourceDirName, "migrations", "20260519101723_init.up.sql"),
 		"LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_SCAN_CONTROL_PLANE_AGENT_BASE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.FileWatcher.Port),
