@@ -2,7 +2,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  width: 280px;
+  width: 300px;
   height: 100%;
   background: #fff;
   border-right: 1px solid #f0f0f0;
@@ -54,11 +54,12 @@
   gap: 6px;
 }
 
+// Each artifact row: id | fields | delete button
 .artifact-row {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
   background: #fafafa;
   border: 1px solid #f0f0f0;
   border-radius: 6px;
@@ -71,21 +72,81 @@
 
 .artifact-row-id {
   flex-shrink: 0;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  width: 88px;
+  padding-top: 3px; // align with first input row
 
   code {
+    display: block;
     font-family: 'SFMono-Regular', Consolas, monospace;
     font-size: 11px;
     color: #1677ff;
     background: #e6f4ff;
-    padding: 1px 5px;
+    padding: 2px 6px;
     border-radius: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
+.artifact-row-fields {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.artifact-row-main {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.artifact-type-select {
+  width: 80px !important;
+  flex-shrink: 0;
+}
+
+.artifact-label-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact-row-flags {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+
+  .ant-checkbox-wrapper {
+    font-size: 12px;
+    color: #595959;
+  }
+}
+
+.artifact-row-extra {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.artifact-extra-label {
+  font-size: 12px;
+  color: #8c8c8c;
+  white-space: nowrap;
+}
+
+.artifact-summary-input {
+  width: 80px !important;
+}
+
+.artifact-row-delete {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+// Add form
 .artifact-add-form {
   display: flex;
   flex-direction: column;
@@ -103,6 +164,25 @@
 
 .artifact-add-row2 {
   display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.artifact-add-flags {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+
+  .ant-checkbox-wrapper {
+    font-size: 12px;
+    color: #595959;
+  }
+}
+
+.artifact-add-extra {
+  display: flex;
+  align-items: center;
   gap: 6px;
 }
 

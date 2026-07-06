@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Input, Select, Tooltip, Empty } from 'antd';
+import { Button, Checkbox, Input, InputNumber, Select, Tooltip, Empty } from 'antd';
 import { PlusOutlined, DeleteOutlined, CloseOutlined } from '@ant-design/icons';
 import type { SlotDef, GraphModel } from '../core/model';
 import './index.scss';
@@ -23,10 +23,27 @@ interface DraftArtifact {
   id: string;
   type: string;
   label: string;
+  cardinality: 'single' | 'list';
+  ordered: boolean;
+  allow_manual_add: boolean;
+  summary_max_chars: string;
   idError?: string;
 }
 
-const EMPTY_DRAFT: DraftArtifact = { id: '', type: 'text', label: '' };
+const EMPTY_DRAFT: DraftArtifact = {
+  id: '',
+  type: 'text',
+  label: '',
+  cardinality: 'single',
+  ordered: false,
+  allow_manual_add: true,
+  summary_max_chars: '',
+};
+
+/** Returns true if any step node uses slotId as an input. */
+function isUsedAsInput(model: GraphModel, slotId: string): boolean {
+  return model.nodes.some((n) => n.inputs.includes(slotId));
+}
 
 export default function ArtifactPanel({ model, onClose, onModelChange }: Props) {
   const [draft, setDraft] = useState<DraftArtifact>(EMPTY_DRAFT);
@@ -47,7 +64,17 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
       setDraft((d) => ({ ...d, idError }));
       return;
     }
-    const newSlot: SlotDef = { id: draft.id, type: draft.type, label: draft.label || undefined };
+    const isList = draft.cardinality === 'list';
+    const maxChars = parseInt(draft.summary_max_chars, 10);
+    const newSlot: SlotDef = {
+      id: draft.id,
+      type: draft.type,
+      label: draft.label || undefined,
+      cardinality: isList ? 'list' : undefined,
+      ordered: (isList && draft.ordered) ? true : undefined,
+      allow_manual_add: isList ? draft.allow_manual_add : undefined,
+      summary_max_chars: (!isNaN(maxChars) && maxChars > 0) ? maxChars : undefined,
+    };
     const newSlots = { ...model.slots, [draft.id]: newSlot };
     onModelChange({ ...model, slots: newSlots });
     setDraft(EMPTY_DRAFT);
@@ -57,7 +84,6 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
   const handleDelete = (id: string) => {
     const newSlots = { ...model.slots };
     delete newSlots[id];
-    // Also remove references from nodes
     const newNodes = model.nodes.map((n) => ({
       ...n,
       inputs: n.inputs.filter((s) => s !== id),
@@ -67,8 +93,21 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
   };
 
   const updateArtifact = (id: string, patch: Partial<Omit<SlotDef, 'id'>>) => {
-    const updated: SlotDef = { ...model.slots[id], ...patch };
+    const current = model.slots[id];
+    const updated: SlotDef = { ...current, ...patch };
+    // When switching back to single, clear list-only fields
+    if ('cardinality' in patch && patch.cardinality !== 'list') {
+      updated.cardinality = undefined;
+      updated.ordered = undefined;
+      updated.allow_manual_add = undefined;
+    }
     onModelChange({ ...model, slots: { ...model.slots, [id]: updated } });
+  };
+
+  // Resolve effective allow_manual_add: explicit value wins, otherwise derive from usage.
+  const resolveAllowManualAdd = (art: SlotDef): boolean => {
+    if (art.allow_manual_add !== undefined) return art.allow_manual_add;
+    return isUsedAsInput(model, art.id);
   };
 
   return (
@@ -95,22 +134,67 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
         {artifacts.map((art) => (
           <div key={art.id} className="artifact-row">
             <div className="artifact-row-id">
-              <code>{art.id}</code>
+              <Tooltip title={art.id}>
+                <code>{art.id}</code>
+              </Tooltip>
             </div>
-            <Select
-              size="small"
-              value={art.type}
-              options={TYPE_OPTIONS}
-              onChange={(val) => updateArtifact(art.id, { type: val })}
-              style={{ width: 80 }}
-            />
-            <Input
-              size="small"
-              value={art.label ?? ''}
-              onChange={(e) => updateArtifact(art.id, { label: e.target.value || undefined })}
-              placeholder="素材名称（可选）"
-              style={{ flex: 1 }}
-            />
+            <div className="artifact-row-fields">
+              <div className="artifact-row-main">
+                <Select
+                  size="small"
+                  value={art.type}
+                  options={TYPE_OPTIONS}
+                  onChange={(val) => updateArtifact(art.id, { type: val })}
+                  className="artifact-type-select"
+                />
+                <Input
+                  size="small"
+                  value={art.label ?? ''}
+                  onChange={(e) => updateArtifact(art.id, { label: e.target.value || undefined })}
+                  placeholder="素材名称（可选）"
+                  className="artifact-label-input"
+                />
+              </div>
+              <div className="artifact-row-flags">
+                <Checkbox
+                  checked={art.cardinality === 'list'}
+                  onChange={(e) =>
+                    updateArtifact(art.id, { cardinality: e.target.checked ? 'list' : 'single' })
+                  }
+                >
+                  列表
+                </Checkbox>
+                {art.cardinality === 'list' && (
+                  <>
+                    <Checkbox
+                      checked={!!art.ordered}
+                      onChange={(e) => updateArtifact(art.id, { ordered: e.target.checked || undefined })}
+                    >
+                      有序
+                    </Checkbox>
+                    <Checkbox
+                      checked={resolveAllowManualAdd(art)}
+                      onChange={(e) => updateArtifact(art.id, { allow_manual_add: e.target.checked })}
+                    >
+                      允许手动添加
+                    </Checkbox>
+                  </>
+                )}
+              </div>
+              <div className="artifact-row-extra">
+                <span className="artifact-extra-label">摘要字数上限</span>
+                <InputNumber
+                  size="small"
+                  min={0}
+                  value={art.summary_max_chars ?? null}
+                  onChange={(val) =>
+                    updateArtifact(art.id, { summary_max_chars: val ?? undefined })
+                  }
+                  placeholder="不限"
+                  className="artifact-summary-input"
+                />
+              </div>
+            </div>
             <Tooltip title="删除素材（同时移除节点引用）">
               <Button
                 type="text"
@@ -119,6 +203,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
                 icon={<DeleteOutlined />}
                 onClick={() => handleDelete(art.id)}
                 aria-label={`删除素材 ${art.id}`}
+                className="artifact-row-delete"
               />
             </Tooltip>
           </div>
@@ -142,14 +227,53 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
                 value={draft.type}
                 options={TYPE_OPTIONS}
                 onChange={(val) => setDraft((d) => ({ ...d, type: val }))}
-                style={{ width: 90 }}
+                className="artifact-type-select"
               />
               <Input
                 size="small"
                 value={draft.label}
                 onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))}
                 placeholder="素材名称（可选）"
-                style={{ flex: 1 }}
+                className="artifact-label-input"
+              />
+            </div>
+            <div className="artifact-add-flags">
+              <Checkbox
+                checked={draft.cardinality === 'list'}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, cardinality: e.target.checked ? 'list' : 'single' }))
+                }
+              >
+                列表
+              </Checkbox>
+              {draft.cardinality === 'list' && (
+                <>
+                  <Checkbox
+                    checked={draft.ordered}
+                    onChange={(e) => setDraft((d) => ({ ...d, ordered: e.target.checked }))}
+                  >
+                    有序
+                  </Checkbox>
+                  <Checkbox
+                    checked={draft.allow_manual_add}
+                    onChange={(e) => setDraft((d) => ({ ...d, allow_manual_add: e.target.checked }))}
+                  >
+                    允许手动添加
+                  </Checkbox>
+                </>
+              )}
+            </div>
+            <div className="artifact-add-extra">
+              <span className="artifact-extra-label">摘要字数上限</span>
+              <InputNumber
+                size="small"
+                min={0}
+                value={draft.summary_max_chars ? parseInt(draft.summary_max_chars, 10) : null}
+                onChange={(val) =>
+                  setDraft((d) => ({ ...d, summary_max_chars: val != null ? String(val) : '' }))
+                }
+                placeholder="不限"
+                className="artifact-summary-input"
               />
             </div>
             <div className="artifact-add-actions">

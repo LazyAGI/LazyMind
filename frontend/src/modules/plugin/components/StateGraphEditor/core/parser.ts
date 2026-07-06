@@ -20,8 +20,8 @@ interface RawStep {
 }
 
 interface RawYaml {
-  'x-layout'?: Record<string, { x?: number; y?: number }>;
-  slots?: Record<string, { type?: unknown; label?: unknown }>;
+  'x-layout'?: Record<string, { x?: number; y?: number; w?: number }>;
+  slots?: Record<string, { type?: unknown; label?: unknown; cardinality?: unknown; ordered?: unknown; allow_manual_add?: unknown; summary_max_chars?: unknown }>;
   steps?: unknown[];
   start_transitions?: unknown;
 }
@@ -62,11 +62,24 @@ function parseSlots(raw: unknown): Record<string, SlotDef> {
   const result: Record<string, SlotDef> = {};
   for (const [id, val] of Object.entries(raw as Record<string, unknown>)) {
     const entry = val && typeof val === 'object' && !Array.isArray(val) ? (val as Record<string, unknown>) : {};
-    result[id] = {
+    const slot: SlotDef = {
       id,
       type: String(entry.type ?? 'text'),
       label: entry.label !== undefined ? String(entry.label) : undefined,
     };
+    if (entry.cardinality === 'list') slot.cardinality = 'list';
+    if (slot.cardinality === 'list') {
+      if (entry.ordered === true || entry.ordered === 'true') slot.ordered = true;
+      if (entry.allow_manual_add === false || entry.allow_manual_add === 'false') {
+        slot.allow_manual_add = false;
+      } else if (entry.allow_manual_add === true || entry.allow_manual_add === 'true') {
+        slot.allow_manual_add = true;
+      }
+    }
+    if (typeof entry.summary_max_chars === 'number' && entry.summary_max_chars > 0) {
+      slot.summary_max_chars = entry.summary_max_chars;
+    }
+    result[id] = slot;
   }
   return result;
 }
@@ -90,6 +103,7 @@ export function parseYaml(yamlText: string): GraphModel | null {
       layout[id] = {
         x: typeof pos.x === 'number' ? pos.x : 0,
         y: typeof pos.y === 'number' ? pos.y : 0,
+        ...(typeof pos.w === 'number' ? { width: pos.w } : {}),
       };
     }
   }

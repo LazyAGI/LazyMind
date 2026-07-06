@@ -5,6 +5,18 @@ export interface SlotDef {
   id: string;
   type: string;
   label?: string;
+  /** 'single' (default) or 'list' — whether the slot holds one item or a list. */
+  cardinality?: 'single' | 'list';
+  /** Whether list items are ordered. Only meaningful when cardinality is 'list'. */
+  ordered?: boolean;
+  /**
+   * Whether the user is allowed to manually add items to this list at runtime.
+   * Only meaningful when cardinality is 'list'.
+   * Default: true if any step uses this slot as input; false otherwise.
+   */
+  allow_manual_add?: boolean;
+  /** Max characters to include when this slot value is injected into a prompt as a summary. */
+  summary_max_chars?: number;
 }
 
 export interface Transition {
@@ -29,6 +41,8 @@ export interface StepNode {
 export interface NodeLayout {
   x: number;
   y: number;
+  /** Optional persisted width; defaults to NODE_WIDTH when absent. */
+  width?: number;
 }
 
 export interface GraphModel {

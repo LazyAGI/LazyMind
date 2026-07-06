@@ -19,7 +19,8 @@ interface Props {
   node: StepNode;
   model: GraphModel;
   onClose: () => void;
-  onChange: (updated: StepNode) => void;
+  /** Returns false when the change was rejected (e.g. duplicate id). */
+  onChange: (updated: StepNode) => boolean;
   onDelete: (nodeId: string) => void;
   /** When true the "添加分支" button is disabled (node is a parallel-fork child). */
   disableAddTransition?: boolean;
@@ -66,9 +67,14 @@ function FieldRow({ label, tip, children }: { label: string; tip: string; childr
 
 export default function NodePropertiesPanel({ node, model, onClose, onChange, onDelete, disableAddTransition }: Props) {
   const { t } = useTranslation();
-  const [allowSkip, setAllowSkip] = useState<boolean>(!!node.skipif);
+  // Derive allowSkip directly from node.skipif so it stays in sync when node
+  // prop updates. Using local state here caused the checkbox and model to
+  // diverge, leading to crashes on the second toggle.
+  const allowSkip = node.skipif !== undefined;
   // Display value for the id field: hidden-placeholder ids are shown as empty string.
   const [idDraft, setIdDraft] = useState<string>(isHiddenId(node.id) ? '' : node.id);
+  // Set when the upstream rejects the id (e.g. duplicate).
+  const [idConflict, setIdConflict] = useState(false);
 
   // Keep draft in sync when node.id changes from outside (e.g. undo, external rename),
   // but only when the user isn't actively typing.
@@ -76,6 +82,7 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
   const displayedNodeId = isHiddenId(node.id) ? '' : node.id;
   if (!idFocused && idDraft !== displayedNodeId) {
     setIdDraft(displayedNodeId);
+    setIdConflict(false);
   }
 
   const slotOptions = Object.keys(model.slots).map((id) => ({
@@ -85,8 +92,20 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
 
   const update = (patch: Partial<StepNode>) => onChange({ ...node, ...patch });
 
-  // Error: non-empty draft that contains invalid chars, or starts with reserved prefix.
-  const stepIdError = !!(idDraft && (!STEP_ID_REGEX.test(idDraft) || idDraft.startsWith('.hid')));
+  // Commit the id draft upstream; revert and show conflict if rejected.
+  const commitIdDraft = () => {
+    const accepted = update({ id: idDraft });
+    if (!accepted) {
+      // Canvas rejected the id (e.g. duplicate) — revert to the current node id.
+      setIdDraft(displayedNodeId);
+      setIdConflict(true);
+    } else {
+      setIdConflict(false);
+    }
+  };
+
+  // Error: non-empty draft with invalid chars, reserved prefix, or rejected by Canvas.
+  const stepIdError = idConflict || !!(idDraft && (!STEP_ID_REGEX.test(idDraft) || idDraft.startsWith('.hid')));
 
   return (
     <div className="node-props-panel" role="complementary" aria-label="步骤设置" onDoubleClick={(e) => e.stopPropagation()}>
@@ -105,20 +124,27 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
               value={idDraft}
               status={stepIdError ? 'error' : undefined}
               onChange={(e) => {
-                const val = e.target.value;
-                setIdDraft(val);
-                // Report upstream immediately; empty string causes Canvas to assign
-                // a hidden placeholder id, keeping the node alive in the model.
-                update({ id: val });
+                setIdDraft(e.target.value);
+                setIdConflict(false);
               }}
               onFocus={() => setIdFocused(true)}
-              onBlur={() => setIdFocused(false)}
+              onBlur={() => {
+                setIdFocused(false);
+                commitIdDraft();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitIdDraft();
+              }}
               placeholder="步骤唯一标识"
               size="small"
             />
             {stepIdError && (
               <span className="npp-field-error">
-                {idDraft.startsWith('.hid') ? '不能以 .hid 开头' : '只能包含英文字母、数字和下划线'}
+                {idConflict
+                  ? '步骤标识已存在，请使用其他名称'
+                  : idDraft.startsWith('.hid')
+                  ? '不能以 .hid 开头'
+                  : '只能包含英文字母、数字和下划线'}
               </span>
             )}
           </FieldRow>
@@ -263,8 +289,12 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
             <Checkbox
               checked={allowSkip}
               onChange={(e) => {
-                setAllowSkip(e.target.checked);
-                if (!e.target.checked) update({ skipif: undefined });
+                if (!e.target.checked) {
+                  update({ skipif: undefined });
+                } else {
+                  // Enable allowSkip by setting skipif to empty string as placeholder.
+                  update({ skipif: '' });
+                }
               }}
             >
               <span className="npp-skip-label">允许跳过</span>
@@ -276,7 +306,7 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
               <Input
                 className="npp-skip-input"
                 value={node.skipif ?? ''}
-                onChange={(e) => update({ skipif: e.target.value || undefined })}
+                onChange={(e) => update({ skipif: e.target.value })}
                 placeholder="例如：用户已提供大纲"
                 size="small"
               />

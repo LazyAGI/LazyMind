@@ -11,9 +11,14 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
 
   // x-layout block (only when includeLayout is true and non-empty)
   if (includeLayout && Object.keys(model.layout).length > 0) {
-    const layoutBlock: Record<string, { x: number; y: number }> = {};
+    const layoutBlock: Record<string, { x: number; y: number; w?: number }> = {};
     for (const [id, pos] of Object.entries(model.layout)) {
-      layoutBlock[id] = { x: Math.round(pos.x), y: Math.round(pos.y) };
+      const entry: { x: number; y: number; w?: number } = {
+        x: Math.round(pos.x),
+        y: Math.round(pos.y),
+      };
+      if (pos.width != null) entry.w = Math.round(pos.width);
+      layoutBlock[id] = entry;
     }
     doc['x-layout'] = layoutBlock;
   }
@@ -32,6 +37,12 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
     for (const [id, slot] of Object.entries(model.slots)) {
       const entry: Record<string, unknown> = { type: slot.type };
       if (slot.label) entry.label = slot.label;
+      if (slot.cardinality === 'list') {
+        entry.cardinality = 'list';
+        if (slot.ordered) entry.ordered = true;
+        if (slot.allow_manual_add !== undefined) entry.allow_manual_add = slot.allow_manual_add;
+      }
+      if (slot.summary_max_chars != null) entry.summary_max_chars = slot.summary_max_chars;
       slotsBlock[id] = entry;
     }
     doc.slots = slotsBlock;

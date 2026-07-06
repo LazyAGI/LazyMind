@@ -12,9 +12,10 @@
 
 // Step node card
 .step-node {
-  width: 148px;
-  height: 80px;
-  min-height: 80px;
+  width: 100%;
+  min-width: 90px;
+  height: auto;
+  min-height: 64px;
   background: #fff;
   border: 1.5px solid #d9d9d9;
   border-radius: 10px;
@@ -25,6 +26,8 @@
   gap: 4px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
+  overflow: hidden;
 
   &.is-selected {
     border-color: #1677ff;
@@ -179,4 +182,46 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   display: block;
+}
+
+// Output slot chips inside step node
+.step-node-outputs {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 3px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.step-node-outputs-prefix {
+  font-size: 10px;
+  color: #8c8c8c;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-right: 1px;
+}
+
+.step-node-output-chip {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #f0f5ff;
+  color: #2f54eb;
+  border: 1px solid #adc6ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+  cursor: default;
+
+  &--more {
+    background: #fafafa;
+    color: #595959;
+    border-color: #d9d9d9;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
 }
