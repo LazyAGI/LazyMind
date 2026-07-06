@@ -258,6 +258,27 @@ func TestRuntimeConfigAllowsLANNetworkProfile(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigLANFrontendPortAvoidsWildcardOccupiedDefault(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "lan")
+	t.Setenv(frontendPortEnvVar, "")
+	ln := occupyPortsOn(t, "0.0.0.0", defaultFrontendPort)
+	defer func() {
+		for _, existing := range ln {
+			_ = existing.Close()
+		}
+	}()
+
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.FrontendPort == defaultFrontendPort {
+		t.Fatalf("expected LAN frontend port to avoid wildcard-occupied default")
+	}
+}
+
 func TestRuntimeConfigRejectsUnknownNetworkProfile(t *testing.T) {
 	t.Setenv(localNetworkProfileEnvVar, "public")
 	repo := t.TempDir()
@@ -1549,15 +1570,19 @@ func writeComposeFixture(t *testing.T, repo string) {
 }
 
 func occupyLocalPorts(t *testing.T, ports ...int) []net.Listener {
+	return occupyPortsOn(t, "127.0.0.1", ports...)
+}
+
+func occupyPortsOn(t *testing.T, address string, ports ...int) []net.Listener {
 	t.Helper()
 	listeners := make([]net.Listener, 0, len(ports))
 	for _, port := range ports {
-		ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		ln, err := net.Listen("tcp", net.JoinHostPort(address, strconv.Itoa(port)))
 		if err != nil {
 			for _, existing := range listeners {
 				_ = existing.Close()
 			}
-			t.Skipf("port %d is already in use on this test host: %v", port, err)
+			t.Skipf("port %d is already in use on %s on this test host: %v", port, address, err)
 		}
 		listeners = append(listeners, ln)
 	}

@@ -300,18 +300,22 @@ func (a *localPortAllocator) envOrAvailable(envName string, fallback int) int {
 }
 
 func (a *localPortAllocator) envOrAvailableDefaultCanMove(envName string, fallback int) int {
+	return a.envOrAvailableDefaultCanMoveOn(envName, fallback, "127.0.0.1")
+}
+
+func (a *localPortAllocator) envOrAvailableDefaultCanMoveOn(envName string, fallback int, address string) int {
 	raw := strings.TrimSpace(os.Getenv(envName))
 	if raw == "" {
-		return a.availableFrom(fallback, 500)
+		return a.availableFromOn(fallback, 500, address)
 	}
 	port := envPort(envName, fallback)
 	if envBool(localPortsPinnedEnvVar, false) {
 		return a.reserve(port)
 	}
-	if port != fallback || localPortAvailable(port) {
+	if port != fallback || localPortAvailableOn(address, port) {
 		return a.reserve(port)
 	}
-	return a.availableFrom(fallback, 500)
+	return a.availableFromOn(fallback, 500, address)
 }
 
 func (a *localPortAllocator) firstEnvOrAvailable(envNames []string, fallback int) int {
@@ -324,11 +328,15 @@ func (a *localPortAllocator) firstEnvOrAvailable(envNames []string, fallback int
 }
 
 func (a *localPortAllocator) availableFrom(start int, attempts int) int {
+	return a.availableFromOn(start, attempts, "127.0.0.1")
+}
+
+func (a *localPortAllocator) availableFromOn(start int, attempts int, address string) int {
 	for port := start; port < start+attempts && port < 65536; port++ {
 		if _, ok := a.used[port]; ok {
 			continue
 		}
-		if !localPortAvailable(port) {
+		if !localPortAvailableOn(address, port) {
 			continue
 		}
 		return a.reserve(port)
@@ -337,7 +345,11 @@ func (a *localPortAllocator) availableFrom(start int, attempts int) int {
 }
 
 func localPortAvailable(port int) bool {
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	return localPortAvailableOn("127.0.0.1", port)
+}
+
+func localPortAvailableOn(address string, port int) bool {
+	ln, err := net.Listen("tcp", net.JoinHostPort(address, strconv.Itoa(port)))
 	if err != nil {
 		return false
 	}
@@ -597,8 +609,16 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		AlgorithmPIDDir:          filepath.Join(runtimeRoot, "run", "algorithm"),
 	}
 	ports := newLocalPortAllocator()
+	networkProfile, err := localNetworkProfile()
+	if err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
+	}
+	frontendBindCheckAddress := "127.0.0.1"
+	if networkProfile == "lan" {
+		frontendBindCheckAddress = "0.0.0.0"
+	}
 	processComposePort := ports.envOrAvailable(processComposePortEnvVar, defaultProcessComposePort)
-	frontendPort := ports.envOrAvailableDefaultCanMove(frontendPortEnvVar, defaultFrontendPort)
+	frontendPort := ports.envOrAvailableDefaultCanMoveOn(frontendPortEnvVar, defaultFrontendPort, frontendBindCheckAddress)
 	localProxyPort := ports.envOrAvailable(localProxyPortEnvVar, defaultLocalProxyPort)
 	authHostPort := ports.envOrAvailable(localProxyAuthHostPortEnvVar, defaultLocalProxyAuthHostPort)
 	coreHostPort := ports.firstEnvOrAvailable([]string{localCorePortEnvVar, localProxyCoreHostPortEnvVar}, defaultLocalProxyCoreHostPort)
@@ -614,10 +634,6 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 	chatPort := ports.firstEnvOrAvailable([]string{localChatPortEnvVar, localProxyChatHostPortEnvVar}, defaultLocalProxyChatHostPort)
 	evoPort := ports.firstEnvOrAvailable([]string{localEvoPortEnvVar, localProxyEvoHostPortEnvVar}, defaultLocalProxyEvoHostPort)
 	milvusLiteDBPath := filepath.Clean(envText(localMilvusLiteDBPathEnvVar, p.MilvusLiteDBPath))
-	networkProfile, err := localNetworkProfile()
-	if err != nil {
-		return RuntimeConfig{}, RuntimePaths{}, err
-	}
 	return RuntimeConfig{
 		Profile:            profile,
 		RepoRoot:           p.RepoRoot,
