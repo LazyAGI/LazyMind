@@ -9,9 +9,15 @@ import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   finishFeishuDataSourceOAuth,
   saveFeishuDataSourceWizardDraft,
+  type CloudDataSourceProvider,
   type FeishuDataSourceConnection,
 } from "@/modules/dataSource/common/feishuOAuth";
 import { getOAuthStateFromConnection } from "../../common/feishuAccounts";
+import { DEFAULT_DATA_SOURCE_FILE_TYPES } from "../../constants/options";
+import {
+  DEFAULT_SCHEDULE_TIME,
+  DEFAULT_SCHEDULE_WEEKDAYS,
+} from "../../utils/schedule";
 import type {
   DataSourceItem,
   DetailDocumentItem,
@@ -21,7 +27,6 @@ import { parseFeishuOAuthCallbackInput } from "../../utils/feishuAccount";
 import { mapScanSyncDetail } from "../../mappers/scanDocument";
 import {
   CLOUD_DOCUMENTS_FEISHU_SETUP_PATH,
-  CLOUD_DOCUMENTS_PATH,
 } from "@/modules/modelProvider/utils/cloudDocumentUrls";
 import type { ManagementContext } from "./context";
 
@@ -50,14 +55,54 @@ export function createWizardFlow(ctx: ManagementContext) {
       return;
     }
     if (type === "feishu" && !ctx.isFeishuSetupReady) {
-      navigate(CLOUD_DOCUMENTS_PATH);
+      ctx.openCloudSetupModal("feishu", "create");
       return;
     }
     if (type === "notion" && !ctx.isNotionSetupReady) {
-      navigate(CLOUD_DOCUMENTS_PATH);
+      ctx.openCloudSetupModal("notion", "create");
       return;
     }
     ctx.applySourceType(type);
+  };
+
+  const buildCloudCreateFormValues = (type: CloudDataSourceProvider) => ({
+    syncMode: "scheduled" as const,
+    scheduleWeekdays: DEFAULT_SCHEDULE_WEEKDAYS,
+    scheduleTime: DEFAULT_SCHEDULE_TIME,
+    conflictPolicy: "versioned" as const,
+    path: [],
+    target: type === "feishu" ? [] : "",
+    targetType: type === "feishu" ? ("wiki_space" as const) : ("page" as const),
+    fileTypes: DEFAULT_DATA_SOURCE_FILE_TYPES,
+  });
+
+  const startCloudAuthForCreate = (type: CloudDataSourceProvider) => {
+    ctx.resetWizard();
+    setWizardMode("create");
+    setEditingId(null);
+    ctx.applySourceType(type);
+    setWizardStep(1);
+    setWizardOpen(false);
+
+    const setup = type === "feishu" ? ctx.feishuAppSetup : ctx.notionAppSetup;
+    if (!setup) {
+      ctx.openCloudSetupModal(type, "create");
+      return;
+    }
+
+    void ctx.startCloudOAuth(type, {
+      setup,
+      draftSelectedType: type,
+      draftWizardStep: 1,
+      draftWizardMode: "create",
+      draftWizardOpen: true,
+      draftFormValues: buildCloudCreateFormValues(type),
+      previousState: "pending",
+      previousVerified: false,
+      previousConnection: null,
+      openWizardOnSuccess: true,
+      reopenSetupOnFailure: true,
+    });
   };
 
   const openSourceCreateWizard = (
@@ -112,19 +157,22 @@ export function createWizardFlow(ctx: ManagementContext) {
     }
 
     setCreateProviderModalOpen(false);
-    ctx.resetWizard();
-    setWizardMode("create");
-    setEditingId(null);
-    ctx.applySourceType(type);
-    setWizardStep(1);
 
     if (type === "feishu" && !ctx.isFeishuAuthValid) {
-      navigate(CLOUD_DOCUMENTS_PATH);
+      if (!ctx.isFeishuSetupReady) {
+        ctx.openCloudSetupModal("feishu", "create");
+        return;
+      }
+      startCloudAuthForCreate("feishu");
       return;
     }
+
     if (type === "notion" && !ctx.isNotionAuthValid) {
-      navigate(CLOUD_DOCUMENTS_PATH);
-      return;
+      if (!ctx.isNotionSetupReady) {
+        ctx.openCloudSetupModal("notion", "create");
+        return;
+      }
+      startCloudAuthForCreate("notion");
     }
   };
 
@@ -136,7 +184,7 @@ export function createWizardFlow(ctx: ManagementContext) {
   };
 
   const handleManageFeishuAuth = () => {
-    navigate(CLOUD_DOCUMENTS_PATH);
+    ctx.openCloudSetupModal("feishu", "auth");
   };
 
   const handleOpenFeishuGuideFromAuthSelect = () => {

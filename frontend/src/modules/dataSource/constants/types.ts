@@ -73,6 +73,9 @@ export interface PendingOAuthAttempt {
   resolved: boolean;
   accountId?: string;
   appId?: string;
+  provider?: "feishu" | "notion";
+  openWizardOnSuccess?: boolean;
+  reopenSetupOnFailure?: boolean;
 }
 
 export interface SyncLogItem {

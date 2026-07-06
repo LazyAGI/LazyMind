@@ -14,14 +14,11 @@ import {
 } from "@/modules/dataSource/common/feishuAccounts";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
-  consumeCloudDataSourceOAuthResult,
-  consumeFeishuDataSourceOAuthResult,
-  consumeFeishuDataSourceWizardDraft,
+  bootstrapOAuthSession,
   type CloudDataSourceProvider,
   type FeishuDataSourceConnection,
   type FeishuDataSourceOAuthMessage,
 } from "@/modules/dataSource/common/feishuOAuth";
-import { DEFAULT_DATA_SOURCE_FILE_TYPES } from "@/modules/dataSource/constants/options";
 import type {
   DataSourceItem,
   FeishuAppSetup,
@@ -251,28 +248,27 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   Object.assign(ctx, createSaveActions(ctx));
 
   useEffect(() => {
-    const draft = consumeFeishuDataSourceWizardDraft();
-    if (draft) {
-      const normalizedWizardStep = Math.min(Math.max(draft.wizardStep, 0), 1);
-      if (draft.authSelectModalOpen !== undefined) {
-        setAuthSelectModalOpen(Boolean(draft.authSelectModalOpen));
-      }
-      setWizardMode(draft.wizardMode);
-      setWizardOpen(draft.wizardOpen);
-      setWizardStep(normalizedWizardStep);
-      setSelectedType((draft.selectedType as SourceType | null) || null);
-      setEditingId(draft.editingId);
-      setValidatedAgentId(draft.validatedAgentId || null);
-      setOauthState((draft.oauthState as OAuthState) || "pending");
-      setConnectionVerified(Boolean(draft.connectionVerified));
-      setOauthConnection(draft.oauthConnection || null);
-      window.setTimeout(() => {
-        form.setFieldsValue({
-          fileTypes: DEFAULT_DATA_SOURCE_FILE_TYPES,
-          ...draft.formValues,
-        });
-      }, 0);
-    }
+    bootstrapOAuthSession({
+      form,
+      setAuthSelectModalOpen,
+      setWizardMode,
+      setWizardOpen,
+      setWizardStep,
+      setSelectedType,
+      setEditingId,
+      setValidatedAgentId,
+      setOauthState,
+      setConnectionVerified,
+      setOauthConnection,
+      applyOauthResult: (payload, options) => {
+        ctx.applyOauthResult(payload, options);
+      },
+      reopenCloudSetupModal: (type) => {
+        if (type === "feishu" || type === "notion") {
+          ctx.openCloudSetupModal(type, "create");
+        }
+      },
+    });
 
     if (feishuAuthAccounts.length === 0 && feishuAppSetup) {
       const seededAccounts: FeishuAuthAccount[] = [
@@ -289,20 +285,6 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
       ];
       setFeishuAuthAccounts(seededAccounts);
       persistFeishuAuthAccounts(seededAccounts);
-    }
-
-    const storedResult = consumeFeishuDataSourceOAuthResult();
-    if (storedResult) {
-      window.setTimeout(() => {
-        ctx.applyOauthResult(storedResult);
-      }, 0);
-    }
-
-    const storedNotionResult = consumeCloudDataSourceOAuthResult("notion");
-    if (storedNotionResult) {
-      window.setTimeout(() => {
-        ctx.applyOauthResult(storedNotionResult);
-      }, 0);
     }
 
     const handleMessage = (event: MessageEvent<FeishuDataSourceOAuthMessage>) => {
@@ -387,6 +369,14 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     handleResetNotionSetup: ctx.handleResetNotionSetup,
     requestSaveWithSyncConfirm,
     openCreateModal,
+    feishuSetupForm: ctx.feishuSetupForm,
+    cloudSetupProvider: ctx.cloudSetupProvider,
+    feishuSetupModalOpen: ctx.feishuSetupModalOpen,
+    setFeishuSetupModalOpen: ctx.setFeishuSetupModalOpen,
+    setFeishuSetupIntent: ctx.setFeishuSetupIntent,
+    feishuSetupSubmitting: ctx.feishuSetupSubmitting,
+    handleSaveFeishuSetup: ctx.handleSaveFeishuSetup,
+    handleCancelCloudSetup: ctx.handleCancelCloudSetup,
   };
 }
 

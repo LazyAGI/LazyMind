@@ -172,20 +172,28 @@ export function createWizardSetup(ctx: ManagementContext) {
     });
   };
 
+  const getCloudSetupFormValues = (
+    provider: CloudDataSourceProvider,
+    account?: FeishuAuthAccount | null,
+  ) => {
+    const activeSetup = provider === "feishu" ? ctx.feishuAppSetup : ctx.notionAppSetup;
+    return {
+      name: account?.name || "",
+      appId: account?.appId || activeSetup?.appId || "",
+      appSecret: account?.appSecret || activeSetup?.appSecret || "",
+    };
+  };
+
   const openCloudSetupModal = (
     provider: CloudDataSourceProvider,
     intent: CloudSetupIntent = null,
     account?: FeishuAuthAccount | null,
   ) => {
-    const activeSetup = provider === "feishu" ? ctx.feishuAppSetup : ctx.notionAppSetup;
     setCloudSetupProvider(provider);
     setFeishuSetupIntent(intent);
     setEditingFeishuAccountId(account?.id || null);
-    feishuSetupForm.setFieldsValue({
-      name: account?.name || "",
-      appId: account?.appId || activeSetup?.appId || "",
-      appSecret: account?.appSecret || activeSetup?.appSecret || "",
-    });
+    feishuSetupForm.resetFields();
+    feishuSetupForm.setFieldsValue(getCloudSetupFormValues(provider, account));
     setFeishuSetupModalOpen(true);
   };
 
@@ -193,6 +201,45 @@ export function createWizardSetup(ctx: ManagementContext) {
     intent: FeishuSetupIntent = null,
     account?: FeishuAuthAccount | null,
   ) => openCloudSetupModal("feishu", intent, account);
+
+  const handleCancelCloudSetup = () => {
+    if (ctx.feishuSetupSubmitting) {
+      return;
+    }
+
+    const provider = ctx.cloudSetupProvider;
+    const intent = ctx.feishuSetupIntent;
+
+    clearFeishuDataSourceWizardDraft();
+    ctx.clearOauthAttempt();
+    feishuSetupForm.resetFields();
+
+    if (intent === "create") {
+      if (provider === "feishu") {
+        clearFeishuAppSetup();
+        setFeishuAppSetup(null);
+      } else {
+        clearNotionAppSetup();
+        setNotionAppSetup(null);
+        setNotionOauthConnection(null);
+      }
+      feishuSetupForm.setFieldsValue({
+        name: "",
+        appId: "",
+        appSecret: "",
+      });
+      setOauthState("pending");
+      setConnectionVerified(false);
+      setOauthConnection(null);
+      setSelectedType(null);
+    } else {
+      feishuSetupForm.setFieldsValue(getCloudSetupFormValues(provider));
+    }
+
+    setFeishuSetupModalOpen(false);
+    setFeishuSetupIntent(null);
+    setEditingFeishuAccountId(null);
+  };
 
   const handleSaveFeishuSetup = async () => {
     if (ctx.feishuSetupSubmitting) {
@@ -246,7 +293,7 @@ export function createWizardSetup(ctx: ManagementContext) {
         };
 
         applySourceType(cloudSetupProvider);
-        setWizardOpen(setupIntent === "create");
+        setWizardOpen(false);
         setWizardStep(1);
         await ctx.startCloudOAuth(cloudSetupProvider, {
           setup: nextSetup,
@@ -261,6 +308,8 @@ export function createWizardSetup(ctx: ManagementContext) {
           previousConnection: null,
           accountId: nextAccount?.id,
           appId: nextSetup.appId,
+          openWizardOnSuccess: setupIntent === "create",
+          reopenSetupOnFailure: setupIntent === "create",
         });
       }
     } finally {
@@ -319,6 +368,7 @@ export function createWizardSetup(ctx: ManagementContext) {
     openCloudSetupModal,
     openFeishuSetupModal,
     handleSaveFeishuSetup,
+    handleCancelCloudSetup,
     handleResetFeishuSetup,
     handleResetNotionSetup,
   };

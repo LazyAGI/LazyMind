@@ -44,6 +44,8 @@ export interface StartCloudOAuthOptions {
   previousConnection?: FeishuDataSourceConnection | null;
   accountId?: string;
   appId?: string;
+  openWizardOnSuccess?: boolean;
+  reopenSetupOnFailure?: boolean;
 }
 
 export interface RefreshSourcesOptions {
@@ -175,7 +177,10 @@ export interface ManagementContext {
   // OAuth engine handlers (createOAuthEngine)
   clearOauthAttempt: () => void;
   restorePreviousOauthState: (messageText?: string, level?: "warning" | "error") => void;
-  applyOauthResult: (payload: FeishuDataSourceOAuthMessage) => void;
+  applyOauthResult: (
+    payload: FeishuDataSourceOAuthMessage,
+    options?: { openWizardOnSuccess?: boolean },
+  ) => void;
   refreshFeishuAuthAccounts: () => Promise<void>;
   refreshNotionAuthConnection: () => Promise<void>;
   upsertFeishuAuthAccount: (
@@ -206,6 +211,7 @@ export interface ManagementContext {
     account?: FeishuAuthAccount | null,
   ) => void;
   handleSaveFeishuSetup: () => Promise<void>;
+  handleCancelCloudSetup: () => void;
   handleResetFeishuSetup: () => void;
   handleResetNotionSetup: () => void;
 

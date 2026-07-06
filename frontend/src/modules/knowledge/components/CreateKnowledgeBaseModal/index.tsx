@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useRef,
   useState,
 } from "react";
 import { Modal, Form, Input, Select, Tabs, Typography, Button } from "antd";
@@ -47,6 +48,7 @@ const CreateKnowledgeBaseModal = forwardRef<
   const [algorithm, setAlgorithm] = useState<Algo[]>([]);
   const [hasTagLengthError, setHasTagLengthError] = useState(false);
   const [form] = Form.useForm();
+  const pendingCloudTabRestoreRef = useRef(false);
 
   useImperativeHandle(ref, () => ({
     onOpen,
@@ -66,10 +68,40 @@ const CreateKnowledgeBaseModal = forwardRef<
     if (!visible) {
       return;
     }
-    if (syncCreateVm.wizardOpen || syncCreateVm.authSelectModalOpen) {
+    const subFlowActive =
+      syncCreateVm.wizardOpen ||
+      syncCreateVm.authSelectModalOpen ||
+      syncCreateVm.feishuSetupModalOpen;
+    if (subFlowActive) {
+      if (syncCreateVm.wizardOpen) {
+        pendingCloudTabRestoreRef.current = false;
+      } else {
+        pendingCloudTabRestoreRef.current = true;
+      }
       setVisible(false);
     }
-  }, [visible, syncCreateVm.wizardOpen, syncCreateVm.authSelectModalOpen]);
+  }, [
+    visible,
+    syncCreateVm.wizardOpen,
+    syncCreateVm.authSelectModalOpen,
+    syncCreateVm.feishuSetupModalOpen,
+  ]);
+
+  useEffect(() => {
+    const subFlowActive =
+      syncCreateVm.wizardOpen ||
+      syncCreateVm.authSelectModalOpen ||
+      syncCreateVm.feishuSetupModalOpen;
+    if (!subFlowActive && pendingCloudTabRestoreRef.current) {
+      pendingCloudTabRestoreRef.current = false;
+      setActiveTab("cloud");
+      setVisible(true);
+    }
+  }, [
+    syncCreateVm.wizardOpen,
+    syncCreateVm.authSelectModalOpen,
+    syncCreateVm.feishuSetupModalOpen,
+  ]);
 
   function loadFormData() {
     KnowledgeBaseServiceApi()
@@ -102,6 +134,7 @@ const CreateKnowledgeBaseModal = forwardRef<
   }
 
   function onCancel() {
+    pendingCloudTabRestoreRef.current = false;
     form.resetFields();
     setHasTagLengthError(false);
     setActiveTab("direct");

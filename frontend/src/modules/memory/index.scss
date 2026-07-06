@@ -1228,6 +1228,38 @@
   flex-wrap: wrap;
 }
 
+.memory-skill-import-section {
+  border: 1px solid #edf1f5;
+  border-radius: 12px;
+  padding: 14px;
+  background: #fbfcff;
+}
+
+.memory-skill-import-method {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.memory-skill-import-panel {
+  label {
+    display: block;
+    margin-bottom: 6px;
+    color: #344054;
+    font-size: 13px;
+    font-weight: 600;
+  }
+}
+
+.memory-skill-import-drop {
+  .ant-upload-drag {
+    min-height: 132px;
+    border-color: #b8c4d4;
+    border-radius: 12px;
+    background: #fff;
+  }
+}
+
 .memory-child-skill-section {
   border-top: 1px solid #edf1f5;
   padding-top: 16px;

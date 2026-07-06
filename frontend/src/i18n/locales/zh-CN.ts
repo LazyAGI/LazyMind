@@ -2708,6 +2708,8 @@ const zhCN = {
     memorySkillUploadSourceTitle: "导入方式",
     memorySkillUploadSourceHelp:
       "可填写 GitHub/内部仓库链接，也可选择本地技能包。上传成功后来源标记为个人上传。",
+    memorySkillImportMethodLink: "链接导入",
+    memorySkillImportMethodPackage: "本地包导入",
     memorySkillUploadRepoLabel: "仓库链接",
     memorySkillUploadRepoPlaceholder:
       "https://github.com/org/my-ability 或内部仓库链接",

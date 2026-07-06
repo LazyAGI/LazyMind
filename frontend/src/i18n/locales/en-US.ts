@@ -2854,6 +2854,8 @@ const enUS = {
     memorySkillUploadSourceTitle: "Import method",
     memorySkillUploadSourceHelp:
       "Use either a GitHub/internal repo link or a local package. Uploaded skills are marked as personal uploads.",
+    memorySkillImportMethodLink: "Import from link",
+    memorySkillImportMethodPackage: "Import from local package",
     memorySkillUploadRepoLabel: "Repository link",
     memorySkillUploadRepoPlaceholder:
       "https://github.com/org/my-ability or an internal repository link",

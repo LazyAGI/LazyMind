@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { Alert, Button, Input, Modal, Select, Upload, message } from "antd";
-import { DeleteOutlined, UploadOutlined } from "@ant-design/icons";
+import { useEffect, useState } from "react";
+import { Alert, Button, Input, Modal, Radio, Select, Upload, message } from "antd";
+import { DeleteOutlined, InboxOutlined, UploadOutlined } from "@ant-design/icons";
 import {
   GLOSSARY_ALIAS_MAX_LENGTH,
   GLOSSARY_CONTENT_MAX_LENGTH,
@@ -28,6 +28,8 @@ interface MemoryDraftModalProps {
   tagOptions: Array<{ label: string; value: string }>;
   normalizeTagValues: (values: string[]) => string[];
   createSkillUploadProps: (childTempId?: string) => any;
+  applySkillRepoImport: (repoUrl: string) => void;
+  handleImportSkillPackage: (file: File) => void;
   addChildSkillDraft: () => void;
   removeChildSkillDraft: (tempId: string) => void;
   updateChildSkillDraft: (
@@ -57,12 +59,27 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
     tagOptions,
     normalizeTagValues,
     createSkillUploadProps,
+    applySkillRepoImport,
+    handleImportSkillPackage,
     addChildSkillDraft,
     removeChildSkillDraft,
     updateChildSkillDraft,
   } = props;
   const [glossaryAliasInput, setGlossaryAliasInput] = useState("");
+  const [skillImportMethod, setSkillImportMethod] = useState<"link" | "package">("link");
+  const [skillRepoUrl, setSkillRepoUrl] = useState("");
+  const [skillPackageFile, setSkillPackageFile] = useState<File | null>(null);
   const shouldShowSkillContentEditor = !(activeTab === "skills" && modalMode === "edit");
+  const shouldShowSkillImportSection =
+    activeTab === "skills" && modalMode === "add" && !isChildSkillDraft;
+
+  useEffect(() => {
+    if (!modalOpen) {
+      setSkillImportMethod("link");
+      setSkillRepoUrl("");
+      setSkillPackageFile(null);
+    }
+  }, [modalOpen]);
 
   const handleGlossaryAliasesChange = (value: string[]) => {
     const normalizedAliases = Array.from(
@@ -212,6 +229,73 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
         </div>
       ) : (
         <div className="memory-modal-grid">
+          {shouldShowSkillImportSection ? (
+            <div className="memory-form-field memory-form-field-full memory-skill-import-section">
+              <label>{t("admin.memorySkillUploadSourceTitle")}</label>
+              <Radio.Group
+                className="memory-skill-import-method"
+                value={skillImportMethod}
+                disabled={isReadOnly}
+                onChange={(event) => {
+                  const nextMethod = event.target.value as "link" | "package";
+                  setSkillImportMethod(nextMethod);
+                  setSkillRepoUrl("");
+                  setSkillPackageFile(null);
+                }}
+              >
+                <Radio value="link">{t("admin.memorySkillImportMethodLink")}</Radio>
+                <Radio value="package">{t("admin.memorySkillImportMethodPackage")}</Radio>
+              </Radio.Group>
+              {skillImportMethod === "link" ? (
+                <div className="memory-skill-import-panel">
+                  <label htmlFor="memorySkillRepoUrlInput">
+                    {t("admin.memorySkillUploadRepoLabel")}
+                  </label>
+                  <Input
+                    id="memorySkillRepoUrlInput"
+                    value={skillRepoUrl}
+                    readOnly={isReadOnly}
+                    placeholder={t("admin.memorySkillUploadRepoPlaceholder")}
+                    onChange={(event) => setSkillRepoUrl(event.target.value)}
+                    onBlur={() => applySkillRepoImport(skillRepoUrl)}
+                  />
+                </div>
+              ) : (
+                <Upload.Dragger
+                  accept=".md,.markdown,.zip,.tgz,.tar,.gz"
+                  multiple={false}
+                  disabled={isReadOnly}
+                  showUploadList={Boolean(skillPackageFile)}
+                  className="memory-skill-import-drop"
+                  beforeUpload={(file) => {
+                    setSkillPackageFile(file);
+                    handleImportSkillPackage(file);
+                    return false;
+                  }}
+                  onRemove={() => {
+                    setSkillPackageFile(null);
+                  }}
+                >
+                  <p className="ant-upload-drag-icon">
+                    <InboxOutlined />
+                  </p>
+                  <p className="ant-upload-text">
+                    <strong>
+                      {skillPackageFile?.name || t("admin.memorySkillUploadFileTitle")}
+                    </strong>
+                  </p>
+                  <p className="ant-upload-hint">
+                    {skillPackageFile
+                      ? t("admin.memorySkillUploadFileReady", {
+                          size: Math.max(1, Math.round(skillPackageFile.size / 1024)),
+                        })
+                      : t("admin.memorySkillUploadFileHint")}
+                  </p>
+                </Upload.Dragger>
+              )}
+              <span className="memory-form-hint">{t("admin.memorySkillUploadSourceHelp")}</span>
+            </div>
+          ) : null}
           <div className="memory-form-field memory-form-field-full">
             <label>{t("admin.memoryName")}</label>
             <Input
@@ -319,7 +403,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
                   setDraft((previous: any) => ({ ...previous, content: event.target.value }))
                 }
               />
-              {activeTab === "skills" ? (
+              {activeTab === "skills" && modalMode !== "add" ? (
                 <div className="memory-upload-actions">
                   <Upload {...createSkillUploadProps()} disabled={isReadOnly}>
                     <Button icon={<UploadOutlined />} disabled={isReadOnly}>

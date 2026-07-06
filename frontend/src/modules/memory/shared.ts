@@ -48,7 +48,7 @@ export interface StructuredAsset extends BaseAsset {
   nodeType?: string;
 }
 
-export type SkillViewMode = "installed" | "market" | "upload";
+export type SkillViewMode = "installed" | "market";
 export type SkillSourceFilter = "all" | "builtin" | "admin" | "personal";
 export type SkillMarketSourceFilter = "all" | "builtin" | "admin";
 

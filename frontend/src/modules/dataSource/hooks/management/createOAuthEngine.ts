@@ -112,9 +112,6 @@ export function createOAuthEngine(ctx: ManagementContext) {
   const restorePreviousOauthState = (messageText?: string, level: "warning" | "error" = "warning") => {
     const attempt = oauthAttemptRef.current;
     if (!attempt) {
-      if (messageText) {
-        message[level](messageText);
-      }
       return;
     }
 
@@ -140,15 +137,32 @@ export function createOAuthEngine(ctx: ManagementContext) {
         return nextAccounts;
       });
     }
+    const shouldReopenSetup = attempt.reopenSetupOnFailure && attempt.provider;
     oauthAttemptRef.current = null;
+    clearFeishuDataSourceWizardDraft();
+
+    if (shouldReopenSetup) {
+      ctx.openCloudSetupModal(attempt.provider!, "create");
+    }
 
     if (messageText) {
       message[level](messageText);
     }
   };
 
-  const applyOauthResult = (payload: FeishuDataSourceOAuthMessage) => {
+  const applyOauthResult = (
+    payload: FeishuDataSourceOAuthMessage,
+    options?: { openWizardOnSuccess?: boolean },
+  ) => {
     const attempt = oauthAttemptRef.current;
+    const shouldOpenWizard =
+      attempt?.openWizardOnSuccess || options?.openWizardOnSuccess;
+    const shouldReopenSetupOnFailure =
+      attempt?.reopenSetupOnFailure || options?.openWizardOnSuccess;
+    const cloudProvider =
+      attempt?.provider ||
+      (payload.status === "error" ? payload.provider : undefined) ||
+      (payload.status === "success" ? payload.connection.provider : undefined);
 
     if (payload.channel !== FEISHU_DATA_SOURCE_OAUTH_CHANNEL) {
       return;
@@ -210,7 +224,22 @@ export function createOAuthEngine(ctx: ManagementContext) {
         });
       }
       setWizardStep(1);
+      clearFeishuDataSourceWizardDraft();
+      if (shouldOpenWizard) {
+        ctx.setWizardOpen(true);
+      }
       message.success(t("admin.dataSourceOauthSuccess"));
+      return;
+    }
+
+    if (shouldReopenSetupOnFailure && cloudProvider) {
+      oauthAttemptRef.current = null;
+      clearFeishuDataSourceWizardDraft();
+      setOauthConnection(null);
+      setOauthState("error");
+      setConnectionVerified(false);
+      ctx.openCloudSetupModal(cloudProvider, "create");
+      message.error(payload.message || t("admin.dataSourceOauthFailedRetry"));
       return;
     }
 
@@ -337,7 +366,8 @@ export function createOAuthEngine(ctx: ManagementContext) {
       });
 
       const draft: FeishuDataSourceWizardDraft = {
-        wizardOpen: options?.draftWizardOpen ?? true,
+        wizardOpen: false,
+        openWizardAfterOAuth: options?.openWizardOnSuccess,
         wizardStep: options?.draftWizardStep ?? ctx.wizardStep,
         wizardMode: options?.draftWizardMode ?? ctx.wizardMode,
         selectedType: options?.draftSelectedType ?? ctx.selectedType,
@@ -356,10 +386,6 @@ export function createOAuthEngine(ctx: ManagementContext) {
         provider === "feishu" ? t("admin.dataSourceFeishuAuthWindowTitle") : t("admin.dataSourceNotionAuthWindowTitle"),
       );
 
-      if (options?.draftWizardOpen === false) {
-        clearFeishuDataSourceWizardDraft();
-      }
-
       oauthAttemptRef.current = {
         timerId: null,
         previousState,
@@ -368,6 +394,9 @@ export function createOAuthEngine(ctx: ManagementContext) {
         resolved: false,
         accountId: options?.accountId,
         appId: options?.appId || activeSetup.appId,
+        provider,
+        openWizardOnSuccess: options?.openWizardOnSuccess,
+        reopenSetupOnFailure: options?.reopenSetupOnFailure,
       };
 
       if (popup) {
@@ -375,6 +404,8 @@ export function createOAuthEngine(ctx: ManagementContext) {
           if (!popup.closed) {
             return;
           }
+
+          window.clearInterval(timerId);
 
           if (oauthAttemptRef.current?.resolved) {
             clearOauthAttempt();

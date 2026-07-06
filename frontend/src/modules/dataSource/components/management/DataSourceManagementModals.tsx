@@ -3,10 +3,18 @@ import { ArrowRightOutlined, FileTextOutlined } from "@ant-design/icons";
 import type { DataSourceManagementVm } from "../../hooks/useDataSourceManagement";
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
 import DataSourceProviderPicker from "./DataSourceProviderPicker";
+import CloudCredentialSetupModal from "./CloudCredentialSetupModal";
 
 type SourceCreationModalsVm = Pick<
   DataSourceManagementVm,
   | "t"
+  | "feishuSetupForm"
+  | "cloudSetupProvider"
+  | "feishuSetupModalOpen"
+  | "setFeishuSetupModalOpen"
+  | "feishuSetupSubmitting"
+  | "handleSaveFeishuSetup"
+  | "handleCancelCloudSetup"
   | "createProviderModalOpen"
   | "setCreateProviderModalOpen"
   | "creatableSourceTypeOptions"
@@ -45,6 +53,13 @@ export default function DataSourceManagementModals({
 }: DataSourceManagementModalsProps) {
   const {
     t,
+    feishuSetupForm,
+    cloudSetupProvider,
+    feishuSetupModalOpen,
+    setFeishuSetupModalOpen,
+    feishuSetupSubmitting,
+    handleSaveFeishuSetup,
+    handleCancelCloudSetup,
     createProviderModalOpen,
     setCreateProviderModalOpen,
     authSelectModalOpen,
@@ -62,6 +77,17 @@ export default function DataSourceManagementModals({
 
   return (
     <>
+      <CloudCredentialSetupModal
+        t={t}
+        cloudSetupProvider={cloudSetupProvider}
+        feishuSetupForm={feishuSetupForm}
+        open={feishuSetupModalOpen}
+        submitting={feishuSetupSubmitting}
+        onCancel={handleCancelCloudSetup}
+        onSave={() => {
+          void handleSaveFeishuSetup();
+        }}
+      />
       {!hideProviderModal ? (
         <Modal
           title={t(titleKey)}

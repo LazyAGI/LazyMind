@@ -379,10 +379,10 @@ export default function MemoryManagement() {
   const [skillListPage, setSkillListPage] = useState(1);
   const [skillListPageSize, setSkillListPageSize] = useState(defaultSkillListPageSize);
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
-  const [skillView, setSkillView] = useState<"installed" | "market" | "upload" | "plugins">(
+  const [skillView, setSkillView] = useState<"installed" | "market" | "plugins">(
     () => {
       const sv = new URLSearchParams(window.location.search).get("skillView");
-      if (sv === "plugins" || sv === "market" || sv === "upload") return sv;
+      if (sv === "plugins" || sv === "market") return sv;
       return "installed";
     },
   );
@@ -2872,6 +2872,33 @@ export default function MemoryManagement() {
       console.error("Read skill file failed:", error);
       message.error(t("admin.memoryUploadSkillFailed"));
     }
+  };
+
+  const applySkillRepoImport = (repoUrl: string) => {
+    const trimmedUrl = repoUrl.trim();
+    if (!trimmedUrl) {
+      return;
+    }
+
+    const rawName = trimmedUrl.split("/").filter(Boolean).pop() || "";
+    const name = rawName.replace(/[-_]/g, " ") || t("admin.memorySkillUploadDefaultName");
+
+    setDraft((previous) => ({
+      ...previous,
+      name: previous.name.trim() || name,
+      description: previous.description.trim() || t("admin.memorySkillUploadPersonalDesc"),
+      category: previous.category.trim() || "personal",
+      content:
+        previous.content.trim() ||
+        `# ${name}\n\n${t("admin.memorySkillUploadUrlPlaceholderContent")}\n\nSource: ${trimmedUrl}`,
+    }));
+  };
+
+  const handleImportSkillPackage = (file: File) => {
+    const isParentSkillUpload = activeTab === "skills" && !draft.parentId;
+    void handleUploadSkillFile(file, {
+      parentOnlyMarkdown: isParentSkillUpload,
+    });
   };
 
   const createSkillUploadProps = (childTempId?: string): UploadProps => {
@@ -6240,6 +6267,8 @@ export default function MemoryManagement() {
         tagOptions={tagOptions}
         normalizeTagValues={normalizeTagValues}
         createSkillUploadProps={createSkillUploadProps}
+        applySkillRepoImport={applySkillRepoImport}
+        handleImportSkillPackage={handleImportSkillPackage}
         addChildSkillDraft={addChildSkillDraft}
         removeChildSkillDraft={removeChildSkillDraft}
         updateChildSkillDraft={updateChildSkillDraft}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Tooltip, message } from "antd";
-import { PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { Button, Modal, message } from "antd";
+import { InfoCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import PluginInstalledView from "./PluginInstalledView";
 import { AgentAppsAuth } from "@/components/auth";
@@ -12,7 +12,6 @@ import { removeSkillAsset, listSkillAssetsPage } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
 import SkillInstalledView from "./SkillInstalledView";
 import SkillMarketView from "./SkillMarketView";
-import SkillUploadView from "./SkillUploadView";
 import {
   collectMarketCategories,
   mapSkillAssetRecordToStructuredAsset,
@@ -400,25 +399,6 @@ export default function SkillManagementSection() {
             onClick={() => setSkillView("market")}
           >
             {t("admin.memorySkillViewMarket")}
-            <Tooltip title={t("admin.memorySkillViewMarketHelp")}>
-              <button
-                type="button"
-                className="memory-skill-tooltip-help"
-                aria-label={t("admin.memorySkillViewMarketHelp")}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <QuestionCircleOutlined />
-              </button>
-            </Tooltip>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`memory-skill-view-tab ${skillView === "upload" ? "is-active" : ""}`}
-            aria-selected={skillView === "upload"}
-            onClick={() => setSkillView("upload")}
-          >
-            {t("admin.memorySkillViewUpload")}
           </button>
           <button
             type="button"
@@ -486,7 +466,15 @@ export default function SkillManagementSection() {
       ) : null}
 
       {skillView === "market" ? (
-        <>
+        <div className="memory-skill-market-panel">
+          <div className="memory-skill-view-market-desc">
+            <span className="memory-skill-view-market-desc__icon" aria-hidden="true">
+              <InfoCircleOutlined />
+            </span>
+            <p className="memory-skill-view-market-desc__text">
+              {t("admin.memorySkillViewMarketHelp")}
+            </p>
+          </div>
           {usingMockMarketData ? (
             <div className="memory-skill-market-demo-banner">
               {t("admin.memorySkillMarketMockBanner")}
@@ -510,17 +498,7 @@ export default function SkillManagementSection() {
             onDetail={handleMarketDetail}
             installingUid={installingUid}
           />
-        </>
-      ) : null}
-
-      {skillView === "upload" ? (
-        <SkillUploadView
-          t={t}
-          onUploaded={async () => {
-            await refreshSkillAssets({ page: skillListPage });
-          }}
-          onNavigateInstalled={() => setSkillView("installed")}
-        />
+        </div>
       ) : null}
 
       <SkillAdminPublishModal
