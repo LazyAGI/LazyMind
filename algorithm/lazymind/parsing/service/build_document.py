@@ -59,17 +59,21 @@ def _milvus_lite_index_kwargs(index_kwargs):
     return lite_kwargs
 
 
+def _runtime_mode() -> str:
+    return (_cfg['runtime_mode'] or 'cloud').strip().lower()
+
+
 def _build_store_config(index_kwargs):
     milvus_uri = _cfg['milvus_uri']
     if not milvus_uri:
         raise ValueError('LAZYMIND_MILVUS_URI is required')
-    if (_cfg['local_milvus_mode'] or '').lower() == 'lite':
+    if _runtime_mode() == 'local':
         index_kwargs = _milvus_lite_index_kwargs(index_kwargs)
     milvus_kwargs = {
         'uri': milvus_uri,
         'index_kwargs': index_kwargs,
     }
-    if (_cfg['local_milvus_mode'] or '').lower() == 'lite':
+    if _runtime_mode() == 'local':
         # Milvus Lite 2.4 does not implement the database-management API.
         # Empty db_name keeps LazyLLM on the default database and skips create_database().
         milvus_kwargs['db_name'] = ''

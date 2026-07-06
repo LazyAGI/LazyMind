@@ -21,13 +21,13 @@ func NewMilvusLiteManager(r CommandRunner) *MilvusLiteManager {
 }
 
 func (m *MilvusLiteManager) Run(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	if cfg.Algorithm.MilvusMode != "lite" {
+	if !cfg.ModeProfile.VectorStore.ManagedProcess {
 		return nil
 	}
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(cfg.Algorithm.MilvusDBPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cfg.ModeProfile.VectorStore.DBPath), 0o755); err != nil {
 		return err
 	}
 	algorithm := NewAlgorithmServiceManager(m.runner)
@@ -35,10 +35,10 @@ func (m *MilvusLiteManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 		return err
 	}
 
-	address := "127.0.0.1:" + strconv.Itoa(cfg.Algorithm.MilvusPort)
+	address := "127.0.0.1:" + strconv.Itoa(cfg.ModeProfile.VectorStore.Port)
 	cmd := exec.CommandContext(ctx, paths.AlgorithmPython,
 		"-m", "lazymind.local_milvus_lite",
-		"--db-file", cfg.Algorithm.MilvusDBPath,
+		"--db-file", cfg.ModeProfile.VectorStore.DBPath,
 		"--address", address,
 	)
 	cmd.Dir = paths.RepoRoot
@@ -58,7 +58,7 @@ func (m *MilvusLiteManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 	go func() {
 		waitErr <- cmd.Wait()
 	}()
-	if err := waitForMilvusLiteReady(ctx, cfg.Algorithm.MilvusPort, waitErr); err != nil {
+	if err := waitForMilvusLiteReady(ctx, cfg.ModeProfile.VectorStore.Port, waitErr); err != nil {
 		_ = killAlgorithmProcess(cmd.Process)
 		_ = os.Remove(paths.MilvusLitePIDFile)
 		return err

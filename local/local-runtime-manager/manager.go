@@ -479,7 +479,7 @@ func (m *RuntimeManager) checkRuntimeReady(ctx context.Context, cfg RuntimeConfi
 			return false
 		}
 	}
-	if cfg.Algorithm.MilvusMode == "lite" && !tcpOK(ctx, "127.0.0.1", cfg.Algorithm.MilvusPort, 500*time.Millisecond) {
+	if cfg.ModeProfile.VectorStore.ManagedProcess && !tcpOK(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, 500*time.Millisecond) {
 		return false
 	}
 	return true
@@ -586,8 +586,8 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 			authAlive = m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond)
 		}
 		milvusAlive := false
-		if _, statErr := os.Stat(paths.MilvusLitePIDFile); statErr == nil && cfg.Algorithm.MilvusMode == "lite" && cfg.Algorithm.MilvusPort > 0 {
-			milvusAlive = tcpOK(ctx, "127.0.0.1", cfg.Algorithm.MilvusPort, 500*time.Millisecond)
+		if _, statErr := os.Stat(paths.MilvusLitePIDFile); statErr == nil && cfg.ModeProfile.VectorStore.ManagedProcess && cfg.ModeProfile.VectorStore.Port > 0 {
+			milvusAlive = tcpOK(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, 500*time.Millisecond)
 		}
 		if err == nil && !apiAlive && !hasContainers && !authAlive && !milvusAlive {
 			return nil
@@ -746,7 +746,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			Status: "unknown",
 		}
 	}
-	if cfg.Algorithm.MilvusMode == "lite" {
+	if cfg.ModeProfile.VectorStore.ManagedProcess {
 		if _, ok := resp.Services[milvusLiteProcessName]; !ok {
 			resp.Services[milvusLiteProcessName] = RuntimeServiceState{
 				Kind:   "host-process",
@@ -801,10 +801,10 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			hostHealthy = false
 		}
 		resp.Services[coreProcessName] = core
-		if cfg.Algorithm.MilvusMode == "lite" {
+		if cfg.ModeProfile.VectorStore.ManagedProcess {
 			milvus := resp.Services[milvusLiteProcessName]
 			milvus.Kind = "host-process"
-			if tcpOK(ctx, "127.0.0.1", cfg.Algorithm.MilvusPort, 500*time.Millisecond) {
+			if tcpOK(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, 500*time.Millisecond) {
 				milvus.Status = "running"
 			} else {
 				hostHealthy = false

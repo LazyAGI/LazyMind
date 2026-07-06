@@ -53,10 +53,6 @@ func derivedComposeProfileArgs() []string {
 	if enabledFromEnv("LAZYMIND_DEPLOY_MINERU") {
 		profiles = append(profiles, "mineru")
 	}
-	if normalizeMilvusMode(envText(localMilvusModeEnvVar, defaultLocalMilvusMode)) == "container" &&
-		isBuiltInServiceURI("LAZYMIND_MILVUS_URI", "http://milvus:19530") {
-		profiles = append(profiles, "milvus")
-	}
 	if localSegmentStoreUsesBuiltInOpenSearch() {
 		profiles = append(profiles, "opensearch")
 	}
@@ -277,7 +273,7 @@ func localComposeEnv(cfg RuntimeConfig) []string {
 		"LAZYMIND_LOCAL_WORKER_PORT=" + strconv.Itoa(cfg.Algorithm.WorkerPort),
 		"LAZYMIND_LOCAL_CHAT_PORT=" + strconv.Itoa(cfg.Algorithm.ChatPort),
 		"LAZYMIND_LOCAL_EVO_PORT=" + strconv.Itoa(cfg.Algorithm.EvoPort),
-		"LAZYMIND_LOCAL_MILVUS_PORT=" + strconv.Itoa(cfg.Algorithm.MilvusPort),
+		"LAZYMIND_LOCAL_MILVUS_PORT=" + strconv.Itoa(cfg.ModeProfile.VectorStore.Port),
 		"LAZYMIND_LOCAL_OPENSEARCH_PORT=" + strconv.Itoa(cfg.Algorithm.OpenSearchPort),
 	}
 }

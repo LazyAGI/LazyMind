@@ -139,7 +139,7 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 			},
 		},
 	}
-	if cfg.Algorithm.MilvusMode == "lite" {
+	if cfg.ModeProfile.VectorStore.ManagedProcess {
 		pcCfg.Processes[milvusLiteProcessName] = processComposeProcess{
 			WorkingDir: repoRoot,
 			Command:    commandForMilvusLiteRun,
@@ -195,8 +195,7 @@ func runtimeCommandEnv(cfg RuntimeConfig) []string {
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
 		authServicePortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
 		localFileWatcherPortEnvVar+"="+strconv.Itoa(cfg.FileWatcher.Port),
-		localMilvusModeEnvVar+"="+cfg.Algorithm.MilvusMode,
-		localMilvusDBPathEnvVar+"="+cfg.Algorithm.MilvusDBPath,
+		localMilvusLiteDBPathEnvVar+"="+cfg.ModeProfile.VectorStore.DBPath,
 	)
 	return env
 }

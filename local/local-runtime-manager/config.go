@@ -32,8 +32,7 @@ const (
 	localChatPortEnvVar           = "LAZYMIND_LOCAL_CHAT_PORT"
 	localEvoPortEnvVar            = "LAZYMIND_LOCAL_EVO_PORT"
 	localMilvusPortEnvVar         = "LAZYMIND_LOCAL_MILVUS_PORT"
-	localMilvusModeEnvVar         = "LAZYMIND_LOCAL_MILVUS_MODE"
-	localMilvusDBPathEnvVar       = "LAZYMIND_LOCAL_MILVUS_DB_PATH"
+	localMilvusLiteDBPathEnvVar   = "LAZYMIND_LOCAL_MILVUS_DB_PATH"
 	localOpenSearchPortEnvVar     = "LAZYMIND_LOCAL_OPENSEARCH_PORT"
 	localEnableEvoEnvVar          = "LAZYMIND_LOCAL_ENABLE_EVO"
 	routerPortPoolStartEnvVar     = "LAZYMIND_ROUTER_PORT_POOL_START"
@@ -68,7 +67,6 @@ const (
 	defaultLocalAlgoPort          = 18004
 	defaultLocalWorkerPort        = 18005
 	defaultLocalMilvusPort        = 19530
-	defaultLocalMilvusMode        = "lite"
 	defaultLocalOpenSearchPort    = 19200
 	defaultRouterPortPoolStart    = 18100
 	defaultRouterPortsPerInstance = 100
@@ -165,6 +163,7 @@ type RuntimeConfig struct {
 	Profile            string
 	RepoRoot           string
 	RuntimeRoot        string
+	ModeProfile        RuntimeModeProfileConfig
 	ProcessComposePort int
 	FrontendPort       int
 	LocalProxy         LocalProxyConfig
@@ -199,6 +198,19 @@ type FileWatcherConfig struct {
 	HostPathStyle string
 }
 
+type RuntimeModeProfileConfig struct {
+	Name        string
+	VectorStore VectorStoreConfig
+}
+
+type VectorStoreConfig struct {
+	Engine         string
+	Endpoint       string
+	Port           int
+	ManagedProcess bool
+	DBPath         string
+}
+
 type AlgorithmConfig struct {
 	PostgresPort   int
 	DocPort        int
@@ -207,10 +219,7 @@ type AlgorithmConfig struct {
 	WorkerPort     int
 	ChatPort       int
 	EvoPort        int
-	MilvusPort     int
-	MilvusMode     string
 	OpenSearchPort int
-	MilvusDBPath   string
 	EnableEvo      bool
 }
 
@@ -398,12 +407,16 @@ func defaultFileWatcherBaseRoot(repoRoot string) string {
 	return filepath.Clean(filepath.Join(repoRoot, raw))
 }
 
-func normalizeMilvusMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "container", "external":
-		return strings.ToLower(strings.TrimSpace(mode))
-	default:
-		return defaultLocalMilvusMode
+func localRuntimeModeProfile(milvusPort int, milvusLiteDBPath string) RuntimeModeProfileConfig {
+	return RuntimeModeProfileConfig{
+		Name: "local",
+		VectorStore: VectorStoreConfig{
+			Engine:         "milvus-lite",
+			Endpoint:       "http://127.0.0.1:" + strconv.Itoa(milvusPort),
+			Port:           milvusPort,
+			ManagedProcess: true,
+			DBPath:         milvusLiteDBPath,
+		},
 	}
 }
 
@@ -569,12 +582,12 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 	openSearchPort := ports.envOrAvailable(localOpenSearchPortEnvVar, defaultLocalOpenSearchPort)
 	chatPort := ports.firstEnvOrAvailable([]string{localChatPortEnvVar, localProxyChatHostPortEnvVar}, defaultLocalProxyChatHostPort)
 	evoPort := ports.firstEnvOrAvailable([]string{localEvoPortEnvVar, localProxyEvoHostPortEnvVar}, defaultLocalProxyEvoHostPort)
-	milvusMode := normalizeMilvusMode(envText(localMilvusModeEnvVar, defaultLocalMilvusMode))
-	milvusDBPath := filepath.Clean(envText(localMilvusDBPathEnvVar, p.MilvusLiteDBPath))
+	milvusLiteDBPath := filepath.Clean(envText(localMilvusLiteDBPathEnvVar, p.MilvusLiteDBPath))
 	return RuntimeConfig{
 		Profile:            profile,
 		RepoRoot:           p.RepoRoot,
 		RuntimeRoot:        runtimeRoot,
+		ModeProfile:        localRuntimeModeProfile(milvusPort, milvusLiteDBPath),
 		ProcessComposePort: processComposePort,
 		FrontendPort:       frontendPort,
 		CaddyVersion:       envText(caddyVersionEnvVar, defaultCaddyVersion),
@@ -595,10 +608,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 			WorkerPort:     workerPort,
 			ChatPort:       chatPort,
 			EvoPort:        evoPort,
-			MilvusPort:     milvusPort,
-			MilvusMode:     milvusMode,
 			OpenSearchPort: openSearchPort,
-			MilvusDBPath:   milvusDBPath,
 			EnableEvo:      envBool(localEnableEvoEnvVar, false),
 		},
 		AuthService: AuthServiceConfig{

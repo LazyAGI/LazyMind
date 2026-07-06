@@ -33,6 +33,8 @@ def _model_config_path_post_action(resolved_path):
 # All LAZYMIND_* environment variables are registered here.
 config = Config(prefix='LAZYMIND', home='~/.lazyllm_rag')
 _LAZYMIND_ROOT = os.path.dirname(__file__)
+config.add('runtime_mode', str, 'cloud', 'RUNTIME_MODE',
+           description='LazyMind runtime mode profile: cloud or local.')
 
 # ---------------------------------------------------------------------------
 # Chat
@@ -129,8 +131,6 @@ config.add('review_debug', bool, False, 'REVIEW_DEBUG', description='Enable revi
 # Parsing
 # ---------------------------------------------------------------------------
 config.add('milvus_uri', str, None, 'MILVUS_URI', description='Milvus vector store URI (required).')
-config.add('local_milvus_mode', str, 'container', 'LOCAL_MILVUS_MODE',
-           description='Local Milvus mode: lite, container, or external. Lite uses the default database.')
 config.add('mineru_backend', str, 'pipeline', 'MINERU_BACKEND', description='MinerU processing backend.')
 config.add('mineru_server_port', int, 8000, 'MINERU_SERVER_PORT', description='MinerU server port.')
 config.add('ocr_cache_dir', str, os.path.join(config['shared_upload_dir'], '.image_cache'), 'OCR_CACHE_DIR',

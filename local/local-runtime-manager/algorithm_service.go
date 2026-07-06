@@ -360,8 +360,8 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 		if err := waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute); err != nil {
 			return err
 		}
-		if cfg.Algorithm.MilvusMode != "external" {
-			if err := waitForTCP(ctx, "127.0.0.1", cfg.Algorithm.MilvusPort, "Milvus", 5*time.Minute); err != nil {
+		if cfg.ModeProfile.VectorStore.ManagedProcess {
+			if err := waitForTCP(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, "Milvus", 5*time.Minute); err != nil {
 				return err
 			}
 		}
@@ -501,7 +501,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_USE_INNER_MODEL=true",
 		"LAZYMIND_RESET_ALGO_ON_STARTUP=" + envText("LAZYMIND_RESET_ALGO_ON_STARTUP", "false"),
 		"LAZYMIND_RESET_ALL_ON_STARTUP=" + envText("LAZYMIND_RESET_ALL_ON_STARTUP", "false"),
-		"LAZYMIND_MILVUS_URI=" + localMilvusURI(cfg),
+		"LAZYMIND_MILVUS_URI=" + cfg.ModeProfile.VectorStore.Endpoint,
 		"LAZYMIND_OPENSEARCH_URI=" + envText("LAZYMIND_OPENSEARCH_URI", fmt.Sprintf("https://127.0.0.1:%d", cfg.Algorithm.OpenSearchPort)),
 		"LAZYMIND_OPENSEARCH_USER=" + envText("LAZYMIND_OPENSEARCH_USER", "admin"),
 		"LAZYMIND_OPENSEARCH_PASSWORD=" + envText("LAZYMIND_OPENSEARCH_PASSWORD", "LazyRAG_OpenSearch123!"),
@@ -562,13 +562,6 @@ func localRouterPortPool(cfg RuntimeConfig) (int, int) {
 		end = envPort(routerPortPoolEndEnvVar, end)
 	}
 	return start, end
-}
-
-func localMilvusURI(cfg RuntimeConfig) string {
-	if cfg.Algorithm.MilvusMode == "external" {
-		return envText("LAZYMIND_MILVUS_URI", "")
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.MilvusPort)
 }
 
 func algorithmPIDFile(paths RuntimePaths, service string) string {

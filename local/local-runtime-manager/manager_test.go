@@ -348,7 +348,7 @@ func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {
 		"LAZYLLM_PADDLE_API_KEY=",
 		"LAZYMIND_RESET_ALGO_ON_STARTUP=false",
 		"LAZYMIND_RESET_ALL_ON_STARTUP=false",
-		"LAZYMIND_MILVUS_URI=http://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.MilvusPort),
+		"LAZYMIND_MILVUS_URI=" + cfg.ModeProfile.VectorStore.Endpoint,
 		"LAZYMIND_MAX_RETRIES=20",
 		"LAZYMIND_REVIEW_MAX_RETRIES=5",
 		"LAZYMIND_SKILL_REVIEW_DEBUG=false",
@@ -544,7 +544,6 @@ func TestFilterRemainingServices(t *testing.T) {
 }
 
 func TestBuildEnabledServicesUsesDockerComposeBuild(t *testing.T) {
-	t.Setenv(localMilvusModeEnvVar, "container")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
@@ -554,7 +553,6 @@ func TestBuildEnabledServicesUsesDockerComposeBuild(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"config", "--format", "json",
 		)
 		return CommandResult{Stdout: `{
@@ -569,7 +567,6 @@ func TestBuildEnabledServicesUsesDockerComposeBuild(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"build",
 			"auth-service",
 			"web",
@@ -596,7 +593,6 @@ func TestClassifyComposeReadinessReportsFatalBeforePending(t *testing.T) {
 }
 
 func TestComposeUpCommandIsCanonical(t *testing.T) {
-	t.Setenv(localMilvusModeEnvVar, "container")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
@@ -607,7 +603,6 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 		expected := []string{"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"config", "--services",
 		}
 		assertCommand(t, cmd, "docker", expected...)
@@ -618,7 +613,6 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"config", "--format", "json",
 		)
 		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
@@ -628,7 +622,6 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"up",
 			"--no-build",
 			"--detach",
@@ -651,7 +644,6 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 }
 
 func TestComposeUpOmitsDisabledServices(t *testing.T) {
-	t.Setenv(localMilvusModeEnvVar, "container")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	overlay := filepath.Join(repo, localComposeOverrideName)
@@ -668,7 +660,6 @@ func TestComposeUpOmitsDisabledServices(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"config", "--format", "json",
 		})
 		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
@@ -677,7 +668,6 @@ func TestComposeUpOmitsDisabledServices(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"up",
 			"--no-build",
 			"--detach",
@@ -844,8 +834,8 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	if !strings.Contains(milvusLite.Command, "internal milvus-lite-run --profile "+profile) {
 		t.Fatalf("missing milvus-lite-run command: %q", milvusLite.Command)
 	}
-	if !strings.Contains(milvusLite.Command, localMilvusModeEnvVar+"=lite") {
-		t.Fatalf("milvus-lite command missing mode env: %q", milvusLite.Command)
+	if !strings.Contains(milvusLite.Command, localMilvusLiteDBPathEnvVar+"="+cfg.ModeProfile.VectorStore.DBPath) {
+		t.Fatalf("milvus-lite command missing db path env: %q", milvusLite.Command)
 	}
 	if !strings.Contains(milvusLite.Shutdown.Command, "internal milvus-lite-down --profile "+profile) {
 		t.Fatalf("missing milvus-lite-down command: %q", milvusLite.Shutdown.Command)
@@ -878,27 +868,12 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 
 func TestDerivedComposeProfilesUseBuiltInStoresByDefault(t *testing.T) {
 	t.Setenv("LAZYMIND_DEPLOY_MINERU", "")
-	t.Setenv(localMilvusModeEnvVar, "")
 	t.Setenv("LAZYMIND_MILVUS_URI", "")
 	t.Setenv("LAZYMIND_OPENSEARCH_URI", "")
 	t.Setenv("LAZYMIND_ENABLE_MILVUS_DASHBOARD", "")
 	t.Setenv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD", "")
 
 	assertStringSlicesEqual(t, derivedComposeProfileArgs(), nil)
-}
-
-func TestDerivedComposeProfilesUseMilvusContainerMode(t *testing.T) {
-	t.Setenv("LAZYMIND_DEPLOY_MINERU", "")
-	t.Setenv(localMilvusModeEnvVar, "container")
-	t.Setenv("LAZYMIND_MILVUS_URI", "")
-	t.Setenv("LAZYMIND_SEGMENT_STORE_TYPE", "")
-	t.Setenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", "")
-	t.Setenv("LAZYMIND_ENABLE_MILVUS_DASHBOARD", "")
-	t.Setenv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD", "")
-
-	assertStringSlicesEqual(t, derivedComposeProfileArgs(), []string{
-		"--profile", "milvus",
-	})
 }
 
 func TestDerivedComposeProfilesUseOpenSearchWhenSegmentStoreRequiresBuiltInOpenSearch(t *testing.T) {
@@ -926,7 +901,6 @@ func TestDerivedComposeProfilesSkipExternalStores(t *testing.T) {
 }
 
 func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
-	t.Setenv(localMilvusModeEnvVar, "container")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	runner := &fakeStreamRunner{fakeRunner: fakeRunner{t: t}}
@@ -936,7 +910,6 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"config", "--services",
 		)
 		return CommandResult{Stdout: "auth-service\ncore\n"}, nil
@@ -945,7 +918,6 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"config", "--format", "json",
 		)
 		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
@@ -955,7 +927,6 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"up",
 			"--no-build",
 			"--detach",
@@ -979,7 +950,6 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 }
 
 func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
-	t.Setenv(localMilvusModeEnvVar, "container")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
@@ -1010,7 +980,6 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"ps",
 			"-a",
 			"--format",
@@ -1126,7 +1095,6 @@ func TestRuntimeManagerUpFailsWhenHostAlgorithmsDoNotBecomeReady(t *testing.T) {
 }
 
 func TestRuntimeManagerUpReusesRunningProcessCompose(t *testing.T) {
-	t.Setenv(localMilvusModeEnvVar, "container")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
@@ -1155,7 +1123,6 @@ func TestRuntimeManagerUpReusesRunningProcessCompose(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
-			"--profile", "milvus",
 			"ps",
 			"-a",
 		})
@@ -1171,7 +1138,6 @@ func TestRuntimeManagerUpReusesRunningProcessCompose(t *testing.T) {
 }
 
 func TestRuntimeManagerUpFailsOnExitedService(t *testing.T) {
-	t.Setenv(localMilvusModeEnvVar, "container")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
@@ -1194,7 +1160,6 @@ func TestRuntimeManagerUpFailsOnExitedService(t *testing.T) {
 				"compose",
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
-				"--profile", "milvus",
 				"ps",
 				"-a",
 				"--format",
@@ -1207,7 +1172,6 @@ func TestRuntimeManagerUpFailsOnExitedService(t *testing.T) {
 				"compose",
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
-				"--profile", "milvus",
 				"ps",
 				"-a",
 			})
@@ -1257,7 +1221,6 @@ func TestProcessComposeManagerDownCommandIncludesPortAndTokenFile(t *testing.T) 
 }
 
 func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *testing.T) {
-	t.Setenv(localMilvusModeEnvVar, "container")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
@@ -1312,7 +1275,6 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 				"compose",
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
-				"--profile", "milvus",
 				"down",
 				"--remove-orphans",
 			})
@@ -1323,7 +1285,6 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 				"compose",
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
-				"--profile", "milvus",
 				"ps",
 				"-a",
 				"--format",
