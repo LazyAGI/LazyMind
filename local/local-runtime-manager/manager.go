@@ -86,6 +86,10 @@ func (m *RuntimeManager) SetOutput(out, errOut io.Writer) {
 	m.errOut = errOut
 }
 
+func (m *RuntimeManager) progressf(format string, args ...any) {
+	_, _ = fmt.Fprintf(m.out, format+"\n", args...)
+}
+
 func randomHexToken() (string, error) {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
@@ -344,19 +348,26 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 	var downErr error
 	apiAlive := m.probeAPI(cfg.ProcessComposePort, 500*time.Millisecond)
 	if apiAlive {
+		m.progressf("stopping process-compose on 127.0.0.1:%d (timeout %s)", cfg.ProcessComposePort, m.downTimeout)
 		downCtx, cancel := context.WithTimeout(ctx, m.downTimeout)
 		defer cancel()
 		downErr = m.processCompose.Down(downCtx, cfg, paths)
+	} else {
+		m.progressf("process-compose API not reachable on 127.0.0.1:%d; skipping process-compose down", cfg.ProcessComposePort)
 	}
 	if downErr != nil {
+		m.progressf("process-compose down failed; killing stale local runtime processes")
 		_ = m.killStaleRuntimeProcesses(context.Background(), paths.RepoRoot)
 	}
+	m.progressf("stopping frontend Caddy on 127.0.0.1:%d", cfg.FrontendPort)
 	if err := m.frontend.Down(ctx, cfg, paths); err != nil && downErr == nil {
 		downErr = err
 	}
+	m.progressf("stopping Local Gateway proxy on 127.0.0.1:%d", cfg.LocalProxy.Port)
 	if err := m.localProxy.Down(ctx, cfg, paths); err != nil && downErr == nil {
 		downErr = err
 	}
+	m.progressf("stopping Docker Compose fallback services")
 	if fallbackErr := m.compose.ComposeDown(ctx, paths.RepoRoot, cfg.Profile); fallbackErr != nil {
 		state = newStateWithServiceStatus(state, "failed")
 		state.OverallStatus = "failed"
@@ -368,19 +379,24 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 	}
 	downErr = nil
 	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
+		m.progressf("stopping algorithm process %s", spec.Name)
 		if err := m.algorithm.Down(ctx, paths, spec.Name); err != nil && downErr == nil {
 			downErr = err
 		}
 	}
+	m.progressf("stopping Milvus Lite process")
 	if err := m.milvusLite.Down(ctx, paths); err != nil && downErr == nil {
 		downErr = err
 	}
+	m.progressf("stopping core service on 127.0.0.1:%d", cfg.LocalProxy.CoreHostPort)
 	if err := m.coreService.Down(ctx, cfg, paths); err != nil && downErr == nil {
 		downErr = err
 	}
+	m.progressf("stopping scan-control-plane on 127.0.0.1:%d", cfg.LocalProxy.ScanHostPort)
 	if err := m.scanControl.Down(ctx, paths); err != nil && downErr == nil {
 		downErr = err
 	}
+	m.progressf("stopping file-watcher on 127.0.0.1:%d", cfg.FileWatcher.Port)
 	if err := m.fileWatcher.Down(ctx, paths); err != nil && downErr == nil {
 		downErr = err
 	}
@@ -390,6 +406,7 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		_ = writeRuntimeState(paths.StateFile, state)
 		return downErr
 	}
+	m.progressf("stopping auth-service on 127.0.0.1:%d", cfg.AuthService.Port)
 	if err := m.authService.Down(ctx, cfg, paths); err != nil {
 		return err
 	}
@@ -595,6 +612,8 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 	defer deadline.Stop()
 	ticker := time.NewTicker(m.pollInterval)
 	defer ticker.Stop()
+	nextReport := m.now()
+	m.progressf("waiting up to %s for local runtime processes and containers to stop", timeout)
 
 	for {
 		apiAlive := cfg.ProcessComposePort > 0 && m.probeAPI(cfg.ProcessComposePort, 500*time.Millisecond)
@@ -609,6 +628,28 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 		}
 		if err == nil && !apiAlive && !hasContainers && !authAlive && !milvusAlive {
 			return nil
+		}
+		if !m.now().Before(nextReport) {
+			blockers := make([]string, 0, 5)
+			if apiAlive {
+				blockers = append(blockers, "process-compose API")
+			}
+			if err != nil {
+				blockers = append(blockers, "compose status check")
+			} else if hasContainers {
+				blockers = append(blockers, "compose containers")
+			}
+			if authAlive {
+				blockers = append(blockers, "auth-service")
+			}
+			if milvusAlive {
+				blockers = append(blockers, "Milvus Lite")
+			}
+			if len(blockers) == 0 {
+				blockers = append(blockers, "runtime probes")
+			}
+			m.progressf("still waiting for local runtime to stop: %s", strings.Join(blockers, ", "))
+			nextReport = m.now().Add(5 * time.Second)
 		}
 		select {
 		case <-ctx.Done():

@@ -559,17 +559,28 @@ reset-kb:
 		$(MAKE) --no-print-directory file-watcher-stop; \
 	fi
 	@if [ -x "$(LAZYMIND_LOCAL_BIN)" ]; then \
-		echo "⏹  Stopping Local Runtime before cleanup..."; \
+		echo "⏹  Stopping Local Runtime before cleanup (profile=$(LAZYMIND_LOCAL_PROFILE), timeout=$(LAZYMIND_LOCAL_DOWN_TIMEOUT))..."; \
 		timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LAZYMIND_LOCAL_BIN)" down --profile "$(LAZYMIND_LOCAL_PROFILE)" || \
 			echo "⚠️  Local Runtime manager down timed out or failed; continuing reset"; \
+	else \
+		echo "ℹ️  No Local Runtime manager found at $(LAZYMIND_LOCAL_BIN); skipping local runtime stop"; \
 	fi
 	@echo "⏫ Starting PostgreSQL only for SQL cleanup..."
 	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) up -d db >/dev/null
-	@for i in $$(seq 1 30); do \
-		if $(_COMPOSE_LOCAL) exec -T db psql -U root -d postgres -c 'SELECT 1' >/dev/null 2>&1; then exit 0; fi; \
+	@echo "⏳ Waiting for PostgreSQL readiness before SQL cleanup..."
+	@ready=0; \
+	for i in $$(seq 1 30); do \
+		if $(_COMPOSE_LOCAL) exec -T db psql -U root -d postgres -c 'SELECT 1' >/dev/null 2>&1; then \
+			echo "✅ PostgreSQL ready for SQL cleanup"; \
+			ready=1; \
+			break; \
+		fi; \
+		echo "  waiting for PostgreSQL ($$i/30)..."; \
 		sleep 1; \
 	done; \
-	echo "⚠️  db did not become ready; SQL cleanup may be skipped"
+	if [ "$$ready" -ne 1 ]; then \
+		echo "⚠️  db did not become ready; SQL cleanup may be skipped"; \
+	fi
 	@echo "🗑  Clearing KB tables in PostgreSQL (core DB)..."
 	@$(_COMPOSE_LOCAL) exec -T db psql -U root -d core -c "$$_RESET_KB_SQL_CORE" 2>&1 || \
 		echo "⚠️  core DB not running or tables not found — skipping"
@@ -579,8 +590,9 @@ reset-kb:
 	@echo "🗑  Dropping lazyllm schema tables in PostgreSQL (app DB)..."
 	@$(_COMPOSE_LOCAL) exec -T db psql -U root -d app -c "$$_RESET_KB_SQL_APP" 2>&1 || \
 		echo "⚠️  app DB not running or tables not found — skipping"
-	@echo "⏹  Stopping remaining services..."
+	@echo "⏹  Stopping remaining local compose services..."
 	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) down 2>/dev/null || true
+	@echo "⏹  Stopping remaining default Cloud/Kong compose services..."
 	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down 2>/dev/null || true
 	@echo "🗑  Removing KB volumes: $(_KB_VOLUMES)..."
 	@for vol in $(_KB_VOLUMES); do \
@@ -592,9 +604,21 @@ reset-kb:
 		fi; \
 	done
 	@echo "🗑  Removing local KB caches and segment stores..."
-	@rm -rf $(_RESET_KB_LOCAL_PATHS) 2>/dev/null || true
+	@for path in $(_RESET_KB_LOCAL_PATHS); do \
+		if [ -e "$$path" ]; then \
+			echo "  removing $$path"; \
+			rm -rf "$$path" 2>/dev/null || true; \
+		else \
+			echo "  skip $$path (not found)"; \
+		fi; \
+	done
 	@echo "🗑  Removing local Milvus Lite data..."
-	@rm -rf "$(dir $(LAZYMIND_LOCAL_MILVUS_DB_PATH))" 2>/dev/null || true
+	@if [ -e "$(dir $(LAZYMIND_LOCAL_MILVUS_DB_PATH))" ]; then \
+		echo "  removing $(dir $(LAZYMIND_LOCAL_MILVUS_DB_PATH))"; \
+		rm -rf "$(dir $(LAZYMIND_LOCAL_MILVUS_DB_PATH))" 2>/dev/null || true; \
+	else \
+		echo "  skip $(dir $(LAZYMIND_LOCAL_MILVUS_DB_PATH)) (not found)"; \
+	fi
 	@echo "✅ KB data cleared."
 
 # ---------------------------------------------------------------------------
@@ -603,23 +627,40 @@ reset-kb:
 # ---------------------------------------------------------------------------
 reset-all: reset-kb
 	@echo "🗑  Removing all remaining persistent volumes (pgdata, redisdata, caches)..."
+	@echo "⏹  Stopping local compose stack and removing local volumes..."
 	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) down -v 2>/dev/null || true
+	@echo "⏹  Stopping default Cloud/Kong compose stack and removing default volumes..."
 	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down -v 2>/dev/null || true
 	@for vol in $(_ALL_VOLUMES); do \
-		for full in $$(docker volume ls -q | grep -E "(^|_)$${vol}$$"); do \
-			docker volume rm "$$full" >/dev/null 2>&1 && echo "  removed $$full" || true; \
-		done; \
+		matches="$$(docker volume ls -q | grep -E "(^|_)$${vol}$$" || true)"; \
+		if [ -z "$$matches" ]; then \
+			echo "  skip $$vol (not found)"; \
+		else \
+			for full in $$matches; do \
+				docker volume rm "$$full" >/dev/null 2>&1 && echo "  removed $$full" || echo "  skip $$full (in use?)"; \
+			done; \
+		fi; \
 	done
 	@echo "🗑  Removing local persistent data paths..."
-	@rm -rf $(_RESET_ALL_LOCAL_PATHS) 2>/dev/null || true
+	@for path in $(_RESET_ALL_LOCAL_PATHS); do \
+		if [ -e "$$path" ]; then \
+			echo "  removing $$path"; \
+			rm -rf "$$path" 2>/dev/null || true; \
+		else \
+			echo "  skip $$path (not found)"; \
+		fi; \
+	done
 	@if [ -e data/core ] || [ -e data/evo ] || [ -e data/scan ] || [ -e data/state/postgres ] || [ -e data/state/redis ] || [ -e data/subagent ] || [ -e data/traces ]; then \
-		echo "🗑  Removing container-owned state paths..."; \
+		echo "🗑  Removing container-owned state paths via temporary postgres container..."; \
 		docker run --rm -v "$(CURDIR):/work" -w /work $${POSTGRES_IMAGE:-postgres:16} \
 			bash -lc 'rm -rf data/core data/evo data/scan data/state/postgres data/state/redis data/subagent data/traces' >/dev/null; \
+	else \
+		echo "ℹ️  No container-owned state paths remain"; \
 	fi
 	@echo "🧹 Clearing Python cache..."
 	@find . -type d -name '__pycache__' ! -path '*/\.git/*' -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name '*.pyc' ! -path '*/\.git/*' -delete 2>/dev/null || true
+	@echo "✅ Python cache cleared."
 	@echo "✅ Full reset done. All persistent data removed."
 
 # ---------------------------------------------------------------------------

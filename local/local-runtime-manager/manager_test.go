@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1484,6 +1485,8 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
 	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	var output bytes.Buffer
+	manager.SetOutput(&output, io.Discard)
 	probeCalls := 0
 	manager.probeAPI = func(port int, timeout time.Duration) bool {
 		probeCalls++
@@ -1565,6 +1568,17 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 	}
 	if got := state.Services[processComposeServiceName].Status; got != "stopped" {
 		t.Fatalf("unexpected service status %s", got)
+	}
+	for _, want := range []string{
+		"stopping process-compose",
+		"process-compose down failed; killing stale local runtime processes",
+		"stopping Docker Compose fallback services",
+		"stopping auth-service",
+		"waiting up to",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("expected down progress output to contain %q, got:\n%s", want, output.String())
+		}
 	}
 	if len(runner.calls) != 6 {
 		t.Fatalf("expected 6 commands got %d", len(runner.calls))
