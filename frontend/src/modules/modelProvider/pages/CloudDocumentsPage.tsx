@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import CloudDocumentProviderPanel, {
   CloudDocumentModals,
 } from "../components/CloudDocumentProviderPanel";
+import DatabaseProviderPanel from "../components/DatabaseProviderPanel";
 import { useCloudDocumentProviders } from "../hooks/useCloudDocumentProviders";
 
 export default function CloudDocumentsPage() {
@@ -27,6 +28,8 @@ export default function CloudDocumentsPage() {
           </div>
           <CloudDocumentProviderPanel vm={vm} />
         </section>
+
+        <DatabaseProviderPanel />
       </Spin>
       <CloudDocumentModals vm={vm} />
     </div>

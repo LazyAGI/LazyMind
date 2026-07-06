@@ -215,9 +215,9 @@ export default function DatabaseConnectionsPage() {
               type="link"
               icon={<ArrowLeftOutlined />}
               className="data-source-provider-back-button"
-              onClick={() => navigate("/data-sources?view=connectors")}
+              onClick={() => navigate("/model-providers/cloud-documents")}
             >
-              {t("admin.dataSourceProviderBack")}
+              {t("modelProvider.cloudDocuments.backToProviders")}
             </Button>
             <h2 className="admin-page-title">{t("admin.dataSourceDatabaseTitle")}</h2>
             <Paragraph className="data-source-page-subtitle">

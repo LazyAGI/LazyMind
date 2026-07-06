@@ -1636,6 +1636,7 @@ const enUS = {
     dataSourceDatabaseTitle: "External Database",
     dataSourceDatabaseSubtitle:
       "Configure MySQL and PostgreSQL database connections for read-only chat queries.",
+    dataSourceDatabaseSectionTitle: "Database",
     dataSourceDatabaseReadonlyTag: "Read-only Query",
     dataSourceDatabaseProviderDesc:
       "Manage MySQL and PostgreSQL connections for external data queries in chat.",

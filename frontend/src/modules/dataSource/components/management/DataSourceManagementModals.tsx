@@ -1,4 +1,4 @@
-import { Alert, Button, Input, Modal, Space, Typography } from "antd";
+import { Alert, Button, Input, Modal, Space, Tag, Typography } from "antd";
 import { ArrowRightOutlined, FileTextOutlined } from "@ant-design/icons";
 import type { DataSourceManagementVm } from "../../hooks/useDataSourceManagement";
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";

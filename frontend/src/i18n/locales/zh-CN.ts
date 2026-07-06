@@ -1594,6 +1594,7 @@ const zhCN = {
       "：查看详细的 Notion OAuth 配置步骤、所需凭证和 Redirect URI 说明。",
     dataSourceDatabaseTitle: "外部数据库",
     dataSourceDatabaseSubtitle: "配置用于聊天只读查询的 MySQL 和 PostgreSQL 数据库连接。",
+    dataSourceDatabaseSectionTitle: "数据库",
     dataSourceDatabaseReadonlyTag: "只读查询",
     dataSourceDatabaseProviderDesc: "管理 MySQL 和 PostgreSQL 连接，用于聊天中的外部数据查询。",
     dataSourceDatabaseCreateAction: "新增连接",
