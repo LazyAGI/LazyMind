@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
@@ -609,7 +610,34 @@ func (m *RuntimeManager) printReadySummary(cfg RuntimeConfig) {
 	_, _ = fmt.Fprintf(m.out, "local runtime ready\n")
 	_, _ = fmt.Fprintf(m.out, "process-compose: http://127.0.0.1:%d\n", cfg.ProcessComposePort)
 	_, _ = fmt.Fprintf(m.out, "frontend: http://localhost:%d\n", cfg.FrontendPort)
+	if cfg.NetworkProfile == "lan" {
+		if ip := firstLANIPv4(); ip != "" {
+			_, _ = fmt.Fprintf(m.out, "frontend LAN: http://%s:%d\n", ip, cfg.FrontendPort)
+		}
+	}
 	_, _ = fmt.Fprintf(m.out, "status: local/local-runtime-manager/lazymind-local status --json --profile %s\n", cfg.Profile)
+}
+
+func firstLANIPv4() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, addr := range addrs {
+		var ip net.IP
+		switch v := addr.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+		ip = ip.To4()
+		if ip == nil || ip.IsLoopback() {
+			continue
+		}
+		return ip.String()
+	}
+	return ""
 }
 
 func acquireUpLock(paths RuntimePaths) (func(), error) {

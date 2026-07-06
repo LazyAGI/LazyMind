@@ -80,6 +80,7 @@ func localRuntimeEnv(cfg RuntimeConfig) []string {
 	return []string{
 		processComposePortEnvVar + "=" + strconv.Itoa(cfg.ProcessComposePort),
 		frontendPortEnvVar + "=" + strconv.Itoa(cfg.FrontendPort),
+		localNetworkProfileEnvVar + "=" + cfg.NetworkProfile,
 		localProxyAddressEnvVar + "=" + cfg.LocalProxy.Address,
 		localProxyPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.Port),
 		localProxyAuthHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),

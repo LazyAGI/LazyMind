@@ -442,6 +442,9 @@ func localSegmentStoreURIOrPath(cfg RuntimeConfig, paths RuntimePaths) string {
 }
 
 func ensureAlgorithmDataDirs(paths RuntimePaths) error {
+	if err := ensureLocalDataRootWritable(paths.RepoRoot); err != nil {
+		return err
+	}
 	dirs := []string{
 		filepath.Join(paths.RepoRoot, "data", "core", "uploads"),
 		filepath.Join(paths.RepoRoot, "data", "traces"),

@@ -113,13 +113,19 @@ func frontendBuildEnv() []string {
 func writeCaddyfile(paths RuntimePaths, cfg RuntimeConfig) error {
 	distRoot := filepath.ToSlash(filepath.Join(paths.RepoRoot, "frontend", "dist"))
 	proxy := "http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.Port)
+	siteAddress := fmt.Sprintf("http://localhost:%d, http://127.0.0.1:%d", cfg.FrontendPort, cfg.FrontendPort)
+	bindAddress := "127.0.0.1"
+	if cfg.NetworkProfile == "lan" {
+		siteAddress = fmt.Sprintf("http://:%d", cfg.FrontendPort)
+		bindAddress = "0.0.0.0"
+	}
 	content := fmt.Sprintf(`{
 	admin off
 	auto_https off
 }
 
-http://localhost:%d, http://127.0.0.1:%d {
-	bind 127.0.0.1
+%s {
+	bind %s
 	root * %s
 	encode gzip
 
@@ -140,7 +146,7 @@ http://localhost:%d, http://127.0.0.1:%d {
 		file_server
 	}
 }
-`, cfg.FrontendPort, cfg.FrontendPort, strconv.Quote(distRoot), proxy, proxy)
+`, siteAddress, bindAddress, strconv.Quote(distRoot), proxy, proxy)
 	return os.WriteFile(paths.CaddyConfig, []byte(content), 0o644)
 }
 

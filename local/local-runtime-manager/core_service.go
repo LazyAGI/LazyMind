@@ -32,6 +32,9 @@ func (m *CoreServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
+	if err := ensureLocalDataRootWritable(paths.RepoRoot); err != nil {
+		return err
+	}
 	for _, dir := range []string{
 		filepath.Join(paths.RepoRoot, "data", "core", "uploads"),
 		filepath.Join(paths.RepoRoot, "data", "subagent"),

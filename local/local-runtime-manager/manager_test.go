@@ -228,6 +228,45 @@ func TestRuntimeConfigKeepsPinnedFrontendPortWhenOccupied(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigDefaultsToLocalhostNetworkProfile(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "")
+	t.Setenv(localProxyAddressEnvVar, "")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.NetworkProfile != "localhost" {
+		t.Fatalf("network profile = %q, want localhost", cfg.NetworkProfile)
+	}
+	if cfg.LocalProxy.Address != "127.0.0.1" {
+		t.Fatalf("local proxy address = %q, want 127.0.0.1", cfg.LocalProxy.Address)
+	}
+}
+
+func TestRuntimeConfigAllowsLANNetworkProfile(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "lan")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.NetworkProfile != "lan" {
+		t.Fatalf("network profile = %q, want lan", cfg.NetworkProfile)
+	}
+}
+
+func TestRuntimeConfigRejectsUnknownNetworkProfile(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "public")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	if _, _, err := NewRuntimeConfig(defaultProfileValue(), repo); err == nil {
+		t.Fatal("expected invalid network profile error")
+	}
+}
+
 func TestFrontendBuildEnvIncludesLocalViteOverrides(t *testing.T) {
 	t.Setenv("VITE_LAZYMIND_MODE", "")
 	t.Setenv("VITE_HIDE_EVO", "true")
@@ -242,6 +281,72 @@ func TestFrontendBuildEnvIncludesLocalViteOverrides(t *testing.T) {
 		"VITE_APP_LOGO=/logo.svg",
 		"VITE_APP_CHAT_TITLE=Local Chat",
 	})
+}
+
+func TestWriteCaddyfileBindsLocalhostByDefault(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	if err := writeCaddyfile(paths, cfg); err != nil {
+		t.Fatalf("write caddyfile: %v", err)
+	}
+	raw, err := os.ReadFile(paths.CaddyConfig)
+	if err != nil {
+		t.Fatalf("read caddyfile: %v", err)
+	}
+	content := string(raw)
+	for _, want := range []string{
+		"http://localhost:" + strconv.Itoa(cfg.FrontendPort),
+		"http://127.0.0.1:" + strconv.Itoa(cfg.FrontendPort),
+		"bind 127.0.0.1",
+		"reverse_proxy http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.Port),
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("caddyfile missing %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "bind 0.0.0.0") {
+		t.Fatalf("default caddyfile should not bind all interfaces:\n%s", content)
+	}
+}
+
+func TestWriteCaddyfileBindsLANFrontendOnly(t *testing.T) {
+	t.Setenv(localNetworkProfileEnvVar, "lan")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	if err := writeCaddyfile(paths, cfg); err != nil {
+		t.Fatalf("write caddyfile: %v", err)
+	}
+	raw, err := os.ReadFile(paths.CaddyConfig)
+	if err != nil {
+		t.Fatalf("read caddyfile: %v", err)
+	}
+	content := string(raw)
+	for _, want := range []string{
+		"http://:" + strconv.Itoa(cfg.FrontendPort),
+		"bind 0.0.0.0",
+		"reverse_proxy http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.Port),
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("caddyfile missing %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "http://localhost:") || strings.Contains(content, "http://127.0.0.1:"+strconv.Itoa(cfg.FrontendPort)+" {") {
+		t.Fatalf("lan caddyfile should use wildcard host matching:\n%s", content)
+	}
 }
 
 func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {

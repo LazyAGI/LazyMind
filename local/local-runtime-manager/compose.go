@@ -258,6 +258,7 @@ func (m *ComposeManager) ComposeConfigJSON(ctx context.Context, repoRoot string)
 func localComposeEnv(cfg RuntimeConfig) []string {
 	return []string{
 		"LAZYMIND_FRONTEND_PORT=" + strconv.Itoa(cfg.FrontendPort),
+		"LAZYMIND_LOCAL_NETWORK_PROFILE=" + cfg.NetworkProfile,
 		"LAZYMIND_LOCAL_PROXY_PORT=" + strconv.Itoa(cfg.LocalProxy.Port),
 		"LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
 		"LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),

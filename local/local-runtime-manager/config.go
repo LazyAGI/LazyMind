@@ -15,6 +15,7 @@ const (
 	processComposePortEnvVar      = "LAZYMIND_PROCESS_COMPOSE_PORT"
 	localUpTimeoutEnvVar          = "LAZYMIND_LOCAL_UP_TIMEOUT"
 	localDownTimeoutEnvVar        = "LAZYMIND_LOCAL_DOWN_TIMEOUT"
+	localNetworkProfileEnvVar     = "LAZYMIND_LOCAL_NETWORK_PROFILE"
 	localProxyAddressEnvVar       = "LAZYMIND_LOCAL_PROXY_ADDRESS"
 	localProxyPortEnvVar          = "LAZYMIND_LOCAL_PROXY_PORT"
 	localProxyAuthHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT"
@@ -54,7 +55,8 @@ const (
 	defaultLocalUpTimeout         = 30 * 60
 	defaultLocalDownTimeout       = 2 * 60
 	defaultFrontendPort           = 8090
-	defaultLocalProxyAddress      = "0.0.0.0"
+	defaultLocalNetworkProfile    = "localhost"
+	defaultLocalProxyAddress      = "127.0.0.1"
 	defaultLocalProxyPort         = 5024
 	defaultLocalProxyAuthHostPort = 18000
 	defaultLocalProxyCoreHostPort = 18001
@@ -171,6 +173,7 @@ type RuntimeConfig struct {
 	ModeProfile        RuntimeModeProfileConfig
 	ProcessComposePort int
 	FrontendPort       int
+	NetworkProfile     string
 	LocalProxy         LocalProxyConfig
 	AuthService        AuthServiceConfig
 	CaddyVersion       string
@@ -381,6 +384,19 @@ func envBool(name string, fallback bool) bool {
 		return false
 	default:
 		return fallback
+	}
+}
+
+func localNetworkProfile() (string, error) {
+	profile := strings.ToLower(strings.TrimSpace(os.Getenv(localNetworkProfileEnvVar)))
+	if profile == "" {
+		return defaultLocalNetworkProfile, nil
+	}
+	switch profile {
+	case "localhost", "lan":
+		return profile, nil
+	default:
+		return "", fmt.Errorf("%s must be localhost or lan", localNetworkProfileEnvVar)
 	}
 }
 
@@ -598,6 +614,10 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 	chatPort := ports.firstEnvOrAvailable([]string{localChatPortEnvVar, localProxyChatHostPortEnvVar}, defaultLocalProxyChatHostPort)
 	evoPort := ports.firstEnvOrAvailable([]string{localEvoPortEnvVar, localProxyEvoHostPortEnvVar}, defaultLocalProxyEvoHostPort)
 	milvusLiteDBPath := filepath.Clean(envText(localMilvusLiteDBPathEnvVar, p.MilvusLiteDBPath))
+	networkProfile, err := localNetworkProfile()
+	if err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
+	}
 	return RuntimeConfig{
 		Profile:            profile,
 		RepoRoot:           p.RepoRoot,
@@ -605,6 +625,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		ModeProfile:        localRuntimeModeProfile(milvusPort, milvusLiteDBPath),
 		ProcessComposePort: processComposePort,
 		FrontendPort:       frontendPort,
+		NetworkProfile:     networkProfile,
 		CaddyVersion:       envText(caddyVersionEnvVar, defaultCaddyVersion),
 		LocalProxy: LocalProxyConfig{
 			Address:      envText(localProxyAddressEnvVar, defaultLocalProxyAddress),

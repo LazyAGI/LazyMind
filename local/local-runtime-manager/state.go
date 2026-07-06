@@ -31,6 +31,7 @@ type ProcessComposeState struct {
 type RuntimeConfigSnapshot struct {
 	FrontendPort       int                       `json:"frontendPort,omitempty"`
 	ModeProfile        RuntimeModeProfileConfig  `json:"modeProfile,omitempty"`
+	NetworkProfile     string                    `json:"networkProfile,omitempty"`
 	LocalProxy         LocalProxyConfig          `json:"localProxy,omitempty"`
 	AuthService        AuthServiceConfig         `json:"authService,omitempty"`
 	Algorithm          AlgorithmConfig           `json:"algorithm,omitempty"`
@@ -155,11 +156,12 @@ func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) Runti
 
 func snapshotRuntimeConfig(cfg RuntimeConfig) RuntimeConfigSnapshot {
 	return RuntimeConfigSnapshot{
-		FrontendPort: cfg.FrontendPort,
-		ModeProfile:  cfg.ModeProfile,
-		LocalProxy:   cfg.LocalProxy,
-		AuthService:  cfg.AuthService,
-		Algorithm:    cfg.Algorithm,
+		FrontendPort:   cfg.FrontendPort,
+		ModeProfile:    cfg.ModeProfile,
+		NetworkProfile: cfg.NetworkProfile,
+		LocalProxy:     cfg.LocalProxy,
+		AuthService:    cfg.AuthService,
+		Algorithm:      cfg.Algorithm,
 		FileWatcher: FileWatcherConfigSnapshot{
 			Port:          cfg.FileWatcher.Port,
 			AgentID:       cfg.FileWatcher.AgentID,
