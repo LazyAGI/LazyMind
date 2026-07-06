@@ -18,6 +18,7 @@ const (
 	localNetworkProfileEnvVar     = "LAZYMIND_LOCAL_NETWORK_PROFILE"
 	localProxyAddressEnvVar       = "LAZYMIND_LOCAL_PROXY_ADDRESS"
 	localProxyPortEnvVar          = "LAZYMIND_LOCAL_PROXY_PORT"
+	localAuthPortEnvVar           = "LAZYMIND_LOCAL_AUTH_PORT"
 	localProxyAuthHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT"
 	localProxyCoreHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT"
 	localProxyChatHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT"
@@ -179,6 +180,7 @@ type RuntimeConfig struct {
 	CaddyVersion       string
 	Algorithm          AlgorithmConfig
 	FileWatcher        FileWatcherConfig
+	PortResolutions    []PortResolution `json:"-"`
 }
 
 type LocalProxyConfig struct {
@@ -231,6 +233,14 @@ type AlgorithmConfig struct {
 	EnableEvo      bool
 }
 
+type PortResolution struct {
+	Name          string
+	EnvName       string
+	RequestedPort int
+	ResolvedPort  int
+	Reason        string
+}
+
 type ServiceEndpoints struct {
 	Host      ServiceEndpointURLs `json:"host"`
 	Container ServiceEndpointURLs `json:"container"`
@@ -278,7 +288,8 @@ func firstAvailableLocalPort(start int, attempts int) int {
 }
 
 type localPortAllocator struct {
-	used map[int]struct{}
+	used        map[int]struct{}
+	resolutions []PortResolution
 }
 
 func newLocalPortAllocator() *localPortAllocator {
@@ -293,38 +304,50 @@ func (a *localPortAllocator) reserve(port int) int {
 }
 
 func (a *localPortAllocator) envOrAvailable(envName string, fallback int) int {
-	if strings.TrimSpace(os.Getenv(envName)) != "" {
-		return a.reserve(envPort(envName, fallback))
-	}
-	return a.availableFrom(fallback, 500)
+	return a.firstEnvOrAvailable([]string{envName}, fallback)
 }
 
 func (a *localPortAllocator) envOrAvailableDefaultCanMove(envName string, fallback int) int {
-	return a.envOrAvailableDefaultCanMoveOn(envName, fallback, "127.0.0.1")
+	return a.firstEnvOrAvailableOn([]string{envName}, fallback, "127.0.0.1")
 }
 
 func (a *localPortAllocator) envOrAvailableDefaultCanMoveOn(envName string, fallback int, address string) int {
-	raw := strings.TrimSpace(os.Getenv(envName))
-	if raw == "" {
-		return a.availableFromOn(fallback, 500, address)
-	}
-	port := envPort(envName, fallback)
-	if envBool(localPortsPinnedEnvVar, false) {
-		return a.reserve(port)
-	}
-	if port != fallback || localPortAvailableOn(address, port) {
-		return a.reserve(port)
-	}
-	return a.availableFromOn(fallback, 500, address)
+	return a.firstEnvOrAvailableOn([]string{envName}, fallback, address)
 }
 
 func (a *localPortAllocator) firstEnvOrAvailable(envNames []string, fallback int) int {
+	return a.firstEnvOrAvailableOn(envNames, fallback, "127.0.0.1")
+}
+
+func (a *localPortAllocator) firstEnvOrAvailableOn(envNames []string, fallback int, address string) int {
 	for _, envName := range envNames {
 		if strings.TrimSpace(os.Getenv(envName)) != "" {
-			return a.reserve(envPort(envName, fallback))
+			requested := envPort(envName, fallback)
+			if envBool(localPortsPinnedEnvVar, false) {
+				return a.reserve(requested)
+			}
+			if a.portAvailableOn(address, requested) {
+				return a.reserve(requested)
+			}
+			resolved := a.availableFromOn(requested, 500, address)
+			a.resolutions = append(a.resolutions, PortResolution{
+				EnvName:       envName,
+				RequestedPort: requested,
+				ResolvedPort:  resolved,
+				Reason:        "preferred port unavailable",
+			})
+			return resolved
 		}
 	}
-	return a.availableFrom(fallback, 500)
+	resolved := a.availableFromOn(fallback, 500, address)
+	if resolved != fallback {
+		a.resolutions = append(a.resolutions, PortResolution{
+			RequestedPort: fallback,
+			ResolvedPort:  resolved,
+			Reason:        "default port unavailable",
+		})
+	}
+	return resolved
 }
 
 func (a *localPortAllocator) availableFrom(start int, attempts int) int {
@@ -333,15 +356,47 @@ func (a *localPortAllocator) availableFrom(start int, attempts int) int {
 
 func (a *localPortAllocator) availableFromOn(start int, attempts int, address string) int {
 	for port := start; port < start+attempts && port < 65536; port++ {
-		if _, ok := a.used[port]; ok {
-			continue
+		if a.portAvailableOn(address, port) {
+			return a.reserve(port)
 		}
-		if !localPortAvailableOn(address, port) {
-			continue
-		}
-		return a.reserve(port)
 	}
 	return a.reserve(start)
+}
+
+func (a *localPortAllocator) portAvailable(port int) bool {
+	if _, ok := a.used[port]; ok {
+		return false
+	}
+	return localPortAvailable(port)
+}
+
+func (a *localPortAllocator) portAvailableOn(address string, port int) bool {
+	if _, ok := a.used[port]; ok {
+		return false
+	}
+	return localPortAvailableOn(address, port)
+}
+
+func (a *localPortAllocator) setLastResolutionName(name string) {
+	if len(a.resolutions) == 0 {
+		return
+	}
+	last := &a.resolutions[len(a.resolutions)-1]
+	if last.Name == "" {
+		last.Name = name
+	}
+}
+
+func (a *localPortAllocator) resolvedPort(name string, envNames []string, fallback int) int {
+	port := a.firstEnvOrAvailable(envNames, fallback)
+	a.setLastResolutionName(name)
+	return port
+}
+
+func (a *localPortAllocator) resolvedPortOn(name string, envNames []string, fallback int, address string) int {
+	port := a.firstEnvOrAvailableOn(envNames, fallback, address)
+	a.setLastResolutionName(name)
+	return port
 }
 
 func localPortAvailable(port int) bool {
@@ -617,22 +672,22 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 	if networkProfile == "lan" {
 		frontendBindCheckAddress = "0.0.0.0"
 	}
-	processComposePort := ports.envOrAvailable(processComposePortEnvVar, defaultProcessComposePort)
-	frontendPort := ports.envOrAvailableDefaultCanMoveOn(frontendPortEnvVar, defaultFrontendPort, frontendBindCheckAddress)
-	localProxyPort := ports.envOrAvailable(localProxyPortEnvVar, defaultLocalProxyPort)
-	authHostPort := ports.envOrAvailable(localProxyAuthHostPortEnvVar, defaultLocalProxyAuthHostPort)
-	coreHostPort := ports.firstEnvOrAvailable([]string{localCorePortEnvVar, localProxyCoreHostPortEnvVar}, defaultLocalProxyCoreHostPort)
-	scanHostPort := ports.envOrAvailable(localProxyScanHostPortEnvVar, defaultLocalProxyScanHostPort)
-	fileWatcherPort := ports.envOrAvailable(localFileWatcherPortEnvVar, defaultLocalFileWatcherPort)
-	postgresPort := ports.envOrAvailable(localPostgresPortEnvVar, defaultLocalPostgresPort)
-	docPort := ports.envOrAvailable(localDocPortEnvVar, defaultLocalDocPort)
-	processorPort := ports.envOrAvailable(localProcessorPortEnvVar, defaultLocalProcessorPort)
-	algoPort := ports.envOrAvailable(localAlgoPortEnvVar, defaultLocalAlgoPort)
-	workerPort := ports.envOrAvailable(localWorkerPortEnvVar, defaultLocalWorkerPort)
-	milvusPort := ports.envOrAvailable(localMilvusPortEnvVar, defaultLocalMilvusPort)
-	openSearchPort := ports.envOrAvailable(localOpenSearchPortEnvVar, defaultLocalOpenSearchPort)
-	chatPort := ports.firstEnvOrAvailable([]string{localChatPortEnvVar, localProxyChatHostPortEnvVar}, defaultLocalProxyChatHostPort)
-	evoPort := ports.firstEnvOrAvailable([]string{localEvoPortEnvVar, localProxyEvoHostPortEnvVar}, defaultLocalProxyEvoHostPort)
+	processComposePort := ports.resolvedPort("process-compose", []string{processComposePortEnvVar}, defaultProcessComposePort)
+	frontendPort := ports.resolvedPortOn("frontend", []string{frontendPortEnvVar}, defaultFrontendPort, frontendBindCheckAddress)
+	localProxyPort := ports.resolvedPort("local-proxy", []string{localProxyPortEnvVar}, defaultLocalProxyPort)
+	authHostPort := ports.resolvedPort("auth-service", []string{localAuthPortEnvVar, localProxyAuthHostPortEnvVar, authServicePortEnvVar}, defaultLocalProxyAuthHostPort)
+	coreHostPort := ports.resolvedPort("core", []string{localCorePortEnvVar, localProxyCoreHostPortEnvVar}, defaultLocalProxyCoreHostPort)
+	scanHostPort := ports.resolvedPort("scan-control-plane", []string{localProxyScanHostPortEnvVar}, defaultLocalProxyScanHostPort)
+	fileWatcherPort := ports.resolvedPort("file-watcher", []string{localFileWatcherPortEnvVar}, defaultLocalFileWatcherPort)
+	postgresPort := ports.resolvedPort("postgres", []string{localPostgresPortEnvVar}, defaultLocalPostgresPort)
+	docPort := ports.resolvedPort("document-service", []string{localDocPortEnvVar}, defaultLocalDocPort)
+	processorPort := ports.resolvedPort("processor-server", []string{localProcessorPortEnvVar}, defaultLocalProcessorPort)
+	algoPort := ports.resolvedPort("lazyllm-algo", []string{localAlgoPortEnvVar}, defaultLocalAlgoPort)
+	workerPort := ports.resolvedPort("processor-worker", []string{localWorkerPortEnvVar}, defaultLocalWorkerPort)
+	milvusPort := ports.resolvedPort("milvus-lite", []string{localMilvusPortEnvVar}, defaultLocalMilvusPort)
+	openSearchPort := ports.resolvedPort("opensearch", []string{localOpenSearchPortEnvVar}, defaultLocalOpenSearchPort)
+	chatPort := ports.resolvedPort("chat", []string{localChatPortEnvVar, localProxyChatHostPortEnvVar}, defaultLocalProxyChatHostPort)
+	evoPort := ports.resolvedPort("evo-api", []string{localEvoPortEnvVar, localProxyEvoHostPortEnvVar}, defaultLocalProxyEvoHostPort)
 	milvusLiteDBPath := filepath.Clean(envText(localMilvusLiteDBPathEnvVar, p.MilvusLiteDBPath))
 	return RuntimeConfig{
 		Profile:            profile,
@@ -676,6 +731,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 			WatchHostDir:  defaultFileWatcherWatchHostDir(root),
 			HostPathStyle: envText("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE", "posix"),
 		},
+		PortResolutions: ports.resolutions,
 	}, p, nil
 }
 

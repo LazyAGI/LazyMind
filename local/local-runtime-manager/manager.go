@@ -135,6 +135,10 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	cfg = freshCfg
+	if err := validatePinnedLocalPorts(cfg); err != nil {
+		return err
+	}
+	m.printPortResolutionSummary(cfg)
 
 	token, err := randomHexToken()
 	if err != nil {
@@ -449,13 +453,19 @@ func (m *RuntimeManager) checkRuntimeReady(ctx context.Context, cfg RuntimeConfi
 	if m.runtimeReady != nil {
 		return m.runtimeReady(ctx, cfg, paths)
 	}
-	statuses, err := m.compose.ComposeStatus(ctx, paths.RepoRoot)
+	plan, err := m.compose.ComposeStartupPlan(ctx, paths.RepoRoot)
 	if err != nil {
 		return false
 	}
-	state, _ := classifyComposeReadiness(statuses)
-	if state != composeReadinessReady {
-		return false
+	if len(plan.Services) > 0 {
+		statuses, err := m.compose.ComposeStatus(ctx, paths.RepoRoot)
+		if err != nil {
+			return false
+		}
+		state, _ := classifyComposeReadiness(filterComposeStatuses(statuses, plan.Services))
+		if state != composeReadinessReady {
+			return false
+		}
 	}
 	if !httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d/_local/healthz", cfg.LocalProxy.Port), 500*time.Millisecond) {
 		return false
@@ -527,6 +537,13 @@ func (m *RuntimeManager) waitForProcessComposeAPI(ctx context.Context, port int,
 }
 
 func (m *RuntimeManager) waitForComposeTerminalState(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	plan, err := m.compose.ComposeStartupPlan(ctx, paths.RepoRoot)
+	if err != nil {
+		return err
+	}
+	if len(plan.Services) == 0 {
+		return nil
+	}
 	timeout := m.upTimeout
 	if timeout <= 0 {
 		timeout = time.Duration(defaultLocalUpTimeout) * time.Second
@@ -543,7 +560,7 @@ func (m *RuntimeManager) waitForComposeTerminalState(ctx context.Context, cfg Ru
 		if err != nil {
 			lastReason = err.Error()
 		} else {
-			state, reason := classifyComposeReadiness(statuses)
+			state, reason := classifyComposeReadiness(filterComposeStatuses(statuses, plan.Services))
 			lastReason = reason
 			switch state {
 			case composeReadinessReady:
@@ -616,6 +633,79 @@ func (m *RuntimeManager) printReadySummary(cfg RuntimeConfig) {
 		}
 	}
 	_, _ = fmt.Fprintf(m.out, "status: local/local-runtime-manager/lazymind-local status --json --profile %s\n", cfg.Profile)
+}
+
+func (m *RuntimeManager) printPortResolutionSummary(cfg RuntimeConfig) {
+	for _, resolution := range cfg.PortResolutions {
+		name := resolution.Name
+		if name == "" {
+			name = "local service"
+		}
+		envName := resolution.EnvName
+		if envName == "" {
+			envName = "default"
+		}
+		_, _ = fmt.Fprintf(
+			m.errOut,
+			"local port moved: %s %s preferred %d, using %d (%s)\n",
+			name,
+			envName,
+			resolution.RequestedPort,
+			resolution.ResolvedPort,
+			resolution.Reason,
+		)
+	}
+}
+
+func validatePinnedLocalPorts(cfg RuntimeConfig) error {
+	if !envBool(localPortsPinnedEnvVar, false) {
+		return nil
+	}
+	seen := map[int]string{}
+	for _, item := range resolvedLocalPorts(cfg) {
+		if previous, ok := seen[item.port]; ok {
+			return fmt.Errorf("local ports are pinned but %s and %s both resolve to port %d", previous, item.name, item.port)
+		}
+		seen[item.port] = item.name
+		if !localPortAvailableOn(item.address, item.port) {
+			return fmt.Errorf("local ports are pinned and %s port %d is already in use; unset %s or choose a free port", item.name, item.port, localPortsPinnedEnvVar)
+		}
+	}
+	return nil
+}
+
+type localPortItem struct {
+	name    string
+	port    int
+	address string
+}
+
+func resolvedLocalPorts(cfg RuntimeConfig) []localPortItem {
+	frontendAddress := "127.0.0.1"
+	if cfg.NetworkProfile == "lan" {
+		frontendAddress = "0.0.0.0"
+	}
+	items := []localPortItem{
+		{name: "process-compose", port: cfg.ProcessComposePort, address: "127.0.0.1"},
+		{name: "frontend", port: cfg.FrontendPort, address: frontendAddress},
+		{name: "local-proxy", port: cfg.LocalProxy.Port, address: "127.0.0.1"},
+		{name: "auth-service", port: cfg.AuthService.Port, address: "127.0.0.1"},
+		{name: "core", port: cfg.LocalProxy.CoreHostPort, address: "127.0.0.1"},
+		{name: "scan-control-plane", port: cfg.LocalProxy.ScanHostPort, address: "127.0.0.1"},
+		{name: "file-watcher", port: cfg.FileWatcher.Port, address: "127.0.0.1"},
+		{name: "postgres", port: cfg.Algorithm.PostgresPort, address: "127.0.0.1"},
+		{name: "document-service", port: cfg.Algorithm.DocPort, address: "127.0.0.1"},
+		{name: "processor-server", port: cfg.Algorithm.ProcessorPort, address: "127.0.0.1"},
+		{name: "lazyllm-algo", port: cfg.Algorithm.AlgoPort, address: "127.0.0.1"},
+		{name: "processor-worker", port: cfg.Algorithm.WorkerPort, address: "127.0.0.1"},
+		{name: "chat", port: cfg.Algorithm.ChatPort, address: "127.0.0.1"},
+		{name: "milvus-lite", port: cfg.ModeProfile.VectorStore.Port, address: "127.0.0.1"},
+		{name: "opensearch", port: cfg.Algorithm.OpenSearchPort, address: "127.0.0.1"},
+	}
+	if cfg.Algorithm.EnableEvo {
+		items = append(items, localPortItem{name: "evo-api", port: cfg.Algorithm.EvoPort, address: "127.0.0.1"})
+	}
+	return items
 }
 
 func firstLANIPv4() string {

@@ -22,6 +22,10 @@ type ComposeServiceStatus struct {
 	ExitCode int
 }
 
+type ComposeStartupPlan struct {
+	Services []string
+}
+
 type composeReadinessState int
 
 const (
@@ -151,30 +155,38 @@ func (m *ComposeManager) ComposeHasContainers(ctx context.Context, repoRoot stri
 	return len(statuses) > 0, nil
 }
 
-func (m *ComposeManager) ComposeUp(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	repoRoot := paths.RepoRoot
+func (m *ComposeManager) ComposeStartupPlan(ctx context.Context, repoRoot string) (ComposeStartupPlan, error) {
 	services, err := m.ComposeServices(ctx, repoRoot)
 	if err != nil {
-		return err
+		return ComposeStartupPlan{}, err
 	}
 	disabled, err := parseRuntimeOverlay(filepath.Join(repoRoot, localComposeOverrideName))
 	if err != nil && !os.IsNotExist(err) {
-		return err
+		return ComposeStartupPlan{}, err
 	}
 
 	remaining, err := filterRemainingServices(services, disabled.DisabledContainerTypes)
 	if err != nil {
+		return ComposeStartupPlan{}, err
+	}
+	return ComposeStartupPlan{Services: remaining}, nil
+}
+
+func (m *ComposeManager) ComposeUp(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	repoRoot := paths.RepoRoot
+	plan, err := m.ComposeStartupPlan(ctx, repoRoot)
+	if err != nil {
 		return err
 	}
-	if len(remaining) == 0 {
-		_ = cfg.Profile
+	if len(plan.Services) == 0 {
+		return nil
 	}
-	if err := m.BuildEnabledServices(ctx, repoRoot, remaining); err != nil {
+	if err := m.BuildEnabledServices(ctx, repoRoot, plan.Services); err != nil {
 		return err
 	}
 
 	args := append(m.composeArgs(repoRoot), "up", "--no-build", "--detach", "--no-deps")
-	args = append(args, remaining...)
+	args = append(args, plan.Services...)
 	env := localComposeEnv(cfg)
 	if streamer, ok := m.runner.(CommandStreamer); ok {
 		err := streamer.Stream(ctx, Command{Name: "docker", Args: args, Dir: repoRoot, Env: env}, os.Stdout, os.Stderr)
@@ -260,7 +272,9 @@ func localComposeEnv(cfg RuntimeConfig) []string {
 		"LAZYMIND_FRONTEND_PORT=" + strconv.Itoa(cfg.FrontendPort),
 		"LAZYMIND_LOCAL_NETWORK_PROFILE=" + cfg.NetworkProfile,
 		"LAZYMIND_LOCAL_PROXY_PORT=" + strconv.Itoa(cfg.LocalProxy.Port),
+		"LAZYMIND_LOCAL_AUTH_PORT=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
 		"LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
+		"LAZYMIND_AUTH_SERVICE_PORT=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
 		"LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_LOCAL_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.ChatHostPort),
@@ -401,4 +415,25 @@ func classifyComposeReadiness(statuses []ComposeServiceStatus) (composeReadiness
 		}
 	}
 	return composeReadinessReady, "all services ready"
+}
+
+func filterComposeStatuses(statuses []ComposeServiceStatus, services []string) []ComposeServiceStatus {
+	if len(services) == 0 {
+		return nil
+	}
+	wanted := make(map[string]struct{}, len(services))
+	for _, service := range services {
+		wanted[service] = struct{}{}
+	}
+	filtered := make([]ComposeServiceStatus, 0, len(statuses))
+	for _, st := range statuses {
+		service := st.Service
+		if service == "" {
+			service = st.Name
+		}
+		if _, ok := wanted[service]; ok {
+			filtered = append(filtered, st)
+		}
+	}
+	return filtered
 }

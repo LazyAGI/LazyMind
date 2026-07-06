@@ -193,6 +193,7 @@ func runtimeCommandEnv(cfg RuntimeConfig) []string {
 	env = append(env,
 		localPortsPinnedEnvVar+"=1",
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
+		localAuthPortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
 		authServicePortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
 		localFileWatcherPortEnvVar+"="+strconv.Itoa(cfg.FileWatcher.Port),
 		localMilvusLiteDBPathEnvVar+"="+cfg.ModeProfile.VectorStore.DBPath,
