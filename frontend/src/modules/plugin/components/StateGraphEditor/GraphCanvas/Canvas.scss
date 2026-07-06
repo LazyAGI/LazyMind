@@ -135,3 +135,17 @@
   color: #bfbfbf;
   font-style: italic;
 }
+
+// Static label shown when edge is not selected/hovered but has a condition
+.transition-edge-label-static {
+  background: transparent;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: #8c8c8c;
+  pointer-events: none;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}

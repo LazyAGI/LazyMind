@@ -8,6 +8,7 @@ import {
   useNodesState,
   useEdgesState,
   useReactFlow,
+  useStore,
   ReactFlowProvider,
   type Node,
   type Edge,
@@ -26,6 +27,8 @@ import type { ValidationError } from '../core/validator';
 import { StepNodeRenderer, TerminalNode, buildNodeErrorMap } from './StepNode';
 import { TransitionEdge } from './TransitionEdge';
 import NodePropertiesPanel from './NodePropertiesPanel';
+import { useAlignmentGuides } from './useAlignmentGuides';
+import { AlignmentGuides } from './AlignmentGuides';
 import './Canvas.scss';
 
 const NODE_WIDTH = 148;
@@ -117,9 +120,10 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
   }
 
   for (const node of model.nodes) {
+    const isMultiExit = node.transitions.length > 1;
     for (const t of node.transitions) {
       const edgeKey = `${node.id}->${t.to}`;
-      const hasError = edgeErrorSet.has(edgeKey) || !t.condition.trim();
+      const hasError = edgeErrorSet.has(edgeKey) || (isMultiExit && !t.condition.trim());
       edges.push({
         id: edgeKey,
         source: node.id,
@@ -141,6 +145,15 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
 function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<CanvasHandle>) {
   const { screenToFlowPosition } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
+  const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides } = useAlignmentGuides();
+
+  // Read all current nodes directly from the ReactFlow store.
+  // onNodeDrag's third arg `allNodes` only contains the dragged node in RF 12.x.
+  const allNodesFromStore = useStore((s) => s.nodes);
+
+  // Track the last snapped position per node so onNodeDragStop can persist it
+  // instead of the pre-snap position that ReactFlow passes in its callback arg.
+  const snapPositionRef = useRef<Record<string, { x: number; y: number }>>({});
 
   // Keep latest model/onModelChange in refs so callbacks below don't need them
   // as deps (avoids re-creating callbacks on every model change).
@@ -294,12 +307,46 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
   // Sync drag-stop positions back to the model layout
   const onNodeDragStop = useCallback(
     (_event: React.MouseEvent, node: Node) => {
+      clearGuides();
+      // Use the snapped position if one was recorded during this drag; otherwise
+      // fall back to whatever position ReactFlow reports (pre-snap coordinates).
+      const snapped = snapPositionRef.current[node.id];
+      const pos = snapped ?? { x: node.position.x, y: node.position.y };
+      delete snapPositionRef.current[node.id];
+
       const m = modelRef.current;
-      const newLayout = { ...m.layout, [node.id]: { x: node.position.x, y: node.position.y } };
+      const newLayout = { ...m.layout, [node.id]: pos };
+      // If we snapped, also update the ReactFlow node state so it stays at the
+      // snapped position (ReactFlow resets to its own tracked pos on drag-stop).
+      if (snapped) {
+        setNodes((nds) =>
+          nds.map((n) => (n.id === node.id ? { ...n, position: snapped } : n)),
+        );
+      }
       skipSyncRef.current = true;
       onModelChangeRef.current({ ...m, layout: newLayout });
     },
-    [],
+    [clearGuides, setNodes],
+  );
+
+  const onNodeDrag = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      const merged = allNodesFromStore.map((n) => (n.id === node.id ? node : n));
+      const snap = computeGuides(node, merged);
+      if (snap) {
+        snapPositionRef.current[node.id] = snap;
+        // Defer setNodes to avoid calling React setState inside ReactFlow's own
+        // synchronous event handler, which causes Minified React error #185.
+        queueMicrotask(() => {
+          setNodes((nds) =>
+            nds.map((n) => (n.id === node.id ? { ...n, position: snap } : n)),
+          );
+        });
+      } else {
+        delete snapPositionRef.current[node.id];
+      }
+    },
+    [computeGuides, allNodesFromStore, setNodes],
   );
 
   // Handle node/edge deletion via Delete or Backspace key
@@ -453,9 +500,25 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
       onModelChangeRef.current({ ...m, nodes: remappedNodes, layout: newLayout });
       setSelectedNodeId(remaId);
     } else {
-      // Only data changed — skip useEffect re-sync to avoid visual flicker
+      // Only data changed — update ReactFlow state in-place to avoid full re-sync flicker
+      const newModel = { ...m, nodes: updatedNodes };
       skipSyncRef.current = true;
-      onModelChangeRef.current({ ...m, nodes: updatedNodes });
+      onModelChangeRef.current(newModel);
+      const errMsgs = nodeErrorMap.get(selectedNodeId!) ?? [];
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== selectedNodeId) return n;
+          return {
+            ...n,
+            data: {
+              ...updated,
+              hasError: errMsgs.length > 0,
+              errorMessages: errMsgs,
+            },
+          };
+        }),
+      );
+      setEdges(modelToFlowEdges(newModel, nodeErrorMap, handleConditionChange));
     }
   };
 
@@ -492,6 +555,7 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
+        onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
         selectNodesOnDrag={false}
@@ -517,6 +581,7 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
           </defs>
         </svg>
       </ReactFlow>
+      <AlignmentGuides guides={guides} />
 
       {selectedNode && (
         <NodePropertiesPanel

@@ -72,21 +72,22 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
   };
 
   return (
-    <div className="artifact-panel" role="complementary" aria-label="成果管理" onDoubleClick={(e) => e.stopPropagation()}>
+    <div className="artifact-panel" role="complementary" aria-label="素材管理" onDoubleClick={(e) => e.stopPropagation()}>
       <div className="artifact-panel-header">
-        <span className="artifact-panel-title">成果 (Artifacts)</span>
-        <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label="关闭成果面板" />
+        <span className="artifact-panel-title">素材</span>
+        <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label="关闭素材面板" />
       </div>
 
       <div className="artifact-panel-desc">
-        成果是步骤间传递的数据单元，对应 YAML 中的 <code>slots</code> 字段。
+        素材是步骤之间传递的东西，可以是文字、图片、文件等任何形式的内容。
+        你也可以在这里定义用户一开始就提供的素材（如上传的图片、填写的文字等）。
       </div>
 
       <div className="artifact-panel-body">
         {artifacts.length === 0 && !adding && (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="暂无成果定义"
+            description="暂无素材定义"
             style={{ margin: '24px 0' }}
           />
         )}
@@ -107,17 +108,17 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
               size="small"
               value={art.label ?? ''}
               onChange={(e) => updateArtifact(art.id, { label: e.target.value || undefined })}
-              placeholder="显示名（可选）"
+              placeholder="素材名称（可选）"
               style={{ flex: 1 }}
             />
-            <Tooltip title="删除成果（同时移除节点引用）">
+            <Tooltip title="删除素材（同时移除节点引用）">
               <Button
                 type="text"
                 danger
                 size="small"
                 icon={<DeleteOutlined />}
                 onClick={() => handleDelete(art.id)}
-                aria-label={`删除成果 ${art.id}`}
+                aria-label={`删除素材 ${art.id}`}
               />
             </Tooltip>
           </div>
@@ -129,7 +130,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
               size="small"
               value={draft.id}
               onChange={(e) => setDraft((d) => ({ ...d, id: e.target.value, idError: undefined }))}
-              placeholder="成果 ID（英文/数字/下划线）"
+              placeholder="素材 ID（英文/数字/下划线）"
               status={draft.idError ? 'error' : ''}
               onPressEnter={handleAdd}
               autoFocus
@@ -147,7 +148,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
                 size="small"
                 value={draft.label}
                 onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))}
-                placeholder="显示名（可选）"
+                placeholder="素材名称（可选）"
                 style={{ flex: 1 }}
               />
             </div>
@@ -168,7 +169,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
             block
             onClick={() => setAdding(true)}
           >
-            添加成果
+            添加素材
           </Button>
         </div>
       )}

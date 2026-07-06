@@ -39,6 +39,28 @@
   gap: 6px;
 }
 
+.node-props-transition-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 28px 0 0;
+}
+
+.node-props-transition-col-label {
+  font-size: 11px;
+  color: #8c8c8c;
+  flex-shrink: 0;
+
+  &.col-to {
+    flex: 1;
+  }
+
+  &.col-condition {
+    flex: 2;
+    margin-left: 4px;
+  }
+}
+
 .node-props-transition-row {
   display: flex;
   align-items: center;

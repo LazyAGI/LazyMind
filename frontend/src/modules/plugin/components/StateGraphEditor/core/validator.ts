@@ -86,15 +86,17 @@ export function validateStateGraph(model: GraphModel): ValidationError[] {
       });
     }
 
-    // V9: condition must not be empty
-    for (const t of node.transitions) {
-      if (!t.condition.trim()) {
-        errors.push({
-          code: 'V9_EMPTY_CONDITION',
-          message: `节点 "${node.id}" 到 "${t.to}" 的转移条件不能为空`,
-          nodeId: node.id,
-          edgeKey: `${node.id}->${t.to}`,
-        });
+    // V9: condition must not be empty when there are multiple transitions
+    if (node.transitions.length > 1) {
+      for (const t of node.transitions) {
+        if (!t.condition.trim()) {
+          errors.push({
+            code: 'V9_EMPTY_CONDITION',
+            message: `步骤 "${node.id}" 有多个出口时，每条线都需要填写条件`,
+            nodeId: node.id,
+            edgeKey: `${node.id}->${t.to}`,
+          });
+        }
       }
     }
   }

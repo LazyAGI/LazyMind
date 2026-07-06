@@ -2,6 +2,7 @@ import { Button, Form, Input, Select, Divider } from 'antd';
 import { CloseOutlined, PlusOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { StepNode, GraphModel } from '../core/model';
+import { VIRTUAL_END } from '../core/model';
 import './NodePropertiesPanel.scss';
 
 const STEP_ID_REGEX = /^[a-zA-Z0-9_]+$/;
@@ -26,9 +27,9 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
   };
 
   return (
-    <div className="node-props-panel" role="complementary" aria-label="节点属性" onDoubleClick={(e) => e.stopPropagation()}>
+    <div className="node-props-panel" role="complementary" aria-label="步骤设置" onDoubleClick={(e) => e.stopPropagation()}>
       <div className="node-props-panel-header">
-        <span className="node-props-panel-title">节点属性</span>
+        <span className="node-props-panel-title">步骤设置</span>
         <Button
           type="text"
           icon={<CloseOutlined />}
@@ -43,7 +44,7 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
           <Form.Item
             label="步骤 ID"
             validateStatus={node.id && !STEP_ID_REGEX.test(node.id) ? 'error' : ''}
-            help={node.id && !STEP_ID_REGEX.test(node.id) ? '步骤 ID 只能包含英文字母、数字和下划线' : undefined}
+            help={node.id && !STEP_ID_REGEX.test(node.id) ? '步骤 ID 只能包含英文字母、数字和下划线' : '用于代码引用，仅支持英文/数字/下划线'}
           >
             <Input
               value={node.id}
@@ -52,11 +53,11 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
             />
           </Form.Item>
 
-          <Form.Item label="显示标签">
+          <Form.Item label="步骤名称">
             <Input
               value={node.label}
               onChange={(e) => update({ label: e.target.value })}
-              placeholder="节点显示名称"
+              placeholder="在画布上展示的名称，例如：审核文档"
             />
           </Form.Item>
 
@@ -74,46 +75,52 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
           <Divider style={{ margin: '8px 0' }} />
 
           <Form.Item
-            label="输入成果"
-            extra={Object.keys(model.slots).length === 0 ? <span style={{ fontSize: 11, color: '#bfbfbf' }}>请先在工具栏添加成果</span> : undefined}
+            label={t('selfEvolutionRun.stateGraphArtifactInputs')}
+            extra={Object.keys(model.slots).length === 0 ? <span style={{ fontSize: 11, color: '#bfbfbf' }}>请先在工具栏添加素材</span> : undefined}
           >
             <Select
               mode="multiple"
               value={node.inputs}
               options={slotOptions}
               onChange={(val) => update({ inputs: val })}
-              placeholder="选择输入成果"
+              placeholder="选择用到的素材"
               allowClear
-              notFoundContent={<span style={{ fontSize: 12, color: '#bfbfbf' }}>暂无成果，请先添加</span>}
+              notFoundContent={<span style={{ fontSize: 12, color: '#bfbfbf' }}>暂无素材，请先添加</span>}
             />
           </Form.Item>
 
           <Form.Item
-            label="输出成果"
-            extra={Object.keys(model.slots).length === 0 ? <span style={{ fontSize: 11, color: '#bfbfbf' }}>请先在工具栏添加成果</span> : undefined}
+            label={t('selfEvolutionRun.stateGraphArtifactOutputs')}
+            extra={Object.keys(model.slots).length === 0 ? <span style={{ fontSize: 11, color: '#bfbfbf' }}>请先在工具栏添加素材</span> : undefined}
           >
             <Select
               mode="multiple"
               value={node.outputs}
               options={slotOptions}
               onChange={(val) => update({ outputs: val })}
-              placeholder="选择输出成果"
+              placeholder="选择产出的素材"
               allowClear
-              notFoundContent={<span style={{ fontSize: 12, color: '#bfbfbf' }}>暂无成果，请先添加</span>}
+              notFoundContent={<span style={{ fontSize: 12, color: '#bfbfbf' }}>暂无素材，请先添加</span>}
             />
           </Form.Item>
 
           <Divider style={{ margin: '8px 0' }} />
 
-          <Form.Item label="转移条件">
+          <Form.Item label="完成后前往">
             <div className="node-props-transitions">
+              {node.transitions.length > 0 && (
+                <div className="node-props-transition-header">
+                  <span className="node-props-transition-col-label col-to">前往</span>
+                  <span className="node-props-transition-col-label col-condition">条件（满足什么情况时）</span>
+                </div>
+              )}
               {node.transitions.map((t, idx) => (
                 <div key={idx} className="node-props-transition-row">
                   <Select
                     value={t.to}
                     options={[
                       ...model.nodes.filter((n) => n.id !== node.id).map((n) => ({ label: n.label, value: n.id })),
-                      { label: '__end__', value: '__end__' },
+                      { label: '结束', value: VIRTUAL_END },
                     ]}
                     onChange={(val) => {
                       const next = [...node.transitions];
@@ -121,7 +128,7 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
                       update({ transitions: next });
                     }}
                     style={{ flex: 1 }}
-                    placeholder="目标节点"
+                    placeholder="选择下一步骤"
                   />
                   <Input
                     value={t.condition}
@@ -131,7 +138,7 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
                       update({ transitions: next });
                     }}
                     style={{ flex: 2, marginLeft: 4 }}
-                    placeholder="条件描述"
+                    placeholder={node.transitions.length > 1 ? '满足什么情况时进入' : '（选填）满足什么情况时进入'}
                   />
                   <Button
                     type="text"
@@ -141,7 +148,7 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
                     onClick={() => {
                       update({ transitions: node.transitions.filter((_, i) => i !== idx) });
                     }}
-                    aria-label="删除转移条件"
+                    aria-label="删除分支"
                   />
                 </div>
               ))}
@@ -152,7 +159,7 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
                 block
                 onClick={() => update({ transitions: [...node.transitions, { to: '', condition: '' }] })}
               >
-                添加转移
+                添加分支
               </Button>
             </div>
           </Form.Item>
@@ -160,7 +167,7 @@ export default function NodePropertiesPanel({ node, model, onClose, onChange, on
 
         <div className="node-props-panel-footer">
           <Button danger size="small" block onClick={() => onDelete(node.id)}>
-            删除此节点
+            删除此步骤
           </Button>
         </div>
       </div>

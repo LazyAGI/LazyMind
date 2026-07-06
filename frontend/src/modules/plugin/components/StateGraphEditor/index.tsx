@@ -17,11 +17,6 @@ import './index.scss';
 type ViewMode = 'canvas' | 'yaml';
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
-const EMPTY_YAML = `slots: {}
-
-steps: []
-`;
-
 const AUTO_SAVE_DELAY_MS = 1500;
 
 interface Props {
@@ -51,9 +46,9 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
   // Ref to canvas for addNode
   const canvasRef = useRef<CanvasHandle>(null);
 
-  // YAML displayed in the editor (stripped of x-layout)
+  // YAML displayed in the editor — always strip x-layout so coordinates never appear in the editor
   const [yamlText, setYamlText] = useState<string>(
-    initialYaml ?? EMPTY_YAML,
+    () => serializeModel(modelRef.current, false),
   );
 
   const [errors, setErrors] = useState<ValidationError[]>(() =>
@@ -191,7 +186,7 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
                 onClick={() => setShowArtifacts((v) => !v)}
                 type={showArtifacts ? 'primary' : 'default'}
               >
-                成果
+                素材
                 {Object.keys(model.slots).length > 0 && (
                   <span className="sge-artifact-count">{Object.keys(model.slots).length}</span>
                 )}
@@ -201,7 +196,7 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
                 icon={<PlusOutlined />}
                 onClick={handleAddNode}
               >
-                新增节点
+                添加步骤
               </Button>
             </>
           )}
@@ -219,7 +214,10 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
             </span>
           )}
           {onClose && (
-            <Button size="small" onClick={onClose}>
+            <Button size="small" onClick={async () => {
+              await doSave(modelRef.current);
+              onClose();
+            }}>
               关闭
             </Button>
           )}
@@ -236,6 +234,19 @@ export default function StateGraphEditor({ initialYaml, onSave, onClose }: Props
               onModelChange={updateModel}
               canvasRef={canvasRef}
             />
+            {model.nodes.length === 0 && (
+              <div className="sge-empty-state" aria-hidden="true">
+                <div className="sge-empty-state-content">
+                  <p className="sge-empty-state-title">用流程图描述你的工作</p>
+                  <ol className="sge-empty-state-list">
+                    <li>点击「添加步骤」创建一个步骤，每个步骤代表一个执行环节</li>
+                    <li>点击「素材」定义步骤间传递的内容，如文字、图片、文件等</li>
+                    <li>拖拽步骤上的连接点来连接各步骤，表示执行顺序</li>
+                  </ol>
+                  <p className="sge-empty-state-hint">也可以双击画布空白处快速添加步骤</p>
+                </div>
+              </div>
+            )}
             {showArtifacts && (
               <ArtifactPanel
                 model={model}

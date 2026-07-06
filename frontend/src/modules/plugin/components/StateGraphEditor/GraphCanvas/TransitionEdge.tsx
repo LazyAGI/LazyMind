@@ -39,6 +39,9 @@ function TransitionEdgeComponent({
   const strokeColor = edgeData?.hasError ? '#ff4d4f' : selected ? '#1677ff' : hovered ? '#555' : '#8c8c8c';
   const strokeWidth = selected ? 2.5 : hovered ? 2.5 : 1.5;
 
+  // Only show the label area when the edge is selected or hovered
+  const showLabel = selected || hovered;
+
   return (
     <>
       {/* Wide invisible hit area for easier selection */}
@@ -88,7 +91,7 @@ function TransitionEdgeComponent({
               }}
               style={{ width: 160, fontSize: 11 }}
             />
-          ) : (
+          ) : showLabel ? (
             <button
               type="button"
               className={`transition-edge-label ${edgeData?.hasError ? 'has-error' : ''}`}
@@ -96,11 +99,19 @@ function TransitionEdgeComponent({
                 setDraft(String(edgeData?.condition ?? ''));
                 setEditing(true);
               }}
-              title="点击编辑转移条件"
+              title="点击编辑条件"
             >
-              {edgeData?.condition || <span className="transition-edge-label-empty">条件</span>}
+              {edgeData?.condition || <span className="transition-edge-label-empty">点击添加条件</span>}
             </button>
-          )}
+          ) : edgeData?.condition ? (
+            // When not selected/hovered but has a condition, show it faintly
+            <span
+              className="transition-edge-label-static"
+              onMouseEnter={() => setHovered(true)}
+            >
+              {edgeData.condition}
+            </span>
+          ) : null}
         </div>
       </EdgeLabelRenderer>
     </>
