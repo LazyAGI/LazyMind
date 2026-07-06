@@ -13,7 +13,11 @@ from lazymind.rewrite.base import (
 )
 from lazymind.rewrite.memory import _apply_memory_edit_operations
 from lazymind.rewrite.preference import _apply_user_preference_edit_operations
-from lazymind.review.memory_review.db import insert_memory_review_record
+from lazymind.review.memory_review.db import (
+    find_pending_memory_review_record,
+    insert_memory_review_record,
+    update_memory_review_record,
+)
 
 
 class EditOperation(TypedDict, total=False):
@@ -60,8 +64,7 @@ def memory_editor(
 
     Only claim to have saved, remembered, or recorded something when this tool
     or another durable-write tool was actually called in the same response. If
-    no write tool was called, do not say things like "已保存到记忆",
-    "我会记住你的偏好", "I've saved this", or "I'll remember that".
+    no write tool was called, do not say things like "I've saved this", or "I'll remember that".
 
     The tool applies the supplied JSON edit operations to the original text,
     validates the edited full text, and writes one pending row to the
@@ -108,7 +111,21 @@ def memory_editor(
     agentic_config = lazyllm.globals['agentic_config']
     user_id = str(agentic_config.get('user_id') or '').strip()
     session_id = str(agentic_config.get('session_id') or '').strip()
-    current_content = agentic_config.get(raw_target) or ''
+    pending_record = find_pending_memory_review_record(
+        target=raw_target,
+        user_id=user_id,
+    )
+    if session_id and pending_record is not None:
+        return tool_error(
+            'memory_editor',
+            'There is an unresolved pending change; tell user to handle it before submitting another edit.'
+        )
+
+    current_content = (
+        pending_record.get('content', '')
+        if pending_record is not None
+        else agentic_config.get(raw_target) or ''
+    )
     operation_payload = [dict(op) for op in operations]
     try:
         apply_operations = (
@@ -126,14 +143,23 @@ def memory_editor(
     except UnprocessableContentError as exc:
         return tool_error('memory_editor', str(exc))
 
-    insert_memory_review_record(
-        target=raw_target,
-        user_id=user_id,
-        session_id=session_id,
-        source_content=current_content,
-        content=edited_content,
-        operations=operation_payload,
-    )
+    if pending_record is not None:
+        update_memory_review_record(
+            record_id=str(pending_record.get('id') or ''),
+            session_id=session_id or str(pending_record.get('session_id') or ''),
+            source_content=current_content,
+            content=edited_content,
+            operations=list(pending_record.get('operations') or []) + operation_payload,
+        )
+    else:
+        insert_memory_review_record(
+            target=raw_target,
+            user_id=user_id,
+            session_id=session_id,
+            source_content=current_content,
+            content=edited_content,
+            operations=operation_payload,
+        )
     return tool_success('memory_editor', {
         'target': raw_target,
         'status': 'pending_review',

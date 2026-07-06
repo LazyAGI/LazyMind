@@ -410,8 +410,18 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 			return p.markEventFailed(tx, event.ID, now, "load_system_user_preference_failed", err.Error())
 		}
 
+		memoryContent, err := memoryReviewContentWithPendingDraft(ctx, tx, event.UserID, orm.ResourceUpdateResourceTypeMemory, memory.Content)
+		if err != nil {
+			cleanupSessionID = event.SessionID
+			return p.markEventFailed(tx, event.ID, now, "load_pending_memory_review_failed", err.Error())
+		}
 		userContent := evolution.FormatSystemUserPreferenceForChat(preference)
-		memoryTaskID, err := createIdleGenerateTask(ctx, tx, event, memory.ID, memory.Content, userContent, historyJSON, now)
+		userContent, err = memoryReviewContentWithPendingDraft(ctx, tx, event.UserID, orm.ResourceUpdateResourceTypeUserPreference, userContent)
+		if err != nil {
+			cleanupSessionID = event.SessionID
+			return p.markEventFailed(tx, event.ID, now, "load_pending_user_preference_review_failed", err.Error())
+		}
+		memoryTaskID, err := createIdleGenerateTask(ctx, tx, event, memory.ID, memoryContent, userContent, historyJSON, now)
 		if err != nil {
 			cleanupSessionID = event.SessionID
 			return p.markEventFailed(tx, event.ID, now, "create_memory_task_failed", err.Error())
@@ -510,6 +520,17 @@ func loadSystemUserPreferenceForIdle(ctx context.Context, db *gorm.DB, userID st
 		Order("created_at ASC").
 		Take(&row).Error
 	return row, err
+}
+
+func memoryReviewContentWithPendingDraft(ctx context.Context, db *gorm.DB, userID, target, currentContent string) (string, error) {
+	result, err := LatestPendingMemoryReviewResult(ctx, db, userID, target)
+	if err == nil {
+		return result.Content, nil
+	}
+	if errors.Is(err, errReviewNotFound) {
+		return currentContent, nil
+	}
+	return "", err
 }
 
 func createIdleGenerateTask(ctx context.Context, db *gorm.DB, event orm.ConversationIdleEvent, resourceID, memoryContent, userContent string, historyJSON json.RawMessage, now time.Time) (string, error) {

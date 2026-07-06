@@ -16,6 +16,9 @@ def test_memory_editor_operations_write_memory_review(monkeypatch):
         records.append(kwargs)
         return {'id': 'review-1', 'review_status': 'pending'}
 
+    def fake_update_memory_review_record(**kwargs):
+        raise AssertionError(f'unexpected update: {kwargs}')
+
     monkeypatch.setattr(memory_mod, 'UnprocessableContentError', FakeUnprocessableContentError)
     monkeypatch.setattr(
         memory_mod,
@@ -33,6 +36,8 @@ def test_memory_editor_operations_write_memory_review(monkeypatch):
         lambda current, payload: current.replace('old', payload['operations'][0]['new']),
     )
     monkeypatch.setattr(memory_mod, 'insert_memory_review_record', fake_insert_memory_review_record)
+    monkeypatch.setattr(memory_mod, 'update_memory_review_record', fake_update_memory_review_record)
+    monkeypatch.setattr(memory_mod, 'find_pending_memory_review_record', lambda **kwargs: None)
     monkeypatch.setattr(
         memory_mod.lazyllm,
         'globals',
@@ -75,6 +80,97 @@ def test_memory_editor_operations_write_memory_review(monkeypatch):
             'content': 'new',
             'operations': [{'op': 'replace_text', 'old': 'old', 'new': 'new'}],
         },
+    ]
+
+
+def test_memory_editor_blocks_chat_when_pending_review_exists(monkeypatch):
+    monkeypatch.setattr(
+        memory_mod.lazyllm,
+        'globals',
+        {
+            'agentic_config': {
+                'user_id': 'user-1',
+                'session_id': 'chat-session',
+                'memory': 'old',
+            }
+        },
+    )
+    monkeypatch.setattr(
+        memory_mod,
+        'find_pending_memory_review_record',
+        lambda **kwargs: {'id': 'pending-1', 'content': 'draft', 'operations': []},
+    )
+    monkeypatch.setattr(
+        memory_mod,
+        'insert_memory_review_record',
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError('unexpected insert')),
+    )
+    monkeypatch.setattr(
+        memory_mod,
+        'update_memory_review_record',
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError('unexpected update')),
+    )
+
+    result = memory_mod.memory_editor(
+        'memory',
+        [{'op': 'replace_text', 'old': 'old', 'new': 'new'}],
+    )
+
+    assert result['success'] is False
+    assert result['tool'] == 'memory_editor'
+    assert result['error']['reason'] == (
+        'There is an unresolved pending change; tell user to handle it before submitting another edit.'
+    )
+
+
+def test_memory_editor_review_updates_pending_draft(monkeypatch):
+    update_calls = []
+
+    monkeypatch.setattr(
+        memory_mod.lazyllm,
+        'globals',
+        {'agentic_config': {'user_id': 'user-1', 'memory': 'current memory'}},
+    )
+    monkeypatch.setattr(memory_mod, '_validate_generated_content', lambda memory_type, content: content)
+    monkeypatch.setattr(
+        memory_mod,
+        '_apply_memory_edit_operations',
+        lambda current, payload: current.replace('draft old', payload['operations'][0]['new']),
+    )
+    monkeypatch.setattr(
+        memory_mod,
+        'find_pending_memory_review_record',
+        lambda **kwargs: {
+            'id': 'pending-1',
+            'content': 'draft old',
+            'operations': [{'op': 'replace_text', 'old': 'base', 'new': 'draft old'}],
+        },
+    )
+    monkeypatch.setattr(
+        memory_mod,
+        'insert_memory_review_record',
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError('unexpected insert')),
+    )
+    monkeypatch.setattr(memory_mod, 'update_memory_review_record', lambda **kwargs: update_calls.append(kwargs))
+
+    result = memory_mod.memory_editor(
+        'memory',
+        [{'op': 'replace_text', 'old': 'draft old', 'new': 'draft new'}],
+    )
+
+    assert result['success'] is True
+    assert result['result']['status'] == 'pending_review'
+    assert update_calls == [
+        {
+            'record_id': 'pending-1',
+            'session_id': '',
+            'source_content': 'draft old',
+            'content': 'draft new',
+            'operations': [
+                {'op': 'replace_text', 'old': 'base', 'new': 'draft old'},
+                {'op': 'replace_text', 'old': 'draft old', 'new': 'draft new'},
+            ],
+        }
     ]
 
 
