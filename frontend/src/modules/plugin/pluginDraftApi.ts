@@ -5,7 +5,15 @@ const coreBasePath = `${BASE_URL}/api/core`;
 export interface PluginDraftRecord {
   id: string;
   name: string;
+  // Legacy content column, kept for backward compatibility.
   content: string;
+  // Split content columns (available after migration 20260706120000).
+  plugin_yaml_content: string;
+  state_yaml_content: string;
+  scenario_content: string;
+  scripts_content: string;
+  // '' | 'generating' | 'done' | 'failed'
+  generate_status: string;
   created_at: string;
   updated_at: string;
   created_by: string;
@@ -30,7 +38,7 @@ export async function listPluginDrafts(params: { page?: number; pageSize?: numbe
   return resp.data.data;
 }
 
-export async function createPluginDraft(payload: { name: string; content: string }): Promise<PluginDraftRecord> {
+export async function createPluginDraft(payload: { name: string; content?: string }): Promise<PluginDraftRecord> {
   const resp = await axiosInstance.post<CoreResponse<PluginDraftRecord>>(`${coreBasePath}/plugin-drafts`, payload);
   return resp.data.data;
 }
@@ -40,11 +48,34 @@ export async function getPluginDraft(id: string): Promise<PluginDraftRecord> {
   return resp.data.data;
 }
 
-export async function updatePluginDraftContent(id: string, content: string): Promise<PluginDraftRecord> {
-  const resp = await axiosInstance.post<CoreResponse<PluginDraftRecord>>(`${coreBasePath}/plugin-drafts/${id}:save`, { content });
+export interface UpdateDraftPayload {
+  content?: string;
+  plugin_yaml_content?: string;
+  state_yaml_content?: string;
+  scenario_content?: string;
+  scripts_content?: string;
+}
+
+export async function updatePluginDraftContent(id: string, payload: UpdateDraftPayload | string): Promise<PluginDraftRecord> {
+  // Accept either the legacy string form or the new object form.
+  const body: UpdateDraftPayload = typeof payload === 'string' ? { content: payload } : payload;
+  const resp = await axiosInstance.post<CoreResponse<PluginDraftRecord>>(`${coreBasePath}/plugin-drafts/${id}:save`, body);
   return resp.data.data;
 }
 
 export async function deletePluginDraft(id: string): Promise<void> {
   await axiosInstance.delete(`${coreBasePath}/plugin-drafts/${id}`);
+}
+
+// Trigger AI generation for a plugin draft.
+// Returns immediately with generate_status == 'generating'; the job runs asynchronously.
+export async function aiGeneratePluginDraft(
+  id: string,
+  payload: { description?: string; skill_id?: string },
+): Promise<PluginDraftRecord> {
+  const resp = await axiosInstance.post<CoreResponse<PluginDraftRecord>>(
+    `${coreBasePath}/plugin-drafts/${id}:ai-generate`,
+    payload,
+  );
+  return resp.data.data;
 }

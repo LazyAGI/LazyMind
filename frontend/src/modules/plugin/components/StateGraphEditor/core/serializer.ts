@@ -2,9 +2,12 @@ import jsYaml from 'js-yaml';
 import type { GraphModel } from './model';
 
 /**
- * Serialize a GraphModel back to a canonical YAML string.
- * @param model  The graph model to serialize.
- * @param includeLayout  Whether to include x-layout coordinates (default false for display to user).
+ * Serialize a GraphModel back to a canonical state.yml YAML string.
+ *
+ * Changes vs. old format:
+ *  - inputs/outputs are serialized as { slot, required } objects (not plain strings)
+ *  - prompt, tools, acceptance_criteria fields are included when present
+ *  - slots block is NOT output (slot definitions live in plugin.yaml)
  */
 export function serializeModel(model: GraphModel, includeLayout = false): string {
   const doc: Record<string, unknown> = {};
@@ -31,22 +34,7 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
     }));
   }
 
-  // slots block
-  if (Object.keys(model.slots).length > 0) {
-    const slotsBlock: Record<string, unknown> = {};
-    for (const [id, slot] of Object.entries(model.slots)) {
-      const entry: Record<string, unknown> = { type: slot.type };
-      if (slot.label) entry.label = slot.label;
-      if (slot.cardinality === 'list') {
-        entry.cardinality = 'list';
-        if (slot.ordered) entry.ordered = true;
-        if (slot.allow_manual_add !== undefined) entry.allow_manual_add = slot.allow_manual_add;
-      }
-      if (slot.summary_max_chars != null) entry.summary_max_chars = slot.summary_max_chars;
-      slotsBlock[id] = entry;
-    }
-    doc.slots = slotsBlock;
-  }
+  // NOTE: slots block is intentionally omitted — slot definitions belong in plugin.yaml.
 
   // steps array
   doc.steps = model.nodes.map((node) => {
@@ -57,8 +45,15 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
     };
     if (node.route && node.route !== 'all') step.route = node.route;
     if (node.skipif?.trim()) step.skipif = node.skipif;
-    if (node.inputs.length > 0) step.inputs = node.inputs;
-    if (node.outputs.length > 0) step.outputs = node.outputs;
+    if (node.prompt?.trim()) step.prompt = node.prompt;
+    if (node.tools && node.tools.length > 0) step.tools = node.tools;
+    if (node.acceptanceCriteria?.trim()) step.acceptance_criteria = node.acceptanceCriteria;
+    if (node.inputs.length > 0) {
+      step.inputs = node.inputs.map((ref) => ({ slot: ref.slot, required: ref.required }));
+    }
+    if (node.outputs.length > 0) {
+      step.outputs = node.outputs.map((ref) => ({ slot: ref.slot, required: ref.required }));
+    }
     if (node.transitions.length > 0) {
       step.transitions = node.transitions.map((t) => {
         const entry: Record<string, unknown> = { to: t.to };

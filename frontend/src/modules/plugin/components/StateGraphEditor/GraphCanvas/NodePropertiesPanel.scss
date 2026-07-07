@@ -209,3 +209,11 @@
   align-items: center;
   gap: 4px;
 }
+
+/* ── Slot 引用行（素材 + 必填切换） ── */
+.npp-slot-ref-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}

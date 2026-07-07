@@ -2,41 +2,24 @@
 
 ## 场景描述
 
-帮助用户生成并增强高质量图片。工作流分五步：
+帮助用户从自然语言描述出发，生成并增强高质量图片。适合需要根据文字描述创作图片的场景，例如概念图、插画、产品效果图等。
 
-1. **analyze_subject** — 分析用户描述的主体、风格、氛围
-2. **collect_materials** — 收集参考素材，为后续生成提供参考
-3. **optimize_prompt** — 基于分析结果生成高质量英文图片生成 prompt
-4. **generate_image** — 调用图片生成模型产出原始图片
-5. **enhance_image** — 对原始图片进行风格增强 / 超分处理
+## 工作流程
 
-**步骤 3（optimize_prompt）和步骤 5（enhance_image）支持独立重跑**：用户无需重启整个流程，
-只需表达对 prompt 或增强结果不满意即可触发单步重跑。
+整个流程分五个步骤依次执行：
 
-## 用户意图识别
+1. **analyze_subject** — 分析用户描述，提取主体、风格、氛围等要素，为后续收集素材和生成 prompt 提供结构化依据
+2. **collect_materials** — 根据分析结果，在网络上搜索并收集参考图片，作为生成时的视觉参考
+3. **optimize_prompt** — 综合分析结果和参考素材，生成一段高质量的英文图片生成 prompt
+4. **generate_image** — 使用优化后的 prompt 调用图片生成模型，产出原始图片
+5. **enhance_image** — 对原始图片进行风格增强或超分处理，产出最终结果
 
-### 冷启动（无活跃会话）
+步骤 3（optimize_prompt）、4（generate_image）、5（enhance_image）支持独立重跑：
+用户无需重启整个流程，可以单独对某个步骤的结果提出修改意见，系统会重跑该步骤并保留之前其他步骤的结果。
 
-- 用户提到「生成图片」、「画一张」、「绘制」、「创建图片」等图片生成类请求
-  → 调用 `trigger_image_plugin(user_input=<用户原始描述>)`
+## 注意事项
 
-### 有活跃会话时
-
-| 用户意图 | 推荐步骤 | 工具调用 |
-|---|---|---|
-| 想重新收集参考素材 | collect_materials | `advance_step(step_id='collect_materials', user_input=<说明>)` |
-| 对 prompt 不满意，想重新优化 | optimize_prompt | `advance_step(step_id='optimize_prompt', user_input=<说明>)` |
-| 想用当前 prompt 重新生图 | generate_image | `advance_step(step_id='generate_image', user_input=<说明>)` |
-| 想重新增强（换风格 / 更高清） | enhance_image | `advance_step(step_id='enhance_image', user_input=<说明>)` |
-| 对最终结果满意 | （无需操作，DriverAgent 自动判 DONE） | — |
-
-当用户或 DriverAgent 指出问题源于某个前序步骤时，使用 `advance_step` 并传入该前序步骤的 `step_id` 即可回退重做。可用的前序步骤由 `advance_step` 工具的 Rewind 列表动态给出，无需在此枚举。
-
-## 注意
-
-- 冷启动时必须调用 `trigger_image_plugin`，不要跳过。
-- 调用工具后立即停止，不要输出额外文字。
-- 工具返回确认消息后，对用户简短说明当前正在进行的步骤，例如：
-  - 冷启动：「正在分析您的描述，请稍候……」
-  - 优化 prompt：「正在重新优化提示词……」
-  - 重跑增强：「正在重新增强图片，新版本会追加到增强结果列表中……」
+- 本插件专注于图片生成任务，不适合文字内容、报告、摘要等非图片类任务
+- collect_materials 步骤依赖外部图片搜索，结果数量和质量受网络状况影响
+- generate_image 和 enhance_image 步骤耗时通常在 10~30 秒，属于正常情况
+- 增强结果以列表形式追加保存，每次重跑 enhance_image 会新增一条记录，不覆盖旧结果

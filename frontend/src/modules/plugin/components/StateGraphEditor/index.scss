@@ -5,93 +5,239 @@
   height: 100%;
   min-height: 500px;
   background: #fafafa;
-  border: 1px solid #f0f0f0;
-  border-radius: 8px;
   overflow: hidden;
 }
 
-.sge-toolbar {
+/* ─── Row 1: top bar ─────────────────────────────────────── */
+.sge-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: 0 16px;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;
-  gap: 8px;
+  height: 44px;
 }
 
-.sge-toolbar-left {
+.sge-topbar-left {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.sge-toolbar-right {
+.sge-topbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.sge-toolbar-error-badge {
-  font-size: 12px;
-  color: #cf1322;
-  background: #fff1f0;
-  border: 1px solid #ffa39e;
+.sge-back-btn {
+  display: flex;
+  align-items: center;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: #595959;
+  cursor: pointer;
   border-radius: 4px;
-  padding: 1px 8px;
+  transition: background 0.15s, color 0.15s;
+
+  &:hover {
+    background: #f0f0f0;
+    color: #1677ff;
+  }
+}
+
+.sge-plugin-name {
+  font-size: 13px;
+  color: #262626;
+}
+
+/* ─── Auto-save status ───────────────────────────────────── */
+.sge-autosave-status {
+  font-size: 12px;
+}
+
+.sge-autosave-pending { color: #8c8c8c; }
+.sge-autosave-saving  { color: #1677ff; }
+.sge-autosave-saved   { color: #52c41a; }
+.sge-autosave-error   { color: #ff4d4f; }
+
+/* ─── Row 2: toolbar ─────────────────────────────────────── */
+.sge-toolbar2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  height: 38px;
+}
+
+.sge-toolbar2-left {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 100%;
+}
+
+.sge-toolbar2-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Capsule segmented control */
+.sge-segmented {
+  display: flex;
+  align-items: center;
+  background: #f0f0f0;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 1px;
+}
+
+.sge-seg-btn {
+  padding: 3px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #595959;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+
+  &:hover {
+    color: #262626;
+  }
+
+  &--active {
+    background: #fff;
+    color: #1677ff;
+    font-weight: 500;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* Divider between the two capsule groups */
+.sge-tab-divider {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: #e8e8e8;
+  margin: 0 8px;
+  flex-shrink: 0;
 }
 
 .sge-artifact-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
+  display: inline-block;
   background: #1677ff;
   color: #fff;
-  border-radius: 8px;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 0 4px;
+  border-radius: 10px;
+  font-size: 11px;
+  padding: 0 5px;
   margin-left: 4px;
-  line-height: 1;
+  line-height: 1.6;
 }
 
-.sge-autosave-status {
-  font-size: 12px;
+/* ─── Content body ───────────────────────────────────────── */
+.sge-body {
+  flex: 1;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 72px;
-  justify-content: flex-end;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
 
-.sge-autosave-pending {
-  color: #8c8c8c;
-}
-
-.sge-autosave-saving {
-  color: #1677ff;
+/* State machine panel */
+.sge-statemachine-panel {
+  flex: 1;
   display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.sge-autosave-saved {
-  color: #52c41a;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
 
 .sge-content {
   flex: 1;
-  overflow: hidden;
   position: relative;
+  overflow: hidden;
   min-height: 0;
 }
 
+/* UI preview panel */
+.sge-ui-preview-panel {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Scenario markdown preview */
+.sge-scenario-preview {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  background: #fff;
+  min-height: 0;
+
+  h1, h2, h3, h4, h5, h6 {
+    color: #262626;
+    margin-top: 1.2em;
+    margin-bottom: 0.5em;
+  }
+
+  p {
+    color: #595959;
+    line-height: 1.7;
+    margin-bottom: 0.8em;
+  }
+
+  ul, ol {
+    color: #595959;
+    padding-left: 1.5em;
+    line-height: 1.7;
+  }
+
+  code {
+    background: #f5f5f5;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 12px;
+    font-family: monospace;
+  }
+
+  pre {
+    background: #f5f5f5;
+    border-radius: 6px;
+    padding: 12px 16px;
+    overflow-x: auto;
+
+    code {
+      background: none;
+      padding: 0;
+    }
+  }
+}
+
+/* ─── Code mode ──────────────────────────────────────────── */
+.sge-code-mode {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.sge-code-editor {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ─── Empty state ────────────────────────────────────────── */
 .sge-empty-state {
   position: absolute;
   inset: 0;
@@ -99,27 +245,22 @@
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  z-index: 5;
 }
 
 .sge-empty-state-content {
-  text-align: center;
-  max-width: 320px;
+  text-align: left;
+  max-width: 400px;
   padding: 24px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px dashed #d9d9d9;
-  border-radius: 10px;
 }
 
 .sge-empty-state-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1f1f1f;
+  color: #262626;
   margin: 0 0 12px;
 }
 
 .sge-empty-state-list {
-  text-align: left;
   font-size: 13px;
   color: #595959;
   padding-left: 18px;

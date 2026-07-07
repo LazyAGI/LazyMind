@@ -1,5 +1,5 @@
 import jsYaml from 'js-yaml';
-import type { GraphModel, SlotDef, StepNode, Transition } from './model';
+import type { GraphModel, SlotDef, StepInputRef, StepNode, Transition } from './model';
 import { VIRTUAL_START, VIRTUAL_END } from './model';
 
 // Raw YAML shape after js-yaml.load
@@ -17,6 +17,9 @@ interface RawStep {
   transitions?: unknown;
   route?: unknown;
   skipif?: unknown;
+  prompt?: unknown;
+  tools?: unknown;
+  acceptance_criteria?: unknown;
 }
 
 interface RawYaml {
@@ -36,15 +39,49 @@ function parseTransitions(raw: unknown): Transition[] {
     }));
 }
 
+/**
+ * Parse a single input/output entry, which can be:
+ *   - A plain string (legacy format) → converted to { slot: string, required: false }
+ *   - An object with { slot, required } (new format)
+ */
+function parseInputRef(raw: unknown): StepInputRef | null {
+  if (typeof raw === 'string') {
+    return { slot: raw, required: false };
+  }
+  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+    const entry = raw as Record<string, unknown>;
+    const slot = String(entry.slot ?? '').trim();
+    if (!slot) return null;
+    return {
+      slot,
+      required: entry.required === true || entry.required === 'true',
+    };
+  }
+  return null;
+}
+
+function parseInputRefs(raw: unknown): StepInputRef[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(parseInputRef).filter((r): r is StepInputRef => r !== null);
+}
+
 function parseStep(raw: RawStep): StepNode | null {
   if (!raw.id) return null;
   const mode = raw.mode === 'auto' ? 'auto' : 'human';
-  const inputs = Array.isArray(raw.inputs) ? raw.inputs.map(String) : [];
-  const outputs = Array.isArray(raw.outputs) ? raw.outputs.map(String) : [];
+  const inputs = parseInputRefs(raw.inputs);
+  const outputs = parseInputRefs(raw.outputs);
   const route: StepNode['route'] = raw.route === 'choice' ? 'choice' : raw.route === 'all' ? 'all' : undefined;
   const skipif = raw.skipif !== undefined && raw.skipif !== null && String(raw.skipif).trim()
     ? String(raw.skipif)
     : undefined;
+  const prompt = raw.prompt !== undefined && raw.prompt !== null && String(raw.prompt).trim()
+    ? String(raw.prompt)
+    : undefined;
+  const tools = Array.isArray(raw.tools) ? raw.tools.map(String) : undefined;
+  const acceptanceCriteria = raw.acceptance_criteria !== undefined && raw.acceptance_criteria !== null && String(raw.acceptance_criteria).trim()
+    ? String(raw.acceptance_criteria)
+    : undefined;
+
   return {
     id: String(raw.id),
     label: String(raw.label ?? raw.id),
@@ -54,6 +91,9 @@ function parseStep(raw: RawStep): StepNode | null {
     transitions: parseTransitions(raw.transitions),
     ...(route !== undefined && { route }),
     ...(skipif !== undefined && { skipif }),
+    ...(prompt !== undefined && { prompt }),
+    ...(tools !== undefined && { tools }),
+    ...(acceptanceCriteria !== undefined && { acceptanceCriteria }),
   };
 }
 
@@ -85,7 +125,7 @@ function parseSlots(raw: unknown): Record<string, SlotDef> {
 }
 
 /**
- * Parse a YAML string into a GraphModel.
+ * Parse a state.yml YAML string into a GraphModel.
  * Returns null if the YAML has a syntax error.
  * On structural errors, returns the best-effort model.
  */
@@ -108,6 +148,7 @@ export function parseYaml(yamlText: string): GraphModel | null {
     }
   }
 
+  // slots block is kept for backward compat with old drafts; serializer no longer outputs it.
   const slots = parseSlots(raw.slots);
 
   const nodes: StepNode[] = [];

@@ -334,7 +334,13 @@ export default function MemoryManagement() {
   const [skillListPage, setSkillListPage] = useState(1);
   const [skillListPageSize, setSkillListPageSize] = useState(defaultSkillListPageSize);
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
-  const [skillView, setSkillView] = useState<"installed" | "market" | "upload" | "plugins">("installed");
+  const [skillView, setSkillView] = useState<"installed" | "market" | "upload" | "plugins">(
+    () => {
+      const sv = new URLSearchParams(window.location.search).get("skillView");
+      if (sv === "plugins" || sv === "market" || sv === "upload") return sv;
+      return "installed";
+    },
+  );
   const [installedSkillSource, setInstalledSkillSource] = useState<
     "all" | "builtin" | "admin" | "personal"
   >("all");

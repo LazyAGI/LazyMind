@@ -7,11 +7,11 @@ initial: __start__
 #   {{<slot>}}               — value of an artifact saved by a prior step
 #                              (text → text field; image → url field)
 
-transitions:
-  __start__:
-    - to: analyze_subject
-      condition: "Cold start — always enter subject analysis first."
+start_transitions:
+  - to: analyze_subject
+    condition: "Cold start — always enter subject analysis first."
 
+transitions:
   analyze_subject:
     - to: collect_materials
       condition: "Subject analysis complete — collect reference materials."

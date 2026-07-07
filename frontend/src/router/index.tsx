@@ -159,7 +159,7 @@ export default function AppRouter() {
             />
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
-          <Route path="memory-management/plugins" element={<Navigate to="/memory-management/skills" replace />} />
+          <Route path="memory-management/plugins" element={<Navigate to="/memory-management/skills?skillView=plugins" replace />} />
           <Route path="memory-management/plugins/:pluginId" element={<PluginDetailPage />} />
           {runtimeFeatures.hideEvo ? (
             <Route

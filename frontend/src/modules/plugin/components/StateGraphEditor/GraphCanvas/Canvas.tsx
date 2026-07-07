@@ -25,6 +25,8 @@ import { v4 as uuidv4 } from 'uuid';
 import type { GraphModel, StepNode, NodeLayout } from '../core/model';
 import { VIRTUAL_END, VIRTUAL_START, newHiddenId } from '../core/model';
 import type { ValidationError } from '../core/validator';
+import type { PluginModel } from '../core/pluginModel';
+import type { ScenarioData } from '../ScenarioEditor';
 import { StepNodeRenderer, TerminalNode, buildNodeErrorMap, NODE_DEFAULT_WIDTH, NODE_MIN_WIDTH, type StepNodeData } from './StepNode';
 import { TransitionEdge } from './TransitionEdge';
 import NodePropertiesPanel from './NodePropertiesPanel';
@@ -45,6 +47,9 @@ interface Props {
   model: GraphModel;
   errors: ValidationError[];
   onModelChange: (model: GraphModel) => void;
+  pluginModel?: PluginModel;
+  scenarioData?: ScenarioData;
+  onScenarioChange?: (data: ScenarioData) => void;
 }
 
 const nodeTypes: NodeTypes = {
@@ -134,7 +139,8 @@ function modelToFlowNodes(
     const nodeWidth = pos.width ?? NODE_WIDTH;
     // Build output label map: slotId → display label
     const outputLabels: Record<string, string> = {};
-    for (const slotId of node.outputs) {
+    for (const ref of node.outputs) {
+      const slotId = ref.slot;
       const slot = model.slots[slotId];
       outputLabels[slotId] = slot?.label ?? slotId;
     }
@@ -144,6 +150,9 @@ function modelToFlowNodes(
       position: pos,
       data: {
         ...node,
+        // StepNodeData.inputs/outputs are string[] (slot ids for display); StepNode uses StepInputRef[].
+        inputs: node.inputs.map((r) => r.slot),
+        outputs: node.outputs.map((r) => r.slot),
         hasError: errMsgs.length > 0,
         errorMessages: errMsgs,
         predecessorIds: predMap.get(node.id) ?? [],
@@ -215,7 +224,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
   return edges;
 }
 
-function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<CanvasHandle>) {
+function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, onScenarioChange }: Props, ref: React.Ref<CanvasHandle>) {
   const { screenToFlowPosition, zoomIn, zoomOut } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
   const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides } = useAlignmentGuides();
@@ -694,18 +703,11 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
   const selectedNode = isStepNodeSelected
     ? (nodes.find((n) => n.id === selectedNodeId)?.data as unknown as StepNodeData | undefined) ?? null
     : null;
-  // NodePropertiesPanel expects a StepNode (subset of StepNodeData), build it:
+  // NodePropertiesPanel expects a StepNode; build it from the canvas node data.
+  // StepNodeData.inputs/outputs are string[] (slot ids), but StepNode.inputs/outputs are StepInputRef[].
+  // Look up the full StepNode from model.nodes to get the StepInputRef[] objects.
   const selectedStepNode = selectedNode && typeof selectedNode.id === 'string'
-    ? {
-        id: selectedNode.id,
-        label: selectedNode.label,
-        mode: selectedNode.mode,
-        inputs: selectedNode.inputs,
-        outputs: selectedNode.outputs,
-        transitions: selectedNode.transitions,
-        route: selectedNode.route,
-        skipif: selectedNode.skipif,
-      }
+    ? (model.nodes.find((n) => n.id === selectedNode.id) ?? null)
     : null;
 
   // Whether the selected node is a direct child of a parallel fork.
@@ -758,6 +760,12 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id !== selectedNodeId) return n;
+          // Rebuild outputLabels from updated outputs
+          const updatedOutputLabels: Record<string, string> = {};
+          for (const ref of normalised.outputs) {
+            const slot = newModel.slots[ref.slot];
+            updatedOutputLabels[ref.slot] = slot?.label ?? ref.slot;
+          }
           return {
             ...n,
             data: {
@@ -765,6 +773,10 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
               // that are not part of StepNode and would be wiped by spreading normalised alone.
               ...n.data,
               ...normalised,
+              // StepNodeData.inputs/outputs must be string[] (slot ids), not StepInputRef[]
+              inputs: normalised.inputs.map((r) => r.slot),
+              outputs: normalised.outputs.map((r) => r.slot),
+              outputLabels: updatedOutputLabels,
               hasError: errMsgs.length > 0,
               errorMessages: errMsgs,
             },
@@ -851,6 +863,9 @@ function CanvasInner({ model, errors, onModelChange }: Props, ref: React.Ref<Can
         <NodePropertiesPanel
           node={selectedStepNode}
           model={model}
+          pluginModel={pluginModel}
+          scenarioData={scenarioData}
+          onScenarioChange={onScenarioChange}
           onClose={() => setSelectedNodeId(null)}
           onChange={handleNodePropertyChange}
           onDelete={handleNodeDelete}

@@ -8,6 +8,8 @@ interface Props {
   value: string;
   onChange: (value: string) => void;
   errors: ValidationError[];
+  language?: string;
+  readOnly?: boolean;
 }
 
 export default function YamlEditor(props: Props) {

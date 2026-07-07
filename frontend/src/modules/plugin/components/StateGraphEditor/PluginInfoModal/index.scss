@@ -1,0 +1,65 @@
+.pim-body {
+  padding: 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+/* 两列行（标签 + 输入框） */
+.pim-row {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  align-items: flex-start;
+  gap: 8px 12px;
+}
+
+.pim-row-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 5px;
+  white-space: nowrap;
+}
+
+.pim-row-input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 单列块（标签在上，文本区在下） */
+.pim-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pim-block-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pim-tip-icon {
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.pim-field-error {
+  font-size: 12px;
+  color: #ff4d4f;
+}
+
+.pim-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

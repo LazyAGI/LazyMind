@@ -42,7 +42,7 @@ const EMPTY_DRAFT: DraftArtifact = {
 
 /** Returns true if any step node uses slotId as an input. */
 function isUsedAsInput(model: GraphModel, slotId: string): boolean {
-  return model.nodes.some((n) => n.inputs.includes(slotId));
+  return model.nodes.some((n) => n.inputs.some((r) => r.slot === slotId));
 }
 
 export default function ArtifactPanel({ model, onClose, onModelChange }: Props) {
@@ -86,8 +86,8 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
     delete newSlots[id];
     const newNodes = model.nodes.map((n) => ({
       ...n,
-      inputs: n.inputs.filter((s) => s !== id),
-      outputs: n.outputs.filter((s) => s !== id),
+      inputs: n.inputs.filter((r) => r.slot !== id),
+      outputs: n.outputs.filter((r) => r.slot !== id),
     }));
     onModelChange({ ...model, slots: newSlots, nodes: newNodes });
   };

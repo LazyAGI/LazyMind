@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Button,
-  Modal,
-  Input,
   Table,
   Tooltip,
   Popconfirm,
+  Tag,
   message,
   Empty,
 } from 'antd';
@@ -17,11 +16,20 @@ import {
 } from '@ant-design/icons';
 import {
   listPluginDrafts,
-  createPluginDraft,
   deletePluginDraft,
+  updatePluginDraftContent,
 } from '../../pluginDraftApi';
 import type { PluginDraftRecord } from '../../pluginDraftApi';
 import { useNavigate } from 'react-router-dom';
+import NewPluginModal from '../../components/NewPluginModal';
+import PluginInfoModal from '../../components/StateGraphEditor/PluginInfoModal';
+import { parsePluginYaml } from '../../components/StateGraphEditor/core/pluginParser';
+import { serializePluginModel } from '../../components/StateGraphEditor/core/pluginSerializer';
+import { createEmptyPluginModel } from '../../components/StateGraphEditor/core/pluginModel';
+import { parseScenario, serializeScenario } from '../../components/StateGraphEditor/ScenarioEditor';
+import { createEmptyModel } from '../../components/StateGraphEditor/core/model';
+import type { PluginModel } from '../../components/StateGraphEditor/core/pluginModel';
+import type { ScenarioData } from '../../components/StateGraphEditor/ScenarioEditor';
 import './index.scss';
 
 export default function PluginListPage() {
@@ -33,8 +41,9 @@ export default function PluginListPage() {
   const pageSize = 20;
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [infoModalRecord, setInfoModalRecord] = useState<PluginDraftRecord | null>(null);
+  const [infoModalPluginModel, setInfoModalPluginModel] = useState<PluginModel>(createEmptyPluginModel());
+  const [infoModalScenarioData, setInfoModalScenarioData] = useState<ScenarioData>({ overview: '', stepDescriptions: {}, notes: '' });
 
   const loadList = useCallback(async (p = 1) => {
     setLoading(true);
@@ -53,23 +62,9 @@ export default function PluginListPage() {
     void loadList(page);
   }, [page, loadList]);
 
-  const handleCreate = async () => {
-    if (!newName.trim()) {
-      message.warning('请输入插件名称');
-      return;
-    }
-    setCreating(true);
-    try {
-      const draft = await createPluginDraft({ name: newName.trim(), content: '' });
-      message.success('插件草稿已创建');
-      setCreateOpen(false);
-      setNewName('');
-      navigate(`/memory-management/plugins/${draft.id}`);
-    } catch {
-      message.error('创建失败，请重试');
-    } finally {
-      setCreating(false);
-    }
+  const handleCreated = (draftId: string) => {
+    setCreateOpen(false);
+    navigate(`/memory-management/plugins/${draftId}`);
   };
 
   const handleDelete = async (id: string) => {
@@ -82,16 +77,76 @@ export default function PluginListPage() {
     }
   };
 
+  const openInfoModal = (record: PluginDraftRecord) => {
+    const pm = parsePluginYaml(record.plugin_yaml_content) ?? createEmptyPluginModel();
+    // Fallback: use the draft's name field if plugin_yaml_content has no name set
+    if (!pm.name && record.name) pm.name = record.name;
+    const graphModel = createEmptyModel();
+    const sd = parseScenario(record.scenario_content ?? '', graphModel.nodes);
+    setInfoModalPluginModel(pm);
+    setInfoModalScenarioData(sd);
+    setInfoModalRecord(record);
+  };
+
+  const handleInfoSave = async (pm: PluginModel, sd: ScenarioData) => {
+    if (!infoModalRecord) return;
+    const pluginYaml = serializePluginModel(pm);
+    const scenarioContent = serializeScenario([], sd);
+    await updatePluginDraftContent(infoModalRecord.id, {
+      plugin_yaml_content: pluginYaml,
+      scenario_content: scenarioContent,
+    });
+    message.success('已保存');
+    void loadList(page);
+  };
+
+  const getPluginId = (record: PluginDraftRecord): string => {
+    if (!record.plugin_yaml_content) return '—';
+    const pm = parsePluginYaml(record.plugin_yaml_content);
+    return pm?.id || '—';
+  };
+
   const columns: ColumnsType<PluginDraftRecord> = [
     {
-      title: '插件名称',
+      title: '插件标识',
+      key: 'plugin_id',
+      render: (_: unknown, record: PluginDraftRecord) => {
+        const pluginId = getPluginId(record);
+        return (
+          <Button
+            type="link"
+            style={{ fontFamily: 'monospace', padding: 0 }}
+            onClick={() => navigate(`/memory-management/plugins/${record.id}`)}
+          >
+            {pluginId}
+          </Button>
+        );
+      },
+    },
+    {
+      title: '显示名称',
       dataIndex: 'name',
       key: 'name',
-      render: (name: string, record) => (
-        <Button type="link" onClick={() => navigate(`/memory-management/plugins/${record.id}`)}>
+      render: (name: string, record: PluginDraftRecord) => (
+        <Button
+          type="link"
+          style={{ padding: 0 }}
+          onClick={() => navigate(`/memory-management/plugins/${record.id}`)}
+        >
           {name}
         </Button>
       ),
+    },
+    {
+      title: '状态',
+      dataIndex: 'generate_status',
+      key: 'generate_status',
+      width: 100,
+      render: (status: string) => {
+        if (status === 'generating') return <Tag color="processing">生成中</Tag>;
+        if (status === 'failed') return <Tag color="error">生成失败</Tag>;
+        return null;
+      },
     },
     {
       title: '最后更新',
@@ -103,15 +158,15 @@ export default function PluginListPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 120,
+      width: 96,
       render: (_: unknown, record: PluginDraftRecord) => (
         <div className="plugin-list-actions">
-          <Tooltip title="编辑">
+          <Tooltip title="修改插件信息">
             <Button
               type="text"
               size="small"
               icon={<EditOutlined />}
-              onClick={() => navigate(`/memory-management/plugins/${record.id}`)}
+              onClick={() => openInfoModal(record)}
             />
           </Tooltip>
           <Popconfirm
@@ -169,23 +224,21 @@ export default function PluginListPage() {
         />
       )}
 
-      <Modal
-        title="新建插件草稿"
+      <NewPluginModal
         open={createOpen}
-        onOk={() => void handleCreate()}
-        onCancel={() => { setCreateOpen(false); setNewName(''); }}
-        confirmLoading={creating}
-        okText="创建"
-        cancelText="取消"
-      >
-        <Input
-          autoFocus
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="插件名称（如：我的审阅工作流）"
-          onPressEnter={() => void handleCreate()}
+        onCancel={() => setCreateOpen(false)}
+        onCreated={handleCreated}
+      />
+
+      {infoModalRecord && (
+        <PluginInfoModal
+          open={!!infoModalRecord}
+          onCancel={() => setInfoModalRecord(null)}
+          pluginModel={infoModalPluginModel}
+          scenarioData={infoModalScenarioData}
+          onSave={handleInfoSave}
         />
-      </Modal>
+      )}
     </div>
   );
 }

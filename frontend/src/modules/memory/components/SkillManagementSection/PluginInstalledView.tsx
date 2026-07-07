@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Button, Empty, Input, Popconfirm, Table, Tooltip, message } from 'antd';
+import { Button, Empty, Input, Popconfirm, Table, Tag, Tooltip, message } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigate } from 'react-router-dom';
@@ -7,8 +7,17 @@ import { getLocalizedTablePagination } from '@/components/ui/pagination';
 import {
   listPluginDrafts,
   deletePluginDraft,
+  updatePluginDraftContent,
 } from '@/modules/plugin/pluginDraftApi';
 import type { PluginDraftRecord } from '@/modules/plugin/pluginDraftApi';
+import PluginInfoModal from '@/modules/plugin/components/StateGraphEditor/PluginInfoModal';
+import { parsePluginYaml } from '@/modules/plugin/components/StateGraphEditor/core/pluginParser';
+import { serializePluginModel } from '@/modules/plugin/components/StateGraphEditor/core/pluginSerializer';
+import { createEmptyPluginModel } from '@/modules/plugin/components/StateGraphEditor/core/pluginModel';
+import { parseScenario, serializeScenario } from '@/modules/plugin/components/StateGraphEditor/ScenarioEditor';
+import { createEmptyModel } from '@/modules/plugin/components/StateGraphEditor/core/model';
+import type { PluginModel } from '@/modules/plugin/components/StateGraphEditor/core/pluginModel';
+import type { ScenarioData } from '@/modules/plugin/components/StateGraphEditor/ScenarioEditor';
 
 interface PluginInstalledViewProps {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -25,6 +34,9 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
+  const [infoModalRecord, setInfoModalRecord] = useState<PluginDraftRecord | null>(null);
+  const [infoModalPluginModel, setInfoModalPluginModel] = useState<PluginModel>(createEmptyPluginModel());
+  const [infoModalScenarioData, setInfoModalScenarioData] = useState<ScenarioData>({ overview: '', stepDescriptions: {}, notes: '' });
 
   const loadList = useCallback(async (p: number, q: string) => {
     setLoading(true);
@@ -69,20 +81,75 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
     setPage(1);
   };
 
+  const openInfoModal = (record: PluginDraftRecord) => {
+    const pm = parsePluginYaml(record.plugin_yaml_content) ?? createEmptyPluginModel();
+    if (!pm.name && record.name) pm.name = record.name;
+    const graphModel = createEmptyModel();
+    const sd = parseScenario(record.scenario_content ?? '', graphModel.nodes);
+    setInfoModalPluginModel(pm);
+    setInfoModalScenarioData(sd);
+    setInfoModalRecord(record);
+  };
+
+  const handleInfoSave = async (pm: PluginModel, sd: ScenarioData) => {
+    if (!infoModalRecord) return;
+    const pluginYaml = serializePluginModel(pm);
+    const scenarioContent = serializeScenario([], sd);
+    await updatePluginDraftContent(infoModalRecord.id, {
+      plugin_yaml_content: pluginYaml,
+      scenario_content: scenarioContent,
+    });
+    message.success('已保存');
+    void loadList(page, query);
+  };
+
+  const getPluginId = (record: PluginDraftRecord): string => {
+    if (!record.plugin_yaml_content) return '—';
+    const pm = parsePluginYaml(record.plugin_yaml_content);
+    return pm?.id || '—';
+  };
+
   const columns: ColumnsType<PluginDraftRecord> = [
     {
-      title: '插件名称',
+      title: '插件标识',
+      key: 'plugin_id',
+      render: (_: unknown, record: PluginDraftRecord) => {
+        const pluginId = getPluginId(record);
+        return (
+          <Button
+            type="link"
+            style={{ fontFamily: 'monospace', padding: 0 }}
+            onClick={() => navigate(`/memory-management/plugins/${record.id}`)}
+          >
+            {pluginId}
+          </Button>
+        );
+      },
+    },
+    {
+      title: '显示名称',
       dataIndex: 'name',
       key: 'name',
-      render: (name: string, record) => (
+      render: (name: string, record: PluginDraftRecord) => (
         <Button
           type="link"
-          style={{ padding: 0, height: 'auto', fontWeight: 500 }}
+          style={{ padding: 0 }}
           onClick={() => navigate(`/memory-management/plugins/${record.id}`)}
         >
           {name}
         </Button>
       ),
+    },
+    {
+      title: '状态',
+      dataIndex: 'generate_status',
+      key: 'generate_status',
+      width: 100,
+      render: (status: string) => {
+        if (status === 'generating') return <Tag color="processing">生成中</Tag>;
+        if (status === 'failed') return <Tag color="error">生成失败</Tag>;
+        return null;
+      },
     },
     {
       title: '最后更新',
@@ -94,15 +161,15 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
     {
       title: '操作',
       key: 'actions',
-      width: 100,
+      width: 96,
       render: (_: unknown, record: PluginDraftRecord) => (
         <div className="plugin-list-actions">
-          <Tooltip title="编辑">
+          <Tooltip title="修改插件信息">
             <Button
               type="text"
               size="small"
               icon={<EditOutlined />}
-              onClick={() => navigate(`/memory-management/plugins/${record.id}`)}
+              onClick={() => openInfoModal(record)}
             />
           </Tooltip>
           <Popconfirm
@@ -174,6 +241,16 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
           />
         )}
       </div>
+
+      {infoModalRecord && (
+        <PluginInfoModal
+          open={!!infoModalRecord}
+          onCancel={() => setInfoModalRecord(null)}
+          pluginModel={infoModalPluginModel}
+          scenarioData={infoModalScenarioData}
+          onSave={handleInfoSave}
+        />
+      )}
     </div>
   );
 }

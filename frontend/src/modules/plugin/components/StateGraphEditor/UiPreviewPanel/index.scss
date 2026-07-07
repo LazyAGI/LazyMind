@@ -1,0 +1,90 @@
+.ui-preview-panel {
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px;
+
+  &--empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+
+  .upp-readonly-note {
+    font-size: 12px;
+    color: #8c8c8c;
+    margin-bottom: 12px;
+  }
+
+  .upp-hint {
+    font-size: 12px;
+    color: #bfbfbf;
+    text-align: center;
+    margin-top: 8px;
+  }
+
+  .upp-tab-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 8px 0;
+
+    &.upp-layout-list {
+      flex-direction: column;
+    }
+
+    &.upp-layout-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    }
+
+    &.upp-layout-horizontal {
+      flex-direction: row;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+  }
+
+  .upp-slot-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border: 1.5px dashed #d9d9d9;
+    border-radius: 6px;
+    background: #fafafa;
+    min-width: 140px;
+  }
+
+  .upp-slot-icon {
+    font-size: 16px;
+    color: #1677ff;
+    flex-shrink: 0;
+  }
+
+  .upp-slot-label {
+    flex: 1;
+    font-size: 13px;
+    color: #262626;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .upp-slot-type {
+    font-size: 11px;
+    color: #8c8c8c;
+    background: #f0f0f0;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .upp-slot-cardinality {
+    font-size: 11px;
+    color: #1677ff;
+    background: #e6f4ff;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+}

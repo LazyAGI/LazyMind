@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -16,22 +17,32 @@ import (
 
 // draftResponse is the JSON shape returned for a single PluginDraft.
 type draftResponse struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Content   string `json:"content"`
-	CreatedBy string `json:"created_by"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Content           string `json:"content"`
+	PluginYAMLContent string `json:"plugin_yaml_content"`
+	StateYAMLContent  string `json:"state_yaml_content"`
+	ScenarioContent   string `json:"scenario_content"`
+	ScriptsContent    string `json:"scripts_content"`
+	GenerateStatus    string `json:"generate_status"`
+	CreatedBy         string `json:"created_by"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 func toDraftResponse(d orm.PluginDraft) draftResponse {
 	return draftResponse{
-		ID:        d.ID,
-		Name:      d.Name,
-		Content:   d.Content,
-		CreatedBy: d.CreatedBy,
-		CreatedAt: d.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: d.UpdatedAt.Format(time.RFC3339),
+		ID:                d.ID,
+		Name:              d.Name,
+		Content:           d.Content,
+		PluginYAMLContent: d.PluginYAMLContent,
+		StateYAMLContent:  d.StateYAMLContent,
+		ScenarioContent:   d.ScenarioContent,
+		ScriptsContent:    d.ScriptsContent,
+		GenerateStatus:    d.GenerateStatus,
+		CreatedBy:         d.CreatedBy,
+		CreatedAt:         d.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:         d.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -143,8 +154,8 @@ func GetPluginDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 // SavePluginDraft handles POST /plugin-drafts/{draft_id}:save
-// Body: { "content": "..." }
-// Validates YAML structure (basic check) and persists.
+// Body: { "content": "...", "plugin_yaml_content": "...", "state_yaml_content": "...", "scenario_content": "...", "scripts_content": "..." }
+// Persists all provided fields; absent fields are left unchanged.
 func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 	draftID := common.PathVar(r, "draft_id")
 	userID := common.UserID(r)
@@ -154,7 +165,11 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Content string `json:"content"`
+		Content           *string `json:"content"`
+		PluginYAMLContent *string `json:"plugin_yaml_content"`
+		StateYAMLContent  *string `json:"state_yaml_content"`
+		ScenarioContent   *string `json:"scenario_content"`
+		ScriptsContent    *string `json:"scripts_content"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
@@ -168,15 +183,34 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := db.Model(&draft).Updates(map[string]any{
-		"content":    body.Content,
-		"updated_at": time.Now().UTC(),
-	}).Error; err != nil {
+	updates := map[string]any{"updated_at": time.Now().UTC()}
+	if body.Content != nil {
+		updates["content"] = *body.Content
+	}
+	if body.PluginYAMLContent != nil {
+		updates["plugin_yaml_content"] = *body.PluginYAMLContent
+	}
+	if body.StateYAMLContent != nil {
+		updates["state_yaml_content"] = *body.StateYAMLContent
+	}
+	if body.ScenarioContent != nil {
+		updates["scenario_content"] = *body.ScenarioContent
+	}
+	if body.ScriptsContent != nil {
+		updates["scripts_content"] = *body.ScriptsContent
+	}
+
+	if err := db.Model(&draft).Updates(updates).Error; err != nil {
 		common.ReplyErr(w, "save failed", http.StatusInternalServerError)
 		return
 	}
 
-	draft.Content = body.Content
+	// Reload to get the updated values.
+	if err := db.Where("id = ?", draftID).First(&draft).Error; err != nil {
+		common.ReplyErr(w, "reload failed", http.StatusInternalServerError)
+		return
+	}
+
 	common.ReplyOK(w, toDraftResponse(draft))
 }
 
@@ -200,4 +234,85 @@ func DeletePluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.ReplyOK(w, nil)
+}
+
+// AIGeneratePluginDraft handles POST /plugin-drafts/{draft_id}:ai-generate
+// Body: { "description": "..." } or { "skill_id": "..." } (mutually exclusive)
+// Sets generate_status to "generating" and enqueues an async job.
+// Returns immediately with the current draft (generate_status == "generating").
+func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
+	draftID := common.PathVar(r, "draft_id")
+	userID := common.UserID(r)
+	if draftID == "" {
+		common.ReplyErr(w, "draft_id required", http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		Description string `json:"description"`
+		SkillID     string `json:"skill_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	body.Description = strings.TrimSpace(body.Description)
+	body.SkillID = strings.TrimSpace(body.SkillID)
+	if body.Description == "" && body.SkillID == "" {
+		common.ReplyErr(w, "description or skill_id is required", http.StatusBadRequest)
+		return
+	}
+
+	db := store.DB()
+	var draft orm.PluginDraft
+	if err := db.Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	skillContent := ""
+	if body.SkillID != "" {
+		var skillRow struct {
+			Content string
+		}
+		if err := db.Raw("SELECT content FROM skill_resources WHERE id = ? AND owner_user_id = ?", body.SkillID, userID).Scan(&skillRow).Error; err != nil || skillRow.Content == "" {
+			common.ReplyErr(w, "skill not found", http.StatusBadRequest)
+			return
+		}
+		skillContent = skillRow.Content
+	}
+
+	if err := db.Model(&draft).Updates(map[string]any{
+		"generate_status": generateStatusGenerating,
+		"updated_at":      time.Now().UTC(),
+	}).Error; err != nil {
+		common.ReplyErr(w, "update failed", http.StatusInternalServerError)
+		return
+	}
+	draft.GenerateStatus = generateStatusGenerating
+
+	_, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{
+		JobType:      pluginDraftGenerateJobType,
+		ResourceType: "plugin_draft",
+		ResourceID:   draftID,
+		Payload: pluginDraftGeneratePayload{
+			DraftID:      draftID,
+			Name:         draft.Name,
+			Description:  body.Description,
+			SkillContent: skillContent,
+			UserID:       userID,
+		},
+		MaxAttempts:  1,
+		CreateUserID: userID,
+	})
+	if err != nil {
+		_ = db.Model(&draft).Updates(map[string]any{
+			"generate_status": generateStatusFailed,
+			"updated_at":      time.Now().UTC(),
+		}).Error
+		common.ReplyErr(w, "enqueue failed", http.StatusInternalServerError)
+		return
+	}
+
+	common.ReplyOK(w, toDraftResponse(draft))
 }
