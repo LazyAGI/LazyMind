@@ -1,5 +1,5 @@
 import jsYaml from 'js-yaml';
-import type { GraphModel, SlotDef, StepInputRef, StepNode, Transition } from './model';
+import type { GraphModel, StepInputRef, StepNode, Transition } from './model';
 import { VIRTUAL_START, VIRTUAL_END } from './model';
 
 // Raw YAML shape after js-yaml.load
@@ -24,7 +24,6 @@ interface RawStep {
 
 interface RawYaml {
   'x-layout'?: Record<string, { x?: number; y?: number; w?: number }>;
-  slots?: Record<string, { type?: unknown; label?: unknown; cardinality?: unknown; ordered?: unknown; allow_manual_add?: unknown; summary_max_chars?: unknown }>;
   steps?: unknown[];
   start_transitions?: unknown;
 }
@@ -97,37 +96,11 @@ function parseStep(raw: RawStep): StepNode | null {
   };
 }
 
-function parseSlots(raw: unknown): Record<string, SlotDef> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
-  const result: Record<string, SlotDef> = {};
-  for (const [id, val] of Object.entries(raw as Record<string, unknown>)) {
-    const entry = val && typeof val === 'object' && !Array.isArray(val) ? (val as Record<string, unknown>) : {};
-    const slot: SlotDef = {
-      id,
-      type: String(entry.type ?? 'text'),
-      label: entry.label !== undefined ? String(entry.label) : undefined,
-    };
-    if (entry.cardinality === 'list') slot.cardinality = 'list';
-    if (slot.cardinality === 'list') {
-      if (entry.ordered === true || entry.ordered === 'true') slot.ordered = true;
-      if (entry.allow_manual_add === false || entry.allow_manual_add === 'false') {
-        slot.allow_manual_add = false;
-      } else if (entry.allow_manual_add === true || entry.allow_manual_add === 'true') {
-        slot.allow_manual_add = true;
-      }
-    }
-    if (typeof entry.summary_max_chars === 'number' && entry.summary_max_chars > 0) {
-      slot.summary_max_chars = entry.summary_max_chars;
-    }
-    result[id] = slot;
-  }
-  return result;
-}
-
 /**
  * Parse a state.yml YAML string into a GraphModel.
  * Returns null if the YAML has a syntax error.
  * On structural errors, returns the best-effort model.
+ * Note: slots are NOT parsed here — they live in plugin.yaml and are loaded separately.
  */
 export function parseYaml(yamlText: string): GraphModel | null {
   let raw: RawYaml;
@@ -148,8 +121,8 @@ export function parseYaml(yamlText: string): GraphModel | null {
     }
   }
 
-  // slots block is kept for backward compat with old drafts; serializer no longer outputs it.
-  const slots = parseSlots(raw.slots);
+  // slots block is intentionally omitted — slot definitions live in plugin.yaml, not state.yml.
+  const slots: GraphModel['slots'] = {};
 
   const nodes: StepNode[] = [];
   if (Array.isArray(raw.steps)) {

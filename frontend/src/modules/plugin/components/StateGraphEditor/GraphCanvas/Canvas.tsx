@@ -375,6 +375,33 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     setEdges(modelToFlowEdges(model, nodeErrorMap, handleConditionChange));
   }, [model, nodeErrorMap, handleConditionChange, setNodes, setEdges]);
 
+  // Propagate error state changes to ReactFlow nodes independently of the main
+  // model sync. This runs even when skipSyncRef suppresses the full sync above,
+  // so error highlights update immediately after the parent re-validates.
+  const nodeErrorMapRef = useRef(nodeErrorMap);
+  useEffect(() => {
+    const prevMap = nodeErrorMapRef.current;
+    nodeErrorMapRef.current = nodeErrorMap;
+    // Skip if the map reference hasn't changed (e.g. no re-validation occurred).
+    if (prevMap === nodeErrorMap) return;
+    setNodes((currentNodes) => {
+      let changed = false;
+      const next = currentNodes.map((n) => {
+        const errMsgs = nodeErrorMap.get(n.id) ?? [];
+        const hasError = errMsgs.length > 0;
+        // Compare by value to avoid updating nodes whose error state didn't change.
+        const prevHasError = (n.data as { hasError?: boolean }).hasError ?? false;
+        const prevMsgs = (n.data as { errorMessages?: string[] }).errorMessages ?? [];
+        if (prevHasError === hasError && prevMsgs.length === errMsgs.length && prevMsgs.every((m, i) => m === errMsgs[i])) {
+          return n;
+        }
+        changed = true;
+        return { ...n, data: { ...n.data, hasError, errorMessages: errMsgs } };
+      });
+      return changed ? next : currentNodes;
+    });
+  }, [nodeErrorMap, setNodes]);
+
   // When a new edge is drawn in the canvas, add a transition to the model
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -572,6 +599,8 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
       const tag = (event.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      // Also skip contenteditable elements (e.g. PromptEditor)
+      if ((event.target as HTMLElement).isContentEditable) return;
 
       const m = modelRef.current;
 

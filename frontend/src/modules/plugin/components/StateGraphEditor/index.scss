@@ -231,10 +231,84 @@
   min-height: 0;
 }
 
+/* File tree sidebar */
+.sge-code-sidebar {
+  width: 180px;
+  min-width: 140px;
+  max-width: 240px;
+  flex-shrink: 0;
+  background: #fafafa;
+  border-right: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.sge-code-sidebar-section {
+  margin-bottom: 8px;
+}
+
+.sge-code-sidebar-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8c8c8c;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px 12px 2px;
+}
+
+.sge-code-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.12s;
+  user-select: none;
+
+  &:hover {
+    background: #f0f0f0;
+  }
+
+  &--active {
+    background: #e6f4ff;
+    color: #1677ff;
+
+    .sge-code-file-icon,
+    .sge-code-file-name {
+      color: #1677ff;
+    }
+  }
+}
+
+.sge-code-file-icon {
+  font-size: 12px;
+  color: #8c8c8c;
+  flex-shrink: 0;
+}
+
+.sge-code-file-name {
+  font-size: 12px;
+  color: #262626;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sge-code-editor {
   flex: 1;
   overflow: hidden;
   min-height: 0;
+}
+
+/* Disabled Tab button (code mode) */
+.sge-seg-btn--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* ─── Empty state ────────────────────────────────────────── */

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, message } from 'antd';
+import { Button, message, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import {
   CheckCircleOutlined,
@@ -7,6 +7,7 @@ import {
   PlusOutlined,
   AppstoreOutlined,
   SettingOutlined,
+  FileOutlined,
 } from '@ant-design/icons';
 import type { GraphModel } from './core/model';
 import { createEmptyModel } from './core/model';
@@ -74,6 +75,29 @@ function parseScriptFiles(raw: string): Record<string, string> {
   return {};
 }
 
+/**
+ * Build the initial GraphModel from state.yml + plugin.yaml.
+ * Slots are always sourced from plugin.yaml (the single persistent store for slot definitions).
+ * state.yml never contains slots; plugin.yaml is authoritative.
+ */
+function initGraphModel(stateYaml: string | undefined, pluginYaml: string | undefined): GraphModel {
+  const base = stateYaml ? (parseYaml(stateYaml) ?? createEmptyModel()) : createEmptyModel();
+  const slots: Record<string, import('./core/model').SlotDef> = {};
+  if (pluginYaml) {
+    const pm = parsePluginYaml(pluginYaml);
+    if (pm) {
+      for (const s of pm.slots) {
+        slots[s.id] = {
+          id: s.id, type: s.type, label: s.label,
+          cardinality: s.cardinality, ordered: s.ordered,
+          allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+        };
+      }
+    }
+  }
+  return { ...base, slots };
+}
+
 export default function StateGraphEditor({
   initialStateYaml,
   initialPluginYaml,
@@ -85,21 +109,21 @@ export default function StateGraphEditor({
 }: Props) {
   const [contentTab, setContentTab] = useState<ContentTab>('statemachine');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
+  // In code mode, the active file is tracked independently of contentTab
+  const [activeCodeFile, setActiveCodeFile] = useState<CodeFile>('state.yml');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [pluginInfoOpen, setPluginInfoOpen] = useState(false);
 
-  // state.yml model
-  const modelRef = useRef<GraphModel>(
-    initialStateYaml ? (parseYaml(initialStateYaml) ?? createEmptyModel()) : createEmptyModel(),
-  );
-  const [model, setModelState] = useState<GraphModel>(modelRef.current);
-  const [errors, setErrors] = useState<ValidationError[]>(() => validateStateGraph(modelRef.current));
-
-  // plugin.yaml model
+  // plugin.yaml model — must be initialized before GraphModel so we can back-fill slots.
   const [pluginModel, setPluginModel] = useState<PluginModel>(() =>
     initialPluginYaml ? (parsePluginYaml(initialPluginYaml) ?? createEmptyPluginModel()) : createEmptyPluginModel(),
   );
+
+  // state.yml model — back-fill slots from plugin.yaml when state.yml has none (post-migration drafts).
+  const modelRef = useRef<GraphModel>(initGraphModel(initialStateYaml, initialPluginYaml));
+  const [model, setModelState] = useState<GraphModel>(modelRef.current);
+  const [errors, setErrors] = useState<ValidationError[]>(() => validateStateGraph(modelRef.current));
 
   // scenario data
   const [scenarioData, setScenarioData] = useState<ScenarioData>(() =>
@@ -245,6 +269,27 @@ export default function StateGraphEditor({
     setContentTab('statemachine');
   }, []);
 
+  // Switch to code mode, initialize activeCodeFile from current tab
+  const handleEnterCode = useCallback(() => {
+    setActiveCodeFile(codeFileForTab(contentTab));
+    setViewMode('code');
+  }, [contentTab]);
+
+  // Exit code mode: derive contentTab from the file that was being edited
+  const handleExitCode = useCallback(() => {
+    if (activeCodeFile === 'state.yml') {
+      setContentTab('statemachine');
+    } else if (activeCodeFile === 'plugin.yaml') {
+      setContentTab('ui');
+    } else if (activeCodeFile === 'scenario.md') {
+      setContentTab('scenario');
+    } else {
+      // script file — default to statemachine
+      setContentTab('statemachine');
+    }
+    setViewMode('preview');
+  }, [activeCodeFile]);
+
   const slotCount = Object.keys(model.slots).length;
   const scriptFiles = parseScriptFiles(scriptsContent);
 
@@ -255,8 +300,9 @@ export default function StateGraphEditor({
   // plugin.yaml text
   const pluginYamlForCode = serializePluginModel(pluginModel, model);
 
-  // The active code file is always derived from the current content tab
-  const activeCodeFile: CodeFile = codeFileForTab(contentTab);
+  // All files available in the file tree (code mode)
+  const coreFiles: CodeFile[] = ['state.yml', 'plugin.yaml', 'scenario.md'];
+  const scriptFilePaths = Object.keys(scriptFiles);
 
   const getCodeFileContent = (file: CodeFile): string => {
     if (file === 'plugin.yaml') return pluginYamlForCode;
@@ -296,13 +342,15 @@ export default function StateGraphEditor({
       {/* ── Row 2: content tabs + view switcher left, action buttons right ── */}
       <div className="sge-toolbar2">
         <div className="sge-toolbar2-left">
-          {/* Capsule group 1: content tabs */}
+          {/* Capsule group 1: content tabs — disabled in code mode */}
           <div className="sge-segmented">
             {(['statemachine', 'ui', 'scenario'] as ContentTab[]).map((tab) => (
               <button
                 key={tab}
-                className={`sge-seg-btn${contentTab === tab ? ' sge-seg-btn--active' : ''}`}
-                onClick={() => setContentTab(tab)}
+                className={`sge-seg-btn${contentTab === tab ? ' sge-seg-btn--active' : ''}${viewMode === 'code' ? ' sge-seg-btn--disabled' : ''}`}
+                onClick={() => { if (viewMode !== 'code') setContentTab(tab); }}
+                disabled={viewMode === 'code'}
+                aria-disabled={viewMode === 'code'}
               >
                 {tab === 'statemachine' ? '状态机' : tab === 'ui' ? 'UI' : '说明文档'}
               </button>
@@ -313,13 +361,13 @@ export default function StateGraphEditor({
           <div className="sge-segmented">
             <button
               className={`sge-seg-btn${viewMode === 'preview' ? ' sge-seg-btn--active' : ''}`}
-              onClick={() => setViewMode('preview')}
+              onClick={handleExitCode}
             >
               预览
             </button>
             <button
               className={`sge-seg-btn${viewMode === 'code' ? ' sge-seg-btn--active' : ''}`}
-              onClick={() => setViewMode('code')}
+              onClick={handleEnterCode}
             >
               代码
             </button>
@@ -397,6 +445,40 @@ export default function StateGraphEditor({
 
         {viewMode === 'code' && (
           <div className="sge-code-mode">
+            {/* Left: file tree */}
+            <div className="sge-code-sidebar">
+              <div className="sge-code-sidebar-section">
+                <span className="sge-code-sidebar-label">核心文件</span>
+                {coreFiles.map((file) => (
+                  <div
+                    key={file}
+                    className={`sge-code-file-item${activeCodeFile === file ? ' sge-code-file-item--active' : ''}`}
+                    onClick={() => setActiveCodeFile(file)}
+                  >
+                    <FileOutlined className="sge-code-file-icon" />
+                    <span className="sge-code-file-name">{file}</span>
+                  </div>
+                ))}
+              </div>
+              {scriptFilePaths.length > 0 && (
+                <div className="sge-code-sidebar-section">
+                  <span className="sge-code-sidebar-label">脚本文件</span>
+                  {scriptFilePaths.map((path) => (
+                    <div
+                      key={path}
+                      className={`sge-code-file-item${activeCodeFile === path ? ' sge-code-file-item--active' : ''}`}
+                      onClick={() => setActiveCodeFile(path)}
+                    >
+                      <FileOutlined className="sge-code-file-icon" />
+                      <Tooltip title={path}>
+                        <span className="sge-code-file-name">{path.replace('scripts/', '')}</span>
+                      </Tooltip>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Right: editor */}
             <div className="sge-code-editor">
               <YamlEditor
                 key={activeCodeFile}

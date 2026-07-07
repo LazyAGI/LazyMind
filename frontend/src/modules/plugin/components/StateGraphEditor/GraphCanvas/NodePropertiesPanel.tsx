@@ -13,6 +13,7 @@ import type { StepNode, GraphModel } from '../core/model';
 import { VIRTUAL_END, isHiddenId } from '../core/model';
 import type { PluginModel } from '../core/pluginModel';
 import type { ScenarioData } from '../ScenarioEditor';
+import PromptEditor from './PromptEditor';
 import './NodePropertiesPanel.scss';
 
 const STEP_ID_REGEX = /^[a-zA-Z0-9_]+$/;
@@ -429,15 +430,14 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
         </Section>
 
         {/* ── 分组四：执行逻辑 ── */}
-        <Section title={t('selfEvolutionRun.stateGraphSectionLogic')} defaultOpen={false}>
+        <Section title={t('selfEvolutionRun.stateGraphSectionLogic')}>
           <div className="npp-field-block">
             <LabelWithTip label={t('selfEvolutionRun.stateGraphFieldPrompt')} tip={t('selfEvolutionRun.stateGraphFieldPromptTip')} />
-            <Input.TextArea
+            <PromptEditor
               value={node.prompt ?? ''}
-              onChange={(e) => update({ prompt: e.target.value || undefined })}
+              onChange={(val) => update({ prompt: val || undefined })}
+              slots={Object.values(model.slots)}
               placeholder={t('selfEvolutionRun.stateGraphFieldPromptPlaceholder')}
-              autoSize={{ minRows: 3, maxRows: 8 }}
-              style={{ marginTop: 4 }}
             />
           </div>
           <div className="npp-field-block" style={{ marginTop: 10 }}>

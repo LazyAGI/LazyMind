@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -24,6 +23,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Plugin format spec — loaded once at module load time.
 # ---------------------------------------------------------------------------
+
 
 def _load_plugin_format_spec() -> str:
     """Load docs/plugin-format.md from the repository root."""
@@ -107,7 +107,8 @@ def _parse_llm_response(raw: str) -> tuple[str, str]:
 class GeneratePluginRequest(BaseModel):
     name: str = Field(..., description='Plugin display name')
     description: Optional[str] = Field(None, description='Natural-language description of the plugin goal')
-    skill_content: Optional[str] = Field(None, description='Existing skill content to convert (mutually exclusive with description)')
+    skill_content: Optional[str] = Field(None, description='Existing skill content to convert '
+                                                           '(mutually exclusive with description)')
     llm_config: Dict[str, Any] = Field(default_factory=dict, description='Per-request model config from core')
 
 
