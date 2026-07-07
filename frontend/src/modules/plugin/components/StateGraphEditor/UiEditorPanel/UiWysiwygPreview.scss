@@ -1,0 +1,376 @@
+// ─── Root ─────────────────────────────────────────────────────────────────────
+.wywp-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #f5f5f5;
+  overflow: hidden;
+}
+
+.wywp-empty {
+  align-items: center;
+  justify-content: center;
+}
+
+.wywp-empty-hint {
+  color: #bfbfbf;
+  font-size: 13px;
+  text-align: center;
+  padding: 0 24px;
+}
+
+// ─── Step bar ─────────────────────────────────────────────────────────────────
+.wywp-stepbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  gap: 8px;
+  overflow: visible;
+}
+
+// Scrollable tabs section (left side of stepbar)
+.wywp-stepbar-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+// Layout picker (right side of stepbar)
+.wywp-layout-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.wywp-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #8c8c8c;
+  font-size: 13px;
+  white-space: nowrap;
+  position: relative;
+
+  &::after {
+    content: '';
+    display: block;
+    position: absolute;
+    right: -12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 1px;
+    background: #e8e8e8;
+    z-index: 0;
+  }
+
+  &:last-child::after {
+    display: none;
+  }
+
+  &--active {
+    color: #1677ff;
+    font-weight: 500;
+
+    .wywp-step-badge {
+      background: #1677ff;
+      color: #fff;
+      border-color: #1677ff;
+    }
+  }
+
+  &--done {
+    .wywp-step-badge {
+      background: #52c41a;
+      color: #fff;
+      border-color: #52c41a;
+    }
+  }
+}
+
+.wywp-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1.5px solid #d9d9d9;
+  background: #fff;
+  color: #8c8c8c;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.wywp-step-label {
+  font-size: 12px;
+  cursor: default;
+}
+
+.wywp-step-input {
+  width: 80px;
+  font-size: 12px;
+}
+
+.wywp-step-menu {
+  opacity: 0;
+  padding: 0 2px;
+  transition: opacity 0.12s;
+
+  .wywp-step:hover &,
+  .wywp-step--active & {
+    opacity: 1;
+  }
+}
+
+.wywp-stepbar-add {
+  font-size: 12px;
+  color: #8c8c8c;
+  flex-shrink: 0;
+  white-space: nowrap;
+
+  &:hover {
+    color: #1677ff;
+  }
+}
+
+// ─── Content area ─────────────────────────────────────────────────────────────
+.wywp-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  background: #fff;
+  margin: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.wywp-no-slots {
+  color: #bfbfbf;
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 0;
+}
+
+// ─── Footer ───────────────────────────────────────────────────────────────────
+.wywp-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #fff;
+  border-top: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+.wywp-btn {
+  padding: 5px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: default;
+  border: 1px solid #d9d9d9;
+  background: #fff;
+  color: #595959;
+
+  &--primary {
+    background: #1677ff;
+    border-color: #1677ff;
+    color: #fff;
+  }
+
+  &--ghost {
+    background: #fff;
+    color: #595959;
+  }
+}
+
+// ─── Slot container ───────────────────────────────────────────────────────────
+.wywp-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.wywp-slot-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8c8c8c;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+// ─── Layout variants ──────────────────────────────────────────────────────────
+.wywp-layout-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wywp-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.wywp-layout-horizontal {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 16px;
+
+  > .wywp-slot {
+    flex: 1;
+    min-width: 180px;
+  }
+}
+
+.wywp-layout-composite {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  min-height: 120px;
+}
+
+.wywp-composite-col {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+// ─── Image placeholders ───────────────────────────────────────────────────────
+.wywp-img-group {
+  display: flex;
+  justify-content: center;
+}
+
+.wywp-img-group--list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.wywp-img-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #f5f5f5;
+  border: 1.5px dashed #d9d9d9;
+  border-radius: 8px;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  min-height: 80px;
+  color: #bfbfbf;
+  gap: 6px;
+}
+
+.wywp-img-icon {
+  font-size: 28px;
+  color: #d9d9d9;
+}
+
+.wywp-img-label {
+  font-size: 11px;
+  color: #bfbfbf;
+}
+
+// ─── File placeholders ────────────────────────────────────────────────────────
+.wywp-file-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wywp-file-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+}
+
+.wywp-file-icon {
+  font-size: 20px;
+  color: #8c8c8c;
+  flex-shrink: 0;
+}
+
+.wywp-file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wywp-file-name {
+  font-size: 13px;
+  color: #262626;
+}
+
+.wywp-file-size {
+  font-size: 11px;
+  color: #bfbfbf;
+}
+
+// ─── Text placeholders ────────────────────────────────────────────────────────
+.wywp-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wywp-text-block {
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #8c8c8c;
+  line-height: 1.7;
+  position: relative;
+  padding-left: 28px;
+}
+
+.wywp-text-index {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #bfbfbf;
+  background: #f0f0f0;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+// ─── JSON placeholder ─────────────────────────────────────────────────────────
+.wywp-json-block {
+  background: #f6f8fa;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  color: #595959;
+  margin: 0;
+  line-height: 1.6;
+}

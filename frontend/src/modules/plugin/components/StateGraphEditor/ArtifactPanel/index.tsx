@@ -22,6 +22,8 @@ interface Props {
   onClose: () => void;
   onModelChange: (model: GraphModel) => void;
   uiMode?: boolean;
+  /** When true, renders as an inline block (position: static) instead of the default floating overlay */
+  inline?: boolean;
   pluginModel?: PluginModel;
   activeTabId?: string;
   onUiModelChange?: (ui: PluginModel['ui']) => void;
@@ -228,8 +230,17 @@ function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, 
     );
   }
 
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData('application/x-slot-id', art.id);
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
   return (
-    <div className="artifact-item">
+    <div
+      className="artifact-item"
+      draggable={uiMode}
+      onDragStart={uiMode ? handleDragStart : undefined}
+    >
       <div className="artifact-item-line1">
         {resolvedAllowManualAdd && (
           <span className="artifact-item-icon" title={t('selfEvolutionRun.artifactPanelAllowManualAddTitle')}>👤</span>
@@ -245,25 +256,27 @@ function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, 
           <Button size="small" type="text" className="artifact-item-edit-btn" onClick={startEdit}>
             {t('selfEvolutionRun.artifactPanelEdit')}
           </Button>
-          <Popconfirm
-            title={t('selfEvolutionRun.artifactPanelDeleteConfirm', { id: art.id })}
-            onConfirm={() => onDelete(art.id)}
-            okText={t('selfEvolutionRun.artifactPanelDeleteOk')}
-            cancelText={t('selfEvolutionRun.artifactPanelDeleteCancel')}
-            okButtonProps={{ danger: true }}
-          >
-            <Tooltip title={t('selfEvolutionRun.artifactPanelDeleteTooltip')}>
-              <Button
-                type="text"
-                danger
-                size="small"
-                className="artifact-item-delete-btn"
-                aria-label={t('selfEvolutionRun.artifactPanelDeleteTooltip')}
-              >
-                🗑️
-              </Button>
-            </Tooltip>
-          </Popconfirm>
+          {!uiMode && (
+            <Popconfirm
+              title={t('selfEvolutionRun.artifactPanelDeleteConfirm', { id: art.id })}
+              onConfirm={() => onDelete(art.id)}
+              okText={t('selfEvolutionRun.artifactPanelDeleteOk')}
+              cancelText={t('selfEvolutionRun.artifactPanelDeleteCancel')}
+              okButtonProps={{ danger: true }}
+            >
+              <Tooltip title={t('selfEvolutionRun.artifactPanelDeleteTooltip')}>
+                <Button
+                  type="text"
+                  danger
+                  size="small"
+                  className="artifact-item-delete-btn"
+                  aria-label={t('selfEvolutionRun.artifactPanelDeleteTooltip')}
+                >
+                  🗑️
+                </Button>
+              </Tooltip>
+            </Popconfirm>
+          )}
         </div>
       </div>
       {uiMode && (
@@ -301,7 +314,7 @@ function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, 
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, pluginModel, onUiModelChange }: Props) {
+export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, inline, pluginModel, onUiModelChange }: Props) {
   const { t } = useTranslation();
   const [newDraft, setNewDraft] = useState<EditDraft>(EMPTY_DRAFT);
   const [adding, setAdding] = useState(false);
@@ -379,10 +392,17 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, p
   };
 
   return (
-    <div className="artifact-panel" role="complementary" aria-label={t('selfEvolutionRun.artifactPanelAria')} onDoubleClick={(e) => e.stopPropagation()}>
+    <div
+      className={`artifact-panel${inline ? ' artifact-panel--inline' : ''}`}
+      role="complementary"
+      aria-label={t('selfEvolutionRun.artifactPanelAria')}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
       <div className="artifact-panel-header">
         <span className="artifact-panel-title">{t('selfEvolutionRun.artifactPanelTitle')}</span>
-        <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label={t('selfEvolutionRun.artifactPanelClose')} />
+        {!inline && (
+          <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label={t('selfEvolutionRun.artifactPanelClose')} />
+        )}
       </div>
 
       <div className="artifact-panel-desc">

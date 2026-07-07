@@ -115,24 +115,15 @@ export default function StateGraphEditor({
   // In code mode, the active file is tracked independently of contentTab
   const [activeCodeFile, setActiveCodeFile] = useState<CodeFile>('state.yml');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  const [showArtifacts, setShowArtifacts] = useState(false);
+  const [showArtifacts, setShowArtifacts] = useState(true);
   const [pluginInfoOpen, setPluginInfoOpen] = useState(false);
+  // Active UI tab — lifted from UiEditorPanel so TabBar removal doesn't lose state
+  const [uiActiveTabId, setUiActiveTabId] = useState<string | undefined>(undefined);
 
   // Prevent macOS browser back/forward navigation when horizontally swiping
-  // inside the editor. Must be non-passive + capture so it fires before the
-  // browser's native gesture recogniser consumes the event.
+  // inside the editor. CSS overscroll-behavior-x:none on the canvas container
+  // handles this; no JS wheel interception needed (it would break ReactFlow pan).
   const editorRootRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = editorRootRef.current;
-    if (!el) return;
-    const handler = (e: WheelEvent) => {
-      if (Math.abs(e.deltaX) > 0) {
-        e.preventDefault();
-      }
-    };
-    el.addEventListener('wheel', handler, { passive: false, capture: true });
-    return () => el.removeEventListener('wheel', handler, { capture: true });
-  }, []);
 
   // plugin.yaml model — must be initialized before GraphModel so we can back-fill slots.
   const [pluginModel, setPluginModel] = useState<PluginModel>(() =>
@@ -266,6 +257,29 @@ export default function StateGraphEditor({
     scenarioDataRef.current = sd;
     triggerAutoSave(modelRef.current, pluginModelRef.current, sd, scriptsContentRef.current);
   }, [triggerAutoSave]);
+
+  // Code-editor change handlers for plugin.yaml and scenario.md
+  // Both use a 500ms debounce like handleYamlChange; plugin.yaml validates before applying.
+  const handlePluginYamlCodeChange = useCallback((text: string) => {
+    const pm = parsePluginYaml(text);
+    if (pm) {
+      setPluginModel(pm);
+      pluginModelRef.current = pm;
+      triggerAutoSave(modelRef.current, pm, scenarioDataRef.current, scriptsContentRef.current);
+      setErrors((prev) => prev.filter((e) => e.code !== 'V10_PLUGIN_YAML_SYNTAX'));
+    } else {
+      setErrors((prev) => {
+        const alreadyHas = prev.some((e) => e.code === 'V10_PLUGIN_YAML_SYNTAX');
+        if (alreadyHas) return prev;
+        return [...prev, { code: 'V10_PLUGIN_YAML_SYNTAX', message: 'plugin.yaml 语法错误，请检查格式' }];
+      });
+    }
+  }, [triggerAutoSave]);
+
+  const handleScenarioMdCodeChange = useCallback((text: string) => {
+    const sd = parseScenario(text, modelRef.current.nodes);
+    handleScenarioChange(sd);
+  }, [handleScenarioChange]);
 
   const handleScriptsChange = useCallback((path: string, content: string) => {
     const files = parseScriptFiles(scriptsContentRef.current);
@@ -457,6 +471,8 @@ export default function StateGraphEditor({
               pluginModel={pluginModel}
               onGraphModelChange={updateModel}
               onPluginModelChange={handlePluginModelChange}
+              activeTabId={uiActiveTabId}
+              onActiveTabChange={setUiActiveTabId}
             />
           </div>
         )}
@@ -510,14 +526,16 @@ export default function StateGraphEditor({
                 onChange={(text) => {
                   if (activeCodeFile === 'state.yml') {
                     handleYamlChange(text);
-                  } else if (activeCodeFile === 'scenario.md' || activeCodeFile === 'plugin.yaml') {
-                    // read-only
+                  } else if (activeCodeFile === 'plugin.yaml') {
+                    handlePluginYamlCodeChange(text);
+                  } else if (activeCodeFile === 'scenario.md') {
+                    handleScenarioMdCodeChange(text);
                   } else {
                     handleScriptsChange(activeCodeFile, text);
                   }
                 }}
                 errors={activeCodeFile === 'state.yml' ? errors : []}
-                readOnly={activeCodeFile === 'scenario.md' || activeCodeFile === 'plugin.yaml'}
+                readOnly={false}
                 language={
                   activeCodeFile.endsWith('.md')
                     ? 'markdown'

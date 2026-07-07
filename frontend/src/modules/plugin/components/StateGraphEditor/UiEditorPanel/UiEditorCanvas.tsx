@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -13,19 +14,22 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable';
-import { Input, Empty } from 'antd';
+import { Empty } from 'antd';
 import type { PluginUiTab } from '../core/pluginModel';
 import type { SlotDef } from '../core/model';
 import UiWidgetCard from './UiWidgetCard';
+import CompositeLayoutEditor from './CompositeLayoutEditor';
 
 interface Props {
   tab: PluginUiTab;
   slotMap: Record<string, SlotDef>;
   onSlotsChange: (slotIds: string[]) => void;
-  onCompositeLayoutChange: (value: string) => void;
+  onCompositeLayoutChange: (value: unknown) => void;
 }
 
 export default function UiEditorCanvas({ tab, slotMap, onSlotsChange, onCompositeLayoutChange }: Props) {
+  const [isDragOver, setIsDragOver] = useState(false);
+
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -46,22 +50,62 @@ export default function UiEditorCanvas({ tab, slotMap, onSlotsChange, onComposit
     onSlotsChange(slotIds.filter((id) => id !== slotId));
   };
 
+  // HTML5 drag-drop: accept slot dragged from ArtifactPanel
+  const handleDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('application/x-slot-id')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragOver(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const slotId = e.dataTransfer.getData('application/x-slot-id');
+    if (!slotId) return;
+
+    if (tab.layout === 'composite') {
+      // Append as a new column in composite_layout
+      const currentLayout = Array.isArray(tab.composite_layout) ? tab.composite_layout : [];
+      if (!currentLayout.some((c) => {
+        if (typeof c === 'string') return c === slotId;
+        if (typeof c === 'object' && c !== null && 'slot' in c) return (c as { slot?: unknown }).slot === slotId;
+        return false;
+      })) {
+        onCompositeLayoutChange([...currentLayout, { slot: slotId, weight: 1 }]);
+      }
+      // Also ensure slot is in tab.slots
+      if (!slotIds.includes(slotId)) {
+        onSlotsChange([...slotIds, slotId]);
+      }
+    } else {
+      if (!slotIds.includes(slotId)) {
+        onSlotsChange([...slotIds, slotId]);
+      }
+    }
+  };
+
+  const dropClass = isDragOver ? ' uep-canvas--drop-active' : '';
+
   if (tab.layout === 'composite') {
     return (
-      <div className="uep-canvas uep-canvas--composite">
-        <p className="uep-canvas-composite-hint">
-          composite 布局：直接编辑 <code>composite_layout</code> YAML 片段
-        </p>
-        <Input.TextArea
-          rows={12}
-          value={
-            typeof tab.composite_layout === 'string'
-              ? tab.composite_layout
-              : JSON.stringify(tab.composite_layout ?? '', null, 2)
-          }
-          onChange={(e) => onCompositeLayoutChange(e.target.value)}
-          className="uep-canvas-composite-editor"
-          placeholder="在此输入 composite_layout 配置…"
+      <div
+        className={`uep-canvas uep-canvas--composite${dropClass}`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <CompositeLayoutEditor
+          tab={tab}
+          slotMap={slotMap}
+          onChange={onCompositeLayoutChange}
         />
       </div>
     );
@@ -69,17 +113,27 @@ export default function UiEditorCanvas({ tab, slotMap, onSlotsChange, onComposit
 
   if (slotIds.length === 0) {
     return (
-      <div className="uep-canvas uep-canvas--empty">
+      <div
+        className={`uep-canvas uep-canvas--empty${dropClass}`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="点击「素材」按钮，将素材加入此 Tab"
+          description="将左侧素材拖入此处，或点击素材行「加入 Tab」"
         />
       </div>
     );
   }
 
   return (
-    <div className={`uep-canvas uep-canvas--${tab.layout ?? 'list'}`}>
+    <div
+      className={`uep-canvas uep-canvas--${tab.layout ?? 'list'}${dropClass}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={slotIds} strategy={verticalListSortingStrategy}>
           <div className="uep-canvas-slots">

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { Alert, Breadcrumb, Skeleton, Spin, Input, message } from 'antd';
 import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { getPluginDraft, listPluginDrafts, updatePluginDraftContent } from '../../pluginDraftApi';
@@ -47,6 +47,13 @@ const PHASE_MESSAGES: Record<GeneratePhase, string> = {
 export default function PluginDetailPage() {
   const { pluginId } = useParams<{ pluginId: string }>();
   const navigate = useNavigate();
+  const { isMenuCollapsed, toggleMenu } = useOutletContext<{ isMenuCollapsed: boolean; toggleMenu: () => void }>();
+
+  // Collapse the chat sidebar when entering the plugin editor
+  useEffect(() => {
+    if (!isMenuCollapsed) toggleMenu();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [draft, setDraft] = useState<PluginDraftRecord | null>(null);
   const [loading, setLoading] = useState(true);

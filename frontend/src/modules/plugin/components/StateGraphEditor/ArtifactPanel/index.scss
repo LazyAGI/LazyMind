@@ -10,6 +10,15 @@
   display: flex;
   flex-direction: column;
   z-index: 10;
+
+  &--inline {
+    position: static;
+    width: 100%;
+    height: 100%;
+    box-shadow: none;
+    border-right: none;
+    z-index: auto;
+  }
 }
 
 .artifact-panel-header {
@@ -55,6 +64,14 @@
 
   &:hover {
     border-color: #d9d9d9;
+  }
+
+  &[draggable='true'] {
+    cursor: grab;
+
+    &:active {
+      cursor: grabbing;
+    }
   }
 
   &--editing,

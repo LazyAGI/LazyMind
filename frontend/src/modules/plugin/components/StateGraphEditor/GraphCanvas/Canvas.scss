@@ -3,13 +3,21 @@
   width: 100%;
   height: 100%;
   outline: none;
-  /* Prevent macOS back/forward navigation gesture when panning the canvas */
   overscroll-behavior-x: none;
 
   .react-flow {
     width: 100%;
     height: 100%;
     overscroll-behavior-x: none;
+  }
+
+  // Tell the browser that horizontal scroll inside the pane is handled
+  // by ReactFlow (pan), so do NOT chain it to browser back/forward navigation.
+  .react-flow__pane,
+  .react-flow__renderer,
+  .react-flow__viewport {
+    overscroll-behavior-x: none;
+    touch-action: pan-y pinch-zoom;
   }
 }
 

@@ -838,20 +838,22 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Prevent browser's horizontal-swipe back/forward navigation gesture.
-  // Use capture phase so we intercept before ReactFlow's own wheel handler,
-  // and passive:false so preventDefault() is actually honoured by the browser.
+  // Prevent macOS back/forward navigation gesture triggered by horizontal wheel.
+  // Attach on `document` in the capture phase so it is stable across ReactFlow
+  // internal re-renders, and check that the event target is inside our canvas.
+  // `preventDefault()` does NOT block ReactFlow's pan — RF moves its viewport
+  // directly in JS and does not rely on native scroll, so preventing the
+  // browser default only stops the navigation gesture, not the canvas pan.
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
     const handler = (e: WheelEvent) => {
-      // Only block horizontal scroll (deltaX); leave vertical and pinch-zoom alone.
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      if (Math.abs(e.deltaX) === 0) return;
+      const el = containerRef.current;
+      if (el && el.contains(e.target as Element)) {
         e.preventDefault();
       }
     };
-    el.addEventListener('wheel', handler, { passive: false, capture: true });
-    return () => el.removeEventListener('wheel', handler, { capture: true });
+    document.addEventListener('wheel', handler, { passive: false, capture: true });
+    return () => document.removeEventListener('wheel', handler, { capture: true });
   }, []);
 
   return (
