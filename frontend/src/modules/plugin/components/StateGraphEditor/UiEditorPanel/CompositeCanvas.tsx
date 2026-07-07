@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, Fragment } from 'react';
+import type { CSSProperties } from 'react';
 import { PlusOutlined, CloseOutlined } from '@ant-design/icons';
 import { Button, Select, Tooltip } from 'antd';
 import type { CompositePanelNode } from '../core/pluginModel';
@@ -70,9 +71,10 @@ interface LeafPaneProps {
   usedSlotIds: Set<string>;
   onChange: (updated: CompositePanelNode) => void;
   onRemove?: () => void;
+  style?: CSSProperties;
 }
 
-function LeafPane({ node, slotMap, usedSlotIds, onChange, onRemove }: LeafPaneProps) {
+function LeafPane({ node, slotMap, usedSlotIds, onChange, onRemove, style }: LeafPaneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const isTabsNode = Array.isArray(node.tabs);
   const hasContent = isTabsNode ? (node.tabs!.length > 0) : !!node.slot;
@@ -120,6 +122,7 @@ function LeafPane({ node, slotMap, usedSlotIds, onChange, onRemove }: LeafPanePr
   return (
     <div
       className={`cc-leaf${isDragOver ? ' cc-leaf--drag-over' : ''}${!hasContent ? ' cc-leaf--empty' : ''}`}
+      style={style}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -212,10 +215,9 @@ interface CanvasNodeProps {
   rootUsedSlotIds: Set<string>;
   onUpdate: (updated: CompositePanelNode) => void;
   onDelete?: () => void;
-  containerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
-function CanvasNode({ node, parentDirection, slotMap, rootUsedSlotIds, onUpdate, onDelete, containerRef }: CanvasNodeProps) {
+function CanvasNode({ node, parentDirection, slotMap, rootUsedSlotIds, onUpdate, onDelete }: CanvasNodeProps) {
   const elRef = useRef<HTMLDivElement>(null);
   const isLeaf = !node.direction && !node.children?.length;
 
@@ -227,6 +229,7 @@ function CanvasNode({ node, parentDirection, slotMap, rootUsedSlotIds, onUpdate,
         usedSlotIds={rootUsedSlotIds}
         onChange={onUpdate}
         onRemove={onDelete}
+        style={parentDirection ? { flex: node.weight ?? 1, minWidth: 0, minHeight: 0 } : undefined}
       />
     );
   }
@@ -235,9 +238,8 @@ function CanvasNode({ node, parentDirection, slotMap, rootUsedSlotIds, onUpdate,
   const children = node.children ?? [];
 
   const handleWeightChange = (idx: number, delta: number) => {
-    const ref = containerRef ?? elRef;
-    if (!ref.current || children.length < 2) return;
-    const containerSize = dir === 'row' ? ref.current.clientWidth : ref.current.clientHeight;
+    if (!elRef.current || children.length < 2) return;
+    const containerSize = dir === 'row' ? elRef.current.clientWidth : elRef.current.clientHeight;
     if (!containerSize) return;
 
     const left = children[idx];
@@ -276,7 +278,7 @@ function CanvasNode({ node, parentDirection, slotMap, rootUsedSlotIds, onUpdate,
       style={parentDirection ? { flex: node.weight ?? 1 } : undefined}
     >
       {children.map((child, idx) => (
-        <div key={idx} className='cc-container-cell' style={{ flex: child.weight ?? 1 }}>
+        <Fragment key={idx}>
           <CanvasNode
             node={child}
             parentDirection={dir}
@@ -284,12 +286,11 @@ function CanvasNode({ node, parentDirection, slotMap, rootUsedSlotIds, onUpdate,
             rootUsedSlotIds={rootUsedSlotIds}
             onUpdate={(u) => handleUpdateChild(idx, u)}
             onDelete={children.length > 1 ? () => handleDeleteChild(idx) : undefined}
-            containerRef={elRef}
           />
           {idx < children.length - 1 && (
             <DividerHandle direction={dir} onDrag={(delta) => handleWeightChange(idx, delta)} />
           )}
-        </div>
+        </Fragment>
       ))}
     </div>
   );

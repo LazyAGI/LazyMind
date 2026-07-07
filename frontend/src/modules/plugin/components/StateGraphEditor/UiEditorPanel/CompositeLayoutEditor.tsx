@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { Button, Switch, Tooltip } from 'antd';
+import { Button, Tooltip } from 'antd';
 import {
   ColumnWidthOutlined,
   LayoutOutlined,
@@ -80,18 +79,14 @@ const TEMPLATES: Array<{ label: string; icon: React.ReactNode; node: CompositePa
 ];
 
 // ---------------------------------------------------------------------------
-// Step 1: Tab bar position selector
+// Step 1: Page-bar position selector (required, no toggle)
 // ---------------------------------------------------------------------------
 
-function TabPositionStep({
-  enabled,
+function PageBarPositionStep({
   position,
-  onToggle,
   onPositionChange,
 }: {
-  enabled: boolean;
   position: PluginUiTab['composite_tab_position'];
-  onToggle: (v: boolean) => void;
   onPositionChange: (pos: PluginUiTab['composite_tab_position']) => void;
 }) {
   const positions: Array<{ value: PluginUiTab['composite_tab_position']; icon: React.ReactNode; label: string }> = [
@@ -105,33 +100,25 @@ function TabPositionStep({
     <div className='cle-step cle-step-1'>
       <div className='cle-step-title'>
         <span className='cle-step-badge'>1</span>
-        <span>全局 Tab 条</span>
-        <Switch
-          size='small'
-          checked={enabled}
-          onChange={onToggle}
-          style={{ marginLeft: 8 }}
-        />
+        <span>Page 条位置</span>
       </div>
-      {enabled && (
-        <div className='cle-tab-positions'>
-          {positions.map((p) => (
-            <Tooltip key={p.value} title={p.label}>
-              <button
-                type='button'
-                className={`cle-tab-pos-btn${position === p.value ? ' cle-tab-pos-btn--active' : ''}`}
-                onClick={() => onPositionChange(p.value)}
-                aria-pressed={position === p.value}
-              >
-                {p.icon}
-                <span>{p.label}</span>
-              </button>
-            </Tooltip>
-          ))}
-        </div>
-      )}
+      <div className='cle-tab-positions'>
+        {positions.map((p) => (
+          <Tooltip key={p.value} title={p.label}>
+            <button
+              type='button'
+              className={`cle-tab-pos-btn${position === p.value ? ' cle-tab-pos-btn--active' : ''}`}
+              onClick={() => onPositionChange(p.value)}
+              aria-pressed={position === p.value}
+            >
+              {p.icon}
+              <span>{p.label}</span>
+            </button>
+          </Tooltip>
+        ))}
+      </div>
       <p className='cle-step-hint'>
-        Tab 数量由运行时 slot 数据条数决定，此处只配置 Tab 条位置。
+        Page 数量由运行时 slot 数据条数决定，此处只配置 page 条位置。
       </p>
     </div>
   );
@@ -175,17 +162,12 @@ export default function CompositeLayoutEditor({
   onChange,
   onTabPositionChange,
 }: Props) {
-  const hasLayout = !!tab.composite_layout?.direction;
-  const [tabEnabled, setTabEnabled] = useState(!!tab.composite_tab_position);
-
-  const handleTabToggle = (enabled: boolean) => {
-    setTabEnabled(enabled);
-    if (!enabled) {
-      onTabPositionChange(undefined);
-    } else {
-      onTabPositionChange(tab.composite_tab_position ?? 'top');
-    }
-  };
+  // Treat layout as "set" only when there are actual children to display
+  const hasLayout = !!(
+    tab.composite_layout?.direction &&
+    tab.composite_layout.children &&
+    tab.composite_layout.children.length > 0
+  );
 
   const handleTabPositionChange = (pos: PluginUiTab['composite_tab_position']) => {
     onTabPositionChange(pos);
@@ -201,15 +183,13 @@ export default function CompositeLayoutEditor({
 
   return (
     <div className='cle-root'>
-      {/* Step 1: Tab bar position */}
-      <TabPositionStep
-        enabled={tabEnabled}
-        position={tab.composite_tab_position}
-        onToggle={handleTabToggle}
+      {/* Step 1: Page-bar position (required) */}
+      <PageBarPositionStep
+        position={tab.composite_tab_position ?? 'top'}
         onPositionChange={handleTabPositionChange}
       />
 
-      {/* Step 2: Template picker (only if no layout yet) */}
+      {/* Step 2: Template picker (shown until a template is selected) */}
       {!hasLayout && (
         <TemplatePicker onSelect={handleSelectTemplate} />
       )}

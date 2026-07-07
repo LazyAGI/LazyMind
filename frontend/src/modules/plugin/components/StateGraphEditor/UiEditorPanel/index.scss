@@ -275,7 +275,7 @@
   line-height: 1.5;
 }
 
-// ─── Step 1: Tab bar positions ────────────────────────────────────────────────
+// ─── Step 1: Page-bar position ────────────────────────────────────────────────
 .cle-tab-positions {
   display: flex;
   gap: 8px;
@@ -363,36 +363,25 @@
   &--column { flex-direction: column; }
 }
 
-.cc-container-cell {
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-}
-
 // ─── DividerHandle ────────────────────────────────────────────────────────────
 .cc-divider {
-  position: absolute;
-  z-index: 10;
-  background: transparent;
+  flex-shrink: 0;
+  background: #e8e8e8;
   transition: background 0.15s;
+  z-index: 10;
 
-  &:hover, &:active { background: rgba(22, 119, 255, 0.3); }
+  &:hover, &:active { background: rgba(22, 119, 255, 0.5); }
 
   &--row {
-    top: 0;
-    right: -3px;
-    width: 6px;
+    width: 4px;
     height: 100%;
     cursor: col-resize;
+    align-self: stretch;
   }
 
   &--column {
-    left: 0;
-    bottom: -3px;
     width: 100%;
-    height: 6px;
+    height: 4px;
     cursor: row-resize;
   }
 }
@@ -409,6 +398,7 @@
   background: #fff;
   transition: border-color 0.12s, box-shadow 0.12s;
   min-height: 80px;
+  min-width: 0;
   position: relative;
 
   &--drag-over {
