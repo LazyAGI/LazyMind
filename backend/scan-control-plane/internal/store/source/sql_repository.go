@@ -107,7 +107,7 @@ WHERE rowid IN (
 	)
 	WHERE rn > 1
 )`
-	return mapSQLConstraint(r.orm.Exec(statement).Error)
+	return r.orm.Exec(statement).Error
 }
 
 func (r *SQLRepository) ormDB(ctx context.Context) *gorm.DB {
