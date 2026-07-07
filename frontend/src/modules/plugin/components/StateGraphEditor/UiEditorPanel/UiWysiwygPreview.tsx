@@ -84,13 +84,26 @@ interface TabContentProps {
 }
 
 function TabContent({ tab, slotMap, pluginSlotMap, gridCols, onSlotsChange, onCompositeLayoutChange }: TabContentProps) {
-  if (tab.slots.length === 0) {
+  // Composite layout always renders the editor (even with no slots yet)
+  if (tab.layout !== 'composite' && tab.slots.length === 0) {
     return (
       <div className="wywp-no-slots">将左侧素材拖入此处，或点击素材行「加入 Tab」</div>
     );
   }
 
-  // Composite layout
+  // Editable canvas (covers all layouts including composite)
+  if (onSlotsChange && onCompositeLayoutChange) {
+    return (
+      <UiEditorCanvas
+        tab={tab}
+        slotMap={slotMap}
+        onSlotsChange={onSlotsChange}
+        onCompositeLayoutChange={onCompositeLayoutChange}
+      />
+    );
+  }
+
+  // Composite layout (read-only fallback)
   if (tab.layout === 'composite') {
     const columns = buildCompositeColumns(tab);
     if (columns.length === 0) {
@@ -119,18 +132,6 @@ function TabContent({ tab, slotMap, pluginSlotMap, gridCols, onSlotsChange, onCo
           );
         })}
       </div>
-    );
-  }
-
-  // Editable canvas for non-composite layouts
-  if (onSlotsChange && onCompositeLayoutChange) {
-    return (
-      <UiEditorCanvas
-        tab={tab}
-        slotMap={slotMap}
-        onSlotsChange={onSlotsChange}
-        onCompositeLayoutChange={onCompositeLayoutChange}
-      />
     );
   }
 
@@ -333,6 +334,7 @@ export default function UiWysiwygPreview({
       <div className="wywp-content">
         {activeTab && (
           <TabContent
+            key={activeTab.id}
             tab={activeTab}
             slotMap={slotMap}
             pluginSlotMap={pluginSlotMap}

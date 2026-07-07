@@ -7,18 +7,19 @@ import type { WidgetConfig, WidgetType } from '../core/pluginModel';
 import { SLOT_DEFAULT_WIDGET } from '../core/pluginModel';
 import { SLOT_TYPE_ICONS } from './slotTypeIcon';
 import WidgetPlaceholder from './WidgetPlaceholder';
-import WidgetConfigPanel from './WidgetConfigPanel';
 import WidgetSelector from './WidgetSelector';
 
 interface Props {
   slotId: string;
   slotDef?: SlotDef;
   widget?: WidgetConfig;
+  isSelected?: boolean;
+  onSelect?: (slotId: string) => void;
   onRemove: (slotId: string) => void;
   onWidgetChange?: (slotId: string, widget: WidgetConfig) => void;
 }
 
-export default function UiWidgetCard({ slotId, slotDef, widget, onRemove, onWidgetChange }: Props) {
+export default function UiWidgetCard({ slotId, slotDef, widget, isSelected, onSelect, onRemove, onWidgetChange }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: slotId });
 
@@ -42,20 +43,17 @@ export default function UiWidgetCard({ slotId, slotDef, widget, onRemove, onWidg
     onWidgetChange?.(slotId, newWidget);
   };
 
-  const handleConfigChange = (next: WidgetConfig) => {
-    onWidgetChange?.(slotId, next);
-  };
-
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="uep-widget-card"
+      className={`uep-widget-card${isSelected ? ' uep-widget-card--selected' : ''}`}
+      onClick={() => onSelect?.(slotId)}
       {...attributes}
     >
       {/* Zone 1: Header */}
       <div className="uep-widget-card-header">
-        <span className="uep-widget-drag" {...listeners} aria-label="拖拽排序">
+        <span className="uep-widget-drag" {...listeners} aria-label="拖拽排序" onClick={(e) => e.stopPropagation()}>
           <HolderOutlined />
         </span>
         <span className="uep-widget-icon">{icon}</span>
@@ -73,7 +71,7 @@ export default function UiWidgetCard({ slotId, slotDef, widget, onRemove, onWidg
             size="small"
             icon={<CloseOutlined />}
             className="uep-widget-remove"
-            onClick={() => onRemove(slotId)}
+            onClick={(e) => { e.stopPropagation(); onRemove(slotId); }}
             aria-label={`移除 ${label}`}
           />
         </Tooltip>
@@ -83,13 +81,6 @@ export default function UiWidgetCard({ slotId, slotDef, widget, onRemove, onWidg
       <div className="uep-widget-preview">
         <WidgetPlaceholder widgetConfig={activeWidget} label={label} />
       </div>
-
-      {/* Zone 3: Inline config panel */}
-      {onWidgetChange && (
-        <div className="uep-widget-config">
-          <WidgetConfigPanel config={activeWidget} onChange={handleConfigChange} />
-        </div>
-      )}
     </div>
   );
 }

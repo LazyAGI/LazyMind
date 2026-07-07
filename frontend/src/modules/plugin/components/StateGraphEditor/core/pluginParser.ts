@@ -84,11 +84,33 @@ function parseUiTabs(raw: unknown): PluginUiTab[] | undefined {
     const t = tab as Record<string, unknown>;
     const id = String(t.id ?? '').trim();
     if (!id) return [];
+
+    const validLayouts = ['list', 'vertical', 'grid', 'horizontal', 'composite'];
+    const rawLayout = String(t.layout ?? '');
+    const layout = validLayouts.includes(rawLayout) ? (rawLayout as PluginUiTab['layout']) : undefined;
+
+    const slots = Array.isArray(t.slots)
+      ? t.slots.flatMap((s: unknown): Array<{ id: string; widget?: unknown }> => {
+          if (!s || typeof s !== 'object' || Array.isArray(s)) {
+            const sid = String(s ?? '').trim();
+            return sid ? [{ id: sid }] : [];
+          }
+          const se = s as Record<string, unknown>;
+          const slotId = String(se.id ?? '').trim();
+          if (!slotId) return [];
+          const entry: { id: string; widget?: unknown } = { id: slotId };
+          if (se.widget && typeof se.widget === 'object') entry.widget = se.widget;
+          return [entry];
+        })
+      : [];
+
     return [{
       id,
       label: t.label !== undefined ? String(t.label) : undefined,
-      layout: ['list', 'grid', 'horizontal'].includes(String(t.layout)) ? (String(t.layout) as PluginUiTab['layout']) : undefined,
-      slots: Array.isArray(t.slots) ? t.slots.map((s: unknown) => ({ id: String(typeof s === 'object' && s !== null ? (s as Record<string, unknown>).id ?? s : s) })) : [],
+      layout,
+      gridCols: typeof t.grid_cols === 'number' ? t.grid_cols : undefined,
+      slots,
+      composite_layout: t.composite_layout ?? undefined,
     }];
   });
 }

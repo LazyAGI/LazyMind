@@ -145,6 +145,10 @@
     align-items: center;
     justify-content: center;
   }
+
+  &--horizontal {
+    overflow-x: auto;
+  }
 }
 
 .uep-canvas-slots {
@@ -163,9 +167,16 @@
 
   &--horizontal {
     flex-direction: row;
-    flex-wrap: wrap;
+    align-items: flex-start;
+    flex-wrap: nowrap;
     gap: 12px;
     max-width: none;
+
+    // Each card takes equal share of available width
+    .uep-widget-card {
+      flex: 1;
+      min-width: 0;
+    }
   }
 }
 
@@ -180,9 +191,15 @@
 // Horizontal layout overrides (legacy)
 .uep-canvas--horizontal .uep-canvas-slots {
   flex-direction: row;
-  flex-wrap: wrap;
+  align-items: flex-start;
+  flex-wrap: nowrap;
   gap: 12px;
   max-width: none;
+
+  .uep-widget-card {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 // Composite canvas
@@ -520,14 +537,140 @@
   &:focus { border-color: #1677ff; }
 }
 
+// ─── Canvas + Properties panel wrapper ───────────────────────────────────────
+.uep-canvas-with-props {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+
+  > .uep-canvas {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+// ─── Right-side properties panel ─────────────────────────────────────────────
+.uep-props-panel {
+  width: 260px;
+  flex-shrink: 0;
+  background: #fff;
+  border-left: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.uep-props-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  min-height: 40px;
+}
+
+.uep-props-panel-icon {
+  color: #8c8c8c;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.uep-props-panel-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uep-props-panel-close {
+  flex-shrink: 0;
+  opacity: 0.6;
+  &:hover { opacity: 1; }
+}
+
+.uep-props-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px 16px;
+}
+
+// ─── Widget card wrapper (for drag insert indicator) ─────────────────────────
+.uep-widget-card-wrapper {
+  position: relative;
+
+  // Vertical indicator (top / bottom) for vertical layout
+  &[data-show-before='top']::before,
+  &[data-show-after='bottom']::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #1677ff;
+    border-radius: 1px;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  &[data-show-before='top']::before { top: -7px; }
+  &[data-show-after='bottom']::after { bottom: -7px; }
+
+  // Horizontal indicator (left / right) for horizontal layout
+  &[data-show-before='left']::before,
+  &[data-show-after='right']::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #1677ff;
+    border-radius: 1px;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  &[data-show-before='left']::before { left: -7px; }
+  &[data-show-after='right']::after { right: -7px; }
+}
+
+// ─── Drag ghost overlay ───────────────────────────────────────────────────────
+.uep-drag-ghost {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #fff;
+  border: 1px solid #1677ff;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  color: #262626;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.uep-drag-ghost-icon {
+  color: #8c8c8c;
+  font-size: 14px;
+}
+
+.uep-drag-ghost-label {
+  font-weight: 500;
+}
+
 // ─── WidgetConfigPanel ────────────────────────────────────────────────────────
 .wcp-root {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 0 4px;
-  border-top: 1px solid #f0f0f0;
-  margin-top: 8px;
+  padding: 4px 0;
 }
 
 .wcp-field {
@@ -549,7 +692,7 @@
   align-items: center;
 }
 
-// ─── UiWidgetCard (upgraded three-zone) ──────────────────────────────────────
+// ─── UiWidgetCard (two-zone: header + preview) ───────────────────────────────
 .uep-widget-card {
   border: 1px solid #e8e8e8;
   border-radius: 8px;
@@ -558,11 +701,16 @@
   flex-direction: column;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  transition: box-shadow 0.15s;
-  cursor: default;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  cursor: pointer;
 
   &:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  &--selected {
+    border-color: #1677ff;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.2);
   }
 
   &--drag-over {
@@ -634,10 +782,5 @@
   border-bottom: 1px solid #f0f0f0;
   background: #fff;
   min-height: 60px;
-}
-
-.uep-widget-config {
-  padding: 0 12px 10px;
-  background: #fafafa;
 }
 
