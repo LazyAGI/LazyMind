@@ -836,8 +836,26 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     setSelectedNodeId(null);
   };
 
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Prevent browser's horizontal-swipe navigation gesture (back/forward) while
+  // still allowing ReactFlow to pan the canvas. Must use a non-passive listener
+  // so that preventDefault() is honoured by the browser.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) > 0) {
+        e.preventDefault();
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
+
   return (
     <div
+      ref={containerRef}
       className="graph-canvas-container"
       onKeyDown={onKeyDown}
       onDoubleClick={onDoubleClick}
