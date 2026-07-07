@@ -100,6 +100,23 @@ export type WidgetConfig =
   | FileCardConfig
   | JsonBlockConfig;
 
+// ── Composite layout tree (format C) ─────────────────────────────────────────
+
+/**
+ * Recursive tree node for composite_layout (format C).
+ * Exactly one of { slot, tabs, direction+children } should be set.
+ */
+export interface CompositePanelNode {
+  /** Leaf: single slot id. */
+  slot?: string;
+  /** Leaf: tab-switching area, each item is a slot id. */
+  tabs?: string[];
+  /** Container: split direction. */
+  direction?: 'row' | 'column';
+  children?: CompositePanelNode[];
+  weight?: number;
+}
+
 // ── Plugin UI model ───────────────────────────────────────────────────────────
 
 export interface PluginUiTab {
@@ -108,9 +125,12 @@ export interface PluginUiTab {
   layout?: 'vertical' | 'grid' | 'horizontal' | 'composite';
   /** Number of columns in grid layout (undefined = auto-fill). */
   gridCols?: number;
-  slots: Array<{ id: string; widget?: WidgetConfig }>;
-  /** Raw composite_layout value — preserved as-is when serializing to YAML. */
-  composite_layout?: unknown;
+  /** Slot id list only — widget config lives in ui.slots. */
+  slots: Array<{ id: string }>;
+  /** Composite mode: global tab-bar position. */
+  composite_tab_position?: 'top' | 'bottom' | 'left' | 'right';
+  /** Composite mode: layout tree (format C). */
+  composite_layout?: CompositePanelNode;
 }
 
 export interface PluginToolScript {
@@ -128,7 +148,11 @@ export interface PluginModel {
   steps: Array<{ id: string; label: string }>;
   /** Slot definitions — list format, each entry is a complete PluginSlotDef. */
   slots: PluginSlotDef[];
-  ui?: { tabs: PluginUiTab[] };
+  ui?: {
+    tabs: PluginUiTab[];
+    /** Global widget config keyed by slot id. Shared across all tabs. */
+    slots?: Record<string, WidgetConfig>;
+  };
   /** i18n block is preserved as-is; never shown or edited in the UI. */
   i18n?: Record<string, unknown>;
 }

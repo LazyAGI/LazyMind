@@ -205,6 +205,41 @@ function resolveColumnSlotId(
   return null;
 }
 
+/**
+ * Flatten a format-C CompositePanelNode tree into a flat column list.
+ * For 'row' nodes, children become columns proportioned by weight.
+ * For 'column' nodes at root, we treat the whole tree as one column (single slot fallback).
+ * tabs[] leaf nodes become an InnerTabsNode for backward compat rendering.
+ */
+function flattenFormatCNode(
+  node: import('@/modules/chat/store/pluginPanel').CompositePanelNode,
+  weight: number,
+): Array<{ slotId: string | InnerTabsNode; weight: number }> {
+  if (node.slot) {
+    return [{ slotId: node.slot, weight }];
+  }
+  if (node.tabs && node.tabs.length > 0) {
+    // Convert format-C tabs (string[]) to legacy InnerTabsNode for rendering
+    const innerTabsNode: InnerTabsNode = {
+      tabs: node.tabs.map((slotId) => slotId as CompositeLayoutNode),
+    };
+    return [{ slotId: innerTabsNode, weight }];
+  }
+  if (node.direction === 'row' && node.children) {
+    const childWeight = node.children.reduce((s, c) => s + (c.weight ?? 1), 0);
+    return node.children.flatMap((child) =>
+      flattenFormatCNode(child, ((child.weight ?? 1) / childWeight) * weight),
+    );
+  }
+  // column direction or unknown: render as a single nested block — just flatten children
+  if (node.direction === 'column' && node.children) {
+    // For now, render only the first child in column containers (rows handle horizontal splitting)
+    // A full nested column render would require CSS grid nesting, handled in the tree renderer.
+    return node.children.flatMap((child) => flattenFormatCNode(child, child.weight ?? 1));
+  }
+  return [];
+}
+
 /** Build the effective column list from composite_layout (or fall back to slot ids). */
 function buildColumns(
   tab: TabDef,
@@ -214,16 +249,13 @@ function buildColumns(
     return tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
   }
 
-  // New tree format: { direction, children }
+  // Format C: { direction, children } tree
   if (!Array.isArray(layout) && typeof layout === 'object' && 'direction' in layout) {
-    const tree = layout as { direction?: string; children?: Array<{ slot?: string; weight?: number }> };
-    if (tree.direction === 'row' && Array.isArray(tree.children)) {
-      return tree.children
-        .map((c) => c.slot ? { slotId: c.slot, weight: c.weight ?? 1 } : null)
-        .filter((c): c is NonNullable<typeof c> => c !== null);
-    }
-    // For column or complex trees, fall back to slot order
-    return tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
+    const result = flattenFormatCNode(
+      layout as import('@/modules/chat/store/pluginPanel').CompositePanelNode,
+      1,
+    );
+    return result.length > 0 ? result : tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
   }
 
   // Legacy array format

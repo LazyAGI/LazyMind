@@ -1,4 +1,4 @@
-import type { PluginModel, PluginUiTab, WidgetConfig } from '../core/pluginModel';
+import type { PluginModel, PluginUiTab, WidgetConfig, CompositePanelNode } from '../core/pluginModel';
 import type { GraphModel } from '../core/model';
 import ArtifactPanel from '../ArtifactPanel';
 import UiWysiwygPreview from './UiWysiwygPreview';
@@ -57,14 +57,33 @@ export default function UiEditorPanel({
     if (activeTabId === tabId) onActiveTabChange(newTabs[0]?.id);
   };
 
-  const handleSlotsChange = (slots: Array<{ id: string; widget?: WidgetConfig }>) => {
+  const handleSlotsChange = (slots: Array<{ id: string }>) => {
     if (!activeTabId) return;
     updateTabs(tabs.map((t) => t.id === activeTabId ? { ...t, slots } : t));
   };
 
-  const handleCompositeLayoutChange = (value: unknown) => {
+  const handleUiSlotsChange = (slotId: string, widget: WidgetConfig | undefined) => {
+    const currentUiSlots = pluginModel.ui?.slots ?? {};
+    const nextSlots = { ...currentUiSlots };
+    if (widget === undefined) {
+      delete nextSlots[slotId];
+    } else {
+      nextSlots[slotId] = widget;
+    }
+    onPluginModelChange({
+      ...pluginModel,
+      ui: { ...(pluginModel.ui ?? { tabs: [] }), slots: nextSlots },
+    });
+  };
+
+  const handleCompositeLayoutChange = (value: CompositePanelNode) => {
     if (!activeTabId) return;
     updateTabs(tabs.map((t) => t.id === activeTabId ? { ...t, composite_layout: value } : t));
+  };
+
+  const handleCompositeTabPositionChange = (pos: PluginUiTab['composite_tab_position']) => {
+    if (!activeTabId) return;
+    updateTabs(tabs.map((t) => t.id === activeTabId ? { ...t, composite_tab_position: pos } : t));
   };
 
   const handleLayoutChange = (layout: PluginUiTab['layout']) => {
@@ -104,14 +123,10 @@ export default function UiEditorPanel({
           onDrop={(e) => {
             e.preventDefault();
             const slotId = e.dataTransfer.getData('application/x-slot-id');
-            const widgetTypeStr = e.dataTransfer.getData('application/x-widget-type');
             if (slotId && activeTabId) {
               const currentTab = tabs.find((t) => t.id === activeTabId);
               if (!currentTab || currentTab.slots.some((s) => s.id === slotId)) return;
-              const widget: WidgetConfig | undefined = widgetTypeStr
-                ? ({ widgetType: widgetTypeStr } as WidgetConfig)
-                : undefined;
-              handleSlotsChange([...(currentTab.slots ?? []), { id: slotId, widget }]);
+              handleSlotsChange([...(currentTab.slots ?? []), { id: slotId }]);
             }
           }}
         >
@@ -129,6 +144,8 @@ export default function UiEditorPanel({
             onGridColsChange={handleGridColsChange}
             onSlotsChange={handleSlotsChange}
             onCompositeLayoutChange={handleCompositeLayoutChange}
+            onCompositeTabPositionChange={handleCompositeTabPositionChange}
+            onUiSlotsChange={handleUiSlotsChange}
           />
         </div>
       </div>

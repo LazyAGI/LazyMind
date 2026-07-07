@@ -48,22 +48,26 @@ export function serializePluginModel(model: PluginModel, graphModel?: GraphModel
   }
 
   if (model.ui?.tabs && model.ui.tabs.length > 0) {
-    doc.ui = {
-      tabs: model.ui.tabs.map((tab) => {
-        const t: Record<string, unknown> = { id: tab.id };
-        if (tab.label) t.label = tab.label;
-        // Always output 'vertical' (never the legacy 'list' value)
-        if (tab.layout) t.layout = tab.layout;
-        if (tab.gridCols != null) t.grid_cols = tab.gridCols;
-        t.slots = tab.slots.map((s) => {
-          const entry: Record<string, unknown> = { id: s.id };
-          if (s.widget) entry.widget = s.widget;
-          return entry;
-        });
-        if (tab.composite_layout != null) t.composite_layout = tab.composite_layout;
-        return t;
-      }),
-    };
+    const uiDoc: Record<string, unknown> = {};
+
+    // Serialize global ui.slots
+    if (model.ui.slots && Object.keys(model.ui.slots).length > 0) {
+      uiDoc.slots = model.ui.slots;
+    }
+
+    uiDoc.tabs = model.ui.tabs.map((tab) => {
+      const t: Record<string, unknown> = { id: tab.id };
+      if (tab.label) t.label = tab.label;
+      if (tab.layout) t.layout = tab.layout;
+      if (tab.gridCols != null) t.grid_cols = tab.gridCols;
+      // slots: only output id list
+      t.slots = tab.slots.map((s) => ({ id: s.id }));
+      if (tab.composite_tab_position) t.composite_tab_position = tab.composite_tab_position;
+      if (tab.composite_layout != null) t.composite_layout = tab.composite_layout;
+      return t;
+    });
+
+    doc.ui = uiDoc;
   }
 
   if (model.i18n) doc.i18n = model.i18n;

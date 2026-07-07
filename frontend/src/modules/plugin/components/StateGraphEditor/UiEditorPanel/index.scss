@@ -228,182 +228,78 @@
   background: rgba(22, 119, 255, 0.04);
 }
 
-// ─── CompositeLayoutEditor ────────────────────────────────────────────────────
+// ─── CompositeLayoutEditor (new 5-step editor) ────────────────────────────────
 .cle-root {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 4px 0;
+  gap: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
-.cle-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.cle-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: #262626;
-}
-
-.cle-empty {
-  font-size: 12px;
-  color: #bfbfbf;
-  text-align: center;
-  padding: 24px 0;
-}
-
-.cle-cols {
-  display: flex;
-  flex-direction: row;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.cle-col-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  background: #fff;
-  border: 1px solid #e8e8e8;
-  border-radius: 8px;
-  min-width: 180px;
-  position: relative;
-  transition: box-shadow 0.15s;
-
-  &:hover {
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-  }
-}
-
-.cle-col-drag {
-  color: #bfbfbf;
-  cursor: grab;
-  font-size: 14px;
-  align-self: center;
-
-  &:active {
-    cursor: grabbing;
-  }
-}
-
-.cle-col-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.cle-col-field {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.cle-col-label {
-  font-size: 11px;
-  color: #8c8c8c;
-  width: 28px;
+.cle-step {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;
 }
 
-.cle-col-delete {
-  align-self: flex-end;
-  opacity: 0;
-  transition: opacity 0.12s;
-
-  .cle-col-card:hover & {
-    opacity: 1;
-  }
-}
-
-.cle-preview-bar {
-  display: flex;
-  height: 32px;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid #e8e8e8;
-}
-
-.cle-preview-segment {
+.cle-step-title {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: #f0f5ff;
-  border-right: 1px solid #e8e8e8;
-  font-size: 11px;
-  overflow: hidden;
-  min-width: 0;
-  transition: background 0.12s;
-
-  &:last-child {
-    border-right: none;
-  }
-
-  &:hover {
-    background: #d6e4ff;
-  }
-}
-
-.cle-preview-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 6px;
-  color: #1677ff;
-}
-
-.cle-advanced-toggle {
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: 11px;
-  color: #8c8c8c;
-  cursor: pointer;
-  text-align: left;
-
-  &:hover {
-    color: #1677ff;
-  }
-}
-
-.cle-advanced-editor {
-  width: 100%;
-  font-family: 'SFMono-Regular', Consolas, monospace;
-  font-size: 12px;
-  border: 1px solid #d9d9d9;
-  border-radius: 4px;
-  padding: 8px;
-  resize: vertical;
-  box-sizing: border-box;
-}
-
-// ─── CompositeLayoutEditor: mode switch ──────────────────────────────────────
-.cle-mode-switch {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.cle-mode-label {
-  font-size: 12px;
-  color: #8c8c8c;
-  white-space: nowrap;
-}
-
-// ─── CompositeLayoutEditor: template picker ──────────────────────────────────
-.cle-templates {
-  padding: 8px 0;
-}
-
-.cle-templates-title {
-  font-size: 12px;
-  color: #8c8c8c;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
   margin-bottom: 10px;
 }
 
+.cle-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #1677ff;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.cle-step-hint {
+  font-size: 11px;
+  color: #8c8c8c;
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+
+// ─── Step 1: Tab bar positions ────────────────────────────────────────────────
+.cle-tab-positions {
+  display: flex;
+  gap: 8px;
+}
+
+.cle-tab-pos-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  background: #fafafa;
+  cursor: pointer;
+  font-size: 12px;
+  color: #595959;
+  transition: border-color 0.12s, background 0.12s;
+
+  &:hover { border-color: #1677ff; background: #f0f5ff; }
+  &--active { border-color: #1677ff; background: #e6f0ff; color: #1677ff; font-weight: 500; }
+}
+
+// ─── Step 2: Template picker ──────────────────────────────────────────────────
 .cle-templates-grid {
   display: flex;
   flex-wrap: wrap;
@@ -424,117 +320,168 @@
   font-size: 12px;
   min-width: 64px;
 
-  &:hover {
-    border-color: #1677ff;
-    background: #f0f5ff;
-  }
+  &:hover { border-color: #1677ff; background: #f0f5ff; }
 }
 
-.cle-template-icon {
-  font-size: 16px;
-  line-height: 1;
-  letter-spacing: 2px;
-}
+.cle-template-icon { font-size: 16px; line-height: 1; letter-spacing: 2px; }
+.cle-template-label { color: #595959; }
 
-.cle-template-label {
-  color: #595959;
-}
-
-// ─── CompositeLayoutEditor: tree editor ──────────────────────────────────────
-.cle-tree-editor {
+// ─── Step canvas ──────────────────────────────────────────────────────────────
+.cle-step-canvas {
+  flex: 1;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  border-bottom: none;
 }
 
-.cle-tree-node {
+.cle-canvas-actions { margin-left: auto; }
+
+.cle-canvas-wrap {
+  flex: 1;
+  overflow: hidden;
   border: 1px solid #e8e8e8;
   border-radius: 6px;
   background: #fafafa;
-  padding: 8px 10px;
+  margin-top: 4px;
+}
+
+// ─── CompositeCanvas ──────────────────────────────────────────────────────────
+.cc-root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+}
+
+.cc-container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+
+  &--row { flex-direction: row; }
+  &--column { flex-direction: column; }
+}
+
+.cc-container-cell {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-
-  &--depth-1 { background: #f0f5ff; border-color: #d6e4ff; }
-  &--depth-2 { background: #f6ffed; border-color: #d9f7be; }
-  &--depth-3 { background: #fff7e6; border-color: #ffe7ba; }
+  position: relative;
+  min-width: 0;
+  min-height: 0;
 }
 
-.cle-tree-node-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+// ─── DividerHandle ────────────────────────────────────────────────────────────
+.cc-divider {
+  position: absolute;
+  z-index: 10;
+  background: transparent;
+  transition: background 0.15s;
+
+  &:hover, &:active { background: rgba(22, 119, 255, 0.3); }
+
+  &--row {
+    top: 0;
+    right: -3px;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+  }
+
+  &--column {
+    left: 0;
+    bottom: -3px;
+    width: 100%;
+    height: 6px;
+    cursor: row-resize;
+  }
 }
 
-.cle-tree-dir-badge {
-  font-size: 11px;
-  font-weight: 600;
-  background: #e6f0ff;
-  color: #1677ff;
-  border-radius: 4px;
-  padding: 2px 6px;
-  white-space: nowrap;
-}
-
-.cle-tree-node-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  flex-wrap: wrap;
-}
-
-.cle-tree-children {
-  display: flex;
-  gap: 8px;
-  padding-left: 12px;
-  border-left: 2px solid #e8e8e8;
-
-  &--column { flex-direction: column; }
-  &--row { flex-direction: row; flex-wrap: wrap; }
-}
-
-.cle-tree-tabs {
+// ─── LeafPane ─────────────────────────────────────────────────────────────────
+.cc-leaf {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 8px;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
   background: #fff;
-  border: 1px solid #f0f0f0;
-  border-radius: 4px;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  min-height: 80px;
+  position: relative;
+
+  &--drag-over {
+    border-color: #1677ff;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.2);
+    background: #f0f5ff;
+  }
+
+  &--empty { background: #fafafa; }
 }
 
-.cle-tree-tabs-bar {
+.cc-leaf-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
-.cle-tree-tabs-label {
-  font-size: 11px;
-  color: #8c8c8c;
-  white-space: nowrap;
-}
+.cc-leaf-tab-toggle { margin-right: auto; }
 
-.cle-tree-tab-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+.cc-leaf-slot-select { flex-shrink: 0; }
 
-.cle-tree-tab-label-input {
+.cc-leaf-placeholder {
   flex: 1;
-  height: 24px;
-  border: 1px solid #d9d9d9;
-  border-radius: 4px;
-  padding: 0 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   font-size: 12px;
-  outline: none;
-  min-width: 0;
+  color: #bfbfbf;
+  pointer-events: none;
+}
 
-  &:focus { border-color: #1677ff; }
+.cc-leaf-slot-badge {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: #595959;
+  background: #f5f5f5;
+  border-radius: 4px;
+  min-height: 32px;
+  padding: 4px 8px;
+  text-align: center;
+}
+
+.cc-leaf-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.cc-leaf-tab-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #f0f5ff;
+  border: 1px solid #d6e4ff;
+  border-radius: 4px;
+  padding: 2px 4px 2px 8px;
+}
+
+.cc-leaf-tab-chip-label {
+  flex: 1;
+  font-size: 12px;
+  color: #1677ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 // ─── Canvas + Properties panel wrapper ───────────────────────────────────────

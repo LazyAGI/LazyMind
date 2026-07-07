@@ -222,11 +222,19 @@ export interface SlotDef {
   summary_max_chars?: number;
 }
 
-// composite_layout node types (recursive).
-// A node is one of:
-//   - string: slot_id
-//   - CompositeColumnNode: { slot?: string | InnerTabsNode; weight?: number }
-//   - InnerTabsNode: { tabs: CompositeLayoutNode[] }
+// composite_layout node types (recursive) — format C.
+export interface CompositePanelNode {
+  /** Leaf: single slot id. */
+  slot?: string;
+  /** Leaf: tab-switching area, each item is a slot id. Tab title is derived from slot label. */
+  tabs?: string[];
+  /** Container: split direction. */
+  direction?: 'row' | 'column';
+  children?: CompositePanelNode[];
+  weight?: number;
+}
+
+// Legacy composite layout types kept for backward-compat parsing in buildColumns.
 export type CompositeLayoutNode =
   | string
   | CompositeColumnNode
@@ -241,27 +249,21 @@ export interface InnerTabsNode {
   tabs: CompositeLayoutNode[];
 }
 
-/** New tree-model node for composite_layout (direction+children format). */
-export interface CompositePanelNode {
-  slot?: string;
-  weight?: number;
-  direction?: 'row' | 'column';
-  children?: CompositePanelNode[];
-  tabs?: Array<{ label?: string; slot: string }>;
-  tabs_position?: 'top' | 'bottom' | 'left' | 'right';
-}
-
 export interface TabDef {
   id: string;
   label: string;
-  layout?: "grid" | "list" | "vertical" | "composite" | "horizontal";
+  layout?: 'grid' | 'list' | 'vertical' | 'composite' | 'horizontal';
   slots: SlotDef[];
-  /** Only present when layout === "composite". Each element describes one column (legacy) or a tree node. */
-  composite_layout?: CompositeLayoutNode[] | CompositePanelNode;
+  /** Composite layout tree (format C) or legacy array (will be normalised at runtime). */
+  composite_layout?: CompositePanelNode | CompositeLayoutNode[];
+  /** Composite mode: global tab-bar position. */
+  composite_tab_position?: 'top' | 'bottom' | 'left' | 'right';
 }
 
 export interface PluginUI {
   tabs?: TabDef[];
+  /** Global widget config keyed by slot id. */
+  slots?: Record<string, Record<string, unknown>>;
 }
 
 export interface SlotOrderInfo {

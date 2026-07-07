@@ -1,11 +1,8 @@
 import { useRef, useState } from 'react';
 import { Button, Dropdown, Input, InputNumber } from 'antd';
 import type { InputRef, MenuProps } from 'antd';
-import {
-  PlusOutlined,
-  EllipsisOutlined,
-} from '@ant-design/icons';
-import type { PluginModel, PluginUiTab, PluginSlotDef, WidgetConfig, WidgetType } from '../core/pluginModel';
+import { PlusOutlined, EllipsisOutlined } from '@ant-design/icons';
+import type { PluginModel, PluginUiTab, PluginSlotDef, WidgetConfig, WidgetType, CompositePanelNode } from '../core/pluginModel';
 import { SLOT_DEFAULT_WIDGET } from '../core/pluginModel';
 import type { SlotDef } from '../core/model';
 import WidgetPlaceholder from './WidgetPlaceholder';
@@ -35,99 +32,66 @@ function resolveSlot(
 }
 
 function getWidgetConfig(
-  slotEntry: { id: string; widget?: WidgetConfig },
+  slotId: string,
+  uiSlots: Record<string, WidgetConfig>,
   slotMap: Record<string, SlotDef>,
   pluginSlotMap: Record<string, PluginSlotDef>,
 ): WidgetConfig {
-  if (slotEntry.widget) return slotEntry.widget;
-  const { type, cardinality } = resolveSlot(slotEntry.id, slotMap, pluginSlotMap);
+  if (uiSlots[slotId]) return uiSlots[slotId];
+  const { type, cardinality } = resolveSlot(slotId, slotMap, pluginSlotMap);
   const key = `${type}/${cardinality ?? 'single'}`;
   const widgetType: WidgetType = (SLOT_DEFAULT_WIDGET[key] ?? 'text-single') as WidgetType;
   return { widgetType } as WidgetConfig;
 }
 
-interface CompositeColumnNode {
-  slot?: string;
-  weight?: number;
-  direction?: string;
-  children?: unknown[];
-}
+// ---------------------------------------------------------------------------
+// Composite read-only renderer: supports format C recursive tree
+// ---------------------------------------------------------------------------
 
-function buildCompositeColumns(tab: PluginUiTab): Array<{ slotId: string; weight: number }> {
-  const layout = tab.composite_layout;
-  if (!Array.isArray(layout) || layout.length === 0) {
-    return tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
+function renderCompositeNode(
+  node: CompositePanelNode,
+  uiSlots: Record<string, WidgetConfig>,
+  slotMap: Record<string, SlotDef>,
+  pluginSlotMap: Record<string, PluginSlotDef>,
+  totalWeight: number,
+): React.ReactNode {
+  if (node.slot) {
+    const widget = getWidgetConfig(node.slot, uiSlots, slotMap, pluginSlotMap);
+    const label = resolveSlot(node.slot, slotMap, pluginSlotMap).label;
+    return <WidgetPlaceholder widgetConfig={widget} label={label} />;
   }
-  // Support new tree format { direction, children }
-  if (!Array.isArray(layout) && typeof layout === 'object' && layout !== null && 'direction' in (layout as object)) {
-    return tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
-  }
-  return (layout as unknown[])
-    .map((node) => {
-      if (typeof node === 'string') return { slotId: node, weight: 1 };
-      if (typeof node === 'object' && node !== null && 'slot' in node) {
-        const n = node as CompositeColumnNode;
-        return n.slot ? { slotId: n.slot, weight: n.weight ?? 1 } : null;
-      }
-      return null;
-    })
-    .filter((c): c is { slotId: string; weight: number } => c !== null);
-}
 
-interface TabContentProps {
-  tab: PluginUiTab;
-  slotMap: Record<string, SlotDef>;
-  pluginSlotMap: Record<string, PluginSlotDef>;
-  gridCols?: number;
-  onSlotsChange?: (slots: Array<{ id: string; widget?: WidgetConfig }>) => void;
-  onCompositeLayoutChange?: (value: unknown) => void;
-}
-
-function TabContent({ tab, slotMap, pluginSlotMap, gridCols, onSlotsChange, onCompositeLayoutChange }: TabContentProps) {
-  // Composite layout always renders the editor (even with no slots yet)
-  if (tab.layout !== 'composite' && tab.slots.length === 0) {
+  if (node.tabs && node.tabs.length > 0) {
+    const firstSlot = node.tabs[0];
+    const widget = getWidgetConfig(firstSlot, uiSlots, slotMap, pluginSlotMap);
+    const label = resolveSlot(firstSlot, slotMap, pluginSlotMap).label;
     return (
-      <div className="wywp-no-slots">将左侧素材拖入此处，或点击素材行「加入 Tab」</div>
-    );
-  }
-
-  // Editable canvas (covers all layouts including composite)
-  if (onSlotsChange && onCompositeLayoutChange) {
-    return (
-      <UiEditorCanvas
-        tab={tab}
-        slotMap={slotMap}
-        onSlotsChange={onSlotsChange}
-        onCompositeLayoutChange={onCompositeLayoutChange}
-      />
-    );
-  }
-
-  // Composite layout (read-only fallback)
-  if (tab.layout === 'composite') {
-    const columns = buildCompositeColumns(tab);
-    if (columns.length === 0) {
-      return (
-        <div className="wywp-layout-vertical">
-          {tab.slots.map((s) => {
-            const widget = getWidgetConfig(s, slotMap, pluginSlotMap);
-            const label = resolveSlot(s.id, slotMap, pluginSlotMap).label;
-            return <WidgetPlaceholder key={s.id} widgetConfig={widget} label={label} />;
-          })}
+      <div className='wywp-composite-tabs'>
+        <div className='wywp-composite-tab-bar'>
+          {node.tabs.map((slotId) => (
+            <span key={slotId} className='wywp-composite-tab-chip'>
+              {resolveSlot(slotId, slotMap, pluginSlotMap).label}
+            </span>
+          ))}
         </div>
-      );
-    }
-    const totalWeight = columns.reduce((sum, c) => sum + c.weight, 0);
+        <WidgetPlaceholder widgetConfig={widget} label={label} />
+      </div>
+    );
+  }
+
+  if (node.direction && node.children) {
+    const childTotalWeight = node.children.reduce((s, c) => s + (c.weight ?? 1), 0);
     return (
-      <div className="wywp-layout-composite">
-        {columns.map((col) => {
-          const pct = totalWeight > 0 ? (col.weight / totalWeight) * 100 : 100 / columns.length;
-          const slotEntry = tab.slots.find((s) => s.id === col.slotId) ?? { id: col.slotId };
-          const widget = getWidgetConfig(slotEntry, slotMap, pluginSlotMap);
-          const label = resolveSlot(col.slotId, slotMap, pluginSlotMap).label;
+      <div className={`wywp-composite-container wywp-composite-container--${node.direction}`}>
+        {node.children.map((child, idx) => {
+          const pct = childTotalWeight > 0 ? ((child.weight ?? 1) / childTotalWeight) * 100 : 100 / node.children!.length;
           return (
-            <div key={col.slotId} className="wywp-composite-col" style={{ flexBasis: `${pct}%` }}>
-              <WidgetPlaceholder widgetConfig={widget} label={label} />
+            <div
+              key={idx}
+              className='wywp-composite-cell'
+              style={node.direction === 'row' ? { flexBasis: `${pct}%`, flexGrow: child.weight ?? 1 } : { flex: child.weight ?? 1 }}
+            >
+              {renderCompositeNode(child, uiSlots, slotMap, pluginSlotMap, child.weight ?? 1)}
             </div>
           );
         })}
@@ -135,7 +99,76 @@ function TabContent({ tab, slotMap, pluginSlotMap, gridCols, onSlotsChange, onCo
     );
   }
 
-  // Read-only fallback: render widget placeholders
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// TabContent
+// ---------------------------------------------------------------------------
+
+interface TabContentProps {
+  tab: PluginUiTab;
+  uiSlots: Record<string, WidgetConfig>;
+  slotMap: Record<string, SlotDef>;
+  pluginSlotMap: Record<string, PluginSlotDef>;
+  gridCols?: number;
+  onSlotsChange?: (slots: Array<{ id: string }>) => void;
+  onUiSlotsChange?: (slotId: string, widget: WidgetConfig | undefined) => void;
+  onCompositeLayoutChange?: (value: CompositePanelNode) => void;
+  onCompositeTabPositionChange?: (pos: PluginUiTab['composite_tab_position']) => void;
+}
+
+function TabContent({
+  tab,
+  uiSlots,
+  slotMap,
+  pluginSlotMap,
+  gridCols,
+  onSlotsChange,
+  onUiSlotsChange,
+  onCompositeLayoutChange,
+  onCompositeTabPositionChange,
+}: TabContentProps) {
+  if (tab.layout !== 'composite' && tab.slots.length === 0) {
+    return <div className="wywp-no-slots">将左侧素材拖入此处，或点击素材行「加入 Tab」</div>;
+  }
+
+  // Editable canvas
+  if (onSlotsChange && onUiSlotsChange && onCompositeLayoutChange && onCompositeTabPositionChange) {
+    return (
+      <UiEditorCanvas
+        tab={tab}
+        slotMap={slotMap}
+        uiSlots={uiSlots}
+        onSlotsChange={onSlotsChange}
+        onUiSlotsChange={onUiSlotsChange}
+        onCompositeLayoutChange={onCompositeLayoutChange}
+        onCompositeTabPositionChange={onCompositeTabPositionChange}
+      />
+    );
+  }
+
+  // Composite read-only fallback
+  if (tab.layout === 'composite') {
+    if (tab.composite_layout?.direction) {
+      return (
+        <div className='wywp-layout-composite'>
+          {renderCompositeNode(tab.composite_layout, uiSlots, slotMap, pluginSlotMap, 1)}
+        </div>
+      );
+    }
+    return (
+      <div className='wywp-layout-vertical'>
+        {tab.slots.map((s) => {
+          const widget = getWidgetConfig(s.id, uiSlots, slotMap, pluginSlotMap);
+          const label = resolveSlot(s.id, slotMap, pluginSlotMap).label;
+          return <WidgetPlaceholder key={s.id} widgetConfig={widget} label={label} />;
+        })}
+      </div>
+    );
+  }
+
+  // Generic read-only fallback
   const layoutClass = `wywp-layout-${tab.layout ?? 'vertical'}`;
   const layoutStyle: React.CSSProperties = {};
   if (tab.layout === 'grid' && gridCols) {
@@ -144,13 +177,17 @@ function TabContent({ tab, slotMap, pluginSlotMap, gridCols, onSlotsChange, onCo
   return (
     <div className={layoutClass} style={layoutStyle}>
       {tab.slots.map((s) => {
-        const widget = getWidgetConfig(s, slotMap, pluginSlotMap);
+        const widget = getWidgetConfig(s.id, uiSlots, slotMap, pluginSlotMap);
         const label = resolveSlot(s.id, slotMap, pluginSlotMap).label;
         return <WidgetPlaceholder key={s.id} widgetConfig={widget} label={label} />;
       })}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
 
 interface Props {
   pluginModel: PluginModel;
@@ -164,8 +201,10 @@ interface Props {
   onDeleteTab?: (tabId: string) => void;
   onLayoutChange?: (layout: PluginUiTab['layout']) => void;
   onGridColsChange?: (gridCols: number | null) => void;
-  onSlotsChange?: (slots: Array<{ id: string; widget?: WidgetConfig }>) => void;
-  onCompositeLayoutChange?: (value: unknown) => void;
+  onSlotsChange?: (slots: Array<{ id: string }>) => void;
+  onUiSlotsChange?: (slotId: string, widget: WidgetConfig | undefined) => void;
+  onCompositeLayoutChange?: (value: CompositePanelNode) => void;
+  onCompositeTabPositionChange?: (pos: PluginUiTab['composite_tab_position']) => void;
 }
 
 export default function UiWysiwygPreview({
@@ -181,9 +220,12 @@ export default function UiWysiwygPreview({
   onLayoutChange,
   onGridColsChange,
   onSlotsChange,
+  onUiSlotsChange,
   onCompositeLayoutChange,
+  onCompositeTabPositionChange,
 }: Props) {
   const tabs = pluginModel.ui?.tabs ?? [];
+  const uiSlots: Record<string, WidgetConfig> = (pluginModel.ui?.slots ?? {}) as Record<string, WidgetConfig>;
   const pluginSlotMap = Object.fromEntries(pluginModel.slots.map((s) => [s.id, s]));
 
   const activeIdx = Math.max(0, tabs.findIndex((t) => t.id === activeTabId));
@@ -227,7 +269,6 @@ export default function UiWysiwygPreview({
 
   return (
     <div className="wywp-root">
-      {/* Step bar + layout picker on the right */}
       <div className="wywp-stepbar">
         <div className="wywp-stepbar-tabs">
           {tabs.map((tab, idx) => {
@@ -262,19 +303,8 @@ export default function UiWysiwygPreview({
                   <Dropdown
                     menu={{
                       items: [
-                        ...(onRenameTab
-                          ? [{ key: 'rename', label: '重命名' as React.ReactNode, onClick: ({ domEvent }: { domEvent: React.MouseEvent }) => { domEvent.stopPropagation(); startEdit(tab); } }]
-                          : []),
-                        ...(onDeleteTab && tabs.length > 1
-                          ? [{
-                              key: 'delete',
-                              label: <span style={{ color: '#ff4d4f' }}>删除 Tab</span> as React.ReactNode,
-                              onClick: ({ domEvent }: { domEvent: React.MouseEvent }) => {
-                                domEvent.stopPropagation();
-                                onDeleteTab(tabId);
-                              },
-                            }]
-                          : []),
+                        ...(onRenameTab ? [{ key: 'rename', label: '重命名' as React.ReactNode, onClick: ({ domEvent }: { domEvent: React.MouseEvent }) => { domEvent.stopPropagation(); startEdit(tab); } }] : []),
+                        ...(onDeleteTab && tabs.length > 1 ? [{ key: 'delete', label: <span style={{ color: '#ff4d4f' }}>删除 Tab</span> as React.ReactNode, onClick: ({ domEvent }: { domEvent: React.MouseEvent }) => { domEvent.stopPropagation(); onDeleteTab(tabId); } }] : []),
                       ] as MenuProps['items'],
                     }}
                     trigger={['click']}
@@ -292,19 +322,12 @@ export default function UiWysiwygPreview({
             );
           })}
           {onAddTab && (
-            <Button
-              type="text"
-              size="small"
-              icon={<PlusOutlined />}
-              className="wywp-stepbar-add"
-              onClick={onAddTab}
-            >
+            <Button type="text" size="small" icon={<PlusOutlined />} className="wywp-stepbar-add" onClick={onAddTab}>
               新建 Tab
             </Button>
           )}
         </div>
 
-        {/* Layout picker + grid cols config */}
         <div className="wywp-stepbar-right">
           {onLayoutChange && (
             <Dropdown menu={{ items: layoutMenuItems }} trigger={['click']}>
@@ -330,22 +353,23 @@ export default function UiWysiwygPreview({
         </div>
       </div>
 
-      {/* Content */}
       <div className="wywp-content">
         {activeTab && (
           <TabContent
             key={activeTab.id}
             tab={activeTab}
+            uiSlots={uiSlots}
             slotMap={slotMap}
             pluginSlotMap={pluginSlotMap}
             gridCols={activeGridCols}
             onSlotsChange={onSlotsChange}
+            onUiSlotsChange={onUiSlotsChange}
             onCompositeLayoutChange={onCompositeLayoutChange}
+            onCompositeTabPositionChange={onCompositeTabPositionChange}
           />
         )}
       </div>
 
-      {/* Footer actions (read-only preview) */}
       <div className="wywp-footer">
         <button type="button" className="wywp-btn wywp-btn--ghost">重试</button>
         <button type="button" className="wywp-btn wywp-btn--primary">继续</button>

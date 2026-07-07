@@ -1,5 +1,5 @@
 import jsYaml from 'js-yaml';
-import type { PluginModel, PluginSlotDef, PluginToolScript, PluginUiTab } from './pluginModel';
+import type { PluginModel, PluginSlotDef, PluginToolScript, PluginUiTab, WidgetConfig, CompositePanelNode } from './pluginModel';
 
 interface RawPluginYaml {
   id?: unknown;
@@ -11,6 +11,35 @@ interface RawPluginYaml {
   slots?: unknown;
   ui?: unknown;
   i18n?: unknown;
+}
+
+/**
+ * Migrate legacy composite_layout (format A or B) to format C (CompositePanelNode tree).
+ * Format A: layout[0] is an array of columns — [[{slot, weight}, ...]] or [[slotId, ...]]
+ * Format B: flat array — [{slot, weight}, ...]
+ */
+function migrateLegacyCompositeLayout(raw: unknown): CompositePanelNode {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { direction: 'row', children: [] };
+  }
+  // Format A: first element is an array
+  const cols: unknown[] = Array.isArray(raw[0]) ? (raw[0] as unknown[]) : raw;
+  const children: CompositePanelNode[] = cols.map((node) => {
+    if (typeof node === 'string') return { slot: node, weight: 1 };
+    if (typeof node === 'object' && node !== null) {
+      const n = node as Record<string, unknown>;
+      // { slot: { tabs: [...] }, weight } -> { tabs: [...], weight }
+      if (n.slot && typeof n.slot === 'object' && !Array.isArray(n.slot) && 'tabs' in (n.slot as object)) {
+        const tabsRaw = (n.slot as Record<string, unknown>).tabs;
+        const tabIds = Array.isArray(tabsRaw) ? tabsRaw.map((t) => typeof t === 'string' ? t : String(t)) : [];
+        return { tabs: tabIds, weight: typeof n.weight === 'number' ? n.weight : 1 };
+      }
+      const slotId = typeof n.slot === 'string' ? n.slot : '';
+      return { slot: slotId, weight: typeof n.weight === 'number' ? n.weight : 1 };
+    }
+    return { slot: '', weight: 1 };
+  });
+  return { direction: 'row', children };
 }
 
 function parseSlots(raw: unknown): PluginSlotDef[] {
@@ -75,11 +104,23 @@ function parseToolScripts(raw: unknown): PluginToolScript[] {
   });
 }
 
-function parseUiTabs(raw: unknown): PluginUiTab[] | undefined {
+function parseUiTabs(raw: unknown): { tabs: PluginUiTab[]; slots?: Record<string, WidgetConfig> } | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const uiObj = raw as Record<string, unknown>;
   if (!Array.isArray(uiObj.tabs)) return undefined;
-  return uiObj.tabs.flatMap((tab): PluginUiTab[] => {
+
+  // Parse global ui.slots map
+  let uiSlots: Record<string, WidgetConfig> | undefined;
+  if (uiObj.slots && typeof uiObj.slots === 'object' && !Array.isArray(uiObj.slots)) {
+    uiSlots = {};
+    for (const [slotId, widgetRaw] of Object.entries(uiObj.slots as Record<string, unknown>)) {
+      if (widgetRaw && typeof widgetRaw === 'object' && !Array.isArray(widgetRaw)) {
+        uiSlots[slotId] = widgetRaw as WidgetConfig;
+      }
+    }
+  }
+
+  const tabs = uiObj.tabs.flatMap((tab): PluginUiTab[] => {
     if (!tab || typeof tab !== 'object' || Array.isArray(tab)) return [];
     const t = tab as Record<string, unknown>;
     const id = String(t.id ?? '').trim();
@@ -89,8 +130,9 @@ function parseUiTabs(raw: unknown): PluginUiTab[] | undefined {
     const rawLayout = String(t.layout ?? '');
     const layout = validLayouts.includes(rawLayout) ? (rawLayout as PluginUiTab['layout']) : undefined;
 
+    // Parse slots — only id, widget is migrated to ui.slots
     const slots = Array.isArray(t.slots)
-      ? t.slots.flatMap((s: unknown): Array<{ id: string; widget?: unknown }> => {
+      ? t.slots.flatMap((s: unknown): Array<{ id: string }> => {
           if (!s || typeof s !== 'object' || Array.isArray(s)) {
             const sid = String(s ?? '').trim();
             return sid ? [{ id: sid }] : [];
@@ -98,11 +140,32 @@ function parseUiTabs(raw: unknown): PluginUiTab[] | undefined {
           const se = s as Record<string, unknown>;
           const slotId = String(se.id ?? '').trim();
           if (!slotId) return [];
-          const entry: { id: string; widget?: unknown } = { id: slotId };
-          if (se.widget && typeof se.widget === 'object') entry.widget = se.widget;
-          return [entry];
+          // Migrate legacy per-slot widget into uiSlots
+          if (se.widget && typeof se.widget === 'object' && !Array.isArray(se.widget)) {
+            if (!uiSlots) uiSlots = {};
+            if (!uiSlots[slotId]) {
+              uiSlots[slotId] = se.widget as WidgetConfig;
+            }
+          }
+          return [{ id: slotId }];
         })
       : [];
+
+    // Parse composite_layout: migrate array format to format C
+    let compositeLayout: CompositePanelNode | undefined;
+    if (t.composite_layout !== undefined && t.composite_layout !== null) {
+      if (Array.isArray(t.composite_layout)) {
+        compositeLayout = migrateLegacyCompositeLayout(t.composite_layout);
+      } else if (typeof t.composite_layout === 'object' && 'direction' in (t.composite_layout as object)) {
+        compositeLayout = t.composite_layout as CompositePanelNode;
+      }
+    }
+
+    const validTabPositions = ['top', 'bottom', 'left', 'right'];
+    const rawTabPos = String(t.composite_tab_position ?? '');
+    const compositeTabPosition = validTabPositions.includes(rawTabPos)
+      ? (rawTabPos as PluginUiTab['composite_tab_position'])
+      : undefined;
 
     return [{
       id,
@@ -110,9 +173,12 @@ function parseUiTabs(raw: unknown): PluginUiTab[] | undefined {
       layout,
       gridCols: typeof t.grid_cols === 'number' ? t.grid_cols : undefined,
       slots,
-      composite_layout: t.composite_layout ?? undefined,
+      composite_layout: compositeLayout,
+      composite_tab_position: compositeTabPosition,
     }];
   });
+
+  return { tabs, slots: uiSlots };
 }
 
 function parseSteps(raw: unknown): Array<{ id: string; label: string }> {
@@ -138,7 +204,7 @@ export function parsePluginYaml(yamlText: string): PluginModel | null {
     return null;
   }
 
-  const uiTabs = parseUiTabs(raw.ui);
+  const uiResult = parseUiTabs(raw.ui);
 
   return {
     id: String(raw.id ?? ''),
@@ -148,7 +214,7 @@ export function parsePluginYaml(yamlText: string): PluginModel | null {
     tool_scripts: parseToolScripts(raw.tool_scripts),
     steps: parseSteps(raw.steps),
     slots: parseSlots(raw.slots),
-    ui: uiTabs ? { tabs: uiTabs } : undefined,
+    ui: uiResult ? { tabs: uiResult.tabs, slots: uiResult.slots } : undefined,
     i18n: raw.i18n as Record<string, unknown> | undefined,
   };
 }

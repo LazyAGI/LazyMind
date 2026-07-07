@@ -161,6 +161,7 @@ interface ArtifactRowProps {
   model: GraphModel;
   uiMode?: boolean;
   tabs: PluginUiTab[];
+  uiSlots: Record<string, WidgetConfig>;
   onUpdate: (id: string, patch: Partial<Omit<SlotDef, 'id'>>) => void;
   onDelete: (id: string) => void;
   onJoinTab: (slotId: string, tabId: string, widget: WidgetConfig) => void;
@@ -168,7 +169,7 @@ interface ArtifactRowProps {
   onWidgetChange: (slotId: string, tabId: string, widget: WidgetConfig) => void;
 }
 
-function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, onLeaveTab, onWidgetChange }: ArtifactRowProps) {
+function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, onJoinTab, onLeaveTab, onWidgetChange }: ArtifactRowProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<EditDraft>(EMPTY_DRAFT);
@@ -307,7 +308,7 @@ function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, 
             <WidgetSelector
               slotType={art.type}
               cardinality={art.cardinality}
-              value={currentTabSlot.widget?.widgetType as WidgetType | undefined}
+              value={uiSlots[art.id]?.widgetType as WidgetType | undefined}
               onChange={(wt) => {
                 const newWidget: WidgetConfig = { widgetType: wt } as WidgetConfig;
                 onWidgetChange(art.id, currentTab.id, newWidget);
@@ -355,6 +356,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
 
   const artifacts = Object.values(model.slots);
   const tabs: PluginUiTab[] = pluginModel?.ui?.tabs ?? [];
+  const uiSlots: Record<string, WidgetConfig> = (pluginModel?.ui?.slots ?? {}) as Record<string, WidgetConfig>;
 
   const validateId = (id: string): string | undefined => {
     if (!id.trim()) return t('selfEvolutionRun.artifactPanelIdErrorEmpty');
@@ -411,10 +413,11 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
     if (!pluginModel || !onUiModelChange) return;
     const newTabs = tabs.map((tab) =>
       tab.id === tabId && !tab.slots.some((s) => s.id === slotId)
-        ? { ...tab, slots: [...tab.slots, { id: slotId, widget }] }
+        ? { ...tab, slots: [...tab.slots, { id: slotId }] }
         : tab,
     );
-    onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs });
+    const nextUiSlots = { ...(pluginModel.ui?.slots ?? {}), [slotId]: widget };
+    onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs, slots: nextUiSlots });
   };
 
   const leaveTab = (slotId: string, tabId: string) => {
@@ -425,14 +428,10 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
     onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs });
   };
 
-  const updateWidget = (slotId: string, tabId: string, widget: WidgetConfig) => {
+  const updateWidget = (slotId: string, _tabId: string, widget: WidgetConfig) => {
     if (!pluginModel || !onUiModelChange) return;
-    const newTabs = tabs.map((tab) =>
-      tab.id === tabId
-        ? { ...tab, slots: tab.slots.map((s) => s.id === slotId ? { ...s, widget } : s) }
-        : tab,
-    );
-    onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs });
+    const nextUiSlots = { ...(pluginModel.ui?.slots ?? {}), [slotId]: widget };
+    onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs, slots: nextUiSlots });
   };
 
   return (
@@ -469,6 +468,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
             model={model}
             uiMode={uiMode}
             tabs={tabs}
+            uiSlots={uiSlots}
             onUpdate={updateArtifact}
             onDelete={handleDelete}
             onJoinTab={joinTab}

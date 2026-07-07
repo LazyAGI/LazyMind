@@ -343,7 +343,66 @@ steps:
     # StateMachine 自动生成 bypass 边，LLM 可选择跳过
 ```
 
-### 7.4 列表 slot 追加
+### 7.5 Composite 布局（新格式 C）
+
+Composite 布局用于将多个 slot 以任意横纵分割方式并排展示，支持嵌套分块和分块内 Tab 切换。
+
+**ui.slots — 全局控件配置**
+
+widget 配置从 `tabs[].slots[].widget` 移至顶层 `ui.slots`，以 slot id 为 key：
+
+```yaml
+ui:
+  slots:
+    page_design:
+      widgetType: image-gallery
+      itemLayout: grid
+      itemWidth: 200
+    content:
+      widgetType: text-markdown
+    notes:
+      widgetType: text-single
+      readOnly: true
+
+  tabs:
+    - id: slides
+      layout: composite
+      composite_tab_position: left   # 全局 Tab 条位置：top/bottom/left/right
+      slots:
+        - id: page_design
+        - id: content
+        - id: notes
+      composite_layout:
+        direction: row
+        children:
+          - slot: page_design
+            weight: 2
+          - direction: column
+            weight: 1
+            children:
+              - slot: content
+                weight: 1
+              - tabs:
+                  - notes
+                weight: 1
+```
+
+**`CompositePanelNode` 字段说明**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `slot` | string | 叶子节点：绑定单个 slot id |
+| `tabs` | string[] | 叶子节点：Tab 切换区，各项为 slot id，Tab 标题取 slot label |
+| `direction` | `'row'` / `'column'` | 容器节点：横向或纵向分割 |
+| `children` | CompositePanelNode[] | 容器节点的子节点列表 |
+| `weight` | number | 该节点在父容器中所占比例（默认 1） |
+
+约束：`slot` / `tabs` / `direction+children` 三者互斥。
+
+**兼容性**
+
+旧格式（数组 `[{slot, weight}]` 或 `[[{slot, weight}]]`）在解析时自动迁移为格式 C，无需手动转换。
+
 
 ```yaml
 slots:                    # 在 plugin.yaml 中定义
