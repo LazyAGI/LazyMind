@@ -6,6 +6,8 @@
   min-height: 500px;
   background: #fafafa;
   overflow: hidden;
+  /* Prevent macOS horizontal swipe from triggering browser back/forward */
+  overscroll-behavior-x: none;
 }
 
 /* ─── Row 1: top bar ─────────────────────────────────────── */

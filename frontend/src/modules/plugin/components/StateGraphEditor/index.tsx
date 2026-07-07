@@ -118,6 +118,22 @@ export default function StateGraphEditor({
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [pluginInfoOpen, setPluginInfoOpen] = useState(false);
 
+  // Prevent macOS browser back/forward navigation when horizontally swiping
+  // inside the editor. Must be non-passive + capture so it fires before the
+  // browser's native gesture recogniser consumes the event.
+  const editorRootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = editorRootRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) > 0) {
+        e.preventDefault();
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false, capture: true });
+    return () => el.removeEventListener('wheel', handler, { capture: true });
+  }, []);
+
   // plugin.yaml model — must be initialized before GraphModel so we can back-fill slots.
   const [pluginModel, setPluginModel] = useState<PluginModel>(() =>
     initialPluginYaml ? (parsePluginYaml(initialPluginYaml) ?? createEmptyPluginModel()) : createEmptyPluginModel(),
@@ -316,7 +332,7 @@ export default function StateGraphEditor({
 
 
   return (
-    <div className="state-graph-editor" aria-label="插件编辑器">
+    <div ref={editorRootRef} className="state-graph-editor" aria-label="插件编辑器">
       {/* ── Row 1: back/breadcrumb left, save status + plugin config right ── */}
       <div className="sge-topbar">
         <div className="sge-topbar-left">

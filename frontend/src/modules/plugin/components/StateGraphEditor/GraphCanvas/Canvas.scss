@@ -3,10 +3,13 @@
   width: 100%;
   height: 100%;
   outline: none;
+  /* Prevent macOS back/forward navigation gesture when panning the canvas */
+  overscroll-behavior-x: none;
 
   .react-flow {
     width: 100%;
     height: 100%;
+    overscroll-behavior-x: none;
   }
 }
 
