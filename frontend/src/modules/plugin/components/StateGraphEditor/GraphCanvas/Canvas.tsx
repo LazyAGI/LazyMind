@@ -251,6 +251,10 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   useEffect(() => { modelRef.current = model; }, [model]);
   useEffect(() => { onModelChangeRef.current = onModelChange; }, [onModelChange]);
 
+  // Keep nodeErrorMap in a ref so stable callbacks can always read the latest value.
+  const nodeErrorMapRef = useRef(nodeErrorMap);
+  useEffect(() => { nodeErrorMapRef.current = nodeErrorMap; }, [nodeErrorMap]);
+
   // Stable callback — never changes reference, reads from refs.
   const handleConditionChange = useCallback(
     (sourceId: string, targetId: string, condition: string) => {
@@ -378,11 +382,10 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   // Propagate error state changes to ReactFlow nodes independently of the main
   // model sync. This runs even when skipSyncRef suppresses the full sync above,
   // so error highlights update immediately after the parent re-validates.
-  const nodeErrorMapRef = useRef(nodeErrorMap);
   useEffect(() => {
+    // nodeErrorMapRef is already kept up to date by the effect above; use it to
+    // detect whether the map actually changed before running the update.
     const prevMap = nodeErrorMapRef.current;
-    nodeErrorMapRef.current = nodeErrorMap;
-    // Skip if the map reference hasn't changed (e.g. no re-validation occurred).
     if (prevMap === nodeErrorMap) return;
     setNodes((currentNodes) => {
       let changed = false;
@@ -750,14 +753,6 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       )
     : false;
 
-  // Keep latest nodeErrorMap in a ref so handleNodePropertyChange (useCallback)
-  // always reads the current value without being re-created on every render.
-  const nodeErrorMapRef2 = useRef(nodeErrorMap);
-  useEffect(() => { nodeErrorMapRef2.current = nodeErrorMap; }, [nodeErrorMap]);
-  // Keep latest handleConditionChange in a ref for the same reason.
-  const handleConditionChangeRef = useRef(handleConditionChange);
-  useEffect(() => { handleConditionChangeRef.current = handleConditionChange; }, [handleConditionChange]);
-
   const handleNodePropertyChange = useCallback((updated: StepNode): boolean => {
     const m = modelRef.current;
     const effectiveId = updated.id || newHiddenId();
@@ -771,6 +766,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     const updatedNodes = m.nodes.map((n) => (n.id === currentSelectedNodeId ? normalised : n));
 
     if (normalised.id !== currentSelectedNodeId) {
+      // Id changed: remap transitions and layout, then let model sync handle RF state.
       const remaId = normalised.id;
       const remappedNodes = updatedNodes.map((n) => ({
         ...n,
@@ -786,37 +782,39 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       onModelChangeRef.current({ ...m, nodes: remappedNodes, layout: newLayout });
       setSelectedNodeId(remaId);
     } else {
+      // Same id, only data changed. Set skipSyncRef so the model-sync useEffect
+      // does not run a full RF rebuild (which would cause a position flicker).
+      // Then defer the RF node/edge update to the next microtask so it runs
+      // outside the current React render batch — this prevents Minified React
+      // error #185 caused by two concurrent setState calls in the same batch.
       const newModel = { ...m, nodes: updatedNodes };
       skipSyncRef.current = true;
       onModelChangeRef.current(newModel);
-      const errMsgs = nodeErrorMapRef2.current.get(currentSelectedNodeId!) ?? [];
-      setNodes((nds) =>
-        nds.map((n) => {
-          if (n.id !== currentSelectedNodeId) return n;
-          const updatedOutputLabels: Record<string, string> = {};
-          for (const ref of normalised.outputs) {
-            const slot = newModel.slots[ref.slot];
-            updatedOutputLabels[ref.slot] = slot?.label ?? ref.slot;
-          }
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              ...normalised,
-              inputs: normalised.inputs.map((r) => r.slot),
-              outputs: normalised.outputs.map((r) => r.slot),
-              outputLabels: updatedOutputLabels,
-              hasError: errMsgs.length > 0,
-              errorMessages: errMsgs,
-            },
-          };
-        }),
-      );
-      // Defer the edges update to avoid calling setEdges synchronously inside
-      // a React event handler that already triggered setNodes above, which
-      // causes Minified React error #185.
       queueMicrotask(() => {
-        setEdges(modelToFlowEdges(newModel, nodeErrorMapRef2.current, handleConditionChangeRef.current));
+        const errMap = nodeErrorMapRef.current;
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id !== currentSelectedNodeId) return n;
+            const updatedOutputLabels: Record<string, string> = {};
+            for (const ref of normalised.outputs) {
+              const slot = newModel.slots[ref.slot];
+              updatedOutputLabels[ref.slot] = slot?.label ?? ref.slot;
+            }
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                ...normalised,
+                inputs: normalised.inputs.map((r) => r.slot),
+                outputs: normalised.outputs.map((r) => r.slot),
+                outputLabels: updatedOutputLabels,
+                hasError: (errMap.get(currentSelectedNodeId!) ?? []).length > 0,
+                errorMessages: errMap.get(currentSelectedNodeId!) ?? [],
+              },
+            };
+          }),
+        );
+        setEdges(modelToFlowEdges(newModel, errMap, handleConditionChange));
       });
     }
     return true;
