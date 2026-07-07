@@ -45,31 +45,31 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 
 	switch args[0] {
 	case "up":
-		profile, repoRoot, err := parseCommonArgs("up", args[1:], c.errOut)
+		repoRoot, err := parseCommonArgs("up", args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfig("", repoRoot)
 		if err != nil {
 			return err
 		}
 		return manager.Up(ctx, cfg, paths)
 	case "down":
-		profile, repoRoot, err := parseCommonArgs("down", args[1:], c.errOut)
+		repoRoot, err := parseCommonArgs("down", args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfig("", repoRoot)
 		if err != nil {
 			return err
 		}
 		return manager.Down(ctx, cfg, paths)
 	case "status":
-		asJSON, profile, repoRoot, err := parseStatusArgs(args[1:], c.errOut)
+		asJSON, repoRoot, err := parseStatusArgs(args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfig("", repoRoot)
 		if err != nil {
 			return err
 		}
@@ -83,21 +83,21 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		}
 		return nil
 	case "reset":
-		scope, profile, repoRoot, err := parseResetArgs(args[1:], c.errOut)
+		scope, repoRoot, err := parseResetArgs(args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfig("", repoRoot)
 		if err != nil {
 			return err
 		}
 		return manager.Reset(ctx, cfg, paths, scope)
 	case "service":
-		service, action, profile, repoRoot, err := parseServiceArgs(args[1:], c.errOut)
+		service, action, repoRoot, err := parseServiceArgs(args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfig("", repoRoot)
 		if err != nil {
 			return err
 		}
@@ -119,11 +119,11 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 	sub := args[0]
 	subArgs := args[1:]
 	if sub == "algorithm-run" || sub == "algorithm-down" {
-		service, profile, repoRoot, err := parseAlgorithmInternalArgs(sub, subArgs, c.errOut)
+		service, repoRoot, err := parseAlgorithmInternalArgs(sub, subArgs, c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfig("", repoRoot)
 		if err != nil {
 			return err
 		}
@@ -132,29 +132,16 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		}
 		return manager.algorithm.Down(ctx, paths, service)
 	}
-	profile, repoRoot, err := parseCommonArgs("internal", subArgs, c.errOut)
+	repoRoot, err := parseCommonArgs("internal", subArgs, c.errOut)
 	if err != nil {
 		return err
 	}
-	cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+	cfg, paths, err := NewRuntimeConfig("", repoRoot)
 	if err != nil {
 		return err
 	}
 
 	switch sub {
-	case "compose-up":
-		return manager.compose.ComposeUp(ctx, cfg, paths)
-	case "compose-down":
-		return manager.compose.ComposeDown(ctx, paths.RepoRoot, cfg.Profile)
-	case "compose-services":
-		services, err := manager.compose.ComposeServices(ctx, paths.RepoRoot)
-		if err != nil {
-			return err
-		}
-		for _, svc := range services {
-			_, _ = io.WriteString(c.out, svc+"\n")
-		}
-		return nil
 	case "local-proxy-run":
 		return manager.localProxy.Run(ctx, cfg, paths)
 	case "local-proxy-down":
@@ -188,28 +175,10 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 	}
 }
 
-func parseAlgorithmInternalArgs(name string, args []string, out io.Writer) (string, string, string, error) {
+func parseAlgorithmInternalArgs(name string, args []string, out io.Writer) (string, string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(out)
 	service := fs.String("service", "", "")
-	profile := fs.String("profile", defaultProfileValue(), "")
-	repoRoot := fs.String("repo-root", "", "")
-	if err := fs.Parse(args); err != nil {
-		return "", "", "", err
-	}
-	if len(fs.Args()) != 0 {
-		return "", "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
-	}
-	if *service == "" {
-		return "", "", "", fmt.Errorf("--service is required")
-	}
-	return *service, *profile, *repoRoot, nil
-}
-
-func parseCommonArgs(name string, args []string, out io.Writer) (string, string, error) {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(out)
-	profile := fs.String("profile", defaultProfileValue(), "")
 	repoRoot := fs.String("repo-root", "", "")
 	if err := fs.Parse(args); err != nil {
 		return "", "", err
@@ -217,29 +186,62 @@ func parseCommonArgs(name string, args []string, out io.Writer) (string, string,
 	if len(fs.Args()) != 0 {
 		return "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
-	return *profile, *repoRoot, nil
+	if *service == "" {
+		return "", "", fmt.Errorf("--service is required")
+	}
+	return *service, *repoRoot, nil
 }
 
-func parseStatusArgs(args []string, out io.Writer) (bool, string, string, error) {
+func parseCommonArgs(name string, args []string, out io.Writer) (string, error) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(out)
+	repoRoot := fs.String("repo-root", "", "")
+	if err := fs.Parse(args); err != nil {
+		return "", err
+	}
+	if len(fs.Args()) != 0 {
+		return "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+	}
+	return *repoRoot, nil
+}
+
+func parseStatusArgs(args []string, out io.Writer) (bool, string, error) {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(out)
 	asJSON := fs.Bool("json", false, "")
-	profile := fs.String("profile", defaultProfileValue(), "")
 	repoRoot := fs.String("repo-root", "", "")
 	if err := fs.Parse(args); err != nil {
-		return false, "", "", err
+		return false, "", err
 	}
 	if len(fs.Args()) != 0 {
-		return false, "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return false, "", fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
-	return *asJSON, *profile, *repoRoot, nil
+	return *asJSON, *repoRoot, nil
 }
 
-func parseResetArgs(args []string, out io.Writer) (ResetScope, string, string, error) {
+func parseResetArgs(args []string, out io.Writer) (ResetScope, string, error) {
 	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
 	fs.SetOutput(out)
 	scopeText := fs.String("scope", string(ResetScopeKB), "")
-	profile := fs.String("profile", defaultProfileValue(), "")
+	repoRoot := fs.String("repo-root", "", "")
+	if err := fs.Parse(args); err != nil {
+		return "", "", err
+	}
+	if len(fs.Args()) != 0 {
+		return "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+	}
+	scope, err := parseResetScope(*scopeText)
+	if err != nil {
+		return "", "", err
+	}
+	return scope, *repoRoot, nil
+}
+
+func parseServiceArgs(args []string, out io.Writer) (string, string, string, error) {
+	fs := flag.NewFlagSet("service", flag.ContinueOnError)
+	fs.SetOutput(out)
+	service := fs.String("name", "", "")
+	action := fs.String("action", "", "")
 	repoRoot := fs.String("repo-root", "", "")
 	if err := fs.Parse(args); err != nil {
 		return "", "", "", err
@@ -247,41 +249,21 @@ func parseResetArgs(args []string, out io.Writer) (ResetScope, string, string, e
 	if len(fs.Args()) != 0 {
 		return "", "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
-	scope, err := parseResetScope(*scopeText)
-	if err != nil {
-		return "", "", "", err
-	}
-	return scope, *profile, *repoRoot, nil
-}
-
-func parseServiceArgs(args []string, out io.Writer) (string, string, string, string, error) {
-	fs := flag.NewFlagSet("service", flag.ContinueOnError)
-	fs.SetOutput(out)
-	service := fs.String("name", "", "")
-	action := fs.String("action", "", "")
-	profile := fs.String("profile", defaultProfileValue(), "")
-	repoRoot := fs.String("repo-root", "", "")
-	if err := fs.Parse(args); err != nil {
-		return "", "", "", "", err
-	}
-	if len(fs.Args()) != 0 {
-		return "", "", "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
-	}
 	if strings.TrimSpace(*service) == "" {
-		return "", "", "", "", fmt.Errorf("--name is required")
+		return "", "", "", fmt.Errorf("--name is required")
 	}
 	if strings.TrimSpace(*action) == "" {
-		return "", "", "", "", fmt.Errorf("--action is required")
+		return "", "", "", fmt.Errorf("--action is required")
 	}
-	return *service, *action, *profile, *repoRoot, nil
+	return *service, *action, *repoRoot, nil
 }
 
 func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "Usage:\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local up --profile <profile>\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local down --profile <profile>\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local status --json\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local reset --scope kb|all --profile <profile>\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local service --name file-watcher --action build|start|stop --profile <profile>\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|scan-control-plane-run|scan-control-plane-down|file-watcher-run|file-watcher-down|frontend-run|frontend-down|milvus-lite-run|milvus-lite-down|algorithm-run|algorithm-down --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager up\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager down\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager status --json\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager reset --scope kb|all\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager service --name file-watcher --action build|start|stop\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager internal local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|scan-control-plane-run|scan-control-plane-down|file-watcher-run|file-watcher-down|frontend-run|frontend-down|milvus-lite-run|milvus-lite-down|algorithm-run|algorithm-down\n")
 }

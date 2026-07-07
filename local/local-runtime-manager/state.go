@@ -61,6 +61,8 @@ type StatusResponse struct {
 	Services       map[string]RuntimeServiceState `json:"services"`
 }
 
+const legacyComposeServiceName = "docker" + "-stack"
+
 func readRuntimeState(path string) (RuntimeState, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -97,7 +99,7 @@ func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) Runti
 		Config: snapshotRuntimeConfig(cfg),
 		Services: map[string]RuntimeServiceState{
 			processComposeServiceName: {
-				Kind:   "docker-compose",
+				Kind:   "host-supervisor",
 				Status: "stopped",
 			},
 			localProxyProcessName: {
@@ -213,7 +215,7 @@ func itoa(v int) string {
 func newStateWithServiceStatus(state RuntimeState, serviceStatus string) RuntimeState {
 	state.Services = normalizeRuntimeServices(state.Services)
 	ds := state.Services[processComposeServiceName]
-	ds.Kind = "docker-compose"
+	ds.Kind = "host-supervisor"
 	ds.Status = serviceStatus
 	state.Services[processComposeServiceName] = ds
 	lp := state.Services[localProxyProcessName]
@@ -280,14 +282,17 @@ func normalizeRuntimeServices(services map[string]RuntimeServiceState) map[strin
 		services = map[string]RuntimeServiceState{}
 	}
 	normalized := map[string]RuntimeServiceState{}
-	if _, ok := services[processComposeServiceName]; !ok {
+	if legacy, ok := services[legacyComposeServiceName]; ok {
+		legacy.Kind = "host-supervisor"
+		normalized[processComposeServiceName] = legacy
+	} else if _, ok := services[processComposeServiceName]; !ok {
 		normalized[processComposeServiceName] = RuntimeServiceState{
-			Kind:   "docker-compose",
+			Kind:   "host-supervisor",
 			Status: "unknown",
 		}
 	} else {
 		svc := services[processComposeServiceName]
-		svc.Kind = "docker-compose"
+		svc.Kind = "host-supervisor"
 		normalized[processComposeServiceName] = svc
 	}
 	if _, ok := services[localProxyProcessName]; !ok {
