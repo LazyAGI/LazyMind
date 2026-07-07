@@ -18,9 +18,11 @@ import (
 const pluginDraftGenerateJobType = "plugin_draft_generate"
 
 const (
-	generateStatusGenerating = "generating"
-	generateStatusDone       = "done"
-	generateStatusFailed     = "failed"
+	generateStatusGenerating   = "generating"
+	generateStatusSkeletonDone = "skeleton_done"
+	generateStatusStateDone    = "state_done"
+	generateStatusDone         = "done"
+	generateStatusFailed       = "failed"
 )
 
 const (
@@ -65,36 +67,77 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 		llmConfig = map[string]any{}
 	}
 
-	resp, err := algo.GeneratePlugin(ctx, algo.GeneratePluginRequest{
+	// ── Phase 1: Skeleton ────────────────────────────────────────────────────
+	skeletonResp, err := algo.GenerateSkeleton(ctx, algo.GenerateSkeletonRequest{
 		Name:         draft.Name,
 		Description:  payload.Description,
 		SkillContent: payload.SkillContent,
 		LLMConfig:    llmConfig,
 	})
 	if err != nil {
-		_ = markGenerateFailed(db, payload.DraftID, err.Error())
-		return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("generate plugin: %w", err)
+		_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase1 skeleton: %s", err))
+		return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("phase1 skeleton: %w", err)
+	}
+	if err := db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
+		"plugin_yaml_content": skeletonResp.PluginYAML,
+		"generate_status":     generateStatusSkeletonDone,
+		"updated_at":          time.Now().UTC(),
+	}).Error; err != nil {
+		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save skeleton: %w", err)
+	}
+
+	// ── Phase 2: State Machine ───────────────────────────────────────────────
+	stateResp, err := algo.GenerateStateMachine(ctx, algo.GenerateStateMachineRequest{
+		Name:       draft.Name,
+		PluginYAML: skeletonResp.PluginYAML,
+		LLMConfig:  llmConfig,
+	})
+	if err != nil {
+		_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase2 state_machine: %s", err))
+		return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("phase2 state_machine: %w", err)
+	}
+	if err := db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
+		"state_yaml_content": stateResp.StateYAML,
+		"generate_status":    generateStatusStateDone,
+		"updated_at":         time.Now().UTC(),
+	}).Error; err != nil {
+		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save state_machine: %w", err)
+	}
+
+	// ── Phase 3: Scenario + Scripts ──────────────────────────────────────────
+	scenarioResp, err := algo.GenerateScenarioScripts(ctx, algo.GenerateScenarioScriptsRequest{
+		Name:       draft.Name,
+		PluginYAML: skeletonResp.PluginYAML,
+		StateYAML:  stateResp.StateYAML,
+		LLMConfig:  llmConfig,
+	})
+	if err != nil {
+		// Phase 3 failure is non-fatal: skeleton + state are already saved.
+		// Mark as done with a warning rather than failed.
+		_ = db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
+			"generate_status": generateStatusDone,
+			"generate_error":  fmt.Sprintf("phase3 scenario_scripts: %s (non-fatal)", err),
+			"updated_at":      time.Now().UTC(),
+		}).Error
+		return asyncjob.Result{}, nil
 	}
 
 	// Encode scripts map as JSON string for storage.
 	scriptsJSON := "{}"
-	if len(resp.Scripts) > 0 {
-		if b, jerr := json.Marshal(resp.Scripts); jerr == nil {
+	if len(scenarioResp.Scripts) > 0 {
+		if b, jerr := json.Marshal(scenarioResp.Scripts); jerr == nil {
 			scriptsJSON = string(b)
 		}
 	}
 
-	updates := map[string]any{
-		"plugin_yaml_content": resp.PluginYAML,
-		"state_yaml_content":  resp.StateYAML,
-		"scenario_content":    resp.ScenarioMD,
-		"scripts_content":     scriptsJSON,
-		"generate_status":     generateStatusDone,
-		"generate_error":      "",
-		"updated_at":          time.Now().UTC(),
-	}
-	if err := db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(updates).Error; err != nil {
-		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save generated content: %w", err)
+	if err := db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
+		"scenario_content": scenarioResp.ScenarioMD,
+		"scripts_content":  scriptsJSON,
+		"generate_status":  generateStatusDone,
+		"generate_error":   "",
+		"updated_at":       time.Now().UTC(),
+	}).Error; err != nil {
+		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save scenario_scripts: %w", err)
 	}
 
 	return asyncjob.Result{}, nil

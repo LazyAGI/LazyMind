@@ -750,46 +750,49 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       )
     : false;
 
-  const handleNodePropertyChange = (updated: StepNode): boolean => {
+  // Keep latest nodeErrorMap in a ref so handleNodePropertyChange (useCallback)
+  // always reads the current value without being re-created on every render.
+  const nodeErrorMapRef2 = useRef(nodeErrorMap);
+  useEffect(() => { nodeErrorMapRef2.current = nodeErrorMap; }, [nodeErrorMap]);
+  // Keep latest handleConditionChange in a ref for the same reason.
+  const handleConditionChangeRef = useRef(handleConditionChange);
+  useEffect(() => { handleConditionChangeRef.current = handleConditionChange; }, [handleConditionChange]);
+
+  const handleNodePropertyChange = useCallback((updated: StepNode): boolean => {
     const m = modelRef.current;
-    // When the user clears the id, assign a hidden placeholder so the node
-    // stays valid in the model while the panel remains open.
     const effectiveId = updated.id || newHiddenId();
     const normalised = updated.id ? updated : { ...updated, id: effectiveId };
+    const currentSelectedNodeId = selectedNodeId;
 
-    // Reject if the new id is already used by another node.
-    if (normalised.id !== selectedNodeId && m.nodes.some((n) => n.id === normalised.id)) {
+    if (normalised.id !== currentSelectedNodeId && m.nodes.some((n) => n.id === normalised.id)) {
       return false;
     }
 
-    const updatedNodes = m.nodes.map((n) => (n.id === selectedNodeId ? normalised : n));
+    const updatedNodes = m.nodes.map((n) => (n.id === currentSelectedNodeId ? normalised : n));
 
-    if (normalised.id !== selectedNodeId) {
-      // Id changed (non-empty new id, or hidden placeholder replacing old id).
+    if (normalised.id !== currentSelectedNodeId) {
       const remaId = normalised.id;
       const remappedNodes = updatedNodes.map((n) => ({
         ...n,
         transitions: n.transitions.map((t) =>
-          t.to === selectedNodeId ? { ...t, to: remaId } : t,
+          t.to === currentSelectedNodeId ? { ...t, to: remaId } : t,
         ),
       }));
       const newLayout = { ...m.layout };
-      if (selectedNodeId && newLayout[selectedNodeId]) {
-        newLayout[remaId] = newLayout[selectedNodeId];
-        delete newLayout[selectedNodeId];
+      if (currentSelectedNodeId && newLayout[currentSelectedNodeId]) {
+        newLayout[remaId] = newLayout[currentSelectedNodeId];
+        delete newLayout[currentSelectedNodeId];
       }
       onModelChangeRef.current({ ...m, nodes: remappedNodes, layout: newLayout });
       setSelectedNodeId(remaId);
     } else {
-      // Same id, only data changed — update in-place to avoid full re-sync flicker.
       const newModel = { ...m, nodes: updatedNodes };
       skipSyncRef.current = true;
       onModelChangeRef.current(newModel);
-      const errMsgs = nodeErrorMap.get(selectedNodeId!) ?? [];
+      const errMsgs = nodeErrorMapRef2.current.get(currentSelectedNodeId!) ?? [];
       setNodes((nds) =>
         nds.map((n) => {
-          if (n.id !== selectedNodeId) return n;
-          // Rebuild outputLabels from updated outputs
+          if (n.id !== currentSelectedNodeId) return n;
           const updatedOutputLabels: Record<string, string> = {};
           for (const ref of normalised.outputs) {
             const slot = newModel.slots[ref.slot];
@@ -798,11 +801,8 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           return {
             ...n,
             data: {
-              // Preserve runtime fields (outputLabels, nodeWidth, onResizeEnd, etc.)
-              // that are not part of StepNode and would be wiped by spreading normalised alone.
               ...n.data,
               ...normalised,
-              // StepNodeData.inputs/outputs must be string[] (slot ids), not StepInputRef[]
               inputs: normalised.inputs.map((r) => r.slot),
               outputs: normalised.outputs.map((r) => r.slot),
               outputLabels: updatedOutputLabels,
@@ -812,10 +812,15 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           };
         }),
       );
-      setEdges(modelToFlowEdges(newModel, nodeErrorMap, handleConditionChange));
+      // Defer the edges update to avoid calling setEdges synchronously inside
+      // a React event handler that already triggered setNodes above, which
+      // causes Minified React error #185.
+      queueMicrotask(() => {
+        setEdges(modelToFlowEdges(newModel, nodeErrorMapRef2.current, handleConditionChangeRef.current));
+      });
     }
     return true;
-  };
+  }, [selectedNodeId, setNodes, setEdges]);
 
   const handleNodeDelete = (nodeId: string) => {
     const m = modelRef.current;

@@ -116,7 +116,13 @@ type PluginDraft struct {
 	CreatedAt time.Time `gorm:"column:created_at;not null"`
 	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
 	// Split content columns (migration 20260706120000).
-	// generate_status: '' | 'generating' | 'done' | 'failed'
+	// generate_status: '' | 'generating' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
+	//   ''             — never triggered AI generation
+	//   'generating'   — Phase 1 in progress
+	//   'skeleton_done' — Phase 1 complete (plugin.yaml available); Phase 2 running
+	//   'state_done'   — Phase 2 complete (state.yml available); Phase 3 running
+	//   'done'         — All phases complete
+	//   'failed'       — A phase failed; see generate_error for details
 	PluginYAMLContent string `gorm:"column:plugin_yaml_content;type:text;not null;default:''"`
 	StateYAMLContent  string `gorm:"column:state_yaml_content;type:text;not null;default:''"`
 	ScenarioContent   string `gorm:"column:scenario_content;type:text;not null;default:''"`

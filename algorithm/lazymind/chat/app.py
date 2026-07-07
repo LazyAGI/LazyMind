@@ -6,6 +6,7 @@ from lazymind.config import config
 from lazymind.chat.api import (
     chat_routes,
     generate_plugin_routes,
+    generate_plugin_staged_routes,
     health_routes,
     model_check_routes,
     model_features_routes,
@@ -31,6 +32,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
     if not config['router_child_proxied_only']:
         app.include_router(rewrite_routes.router)
         app.include_router(generate_plugin_routes.router)
+        app.include_router(generate_plugin_staged_routes.router)
         app.include_router(memory_review_routes.router)
         app.include_router(skill_review_routes.router)
         app.include_router(model_features_routes.router)

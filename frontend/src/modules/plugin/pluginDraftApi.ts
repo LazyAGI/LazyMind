@@ -12,8 +12,16 @@ export interface PluginDraftRecord {
   state_yaml_content: string;
   scenario_content: string;
   scripts_content: string;
-  // '' | 'generating' | 'done' | 'failed'
+  // '' | 'generating' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
+  //   ''              — AI generation never triggered
+  //   'generating'    — Phase 1 (skeleton) in progress
+  //   'skeleton_done' — Phase 1 complete; plugin_yaml_content available; Phase 2 running
+  //   'state_done'    — Phase 2 complete; state_yaml_content available; Phase 3 running; editor usable
+  //   'done'          — All phases complete
+  //   'failed'        — A phase failed; see generate_error for details
   generate_status: string;
+  // Non-empty when generate_status === 'failed'; may also contain non-fatal Phase 3 warnings when 'done'.
+  generate_error: string;
   created_at: string;
   updated_at: string;
   created_by: string;

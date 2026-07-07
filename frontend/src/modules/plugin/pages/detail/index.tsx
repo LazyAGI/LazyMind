@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Alert, Breadcrumb, Skeleton, Spin, Input, message } from 'antd';
-import { SyncOutlined } from '@ant-design/icons';
+import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { getPluginDraft, updatePluginDraftContent } from '../../pluginDraftApi';
 import type { PluginDraftRecord } from '../../pluginDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
@@ -9,6 +9,40 @@ import type { SavePayload } from '../../components/StateGraphEditor';
 import './index.scss';
 
 const POLL_INTERVAL_MS = 3000;
+
+// generate_status values that indicate AI generation is still in progress.
+const GENERATING_STATUSES = new Set(['generating', 'skeleton_done', 'state_done']);
+
+// generate_status values where enough content is available to render the editor.
+// state_done means plugin.yaml + state.yml are ready even though Phase 3 is still running.
+const EDITOR_READY_STATUSES = new Set(['state_done', 'done']);
+
+type GeneratePhase = 'skeleton' | 'state_machine' | 'scenario_scripts' | 'done' | 'failed' | 'idle';
+
+function resolvePhase(status: string): GeneratePhase {
+  switch (status) {
+    case 'generating':
+    case 'skeleton_done':
+      return 'skeleton';
+    case 'state_done':
+      return 'scenario_scripts';
+    case 'done':
+      return 'done';
+    case 'failed':
+      return 'failed';
+    default:
+      return 'idle';
+  }
+}
+
+const PHASE_MESSAGES: Record<GeneratePhase, string> = {
+  skeleton: 'AI 正在分析需求、生成插件骨架（slots / steps）…',
+  state_machine: 'AI 正在生成状态机执行逻辑（transitions / prompts）…',
+  scenario_scripts: 'AI 正在生成 scenario.md 与脚本文件，编辑器可以提前使用…',
+  done: '',
+  failed: '',
+  idle: '',
+};
 
 export default function PluginDetailPage() {
   const { pluginId } = useParams<{ pluginId: string }>();
@@ -34,7 +68,6 @@ export default function PluginDetailPage() {
     }
   }, [pluginId]);
 
-  // Poll for generate_status changes when status == 'generating'
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
@@ -42,7 +75,7 @@ export default function PluginDetailPage() {
       try {
         const data = await getPluginDraft(pluginId);
         setDraft(data);
-        if (data.generate_status !== 'generating') {
+        if (!GENERATING_STATUSES.has(data.generate_status)) {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
         }
@@ -58,7 +91,7 @@ export default function PluginDetailPage() {
   }, [loadDraft]);
 
   useEffect(() => {
-    if (draft?.generate_status === 'generating') {
+    if (draft && GENERATING_STATUSES.has(draft.generate_status)) {
       startPolling();
     } else {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -94,12 +127,15 @@ export default function PluginDetailPage() {
     );
   }
 
-  const isGenerating = draft.generate_status === 'generating';
+  const phase = resolvePhase(draft.generate_status);
+  const isStillGenerating = GENERATING_STATUSES.has(draft.generate_status);
+  const editorReady = EDITOR_READY_STATUSES.has(draft.generate_status) || draft.generate_status === 'done';
   const isFailed = draft.generate_status === 'failed';
+  // Show the editor in a read-only banner state when Phase 3 is still running
+  const isPhase3Running = draft.generate_status === 'state_done';
 
-  // Determine which YAML content to use: prefer new columns, fallback to legacy content
+  // Determine which YAML content to use
   const stateYaml = draft.state_yaml_content || draft.content || undefined;
-  // Ensure plugin.yaml always contains at least the draft name so the modal can pre-fill it
   let pluginYaml = draft.plugin_yaml_content || undefined;
   if (!pluginYaml && draft.name) {
     pluginYaml = `name: "${draft.name.replace(/"/g, '\\"')}"\n`;
@@ -107,13 +143,25 @@ export default function PluginDetailPage() {
 
   return (
     <div className="plugin-detail-page">
-      {isGenerating && (
+      {/* Generation progress banner */}
+      {isStillGenerating && !editorReady && (
         <Alert
           className="plugin-detail-banner"
           type="info"
           icon={<SyncOutlined spin />}
           showIcon
-          message="AI 正在生成插件内容，通常需要 10~30 秒…"
+          message={PHASE_MESSAGES[phase] || 'AI 正在生成插件内容…'}
+        />
+      )}
+
+      {isPhase3Running && (
+        <Alert
+          className="plugin-detail-banner"
+          type="info"
+          icon={<SyncOutlined spin />}
+          showIcon
+          message={PHASE_MESSAGES.scenario_scripts}
+          description="插件骨架和状态机已就绪，你可以提前预览和编辑，scenario.md 与脚本文件稍后自动填入。"
         />
       )}
 
@@ -123,15 +171,53 @@ export default function PluginDetailPage() {
           type="error"
           showIcon
           message="生成失败，你可以手动编辑或重新生成"
+          description={draft.generate_error || undefined}
         />
       )}
 
-      {isGenerating ? (
+      {draft.generate_status === 'done' && draft.generate_error && (
+        <Alert
+          className="plugin-detail-banner"
+          type="warning"
+          showIcon
+          message="生成完成（部分阶段有警告）"
+          description={draft.generate_error}
+        />
+      )}
+
+      {/* Phase 1+2 still loading — no content to show yet */}
+      {isStillGenerating && !editorReady ? (
         <div className="plugin-detail-skeleton">
+          <div className="plugin-detail-phase-steps">
+            <div className={`phase-step ${phase === 'skeleton' ? 'active' : ''}`}>
+              <SyncOutlined spin={phase === 'skeleton'} />
+              {' 阶段 1：分析需求 & 生成骨架'}
+            </div>
+            <div className="phase-step">
+              {'阶段 2：生成状态机'}
+            </div>
+            <div className="phase-step">
+              {'阶段 3：生成文档 & 脚本'}
+            </div>
+          </div>
           <Skeleton active paragraph={{ rows: 12 }} />
         </div>
       ) : (
         <div className="plugin-detail-editor">
+          {editorReady && (
+            <div className="plugin-detail-phase-steps plugin-detail-phase-steps--inline">
+              <div className="phase-step phase-step--done">
+                <CheckCircleOutlined /> 骨架
+              </div>
+              <div className="phase-step phase-step--done">
+                <CheckCircleOutlined /> 状态机
+              </div>
+              <div className={`phase-step ${isPhase3Running ? 'active' : 'phase-step--done'}`}>
+                {isPhase3Running ? <SyncOutlined spin /> : <CheckCircleOutlined />}
+                {' 文档 & 脚本'}
+              </div>
+            </div>
+          )}
           <StateGraphEditor
             initialStateYaml={stateYaml}
             initialPluginYaml={pluginYaml}
