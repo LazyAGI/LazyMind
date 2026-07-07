@@ -31,54 +31,57 @@ func registerLocalProcess(paths RuntimePaths, service string, pid int, ports []i
 	if pid <= 0 {
 		return
 	}
-	registry, _ := readLocalProcessRegistry(paths)
-	registry.Version = 1
-	registry.RepoRoot = paths.RepoRoot
-	record := LocalProcessRecord{
-		Service:     service,
-		PID:         pid,
-		PGID:        processGroupID(pid),
-		RepoRoot:    paths.RepoRoot,
-		RuntimeRoot: paths.RuntimeRoot,
-		Ports:       compactPorts(ports),
-		Command:     command,
-		StartedAt:   time.Now().UTC().Format(time.RFC3339),
-	}
-	replaced := false
-	for i := range registry.Processes {
-		if registry.Processes[i].Service == service || registry.Processes[i].PID == pid {
-			registry.Processes[i] = record
-			replaced = true
-			break
+	_ = withFileLock(paths.ProcessRegistryFile+".lock", func() error {
+		registry, _ := readLocalProcessRegistry(paths)
+		registry.Version = 1
+		registry.RepoRoot = paths.RepoRoot
+		record := LocalProcessRecord{
+			Service:     service,
+			PID:         pid,
+			PGID:        processGroupID(pid),
+			RepoRoot:    paths.RepoRoot,
+			RuntimeRoot: paths.RuntimeRoot,
+			Ports:       compactPorts(ports),
+			Command:     command,
+			StartedAt:   time.Now().UTC().Format(time.RFC3339),
 		}
-	}
-	if !replaced {
-		registry.Processes = append(registry.Processes, record)
-	}
-	_ = writeLocalProcessRegistry(paths, registry)
+		replaced := false
+		for i := range registry.Processes {
+			if registry.Processes[i].Service == service || registry.Processes[i].PID == pid {
+				registry.Processes[i] = record
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			registry.Processes = append(registry.Processes, record)
+		}
+		return writeLocalProcessRegistry(paths, registry)
+	})
 }
 
 func unregisterLocalProcess(paths RuntimePaths, service string, pid int) {
-	registry, err := readLocalProcessRegistry(paths)
-	if err != nil {
-		return
-	}
-	kept := registry.Processes[:0]
-	for _, record := range registry.Processes {
-		if service != "" && record.Service == service {
-			continue
+	_ = withFileLock(paths.ProcessRegistryFile+".lock", func() error {
+		registry, err := readLocalProcessRegistry(paths)
+		if err != nil {
+			return nil
 		}
-		if pid > 0 && record.PID == pid {
-			continue
+		kept := registry.Processes[:0]
+		for _, record := range registry.Processes {
+			if service != "" && record.Service == service {
+				continue
+			}
+			if pid > 0 && record.PID == pid {
+				continue
+			}
+			kept = append(kept, record)
 		}
-		kept = append(kept, record)
-	}
-	registry.Processes = kept
-	if len(registry.Processes) == 0 {
-		_ = os.Remove(paths.ProcessRegistryFile)
-		return
-	}
-	_ = writeLocalProcessRegistry(paths, registry)
+		registry.Processes = kept
+		if len(registry.Processes) == 0 {
+			return os.Remove(paths.ProcessRegistryFile)
+		}
+		return writeLocalProcessRegistry(paths, registry)
+	})
 }
 
 func readLocalProcessRegistry(paths RuntimePaths) (localProcessRegistry, error) {

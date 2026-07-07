@@ -229,7 +229,7 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 		if err != nil {
 			return err
 		}
-		cmd := exec.CommandContext(ctx, processComposeCommand(paths.RepoRoot), args...)
+		cmd := exec.Command(processComposeCommand(paths.RepoRoot), args...)
 		cmd.Dir = paths.RepoRoot
 		cmd.Env = append(os.Environ(), processComposeRuntimeEnv(paths)...)
 		cmd.Stdout = logFile

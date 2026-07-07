@@ -67,6 +67,59 @@ func TestRuntimeConfigKeepsRuntimeDataUnderLocalRoot(t *testing.T) {
 	}
 }
 
+func TestEnsurePathUnderRootResolvesSymlinks(t *testing.T) {
+	temp := t.TempDir()
+	realRoot := filepath.Join(temp, "real-root")
+	linkRoot := filepath.Join(temp, "link-root")
+	python := filepath.Join(realRoot, "runtimes", "python", "bin", "python3")
+	if err := os.MkdirAll(filepath.Dir(python), 0o755); err != nil {
+		t.Fatalf("mkdir python dir: %v", err)
+	}
+	if err := os.WriteFile(python, []byte("python"), 0o755); err != nil {
+		t.Fatalf("write python: %v", err)
+	}
+	if err := os.Symlink(realRoot, linkRoot); err != nil {
+		t.Fatalf("symlink runtime root: %v", err)
+	}
+	linkPython := filepath.Join(linkRoot, "runtimes", "python", "bin", "python3")
+	if err := ensurePathUnderRoot(linkPython, realRoot); err != nil {
+		t.Fatalf("symlinked path should be under real root: %v", err)
+	}
+	if err := ensurePathUnderRoot(python, linkRoot); err != nil {
+		t.Fatalf("real path should be under symlinked root: %v", err)
+	}
+}
+
+func TestRegisterLocalProcessConcurrent(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	done := make(chan struct{}, 20)
+	for i := 0; i < cap(done); i++ {
+		i := i
+		go func() {
+			registerLocalProcess(paths, "svc-"+strconv.Itoa(i), 9000+i, []int{18000 + i}, []string{"cmd", strconv.Itoa(i)})
+			done <- struct{}{}
+		}()
+	}
+	for i := 0; i < cap(done); i++ {
+		<-done
+	}
+	registry, err := readLocalProcessRegistry(paths)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	if len(registry.Processes) != cap(done) {
+		t.Fatalf("registry process count = %d, want %d: %#v", len(registry.Processes), cap(done), registry.Processes)
+	}
+}
+
 func TestEnsureAllDirsCreatesRuntimeDataDirs(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

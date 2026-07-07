@@ -20,6 +20,9 @@ func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error)
 		return nil, nil
 	}
 	pidCount := int(size) / C.sizeof_int
+	if pidCount == 0 {
+		return nil, nil
+	}
 	pids := make([]C.int, pidCount)
 	size = C.proc_listpids(C.PROC_ALL_PIDS, 0, unsafe.Pointer(&pids[0]), size)
 	if size <= 0 {

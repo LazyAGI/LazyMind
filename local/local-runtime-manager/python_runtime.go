@@ -14,32 +14,39 @@ func ensureLocalPythonRuntime(ctx context.Context, runner CommandRunner, paths R
 	if !ok {
 		return "", fmt.Errorf("uv is required to provision local Python runtime; install uv or set %s", authServiceUVEnvVar)
 	}
-	env := pythonRuntimeEnv(paths)
-	install := Command{
-		Name: uv,
-		Args: []string{"python", "install", "--install-dir", paths.PythonRuntimeDir, version},
-		Dir:  paths.RepoRoot,
-		Env:  env,
-	}
-	if res, err := runner.Run(ctx, install); err != nil {
-		return "", fmt.Errorf("install local Python %s failed: %w (%s)", version, err, strings.TrimSpace(res.Stderr))
-	}
-	find := Command{
-		Name: uv,
-		Args: []string{"python", "find", "--managed-python", "--no-python-downloads", "--resolve-links", version},
-		Dir:  paths.RepoRoot,
-		Env:  env,
-	}
-	res, err := runner.Run(ctx, find)
+	var python string
+	err := withFileLock(filepath.Join(paths.RunDir, "python-runtime.lock"), func() error {
+		env := pythonRuntimeEnv(paths)
+		install := Command{
+			Name: uv,
+			Args: []string{"python", "install", "--install-dir", paths.PythonRuntimeDir, version},
+			Dir:  paths.RepoRoot,
+			Env:  env,
+		}
+		if res, err := runner.Run(ctx, install); err != nil {
+			return fmt.Errorf("install local Python %s failed: %w (%s)", version, err, strings.TrimSpace(res.Stderr))
+		}
+		find := Command{
+			Name: uv,
+			Args: []string{"python", "find", "--managed-python", "--no-python-downloads", "--resolve-links", version},
+			Dir:  paths.RepoRoot,
+			Env:  env,
+		}
+		res, err := runner.Run(ctx, find)
+		if err != nil {
+			return fmt.Errorf("find local Python %s failed: %w (%s)", version, err, strings.TrimSpace(res.Stderr))
+		}
+		python = strings.TrimSpace(res.Stdout)
+		if python == "" {
+			return fmt.Errorf("find local Python %s returned an empty path", version)
+		}
+		if err := ensurePathUnderRoot(python, paths.RuntimeRoot); err != nil {
+			return fmt.Errorf("local Python %s is not self-contained: %w", version, err)
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("find local Python %s failed: %w (%s)", version, err, strings.TrimSpace(res.Stderr))
-	}
-	python := strings.TrimSpace(res.Stdout)
-	if python == "" {
-		return "", fmt.Errorf("find local Python %s returned an empty path", version)
-	}
-	if err := ensurePathUnderRoot(python, paths.RuntimeRoot); err != nil {
-		return "", fmt.Errorf("local Python %s is not self-contained: %w", version, err)
+		return "", err
 	}
 	return python, nil
 }
@@ -92,11 +99,11 @@ func uvCommand() (string, bool) {
 }
 
 func ensurePathUnderRoot(path string, root string) error {
-	absPath, err := filepath.Abs(path)
+	absPath, err := resolveExistingPathSymlinks(path)
 	if err != nil {
 		return err
 	}
-	absRoot, err := filepath.Abs(root)
+	absRoot, err := resolveExistingPathSymlinks(root)
 	if err != nil {
 		return err
 	}
@@ -108,4 +115,36 @@ func ensurePathUnderRoot(path string, root string) error {
 		return nil
 	}
 	return fmt.Errorf("%s is outside %s", absPath, absRoot)
+}
+
+func resolveExistingPathSymlinks(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err == nil {
+		return resolved, nil
+	}
+	missing := []string{}
+	current := abs
+	for {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			parts := append([]string{resolved}, reverseStrings(missing)...)
+			return filepath.Join(parts...), nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return abs, nil
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
+}
+
+func reverseStrings(values []string) []string {
+	for i, j := 0, len(values)-1; i < j; i, j = i+1, j-1 {
+		values[i], values[j] = values[j], values[i]
+	}
+	return values
 }

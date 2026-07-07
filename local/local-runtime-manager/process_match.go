@@ -6,7 +6,7 @@ import (
 )
 
 func processTextMatchesRuntime(paths RuntimePaths, parts ...string) bool {
-	text := filepath.Clean(strings.Join(parts, " "))
+	text := strings.Join(parts, " ")
 	repo := filepath.Clean(paths.RepoRoot)
 	runtimeRoot := filepath.Clean(paths.RuntimeRoot)
 	if strings.Contains(text, runtimeRoot) {
