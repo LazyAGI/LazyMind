@@ -18,8 +18,10 @@ type GeneratePluginRequest struct {
 
 // GeneratePluginResponse is the response body from /api/chat/generate_plugin.
 type GeneratePluginResponse struct {
-	PluginYAML string `json:"plugin_yaml"`
-	StateYAML  string `json:"state_yaml"`
+	PluginYAML string            `json:"plugin_yaml"`
+	StateYAML  string            `json:"state_yaml"`
+	ScenarioMD string            `json:"scenario_md"`
+	Scripts    map[string]string `json:"scripts"`
 }
 
 // GeneratePlugin calls the Python chat service to generate plugin YAML files from a
@@ -37,9 +39,27 @@ func GeneratePlugin(ctx context.Context, req GeneratePluginRequest) (*GeneratePl
 	if data, ok := raw["data"].(map[string]any); ok {
 		resp.PluginYAML, _ = data["plugin_yaml"].(string)
 		resp.StateYAML, _ = data["state_yaml"].(string)
+		resp.ScenarioMD, _ = data["scenario_md"].(string)
+		if scripts, ok := data["scripts"].(map[string]any); ok {
+			resp.Scripts = make(map[string]string, len(scripts))
+			for k, v := range scripts {
+				if s, ok := v.(string); ok {
+					resp.Scripts[k] = s
+				}
+			}
+		}
 	} else {
 		resp.PluginYAML, _ = raw["plugin_yaml"].(string)
 		resp.StateYAML, _ = raw["state_yaml"].(string)
+		resp.ScenarioMD, _ = raw["scenario_md"].(string)
+		if scripts, ok := raw["scripts"].(map[string]any); ok {
+			resp.Scripts = make(map[string]string, len(scripts))
+			for k, v := range scripts {
+				if s, ok := v.(string); ok {
+					resp.Scripts[k] = s
+				}
+			}
+		}
 	}
 	return resp, nil
 }

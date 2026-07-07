@@ -72,14 +72,25 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 		LLMConfig:    llmConfig,
 	})
 	if err != nil {
-		_ = markGenerateFailed(db, payload.DraftID)
+		_ = markGenerateFailed(db, payload.DraftID, err.Error())
 		return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("generate plugin: %w", err)
+	}
+
+	// Encode scripts map as JSON string for storage.
+	scriptsJSON := "{}"
+	if len(resp.Scripts) > 0 {
+		if b, jerr := json.Marshal(resp.Scripts); jerr == nil {
+			scriptsJSON = string(b)
+		}
 	}
 
 	updates := map[string]any{
 		"plugin_yaml_content": resp.PluginYAML,
 		"state_yaml_content":  resp.StateYAML,
+		"scenario_content":    resp.ScenarioMD,
+		"scripts_content":     scriptsJSON,
 		"generate_status":     generateStatusDone,
+		"generate_error":      "",
 		"updated_at":          time.Now().UTC(),
 	}
 	if err := db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(updates).Error; err != nil {
@@ -89,9 +100,10 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 	return asyncjob.Result{}, nil
 }
 
-func markGenerateFailed(db *gorm.DB, draftID string) error {
+func markGenerateFailed(db *gorm.DB, draftID string, errMsg string) error {
 	return db.Model(&orm.PluginDraft{}).Where("id = ?", draftID).Updates(map[string]any{
 		"generate_status": generateStatusFailed,
+		"generate_error":  errMsg,
 		"updated_at":      time.Now().UTC(),
 	}).Error
 }

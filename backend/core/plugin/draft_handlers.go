@@ -25,6 +25,7 @@ type draftResponse struct {
 	ScenarioContent   string `json:"scenario_content"`
 	ScriptsContent    string `json:"scripts_content"`
 	GenerateStatus    string `json:"generate_status"`
+	GenerateError     string `json:"generate_error"`
 	CreatedBy         string `json:"created_by"`
 	CreatedAt         string `json:"created_at"`
 	UpdatedAt         string `json:"updated_at"`
@@ -40,6 +41,7 @@ func toDraftResponse(d orm.PluginDraft) draftResponse {
 		ScenarioContent:   d.ScenarioContent,
 		ScriptsContent:    d.ScriptsContent,
 		GenerateStatus:    d.GenerateStatus,
+		GenerateError:     d.GenerateError,
 		CreatedBy:         d.CreatedBy,
 		CreatedAt:         d.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:         d.UpdatedAt.Format(time.RFC3339),

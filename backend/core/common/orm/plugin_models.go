@@ -122,6 +122,8 @@ type PluginDraft struct {
 	ScenarioContent   string `gorm:"column:scenario_content;type:text;not null;default:''"`
 	ScriptsContent    string `gorm:"column:scripts_content;type:text;not null;default:'{}'"`
 	GenerateStatus    string `gorm:"column:generate_status;type:varchar(16);not null;default:''"`
+	// GenerateError stores the last error message when GenerateStatus = 'failed' (migration 20260707120000).
+	GenerateError string `gorm:"column:generate_error;type:text;not null;default:''"`
 }
 
 func (PluginDraft) TableName() string { return "plugin_drafts" }
