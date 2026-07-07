@@ -73,13 +73,22 @@ export default function Editor({ value, onChange, errors, language = 'yaml', rea
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync external value changes (e.g. from graph operations) without triggering onChange
+  // Sync external value changes (e.g. from graph canvas) without resetting cursor.
+  // We use pushEditOperations instead of setValue so the cursor position is preserved.
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (editor.getValue() === value) return;
+    const editorModel = editor.getModel();
+    if (!editorModel) return;
+    if (editorModel.getValue() === value) return;
+
     externalUpdateRef.current = true;
-    editor.setValue(value);
+    // Replace the entire document content while preserving cursor & scroll
+    editorModel.pushEditOperations(
+      editor.getSelections() ?? [],
+      [{ range: editorModel.getFullModelRange(), text: value }],
+      () => null,
+    );
     externalUpdateRef.current = false;
   }, [value]);
 

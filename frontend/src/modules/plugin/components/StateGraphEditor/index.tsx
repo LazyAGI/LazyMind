@@ -259,13 +259,26 @@ export default function StateGraphEditor({
   }, [triggerAutoSave]);
 
   // Code-editor change handlers for plugin.yaml and scenario.md
-  // Both use a 500ms debounce like handleYamlChange; plugin.yaml validates before applying.
+  // plugin.yaml: parse → validate → sync both pluginModel and graphModel.slots
   const handlePluginYamlCodeChange = useCallback((text: string) => {
     const pm = parsePluginYaml(text);
     if (pm) {
+      // Sync slots into GraphModel so serializePluginModel always has the correct source
+      const slots: Record<string, import('./core/model').SlotDef> = {};
+      for (const s of pm.slots) {
+        slots[s.id] = {
+          id: s.id, type: s.type, label: s.label,
+          cardinality: s.cardinality, ordered: s.ordered,
+          allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+        };
+      }
+      const updatedModel: GraphModel = { ...modelRef.current, slots };
+      modelRef.current = updatedModel;
+      setModelState(updatedModel);
+
       setPluginModel(pm);
       pluginModelRef.current = pm;
-      triggerAutoSave(modelRef.current, pm, scenarioDataRef.current, scriptsContentRef.current);
+      triggerAutoSave(updatedModel, pm, scenarioDataRef.current, scriptsContentRef.current);
       setErrors((prev) => prev.filter((e) => e.code !== 'V10_PLUGIN_YAML_SYNTAX'));
     } else {
       setErrors((prev) => {
