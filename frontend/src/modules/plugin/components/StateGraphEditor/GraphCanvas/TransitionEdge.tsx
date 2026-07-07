@@ -1,7 +1,8 @@
-import { memo, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { EdgeLabelRenderer, getBezierPath } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 import { Input } from 'antd';
+import { EditOutlined } from '@ant-design/icons';
 
 export interface TransitionEdgeData extends Record<string, unknown> {
   condition: string;
@@ -26,6 +27,21 @@ function TransitionEdgeComponent({
   const edgeData = data as unknown as TransitionEdgeData | undefined;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const [hovered, setHovered] = useState(false);
+
+  // Debounce leave so moving between path ↔ popover doesn't flicker
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const onEnter = () => {
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    setHovered(true);
+  };
+
+  const onLeave = () => {
+    leaveTimer.current = setTimeout(() => {
+      if (!editing) setHovered(false);
+    }, 120);
+  };
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -36,27 +52,34 @@ function TransitionEdgeComponent({
     targetPosition,
   });
 
-  const [hovered, setHovered] = useState(false);
   const isParallel = edgeData?.isParallel ?? false;
-  // Parallel edges use a dashed stroke to indicate simultaneous fan-out,
-  // avoiding the confusing double-line ghost effect.
-  const strokeColor = edgeData?.hasError ? '#ff4d4f' : selected ? '#1677ff' : hovered ? '#555' : '#8c8c8c';
-  const strokeWidth = selected ? 2.5 : hovered ? 2.5 : 1.5;
+  const hasError = edgeData?.hasError ?? false;
+  const condition = edgeData?.condition ?? '';
+
+  const strokeColor = hasError ? '#ff4d4f' : selected ? '#1677ff' : hovered ? '#555' : '#8c8c8c';
+  const strokeWidth = selected || hovered ? 2.5 : 1.5;
   const strokeDash = isParallel ? '6 3' : undefined;
 
-  // Only show the label area when the edge is selected or hovered
-  const showLabel = selected || hovered;
+  const commitEdit = () => {
+    setEditing(false);
+    setHovered(false);
+    edgeData?.onConditionChange(source, target, draft);
+  };
+
+  // Position popover above the midpoint of the edge
+  const popX = labelX;
+  const popY = labelY - 44;
 
   return (
     <>
-      {/* Wide invisible hit area for easier selection */}
+      {/* Wide invisible hit area */}
       <path
         d={edgePath}
         fill="none"
         stroke="transparent"
         strokeWidth={16}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
         style={{ cursor: 'pointer' }}
       />
       <path
@@ -68,57 +91,54 @@ function TransitionEdgeComponent({
         strokeDasharray={strokeDash}
         fill="none"
         markerEnd="url(#arrow)"
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
         style={{ transition: 'stroke-width 0.1s, stroke 0.1s', pointerEvents: 'none' }}
       />
+
+      {/* Popover label — floats above the edge midpoint */}
       <EdgeLabelRenderer>
-        <div
-          style={{
-            position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            pointerEvents: 'all',
-          }}
-          className="nodrag nopan"
-        >
-          {editing ? (
-            <Input
-              size="small"
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => {
-                setEditing(false);
-                edgeData?.onConditionChange(source, target, draft);
-              }}
-              onPressEnter={() => {
-                setEditing(false);
-                edgeData?.onConditionChange(source, target, draft);
-              }}
-              style={{ width: 160, fontSize: 11 }}
-            />
-          ) : showLabel ? (
-            <button
-              type="button"
-              className={`transition-edge-label ${edgeData?.hasError ? 'has-error' : ''}`}
-              onClick={() => {
-                setDraft(String(edgeData?.condition ?? ''));
-                setEditing(true);
-              }}
-              title="点击编辑条件"
-            >
-              {edgeData?.condition || <span className="transition-edge-label-empty">点击添加条件</span>}
-            </button>
-          ) : edgeData?.condition ? (
-            // When not selected/hovered but has a condition, show it faintly
-            <span
-              className="transition-edge-label-static"
-              onMouseEnter={() => setHovered(true)}
-            >
-              {edgeData.condition}
-            </span>
-          ) : null}
-        </div>
+        {(hovered || editing) && (
+          <div
+            className="nodrag nopan transition-edge-popover"
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -100%) translate(${popX}px,${popY}px)`,
+              pointerEvents: 'all',
+            }}
+            onMouseEnter={onEnter}
+            onMouseLeave={onLeave}
+          >
+            {editing ? (
+              <Input
+                size="small"
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commitEdit}
+                onPressEnter={commitEdit}
+                onKeyDown={(e) => { if (e.key === 'Escape') { setEditing(false); setHovered(false); } }}
+                style={{ width: 160, fontSize: 12 }}
+                placeholder="输入跳转条件"
+              />
+            ) : (
+              <button
+                type="button"
+                className={`transition-edge-popover-inner${hasError ? ' has-error' : ''}`}
+                onClick={() => {
+                  setDraft(condition);
+                  setEditing(true);
+                }}
+                title="点击编辑条件"
+              >
+                <EditOutlined className="transition-edge-popover-icon" />
+                <span className="transition-edge-popover-text">
+                  {condition || <span className="transition-edge-popover-empty">点击添加条件</span>}
+                </span>
+              </button>
+            )}
+            {/* Arrow pointing down to the edge */}
+            {!editing && <div className="transition-edge-popover-arrow" />}
+          </div>
+        )}
       </EdgeLabelRenderer>
     </>
   );

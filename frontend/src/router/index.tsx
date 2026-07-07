@@ -1,5 +1,6 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { ConfigProvider } from "antd";
+import { ConfigProvider, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import MainLayout from "@/layouts/MainLayout";
 import SigninLogin from "@/modules/signin/pages/login";
@@ -35,7 +36,6 @@ import MemoryReviewPage from "@/modules/memory/pages/review";
 import MemoryGlossaryDetailPage from "@/modules/memory/pages/glossaryDetail";
 import MemorySkillDetailPage from "@/modules/memory/pages/skillDetail";
 import MemoryExperienceDetailPage from "@/modules/memory/pages/experienceDetail";
-import PluginDetailPage from "@/modules/plugin/pages/detail";
 import ModelProviderPage from "@/modules/modelProvider";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
 import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
@@ -47,6 +47,8 @@ import {
 } from "@/modules/selfEvolution";
 import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
+
+const PluginDetailPage = lazy(() => import("@/modules/plugin/pages/detail"));
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
@@ -160,7 +162,7 @@ export default function AppRouter() {
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
           <Route path="memory-management/plugins" element={<Navigate to="/memory-management/skills?skillView=plugins" replace />} />
-          <Route path="memory-management/plugins/:pluginId" element={<PluginDetailPage />} />
+          <Route path="memory-management/plugins/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><PluginDetailPage /></Suspense>} />
           {runtimeFeatures.hideEvo ? (
             <Route
               path="self-evolution/*"

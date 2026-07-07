@@ -855,7 +855,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         onNodeClick={handleNodeClick}
         onConnect={onConnect}
         onReconnect={onReconnect}
-        reconnectRadius={20}
+        reconnectRadius={8}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}

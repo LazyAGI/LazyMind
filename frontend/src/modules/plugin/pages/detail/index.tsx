@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Alert, Breadcrumb, Skeleton, Spin, Input, message } from 'antd';
 import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import { getPluginDraft, updatePluginDraftContent } from '../../pluginDraftApi';
+import { getPluginDraft, listPluginDrafts, updatePluginDraftContent } from '../../pluginDraftApi';
 import type { PluginDraftRecord } from '../../pluginDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
 import type { SavePayload } from '../../components/StateGraphEditor';
@@ -52,6 +52,8 @@ export default function PluginDetailPage() {
   const [loading, setLoading] = useState(true);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
+  // true = show empty-canvas hint; false = user already has experience (≥1 non-empty plugin)
+  const [showEmptyHint, setShowEmptyHint] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadDraft = useCallback(async () => {
@@ -66,6 +68,23 @@ export default function PluginDetailPage() {
     } finally {
       setLoading(false);
     }
+  }, [pluginId]);
+
+  // Check whether the user already has at least one non-empty plugin (excluding the current one).
+  // A plugin is considered non-empty when it has state_yaml_content / content, or generate_status is done/state_done.
+  useEffect(() => {
+    if (!pluginId) return;
+    listPluginDrafts({ pageSize: 50 })
+      .then(({ records }) => {
+        const hasExperience = records.some(
+          (r) =>
+            r.id !== pluginId &&
+            (r.state_yaml_content || r.content || r.plugin_yaml_content ||
+              r.generate_status === 'done' || r.generate_status === 'state_done'),
+        );
+        if (hasExperience) setShowEmptyHint(false);
+      })
+      .catch(() => {});
   }, [pluginId]);
 
   const startPolling = useCallback(() => {
@@ -254,6 +273,7 @@ export default function PluginDetailPage() {
             }
             onSave={handleSave}
             onClose={() => navigate('/memory-management/plugins')}
+            showEmptyHint={showEmptyHint}
           />
         </div>
       )}

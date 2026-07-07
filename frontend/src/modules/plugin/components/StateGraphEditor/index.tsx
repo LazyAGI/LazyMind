@@ -65,6 +65,8 @@ interface Props {
   /** Called automatically when any file changes (auto-save). */
   onSave?: (payload: SavePayload) => Promise<void>;
   onClose?: () => void;
+  /** When false, the empty-canvas hint is suppressed (user already has experience). */
+  showEmptyHint?: boolean;
 }
 
 function parseScriptFiles(raw: string): Record<string, string> {
@@ -106,6 +108,7 @@ export default function StateGraphEditor({
   pluginName,
   onSave,
   onClose,
+  showEmptyHint = true,
 }: Props) {
   const [contentTab, setContentTab] = useState<ContentTab>('statemachine');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
@@ -406,7 +409,7 @@ export default function StateGraphEditor({
                 onScenarioChange={handleScenarioChange}
                 canvasRef={canvasRef}
               />
-              {model.nodes.length === 0 && (
+              {model.nodes.length === 0 && showEmptyHint && (
                 <div className="sge-empty-state" aria-hidden="true">
                   <div className="sge-empty-state-content">
                     <p className="sge-empty-state-title">用流程图描述你的工作</p>
@@ -415,7 +418,7 @@ export default function StateGraphEditor({
                       <li>点击「素材」定义步骤间传递的内容，如文字、图片、文件等</li>
                       <li>拖拽步骤上的连接点来连接各步骤，表示执行顺序</li>
                     </ol>
-                    <p className="sge-empty-state-hint">也可以双击画布空白处快速添加步骤</p>
+                    <p className="sge-empty-state-hint">也可以双击画布空白处快速添加步骤 · 添加第一个步骤后提示消失</p>
                   </div>
                 </div>
               )}
