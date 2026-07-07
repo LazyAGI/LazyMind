@@ -1,28 +1,36 @@
 import { useState } from 'react';
-import { Button, Checkbox, Input, InputNumber, Select, Tooltip, Empty } from 'antd';
-import { PlusOutlined, DeleteOutlined, CloseOutlined } from '@ant-design/icons';
+import { Button, Checkbox, Input, InputNumber, Select, Tooltip, Empty, Dropdown, Popconfirm } from 'antd';
+import { PlusOutlined, CloseOutlined, CheckOutlined, DownOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { SlotDef, GraphModel } from '../core/model';
+import type { PluginModel, PluginUiTab } from '../core/pluginModel';
 import './index.scss';
 
 const ARTIFACT_ID_REGEX = /^[a-zA-Z0-9_]+$/;
 
-const TYPE_OPTIONS = [
-  { label: '文本', value: 'text' },
-  { label: '图片', value: 'image' },
-  { label: '文件', value: 'file' },
-  { label: 'JSON', value: 'json' },
-];
+const TYPE_VALUES = ['text', 'image', 'file', 'json'] as const;
+
+const TYPE_LABEL_KEYS: Record<string, string> = {
+  text: 'selfEvolutionRun.stateGraphArtifactTypeText',
+  image: 'selfEvolutionRun.stateGraphArtifactTypeImage',
+  file: 'selfEvolutionRun.stateGraphArtifactTypeFile',
+  json: 'selfEvolutionRun.stateGraphArtifactTypeJson',
+};
 
 interface Props {
   model: GraphModel;
   onClose: () => void;
   onModelChange: (model: GraphModel) => void;
+  uiMode?: boolean;
+  pluginModel?: PluginModel;
+  activeTabId?: string;
+  onUiModelChange?: (ui: PluginModel['ui']) => void;
 }
 
-interface DraftArtifact {
+interface EditDraft {
   id: string;
-  type: string;
   label: string;
+  type: string;
   cardinality: 'single' | 'list';
   ordered: boolean;
   allow_manual_add: boolean;
@@ -30,10 +38,10 @@ interface DraftArtifact {
   idError?: string;
 }
 
-const EMPTY_DRAFT: DraftArtifact = {
+const EMPTY_DRAFT: EditDraft = {
   id: '',
-  type: 'text',
   label: '',
+  type: 'text',
   cardinality: 'single',
   ordered: false,
   allow_manual_add: true,
@@ -45,39 +53,288 @@ function isUsedAsInput(model: GraphModel, slotId: string): boolean {
   return model.nodes.some((n) => n.inputs.some((r) => r.slot === slotId));
 }
 
-export default function ArtifactPanel({ model, onClose, onModelChange }: Props) {
-  const [draft, setDraft] = useState<DraftArtifact>(EMPTY_DRAFT);
-  const [adding, setAdding] = useState(false);
+// ── EditForm ────────────────────────────────────────────────────────────────
+interface EditFormProps {
+  draft: EditDraft;
+  isNew: boolean;
+  onChange: (patch: Partial<EditDraft>) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  saveLabel?: string;
+}
 
-  const artifacts = Object.values(model.slots);
+function EditForm({ draft, isNew, onChange, onSave, onCancel, saveLabel }: EditFormProps) {
+  const { t } = useTranslation();
+  const typeOptions = TYPE_VALUES.map((v) => ({ label: t(TYPE_LABEL_KEYS[v]), value: v }));
+  const resolvedSaveLabel = saveLabel ?? t('selfEvolutionRun.artifactPanelSave');
+  return (
+    <div className="artifact-edit-form">
+      <div className="artifact-edit-row">
+        <span className="artifact-edit-field-label">{t('selfEvolutionRun.artifactPanelFieldId')}</span>
+        {isNew ? (
+          <div className="artifact-edit-field-value">
+            <Input
+              size="small"
+              value={draft.id}
+              onChange={(e) => onChange({ id: e.target.value, idError: undefined })}
+              placeholder={t('selfEvolutionRun.artifactPanelFieldIdPlaceholder')}
+              status={draft.idError ? 'error' : ''}
+              onPressEnter={onSave}
+              autoFocus
+            />
+            {draft.idError && <div className="artifact-id-error">{draft.idError}</div>}
+          </div>
+        ) : (
+          <span className="artifact-edit-id-readonly">{draft.id}</span>
+        )}
+      </div>
+      <div className="artifact-edit-row">
+        <span className="artifact-edit-field-label">{t('selfEvolutionRun.artifactPanelFieldLabel')}</span>
+        <Input
+          size="small"
+          value={draft.label}
+          onChange={(e) => onChange({ label: e.target.value })}
+          placeholder={t('selfEvolutionRun.artifactPanelFieldLabelPlaceholder')}
+          className="artifact-edit-field-value"
+        />
+      </div>
+      <div className="artifact-edit-row">
+        <span className="artifact-edit-field-label">{t('selfEvolutionRun.artifactPanelFieldType')}</span>
+        <Select
+          size="small"
+          value={draft.type}
+          options={typeOptions}
+          onChange={(val) => onChange({ type: val })}
+          className="artifact-edit-type-select"
+        />
+      </div>
+      <div className="artifact-edit-row artifact-edit-row--flags">
+        <Checkbox
+          checked={draft.cardinality === 'list'}
+          onChange={(e) => onChange({ cardinality: e.target.checked ? 'list' : 'single' })}
+        >
+          {t('selfEvolutionRun.artifactPanelFieldIsList')}
+        </Checkbox>
+        {draft.cardinality === 'list' && (
+          <>
+            <Checkbox
+              checked={draft.ordered}
+              onChange={(e) => onChange({ ordered: e.target.checked })}
+            >
+              {t('selfEvolutionRun.artifactPanelFieldOrdered')}
+            </Checkbox>
+            <Checkbox
+              checked={draft.allow_manual_add}
+              onChange={(e) => onChange({ allow_manual_add: e.target.checked })}
+            >
+              {t('selfEvolutionRun.artifactPanelFieldAllowManualAdd')}
+            </Checkbox>
+          </>
+        )}
+      </div>
+      <div className="artifact-edit-row">
+        <span className="artifact-edit-field-label">{t('selfEvolutionRun.artifactPanelFieldSummaryMax')}</span>
+        <InputNumber
+          size="small"
+          min={0}
+          value={draft.summary_max_chars ? parseInt(draft.summary_max_chars, 10) : null}
+          onChange={(val) => onChange({ summary_max_chars: val != null ? String(val) : '' })}
+          placeholder={t('selfEvolutionRun.artifactPanelFieldSummaryMaxPlaceholder')}
+          className="artifact-edit-summary-input"
+        />
+      </div>
+      <div className="artifact-edit-actions">
+        <Button size="small" type="primary" onClick={onSave}>{resolvedSaveLabel}</Button>
+        <Button size="small" onClick={onCancel}>{t('selfEvolutionRun.artifactPanelCancel')}</Button>
+      </div>
+    </div>
+  );
+}
 
-  const validateId = (id: string): string | undefined => {
-    if (!id.trim()) return 'ID 不能为空';
-    if (!ARTIFACT_ID_REGEX.test(id)) return 'ID 只能包含英文字母、数字和下划线';
-    if (model.slots[id]) return '该 ID 已存在';
-    return undefined;
+// ── ArtifactRow (preview + inline edit) ─────────────────────────────────────
+interface ArtifactRowProps {
+  art: SlotDef;
+  model: GraphModel;
+  uiMode?: boolean;
+  tabs: PluginUiTab[];
+  onUpdate: (id: string, patch: Partial<Omit<SlotDef, 'id'>>) => void;
+  onDelete: (id: string) => void;
+  onJoinTab: (slotId: string, tabId: string) => void;
+  onLeaveTab: (slotId: string, tabId: string) => void;
+}
+
+function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, onLeaveTab }: ArtifactRowProps) {
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<EditDraft>(EMPTY_DRAFT);
+
+  const resolveAllowManualAdd = (): boolean => {
+    if (art.allow_manual_add !== undefined) return art.allow_manual_add;
+    return isUsedAsInput(model, art.id);
   };
 
-  const handleAdd = () => {
-    const idError = validateId(draft.id);
-    if (idError) {
-      setDraft((d) => ({ ...d, idError }));
-      return;
-    }
+  // Find which tab (if any) this slot currently belongs to — at most one tab.
+  const currentTab = tabs.find((tab) => tab.slots.some((s) => s.id === art.id)) ?? null;
+
+  const startEdit = () => {
+    setDraft({
+      id: art.id,
+      label: art.label ?? '',
+      type: art.type,
+      cardinality: art.cardinality === 'list' ? 'list' : 'single',
+      ordered: !!art.ordered,
+      allow_manual_add: resolveAllowManualAdd(),
+      summary_max_chars: art.summary_max_chars != null ? String(art.summary_max_chars) : '',
+    });
+    setEditing(true);
+  };
+
+  const handleSave = () => {
     const isList = draft.cardinality === 'list';
     const maxChars = parseInt(draft.summary_max_chars, 10);
-    const newSlot: SlotDef = {
-      id: draft.id,
+    onUpdate(art.id, {
       type: draft.type,
       label: draft.label || undefined,
       cardinality: isList ? 'list' : undefined,
       ordered: (isList && draft.ordered) ? true : undefined,
       allow_manual_add: isList ? draft.allow_manual_add : undefined,
       summary_max_chars: (!isNaN(maxChars) && maxChars > 0) ? maxChars : undefined,
+    });
+    setEditing(false);
+  };
+
+  const typeLabel = t(TYPE_LABEL_KEYS[art.type] ?? 'selfEvolutionRun.stateGraphArtifactTypeText');
+  const cardinalityLabel = art.cardinality === 'list' ? `(${t('selfEvolutionRun.artifactPanelFieldIsList')})` : '';
+
+  const displayName = art.label || art.id;
+  const idLabel = art.label ? `(${art.id})` : '';
+  // Show a person icon when allow_manual_add is enabled (user provides this slot)
+  const resolvedAllowManualAdd = art.cardinality === 'list'
+    ? (art.allow_manual_add !== undefined ? art.allow_manual_add : isUsedAsInput(model, art.id))
+    : false;
+
+  if (editing) {
+    return (
+      <div className="artifact-item artifact-item--editing">
+        <EditForm
+          draft={draft}
+          isNew={false}
+          onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+          onSave={handleSave}
+          onCancel={() => setEditing(false)}
+          saveLabel={t('selfEvolutionRun.artifactPanelSave')}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="artifact-item">
+      <div className="artifact-item-line1">
+        {resolvedAllowManualAdd && (
+          <span className="artifact-item-icon" title={t('selfEvolutionRun.artifactPanelAllowManualAddTitle')}>👤</span>
+        )}
+        <span className="artifact-item-name">{displayName}</span>
+        {idLabel && <span className="artifact-item-id">{idLabel}</span>}
+        <span className="artifact-item-sep">,</span>
+        <span className="artifact-item-type">
+          {typeLabel}
+          {cardinalityLabel && <span className="artifact-item-cardinality">{cardinalityLabel}</span>}
+        </span>
+        <div className="artifact-item-actions">
+          <Button size="small" type="text" className="artifact-item-edit-btn" onClick={startEdit}>
+            {t('selfEvolutionRun.artifactPanelEdit')}
+          </Button>
+          <Popconfirm
+            title={t('selfEvolutionRun.artifactPanelDeleteConfirm', { id: art.id })}
+            onConfirm={() => onDelete(art.id)}
+            okText={t('selfEvolutionRun.artifactPanelDeleteOk')}
+            cancelText={t('selfEvolutionRun.artifactPanelDeleteCancel')}
+            okButtonProps={{ danger: true }}
+          >
+            <Tooltip title={t('selfEvolutionRun.artifactPanelDeleteTooltip')}>
+              <Button
+                type="text"
+                danger
+                size="small"
+                className="artifact-item-delete-btn"
+                aria-label={t('selfEvolutionRun.artifactPanelDeleteTooltip')}
+              >
+                🗑️
+              </Button>
+            </Tooltip>
+          </Popconfirm>
+        </div>
+      </div>
+      {uiMode && (
+        <div className="artifact-item-line2">
+          {currentTab ? (
+            <Button
+              size="small"
+              type="link"
+              className="artifact-row-join artifact-row-join--active"
+              icon={<CheckOutlined />}
+              onClick={() => onLeaveTab(art.id, currentTab.id)}
+            >
+              {t('selfEvolutionRun.artifactPanelJoinedTab', { tabLabel: currentTab.label ?? currentTab.id })}
+            </Button>
+          ) : (
+            <Dropdown
+              menu={{
+                items: tabs.map((tab) => ({
+                  key: tab.id,
+                  label: tab.label ?? tab.id,
+                  onClick: () => onJoinTab(art.id, tab.id),
+                })),
+              }}
+              trigger={['click']}
+            >
+              <Button size="small" className="artifact-row-join">
+                {t('selfEvolutionRun.artifactPanelJoinTab')} <DownOutlined />
+              </Button>
+            </Dropdown>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main component ───────────────────────────────────────────────────────────
+export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, pluginModel, onUiModelChange }: Props) {
+  const { t } = useTranslation();
+  const [newDraft, setNewDraft] = useState<EditDraft>(EMPTY_DRAFT);
+  const [adding, setAdding] = useState(false);
+
+  const artifacts = Object.values(model.slots);
+  const tabs: PluginUiTab[] = pluginModel?.ui?.tabs ?? [];
+
+  const validateId = (id: string): string | undefined => {
+    if (!id.trim()) return t('selfEvolutionRun.artifactPanelIdErrorEmpty');
+    if (!ARTIFACT_ID_REGEX.test(id)) return t('selfEvolutionRun.artifactPanelIdErrorInvalid');
+    if (model.slots[id]) return t('selfEvolutionRun.artifactPanelIdErrorDuplicate');
+    return undefined;
+  };
+
+  const handleAdd = () => {
+    const idError = validateId(newDraft.id);
+    if (idError) {
+      setNewDraft((d) => ({ ...d, idError }));
+      return;
+    }
+    const isList = newDraft.cardinality === 'list';
+    const maxChars = parseInt(newDraft.summary_max_chars, 10);
+    const newSlot: SlotDef = {
+      id: newDraft.id,
+      type: newDraft.type,
+      label: newDraft.label || undefined,
+      cardinality: isList ? 'list' : undefined,
+      ordered: (isList && newDraft.ordered) ? true : undefined,
+      allow_manual_add: isList ? newDraft.allow_manual_add : undefined,
+      summary_max_chars: (!isNaN(maxChars) && maxChars > 0) ? maxChars : undefined,
     };
-    const newSlots = { ...model.slots, [draft.id]: newSlot };
-    onModelChange({ ...model, slots: newSlots });
-    setDraft(EMPTY_DRAFT);
+    onModelChange({ ...model, slots: { ...model.slots, [newDraft.id]: newSlot } });
+    setNewDraft(EMPTY_DRAFT);
     setAdding(false);
   };
 
@@ -95,7 +352,6 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
   const updateArtifact = (id: string, patch: Partial<Omit<SlotDef, 'id'>>) => {
     const current = model.slots[id];
     const updated: SlotDef = { ...current, ...patch };
-    // When switching back to single, clear list-only fields
     if ('cardinality' in patch && patch.cardinality !== 'list') {
       updated.cardinality = undefined;
       updated.ordered = undefined;
@@ -104,182 +360,68 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
     onModelChange({ ...model, slots: { ...model.slots, [id]: updated } });
   };
 
-  // Resolve effective allow_manual_add: explicit value wins, otherwise derive from usage.
-  const resolveAllowManualAdd = (art: SlotDef): boolean => {
-    if (art.allow_manual_add !== undefined) return art.allow_manual_add;
-    return isUsedAsInput(model, art.id);
+  const joinTab = (slotId: string, tabId: string) => {
+    if (!pluginModel || !onUiModelChange) return;
+    const newTabs = tabs.map((tab) =>
+      tab.id === tabId && !tab.slots.some((s) => s.id === slotId)
+        ? { ...tab, slots: [...tab.slots, { id: slotId }] }
+        : tab,
+    );
+    onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs });
+  };
+
+  const leaveTab = (slotId: string, tabId: string) => {
+    if (!pluginModel || !onUiModelChange) return;
+    const newTabs = tabs.map((tab) =>
+      tab.id === tabId ? { ...tab, slots: tab.slots.filter((s) => s.id !== slotId) } : tab,
+    );
+    onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs });
   };
 
   return (
-    <div className="artifact-panel" role="complementary" aria-label="素材管理" onDoubleClick={(e) => e.stopPropagation()}>
+    <div className="artifact-panel" role="complementary" aria-label={t('selfEvolutionRun.artifactPanelAria')} onDoubleClick={(e) => e.stopPropagation()}>
       <div className="artifact-panel-header">
-        <span className="artifact-panel-title">素材</span>
-        <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label="关闭素材面板" />
+        <span className="artifact-panel-title">{t('selfEvolutionRun.artifactPanelTitle')}</span>
+        <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label={t('selfEvolutionRun.artifactPanelClose')} />
       </div>
 
       <div className="artifact-panel-desc">
-        素材是步骤之间传递的东西，可以是文字、图片、文件等任何形式的内容。
-        你也可以在这里定义用户一开始就提供的素材（如上传的图片、填写的文字等）。
+        {t('selfEvolutionRun.artifactPanelDesc')}
       </div>
 
       <div className="artifact-panel-body">
         {artifacts.length === 0 && !adding && (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="暂无素材定义"
+            description={t('selfEvolutionRun.artifactPanelEmpty')}
             style={{ margin: '24px 0' }}
           />
         )}
 
         {artifacts.map((art) => (
-          <div key={art.id} className="artifact-row">
-            <div className="artifact-row-id">
-              <Tooltip title={art.id}>
-                <code>{art.id}</code>
-              </Tooltip>
-            </div>
-            <div className="artifact-row-fields">
-              <div className="artifact-row-main">
-                <Select
-                  size="small"
-                  value={art.type}
-                  options={TYPE_OPTIONS}
-                  onChange={(val) => updateArtifact(art.id, { type: val })}
-                  className="artifact-type-select"
-                />
-                <Input
-                  size="small"
-                  value={art.label ?? ''}
-                  onChange={(e) => updateArtifact(art.id, { label: e.target.value || undefined })}
-                  placeholder="素材名称（可选）"
-                  className="artifact-label-input"
-                />
-              </div>
-              <div className="artifact-row-flags">
-                <Checkbox
-                  checked={art.cardinality === 'list'}
-                  onChange={(e) =>
-                    updateArtifact(art.id, { cardinality: e.target.checked ? 'list' : 'single' })
-                  }
-                >
-                  列表
-                </Checkbox>
-                {art.cardinality === 'list' && (
-                  <>
-                    <Checkbox
-                      checked={!!art.ordered}
-                      onChange={(e) => updateArtifact(art.id, { ordered: e.target.checked || undefined })}
-                    >
-                      有序
-                    </Checkbox>
-                    <Checkbox
-                      checked={resolveAllowManualAdd(art)}
-                      onChange={(e) => updateArtifact(art.id, { allow_manual_add: e.target.checked })}
-                    >
-                      允许手动添加
-                    </Checkbox>
-                  </>
-                )}
-              </div>
-              <div className="artifact-row-extra">
-                <span className="artifact-extra-label">摘要字数上限</span>
-                <InputNumber
-                  size="small"
-                  min={0}
-                  value={art.summary_max_chars ?? null}
-                  onChange={(val) =>
-                    updateArtifact(art.id, { summary_max_chars: val ?? undefined })
-                  }
-                  placeholder="不限"
-                  className="artifact-summary-input"
-                />
-              </div>
-            </div>
-            <Tooltip title="删除素材（同时移除节点引用）">
-              <Button
-                type="text"
-                danger
-                size="small"
-                icon={<DeleteOutlined />}
-                onClick={() => handleDelete(art.id)}
-                aria-label={`删除素材 ${art.id}`}
-                className="artifact-row-delete"
-              />
-            </Tooltip>
-          </div>
+          <ArtifactRow
+            key={art.id}
+            art={art}
+            model={model}
+            uiMode={uiMode}
+            tabs={tabs}
+            onUpdate={updateArtifact}
+            onDelete={handleDelete}
+            onJoinTab={joinTab}
+            onLeaveTab={leaveTab}
+          />
         ))}
 
         {adding && (
-          <div className="artifact-add-form">
-            <Input
-              size="small"
-              value={draft.id}
-              onChange={(e) => setDraft((d) => ({ ...d, id: e.target.value, idError: undefined }))}
-              placeholder="素材标识（英文/数字/下划线）"
-              status={draft.idError ? 'error' : ''}
-              onPressEnter={handleAdd}
-              autoFocus
+          <div className="artifact-item artifact-item--new">
+            <EditForm
+              draft={newDraft}
+              isNew={true}
+              onChange={(patch) => setNewDraft((d) => ({ ...d, ...patch }))}
+              onSave={handleAdd}
+              onCancel={() => { setAdding(false); setNewDraft(EMPTY_DRAFT); }}
+              saveLabel={t('selfEvolutionRun.artifactPanelConfirmAdd')}
             />
-            {draft.idError && <div className="artifact-id-error">{draft.idError}</div>}
-            <div className="artifact-add-row2">
-              <Select
-                size="small"
-                value={draft.type}
-                options={TYPE_OPTIONS}
-                onChange={(val) => setDraft((d) => ({ ...d, type: val }))}
-                className="artifact-type-select"
-              />
-              <Input
-                size="small"
-                value={draft.label}
-                onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))}
-                placeholder="素材名称（可选）"
-                className="artifact-label-input"
-              />
-            </div>
-            <div className="artifact-add-flags">
-              <Checkbox
-                checked={draft.cardinality === 'list'}
-                onChange={(e) =>
-                  setDraft((d) => ({ ...d, cardinality: e.target.checked ? 'list' : 'single' }))
-                }
-              >
-                列表
-              </Checkbox>
-              {draft.cardinality === 'list' && (
-                <>
-                  <Checkbox
-                    checked={draft.ordered}
-                    onChange={(e) => setDraft((d) => ({ ...d, ordered: e.target.checked }))}
-                  >
-                    有序
-                  </Checkbox>
-                  <Checkbox
-                    checked={draft.allow_manual_add}
-                    onChange={(e) => setDraft((d) => ({ ...d, allow_manual_add: e.target.checked }))}
-                  >
-                    允许手动添加
-                  </Checkbox>
-                </>
-              )}
-            </div>
-            <div className="artifact-add-extra">
-              <span className="artifact-extra-label">摘要字数上限</span>
-              <InputNumber
-                size="small"
-                min={0}
-                value={draft.summary_max_chars ? parseInt(draft.summary_max_chars, 10) : null}
-                onChange={(val) =>
-                  setDraft((d) => ({ ...d, summary_max_chars: val != null ? String(val) : '' }))
-                }
-                placeholder="不限"
-                className="artifact-summary-input"
-              />
-            </div>
-            <div className="artifact-add-actions">
-              <Button size="small" type="primary" onClick={handleAdd}>确认添加</Button>
-              <Button size="small" onClick={() => { setAdding(false); setDraft(EMPTY_DRAFT); }}>取消</Button>
-            </div>
           </div>
         )}
       </div>
@@ -293,7 +435,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange }: Props) 
             block
             onClick={() => setAdding(true)}
           >
-            添加素材
+            {t('selfEvolutionRun.artifactPanelAdd')}
           </Button>
         </div>
       )}

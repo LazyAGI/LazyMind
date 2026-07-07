@@ -169,8 +169,9 @@
   min-height: 0;
 }
 
-/* UI preview panel */
-.sge-ui-preview-panel {
+/* UI editor panel */
+.sge-ui-preview-panel,
+.sge-ui-editor-panel {
   flex: 1;
   overflow: hidden;
   min-height: 0;

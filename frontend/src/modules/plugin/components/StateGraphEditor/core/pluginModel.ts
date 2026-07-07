@@ -14,8 +14,10 @@ export interface PluginSlotDef {
 export interface PluginUiTab {
   id: string;
   label?: string;
-  layout?: 'list' | 'grid' | 'horizontal';
+  layout?: 'list' | 'grid' | 'horizontal' | 'composite';
   slots: Array<{ id: string }>;
+  /** Raw composite_layout value — preserved as-is when serializing to YAML. */
+  composite_layout?: unknown;
 }
 
 export interface PluginToolScript {

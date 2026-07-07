@@ -54,6 +54,7 @@ export function serializePluginModel(model: PluginModel, graphModel?: GraphModel
         if (tab.label) t.label = tab.label;
         if (tab.layout) t.layout = tab.layout;
         t.slots = tab.slots.map((s) => ({ id: s.id }));
+        if (tab.composite_layout != null) t.composite_layout = tab.composite_layout;
         return t;
       }),
     };

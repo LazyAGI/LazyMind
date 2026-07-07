@@ -26,7 +26,7 @@ import type { CanvasHandle } from './GraphCanvas';
 import ArtifactPanel from './ArtifactPanel';
 import YamlEditor from './YamlEditor';
 import ValidationPanel from './ValidationPanel';
-import UiPreviewPanel from './UiPreviewPanel';
+import UiEditorPanel from './UiEditorPanel';
 import PluginInfoModal from './PluginInfoModal';
 import './index.scss';
 
@@ -435,8 +435,13 @@ export default function StateGraphEditor({
         )}
 
         {viewMode === 'preview' && contentTab === 'ui' && (
-          <div className="sge-ui-preview-panel">
-            <UiPreviewPanel model={pluginModel} />
+          <div className="sge-ui-editor-panel">
+            <UiEditorPanel
+              graphModel={model}
+              pluginModel={pluginModel}
+              onGraphModelChange={updateModel}
+              onPluginModelChange={handlePluginModelChange}
+            />
           </div>
         )}
 
