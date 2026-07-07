@@ -21,6 +21,7 @@ uvicorn
 fastapi
 pymupdf==1.24.14
 scikit-learn==1.6.1
+umap-learn>=0.5.7
 Levenshtein
 openpyxl-image-loader
 cryptography==45.0.5

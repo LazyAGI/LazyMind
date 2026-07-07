@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo, createContext, useCo
 import ReactDOM from "react-dom";
 import type { SlotRevision, SlotVersionEntry } from "@/modules/chat/store/pluginPanel";
 import { usePluginStore, draftStore } from "@/modules/chat/store/pluginPanel";
-import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
+import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl } from "@/modules/knowledge/utils/imageUrl";
 import { buildDiffLinesWithInline } from "@/modules/memory/shared";
 import { DiffLineContent } from "@/modules/memory/components/DiffLineContent";
 import { uploadFileInChunks } from "@/modules/chat/utils/chunkUpload";
@@ -27,6 +27,93 @@ function normalizeContentType(ct: string): 'image' | 'file' | 'text' {
   if (ct === 'image' || ct.startsWith('image/')) return 'image';
   if (ct === 'file' || ct === 'file_list' || ct.startsWith('application/')) return 'file';
   return 'text';
+}
+
+/** True when the URL can be used directly as an <img src> in the browser. */
+function isBrowserReadyImageUrl(url: string): boolean {
+  const trimmed = (url || '').trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('data:image/')) return true;
+  if (/^https?:\/\//i.test(trimmed)) return true;
+  return trimmed.includes('/api/core/static-files/') || trimmed.includes('/static-files/');
+}
+
+function preloadImageUrl(src: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = src;
+  });
+}
+
+const SLOT_IMAGE_PRELOAD_RETRIES = 4;
+const SLOT_IMAGE_PRELOAD_RETRY_MS = 800;
+
+/**
+ * Resolve a slot image URL and preload it before display.
+ * Avoids flashing a broken <img> when the API returns a signed URL before the file exists.
+ */
+function useSlotImageUrl(raw: Record<string, unknown> | undefined) {
+  const pathForSign = String(raw?.path ?? raw?.url ?? '').trim();
+  const apiUrlRaw = raw?.url ? String(raw.url).trim() : '';
+  const [displayUrl, setDisplayUrl] = useState('');
+  const [pending, setPending] = useState(Boolean(pathForSign));
+
+  useEffect(() => {
+    if (!pathForSign) {
+      setDisplayUrl('');
+      setPending(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function resolveCandidate(): Promise<string> {
+      const apiUrl = apiUrlRaw ? resolveCoreAssetUrl(apiUrlRaw) : '';
+      if (apiUrl && isBrowserReadyImageUrl(apiUrl) && !isExpiredSignedUrl(apiUrl)) {
+        return apiUrl;
+      }
+      const signed = await resolveMarkdownImageUrlAsync(pathForSign);
+      return isBrowserReadyImageUrl(signed) ? signed : '';
+    }
+
+    async function load() {
+      setPending(true);
+      setDisplayUrl('');
+      let candidate = await resolveCandidate();
+      if (!candidate || cancelled) {
+        if (!cancelled) setPending(false);
+        return;
+      }
+
+      for (let attempt = 0; attempt < SLOT_IMAGE_PRELOAD_RETRIES && !cancelled; attempt++) {
+        if (await preloadImageUrl(candidate)) {
+          if (!cancelled) {
+            setDisplayUrl(candidate);
+            setPending(false);
+          }
+          return;
+        }
+        if (attempt + 1 >= SLOT_IMAGE_PRELOAD_RETRIES) break;
+        await new Promise((r) => setTimeout(r, SLOT_IMAGE_PRELOAD_RETRY_MS));
+        candidate = await resolveMarkdownImageUrlAsync(pathForSign);
+        if (!isBrowserReadyImageUrl(candidate)) break;
+      }
+
+      if (!cancelled) {
+        setDisplayUrl('');
+        setPending(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [pathForSign, apiUrlRaw]);
+
+  return { displayUrl, pending, hasSource: Boolean(pathForSign) };
 }
 
 /** Shown when the slot has no artifact yet (backend returned no artifact_value). */
@@ -626,20 +713,7 @@ export function SlotImage({
   onReference,
 }: SlotImageProps) {
   const raw = slot.artifact_value;
-  const rawPath: string = raw?.url ?? raw?.path ?? '';
-  const syncUrl: string = rawPath ? resolveCoreAssetUrl(rawPath) : '';
-  // For absolute upload paths that resolveCoreAssetUrl cannot serve directly,
-  // asynchronously sign the path and replace the URL.
-  const [resolvedUrl, setResolvedUrl] = useState<string>(syncUrl);
-  useEffect(() => {
-    setResolvedUrl(syncUrl);
-    // syncUrl === rawPath means resolveCoreAssetUrl returned it unchanged (not http/static-files),
-    // so it's an absolute filesystem path that needs signing via the core API.
-    if (rawPath && syncUrl === rawPath && !rawPath.startsWith('http')) {
-      resolveMarkdownImageUrlAsync(rawPath).then(setResolvedUrl).catch(() => {});
-    }
-  }, [rawPath, syncUrl]);
-  const url = resolvedUrl;
+  const { displayUrl: url, pending, hasSource } = useSlotImageUrl(raw);
   const alt: string = slot.caption ?? raw?.alt ?? '';
   const { deleteSlotItem, patchSlotCaption, patchSlotItemValue } = usePluginStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -722,7 +796,9 @@ export function SlotImage({
     if (e.key === 'Escape') setCaptionEditing(false);
   }, [handleCaptionSave]);
 
-  if (!url) return <SlotPending type='image' cardMode={cardMode} />;
+  if (!hasSource || pending || !url) {
+    return <SlotPending type='image' cardMode={cardMode} />;
+  }
 
   const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined);
 

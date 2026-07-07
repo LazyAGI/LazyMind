@@ -77,13 +77,12 @@ def _build_reranker() -> Optional[Reranker]:
 
 def _ensure_kb_search_runtime() -> tuple[List[Retriever], Optional[Reranker], Retriever]:
     global _kb_retrievers, _kb_reranker, _kb_image_retriever
-    if _kb_retrievers is None:
-        _kb_retrievers = [
-            Retriever(DOCUMENT, **cfg)
-            for cfg in _KB_RETRIEVER_CONFIGS
-        ]
-        _kb_reranker = _build_reranker()
-        _kb_image_retriever = Retriever(DOCUMENT, **_KB_IMAGE_RETRIEVER_CONFIG)
+    if _kb_retrievers is not None and _kb_image_retriever is not None:
+        return _kb_retrievers, _kb_reranker, _kb_image_retriever
+
+    _kb_retrievers = [Retriever(DOCUMENT, **cfg) for cfg in _KB_RETRIEVER_CONFIGS]
+    _kb_reranker = _build_reranker()
+    _kb_image_retriever = Retriever(DOCUMENT, **_KB_IMAGE_RETRIEVER_CONFIG)
     return _kb_retrievers, _kb_reranker, _kb_image_retriever
 
 
@@ -511,6 +510,10 @@ class KBToolGroup:
         doc = DOCUMENT
         docid = target if target_type == 'docid' else ''
         file_name = target if target_type == 'file_name' else None
+        if not keyword:
+            raise ValueError('keyword is required')
+        if not (target and str(target).strip()):
+            raise ValueError('target is required')
         LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
                  f'file_name={file_name!r} group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 

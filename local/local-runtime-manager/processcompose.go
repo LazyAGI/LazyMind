@@ -19,6 +19,8 @@ type ProcessComposeManager struct {
 	execPath string
 }
 
+const processComposePackage = "github.com/f1bonacc1/process-compose@v1.116.0"
+
 func NewProcessComposeManager(r CommandRunner, execPath string) *ProcessComposeManager {
 	return &ProcessComposeManager{runner: r, execPath: execPath}
 }
@@ -202,6 +204,9 @@ func runtimeCommandEnv(cfg RuntimeConfig) []string {
 }
 
 func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := m.EnsureBinary(ctx, paths.RepoRoot); err != nil {
+		return err
+	}
 	args := []string{
 		"--config", filepath.ToSlash(paths.GeneratedConfig),
 		"-D",
@@ -222,6 +227,9 @@ func (m *ProcessComposeManager) FollowLogs(ctx context.Context, cfg RuntimeConfi
 	streamer, ok := m.runner.(CommandStreamer)
 	if !ok {
 		return nil
+	}
+	if err := m.EnsureBinary(ctx, paths.RepoRoot); err != nil {
+		return err
 	}
 	args := []string{
 		"-p", strconv.Itoa(cfg.ProcessComposePort),
@@ -244,6 +252,9 @@ func (m *ProcessComposeManager) FollowLogs(ctx context.Context, cfg RuntimeConfi
 }
 
 func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := m.EnsureBinary(ctx, paths.RepoRoot); err != nil {
+		return err
+	}
 	args := []string{
 		"-p", strconv.Itoa(cfg.ProcessComposePort),
 		"--token-file", paths.RunDirTokenFile,
@@ -273,16 +284,50 @@ func (m *ProcessComposeManager) ProbeAPI(port int, timeout time.Duration) bool {
 	return resp.StatusCode < 500
 }
 
+func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, repoRoot string) error {
+	if _, ok := m.runner.(*ExecRunner); !ok {
+		return nil
+	}
+	candidate := filepath.Join(repoRoot, localProcessComposeBin)
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(candidate), 0o755); err != nil {
+		return err
+	}
+	gobin, err := processComposeGOBIN(repoRoot)
+	if err != nil {
+		return fmt.Errorf("resolve process-compose GOBIN: %w", err)
+	}
+	res, err := m.runner.Run(ctx, Command{
+		Name: "go",
+		Args: []string{"install", processComposePackage},
+		Dir:  repoRoot,
+		Env:  []string{"GOBIN=" + gobin},
+	})
+	if err != nil {
+		return fmt.Errorf("install process-compose failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+	}
+	return nil
+}
+
+func processComposeGOBIN(repoRoot string) (string, error) {
+	return filepath.Abs(filepath.Join(repoRoot, "local", "bin"))
+}
+
 func quoteShellArg(value string) string {
 	if value == "" {
 		return "''"
 	}
 	if strings.IndexFunc(value, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '\n'
+		return !(r >= 'A' && r <= 'Z') &&
+			!(r >= 'a' && r <= 'z') &&
+			!(r >= '0' && r <= '9') &&
+			r != '_' && r != '-' && r != '.' && r != '/'
 	}) == -1 {
 		return value
 	}
-	return strconv.Quote(value)
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func processComposeCommand(repoRoot string) string {

@@ -19,6 +19,7 @@ remember to list them explicitly.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -87,6 +88,20 @@ def _agentic_config() -> Dict[str, Any]:
         return lazyllm.globals['agentic_config'] or {}
     except Exception:
         return {}
+
+
+def _export_parent_agentic_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the JSON-safe request context a plugin SubAgent should inherit."""
+    exported: Dict[str, Any] = {}
+    for key, value in (config or {}).items():
+        if key == 'citation_state':
+            continue
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError):
+            continue
+        exported[key] = value
+    return exported
 
 
 def _render_step_objective(
@@ -189,31 +204,56 @@ def _trigger_plugin_step(
                 for inp in inputs:
                     slot = inp['slot']
                     required = inp.get('required', True)
-                    producer_step = plugin_loader.find_producer_step(plugin_id, slot)
-                    if not producer_step:
+                    producer_steps = plugin_loader.find_producer_steps(plugin_id, slot)
+                    if not producer_steps:
                         continue
-                    step_status = steps_data.get(producer_step)
+                    producer_statuses = {
+                        producer_step: steps_data.get(producer_step)
+                        for producer_step in producer_steps
+                    }
+                    if any(status == 'succeeded' for status in producer_statuses.values()):
+                        continue
+
+                    preferred_producer = (
+                        current_step if current_step in producer_steps else producer_steps[0]
+                    )
+                    step_status = producer_statuses.get(preferred_producer)
                     if step_status is None:
                         if required:
                             return (
                                 f'Error: required artifact {slot!r} not available. '
-                                f'Please trigger {producer_step!r} first.'
+                                f'Please trigger {preferred_producer!r} first.'
                             )
                         continue
-                    if step_status in ('running', 'failed', 'interrupted'):
+                    if step_status in ('running', 'interrupted'):
                         return (
                             f'Error: artifact {slot!r} not ready '
-                            f'(producer step {producer_step!r} status: {step_status!r}).'
+                            f'(producer step {preferred_producer!r} status: {step_status!r}).'
+                        )
+                    if step_status == 'failed':
+                        if not required:
+                            continue
+                        return (
+                            f'Error: artifact {slot!r} not ready '
+                            f'(producer step {preferred_producer!r} status: {step_status!r}).'
                         )
         except Exception:
             pass  # Defensive: skip DB check on error; Go will re-validate
 
     # --- Emit task_created signal ---
     task_id = str(uuid.uuid4())
-    output_keys = [o['slot'] for o in step_config.get('outputs', [])]
+    output_defs = step_config.get('outputs', [])
+    output_keys = [o['slot'] for o in output_defs if o.get('slot')]
+    required_output_keys = [
+        o['slot']
+        for o in output_defs
+        if o.get('slot') and o.get('required', True)
+    ]
     input_keys = [i['slot'] for i in inputs]
 
     # Framework tools are always present regardless of plugin declaration.
+    # Domain tools (e.g. kb) come only from state.yml — Go does not forward this
+    # list to the SubAgent runner; runner re-resolves tools from plugin_loader.
     declared_tools: List[str] = step_config.get('tools', [])
     merged_tools = _merge_tools(declared_tools)
 
@@ -224,15 +264,27 @@ def _trigger_plugin_step(
         'user_input': user_input,
         'is_cold_start': is_cold_start,
     }
+    parent_agentic_config = _export_parent_agentic_config(cfg)
+    if parent_agentic_config:
+        params['parent_agentic_config'] = parent_agentic_config
     # Map Python-side runtime_instruction to Go-side retry_hint field name.
     if runtime_instruction:
         params['retry_hint'] = runtime_instruction
     if partial_indices:
         params['partial_indices'] = partial_indices
+    params['required_output_artifact_keys'] = required_output_keys
     # Propagate full per-turn attachment index so SubAgent can access user files.
     history_files_per_turn: dict = cfg.get('history_files_per_turn') or {}
     if history_files_per_turn:
         params['history_files_per_turn'] = history_files_per_turn
+
+    # Propagate KB filters and user_id so plugin SubAgents can call kb_search.
+    filters: dict = dict(cfg.get('filters') or {})
+    if filters:
+        params['filters'] = filters
+    user_id: str = str(cfg.get('user_id') or '').strip()
+    if user_id:
+        params['user_id'] = user_id
 
     # Inject focused_tab (UI context hint) into the objective.
     # focused_sort_order is NOT injected — it is the UI scroll position,
@@ -909,9 +961,6 @@ def resolve_plugin_injection(
             # Read-only query tools (active session required).
             plugin_tools.extend(build_query_tools())
 
-            # find_artifact lets ChatAgent look up plugin step outputs by key.
-            from lazymind.chat.engine.subagent.tools import find_artifact
-            plugin_tools.append(find_artifact)
             # save_plugin_artifact lets ChatAgent write an artifact directly.
             from lazymind.chat.engine.tools.subagent_chat_tools import save_plugin_artifact
             plugin_tools.append(save_plugin_artifact)

@@ -331,6 +331,26 @@ class SubAgentDB:
         except Exception:
             return None
 
+    def load_slot_order_list(self, session_id: str, slot: str) -> List[int]:
+        """Return list_index values in UI display order for a plugin slot."""
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    text(
+                        'SELECT order_list FROM plugin_slot_order '
+                        'WHERE session_id = :session_id AND slot_id = :slot'
+                    ),
+                    {'session_id': session_id, 'slot': slot},
+                ).mappings().first()
+            if not row or not row.get('order_list'):
+                return []
+            order_list = row['order_list']
+            if isinstance(order_list, str):
+                order_list = json.loads(order_list)
+            return [int(x) for x in order_list]
+        except Exception:
+            return []
+
     def resolve_slot_revision_value(
         self, row: Dict[str, Any]
     ) -> tuple:

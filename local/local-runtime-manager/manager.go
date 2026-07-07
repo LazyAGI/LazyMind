@@ -17,61 +17,67 @@ import (
 )
 
 type RuntimeManager struct {
-	runner         CommandRunner
-	execPath       string
-	now            func() time.Time
-	out            io.Writer
-	errOut         io.Writer
-	probeAPI       func(port int, timeout time.Duration) bool
-	probeAuth      func(port int, timeout time.Duration) bool
-	probeCore      func(port int, timeout time.Duration) bool
-	probeScan      func(port int, timeout time.Duration) bool
-	probeFileWatch func(port int, timeout time.Duration) bool
-	waitHostReady  func(context.Context, RuntimeConfig) error
-	runtimeReady   func(context.Context, RuntimeConfig, RuntimePaths) bool
-	pollInterval   time.Duration
-	upTimeout      time.Duration
-	downTimeout    time.Duration
-	compose        *ComposeManager
-	processCompose *ProcessComposeManager
-	localProxy     *LocalProxyManager
-	authService    *AuthServiceManager
-	coreService    *CoreServiceManager
-	scanControl    *ScanControlPlaneManager
-	fileWatcher    *FileWatcherManager
-	frontend       *FrontendManager
-	algorithm      *AlgorithmServiceManager
-	milvusLite     *MilvusLiteManager
+	runner          CommandRunner
+	execPath        string
+	now             func() time.Time
+	out             io.Writer
+	errOut          io.Writer
+	probeAPI        func(port int, timeout time.Duration) bool
+	probeLocalProxy func(port int, timeout time.Duration) bool
+	probeFrontend   func(port int, timeout time.Duration) bool
+	probeAuth       func(port int, timeout time.Duration) bool
+	probeCore       func(port int, timeout time.Duration) bool
+	probeScan       func(port int, timeout time.Duration) bool
+	probeFileWatch  func(port int, timeout time.Duration) bool
+	waitHostReady   func(context.Context, RuntimeConfig) error
+	runtimeReady    func(context.Context, RuntimeConfig, RuntimePaths) bool
+	pollInterval    time.Duration
+	upTimeout       time.Duration
+	downTimeout     time.Duration
+	compose         *ComposeManager
+	processCompose  *ProcessComposeManager
+	localProxy      *LocalProxyManager
+	authService     *AuthServiceManager
+	coreService     *CoreServiceManager
+	scanControl     *ScanControlPlaneManager
+	fileWatcher     *FileWatcherManager
+	frontend        *FrontendManager
+	algorithm       *AlgorithmServiceManager
+	milvusLite      *MilvusLiteManager
 }
+
+const startupProgressInterval = 10 * time.Second
 
 func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 	processCompose := NewProcessComposeManager(r, execPath)
 	return &RuntimeManager{
-		runner:         r,
-		execPath:       execPath,
-		now:            time.Now,
-		out:            io.Discard,
-		errOut:         io.Discard,
-		probeAPI:       processCompose.ProbeAPI,
-		probeAuth:      authServiceHealthAlive,
-		probeCore:      coreServiceHealthAlive,
-		probeScan:      scanControlPlaneHealthAlive,
-		probeFileWatch: fileWatcherHealthAlive,
-		waitHostReady:  waitForHostAlgorithmReadiness,
-		runtimeReady:   nil,
-		pollInterval:   2 * time.Second,
-		upTimeout:      envDuration(localUpTimeoutEnvVar, time.Duration(defaultLocalUpTimeout)*time.Second),
-		downTimeout:    envDuration(localDownTimeoutEnvVar, time.Duration(defaultLocalDownTimeout)*time.Second),
-		compose:        NewComposeManager(r),
-		processCompose: processCompose,
-		localProxy:     NewLocalProxyManager(r),
-		authService:    NewAuthServiceManager(r),
-		coreService:    NewCoreServiceManager(r),
-		scanControl:    NewScanControlPlaneManager(r),
-		fileWatcher:    NewFileWatcherManager(r),
-		frontend:       NewFrontendManager(r),
-		algorithm:      NewAlgorithmServiceManager(r),
-		milvusLite:     NewMilvusLiteManager(r),
+		runner:          r,
+		execPath:        execPath,
+		now:             time.Now,
+		out:             io.Discard,
+		errOut:          io.Discard,
+		probeAPI:        processCompose.ProbeAPI,
+		probeLocalProxy: localProxyHealthAlive,
+		probeFrontend:   frontendHealthAlive,
+		probeAuth:       authServiceHealthAlive,
+		probeCore:       coreServiceHealthAlive,
+		probeScan:       scanControlPlaneHealthAlive,
+		probeFileWatch:  fileWatcherHealthAlive,
+		waitHostReady:   waitForHostAlgorithmReadiness,
+		runtimeReady:    nil,
+		pollInterval:    2 * time.Second,
+		upTimeout:       envDuration(localUpTimeoutEnvVar, time.Duration(defaultLocalUpTimeout)*time.Second),
+		downTimeout:     envDuration(localDownTimeoutEnvVar, time.Duration(defaultLocalDownTimeout)*time.Second),
+		compose:         NewComposeManager(r),
+		processCompose:  processCompose,
+		localProxy:      NewLocalProxyManager(r),
+		authService:     NewAuthServiceManager(r),
+		coreService:     NewCoreServiceManager(r),
+		scanControl:     NewScanControlPlaneManager(r),
+		fileWatcher:     NewFileWatcherManager(r),
+		frontend:        NewFrontendManager(r),
+		algorithm:       NewAlgorithmServiceManager(r),
+		milvusLite:      NewMilvusLiteManager(r),
 	}
 }
 
@@ -152,6 +158,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 
+	m.progressf("preparing local runtime directories and process-compose config")
 	generatedFile, err := os.Create(paths.GeneratedConfig)
 	if err != nil {
 		return err
@@ -176,6 +183,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 
+	m.progressf("starting process-compose supervisor on 127.0.0.1:%d", cfg.ProcessComposePort)
 	if err := m.processCompose.Up(ctx, cfg, paths); err != nil {
 		state = newStateWithServiceStatus(state, "failed")
 		state.OverallStatus = "failed"
@@ -183,12 +191,14 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 
+	m.progressf("waiting for process-compose API on 127.0.0.1:%d", cfg.ProcessComposePort)
 	if !m.waitForProcessComposeAPI(ctx, cfg.ProcessComposePort, 15*time.Second) {
 		state = newStateWithServiceStatus(state, "failed")
 		state.OverallStatus = "failed"
 		_ = writeRuntimeState(paths.StateFile, state)
 		return fmt.Errorf("process-compose API did not become ready on port %d", cfg.ProcessComposePort)
 	}
+	m.progressf("process-compose API ready on 127.0.0.1:%d", cfg.ProcessComposePort)
 
 	logCtx, stopLogs := context.WithCancel(ctx)
 	logErrCh := make(chan error, 1)
@@ -217,6 +227,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		}
 		return waitErr
 	}
+	if err := m.waitForLocalProxyHealthy(ctx, cfg.LocalProxy.Port, m.upTimeout); err != nil {
+		state = newStateWithServiceStatus(state, "failed")
+		state.OverallStatus = "failed"
+		_ = writeRuntimeState(paths.StateFile, state)
+		return err
+	}
 	if err := m.waitForAuthServiceHealthy(ctx, cfg.AuthService.Port, m.upTimeout, paths.AuthServicePIDFile); err != nil {
 		state = newStateWithServiceStatus(state, "failed")
 		state.OverallStatus = "failed"
@@ -241,11 +257,17 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		_ = writeRuntimeState(paths.StateFile, state)
 		return err
 	}
-	if waitErr := m.waitHostReady(ctx, cfg); waitErr != nil {
+	if waitErr := m.waitHostAlgorithmsReady(ctx, cfg); waitErr != nil {
 		state = newStateWithServiceStatus(state, "failed")
 		state.OverallStatus = "failed"
 		_ = writeRuntimeState(paths.StateFile, state)
 		return waitErr
+	}
+	if err := m.waitForFrontendHealthy(ctx, cfg.FrontendPort, m.upTimeout); err != nil {
+		state = newStateWithServiceStatus(state, "failed")
+		state.OverallStatus = "failed"
+		_ = writeRuntimeState(paths.StateFile, state)
+		return err
 	}
 
 	state = newStateWithServiceStatus(state, "running")
@@ -264,8 +286,12 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	sawPIDFile := false
+	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	nextReport := m.now().Add(startupProgressInterval)
+	m.progressf("waiting for auth-service health: %s", url)
 	for {
 		if m.probeAuth(port, time.Second) {
+			m.progressf("auth-service ready: %s", url)
 			return nil
 		}
 		alive, err := upLockProcessAlive(pidFile)
@@ -277,6 +303,10 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 		} else if sawPIDFile && os.IsNotExist(err) {
 			return fmt.Errorf("auth-service process exited before becoming healthy")
 		}
+		if !m.now().Before(nextReport) {
+			m.progressf("still waiting for auth-service health: %s", url)
+			nextReport = m.now().Add(startupProgressInterval)
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -287,41 +317,42 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 	}
 }
 
+func (m *RuntimeManager) waitForLocalProxyHealthy(ctx context.Context, port int, timeout time.Duration) error {
+	return m.waitForServiceProbeReady(ctx, m.probeLocalProxy, port, localProxyProcessName, "/_local/healthz", timeout)
+}
+
+func (m *RuntimeManager) waitForFrontendHealthy(ctx context.Context, port int, timeout time.Duration) error {
+	return m.waitForServiceProbeReady(ctx, m.probeFrontend, port, frontendProcessName, "/", timeout)
+}
+
 func (m *RuntimeManager) waitForCoreHealthy(ctx context.Context, port int, timeout time.Duration) error {
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if m.probeCore(port, time.Second) {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline.C:
-			return fmt.Errorf("core health check timed out on port %d", port)
-		case <-ticker.C:
-		}
-	}
+	return m.waitForServiceProbeReady(ctx, m.probeCore, port, "core", "/health", timeout)
 }
 
 func (m *RuntimeManager) waitForScanControlPlaneHealthy(ctx context.Context, port int, timeout time.Duration) error {
-	return waitForServiceProbeReady(ctx, m.probeScan, port, scanControlPlaneProcessName, timeout)
+	return m.waitForServiceProbeReady(ctx, m.probeScan, port, scanControlPlaneProcessName, "/health", timeout)
 }
 
 func (m *RuntimeManager) waitForFileWatcherHealthy(ctx context.Context, port int, timeout time.Duration) error {
-	return waitForServiceProbeReady(ctx, m.probeFileWatch, port, fileWatcherProcessName, timeout)
+	return m.waitForServiceProbeReady(ctx, m.probeFileWatch, port, fileWatcherProcessName, "/health", timeout)
 }
 
-func waitForServiceProbeReady(ctx context.Context, probe func(int, time.Duration) bool, port int, service string, timeout time.Duration) error {
+func (m *RuntimeManager) waitForServiceProbeReady(ctx context.Context, probe func(int, time.Duration) bool, port int, service string, path string, timeout time.Duration) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
+	nextReport := m.now().Add(startupProgressInterval)
+	m.progressf("waiting for %s health: %s", service, url)
 	for {
 		if probe(port, time.Second) {
+			m.progressf("%s ready: %s", service, url)
 			return nil
+		}
+		if !m.now().Before(nextReport) {
+			m.progressf("still waiting for %s health: %s", service, url)
+			nextReport = m.now().Add(startupProgressInterval)
 		}
 		select {
 		case <-ctx.Done():
@@ -331,6 +362,74 @@ func waitForServiceProbeReady(ctx context.Context, probe func(int, time.Duration
 		case <-ticker.C:
 		}
 	}
+}
+
+func (m *RuntimeManager) waitHostAlgorithmsReady(ctx context.Context, cfg RuntimeConfig) error {
+	m.progressf("waiting for host algorithm services")
+	monitorCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		m.reportHostAlgorithmReadiness(monitorCtx, cfg)
+	}()
+
+	waitErr := m.waitHostReady(ctx, cfg)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+	}
+	if waitErr != nil {
+		return waitErr
+	}
+	m.progressf("host algorithm services ready")
+	return nil
+}
+
+func (m *RuntimeManager) reportHostAlgorithmReadiness(ctx context.Context, cfg RuntimeConfig) {
+	m.progressf("host algorithm status: %s", hostAlgorithmReadinessSummary(ctx, cfg))
+	ticker := time.NewTicker(startupProgressInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.progressf("host algorithm status: %s", hostAlgorithmReadinessSummary(ctx, cfg))
+		}
+	}
+}
+
+func hostAlgorithmReadinessSummary(ctx context.Context, cfg RuntimeConfig) string {
+	statuses := make([]string, 0, len(algorithmProcessSpecs(cfg.Algorithm))+2)
+	if cfg.ModeProfile.VectorStore.ManagedProcess {
+		statuses = append(statuses, readinessLabel(milvusLiteProcessName, tcpOK(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, 500*time.Millisecond)))
+	}
+	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
+		url := fmt.Sprintf("http://127.0.0.1:%d%s", spec.Port, spec.HealthPath)
+		statuses = append(statuses, readinessLabel(spec.Name, httpOK(ctx, url, 500*time.Millisecond)))
+	}
+	registrationURL := fmt.Sprintf("http://127.0.0.1:%d/algo/list", cfg.Algorithm.ProcessorPort)
+	registrationCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	statuses = append(statuses, readinessLabel("algorithm-registration", algorithmRegistered(registrationCtx, registrationURL)))
+	return strings.Join(statuses, ", ")
+}
+
+func readinessLabel(name string, ready bool) string {
+	status := "waiting"
+	if ready {
+		status = "ready"
+	}
+	return name + "=" + status
+}
+
+func localProxyHealthAlive(port int, timeout time.Duration) bool {
+	return httpOK(context.Background(), fmt.Sprintf("http://127.0.0.1:%d/_local/healthz", port), timeout)
+}
+
+func frontendHealthAlive(port int, timeout time.Duration) bool {
+	return httpOK(context.Background(), fmt.Sprintf("http://127.0.0.1:%d/", port), timeout)
 }
 
 func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
@@ -484,10 +583,10 @@ func (m *RuntimeManager) checkRuntimeReady(ctx context.Context, cfg RuntimeConfi
 			return false
 		}
 	}
-	if !httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d/_local/healthz", cfg.LocalProxy.Port), 500*time.Millisecond) {
+	if !m.probeLocalProxy(cfg.LocalProxy.Port, 500*time.Millisecond) {
 		return false
 	}
-	if !httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d/", cfg.FrontendPort), 500*time.Millisecond) {
+	if !m.probeFrontend(cfg.FrontendPort, 500*time.Millisecond) {
 		return false
 	}
 	if !m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond) {
@@ -930,7 +1029,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		hostHealthy := true
 		lp := resp.Services[localProxyProcessName]
 		lp.Kind = "host-process"
-		if httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d/_local/healthz", cfg.LocalProxy.Port), 500*time.Millisecond) {
+		if m.probeLocalProxy(cfg.LocalProxy.Port, 500*time.Millisecond) {
 			lp.Status = "running"
 		} else {
 			hostHealthy = false
@@ -946,7 +1045,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		resp.Services[authServiceProcessName] = auth
 		frontend := resp.Services[frontendProcessName]
 		frontend.Kind = "host-process"
-		if httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d/", cfg.FrontendPort), 500*time.Millisecond) {
+		if m.probeFrontend(cfg.FrontendPort, 500*time.Millisecond) {
 			frontend.Status = "running"
 		} else {
 			hostHealthy = false

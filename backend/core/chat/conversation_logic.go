@@ -1697,6 +1697,12 @@ func handlePluginStepCreated(
 			}
 			params.HistoryFilesPerTurn = parsed
 		}
+		if flt, ok := ev.Params["filters"].(map[string]any); ok && len(flt) > 0 {
+			params.Filters = flt
+		}
+		if uid, ok := ev.Params["user_id"].(string); ok && uid != "" {
+			params.UserID = uid
+		}
 	}
 	// Carry the resolved plugin_mode into params so it is persisted with the task
 	// and available when OnSubAgentDone reconstructs PluginChatContext from DB.

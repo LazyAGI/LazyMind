@@ -414,6 +414,7 @@
     &--horizontal {
       flex-direction: row;
       align-items: flex-start;
+      gap: 16px;
 
       .plugin-panel__named-slot {
         flex: 1;

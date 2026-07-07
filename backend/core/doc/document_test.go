@@ -55,6 +55,52 @@ func TestStreamLocalFileInlineUsesActualFilenameForCSV(t *testing.T) {
 	}
 }
 
+func TestStreamLocalFileSubagentWorkspace(t *testing.T) {
+	subRoot := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", subRoot)
+
+	fullPath := filepath.Join(subRoot, "user-1", "task-1", "output.png")
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("create dir: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("png"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	streamLocalFile(recorder, fullPath, "output.png", "image/png", true)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestGetSignedStaticFileSubagentPath(t *testing.T) {
+	subRoot := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", subRoot)
+
+	inner := filepath.Join("user-1", "task-1", "output.png")
+	fullPath := filepath.Join(subRoot, inner)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("create dir: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("png"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	rel := "subagent/" + filepath.ToSlash(inner)
+	expires := time.Now().UTC().Unix() + 3600
+	sig := signStaticFile(rel, expires)
+	req := httptest.NewRequest(http.MethodGet,
+		fmt.Sprintf("/static-files/%s?expires=%d&sig=%s", encodeStaticFilePath(rel), expires, sig),
+		nil)
+	req = mux.SetURLVars(req, map[string]string{"path": encodeStaticFilePath(rel)})
+
+	recorder := httptest.NewRecorder()
+	GetSignedStaticFile(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
 func TestAggregateDocumentsFiltersUnreadableDatasets(t *testing.T) {
 	db := newDocumentTestDB(t)
 	now := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)

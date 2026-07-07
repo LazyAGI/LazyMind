@@ -565,16 +565,24 @@ def get_plugin_yaml(plugin_id: str) -> Dict[str, Any]:
     return spec.yaml if spec else {}
 
 
-def find_producer_step(plugin_id: str, slot: str) -> Optional[str]:
-    """Return the step_id that produces slot, or None."""
+def find_producer_steps(plugin_id: str, slot: str) -> List[str]:
+    """Return all step_ids that can produce slot, preserving state.yml order."""
     spec = get_plugin(plugin_id)
     if not spec:
-        return None
+        return []
+    producers: List[str] = []
     for step_id, step_cfg in spec._steps.items():
         for out in step_cfg.get('outputs', []):
             if out.get('slot') == slot:
-                return step_id
-    return None
+                producers.append(step_id)
+                break
+    return producers
+
+
+def find_producer_step(plugin_id: str, slot: str) -> Optional[str]:
+    """Return one step_id that produces slot, or None."""
+    producers = find_producer_steps(plugin_id, slot)
+    return producers[0] if producers else None
 
 
 def get_script_tool(plugin_id: str, tool_name: str) -> Optional[Callable]:

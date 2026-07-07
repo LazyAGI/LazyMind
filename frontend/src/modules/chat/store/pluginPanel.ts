@@ -1,5 +1,17 @@
 import { create } from "zustand";
 import { PluginInfoApi, PluginSessionApi, TempUploadServiceApi } from "@/modules/chat/utils/request";
+import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
+
+export function buildPluginSearchConfig(
+  chatConfig?: Pick<ChatConfig, "knowledgeBaseId" | "creators" | "tags">,
+): Record<string, unknown> {
+  const kbIds = chatConfig?.knowledgeBaseId?.filter(Boolean) ?? [];
+  return {
+    dataset_list: kbIds.map((id) => ({ id })),
+    creators: chatConfig?.creators ?? [],
+    tags: chatConfig?.tags ?? [],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // DraftStore — two-layer draft management for slot text editing
@@ -160,14 +172,14 @@ export interface PluginSession {
   session_id: string;
   conversation_id: string;
   plugin_id: string;
-  status: "active" | "waiting" | "completed";
+  status: "active" | "completed" | "failed" | "waiting";
   current_step_id: string;
   /** Global intent/constraint for this session, JSON string e.g. {"text":"..."} */
   intent_context?: string;
   created_at: string;
   updated_at: string;
   slots?: SlotRevision[];
-  /** Steps for this session, used in completed state to render rollback step list. */
+  /** Steps for this session, used in completed/waiting state to render rollback step list. */
   steps?: PluginSessionStep[];
   /** The tab currently focused by the user — forwarded to the AI in plugin_context. */
   focusedTab?: string;
@@ -277,6 +289,7 @@ interface PluginStore {
   loadActiveSession: (conversationId: string) => Promise<void>;
   refreshSlots: (conversationId: string, sessionId: string) => Promise<void>;
   patchSlot: (conversationId: string, sessionId: string, slotId: string, revision: number) => Promise<void>;
+  syncSessionSearchConfig: (conversationId: string, sessionId: string, searchConfig: Record<string, unknown>) => Promise<void>;
   clearSession: (conversationId: string) => void;
   setAutoRunning: (conversationId: string, running: boolean) => void;
   fetchPluginUI: (pluginId: string) => Promise<PluginUI>;
@@ -334,11 +347,9 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
 
   setSession: (conversationId, session) => {
     set((state) => {
-      const next: Record<string, any> = {
+      const next: Partial<PluginStore> = {
         sessionByConversation: { ...state.sessionByConversation, [conversationId]: session },
       };
-      // If the session is no longer active, clear any stale autoRunning flag synchronously.
-      // This ensures displayStatus is not stuck on 'active' regardless of async timing.
       if (session && session.status !== 'active') {
         if (state.autoRunningByConversation[conversationId]) {
           next.autoRunningByConversation = {
@@ -391,8 +402,7 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
         try {
           const stepsRes = await PluginSessionApi().getSteps(session.session_id);
           const rawSteps = stepsRes?.data?.data?.steps ?? [];
-          // Exclude the __end__ sentinel — only expose real steps to the UI.
-          session.steps = rawSteps.filter((s: any) => s.step_id !== '__end__');
+          session.steps = rawSteps.filter((s: PluginSessionStep) => s.step_id !== '__end__');
         } catch {
           session.steps = [];
         }
@@ -413,14 +423,6 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     try {
       const res = await PluginSessionApi().getSlots(sessionId);
       const slots: SlotRevision[] = res?.data?.data?.slots ?? [];
-      console.log('[refreshSlots] raw slots from API:', slots.map(s => ({
-        slot_id: s.slot_id,
-        list_index: s.list_index,
-        revision: s.revision,
-        change_source: s.change_source,
-        artifact_value: s.artifact_value,
-        content_type: s.content_type,
-      })));
       set((state) => {
         const session = state.sessionByConversation[conversationId];
         if (!session) return state;
@@ -440,6 +442,14 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     try {
       await PluginSessionApi().patchSlot(sessionId, slotId, revision);
       get().refreshSlots(conversationId, sessionId);
+    } catch {
+      // ignore
+    }
+  },
+
+  syncSessionSearchConfig: async (_conversationId, sessionId, searchConfig) => {
+    try {
+      await PluginSessionApi().syncSessionSearchConfig(sessionId, searchConfig);
     } catch {
       // ignore
     }

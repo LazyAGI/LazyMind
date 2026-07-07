@@ -79,12 +79,13 @@ func ensureWritableDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	probe := filepath.Join(dir, ".lazymind-write-test")
-	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	f, err := os.CreateTemp(dir, ".lazymind-write-test-*")
 	if err != nil {
 		return err
 	}
+	probe := f.Name()
 	if err := f.Close(); err != nil {
+		_ = os.Remove(probe)
 		return err
 	}
 	return os.Remove(probe)

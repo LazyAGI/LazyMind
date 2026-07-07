@@ -93,6 +93,7 @@ def resolve_skill_actions(
         input_count=len(candidates),
         output_count=len(resolutions),
         errors=errors,
+        status='failed' if candidates and not resolutions else 'completed',
     )
 
 

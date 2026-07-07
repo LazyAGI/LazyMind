@@ -179,7 +179,7 @@ class HealthChecker:
         url = f'http://127.0.0.1:{port}/health'
         healthy = False
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(url)
             healthy = resp.status_code < 500
         except Exception:

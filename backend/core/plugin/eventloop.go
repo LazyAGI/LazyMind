@@ -18,6 +18,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
 	"lazymind/core/state"
+	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
 )
@@ -50,6 +51,12 @@ type PluginStepParams struct {
 	// SubAgent can access uploaded files via read_user_attachment / find_user_attachment.
 	// Key = conversation turn sequence (string), value = list of absolute file paths.
 	HistoryFilesPerTurn map[string][]string `json:"history_files_per_turn,omitempty"`
+
+	// Filters carries retrieval filters (e.g. kb_id) from the chat session into plugin steps.
+	Filters map[string]any `json:"filters,omitempty"`
+
+	// UserID is the chat user id for KB ACL and signed static-file URLs.
+	UserID string `json:"user_id,omitempty"`
 }
 
 // asMap serialises the params into the generic map expected by subagent.RunRequest.Params.
@@ -72,6 +79,12 @@ func (p PluginStepParams) asMap() map[string]any {
 	}
 	if len(p.HistoryFilesPerTurn) > 0 {
 		m["history_files_per_turn"] = p.HistoryFilesPerTurn
+	}
+	if len(p.Filters) > 0 {
+		m["filters"] = p.Filters
+	}
+	if p.UserID != "" {
+		m["user_id"] = p.UserID
 	}
 	return m
 }
@@ -199,9 +212,7 @@ func HandlePluginStepCreated(
 		if uErr := UpdateSessionCurrentStep(ctx, db, sessionID, stepID); uErr != nil {
 			fmt.Printf("[Plugin] failed to update current_step: %v\n", uErr)
 		}
-		// Ensure session is marked active when a new step starts. This covers the
-		// auto-advance path where advanceAutoMode triggers ChatAgent directly without
-		// going through /plugin-sessions/{id}:advance (which would set active explicitly).
+		// Ensure session is marked active when a new step starts (e.g. auto-advance via ChatAgent).
 		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive); uErr != nil {
 			fmt.Printf("[Plugin] failed to reset session status to active: %v\n", uErr)
 		}
@@ -232,6 +243,19 @@ func HandlePluginStepCreated(
 	}
 	if len(params.HistoryFilesPerTurn) > 0 {
 		rawParamsMap["history_files_per_turn"] = params.HistoryFilesPerTurn
+	}
+	filters := params.Filters
+	if len(filters) == 0 {
+		filters = filtersFromConversation(db, convID)
+		if len(filters) > 0 {
+			params.Filters = filters
+		}
+	}
+	if len(filters) > 0 {
+		rawParamsMap["filters"] = filters
+	}
+	if params.UserID != "" {
+		rawParamsMap["user_id"] = params.UserID
 	}
 	rawParams, _ := json.Marshal(rawParamsMap)
 	inputJSON, _ := json.Marshal(inputKeys)
@@ -404,13 +428,13 @@ func advanceAutoMode(
 		pctxCopy := *pctx
 		go func() {
 			triggerNextChatTurn(pctxCopy.ConvID, pctxCopy.SessionID, pctxCopy.PluginID, pctxCopy.StepID,
-				pctxCopy.UserID, summary, func() {
+				pctxCopy.PluginMode, pctxCopy.UserID, summary, func() {
 					onSSE("auto_chat_started", map[string]any{
 						"session_id":      pctxCopy.SessionID,
 						"conversation_id": pctxCopy.ConvID,
 						"driver_message":  summary,
 					})
-				})
+				}, "driver")
 			checkAndFallbackIfStuck(ctx, db, stateStore, onSSE, &pctxCopy)
 		}()
 		return
@@ -461,7 +485,7 @@ func advanceAutoMode(
 	pctxCopy := *pctx
 	go func() {
 		triggerNextChatTurn(pctxCopy.ConvID, pctxCopy.SessionID, pctxCopy.PluginID, pctxCopy.StepID,
-			pctxCopy.UserID, driverMsg, func() {
+			pctxCopy.PluginMode, pctxCopy.UserID, driverMsg, func() {
 				// Emit after core has accepted the request and set Redis generating status,
 				// so the frontend resume SSE does not race with stream setup.
 				onSSE("auto_chat_started", map[string]any{
@@ -469,7 +493,7 @@ func advanceAutoMode(
 					"conversation_id": pctxCopy.ConvID,
 					"driver_message":  driverMsg,
 				})
-			})
+			}, "driver")
 		checkAndFallbackIfStuck(ctx, db, stateStore, onSSE, &pctxCopy)
 	}()
 }
@@ -478,24 +502,33 @@ func advanceAutoMode(
 // the next ChatAgent round. This ensures history persistence, applyChatRuntimeConfigs,
 // and all other Go-side pipeline steps run exactly as in a real user turn.
 func triggerNextChatTurn(
-	convID, sessionID, pluginID, currentStep, userID, syntheticMsg string,
+	convID, sessionID, pluginID, currentStep, pluginMode, userID, syntheticMsg string,
 	onReady func(),
+	syntheticSource string,
 ) {
 	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
+	pluginCtx := map[string]any{
+		"session_id":   sessionID,
+		"plugin_id":    pluginID,
+		"current_step": currentStep,
+		"plugin_mode":  pluginMode,
+	}
+	if syntheticSource != "" {
+		pluginCtx["synthetic_source"] = syntheticSource
+	}
 	reqBody := map[string]any{
 		"query":           syntheticMsg,
 		"conversation_id": convID,
 		// stream=true is required so that task_created events emitted by the ChatAgent
 		// are written to the Redis SSE buffer and delivered to the frontend.
 		// Non-streaming mode skips the event pipeline entirely.
-		"stream": true,
-		"mode":   "auto",
-		"input":  []map[string]any{{"input_type": "text", "text": syntheticMsg}},
-		"plugin_context": map[string]any{
-			"session_id":   sessionID,
-			"plugin_id":    pluginID,
-			"current_step": currentStep,
-		},
+		"stream":         true,
+		"mode":           "auto",
+		"input":          []map[string]any{{"input_type": "text", "text": syntheticMsg}},
+		"plugin_context": pluginCtx,
+	}
+	if searchConfig := loadConversationSearchConfig(store.DB(), convID); len(searchConfig) > 0 {
+		reqBody["conversation"] = map[string]any{"search_config": searchConfig}
 	}
 	body, _ := json.Marshal(reqBody)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)

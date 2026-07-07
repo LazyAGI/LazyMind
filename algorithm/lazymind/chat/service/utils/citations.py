@@ -31,7 +31,10 @@ def register_image_url(config: dict[str, Any], path_or_url: str) -> None:
     signed = static_file_url_from_any(path_or_url)
     if not signed:
         return
-    registry = config[IMAGE_URL_REGISTRY_KEY]
+    registry = config.get(IMAGE_URL_REGISTRY_KEY)
+    if not isinstance(registry, dict):
+        registry = {}
+        config[IMAGE_URL_REGISTRY_KEY] = registry
     registry[signed] = signed
     base = basename_from_path(signed)
     if base:

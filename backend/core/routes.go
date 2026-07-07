@@ -229,7 +229,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/user/ui-preferences", []string{"qa.write"}, userprefs.PatchUIPreferences)
 	handleAPI(r, "PATCH", "/conversations/{conversation_id}/plugin-settings", []string{"qa.write"}, chat.PatchConversationPluginSettings)
 
-	// ----- Plugin Sessions -----	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions", []string{"qa.read"}, plugin.ListConversationSessions)
+	// ----- Plugin Sessions -----
+	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions", []string{"qa.read"}, plugin.ListConversationSessions)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions:active", []string{"qa.read"}, plugin.GetActiveConversationSession)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions:latest", []string{"qa.read"}, plugin.GetLatestConversationSession)
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}", []string{"qa.read"}, plugin.GetSessionDetail)
@@ -237,6 +238,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/steps", []string{"qa.read"}, plugin.GetSessionSteps)
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/state-graph", []string{"qa.read"}, plugin.GetStateGraph)
 	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, plugin.PatchSessionSlot)
+	handleAPI(r, "POST", "/plugin-sessions/{session_id}:sync-search-config", []string{"qa.write"}, plugin.SyncSessionSearchConfig)
 	// Phase 3: slot item management.
 	// Stable list_index-based routes (preferred).
 	handleAPI(r, "DELETE", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.DeleteSlotItemByIndex)

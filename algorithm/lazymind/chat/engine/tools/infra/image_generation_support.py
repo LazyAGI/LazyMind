@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import lazyllm
+import requests
 from lazyllm import AutoModel
 from lazyllm.components.formatter import decode_query_with_filepaths
 
@@ -20,6 +21,7 @@ _DEFAULT_IMAGE_SIZE = '1024x1024'
 _DEFAULT_BATCH_SIZE = 1
 _IMAGE_SUFFIXES = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
 _UPLOAD_SUBDIR = 'ai_generated'
+_REMOTE_IMAGE_UA = 'Mozilla/5.0 (compatible; LazyMind/1.0; image-download)'
 
 
 def _image_url_registry() -> dict[str, Any]:
@@ -86,6 +88,45 @@ def _register_generated_image_paths(local_paths: List[str]) -> None:
         register_image_url(citation_state, path)
 
 
+def _download_remote_image_to_upload(url: str) -> str:
+    """Download an external image into uploads so image_editor can read it locally.
+
+    Wikimedia and some CDNs return 403 to bare server requests without User-Agent.
+    Browsers and validate_image_ref succeed; lazyllm URL fetch does not unless we
+    materialize the file first.
+    """
+    raw = str(url or '').strip()
+    if not raw.startswith(('http://', 'https://')):
+        raise ValueError(f'not a remote image url: {raw!r}')
+    headers = {'User-Agent': _REMOTE_IMAGE_UA}
+    resp = requests.get(
+        raw,
+        headers=headers,
+        timeout=60,
+        allow_redirects=True,
+        stream=True,
+    )
+    resp.raise_for_status()
+    content_type = str(resp.headers.get('Content-Type') or '').lower()
+    if content_type and not content_type.startswith('image/'):
+        raise ValueError(f'remote url is not an image: content-type={content_type}')
+    dest_dir = Path(_upload_root()).resolve() / _UPLOAD_SUBDIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    suffix = '.jpg'
+    if 'png' in content_type:
+        suffix = '.png'
+    elif 'webp' in content_type:
+        suffix = '.webp'
+    elif 'gif' in content_type:
+        suffix = '.gif'
+    dest = dest_dir / f'{uuid.uuid4().hex}{suffix}'
+    with open(dest, 'wb') as fh:
+        for chunk in resp.iter_content(1024 * 64):
+            if chunk:
+                fh.write(chunk)
+    return str(dest.resolve())
+
+
 def _resolve_source_image_paths(urls: List[str]) -> List[str]:
     candidates = [str(item).strip() for item in urls if str(item or '').strip()]
     if not candidates:
@@ -95,6 +136,10 @@ def _resolve_source_image_paths(urls: List[str]) -> List[str]:
     seen: set[str] = set()
     for raw in candidates:
         local_path = resolve_tool_image_path(raw)
+        if not local_path:
+            continue
+        if local_path.startswith(('http://', 'https://')):
+            local_path = _download_remote_image_to_upload(local_path)
         if local_path and local_path not in seen:
             seen.add(local_path)
             resolved.append(local_path)

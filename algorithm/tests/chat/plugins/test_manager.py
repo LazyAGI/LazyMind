@@ -211,7 +211,7 @@ def test_trigger_plugin_step_unreachable_step(loaded_plugin, mock_agentic_config
 
 
 def test_trigger_plugin_step_output_keys_emitted(loaded_plugin, mock_agentic_config, mock_write_agent_data):
-    """Verify output_artifact_keys is set correctly from state.yml step outputs."""
+    """Verify output_slots is set correctly from state.yml step outputs."""
     from lazymind.chat.plugin.plugin_manager import _trigger_plugin_step
     mock_agentic_config['plugin_step'] = '__start__'
 
@@ -219,7 +219,7 @@ def test_trigger_plugin_step_output_keys_emitted(loaded_plugin, mock_agentic_con
 
     assert mock_write_agent_data.called
     kwargs = mock_write_agent_data.call_args.kwargs
-    assert 'analysis' in kwargs['output_artifact_keys']
+    assert 'analysis' in kwargs['output_slots']
 
 
 # ---------------------------------------------------------------------------
@@ -364,14 +364,14 @@ def test_enrich_objective_replaces_placeholders():
         {'step_id': 'step_a', 'task_id': 'task-001', 'status': 'succeeded'},
     ]
     db.load_artifacts_for_tasks.return_value = [
-        {'task_id': 'task-001', 'artifact_key': 'optimized_prompt', 'content_type': 'text',
+        {'task_id': 'task-001', 'slot': 'prompt_used', 'content_type': 'text',
          'value': {'text': 'a beautiful sunset'}, 'seq': 1},
     ]
 
-    objective = 'Generate image from: {{optimized_prompt}}.'
+    objective = 'Generate image from: {{prompt_used}}.'
     result = _enrich_objective_with_artifacts(objective, {'session_id': 'ps-1'}, db)
     assert 'a beautiful sunset' in result
-    assert '{{optimized_prompt}}' not in result
+    assert '{{prompt_used}}' not in result
 
 
 def test_enrich_objective_skips_non_succeeded_steps():

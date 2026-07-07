@@ -71,11 +71,13 @@ func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 }
 
 func toArtifactDTO(a *orm.SubAgentArtifact) artifactDTO {
+	value := normalizeJSON(a.Value, "{}")
+	value = SignArtifactImageValue(a.ContentType, value)
 	return artifactDTO{
 		Slot:        a.Slot,
 		ContentType: a.ContentType,
 		Seq:         a.Seq,
-		Value:       normalizeJSON(a.Value, "{}"),
+		Value:       value,
 		CreatedAt:   a.CreatedAt,
 	}
 }

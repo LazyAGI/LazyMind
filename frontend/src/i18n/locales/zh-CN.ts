@@ -842,6 +842,8 @@ const zhCN = {
     send: "发送",
     pluginContinue: "继续",
     pluginRetry: "重试",
+    pluginGeneratedImage: "生成图片",
+    pluginAddAttachment: "新增附件",
     pluginStop: "停止",
     askCardSubmit: "提交",
     askCardPrev: "上一项",
@@ -1305,7 +1307,7 @@ const zhCN = {
     supportedFolderImport: "支持导入文件夹",
     supportedZipFile: "仅支持 ZIP 类型压缩包文件（.zip）",
     supportedDocTypes:
-      "支持 pdf、docx、doc、hwp、ppt、pptx、jpg、jpeg、png、gif、bmp、webp、tiff、tif、ipynb、epub、md、mbox、csv、xls、xlsx、mp3、mp4、txt、xml、json、jsonl、yaml、yml、html、htm、py 类型的文件",
+      "支持 pdf、docx、doc、ppt、pptx、jpg、jpeg、png、gif、bmp、webp、tiff、tif、ipynb、epub、md、mbox、csv、xls、xlsx、mp3、mp4、txt、xml、json、jsonl、yaml、yml、html、htm、py 类型的文件",
     zipRootOnly: "zip压缩包仅支持根目录的文件，一级及以上文件夹将被忽略",
     uploadLimitHint: "单次上传限制300个文件，单个文件大小不超过500MB，总大小不超过1GB",
     uploadSecurityRiskTip:
@@ -1677,7 +1679,6 @@ const zhCN = {
     dataSourceFileTypePdf: "PDF（.pdf）",
     dataSourceFileTypeDoc: "DOC（.doc）",
     dataSourceFileTypeDocx: "DOCX（.docx）",
-    dataSourceFileTypeHwp: "HWP（.hwp）",
     dataSourceFileTypePpt: "PPT（.ppt）",
     dataSourceFileTypePptx: "PPTX（.pptx）",
     dataSourceFileTypePptm: "PPTM（.pptm）",

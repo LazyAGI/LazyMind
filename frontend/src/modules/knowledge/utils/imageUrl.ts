@@ -4,6 +4,7 @@ import { normalizeProxyableUrl } from '@/modules/knowledge/utils/request';
 
 const IMAGE_MD_RE = /!\[(.*?)\]\((.*?)\)/g;
 const UPLOAD_ROOT_MARKER = '/var/lib/lazymind/uploads/';
+const SUBAGENT_ROOT_MARKER = '/data/subagent/';
 const signCache = new Map<string, string>();
 const signInflight = new Map<string, Promise<string>>();
 
@@ -41,7 +42,7 @@ function parseExpires(url: string): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-function isExpiredSignedUrl(url: string): boolean {
+export function isExpiredSignedUrl(url: string): boolean {
   const expires = parseExpires(url);
   if (!expires) {
     return false;
@@ -70,6 +71,13 @@ function extractUploadPath(raw: string): string {
   }
   if (trimmed.startsWith(UPLOAD_ROOT_MARKER)) {
     return trimmed.split('?', 1)[0];
+  }
+  const subIdx = trimmed.indexOf(SUBAGENT_ROOT_MARKER);
+  if (subIdx >= 0) {
+    return trimmed.slice(subIdx);
+  }
+  if (trimmed.startsWith(SUBAGENT_ROOT_MARKER)) {
+    return trimmed;
   }
   return trimmed;
 }

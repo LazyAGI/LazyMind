@@ -12,8 +12,8 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/doc"
 	"lazymind/core/store"
+	"lazymind/core/subagent"
 )
 
 // resolveValuePaths normalises a human-uploaded value by ensuring it carries a stable
@@ -44,51 +44,9 @@ func resolveValuePaths(raw json.RawMessage) json.RawMessage {
 }
 
 // signArtifactImagePath enriches an artifact value with a signed URL when it contains
-// a local file path. Works for both AI-generated artifacts and human-uploaded snapshots.
-// External http(s) URLs stored in the path field are moved to the url field for consistent
-// frontend handling. Local paths are signed fresh (avoiding stale signed URLs in the DB).
-// The path field is preserved alongside url so the algorithm layer can still read the file.
-// Values without a path field, or that already have a url field, are returned unchanged.
-// The contentType parameter is used only to skip non-image processing; pass "image" when
-// the content type is known, or pass "" to attempt signing for any path-bearing value.
+// a local file path. Delegates to subagent.SignArtifactImageValue.
 func signArtifactImagePath(raw json.RawMessage, contentType string) json.RawMessage {
-	if len(raw) == 0 {
-		return raw
-	}
-	if contentType != "" && contentType != "image" {
-		return raw
-	}
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return raw
-	}
-	pathVal, _ := m["path"].(string)
-	if pathVal == "" {
-		return raw
-	}
-	// Always re-sign regardless of existing url — stored urls may have expired.
-	// External or inline URL stored in path field — move it to url for consistent frontend handling.
-	if strings.HasPrefix(pathVal, "http://") || strings.HasPrefix(pathVal, "https://") ||
-		strings.HasPrefix(pathVal, "data:") {
-		m["url"] = pathVal
-		delete(m, "path")
-		out, err := json.Marshal(m)
-		if err != nil {
-			return raw
-		}
-		return out
-	}
-	// Local path: generate signed URL and keep path for algorithm access.
-	signed := doc.StaticFileURLFromFullPath(pathVal)
-	if signed == "" {
-		return raw
-	}
-	m["url"] = signed
-	out, err := json.Marshal(m)
-	if err != nil {
-		return raw
-	}
-	return out
+	return subagent.SignArtifactImageValue(contentType, raw)
 }
 
 // sessionDTO is the frontend shape for a PluginSession.
@@ -98,7 +56,6 @@ type sessionDTO struct {
 	PluginID       string    `json:"plugin_id"`
 	Status         string    `json:"status"`
 	CurrentStepID  string    `json:"current_step_id"`
-	IntentContext  string    `json:"intent_context,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Slots          []slotDTO `json:"slots,omitempty"`
@@ -107,12 +64,11 @@ type sessionDTO struct {
 
 // stepDTO summarises one plugin_session_steps row (used for dependency validation).
 type stepDTO struct {
-	StepID        string    `json:"step_id"`
-	Attempt       int       `json:"attempt"`
-	TaskID        string    `json:"task_id"`
-	Status        string    `json:"status"`
-	IntentContext string    `json:"intent_context,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	StepID    string    `json:"step_id"`
+	Attempt   int       `json:"attempt"`
+	TaskID    string    `json:"task_id"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // slotDTO represents a currently-selected slot revision, with its artifact value inline.
@@ -146,7 +102,6 @@ func toSessionDTO(s *orm.PluginSession) sessionDTO {
 		PluginID:       s.PluginID,
 		Status:         s.Status,
 		CurrentStepID:  s.CurrentStepID,
-		IntentContext:  s.IntentContext,
 		CreatedAt:      s.CreatedAt,
 		UpdatedAt:      s.UpdatedAt,
 	}
@@ -427,12 +382,8 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 	enrichSlots(ctx, db, sessionID, dto.Slots)
 	// Load steps inline (used by Python Layer-2 dependency validation).
 	steps, _ := ListSteps(ctx, db, sessionID)
-	// Build step intent map for fast lookup.
-	intentMap := buildStepIntentMap(ctx, db, sessionID)
 	for i := range steps {
-		sd := toStepDTO(&steps[i])
-		sd.IntentContext = intentMap[steps[i].StepID]
-		dto.Steps = append(dto.Steps, sd)
+		dto.Steps = append(dto.Steps, toStepDTO(&steps[i]))
 	}
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
@@ -538,7 +489,7 @@ func GetSessionSteps(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"steps": out})
 }
 
-// Accepts body: {"selected_revision": int} to switch which revision is displayed.
+// PatchSessionSlot handles PATCH /plugin-sessions/{session_id}/slots/{slot_id}.
 func PatchSessionSlot(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
 	slotID := common.PathVar(r, "slot_id")
@@ -640,13 +591,6 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 	if s == nil {
 		common.ReplyOK(w, map[string]any{"session": nil})
 		return
-	}
-
-	// Self-healing: if the session appears active but no steps are still running
-	// (e.g. the server crashed before updating statuses), repair the state so
-	// the frontend doesn't get stuck on "executing".
-	if s.Status == SessionStatusActive {
-		healStaleActiveSession(r.Context(), db, s)
 	}
 	dto := toSessionDTO(s)
 	revisions, _ := LoadSelectedSlots(r.Context(), db, s.ID)
@@ -1167,6 +1111,46 @@ func ListPlugins(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+}
+
+// SyncSessionSearchConfig handles POST /plugin-sessions/{session_id}:sync-search-config.
+// Persists the current UI knowledge-base selection onto the parent conversation so
+// analyze_subject KB prefetch can read filters.kb_id.
+// Body: {"search_config": {"dataset_list": [{"id": "..."}], "creators": [], "tags": []}}
+func SyncSessionSearchConfig(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		SearchConfig map[string]any `json:"search_config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.SearchConfig) == 0 {
+		common.ReplyErr(w, "search_config required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	ctx := r.Context()
+	session, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "session not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	userID := store.UserID(r)
+	if err := persistConversationSearchConfig(db, session.ConversationID, userID, body.SearchConfig); err != nil {
+		common.ReplyErr(w, "persist search_config failed", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"conversation_id": session.ConversationID})
 }
 
 // ReorderSlotItems handles PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order.

@@ -8,7 +8,6 @@ from lazyllm.tools.rag.doc_impl import NodeGroupType
 from lazyllm.tools.rag.parsing_service import DocumentProcessor
 from lazyllm.tools.rag.readers import (
     EpubReader,
-    HWPReader,
     IPYNBReader,
     MboxReader,
     PandasCSVReader,
@@ -161,7 +160,6 @@ def _build_pdf_reader():
 def _register_document_readers(docs: Document) -> None:
     pdf_reader = _build_pdf_reader()
     docs.add_reader('*.pdf', pdf_reader)
-    docs.add_reader('*.hwp', HWPReader())
 
     # mineru ppt reader.
     docs.add_reader('*.pptx', pdf_reader)

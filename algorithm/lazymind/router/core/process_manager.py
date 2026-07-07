@@ -354,7 +354,7 @@ class ProcessManager:
             timeout = config['router_startup_timeout']
         url = f'http://127.0.0.1:{port}/health'
         deadline = time.monotonic() + timeout
-        async with httpx.AsyncClient(timeout=2.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             while time.monotonic() < deadline:
                 try:
                     resp = await client.get(url)

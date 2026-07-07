@@ -25,7 +25,6 @@ export type DataSourceFileType =
   | "pdf"
   | "doc"
   | "docx"
-  | "hwp"
   | "ppt"
   | "pptx"
   | "pptm"

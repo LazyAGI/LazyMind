@@ -1,30 +1,30 @@
 id: image-plugin
 name: AI Image Generation
 description: >
-  Generate and enhance high-quality images from natural language descriptions.
-  The workflow has five steps: analyze the subject, collect reference materials,
-  optimize the prompt, generate an image, and enhance the result. Each step
-  supports full retry via state-machine self-loops. The collect_materials and
-  enhance_image steps additionally support partial retry: the user can request
-  re-collection or re-enhancement of specific list items while keeping others.
+  Generate, find, or edit images from natural language descriptions.
+  The workflow is dynamic: ChatAgent routes through analyze_subject,
+  optimize_prompt, generate_image, collect_materials, and enhance_image
+  based on user intent (CREATE_NEW vs FIND_AND_EDIT vs EDIT_UPLOAD).
+  CREATE_NEW and KB_STYLE skip material collection and generate directly after
+  prompt optimization; collect_materials is only for preparing a raw source
+  image for image editing.
 
 when_to_use: >
-  ONLY call this tool when image generation is the user's PRIMARY and DIRECT intent —
-  i.e. the user explicitly asks to generate, draw, create, paint, or produce an image
-  or picture as the main goal of their request. Examples: "画一张图", "帮我生成图片",
-  "draw a cat", "create an illustration", "生成漫画风格的图".
-  Do NOT trigger this plugin if image generation is merely one sub-step within a larger
-  multi-step task the model has planned (e.g. "write a report and add an image" — the
-  primary intent is the report, not image generation). Do NOT trigger for text content,
-  quizzes, reports, summaries, or any non-visual task.
+  Call this tool whenever the user wants to generate, draw, create, paint,
+  edit, or find-and-modify an image as the PRIMARY and DIRECT intent of their
+  request — including "画一张图", "帮我生成图片", "找一张XX的照片然后加上YY",
+  "在这张图上加水印", "根据知识库中的风格画图", or "draw a cat".
+  When the user has selected a knowledge base, use KB_STYLE workflow;
+  the analyze_subject step calls kb_search inside the plugin SubAgent.
+  Do NOT trigger if image generation is merely one sub-step within a larger
+  multi-step task (e.g. "write a report and add an image"). Do NOT trigger
+  for text content, quizzes, reports, summaries, or any non-visual task.
 
 tool_scripts:
   - path: scripts/tools.py
     functions:
-      - web_search_tool
       - image_search_tool
-      - generate_image_tool
-      - enhance_image_tool
+      - validate_image_ref
 
 steps:
   - id: analyze_subject
@@ -55,6 +55,12 @@ slots:
     cardinality: list
     ordered: true
 
+  - id: material_summary
+    label: Material Summary
+    type: text
+    cardinality: single
+    summary_max_chars: 400
+
   - id: prompt_used
     label: Optimized Prompt
     type: text
@@ -84,6 +90,7 @@ ui:
       layout: grid
       slots:
         - id: material_images
+        - id: material_summary
 
     - id: prompt
       label: Prompt
@@ -95,8 +102,8 @@ ui:
       label: Result
       layout: horizontal
       slots:
-        - id: enhanced_image_output
         - id: image_output
+        - id: enhanced_image_output
 
 i18n:
   zh-CN:
@@ -115,6 +122,7 @@ i18n:
     slots:
       subject_analysis: {label: 主体分析}
       material_images: {label: 参考素材}
+      material_summary: {label: 材料摘要}
       prompt_used: {label: 优化后的提示词}
       enhanced_image_output: {label: 增强图片}
       image_output: {label: 原始图片}

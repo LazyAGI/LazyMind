@@ -14,6 +14,7 @@ cors:
     - "http://127.0.0.1:5173"
     - "http://localhost:${LAZYMIND_FRONTEND_PORT}"
     - "http://127.0.0.1:${LAZYMIND_FRONTEND_PORT}"
+    - "${LAZYMIND_FRONTEND_LAN_ORIGIN}"
 
 timeouts:
   connect: 10s

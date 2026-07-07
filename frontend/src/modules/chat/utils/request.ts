@@ -156,6 +156,17 @@ export function PluginSessionApi() {
         options,
       );
     },
+    syncSessionSearchConfig(
+      sessionId: string,
+      searchConfig: Record<string, unknown>,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:sync-search-config`,
+        { search_config: searchConfig },
+        options,
+      );
+    },
     // Phase 3: slot item management — addressed by stable list_index (not sort_order).
     deleteSlotItem(sessionId: string, slotId: string, listIndex: number, orderVersion?: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.delete(

@@ -13,24 +13,44 @@ start_transitions:
 
 transitions:
   analyze_subject:
+    - to: optimize_prompt
+      condition: "CREATE_NEW or KB_STYLE — analysis already contains all text/style guidance; skip material collection."
     - to: collect_materials
-      condition: "Subject analysis complete — collect reference materials."
+      condition: "FIND_AND_EDIT or EDIT_UPLOAD — need to prepare a raw source image before editing."
+    - to: analyze_subject
+      condition: "Re-analyze (full retry)."
 
   collect_materials:
-    - to: optimize_prompt
-      condition: "All materials collected — proceed to prompt optimization."
+    - to: enhance_image
+      condition: "FIND_AND_EDIT or EDIT_UPLOAD — raw image and edit instruction prepared in collect_materials."
+    - to: collect_materials
+      condition: "Re-collect materials (full or partial retry)."
 
   optimize_prompt:
     - to: generate_image
-      condition: "Prompt ready — proceed to image generation."
+      condition: "Prompt ready — proceed to text-to-image generation."
+    - to: optimize_prompt
+      condition: "User wants to re-optimize the prompt (full retry)."
 
   generate_image:
+    - to: __end__
+      condition: "CREATE_NEW or KB_STYLE — generated image is the final result."
     - to: enhance_image
-      condition: "Raw image generated — proceed to enhancement."
+      condition: "User explicitly wants to edit/enhance the generated image."
+    - to: generate_image
+      condition: "Regenerate with the same prompt (full retry)."
+    - to: optimize_prompt
+      condition: "User is unhappy with the image — re-optimize prompt."
 
   enhance_image:
     - to: __end__
-      condition: "Pipeline complete."
+      condition: "User is satisfied — pipeline complete."
+    - to: enhance_image
+      condition: "Re-enhance (full or partial retry)."
+    - to: generate_image
+      condition: "User wants to regenerate from scratch via text-to-image."
+    - to: collect_materials
+      condition: "User wants a different source photo."
 
 steps:
   analyze_subject:
@@ -38,31 +58,76 @@ steps:
     prompt: |
       You are an expert art director and image analyst.
 
-      The user wants to create an image with this description:
+      The user wants to create or edit an image with this description:
       {{user_input}}
 
       {{runtime_instruction}}
 
       Your task:
-      1. Identify the main subject(s) and sub-topics that require reference materials.
-         For example, if the user asks for "a painting featuring A, B, C, D",
-         list each of A, B, C, D as an item to collect.
-      2. Suggest a suitable artistic style (photorealistic, oil painting, anime, etc.).
-      3. Note mood, lighting, and composition hints.
-      4. Save the structured analysis:
+      1. If the system prompt lists user-uploaded images under "## User Uploaded Files",
+         call find_user_attachment(filename) only to confirm the file exists and to
+         route EDIT_UPLOAD — do NOT call vision_extractor or any VLM in this step.
+         Visual analysis of uploads belongs in collect_materials when needed.
+      2. Identify the main subject(s) and sub-topics that require reference materials.
+      3. Suggest a suitable artistic style (photorealistic, oil painting, anime, etc.).
+      4. Note mood, lighting, and composition hints from the user text and any uploaded images.
+      5. Classify the workflow and include it explicitly in the saved analysis:
+           WORKFLOW: <one of CREATE_NEW | KB_STYLE | FIND_AND_EDIT | EDIT_UPLOAD>
+           - CREATE_NEW — brand-new image from scratch (text-to-image).
+           - KB_STYLE — user wants style/content from a selected knowledge base as reference
+             (e.g. "根据知识库中的风格画图"). Call kb_search in this step when filters.kb_id is set.
+           - FIND_AND_EDIT — user asks to find/search an existing photo online, then edit it.
+             Use this even when older session attachments exist, unless the user clearly
+             refers to a newly uploaded image for this request.
+           - EDIT_UPLOAD — user uploaded the source image for THIS edit request and wants to
+             edit that upload directly (not search the web for a new photo).
+           NEXT_STEPS: <comma-separated step ids, e.g.
+            "optimize_prompt,generate_image" or "collect_materials,enhance_image">
+           SKIP_STEPS: <comma-separated step ids to skip, or "none">
+      6. If the runtime instruction mentions a selected knowledge base, filters.kb_id is set,
+         or the user explicitly references 知识库 / knowledge base style, prefer WORKFLOW: KB_STYLE.
+      7. When filters.kb_id is set (or WORKFLOW is KB_STYLE), call kb_search with the
+         user's core subject/style query, then:
+           a. Extract visual style, color palette, composition, and subject cues from
+              **text hits only** — never call vision_extractor/multimodal on KB images.
+           b. Include those text findings inside subject_analysis.
+           c. KB image URLs are optional references only. KB recall URLs are already
+              local/trusted — do NOT call validate_image_ref on them. Save at most **3**:
+              save_artifact(key='material_images', content_type='image', value=<url from hit>).
+              Do NOT visually analyze KB images; the frontend shows at most a few thumbnails.
+      8. Save the structured analysis:
            save_artifact(key='subject_analysis', content_type='text', value=<analysis text>)
+      9. If WORKFLOW is KB_STYLE, FIND_AND_EDIT, EDIT_UPLOAD, or CREATE_NEW:
+         - Save subject_analysis; for KB_STYLE, include KB text findings in subject_analysis.
+           Save material_images only when an image reference is clearly useful for the request.
+         - Do NOT save image_output or prompt_used.
+         - Set NEXT_STEPS for KB_STYLE / CREATE_NEW to:
+             optimize_prompt,generate_image
+         - Set SKIP_STEPS for KB_STYLE / CREATE_NEW to:
+             collect_materials,enhance_image
+         - Set NEXT_STEPS for FIND_AND_EDIT / EDIT_UPLOAD to: collect_materials,enhance_image
 
-      Keep the analysis concise (100–200 words). Stop after saving.
+      Keep the analysis concise (100–200 words). Stop after saving required artifacts only.
+    tools:
+      - kb
     outputs:
       - slot: subject_analysis
+        content_type: text
+        required: true
+      - slot: material_images
+        content_type: image
+        required: false
     acceptance_criteria: |
-      subject_analysis artifact must be saved and contain at least 50 words covering
-      subjects/items to collect, artistic style, and mood/lighting hints.
+      subject_analysis artifact must be saved and contain at least 50 words with WORKFLOW and NEXT_STEPS.
+      For KB_STYLE with a knowledge base available: KB text findings from the prefetch block
+      must be included in subject_analysis; material_images is optional (max 3 KB URLs,
+      save directly — no validate_image_ref, no VLM). Do NOT call vision_extractor in this step.
+      Do NOT save image_output or prompt_used in this step.
 
   collect_materials:
     label: Collect Reference Materials
     prompt: |
-      You are a research agent that collects reference images for an art project.
+      You are a source-image preparation agent for edit workflows.
 
       Subject analysis:
       {{subject_analysis}}
@@ -70,22 +135,59 @@ steps:
       {{runtime_instruction}}
 
       Your task:
-      - Collect one reference image URL for each subject item identified in the analysis.
-      - For each item, call image_search_tool to obtain image URLs, then immediately call:
-          save_artifact(key='material_images', content_type='image', value=<url>)
-        using the EXACT URL returned by image_search_tool. Never fabricate, substitute,
-        or look up alternative URLs — always use what image_search_tool returns.
-      - Stop after all items are saved.
+      0. This step is ONLY for workflows that need a raw source image for image_editor:
+         FIND_AND_EDIT or EDIT_UPLOAD. If WORKFLOW is KB_STYLE or CREATE_NEW, stop and say
+         this step should be skipped; do not search the web and do not save placeholders.
+      - Read WORKFLOW from subject_analysis.
+      - Do NOT call kb_search here — KB retrieval belongs in analyze_subject.
+      - For FIND_AND_EDIT, you MUST call web_search at least once for the requested source
+        subject before calling image_search_tool.
+      - If web_search is unavailable, fall back to wikipedia, then continue.
+      - If both web_search and wikipedia are unavailable, STOP with a failure note.
+      - For web-sourced items, call image_search_tool, then for EACH candidate URL:
+          1. Call validate_image_ref(url=<candidate>) — probe only, no full download
+          2. If status is ok, save:
+               save_artifact(key='material_images', content_type='image', value=<url>)
+             Use the url field from validate_image_ref.
+          3. If status is invalid, try the next candidate (at least 3 attempts).
+        Do not save URLs that failed validation — they must not appear in the frontend.
+      - If WORKFLOW is EDIT_UPLOAD, use find_user_attachment to get the uploaded source image.
+        Save it as image_output (the raw image entering image_editor), then save a
+        concise English edit instruction as prompt_used. Do not web-search for this workflow.
+      - If WORKFLOW is FIND_AND_EDIT, after validating and saving the best subject photo
+        as material_images, also in the SAME step (use the **same validated URL**, not an
+        edited or generated image):
+          1. save_artifact(key='image_output', content_type='image',
+                            value=<same validated url as material_images>)
+          2. save_artifact(key='prompt_used', content_type='text',
+                            value=<concise English edit instruction from user_input>)
+        Example edit instruction: "Add bold red Chinese characters '王老吉' on the jersey
+        chest, keeping the rest of the photo realistic and unchanged."
+      - Follow any "Partial retry instruction" block for sort_order on list slots.
+      - Stop after all required artifacts are saved.
     tools:
-      - web_search_tool
+      - multimodal
+      - web_search
+      - wikipedia
       - image_search_tool
+      - validate_image_ref
     inputs:
       - slot: subject_analysis
         required: true
     outputs:
-      - slot: material_images   # cardinality: list
+      - slot: material_images
+        content_type: image
+        required: false
+      - slot: image_output
+        content_type: image
+        required: false
+      - slot: prompt_used
+        content_type: text
+        required: false
     acceptance_criteria: |
-      At least one material_images artifact must be saved with a valid http(s):// URL.
+      KB_STYLE / CREATE_NEW should skip this step; do not web-search or save placeholders.
+      For FIND_AND_EDIT: at least one material_images must be saved (url that passed validate_image_ref).
+      For FIND_AND_EDIT / EDIT_UPLOAD workflows, image_output and prompt_used must also be saved.
 
   optimize_prompt:
     label: Optimize Prompt
@@ -95,7 +197,7 @@ steps:
       Subject analysis:
       {{subject_analysis}}
 
-      Reference materials collected:
+      Optional reference materials:
       {{material_images}}
 
       Original user request:
@@ -104,10 +206,13 @@ steps:
       {{runtime_instruction}}
 
       Your task:
-      1. Combine the analysis and material references into a high-quality English
-         image-generation prompt (50–200 words, rich in visual detail).
-      2. Include style modifiers, lighting, composition, and quality keywords.
-      3. Save the result:
+      1. Combine subject_analysis and any optional material images into a high-quality
+         English image-generation prompt (50–200 words, rich in visual detail).
+      2. When subject_analysis includes KB text findings, mirror their color palette,
+         composition, and artistic style in the prompt. Use material_images only as an
+         optional visual reference when it exists and is relevant.
+      3. Include style modifiers, lighting, composition, and quality keywords.
+      4. Save the result:
            save_artifact(key='prompt_used', content_type='text', value=<prompt>)
 
       Stop after saving. Do not output anything else.
@@ -132,43 +237,75 @@ steps:
       {{runtime_instruction}}
 
       Steps:
-      1. Call generate_image_tool(prompt=<optimized_prompt>) to create the image.
-      2. Save the EXACT URL returned by generate_image_tool — do not fabricate or
-         substitute any URL:
-           save_artifact(key='image_output', content_type='image', value=<url>)
-      3. Stop after saving.
+      1. Call image_generator exactly ONCE with:
+           prompt=<prompt_used>, image_size='1024x1024', batch_size=1.
+      2. If the tool call fails, STOP immediately with a concise failure note.
+      3. Take `local_path` (preferred) or `image_url` — do NOT fabricate paths.
+      4. Save:
+           save_artifact(key='image_output', content_type='image',
+                         value=<local_path or image_url>, source_tool='image_generator')
+      5. Final text image links MUST start with `/static-files/` if present.
+      6. Stop after saving.
     tools:
-      - generate_image_tool
+      - image_generator
     inputs:
       - slot: prompt_used
         required: true
     outputs:
       - slot: image_output
     acceptance_criteria: |
-      image_output artifact must be saved and contain a valid URL starting with http(s)://.
+      image_output artifact must be saved with a valid local path or http(s) URL.
 
   enhance_image:
     label: Enhance Image
     prompt: |
-      You are an image enhancement agent.
+      You are an image enhancement / editing agent.
 
-      Raw generated image URL:
+      Raw image (if already saved):
       {{image_output}}
+
+      Reference materials (fallback source):
+      {{material_images}}
+
+      Original user request:
+      {{user_input}}
+
+      Edit / style instruction:
+      {{prompt_used}}
 
       {{runtime_instruction}}
 
-      Steps:
-      1. Call enhance_image_tool(image_url=<generated_image_url>) to produce an enhanced version.
-      2. Save the EXACT URL returned by enhance_image_tool — do not fabricate or
-         substitute any URL:
-           save_artifact(key='enhanced_image_output', content_type='image', value=<url>)
-      3. Stop after saving.
+      Your task:
+      1. Resolve the source image (the **original photo**, not an AI-generated image):
+         - Prefer image_output if present (should be the raw photo from collect_materials).
+         - Else call get_artifact(key='material_images') and use the best subject photo.
+         - Else use find_user_attachment for user uploads.
+         - If validation is uncertain, call validate_image_ref first.
+      2. Call validate_image_ref if not already validated. Proceed only when status is ok.
+      3. Call image_editor (NOT image_generator) with:
+           prompt=<edit instruction from prompt_used and user_input>
+           urls=[<url from validate_image_ref or validated artifact>]
+      4. Take `local_path` (preferred) or `image_url` from the tool result.
+      5. Save the **edited** image ONLY here:
+           save_artifact(key='enhanced_image_output', content_type='image',
+                         value=<local_path or image_url>, source_tool='image_editor')
+         Do NOT call save_artifact(key='image_output', ...) in this step — that slot
+         must keep the original raw photo from collect_materials.
+         For partial retry, pass sort_order=N per the "Partial retry instruction" block.
+      6. Final text image links MUST start with `/static-files/` if present.
+      7. Stop after saving.
     tools:
-      - enhance_image_tool
+      - image_editor
+      - multimodal
+      - validate_image_ref
     inputs:
       - slot: image_output
-        required: true
+        required: false
+      - slot: material_images
+        required: false
+      - slot: prompt_used
+        required: false
     outputs:
       - slot: enhanced_image_output
     acceptance_criteria: |
-      enhanced_image_output artifact must be saved and contain a valid URL starting with http(s)://.
+      enhanced_image_output artifact must be saved with a valid local path or http(s) URL.

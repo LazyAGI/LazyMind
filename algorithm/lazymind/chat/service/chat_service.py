@@ -360,9 +360,14 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         f'[files_map_keys={sorted(message.files.keys()) if isinstance(message.files, dict) else None}]'
     )
     start_time = time.time()
+    plugin_context = plugin.plugin_context or {}
     priority = runtime.priority or LAZYMIND_LLM_PRIORITY
     query, agent_query = _normalize_cite_message_query_for_agent(message.query)
-    sensitive_word = check_sensitive_content(query)
+    is_driver_turn = (
+        isinstance(plugin_context, dict)
+        and plugin_context.get('synthetic_source') == 'driver'
+    )
+    sensitive_word = None if is_driver_turn else check_sensitive_content(query)
     if sensitive_word:
         cost = round(time.time() - start_time, 3)
         LOG.warning(
@@ -379,7 +384,6 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             },
             cost,
         ), final_data={'tool_call_turns': 0})
-
     filters = dict(retrieval.filters or {})
     files_map: Dict[str, List[str]] = message.files if isinstance(message.files, dict) else {}
     flat_files: List[str] = []
@@ -568,23 +572,12 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             async with rag_sem:
                 async for kind, payload in drive_agent(react_agent, agent_query, history=agent_history):
                     if kind == 'event':
-                        event_tag = payload.get('tag', '') if isinstance(payload, dict) else ''
-                        if event_tag in ('tool_calls', 'tool_results'):
-                            LOG.info(
-                                f'[ChatServer] [DBG_AGENT_EVENT] [sid={conversation.session_id}] '
-                                f'[tag={event_tag}] [payload={payload}]'
-                            )
                         for frame in translator.feed(payload):
                             cost = round(time.time() - start_time, 3)
                             yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FEED')
                     else:
                         # 'final' -- payload is already the resolved result value;
                         # if future.result() raised, drive_agent propagated it before yielding.
-                        LOG.info(
-                            f'[ChatServer] [DBG_AGENT_FINAL] [sid={conversation.session_id}] '
-                            f'[tool_call_turns={translator.tool_call_turns}] '
-                            f'[result_type={type(payload).__name__}] [result={str(payload)[:200]}]'
-                        )
                         final_result = payload
 
             for frame in translator.finish(final_result):

@@ -45,6 +45,11 @@ def _search_text(
     return _ctx_expand(merged)
 
 
+def _fuse_retriever_results(results):
+    nodes = tuple(r for r in results if r)
+    return RRFFusion(top_k=50)(nodes)
+
+
 def search_kb(
     payload: dict,
     *,
@@ -60,11 +65,11 @@ def search_kb(
     expanded = get_vocab_manager(payload['user_id'])(query)
 
     def _kb_retrieve(expanded: str):
+        filters = payload.get('filters') or {}
         results = parallel(*retrievers)(
-            expanded, filters=payload.get('filters') or {}, topk=retriever_topk
+            expanded, filters=filters, topk=retriever_topk
         )
-        nodes = tuple(r for r in results if r)
-        return RRFFusion(top_k=50)(nodes)
+        return _fuse_retriever_results(results)
 
     text_nodes = _search_text(expanded, _kb_retrieve, reranker, rerank_topk, k_max)
 

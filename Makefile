@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build up-build-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-stop-if-present
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-stop-if-present
 .DEFAULT_GOAL := help
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -13,8 +13,6 @@ LAZYMIND_LOCAL_BIN ?= local/local-runtime-manager/lazymind-local
 LAZYMIND_LOCAL_GOCACHE ?= $(CURDIR)/.codex-gocache/go-build
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
 export LAZYMIND_LOCAL_MILVUS_DB_PATH ?= $(CURDIR)/.lazymind-local/stores/milvus/lazymind.db
-PROCESS_COMPOSE_BIN ?= local/bin/process-compose
-PROCESS_COMPOSE_PKG ?= github.com/f1bonacc1/process-compose@v1.116.0
 comma := ,
 
 # ---------------------------------------------------------------------------
@@ -314,17 +312,21 @@ compose-host-permissions:
 	@echo "🔐 Ensuring compose bind mounts are readable by containers..."
 	@dir="$(CURDIR)"; \
 	while [ "$$dir" != "/" ] && [ "$$dir" != "$(HOME)" ]; do \
+		echo "  parent execute: $$dir"; \
 		chmod a+x "$$dir" 2>/dev/null || true; \
 		dir="$$(dirname "$$dir")"; \
 	done
+	@echo "  repo root read/execute: ."
 	@chmod a+rx .
 	@for path in $(_COMPOSE_BIND_CRITICAL_READ_PATHS); do \
 		if [ -e "$$path" ]; then \
+			echo "  critical read: $$path"; \
 			chmod -R a+rX "$$path"; \
 		fi; \
 	done
 	@for path in $(_COMPOSE_BIND_BEST_EFFORT_READ_PATHS); do \
 		if [ -e "$$path" ]; then \
+			echo "  best-effort read: $$path"; \
 			chmod -R a+rX "$$path" 2>/dev/null || true; \
 		fi; \
 	done
@@ -445,16 +447,11 @@ up-build:
 		echo "✅ file-watcher container enabled"; \
 	fi
 
-up-build-local:
-	@$(MAKE) --no-print-directory compose-host-permissions
-	@if [ ! -x "$(PROCESS_COMPOSE_BIN)" ]; then \
-		mkdir -p "$(dir $(PROCESS_COMPOSE_BIN))"; \
-		GOBIN="$(CURDIR)/local/bin" $(GO) install "$(PROCESS_COMPOSE_PKG)"; \
-	fi
-	@$(MAKE) --no-print-directory compose-host-permissions
+local-runtime-manager-build:
 	@mkdir -p "$(LAZYMIND_LOCAL_GOCACHE)"
 	@cd local/local-runtime-manager && GOCACHE="$(LAZYMIND_LOCAL_GOCACHE)" $(GO) build -buildvcs=false -o lazymind-local .
-	@$(MAKE) --no-print-directory compose-host-permissions
+
+up-build-local: local-runtime-manager-build
 	@"$(LAZYMIND_LOCAL_BIN)" up --profile "$(LAZYMIND_LOCAL_PROFILE)"
 
 clear:
@@ -484,28 +481,6 @@ clear:
 # After this, run: make up LAZYMIND_RESET_ALGO_ON_STARTUP=true
 # ---------------------------------------------------------------------------
 _KB_VOLUMES := milvus-etcd milvus-minio milvus-data opensearch-data rag-uploads
-_RESET_KB_LOCAL_PATHS := \
-	data/core/uploads \
-	data/scan/staging \
-	.lazymind-local/home/sqlite \
-	.lazymind-local/tmp/scan-control-plane \
-	.lazymind-local/stores/scan/file-watcher/staging \
-	.lazymind-local/stores/scan/file-watcher/snapshots
-_RESET_ALL_LOCAL_PATHS := \
-	data/core \
-	data/evo \
-	data/scan \
-	data/state/postgres \
-	data/state/redis \
-	data/subagent \
-	data/traces \
-	.lazymind-local/generated \
-	.lazymind-local/home \
-	.lazymind-local/logs \
-	.lazymind-local/run \
-	.lazymind-local/state \
-	.lazymind-local/stores \
-	.lazymind-local/tmp
 _ALL_VOLUMES := $(_KB_VOLUMES) pgdata redisdata sqlite-data
 
 # SQL run inside the running db container (or via docker run if db is stopped).
@@ -554,17 +529,10 @@ CASCADE;
 endef
 export _RESET_KB_SQL_APP
 
-reset-kb:
-	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
-		$(MAKE) --no-print-directory file-watcher-stop; \
-	fi
-	@if [ -x "$(LAZYMIND_LOCAL_BIN)" ]; then \
-		echo "⏹  Stopping Local Runtime before cleanup (profile=$(LAZYMIND_LOCAL_PROFILE), timeout=$(LAZYMIND_LOCAL_DOWN_TIMEOUT))..."; \
-		timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LAZYMIND_LOCAL_BIN)" down --profile "$(LAZYMIND_LOCAL_PROFILE)" || \
-			echo "⚠️  Local Runtime manager down timed out or failed; continuing reset"; \
-	else \
-		echo "ℹ️  No Local Runtime manager found at $(LAZYMIND_LOCAL_BIN); skipping local runtime stop"; \
-	fi
+reset-kb: local-runtime-manager-build
+	@echo "🧹 Clearing Local Runtime KB state via local-runtime-manager..."
+	@timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LAZYMIND_LOCAL_BIN)" reset --scope kb --profile "$(LAZYMIND_LOCAL_PROFILE)" || \
+		echo "⚠️  Local Runtime manager reset timed out or failed; continuing compose cleanup"
 	@echo "⏫ Starting PostgreSQL only for SQL cleanup..."
 	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) up -d db >/dev/null
 	@echo "⏳ Waiting for PostgreSQL readiness before SQL cleanup..."
@@ -603,22 +571,6 @@ reset-kb:
 			echo "  skip $$vol (not found)"; \
 		fi; \
 	done
-	@echo "🗑  Removing local KB caches and segment stores..."
-	@for path in $(_RESET_KB_LOCAL_PATHS); do \
-		if [ -e "$$path" ]; then \
-			echo "  removing $$path"; \
-			rm -rf "$$path" 2>/dev/null || true; \
-		else \
-			echo "  skip $$path (not found)"; \
-		fi; \
-	done
-	@echo "🗑  Removing local Milvus Lite data..."
-	@if [ -e "$(dir $(LAZYMIND_LOCAL_MILVUS_DB_PATH))" ]; then \
-		echo "  removing $(dir $(LAZYMIND_LOCAL_MILVUS_DB_PATH))"; \
-		rm -rf "$(dir $(LAZYMIND_LOCAL_MILVUS_DB_PATH))" 2>/dev/null || true; \
-	else \
-		echo "  skip $(dir $(LAZYMIND_LOCAL_MILVUS_DB_PATH)) (not found)"; \
-	fi
 	@echo "✅ KB data cleared."
 
 # ---------------------------------------------------------------------------
@@ -641,22 +593,9 @@ reset-all: reset-kb
 			done; \
 		fi; \
 	done
-	@echo "🗑  Removing local persistent data paths..."
-	@for path in $(_RESET_ALL_LOCAL_PATHS); do \
-		if [ -e "$$path" ]; then \
-			echo "  removing $$path"; \
-			rm -rf "$$path" 2>/dev/null || true; \
-		else \
-			echo "  skip $$path (not found)"; \
-		fi; \
-	done
-	@if [ -e data/core ] || [ -e data/evo ] || [ -e data/scan ] || [ -e data/state/postgres ] || [ -e data/state/redis ] || [ -e data/subagent ] || [ -e data/traces ]; then \
-		echo "🗑  Removing container-owned state paths via temporary postgres container..."; \
-		docker run --rm -v "$(CURDIR):/work" -w /work $${POSTGRES_IMAGE:-postgres:16} \
-			bash -lc 'rm -rf data/core data/evo data/scan data/state/postgres data/state/redis data/subagent data/traces' >/dev/null; \
-	else \
-		echo "ℹ️  No container-owned state paths remain"; \
-	fi
+	@echo "🧹 Clearing all Local Runtime persistent state via local-runtime-manager..."
+	@timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LAZYMIND_LOCAL_BIN)" reset --scope all --profile "$(LAZYMIND_LOCAL_PROFILE)" || \
+		echo "⚠️  Local Runtime manager full reset timed out or failed; continuing Python cache cleanup"
 	@echo "🧹 Clearing Python cache..."
 	@find . -type d -name '__pycache__' ! -path '*/\.git/*' -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name '*.pyc' ! -path '*/\.git/*' -delete 2>/dev/null || true

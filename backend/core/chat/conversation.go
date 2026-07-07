@@ -681,18 +681,23 @@ func resumeMultiAnswerChat(ctx context.Context, stateStore state.Store, convID s
 	}
 }
 
-// StopChatGeneration text POST /api/v1/conversations:stopChatGeneration
+// StopChatGeneration handles:
+//   - POST /conversations:stopChatGeneration (conversation_id in JSON body)
+//   - POST /conversations/{conversation_id}:stop (conversation_id in path; body optional)
 func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ConversationID string `json:"conversation_id"`
 		HistoryID      string `json:"history_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
 		return
 	}
 	convID := strings.TrimSpace(body.ConversationID)
 	historyID := strings.TrimSpace(body.HistoryID)
+	if convID == "" {
+		convID = conversationIDFromPath(r)
+	}
 	if convID == "" {
 		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
 		return

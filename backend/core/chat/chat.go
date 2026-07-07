@@ -564,6 +564,13 @@ func filesMapFromAny(v any) map[string][]string {
 }
 
 func stringSlice(v any) []string {
+	if s, ok := v.(string); ok {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil
+		}
+		return []string{s}
+	}
 	if raw, ok := v.([]string); ok {
 		if len(raw) == 0 {
 			return nil

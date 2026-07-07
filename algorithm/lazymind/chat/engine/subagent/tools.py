@@ -9,12 +9,31 @@ from lazymind.chat.engine.attachment_reader import (
     is_chat_image_file,
     parse_attachment_content,
 )
-from lazymind.chat.engine.tools.infra import tool_success
+from lazymind.chat.engine.tools.infra import tool_error, tool_success
 
-from .context import require_context, LARGE_ARTIFACT_THRESHOLD
+from .context import get_context, require_context, LARGE_ARTIFACT_THRESHOLD
 
 # Valid artifact content types.
 _CONTENT_TYPES = {'text', 'json', 'image', 'file', 'file_list'}
+
+UPLOAD_MARKER = '/var/lib/lazymind/uploads/'
+SUBAGENT_MARKER = '/data/subagent/'
+
+
+def _is_valid_image_ref(path: str) -> bool:
+    """Return True when *path* looks like a real image URL or filesystem reference."""
+    p = (path or '').strip()
+    if not p:
+        return False
+    if p.startswith(('http://', 'https://', '/static-files/', 'data:image/')):
+        return True
+    if p.startswith('/data/subagent/') or SUBAGENT_MARKER in p:
+        return True
+    if p.startswith(UPLOAD_MARKER) or p.startswith('/var/lib/lazymind/uploads/'):
+        return True
+    if os.path.isabs(p) and os.path.isfile(p):
+        return True
+    return False
 
 
 def _build_artifact_value(value: Any, content_type: str):
@@ -46,7 +65,16 @@ def _build_artifact_value(value: Any, content_type: str):
             return {'type': 'json', 'path': rel, 'size': os.path.getsize(abs_path)}, 'file'
         return {'data': value}, 'json'
     if content_type == 'image':
-        src = str(value)
+        src = str(value).strip()
+        if not _is_valid_image_ref(src):
+            raise ValueError(
+                f'Invalid image reference {src!r}: expected http(s) URL, /static-files/ path, '
+                'or an existing absolute file path — placeholder text is not allowed.'
+            )
+        # '/static-files/...' (possibly with query) is a signed URL path, not a local
+        # filesystem path. Keep it as URL text instead of copying from disk.
+        if src.startswith('/static-files/'):
+            return {'path': src}, 'image'
         if os.path.isabs(src):
             # Copy into workspace; keep absolute path so Go core can sign a URL for it.
             dst_rel = ctx.copy_into_workspace(src)
@@ -124,6 +152,12 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
         A confirmation that the artifact was saved.
     """
     ctx = require_context()
+    if ctx.output_slots and key not in ctx.output_slots:
+        return tool_error(
+            'save_artifact',
+            f'Artifact key {key!r} is not declared for this step. '
+            f'Allowed keys: {", ".join(ctx.output_slots)}',
+        )
     ct = content_type if content_type in _CONTENT_TYPES else 'text'
     built, actual_ct = _build_artifact_value(value, ct)
     if source_tool:
@@ -191,16 +225,14 @@ def _write_artifact_draft(
 def _resolve_list_index_from_sort_order(
     slot: str, sort_order: int
 ) -> tuple[Optional[int], Optional[str]]:
-    """Query Go core to translate sort_order → list_index for a list-slot artifact.
+    """Translate sort_order → list_index for a list-slot artifact.
 
     Returns (list_index, None) on success, or (None, error_message) when sort_order
     is out of range. Returns (None, None) on technical errors or non-list slots
     (caller should silently append in those cases).
     """
     try:
-        import httpx
         import lazyllm
-        from lazymind.config import config as _cfg
         cfg = {}
         try:
             cfg = lazyllm.globals.get('agentic_config') or {}
@@ -209,29 +241,8 @@ def _resolve_list_index_from_sort_order(
         session_id: str = cfg.get('plugin_session_id', '')
         if not session_id:
             return None, None
-        # Look up slot_id from plugin_loader via slot.
-        plugin_id: str = cfg.get('plugin_id', '')
-        if not plugin_id:
-            return None, None
-        from lazymind.chat.plugin import plugin_loader
-        spec = plugin_loader.get_plugin(plugin_id)
-        if not spec:
-            return None, None
-        slot_def = spec.get_slot(slot)
-        if not slot_def:
-            return None, None
-        slot_id = slot_def.get('id', '')
-        if not slot_id:
-            return None, None
-        core_url = str(_cfg['core_api_url']).rstrip('/')
-        url = (
-            f'{core_url}/plugin-sessions/{session_id}'
-            f'/slots/{slot_id}/order'
-        )
-        resp = httpx.get(url, timeout=3.0)
-        if resp.status_code != 200:
-            return None, None
-        order_list: list = resp.json().get('data', {}).get('order_list', [])
+        ctx = require_context()
+        order_list = ctx.db.load_slot_order_list(session_id, slot)
         if not order_list:
             # Single-cardinality slot — sort_order is meaningless, ignore silently.
             return None, None
@@ -1098,10 +1109,16 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
             'message': 'No active plugin session found in agentic_config.',
         })
 
-    ctx = require_context()
-
+    ctx = get_context()
+    if ctx is None:
+        return tool_success('find_artifact', {
+            'status': 'error',
+            'message': 'find_artifact requires an active SubAgent context.',
+        })
     if sort_order is not None:
-        result_dict = _get_plugin_artifact_by_sort_order(ctx, slot, session_id, sort_order)
+        result_dict = _get_plugin_artifact_by_sort_order(
+            ctx, slot, session_id, sort_order,
+        )
     else:
         result_dict = _get_plugin_artifact_all(ctx, slot, session_id)
 
@@ -1127,6 +1144,10 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
         except Exception:
             value = {}
 
+    signed_url: Optional[str] = None
+    if isinstance(value.get('url'), str) and value.get('url'):
+        signed_url = value['url']
+
     path: Optional[str] = value.get('path') or value.get('url') or value.get('text')
     if not path or not isinstance(path, str):
         return tool_success('find_artifact', {
@@ -1134,21 +1155,24 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
             'message': f"Artifact '{slot}' has no resolvable path.",
         })
 
-    # Try to get a signed URL from Go /static-files:sign.
-    signed_url: Optional[str] = None
-    try:
-        import httpx
-        from lazymind.config import config as _cfg
-        core_url = str(_cfg['core_api_url']).rstrip('/')
-        resp = httpx.post(
-            f'{core_url}/static-files:sign',
-            json={'path': path},
-            timeout=3.0,
-        )
-        if resp.status_code == 200:
-            signed_url = resp.json().get('data', {}).get('url') or resp.json().get('url')
-    except Exception:
-        pass
+    # Re-sign local paths when the slots API did not already provide a URL.
+    if not signed_url:
+        try:
+            import httpx
+            from lazymind.config import config as _cfg
+            core_url = str(_cfg['core_api_url']).rstrip('/')
+            resp = httpx.post(
+                f'{core_url}/static-files:sign',
+                json={'paths': [path]},
+                timeout=3.0,
+            )
+            if resp.status_code == 200:
+                payload = resp.json()
+                data = payload.get('data') if isinstance(payload.get('data'), dict) else payload
+                urls = data.get('urls') or {}
+                signed_url = urls.get(path)
+        except Exception:
+            pass
 
     out: Dict[str, Any] = {
         'status': 'ok',
