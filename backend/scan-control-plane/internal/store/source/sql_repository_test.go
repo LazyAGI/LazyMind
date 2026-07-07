@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	_ "github.com/glebarez/go-sqlite"
 	"gorm.io/gorm/clause"
 )
 
@@ -151,6 +153,87 @@ func TestJSONValueReturnsValidJSONTextForStructuredProviderOptions(t *testing.T)
 		t.Fatalf("json value: %v", err)
 	}
 	assertValidJSONTextParam(t, value, "provider_options")
+}
+
+func TestSQLiteAutoMigrateCreatesUpsertConstraints(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "scan.db"))+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewSQLRepositoryWithDriver("sqlite", db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatalf("auto migrate sqlite: %v", err)
+	}
+
+	for table, index := range map[string][]string{
+		"source_bindings":               {"uk_source_binding_current_target", "source_id", "connector_type", "target_type", "target_fingerprint"},
+		"documents":                     {"uk_documents_object", "source_id", "binding_id", "object_key"},
+		"parse_tasks":                   {"uk_parse_task_idempotency", "idempotency_key"},
+		"source_sync_runs":              {"uk_source_sync_runs_scheduled_fire", "binding_id", "binding_generation", "scheduled_fire_at"},
+		"data_source_create_operations": {"uk_create_operation", "caller_id", "request_id"},
+	} {
+		assertSQLiteUniqueIndex(t, db, table, index[0], index[1:])
+	}
+	assertSQLiteUniqueIndex(t, db, "parse_tasks", "uk_parse_task_active", []string{
+		"source_id", "binding_id", "object_key", "target_version_id", "task_action",
+	})
+}
+
+func TestSQLiteCreateOperationUpsertUsesCallerRequestConstraint(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "scan.db"))+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewSQLRepositoryWithDriver("sqlite", db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatalf("auto migrate sqlite: %v", err)
+	}
+
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	base := CreateOperation{
+		OperationID:        "op-1",
+		CallerID:           "user-1",
+		RequestID:          "request-1",
+		RequestHash:        "hash-1",
+		Status:             "PENDING",
+		CompensationStatus: "NONE",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	if err := ormUpsertOperation(repo.orm, base); err != nil {
+		t.Fatalf("insert create operation: %v", err)
+	}
+	base.OperationID = "op-2"
+	base.SourceID = "source-1"
+	base.DatasetID = "dataset-1"
+	base.Status = "SUCCEEDED"
+	base.UpdatedAt = now.Add(time.Minute)
+	if err := ormUpsertOperation(repo.orm, base); err != nil {
+		t.Fatalf("upsert create operation: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM data_source_create_operations WHERE caller_id = ? AND request_id = ?", "user-1", "request-1").Scan(&count); err != nil {
+		t.Fatalf("count create operations: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one create operation after upsert, got %d", count)
+	}
+	var sourceID string
+	if err := db.QueryRow("SELECT source_id FROM data_source_create_operations WHERE caller_id = ? AND request_id = ?", "user-1", "request-1").Scan(&sourceID); err != nil {
+		t.Fatalf("read create operation: %v", err)
+	}
+	if sourceID != "source-1" {
+		t.Fatalf("upsert did not update source_id: %q", sourceID)
+	}
 }
 
 func TestListSourcesScansProjectedSourceFields(t *testing.T) {
@@ -448,6 +531,64 @@ func assertValidJSONTextParam(t *testing.T, value any, name string) {
 	decoder.UseNumber()
 	if err := decoder.Decode(&decoded); err != nil {
 		t.Fatalf("%s JSON param is invalid: %v text=%q", name, err, text)
+	}
+}
+
+func assertSQLiteUniqueIndex(t *testing.T, db *sql.DB, table, indexName string, wantColumns []string) {
+	t.Helper()
+
+	rows, err := db.Query("PRAGMA index_list(" + table + ")")
+	if err != nil {
+		t.Fatalf("list sqlite indexes for %s: %v", table, err)
+	}
+	defer rows.Close()
+
+	found := false
+	for rows.Next() {
+		var seq int
+		var name string
+		var unique int
+		var origin string
+		var partial int
+		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
+			t.Fatalf("scan sqlite index for %s: %v", table, err)
+		}
+		if name == indexName {
+			if unique != 1 {
+				t.Fatalf("sqlite index %s on %s is not unique", indexName, table)
+			}
+			found = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("scan sqlite indexes for %s: %v", table, err)
+	}
+	if !found {
+		t.Fatalf("sqlite index %s on %s not found", indexName, table)
+	}
+
+	columnRows, err := db.Query("PRAGMA index_info(" + indexName + ")")
+	if err != nil {
+		t.Fatalf("read sqlite index info for %s: %v", indexName, err)
+	}
+	defer columnRows.Close()
+
+	var gotColumns []string
+	for columnRows.Next() {
+		var seqno int
+		var cid int
+		var name string
+		if err := columnRows.Scan(&seqno, &cid, &name); err != nil {
+			t.Fatalf("scan sqlite index info for %s: %v", indexName, err)
+		}
+		gotColumns = append(gotColumns, name)
+	}
+	if err := columnRows.Err(); err != nil {
+		t.Fatalf("scan sqlite index columns for %s: %v", indexName, err)
+	}
+	if fmt.Sprint(gotColumns) != fmt.Sprint(wantColumns) {
+		t.Fatalf("sqlite index %s columns = %v, want %v", indexName, gotColumns, wantColumns)
 	}
 }
 
