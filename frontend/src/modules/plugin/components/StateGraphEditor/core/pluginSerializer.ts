@@ -52,8 +52,14 @@ export function serializePluginModel(model: PluginModel, graphModel?: GraphModel
       tabs: model.ui.tabs.map((tab) => {
         const t: Record<string, unknown> = { id: tab.id };
         if (tab.label) t.label = tab.label;
+        // Always output 'vertical' (never the legacy 'list' value)
         if (tab.layout) t.layout = tab.layout;
-        t.slots = tab.slots.map((s) => ({ id: s.id }));
+        if (tab.gridCols != null) t.grid_cols = tab.gridCols;
+        t.slots = tab.slots.map((s) => {
+          const entry: Record<string, unknown> = { id: s.id };
+          if (s.widget) entry.widget = s.widget;
+          return entry;
+        });
         if (tab.composite_layout != null) t.composite_layout = tab.composite_layout;
         return t;
       }),
@@ -68,4 +74,16 @@ export function serializePluginModel(model: PluginModel, graphModel?: GraphModel
     noRefs: true,
     quotingType: '"',
   });
+}
+
+/**
+ * Normalize layout value from YAML: 'list' is the legacy name for 'vertical'.
+ * All other values pass through unchanged.
+ */
+export function normalizeTabLayout(
+  layout: string | undefined,
+): 'vertical' | 'grid' | 'horizontal' | 'composite' | undefined {
+  if (layout === 'list') return 'vertical';
+  if (layout === 'vertical' || layout === 'grid' || layout === 'horizontal' || layout === 'composite') return layout;
+  return undefined;
 }

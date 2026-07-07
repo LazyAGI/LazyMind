@@ -700,6 +700,7 @@ interface SlotImageProps {
   onRefresh?: () => void;
   /** Called when the user clicks the reference (cite) button. */
   onReference?: (slot: SlotRevision) => void;
+  readOnly?: boolean;
 }
 
 export function SlotImage({
@@ -711,6 +712,7 @@ export function SlotImage({
   isDraggable,
   onRefresh,
   onReference,
+  readOnly,
 }: SlotImageProps) {
   const raw = slot.artifact_value;
   const { displayUrl: url, pending, hasSource } = useSlotImageUrl(raw);
@@ -800,7 +802,7 @@ export function SlotImage({
     return <SlotPending type='image' cardMode={cardMode} />;
   }
 
-  const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined);
+  const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined) && !readOnly;
 
   // Overlays rendered directly on top of the image (no separate action bar)
   const overlays = hasActions ? (
@@ -968,9 +970,10 @@ interface SlotTextProps {
   slotId?: string;
   revisionCount?: number;
   onRefresh?: () => void;
+  readOnly?: boolean;
 }
 
-export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: SlotTextProps) {
+export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotTextProps) {
   const raw = slot.artifact_value;
   const { patchSlotCaption } = usePluginStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
@@ -1019,7 +1022,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
     return <SlotPending type='text' />;
   }
 
-  const canEdit = Boolean(sessionId && slotId);
+  const canEdit = Boolean(sessionId && slotId) && !readOnly;
   // For single slots, list_index is undefined from the backend; use 0 as the canonical index
   // for localStorage keys (front-end only convention).
   const effectiveListIndex = slot.list_index ?? 0;
@@ -1259,9 +1262,10 @@ interface SlotFileProps {
   sessionId?: string;
   slotId?: string;
   onRefresh?: () => void;
+  readOnly?: boolean;
 }
 
-export function SlotFile({ slot, sessionId, slotId, onRefresh }: SlotFileProps) {
+export function SlotFile({ slot, sessionId, slotId, onRefresh, readOnly }: SlotFileProps) {
   const raw = slot.artifact_value;
   const rawPath: string = raw?.url ?? raw?.path ?? '';
   const url: string = rawPath ? resolveCoreAssetUrl(rawPath) : '';
@@ -1273,7 +1277,7 @@ export function SlotFile({ slot, sessionId, slotId, onRefresh }: SlotFileProps) 
   const [captionEditing, setCaptionEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState('');
 
-  const canEdit = Boolean(sessionId && slotId && slot.list_index !== undefined);
+  const canEdit = Boolean(sessionId && slotId && slot.list_index !== undefined) && !readOnly;
 
   const handlePreview = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1420,6 +1424,7 @@ export function SlotRenderer({
   isDraggable,
   onRefresh,
   onReference,
+  readOnly,
 }: {
   slot: SlotRevision;
   cardMode?: boolean;
@@ -1430,6 +1435,7 @@ export function SlotRenderer({
   isDraggable?: boolean;
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
+  readOnly?: boolean;
 }) {
   if (slot.artifact_value === undefined || slot.artifact_value === null) {
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
@@ -1447,10 +1453,11 @@ export function SlotRenderer({
         isDraggable={isDraggable}
         onRefresh={onRefresh}
         onReference={onReference}
+        readOnly={readOnly}
       />
     );
   }
-  if (normalized === 'file') return <SlotFile slot={slot} sessionId={sessionId} slotId={slotId} onRefresh={onRefresh} />;
+  if (normalized === 'file') return <SlotFile slot={slot} sessionId={sessionId} slotId={slotId} onRefresh={onRefresh} readOnly={readOnly} />;
   return (
     <SlotText
       slot={slot}
@@ -1458,6 +1465,7 @@ export function SlotRenderer({
       slotId={slotId}
       revisionCount={revisionCount}
       onRefresh={onRefresh}
+      readOnly={readOnly}
     />
   );
 }

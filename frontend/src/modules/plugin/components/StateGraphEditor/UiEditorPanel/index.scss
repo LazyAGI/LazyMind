@@ -150,19 +150,34 @@
 .uep-canvas-slots {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 640px;
+  gap: 12px;
+  max-width: 680px;
   margin: 0 auto;
+
+  &--grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+    max-width: none;
+  }
+
+  &--horizontal {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px;
+    max-width: none;
+  }
 }
 
-// Grid layout overrides
+// Grid layout overrides (legacy)
 .uep-canvas--grid .uep-canvas-slots {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 12px;
+  max-width: none;
 }
 
-// Horizontal layout overrides
+// Horizontal layout overrides (legacy)
 .uep-canvas--horizontal .uep-canvas-slots {
   flex-direction: row;
   flex-wrap: wrap;
@@ -187,66 +202,6 @@
 .uep-canvas-composite-editor {
   font-family: 'SFMono-Regular', Consolas, monospace;
   font-size: 12px;
-}
-
-// ─── Widget card ──────────────────────────────────────────────────────────────
-.uep-widget-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: #fff;
-  border: 1px solid #e8e8e8;
-  border-radius: 8px;
-  cursor: default;
-  transition: box-shadow 0.15s, border-color 0.15s;
-
-  &:hover {
-    border-color: #bfbfbf;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
-  }
-}
-
-.uep-widget-drag {
-  color: #bfbfbf;
-  cursor: grab;
-  font-size: 14px;
-  flex-shrink: 0;
-
-  &:active {
-    cursor: grabbing;
-  }
-}
-
-.uep-widget-icon {
-  font-size: 16px;
-  color: #8c8c8c;
-  flex-shrink: 0;
-}
-
-.uep-widget-label {
-  flex: 1;
-  font-size: 13px;
-  color: #262626;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.uep-widget-meta {
-  font-size: 11px;
-  color: #bfbfbf;
-  flex-shrink: 0;
-}
-
-.uep-widget-remove {
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.12s;
-
-  .uep-widget-card:hover & {
-    opacity: 1;
-  }
 }
 
 // ─── Drop zone highlight ──────────────────────────────────────────────────────
@@ -407,3 +362,282 @@
   resize: vertical;
   box-sizing: border-box;
 }
+
+// ─── CompositeLayoutEditor: mode switch ──────────────────────────────────────
+.cle-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cle-mode-label {
+  font-size: 12px;
+  color: #8c8c8c;
+  white-space: nowrap;
+}
+
+// ─── CompositeLayoutEditor: template picker ──────────────────────────────────
+.cle-templates {
+  padding: 8px 0;
+}
+
+.cle-templates-title {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-bottom: 10px;
+}
+
+.cle-templates-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cle-template-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  background: #fafafa;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+  font-size: 12px;
+  min-width: 64px;
+
+  &:hover {
+    border-color: #1677ff;
+    background: #f0f5ff;
+  }
+}
+
+.cle-template-icon {
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 2px;
+}
+
+.cle-template-label {
+  color: #595959;
+}
+
+// ─── CompositeLayoutEditor: tree editor ──────────────────────────────────────
+.cle-tree-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cle-tree-node {
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  background: #fafafa;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  &--depth-1 { background: #f0f5ff; border-color: #d6e4ff; }
+  &--depth-2 { background: #f6ffed; border-color: #d9f7be; }
+  &--depth-3 { background: #fff7e6; border-color: #ffe7ba; }
+}
+
+.cle-tree-node-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cle-tree-dir-badge {
+  font-size: 11px;
+  font-weight: 600;
+  background: #e6f0ff;
+  color: #1677ff;
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.cle-tree-node-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.cle-tree-children {
+  display: flex;
+  gap: 8px;
+  padding-left: 12px;
+  border-left: 2px solid #e8e8e8;
+
+  &--column { flex-direction: column; }
+  &--row { flex-direction: row; flex-wrap: wrap; }
+}
+
+.cle-tree-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+}
+
+.cle-tree-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cle-tree-tabs-label {
+  font-size: 11px;
+  color: #8c8c8c;
+  white-space: nowrap;
+}
+
+.cle-tree-tab-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cle-tree-tab-label-input {
+  flex: 1;
+  height: 24px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: 12px;
+  outline: none;
+  min-width: 0;
+
+  &:focus { border-color: #1677ff; }
+}
+
+// ─── WidgetConfigPanel ────────────────────────────────────────────────────────
+.wcp-root {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 4px;
+  border-top: 1px solid #f0f0f0;
+  margin-top: 8px;
+}
+
+.wcp-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.wcp-field-label {
+  font-size: 11px;
+  color: #8c8c8c;
+  white-space: nowrap;
+  min-width: 52px;
+}
+
+.wcp-field-value {
+  display: flex;
+  align-items: center;
+}
+
+// ─── UiWidgetCard (upgraded three-zone) ──────────────────────────────────────
+.uep-widget-card {
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.15s;
+  cursor: default;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  &--drag-over {
+    border-color: #1677ff;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.15);
+  }
+}
+
+.uep-widget-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  min-height: 34px;
+}
+
+.uep-widget-drag {
+  color: #bfbfbf;
+  cursor: grab;
+  font-size: 14px;
+  flex-shrink: 0;
+  padding: 2px 2px;
+  display: flex;
+  align-items: center;
+
+  &:active { cursor: grabbing; }
+}
+
+.uep-widget-icon {
+  color: #8c8c8c;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.uep-widget-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uep-widget-type-tag {
+  font-size: 11px;
+  color: #8c8c8c;
+  background: #f5f5f5;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+.uep-widget-remove {
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity 0.12s;
+
+  .uep-widget-card:hover & {
+    opacity: 1;
+  }
+}
+
+.uep-widget-preview {
+  padding: 12px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fff;
+  min-height: 60px;
+}
+
+.uep-widget-config {
+  padding: 0 12px 10px;
+  background: #fafafa;
+}
+

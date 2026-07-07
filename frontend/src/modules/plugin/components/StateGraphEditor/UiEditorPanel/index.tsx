@@ -1,4 +1,4 @@
-import type { PluginModel, PluginUiTab } from '../core/pluginModel';
+import type { PluginModel, PluginUiTab, WidgetConfig } from '../core/pluginModel';
 import type { GraphModel } from '../core/model';
 import ArtifactPanel from '../ArtifactPanel';
 import UiWysiwygPreview from './UiWysiwygPreview';
@@ -42,7 +42,7 @@ export default function UiEditorPanel({
 
   const handleAddTab = () => {
     const id = nextTabId();
-    const newTab: PluginUiTab = { id, label: `Tab ${tabs.length + 1}`, layout: 'list', slots: [] };
+    const newTab: PluginUiTab = { id, label: `Tab ${tabs.length + 1}`, layout: 'vertical', slots: [] };
     updateTabs([...tabs, newTab]);
     onActiveTabChange(id);
   };
@@ -57,15 +57,14 @@ export default function UiEditorPanel({
     if (activeTabId === tabId) onActiveTabChange(newTabs[0]?.id);
   };
 
-  const handleAddSlotToTab = (slotId: string) => {
+  const handleSlotsChange = (slots: Array<{ id: string; widget?: WidgetConfig }>) => {
     if (!activeTabId) return;
-    updateTabs(
-      tabs.map((t) => {
-        if (t.id !== activeTabId) return t;
-        if (t.slots.some((s) => s.id === slotId)) return t;
-        return { ...t, slots: [...t.slots, { id: slotId }] };
-      }),
-    );
+    updateTabs(tabs.map((t) => t.id === activeTabId ? { ...t, slots } : t));
+  };
+
+  const handleCompositeLayoutChange = (value: unknown) => {
+    if (!activeTabId) return;
+    updateTabs(tabs.map((t) => t.id === activeTabId ? { ...t, composite_layout: value } : t));
   };
 
   const handleLayoutChange = (layout: PluginUiTab['layout']) => {
@@ -73,9 +72,13 @@ export default function UiEditorPanel({
     updateTabs(tabs.map((t) => (t.id === activeTabId ? { ...t, layout } : t)));
   };
 
+  const handleGridColsChange = (gridCols: number | null) => {
+    if (!activeTabId) return;
+    updateTabs(tabs.map((t) => t.id === activeTabId ? { ...t, gridCols: gridCols ?? undefined } : t));
+  };
+
   return (
     <div className="uep-root">
-      {/* Body: fixed left ArtifactPanel + right WYSIWYG (no separate toolbar/tabbar rows) */}
       <div className="uep-body">
         <div className="uep-sidebar">
           <ArtifactPanel
@@ -101,19 +104,31 @@ export default function UiEditorPanel({
           onDrop={(e) => {
             e.preventDefault();
             const slotId = e.dataTransfer.getData('application/x-slot-id');
-            if (slotId) handleAddSlotToTab(slotId);
+            const widgetTypeStr = e.dataTransfer.getData('application/x-widget-type');
+            if (slotId && activeTabId) {
+              const currentTab = tabs.find((t) => t.id === activeTabId);
+              if (!currentTab || currentTab.slots.some((s) => s.id === slotId)) return;
+              const widget: WidgetConfig | undefined = widgetTypeStr
+                ? ({ widgetType: widgetTypeStr } as WidgetConfig)
+                : undefined;
+              handleSlotsChange([...(currentTab.slots ?? []), { id: slotId, widget }]);
+            }
           }}
         >
           <UiWysiwygPreview
             pluginModel={pluginModel}
             activeTabId={activeTabId}
-            activeLayout={activeTab?.layout ?? 'list'}
+            activeLayout={activeTab?.layout ?? 'vertical'}
+            activeGridCols={activeTab?.gridCols}
             slotMap={slotMap}
             onTabSelect={onActiveTabChange}
             onAddTab={handleAddTab}
             onRenameTab={handleRenameTab}
             onDeleteTab={handleDeleteTab}
             onLayoutChange={handleLayoutChange}
+            onGridColsChange={handleGridColsChange}
+            onSlotsChange={handleSlotsChange}
+            onCompositeLayoutChange={handleCompositeLayoutChange}
           />
         </div>
       </div>

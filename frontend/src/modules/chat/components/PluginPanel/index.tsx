@@ -210,17 +210,31 @@ function buildColumns(
   tab: TabDef,
 ): Array<{ slotId: string | InnerTabsNode; weight: number }> {
   const layout = tab.composite_layout;
-  if (!layout || layout.length === 0) {
-    // Fallback: all slots side-by-side with equal weight.
+  if (!layout) {
     return tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
   }
-  // The top-level array may be a single [...] parallel node or an explicit list of columns.
-  // Detect whether the first element is itself an array (parallel node).
+
+  // New tree format: { direction, children }
+  if (!Array.isArray(layout) && typeof layout === 'object' && 'direction' in layout) {
+    const tree = layout as { direction?: string; children?: Array<{ slot?: string; weight?: number }> };
+    if (tree.direction === 'row' && Array.isArray(tree.children)) {
+      return tree.children
+        .map((c) => c.slot ? { slotId: c.slot, weight: c.weight ?? 1 } : null)
+        .filter((c): c is NonNullable<typeof c> => c !== null);
+    }
+    // For column or complex trees, fall back to slot order
+    return tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
+  }
+
+  // Legacy array format
+  if (!Array.isArray(layout) || layout.length === 0) {
+    return tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
+  }
   const first = layout[0];
   const cols =
     Array.isArray(first)
       ? (first as CompositeLayoutNode[])
-      : layout;
+      : layout as CompositeLayoutNode[];
   return cols
     .map((n) => resolveColumnSlotId(n))
     .filter((c): c is NonNullable<typeof c> => c !== null);
@@ -729,7 +743,7 @@ function TabSlotGrid({
     return slotDef.label ?? slotDef.id;
   };
   return (
-    <div className={`plugin-panel__tab-content plugin-panel__tab-content--${tab.layout ?? 'list'}`}>
+    <div className={`plugin-panel__tab-content plugin-panel__tab-content--${tab.layout ?? 'vertical'}`}>
       {/* Hidden file input for adding new items */}
       <input
         ref={addFileInputRef}

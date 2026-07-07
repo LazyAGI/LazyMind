@@ -3,7 +3,9 @@ import { Button, Checkbox, Input, InputNumber, Select, Tooltip, Empty, Dropdown,
 import { PlusOutlined, CloseOutlined, CheckOutlined, DownOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { SlotDef, GraphModel } from '../core/model';
-import type { PluginModel, PluginUiTab } from '../core/pluginModel';
+import type { PluginModel, PluginUiTab, WidgetConfig, WidgetType } from '../core/pluginModel';
+import { SLOT_DEFAULT_WIDGET, SLOT_COMPATIBLE_WIDGETS } from '../core/pluginModel';
+import WidgetSelector from '../UiEditorPanel/WidgetSelector';
 import './index.scss';
 
 const ARTIFACT_ID_REGEX = /^[a-zA-Z0-9_]+$/;
@@ -161,14 +163,20 @@ interface ArtifactRowProps {
   tabs: PluginUiTab[];
   onUpdate: (id: string, patch: Partial<Omit<SlotDef, 'id'>>) => void;
   onDelete: (id: string) => void;
-  onJoinTab: (slotId: string, tabId: string) => void;
+  onJoinTab: (slotId: string, tabId: string, widget: WidgetConfig) => void;
   onLeaveTab: (slotId: string, tabId: string) => void;
+  onWidgetChange: (slotId: string, tabId: string, widget: WidgetConfig) => void;
 }
 
-function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, onLeaveTab }: ArtifactRowProps) {
+function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, onLeaveTab, onWidgetChange }: ArtifactRowProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<EditDraft>(EMPTY_DRAFT);
+
+  // Selected widget type for this slot when joining a tab
+  const slotKey = `${art.type}/${art.cardinality ?? 'single'}`;
+  const defaultWidgetType: WidgetType = (SLOT_DEFAULT_WIDGET[slotKey] ?? 'text-single') as WidgetType;
+  const [selectedWidget, setSelectedWidget] = useState<WidgetType>(defaultWidgetType);
 
   const resolveAllowManualAdd = (): boolean => {
     if (art.allow_manual_add !== undefined) return art.allow_manual_add;
@@ -177,6 +185,7 @@ function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, 
 
   // Find which tab (if any) this slot currently belongs to — at most one tab.
   const currentTab = tabs.find((tab) => tab.slots.some((s) => s.id === art.id)) ?? null;
+  const currentTabSlot = currentTab?.slots.find((s) => s.id === art.id);
 
   const startEdit = () => {
     setDraft({
@@ -210,7 +219,6 @@ function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, 
 
   const displayName = art.label || art.id;
   const idLabel = art.label ? `(${art.id})` : '';
-  // Show a person icon when allow_manual_add is enabled (user provides this slot)
   const resolvedAllowManualAdd = art.cardinality === 'list'
     ? (art.allow_manual_add !== undefined ? art.allow_manual_add : isUsedAsInput(model, art.id))
     : false;
@@ -232,8 +240,11 @@ function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, 
 
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData('application/x-slot-id', art.id);
+    e.dataTransfer.setData('application/x-widget-type', selectedWidget);
     e.dataTransfer.effectAllowed = 'copy';
   };
+
+  const compatibleWidgets = SLOT_COMPATIBLE_WIDGETS[slotKey] ?? ['text-single'];
 
   return (
     <div
@@ -281,6 +292,29 @@ function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, 
       </div>
       {uiMode && (
         <div className="artifact-item-line2">
+          {/* Widget selector — only show compatible types */}
+          {compatibleWidgets.length > 1 && !currentTab && (
+            <WidgetSelector
+              slotType={art.type}
+              cardinality={art.cardinality}
+              value={selectedWidget}
+              onChange={(wt) => setSelectedWidget(wt)}
+              size="small"
+            />
+          )}
+          {/* Widget selector for already-joined tab slot */}
+          {compatibleWidgets.length > 1 && currentTab && currentTabSlot && (
+            <WidgetSelector
+              slotType={art.type}
+              cardinality={art.cardinality}
+              value={currentTabSlot.widget?.widgetType as WidgetType | undefined}
+              onChange={(wt) => {
+                const newWidget: WidgetConfig = { widgetType: wt } as WidgetConfig;
+                onWidgetChange(art.id, currentTab.id, newWidget);
+              }}
+              size="small"
+            />
+          )}
           {currentTab ? (
             <Button
               size="small"
@@ -297,7 +331,7 @@ function ArtifactRow({ art, model, uiMode, tabs, onUpdate, onDelete, onJoinTab, 
                 items: tabs.map((tab) => ({
                   key: tab.id,
                   label: tab.label ?? tab.id,
-                  onClick: () => onJoinTab(art.id, tab.id),
+                  onClick: () => onJoinTab(art.id, tab.id, { widgetType: selectedWidget } as WidgetConfig),
                 })),
               }}
               trigger={['click']}
@@ -373,11 +407,11 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
     onModelChange({ ...model, slots: { ...model.slots, [id]: updated } });
   };
 
-  const joinTab = (slotId: string, tabId: string) => {
+  const joinTab = (slotId: string, tabId: string, widget: WidgetConfig) => {
     if (!pluginModel || !onUiModelChange) return;
     const newTabs = tabs.map((tab) =>
       tab.id === tabId && !tab.slots.some((s) => s.id === slotId)
-        ? { ...tab, slots: [...tab.slots, { id: slotId }] }
+        ? { ...tab, slots: [...tab.slots, { id: slotId, widget }] }
         : tab,
     );
     onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs });
@@ -387,6 +421,16 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
     if (!pluginModel || !onUiModelChange) return;
     const newTabs = tabs.map((tab) =>
       tab.id === tabId ? { ...tab, slots: tab.slots.filter((s) => s.id !== slotId) } : tab,
+    );
+    onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs });
+  };
+
+  const updateWidget = (slotId: string, tabId: string, widget: WidgetConfig) => {
+    if (!pluginModel || !onUiModelChange) return;
+    const newTabs = tabs.map((tab) =>
+      tab.id === tabId
+        ? { ...tab, slots: tab.slots.map((s) => s.id === slotId ? { ...s, widget } : s) }
+        : tab,
     );
     onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs });
   };
@@ -429,6 +473,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
             onDelete={handleDelete}
             onJoinTab={joinTab}
             onLeaveTab={leaveTab}
+            onWidgetChange={updateWidget}
           />
         ))}
 

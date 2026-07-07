@@ -11,11 +11,104 @@ export interface PluginSlotDef {
   summary_max_chars?: number;
 }
 
+// ── Widget type system ────────────────────────────────────────────────────────
+
+export type WidgetType =
+  | 'text-single'
+  | 'text-list'
+  | 'text-markdown'
+  | 'image-single'
+  | 'image-gallery'
+  | 'file-card'
+  | 'json-block';
+
+/** Default widget for each slot type+cardinality combination. */
+export const SLOT_DEFAULT_WIDGET: Record<string, WidgetType> = {
+  'text/single':  'text-single',
+  'text/list':    'text-list',
+  'image/single': 'image-single',
+  'image/list':   'image-gallery',
+  'file/single':  'file-card',
+  'file/list':    'file-card',
+  'json/single':  'json-block',
+  'json/list':    'json-block',
+};
+
+/** Compatible widget types for each slot type+cardinality. */
+export const SLOT_COMPATIBLE_WIDGETS: Record<string, WidgetType[]> = {
+  'text/single':  ['text-single', 'text-markdown'],
+  'text/list':    ['text-list', 'text-markdown'],
+  'image/single': ['image-single'],
+  'image/list':   ['image-gallery'],
+  'file/single':  ['file-card'],
+  'file/list':    ['file-card'],
+  'json/single':  ['json-block', 'text-single'],
+  'json/list':    ['json-block', 'text-single'],
+};
+
+interface WidgetBaseConfig {
+  widgetType: WidgetType;
+  readOnly?: boolean;
+  maxHeight?: number;
+}
+
+export interface TextSingleConfig extends WidgetBaseConfig {
+  widgetType: 'text-single';
+}
+
+export interface TextListConfig extends WidgetBaseConfig {
+  widgetType: 'text-list';
+  itemLayout?: 'vertical' | 'horizontal' | 'grid';
+  itemMaxWidth?: number;
+  gridMaxCols?: number;
+  showAddButton?: boolean;
+}
+
+export interface TextMarkdownConfig extends WidgetBaseConfig {
+  widgetType: 'text-markdown';
+}
+
+export interface ImageSingleConfig extends WidgetBaseConfig {
+  widgetType: 'image-single';
+  imageHeight?: number;
+}
+
+export interface ImageGalleryConfig extends WidgetBaseConfig {
+  widgetType: 'image-gallery';
+  itemLayout?: 'horizontal' | 'grid';
+  itemWidth?: number;
+  itemHeight?: number;
+  gridMaxCols?: number;
+  showAddButton?: boolean;
+}
+
+export interface FileCardConfig extends WidgetBaseConfig {
+  widgetType: 'file-card';
+}
+
+export interface JsonBlockConfig extends WidgetBaseConfig {
+  widgetType: 'json-block';
+  collapsed?: boolean;
+}
+
+export type WidgetConfig =
+  | TextSingleConfig
+  | TextListConfig
+  | TextMarkdownConfig
+  | ImageSingleConfig
+  | ImageGalleryConfig
+  | FileCardConfig
+  | JsonBlockConfig;
+
+// ── Plugin UI model ───────────────────────────────────────────────────────────
+
 export interface PluginUiTab {
   id: string;
   label?: string;
-  layout?: 'list' | 'grid' | 'horizontal' | 'composite';
-  slots: Array<{ id: string }>;
+  layout?: 'vertical' | 'grid' | 'horizontal' | 'composite';
+  /** Number of columns in grid layout (undefined = auto-fill). */
+  gridCols?: number;
+  slots: Array<{ id: string; widget?: WidgetConfig }>;
   /** Raw composite_layout value — preserved as-is when serializing to YAML. */
   composite_layout?: unknown;
 }

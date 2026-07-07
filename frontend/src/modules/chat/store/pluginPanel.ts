@@ -241,13 +241,23 @@ export interface InnerTabsNode {
   tabs: CompositeLayoutNode[];
 }
 
+/** New tree-model node for composite_layout (direction+children format). */
+export interface CompositePanelNode {
+  slot?: string;
+  weight?: number;
+  direction?: 'row' | 'column';
+  children?: CompositePanelNode[];
+  tabs?: Array<{ label?: string; slot: string }>;
+  tabs_position?: 'top' | 'bottom' | 'left' | 'right';
+}
+
 export interface TabDef {
   id: string;
   label: string;
-  layout?: "grid" | "list" | "composite" | "horizontal";
+  layout?: "grid" | "list" | "vertical" | "composite" | "horizontal";
   slots: SlotDef[];
-  /** Only present when layout === "composite". Each element describes one column. */
-  composite_layout?: CompositeLayoutNode[];
+  /** Only present when layout === "composite". Each element describes one column (legacy) or a tree node. */
+  composite_layout?: CompositeLayoutNode[] | CompositePanelNode;
 }
 
 export interface PluginUI {

@@ -12,10 +12,12 @@ import {
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
+  horizontalListSortingStrategy,
+  rectSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable';
 import { Empty } from 'antd';
-import type { PluginUiTab } from '../core/pluginModel';
+import type { PluginUiTab, WidgetConfig } from '../core/pluginModel';
 import type { SlotDef } from '../core/model';
 import UiWidgetCard from './UiWidgetCard';
 import CompositeLayoutEditor from './CompositeLayoutEditor';
@@ -23,31 +25,37 @@ import CompositeLayoutEditor from './CompositeLayoutEditor';
 interface Props {
   tab: PluginUiTab;
   slotMap: Record<string, SlotDef>;
-  onSlotsChange: (slotIds: string[]) => void;
+  onSlotsChange: (slots: Array<{ id: string; widget?: WidgetConfig }>) => void;
   onCompositeLayoutChange: (value: unknown) => void;
 }
 
 export default function UiEditorCanvas({ tab, slotMap, onSlotsChange, onCompositeLayoutChange }: Props) {
   const [isDragOver, setIsDragOver] = useState(false);
 
+  // activationConstraint: distance 8px to avoid triggering drag on config panel clicks
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const slotIds = tab.slots.map((s) => s.id);
+  const tabSlots = tab.slots;
+  const slotIds = tabSlots.map((s) => s.id);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
       const oldIndex = slotIds.indexOf(active.id as string);
       const newIndex = slotIds.indexOf(over.id as string);
-      onSlotsChange(arrayMove(slotIds, oldIndex, newIndex));
+      onSlotsChange(arrayMove(tabSlots, oldIndex, newIndex));
     }
   };
 
   const handleRemove = (slotId: string) => {
-    onSlotsChange(slotIds.filter((id) => id !== slotId));
+    onSlotsChange(tabSlots.filter((s) => s.id !== slotId));
+  };
+
+  const handleWidgetChange = (slotId: string, widget: WidgetConfig) => {
+    onSlotsChange(tabSlots.map((s) => s.id === slotId ? { ...s, widget } : s));
   };
 
   // HTML5 drag-drop: accept slot dragged from ArtifactPanel
@@ -69,10 +77,14 @@ export default function UiEditorCanvas({ tab, slotMap, onSlotsChange, onComposit
     e.preventDefault();
     setIsDragOver(false);
     const slotId = e.dataTransfer.getData('application/x-slot-id');
+    const widgetTypeStr = e.dataTransfer.getData('application/x-widget-type');
     if (!slotId) return;
 
+    const widget: WidgetConfig | undefined = widgetTypeStr
+      ? ({ widgetType: widgetTypeStr } as WidgetConfig)
+      : undefined;
+
     if (tab.layout === 'composite') {
-      // Append as a new column in composite_layout
       const currentLayout = Array.isArray(tab.composite_layout) ? tab.composite_layout : [];
       if (!currentLayout.some((c) => {
         if (typeof c === 'string') return c === slotId;
@@ -81,18 +93,23 @@ export default function UiEditorCanvas({ tab, slotMap, onSlotsChange, onComposit
       })) {
         onCompositeLayoutChange([...currentLayout, { slot: slotId, weight: 1 }]);
       }
-      // Also ensure slot is in tab.slots
       if (!slotIds.includes(slotId)) {
-        onSlotsChange([...slotIds, slotId]);
+        onSlotsChange([...tabSlots, { id: slotId, widget }]);
       }
     } else {
       if (!slotIds.includes(slotId)) {
-        onSlotsChange([...slotIds, slotId]);
+        onSlotsChange([...tabSlots, { id: slotId, widget }]);
       }
     }
   };
 
   const dropClass = isDragOver ? ' uep-canvas--drop-active' : '';
+
+  // Choose sorting strategy based on tab layout
+  const sortingStrategy =
+    tab.layout === 'horizontal' ? horizontalListSortingStrategy
+    : tab.layout === 'grid' ? rectSortingStrategy
+    : verticalListSortingStrategy;
 
   if (tab.layout === 'composite') {
     return (
@@ -129,20 +146,22 @@ export default function UiEditorCanvas({ tab, slotMap, onSlotsChange, onComposit
 
   return (
     <div
-      className={`uep-canvas uep-canvas--${tab.layout ?? 'list'}${dropClass}`}
+      className={`uep-canvas uep-canvas--${tab.layout ?? 'vertical'}${dropClass}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={slotIds} strategy={verticalListSortingStrategy}>
-          <div className="uep-canvas-slots">
-            {slotIds.map((id) => (
+        <SortableContext items={slotIds} strategy={sortingStrategy}>
+          <div className={`uep-canvas-slots uep-canvas-slots--${tab.layout ?? 'vertical'}`}>
+            {tabSlots.map((s) => (
               <UiWidgetCard
-                key={id}
-                slotId={id}
-                slotDef={slotMap[id]}
+                key={s.id}
+                slotId={s.id}
+                slotDef={slotMap[s.id]}
+                widget={s.widget}
                 onRemove={handleRemove}
+                onWidgetChange={handleWidgetChange}
               />
             ))}
           </div>

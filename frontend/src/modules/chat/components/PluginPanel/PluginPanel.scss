@@ -411,6 +411,11 @@
     flex-direction: column;
     gap: 12px;
 
+    &--vertical,
+    &--list {
+      flex-direction: column;
+    }
+
     &--horizontal {
       flex-direction: row;
       align-items: flex-start;
@@ -420,6 +425,13 @@
         flex: 1;
         min-width: 0;
       }
+    }
+
+    &--grid {
+      display: grid;
+      grid-template-columns: var(--plugin-grid-cols, repeat(auto-fill, minmax(200px, 1fr)));
+      gap: 16px;
+      align-items: start;
     }
   }
 
@@ -2004,6 +2016,22 @@
     height: 100%;
     color: #6b7280;
     font-size: 14px;
+  }
+
+  // readOnly: hides all edit operations on slots
+  &--readonly {
+    .plugin-slot__edit-btn,
+    .plugin-slot__delete-btn,
+    .plugin-slot__upload-btn,
+    .plugin-slot__add-btn,
+    .plugin-panel__image-add-card {
+      display: none !important;
+    }
+
+    .plugin-slot__text {
+      cursor: default;
+      pointer-events: none;
+    }
   }
 }
 
