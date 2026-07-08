@@ -3,7 +3,7 @@ import { type EvalDataset, type ExtraEvalStrategy, type PxMetricKey, type Thread
 
 export const FIXED_EVAL_SET = "__none__";
 export const FIXED_EXTRA_EVAL_STRATEGY: ExtraEvalStrategy = "generate";
-export const DEFAULT_EVAL_CASE_COUNT = 100;
+export const DEFAULT_EVAL_CASE_COUNT = 10;
 export const AGENT_API_BASE = `${BASE_URL}/api/core/agent`;
 export const EVO_API_BASE = `${BASE_URL}/api/evo/v1/evo`;
 export const SELF_EVOLUTION_LAST_THREAD_STORAGE_KEY = "lazymind:self-evolution:last-thread";
