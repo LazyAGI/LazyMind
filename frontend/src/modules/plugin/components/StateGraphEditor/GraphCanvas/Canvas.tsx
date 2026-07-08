@@ -323,7 +323,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   // no stale-closure or race-condition issues.
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
-      if (node.id === VIRTUAL_START || node.id === VIRTUAL_END) return;
+      if (node.id === VIRTUAL_END) return;
       setSelectedNodeId(node.id);
       setSelectedEdgeId(null);
     },
@@ -768,11 +768,22 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     ? (nodes.find((n) => n.id === selectedNodeId)?.data as unknown as StepNodeData | undefined) ?? null
     : null;
   // NodePropertiesPanel expects a StepNode; build it from the canvas node data.
-  // StepNodeData.inputs/outputs are string[] (slot ids), but StepNode.inputs/outputs are StepInputRef[].
-  // Look up the full StepNode from model.nodes to get the StepInputRef[] objects.
-  const selectedStepNode = selectedNode && typeof selectedNode.id === 'string'
-    ? (model.nodes.find((n) => n.id === selectedNode.id) ?? null)
-    : null;
+  // For __start__, synthesize a virtual StepNode from model.startTransitions.
+  const selectedStepNode: StepNode | null = (() => {
+    if (!selectedNode || typeof selectedNode.id !== 'string') return null;
+    if (selectedNode.id === VIRTUAL_START) {
+      return {
+        id: VIRTUAL_START,
+        label: '__start__',
+        mode: 'auto',
+        inputs: [],
+        outputs: [],
+        transitions: model.startTransitions,
+        route: model.startRoute,
+      } as StepNode;
+    }
+    return model.nodes.find((n) => n.id === selectedNode.id) ?? null;
+  })();
 
   // Whether the selected node is a direct child of a parallel fork.
   // If true, "添加分支" must be disabled to prevent V11 violations.
@@ -787,6 +798,14 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
 
   const handleNodePropertyChange = useCallback((updated: StepNode): boolean => {
     const m = modelRef.current;
+
+    // Handle __start__ virtual node: update startTransitions and startRoute only.
+    if (updated.id === VIRTUAL_START) {
+      const newModel = { ...m, startTransitions: updated.transitions, startRoute: updated.route };
+      onModelChangeRef.current(newModel);
+      return true;
+    }
+
     const effectiveId = updated.id || newHiddenId();
     const normalised = updated.id ? updated : { ...updated, id: effectiveId };
     const currentSelectedNodeId = selectedNodeId;

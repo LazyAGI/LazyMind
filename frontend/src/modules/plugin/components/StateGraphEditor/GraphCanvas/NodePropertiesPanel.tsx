@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { StepNode, GraphModel } from '../core/model';
-import { VIRTUAL_END, isHiddenId } from '../core/model';
+import { VIRTUAL_END, VIRTUAL_START, isHiddenId } from '../core/model';
 import type { PluginModel } from '../core/pluginModel';
 import type { ScenarioData } from '../ScenarioEditor';
 import PromptEditor from './PromptEditor';
@@ -130,6 +130,81 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
 
   // Error: non-empty draft with invalid chars, reserved prefix, or rejected by Canvas.
   const stepIdError = idConflict || !!(idDraft && (!STEP_ID_REGEX.test(idDraft) || idDraft.startsWith('.hid')));
+
+  // __start__ virtual node: render a minimal panel with only flow/route controls.
+  if (node.id === VIRTUAL_START) {
+    return (
+      <div className="node-props-panel" role="complementary" aria-label="起始节点属性" onDoubleClick={(e) => e.stopPropagation()}>
+        <div className="node-props-panel-header">
+          <span className="node-props-panel-title">起始节点</span>
+          <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label="关闭" />
+        </div>
+        <div className="node-props-panel-body">
+          <Section title={t('selfEvolutionRun.stateGraphSectionFlow')}>
+            <div className="npp-transitions">
+              {node.transitions.map((tr, idx) => (
+                <div key={idx} className="npp-transition-row">
+                  <Select
+                    value={tr.to || undefined}
+                    options={model.nodes.filter((n) => n.id !== VIRTUAL_END).map((n) => ({ label: n.label || n.id, value: n.id }))}
+                    onChange={(val) => {
+                      const next = [...node.transitions];
+                      next[idx] = { ...tr, to: val };
+                      update({ transitions: next });
+                    }}
+                    placeholder={t('selfEvolutionRun.stateGraphFlowTargetPlaceholder')}
+                    style={{ flex: 1 }}
+                    size="small"
+                  />
+                  <Input
+                    value={tr.condition}
+                    onChange={(e) => {
+                      const next = [...node.transitions];
+                      next[idx] = { ...tr, condition: e.target.value };
+                      update({ transitions: next });
+                    }}
+                    style={{ flex: 2, marginLeft: 4 }}
+                    size="small"
+                    placeholder={t('selfEvolutionRun.stateGraphFlowConditionPlaceholder')}
+                  />
+                  <Button
+                    type="text"
+                    danger
+                    size="small"
+                    icon={<CloseOutlined />}
+                    onClick={() => update({ transitions: node.transitions.filter((_, i) => i !== idx) })}
+                  />
+                </div>
+              ))}
+              <Button
+                type="dashed"
+                size="small"
+                icon={<PlusOutlined />}
+                block
+                onClick={() => update({ transitions: [...node.transitions, { to: '', condition: '' }] })}
+              >
+                {t('selfEvolutionRun.stateGraphAddBranch')}
+              </Button>
+            </div>
+            {node.transitions.length > 1 && (
+              <FieldRow label={t('selfEvolutionRun.stateGraphRouteMode')} tip={t('selfEvolutionRun.stateGraphRouteModeTip')}>
+                <Select
+                  value={node.route ?? 'all'}
+                  options={[
+                    { label: t('selfEvolutionRun.stateGraphRouteModeAll'), value: 'all' },
+                    { label: t('selfEvolutionRun.stateGraphRouteModeChoice'), value: 'choice' },
+                  ]}
+                  onChange={(val) => update({ route: val })}
+                  size="small"
+                  style={{ width: '100%' }}
+                />
+              </FieldRow>
+            )}
+          </Section>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="node-props-panel" role="complementary" aria-label={t('selfEvolutionRun.stateGraphPanelTitle')} onDoubleClick={(e) => e.stopPropagation()}>

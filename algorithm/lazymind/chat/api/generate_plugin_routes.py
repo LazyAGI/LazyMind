@@ -49,7 +49,7 @@ _PLUGIN_FORMAT_SPEC: str = _load_plugin_format_spec()
 
 # Top-level required fields
 _REQUIRED_PLUGIN_TOP = ['id', 'name', 'description', 'steps', 'slots']
-_REQUIRED_STATE_TOP = ['initial', 'start_transitions', 'transitions', 'steps']
+_REQUIRED_STATE_TOP = ['initial', 'transitions', 'steps']
 
 # Required per-item fields (checked dynamically)
 _REQUIRED_SLOT_FIELDS = ['id', 'label', 'type', 'cardinality']
@@ -150,13 +150,6 @@ def _check_missing_fields(
         val = state_dict.get(field)
         if val is None or val == '' or val == [] or val == {}:
             missing.append(f'state.{field}')
-
-    # --- state.yml start_transitions items ---
-    start_trans = state_dict.get('start_transitions')
-    if isinstance(start_trans, list):
-        for i, entry in enumerate(start_trans):
-            if not isinstance(entry, dict) or not entry.get('to'):
-                missing.append(f'state.start_transitions[{i}].to')
 
     # --- state.yml transitions entries ---
     transitions = state_dict.get('transitions')

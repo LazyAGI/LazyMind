@@ -132,14 +132,11 @@ initial: __start__    # 状态机起始状态，固定为 __start__
 #   {{runtime_instruction}}  — 运行时临时指令（重试 hint 等，由 Go 注入），无时为空字符串
 #   {{<slot_id>}}            — 指定 slot 的 artifact 值（text → 文本内容；image → URL）
 
-start_transitions:                   # 从 __start__ 出发的初始转移（独立字段，不再放在 transitions 里）
-  - to: step_one
-    condition: 'Always enter step_one first.'   # 供 LLM 阅读的自然语言条件
-
 transitions:
+  __start__:
+    - to: step_one
+      condition: 'Always enter step_one first.'   # 供 LLM 阅读的自然语言条件
   step_one:
-    - to: step_two
-      condition: 'step_one complete — proceed to step_two.'
 
   step_two:
     - to: step_three
@@ -187,10 +184,9 @@ steps:
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `initial` | 是 | 固定为 `__start__` |
-| `start_transitions` | 是 | 从 `__start__` 出发的初始转移列表（独立顶层字段，不在 `transitions` 里写 `__start__` key）|
-| `start_transitions[].to` | 是 | 第一个目标步骤 |
-| `start_transitions[].condition` | 推荐 | 起始转移条件描述 |
-| `transitions` | 是 | 非起始状态的转移规则 map，key 为源步骤 id |
+| `transitions` | 是 | 转移规则 map，key 为源步骤 id；`__start__` key 定义从起始节点出发的入口转移 |
+| `transitions.__start__[].to` | 是 | 第一个目标步骤 |
+| `transitions.__start__[].condition` | 推荐 | 起始转移条件描述 |
 | `transitions[src][].to` | 是 | 目标状态 |
 | `transitions[src][].condition` | 推荐 | 供 LLM 阅读的转移条件描述 |
 | `steps[step_id].label` | 否 | 步骤显示名称 |
@@ -312,10 +308,8 @@ transitions:
 ### 7.1 串行流水线（最简单）
 
 ```yaml
-start_transitions:
-  - to: step_a
-    condition: 'Always.'
 transitions:
+  __start__: [{to: step_a, condition: 'Always.'}]
   step_a: [{to: step_b, condition: 'step_a done.'}]
   step_b: [{to: __end__, condition: 'Pipeline complete.'}]
 ```

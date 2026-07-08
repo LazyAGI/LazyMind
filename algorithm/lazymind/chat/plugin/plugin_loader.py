@@ -67,17 +67,12 @@ class StateMachine:
         initial: str,
         transitions: Dict[str, List[Dict[str, Any]]],
         steps: Optional[Dict[str, Any]] = None,
-        start_transitions: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         self.initial = initial
         self._raw_transitions: Dict[str, List[Dict[str, Any]]] = {}
         for src, edges in transitions.items():
             valid = [e for e in edges if isinstance(e, dict) and 'to' in e]
             self._raw_transitions[src] = valid
-        # start_transitions (new format) takes precedence over transitions.__start__ (legacy).
-        if start_transitions is not None:
-            valid_start = [e for e in start_transitions if isinstance(e, dict) and 'to' in e]
-            self._raw_transitions['__start__'] = valid_start
         self._transitions: Dict[str, List[str]] = {
             src: [e['to'] for e in edges]
             for src, edges in self._raw_transitions.items()
@@ -256,7 +251,6 @@ class PluginSpec:
             initial=str(self.state.get('initial', '__start__')),
             transitions=self.state.get('transitions', {}),
             steps=self.state.get('steps'),
-            start_transitions=self.state.get('start_transitions') or None,
         )
 
         # Extract step configs from state.yml

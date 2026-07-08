@@ -7,11 +7,11 @@ initial: __start__
 #   {{<slot>}}               — value of an artifact saved by a prior step
 #                              (text → text field; image → url field)
 
-start_transitions:
-  - to: analyze_subject
-    condition: "Cold start — always enter subject analysis first."
-
 transitions:
+  __start__:
+    - to: analyze_subject
+      condition: "Cold start — always enter subject analysis first."
+
   analyze_subject:
     - to: optimize_prompt
       condition: "CREATE_NEW or KB_STYLE — analysis already contains all text/style guidance; skip material collection."

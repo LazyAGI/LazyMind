@@ -25,7 +25,14 @@ interface RawStep {
 interface RawYaml {
   'x-layout'?: Record<string, { x?: number; y?: number; w?: number }>;
   steps?: unknown[];
+  /** Legacy flat key (pre-refactor). Superseded by transitions.__start__. */
   start_transitions?: unknown;
+  /** Canonical format: keyed transition lists per node id. __start__ holds entry transitions. */
+  transitions?: Record<string, unknown>;
+  /** Legacy: single default entry node id. */
+  initial?: unknown;
+  /** Route mode for __start__ transitions: 'choice' picks first match; default is 'all'. */
+  start_route?: unknown;
 }
 
 function parseTransitions(raw: unknown): Transition[] {
@@ -64,8 +71,9 @@ function parseInputRefs(raw: unknown): StepInputRef[] {
   return raw.map(parseInputRef).filter((r): r is StepInputRef => r !== null);
 }
 
-function parseStep(raw: RawStep): StepNode | null {
+function parseStep(raw: RawStep, topLevelTransitions?: Record<string, unknown>): StepNode | null {
   if (!raw.id) return null;
+  const stepId = String(raw.id);
   const mode = raw.mode === 'auto' ? 'auto' : 'human';
   const inputs = parseInputRefs(raw.inputs);
   const outputs = parseInputRefs(raw.outputs);
@@ -81,13 +89,18 @@ function parseStep(raw: RawStep): StepNode | null {
     ? String(raw.acceptance_criteria)
     : undefined;
 
+  // Prefer top-level transitions[stepId] over inline step.transitions (canonical format).
+  const transitionsRaw = (topLevelTransitions && topLevelTransitions[stepId] !== undefined)
+    ? topLevelTransitions[stepId]
+    : raw.transitions;
+
   return {
-    id: String(raw.id),
+    id: stepId,
     label: String(raw.label ?? raw.id),
     mode,
     inputs,
     outputs,
-    transitions: parseTransitions(raw.transitions),
+    transitions: parseTransitions(transitionsRaw),
     ...(route !== undefined && { route }),
     ...(skipif !== undefined && { skipif }),
     ...(prompt !== undefined && { prompt }),
@@ -125,10 +138,13 @@ export function parseYaml(yamlText: string): GraphModel | null {
   const slots: GraphModel['slots'] = {};
 
   const nodes: StepNode[] = [];
+  const topLevelTransitions = (raw.transitions && typeof raw.transitions === 'object')
+    ? raw.transitions as Record<string, unknown>
+    : undefined;
   if (Array.isArray(raw.steps)) {
     for (const step of raw.steps) {
       if (step !== null && typeof step === 'object') {
-        const parsed = parseStep(step as RawStep);
+        const parsed = parseStep(step as RawStep, topLevelTransitions);
         // Skip virtual terminal nodes — they are always rendered as built-in terminals
         if (parsed && parsed.id !== VIRTUAL_START && parsed.id !== VIRTUAL_END) {
           nodes.push(parsed);
@@ -137,7 +153,27 @@ export function parseYaml(yamlText: string): GraphModel | null {
     }
   }
 
-  const startTransitions = parseTransitions(raw.start_transitions);
+  const startTransitions: Transition[] = (() => {
+    // Priority 1: canonical transitions.__start__
+    if (raw.transitions && typeof raw.transitions === 'object') {
+      const fromStart = (raw.transitions as Record<string, unknown>)['__start__'];
+      if (Array.isArray(fromStart) && fromStart.length > 0) {
+        return parseTransitions(fromStart);
+      }
+    }
+    // Priority 2: legacy start_transitions flat key
+    if (raw.start_transitions) {
+      return parseTransitions(raw.start_transitions);
+    }
+    // Priority 3: legacy initial field — single entry node, no condition
+    if (raw.initial != null) {
+      const initialId = String(raw.initial).trim();
+      if (initialId) return [{ to: initialId, condition: '' }];
+    }
+    return [];
+  })();
 
-  return { nodes, slots, layout, startTransitions };
+  const startRoute: GraphModel['startRoute'] = raw.start_route === 'choice' ? 'choice' : raw.start_route === 'all' ? 'all' : undefined;
+
+  return { nodes, slots, layout, startTransitions, startRoute };
 }

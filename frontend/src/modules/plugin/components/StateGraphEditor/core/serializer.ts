@@ -26,17 +26,34 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
     doc['x-layout'] = layoutBlock;
   }
 
-  // start_transitions (conditional entry points)
-  if (model.startTransitions.length > 0) {
-    doc['start_transitions'] = model.startTransitions.map((t) => ({
-      to: t.to,
-      condition: t.condition,
-    }));
-  }
-
   // NOTE: slots block is intentionally omitted — slot definitions belong in plugin.yaml.
 
-  // steps array
+  // transitions block: __start__ entry transitions + per-step transitions
+  const transitionsBlock: Record<string, unknown[]> = {};
+  if (model.startTransitions.length > 0) {
+    transitionsBlock['__start__'] = model.startTransitions.map((t) => {
+      const entry: Record<string, unknown> = { to: t.to };
+      if (t.condition.trim()) entry.condition = t.condition;
+      return entry;
+    });
+  }
+  for (const node of model.nodes) {
+    if (node.transitions.length > 0) {
+      transitionsBlock[node.id] = node.transitions.map((t) => {
+        const entry: Record<string, unknown> = { to: t.to };
+        if (t.condition.trim()) entry.condition = t.condition;
+        return entry;
+      });
+    }
+  }
+  if (Object.keys(transitionsBlock).length > 0) {
+    doc['transitions'] = transitionsBlock;
+    if (model.startRoute && model.startRoute !== 'all') {
+      doc['start_route'] = model.startRoute;
+    }
+  }
+
+  // steps array — descriptive fields only; transitions live in the top-level transitions block
   doc.steps = model.nodes.map((node) => {
     const step: Record<string, unknown> = {
       id: node.id,
@@ -54,13 +71,7 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
     if (node.outputs.length > 0) {
       step.outputs = node.outputs.map((ref) => ({ slot: ref.slot, required: ref.required }));
     }
-    if (node.transitions.length > 0) {
-      step.transitions = node.transitions.map((t) => {
-        const entry: Record<string, unknown> = { to: t.to };
-        if (t.condition.trim()) entry.condition = t.condition;
-        return entry;
-      });
-    }
+    // transitions are serialized in the top-level transitions block, not inline here
     return step;
   });
 

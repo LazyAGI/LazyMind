@@ -72,6 +72,11 @@ export interface GraphModel {
    * Empty array means no explicit start is configured.
    */
   startTransitions: Transition[];
+  /**
+   * How __start__ follows its outgoing transitions.
+   * 'all' triggers all simultaneously (default); 'choice' picks the first match.
+   */
+  startRoute?: 'all' | 'choice';
 }
 
 export const VIRTUAL_START = '__start__';
@@ -95,4 +100,5 @@ export const createEmptyModel = (): GraphModel => ({
   slots: {},
   layout: {},
   startTransitions: [],
+  startRoute: undefined,
 });
