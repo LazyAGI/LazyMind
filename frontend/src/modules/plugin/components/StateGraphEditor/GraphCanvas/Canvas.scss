@@ -23,6 +23,7 @@
 
 // Step node card
 .step-node {
+  position: relative;
   width: 100%;
   min-width: 90px;
   height: auto;
@@ -38,7 +39,7 @@
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   transition: border-color 0.15s, box-shadow 0.15s;
   box-sizing: border-box;
-  overflow: hidden;
+  // Do not clip — allows source Handle and resize grip to extend beyond the node border
 
   &.is-selected {
     border-color: #1677ff;
@@ -56,11 +57,45 @@
   }
 }
 
+// Right-edge resize grip — always present, visible on node hover
+.step-node-resize-handle {
+  position: absolute;
+  top: 0;
+  // Center the grip on the node's right border: shift it 3px outward so the
+  // 6px-wide hit area straddles the border (3px inside + 3px outside).
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  // Below the source Handle (z-index: 20) so the connection dot stays clickable
+  z-index: 9;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 1px;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 20px;
+    border-radius: 2px;
+    background: #d9d9d9;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+}
+
+.step-node:hover .step-node-resize-handle::after,
+.step-node.is-selected .step-node-resize-handle::after {
+  opacity: 1;
+}
+
 .step-node-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 4px;
+  overflow: hidden;
 }
 
 .step-node-id {
@@ -119,6 +154,8 @@
   height: 10px;
   background: #1677ff;
   border: 2px solid #fff;
+  // Source handle must sit above the resize grip so it is always clickable
+  z-index: 20 !important;
 }
 
 // Terminal nodes — card style (like step nodes)

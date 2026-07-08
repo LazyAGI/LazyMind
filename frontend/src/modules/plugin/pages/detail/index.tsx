@@ -188,11 +188,15 @@ export default function PluginDetailPage() {
   let stateYaml = rawStateYaml;
   if (rawStateYaml && draft.state_layout_content) {
     try {
-      const layoutObj = JSON.parse(draft.state_layout_content) as Record<string, { x: number; y: number; w?: number }>;
+      const layoutObj = JSON.parse(draft.state_layout_content) as Record<string, { x: number; y: number; w?: number; width?: number }>;
       if (Object.keys(layoutObj).length > 0) {
         // Prepend x-layout block to state YAML so the parser picks it up.
+        // Support both 'w' (legacy) and 'width' (current NodeLayout field name).
         const layoutYaml = `x-layout:\n${Object.entries(layoutObj)
-          .map(([id, pos]) => `  ${id}: { x: ${pos.x}, y: ${pos.y}${pos.w != null ? `, w: ${pos.w}` : ''} }`)
+          .map(([id, pos]) => {
+            const w = pos.w ?? pos.width;
+            return `  ${id}: { x: ${pos.x}, y: ${pos.y}${w != null ? `, w: ${w}` : ''} }`;
+          })
           .join('\n')}\n`;
         stateYaml = layoutYaml + rawStateYaml;
       }

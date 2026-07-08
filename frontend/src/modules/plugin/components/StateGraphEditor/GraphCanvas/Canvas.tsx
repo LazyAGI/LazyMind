@@ -117,6 +117,8 @@ function modelToFlowNodes(
   model: GraphModel,
   nodeErrorMap: Map<string, string[]>,
   onResizeEnd: (nodeId: string, width: number) => void,
+  onResizeDrag: (nodeId: string, width: number) => void,
+  getZoom: () => number,
 ): Node[] {
   const flowNodes: Node[] = [];
   let autoX = 80;
@@ -159,10 +161,11 @@ function modelToFlowNodes(
         outputLabels,
         nodeWidth,
         onResizeEnd,
+        onResizeDrag,
+        getZoom,
       },
       selected: false,
       width: nodeWidth,
-      height: NODE_HEIGHT,
     });
     autoX += DEFAULT_SPACING_X;
   }
@@ -225,7 +228,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
 }
 
 function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, onScenarioChange }: Props, ref: React.Ref<CanvasHandle>) {
-  const { screenToFlowPosition, zoomIn, zoomOut } = useReactFlow();
+  const { screenToFlowPosition, zoomIn, zoomOut, getZoom } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
   const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides } = useAlignmentGuides();
 
@@ -235,6 +238,18 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   const stableResizeEnd = useCallback((nodeId: string, width: number) => {
     handleNodeResizeEndRef.current(nodeId, width);
   }, []);
+
+  // Live resize drag: updates ReactFlow node width in real time without persisting to model.
+  const handleNodeResizeDragRef = useRef<(nodeId: string, width: number) => void>(() => {});
+  const stableResizeDrag = useCallback((nodeId: string, width: number) => {
+    handleNodeResizeDragRef.current(nodeId, width);
+  }, []);
+
+  // Stable zoom getter passed into StepNode so the resize handle can do correct
+  // screen→canvas coordinate conversion without needing React context.
+  const getZoomRef = useRef(getZoom);
+  getZoomRef.current = getZoom;
+  const stableGetZoom = useCallback(() => getZoomRef.current(), []);
 
   // Read all current nodes directly from the ReactFlow store.
   // onNodeDrag's third arg `allNodes` only contains the dragged node in RF 12.x.
@@ -281,7 +296,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   );
 
   const initialNodes = useMemo(
-    () => modelToFlowNodes(model, nodeErrorMap, stableResizeEnd),
+    () => modelToFlowNodes(model, nodeErrorMap, stableResizeEnd, stableResizeDrag, stableGetZoom),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -315,29 +330,8 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       onNodesChange(changes);
-      // Persist width when a resize drag ends (resizing transitions from true → false).
-      for (const change of changes) {
-        if (change.type === 'dimensions' && change.resizing === false) {
-          const w = change.dimensions?.width;
-          if (w == null) continue;
-          const nodeId = change.id;
-          const m = modelRef.current;
-          const width = Math.max(NODE_MIN_WIDTH, Math.round(w));
-          // Read position from current nodes state via a follow-up setNodes.
-          setNodes((nds) => {
-            const rfNode = nds.find((n) => n.id === nodeId);
-            const pos = m.layout[nodeId] ?? rfNode?.position ?? { x: 0, y: 0 };
-            const newLayout = { ...m.layout, [nodeId]: { ...pos, width } };
-            skipSyncRef.current = true;
-            onModelChangeRef.current({ ...m, layout: newLayout });
-            return nds.map((n) =>
-              n.id === nodeId ? { ...n, data: { ...n.data, nodeWidth: width } } : n,
-            );
-          });
-        }
-      }
     },
-    [onNodesChange, setNodes],
+    [onNodesChange],
   );
 
   const handleEdgesChange = useCallback(
@@ -365,16 +359,29 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       skipSyncRef.current = false;
       return;
     }
-    const newNodes = modelToFlowNodes(model, nodeErrorMap, stableResizeEnd);
-    // Preserve whatever selected state ReactFlow currently tracks for each node.
-    // Using a ref snapshot here would be stale (e.g. mid-transition between two
-    // selected nodes), so we read directly from the current nodes state via a
-    // functional setNodes updater.
+    const newNodes = modelToFlowNodes(model, nodeErrorMap, stableResizeEnd, stableResizeDrag, stableGetZoom);
+    // Preserve selected state and, importantly, the current rendered width of each
+    // node. Width is managed independently via onResizeDrag/onResizeEnd and may
+    // have been updated inside a setNodes callback that hasn't propagated back into
+    // model.layout yet. Re-deriving width from model here would cause a flicker
+    // back to the stale value. Always trust the current ReactFlow node's width.
     setNodes((currentNodes) => {
+      const currentById = new Map(currentNodes.map((n) => [n.id, n]));
       const selectedSet = new Set(currentNodes.filter((n) => n.selected).map((n) => n.id));
-      return selectedSet.size > 0
-        ? newNodes.map((n) => (selectedSet.has(n.id) ? { ...n, selected: true } : n))
-        : newNodes;
+      return newNodes.map((n) => {
+        const current = currentById.get(n.id);
+        const preservedWidth = current?.width ?? n.width;
+        const preservedHeight = current?.height; // undefined → ReactFlow measures from DOM
+        const preservedNodeWidth = (current?.data as { nodeWidth?: number } | undefined)?.nodeWidth
+          ?? (n.data as { nodeWidth?: number }).nodeWidth;
+        return {
+          ...n,
+          width: preservedWidth,
+          ...(preservedHeight != null ? { height: preservedHeight } : {}),
+          data: { ...n.data, nodeWidth: preservedNodeWidth },
+          selected: selectedSet.has(n.id) ? true : n.selected,
+        };
+      });
     });
     setEdges(modelToFlowEdges(model, nodeErrorMap, handleConditionChange));
   }, [model, nodeErrorMap, handleConditionChange, setNodes, setEdges]);
@@ -582,6 +589,22 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   // Wire the stable ref to the real implementation now that setNodes is available.
   handleNodeResizeEndRef.current = handleNodeResizeEnd;
 
+  // Live resize drag: update ReactFlow node width in real time (no model persist).
+  const handleNodeResizeDrag = useCallback(
+    (nodeId: string, width: number) => {
+      const w = Math.max(NODE_MIN_WIDTH, width);
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId
+            ? { ...n, width: w, data: { ...n.data, nodeWidth: w } }
+            : n,
+        ),
+      );
+    },
+    [setNodes],
+  );
+  handleNodeResizeDragRef.current = handleNodeResizeDrag;
+
   // Handle node/edge deletion via Delete or Backspace key,
   // and Cmd+/- zoom within the canvas (prevents browser zoom).
   const onKeyDown = useCallback(
@@ -678,14 +701,13 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         id: newId,
         type: 'step',
         position: flowPos,
-        data: { ...newNode, hasError: false, errorMessages: [], predecessorIds: [], outputLabels: {}, nodeWidth: NODE_WIDTH, onResizeEnd: stableResizeEnd },
+        data: { ...newNode, hasError: false, errorMessages: [], predecessorIds: [], outputLabels: {}, nodeWidth: NODE_WIDTH, onResizeEnd: stableResizeEnd, onResizeDrag: stableResizeDrag, getZoom: stableGetZoom },
         width: NODE_WIDTH,
-        height: NODE_HEIGHT,
       },
     ]);
     skipSyncRef.current = true;
     onModelChangeRef.current({ ...m, nodes: [...m.nodes, newNode], layout: newLayout });
-  }, [screenToFlowPosition, setNodes, stableResizeEnd]);
+  }, [screenToFlowPosition, setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom]);
 
   useImperativeHandle(ref, () => ({ addNode: addNodeAtCenter }), [addNodeAtCenter]);
 
@@ -714,15 +736,14 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           id: newId,
           type: 'step',
           position: flowPos,
-          data: { ...newNode, hasError: false, errorMessages: [], predecessorIds: [], outputLabels: {}, nodeWidth: NODE_WIDTH, onResizeEnd: stableResizeEnd },
+          data: { ...newNode, hasError: false, errorMessages: [], predecessorIds: [], outputLabels: {}, nodeWidth: NODE_WIDTH, onResizeEnd: stableResizeEnd, onResizeDrag: stableResizeDrag, getZoom: stableGetZoom },
           width: NODE_WIDTH,
-          height: NODE_HEIGHT,
         },
       ]);
       skipSyncRef.current = true;
       onModelChangeRef.current({ ...m, nodes: [...m.nodes, newNode], layout: newLayout });
     },
-    [screenToFlowPosition, setNodes, stableResizeEnd],
+    [screenToFlowPosition, setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom],
   );
 
   // Derive selectedNode from ReactFlow's nodes state (not model prop) so the
@@ -766,7 +787,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     const updatedNodes = m.nodes.map((n) => (n.id === currentSelectedNodeId ? normalised : n));
 
     if (normalised.id !== currentSelectedNodeId) {
-      // Id changed: remap transitions and layout, then let model sync handle RF state.
+      // Id changed: remap transitions, startTransitions and layout, then let model sync handle RF state.
       const remaId = normalised.id;
       const remappedNodes = updatedNodes.map((n) => ({
         ...n,
@@ -774,12 +795,15 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           t.to === currentSelectedNodeId ? { ...t, to: remaId } : t,
         ),
       }));
+      const remappedStartTransitions = m.startTransitions.map((t) =>
+        t.to === currentSelectedNodeId ? { ...t, to: remaId } : t,
+      );
       const newLayout = { ...m.layout };
       if (currentSelectedNodeId && newLayout[currentSelectedNodeId]) {
         newLayout[remaId] = newLayout[currentSelectedNodeId];
         delete newLayout[currentSelectedNodeId];
       }
-      onModelChangeRef.current({ ...m, nodes: remappedNodes, layout: newLayout });
+      onModelChangeRef.current({ ...m, nodes: remappedNodes, startTransitions: remappedStartTransitions, layout: newLayout });
       setSelectedNodeId(remaId);
     } else {
       // Same id, only data changed. Set skipSyncRef so the model-sync useEffect

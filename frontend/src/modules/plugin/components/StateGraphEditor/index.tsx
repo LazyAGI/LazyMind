@@ -228,6 +228,21 @@ export default function StateGraphEditor({
     modelRef.current = nextModel;
     setModelState(nextModel);
     setErrors(validateStateGraph(nextModel));
+
+    // Keep pluginModel.slots in sync with graphModel.slots.
+    // ArtifactPanel writes new slots only into GraphModel; syncing back here
+    // ensures handlePluginModelChange never overwrites them with stale data.
+    if (nextModel.slots !== prev.slots) {
+      const syncedSlots: import('./core/pluginModel').PluginSlotDef[] = Object.values(nextModel.slots).map((s) => ({
+        id: s.id, type: s.type as import('./core/pluginModel').PluginSlotDef['type'],
+        label: s.label, cardinality: s.cardinality, ordered: s.ordered,
+        allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+      }));
+      const syncedPm = { ...pluginModelRef.current, slots: syncedSlots };
+      pluginModelRef.current = syncedPm;
+      setPluginModel(syncedPm);
+    }
+
     triggerAutoSave(nextModel, pluginModelRef.current, scenarioDataRef.current, scriptsContentRef.current);
   }, [triggerAutoSave]);
 
@@ -239,6 +254,9 @@ export default function StateGraphEditor({
         const mergedModel: GraphModel = {
           ...parsed,
           layout: { ...parsed.layout, ...modelRef.current.layout },
+          // parseYaml always returns slots:{} — slot definitions live in plugin.yaml.
+          // Preserve the current slots so editing state.yml never wipes them.
+          slots: modelRef.current.slots,
         };
         modelRef.current = mergedModel;
         setModelState(mergedModel);
@@ -253,8 +271,9 @@ export default function StateGraphEditor({
   const handlePluginModelChange = useCallback((pm: PluginModel) => {
     setPluginModel(pm);
     pluginModelRef.current = pm;
-    // Sync slots into GraphModel so serializePluginModel always reads the latest slot
-    // definitions regardless of whether the change came from the UI editor or code editor.
+    // Sync slots into both modelRef and React model state so ArtifactPanel always
+    // displays the latest slot definitions. Previously only the ref was updated,
+    // leaving the React state stale and causing ArtifactPanel to show old slots.
     const slots: Record<string, import('./core/model').SlotDef> = {};
     for (const s of pm.slots) {
       slots[s.id] = {
@@ -263,7 +282,7 @@ export default function StateGraphEditor({
         allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
       };
     }
-    const updatedModel: GraphModel = { ...modelRef.current, slots };
+    const updatedModel = { ...modelRef.current, slots };
     modelRef.current = updatedModel;
     setModelState(updatedModel);
     triggerAutoSave(updatedModel, pm, scenarioDataRef.current, scriptsContentRef.current);
@@ -356,8 +375,8 @@ export default function StateGraphEditor({
   const slotCount = Object.keys(model.slots).length;
   const scriptFiles = parseScriptFiles(scriptsContent);
 
-  // Derive yaml text for code view of state.yml (includes x-layout for display only)
-  const stateYamlForCode = serializeModel(model, true);
+  // Derive yaml text for code view of state.yml (x-layout is internal, not shown to users)
+  const stateYamlForCode = serializeModel(model, false);
   // scenario.md text
   const scenarioMdForCode = serializeScenario(model.nodes, scenarioData);
   // plugin.yaml text

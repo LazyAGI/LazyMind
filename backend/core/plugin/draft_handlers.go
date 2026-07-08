@@ -12,7 +12,6 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/log"
 	"lazymind/core/store"
 )
 
@@ -206,11 +205,7 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 
 	// --- Optimistic-lock check for versioned fields ---
 	needsVersionCheck := body.PluginYAMLContent != nil || body.StateYAMLContent != nil
-	if needsVersionCheck {
-		if body.Version == nil {
-			common.ReplyErr(w, "version is required when saving plugin_yaml_content or state_yaml_content", http.StatusBadRequest)
-			return
-		}
+	if needsVersionCheck && body.Version != nil {
 		if *body.Version != draft.Version {
 			common.ReplyErrWithData(w, "conflict", toDraftResponse(draft), http.StatusConflict)
 			return
@@ -236,88 +231,18 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 	if body.ScriptsContent != nil {
 		updates["scripts_content"] = *body.ScriptsContent
 	}
-	newVersion := draft.Version
-	if needsVersionCheck {
-		newVersion = draft.Version + 1
-		updates["version"] = newVersion
+	if needsVersionCheck && body.Version != nil {
+		updates["version"] = draft.Version + 1
 	}
 
-	// --- Write buffer (P2): write to state store first; flush worker syncs to DB ---
-	// Build the buffer fields map (content field is not buffered — it's legacy and small).
-	bufFields := map[string]any{}
-	if body.PluginYAMLContent != nil {
-		bufFields[bufFieldPluginYAML] = *body.PluginYAMLContent
+	if err := db.Model(&draft).Updates(updates).Error; err != nil {
+		common.ReplyErr(w, "save failed", http.StatusInternalServerError)
+		return
 	}
-	if body.StateYAMLContent != nil {
-		bufFields[bufFieldStateYAML] = *body.StateYAMLContent
-	}
-	if body.StateLayoutContent != nil {
-		bufFields[bufFieldStateLayout] = *body.StateLayoutContent
-	}
-	if body.ScenarioContent != nil {
-		bufFields[bufFieldScenario] = *body.ScenarioContent
-	}
-	if body.ScriptsContent != nil {
-		bufFields[bufFieldScripts] = *body.ScriptsContent
-	}
-
-	bufVersion := 0
-	if needsVersionCheck {
-		bufVersion = newVersion
-	}
-
-	usedBuffer := false
-	if len(bufFields) > 0 && store.State() != nil {
-		if err := draftBufferWrite(r.Context(), store.State(), draftID, bufFields, bufVersion); err == nil {
-			// Buffer write succeeded: update version in DB immediately so the
-			// next request sees the correct version, but skip the heavy content update.
-			dbVersionUpdates := map[string]any{"updated_at": time.Now().UTC()}
-			if needsVersionCheck {
-				dbVersionUpdates["version"] = newVersion
-			}
-			// Also persist content (legacy field) and any fields NOT going through the buffer.
-			if body.Content != nil {
-				dbVersionUpdates["content"] = *body.Content
-			}
-			if err2 := db.Model(&draft).Updates(dbVersionUpdates).Error; err2 != nil {
-				// Fall through to full DB write below.
-				log.Logger.Warn().Err(err2).Str("draft_id", draftID).Msg("[draft_buffer] version update failed; falling back to full DB write")
-			} else {
-				usedBuffer = true
-				// Optimistically update the local draft struct so the response is correct.
-				draft.Version = newVersion
-				if body.PluginYAMLContent != nil {
-					draft.PluginYAMLContent = *body.PluginYAMLContent
-				}
-				if body.StateYAMLContent != nil {
-					draft.StateYAMLContent = *body.StateYAMLContent
-				}
-				if body.StateLayoutContent != nil {
-					draft.StateLayoutContent = *body.StateLayoutContent
-				}
-				if body.ScenarioContent != nil {
-					draft.ScenarioContent = *body.ScenarioContent
-				}
-				if body.ScriptsContent != nil {
-					draft.ScriptsContent = *body.ScriptsContent
-				}
-			}
-		} else {
-			log.Logger.Warn().Err(err).Str("draft_id", draftID).Msg("[draft_buffer] buffer write failed; falling back to full DB write")
-		}
-	}
-
-	if !usedBuffer {
-		// Direct DB write (fallback or state store unavailable).
-		if err := db.Model(&draft).Updates(updates).Error; err != nil {
-			common.ReplyErr(w, "save failed", http.StatusInternalServerError)
-			return
-		}
-		// Reload to return the authoritative post-save state.
-		if err := db.Where("id = ?", draftID).First(&draft).Error; err != nil {
-			common.ReplyErr(w, "reload failed", http.StatusInternalServerError)
-			return
-		}
+	// Reload to return the authoritative post-save state.
+	if err := db.Where("id = ?", draftID).First(&draft).Error; err != nil {
+		common.ReplyErr(w, "reload failed", http.StatusInternalServerError)
+		return
 	}
 
 	common.ReplyOK(w, toDraftResponse(draft))

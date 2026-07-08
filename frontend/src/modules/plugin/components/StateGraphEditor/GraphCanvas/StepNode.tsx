@@ -1,6 +1,6 @@
-import { memo, useRef, useState, useLayoutEffect } from 'react';
-import { Handle, Position, NodeResizer } from '@xyflow/react';
-import type { NodeProps, NodeResizeControlStyle } from '@xyflow/react';
+import { memo, useRef, useState, useLayoutEffect, useCallback } from 'react';
+import { Handle, Position } from '@xyflow/react';
+import type { NodeProps } from '@xyflow/react';
 import { Tag, Tooltip } from 'antd';
 import { RobotOutlined, UserOutlined } from '@ant-design/icons';
 import type { ValidationError } from '../core/validator';
@@ -28,12 +28,11 @@ export interface StepNodeData extends Record<string, unknown> {
   nodeWidth: number;
   /** Callback to persist width when user finishes resizing */
   onResizeEnd: (nodeId: string, width: number) => void;
+  /** Callback for live width updates during drag (before mouseup) */
+  onResizeDrag: (nodeId: string, width: number) => void;
+  /** Returns current canvas zoom level for screen→canvas coordinate conversion */
+  getZoom: () => number;
 }
-
-const RESIZER_STYLE: NodeResizeControlStyle = {
-  background: 'transparent',
-  border: 'none',
-};
 
 // Chip width estimate: ~6px per char + 16px padding, min 40px
 function estimateChipWidth(label: string): number {
@@ -59,9 +58,7 @@ function OutputChips({ outputs, outputLabels, containerWidth }: {
   for (let i = 0; i < labels.length; i++) {
     const chipW = estimateChipWidth(labels[i]);
     const remaining = labels.length - i - 1;
-    const needsPlus = remaining > 0;
     if (i === 0) {
-      // Always show at least one, truncate if needed
       shown = 1;
       used = chipW;
       continue;
@@ -104,7 +101,7 @@ function OutputChips({ outputs, outputLabels, containerWidth }: {
 function StepNodeComponent({ data, selected }: NodeProps) {
   const nodeData = data as unknown as StepNodeData;
   const { hasError, errorMessages, mode, label, id, route, skipif, transitions,
-          outputs, outputLabels, nodeWidth, onResizeEnd } = nodeData;
+          outputs, outputLabels, nodeWidth, onResizeEnd, onResizeDrag, getZoom } = nodeData;
 
   const isChoice = route === 'choice';
   const isParallel = (route === 'all' || !route) && transitions.length > 1;
@@ -112,7 +109,7 @@ function StepNodeComponent({ data, selected }: NodeProps) {
 
   // Measure inner content width for chip layout
   const bodyRef = useRef<HTMLDivElement>(null);
-  const [innerWidth, setInnerWidth] = useState(nodeWidth - 20); // subtract padding
+  const [innerWidth, setInnerWidth] = useState(nodeWidth - 20);
   useLayoutEffect(() => {
     if (!bodyRef.current) return;
     const obs = new ResizeObserver(([entry]) => {
@@ -121,6 +118,39 @@ function StepNodeComponent({ data, selected }: NodeProps) {
     obs.observe(bodyRef.current);
     return () => obs.disconnect();
   }, []);
+
+  // Custom right-edge resize handle: works regardless of node selection state.
+  const dragStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  const handleResizeMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const zoom = getZoom();
+      dragStateRef.current = { startX: e.clientX, startWidth: nodeWidth };
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        if (!dragStateRef.current) return;
+        const dx = (moveEvent.clientX - dragStateRef.current.startX) / zoom;
+        const newWidth = Math.max(NODE_MIN_WIDTH, Math.round(dragStateRef.current.startWidth + dx));
+        onResizeDrag(id, newWidth);
+      };
+
+      const onMouseUp = (upEvent: MouseEvent) => {
+        if (!dragStateRef.current) return;
+        const dx = (upEvent.clientX - dragStateRef.current.startX) / zoom;
+        const newWidth = Math.max(NODE_MIN_WIDTH, Math.round(dragStateRef.current.startWidth + dx));
+        onResizeEnd(id, newWidth);
+        dragStateRef.current = null;
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    },
+    [id, nodeWidth, onResizeDrag, onResizeEnd, getZoom],
+  );
 
   return (
     <Tooltip
@@ -137,13 +167,6 @@ function StepNodeComponent({ data, selected }: NodeProps) {
         ].filter(Boolean).join(' ')}
         aria-label={`步骤节点: ${String(label)}`}
       >
-        <NodeResizer
-          minWidth={NODE_MIN_WIDTH}
-          isVisible={!!selected}
-          handleStyle={RESIZER_STYLE}
-          lineStyle={RESIZER_STYLE}
-          onResizeEnd={(_event, params) => onResizeEnd(id, Math.max(NODE_MIN_WIDTH, Math.round(params.width)))}
-        />
         <Handle
           type="target"
           position={Position.Left}
@@ -180,6 +203,14 @@ function StepNodeComponent({ data, selected }: NodeProps) {
         <OutputChips outputs={outputs} outputLabels={outputLabels} containerWidth={innerWidth} />
 
         <Handle type="source" position={Position.Right} className="step-node-handle" />
+
+        {/* Always-present right-edge resize grip — visible on hover, works without selecting.
+            Uses noDragClassName so ReactFlow does not treat mousedown here as a node drag. */}
+        <div
+          className="step-node-resize-handle nodrag"
+          onMouseDown={handleResizeMouseDown}
+          aria-hidden="true"
+        />
       </div>
     </Tooltip>
   );
