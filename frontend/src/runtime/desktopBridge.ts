@@ -6,6 +6,26 @@ export type DesktopBridgeResult =
   | { ok: true }
   | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
 
+export interface DesktopAdminSession {
+  token: string;
+  refreshToken?: string;
+  username: string;
+  userId?: string;
+  role?: string;
+  email?: string;
+  displayName?: string;
+  tenantId?: string;
+  dynamic?: boolean;
+  chatUnlikeSwitch?: boolean;
+  timestamp?: number;
+}
+
+type DesktopBridgeCommand =
+  | "openLogsDir"
+  | "openDataDir"
+  | "runtimeStatus"
+  | "restartRuntime";
+
 interface LazyMindDesktopBridge {
   openLogsDir?: () => Promise<void> | void;
   openDataDir?: () => Promise<void> | void;
@@ -14,6 +34,7 @@ interface LazyMindDesktopBridge {
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
   selectFolder?: () => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
+  desktopAdminSession?: () => Promise<DesktopAdminSession> | DesktopAdminSession;
 }
 
 function getDesktopBridge(): LazyMindDesktopBridge | undefined {
@@ -26,7 +47,7 @@ function getDesktopBridge(): LazyMindDesktopBridge | undefined {
 }
 
 async function callDesktopBridge(
-  method: keyof LazyMindDesktopBridge,
+  method: DesktopBridgeCommand,
 ): Promise<DesktopBridgeResult> {
   const bridge = getDesktopBridge();
   const handler = bridge?.[method];
@@ -84,4 +105,12 @@ export function exportDiagnostics(): Promise<string | null> {
     return Promise.resolve(null);
   }
   return Promise.resolve(bridge.exportDiagnostics());
+}
+
+export function requestDesktopAdminSession(): Promise<DesktopAdminSession> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.desktopAdminSession) {
+    return Promise.reject(new Error("Desktop admin session bridge is unavailable"));
+  }
+  return Promise.resolve(bridge.desktopAdminSession());
 }

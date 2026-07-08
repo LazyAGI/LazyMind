@@ -47,23 +47,37 @@ import {
 } from "@/modules/selfEvolution";
 import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
+import { isDesktopSessionEnabled } from "@/runtime/desktopSession";
 
 const PluginDetailPage = lazy(() => import("@/modules/plugin/pages/detail"));
 const BuiltinPluginDetailPage = lazy(() => import("@/modules/plugin/pages/builtin-detail"));
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
+  const desktopSessionEnabled = isDesktopSessionEnabled();
 
   return (
     <ConfigProvider
       locale={getAntdLocale(i18n.resolvedLanguage || i18n.language)}
     >
       <Routes>
-        <Route path="/login" element={<SigninDashboard />}>
-          <Route index element={<SigninLogin />} />
-        </Route>
+        {desktopSessionEnabled ? (
+          <Route path="/login" element={<Navigate to="/agent/chat" replace />} />
+        ) : (
+          <Route path="/login" element={<SigninDashboard />}>
+            <Route index element={<SigninLogin />} />
+          </Route>
+        )}
         {runtimeFeatures.hideRegister ? (
-          <Route path="/register" element={<Navigate to="/login" replace />} />
+          <Route
+            path="/register"
+            element={
+              <Navigate
+                to={desktopSessionEnabled ? "/agent/chat" : "/login"}
+                replace
+              />
+            }
+          />
         ) : (
           <Route path="/register" element={<SigninDashboard />}>
             <Route index element={<SigninRegister />} />
@@ -81,7 +95,16 @@ export default function AppRouter() {
           path="/oauth/notion/callback"
           element={<DataSourceFeishuCallback provider="notion" />}
         />
-        <Route path="/loginTransition" element={<LoginTransition />} />
+        <Route
+          path="/loginTransition"
+          element={
+            desktopSessionEnabled ? (
+              <Navigate to="/agent/chat" replace />
+            ) : (
+              <LoginTransition />
+            )
+          }
+        />
         <Route path="/" element={<MainLayout />}>
           <Route index element={<Navigate to="/agent/chat" replace />} />
           <Route path="agent/chat" element={<ChatApp />}>

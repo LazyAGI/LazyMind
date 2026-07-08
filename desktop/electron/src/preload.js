@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("lazymindDesktop", {
   selectFolder: () => ipcRenderer.invoke("lazymind:selectFolder"),
   exportDiagnostics: () => ipcRenderer.invoke("lazymind:exportDiagnostics"),
   startupDiagnostics: () => ipcRenderer.invoke("lazymind:startupDiagnostics"),
+  desktopAdminSession: () => ipcRenderer.invoke("lazymind:desktopAdminSession"),
   copyStartupLogs: () => ipcRenderer.invoke("lazymind:copyStartupLogs"),
   onStartupDiagnosticsUpdate: (handler) => {
     if (typeof handler !== "function") {
