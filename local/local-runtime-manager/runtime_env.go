@@ -16,6 +16,7 @@ func scopedRuntimeEnv(paths RuntimePaths, home string) []string {
 		"XDG_CACHE_HOME=" + paths.XDGCacheDir,
 		"XDG_STATE_HOME=" + paths.XDGStateDir,
 		localHostHomeEnvVar + "=" + hostHomeDir(),
+		"PYTHONDONTWRITEBYTECODE=1",
 	}
 }
 

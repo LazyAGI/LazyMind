@@ -11,11 +11,14 @@ APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
 GO_BIN="${GO:-go}"
 PNPM_BIN="${PNPM:-pnpm}"
 UV_BIN="${UV:-uv}"
+GO_BUILD_FLAGS=(-trimpath -buildvcs=false -ldflags="-s -w")
+GO_INSTALL_FLAGS=(-trimpath -ldflags="-s -w")
 
 : "${ELECTRON_CACHE:=${HOME}/Library/Caches/electron}"
 : "${ELECTRON_BUILDER_CACHE:=${HOME}/Library/Caches/electron-builder}"
 export ELECTRON_CACHE
 export ELECTRON_BUILDER_CACHE
+export PYTHONDONTWRITEBYTECODE=1
 
 remove_generated_path() {
   local target="$1"
@@ -49,6 +52,36 @@ make_internal_symlinks_relative() {
   done
 }
 
+prune_python_runtime() {
+  local root="$1"
+  find "${root}" -type d -name "__pycache__" -prune -exec rm -rf {} +
+  find "${root}" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+  find "${root}" -type d \( -name "test" -o -name "tests" \) -prune -exec rm -rf {} +
+}
+
+assert_desktop_runtime_app() {
+  local app_root="$1"
+  local frontend_dist="${app_root}/frontend/dist/index.html"
+  local lazyllm_source="${app_root}/algorithm/lazyllm/lazyllm"
+  if [[ ! -f "${frontend_dist}" ]]; then
+    echo "desktop frontend dist is required: ${frontend_dist}" >&2
+    exit 1
+  fi
+  if [[ ! -d "${lazyllm_source}" ]]; then
+    echo "bundled LazyLLM source is required: ${lazyllm_source}" >&2
+    exit 1
+  fi
+}
+
+prune_runtime_app() {
+  local app_root="$1"
+  if [[ -d "${app_root}/frontend" ]]; then
+    find "${app_root}/frontend" -mindepth 1 -maxdepth 1 ! -name "dist" -exec rm -rf {} +
+  fi
+  remove_generated_path "${app_root}/algorithm/lazyllm/docs"
+  remove_generated_path "${app_root}/backend/core/core"
+}
+
 mkdir -p \
   "${RUNTIME_ROOT}/bin" \
   "${RUNTIME_ROOT}/app" \
@@ -57,13 +90,13 @@ mkdir -p \
   "${ELECTRON_BUILDER_CACHE}"
 
 echo "==> Building Go desktop runtime binaries"
-(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build -buildvcs=false -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
-(cd "${ROOT}/local/local-proxy" && "${GO_BIN}" build -buildvcs=false -o "${RUNTIME_ROOT}/bin/local-proxy" ./cmd/local-proxy)
-(cd "${ROOT}/backend/core" && "${GO_BIN}" build -buildvcs=false -o "${RUNTIME_ROOT}/bin/core" .)
-(cd "${ROOT}/backend/scan-control-plane" && "${GO_BIN}" build -buildvcs=false -o "${RUNTIME_ROOT}/bin/scan-control-plane" ./cmd/scan-control-plane)
-(cd "${ROOT}/backend/file-watcher" && "${GO_BIN}" build -buildvcs=false -o "${RUNTIME_ROOT}/bin/file-watcher" ./cmd/main.go)
-GOBIN="${RUNTIME_ROOT}/bin" "${GO_BIN}" install github.com/f1bonacc1/process-compose@v1.116.0
-GOBIN="${RUNTIME_ROOT}/bin" "${GO_BIN}" install github.com/caddyserver/caddy/v2/cmd/caddy@v2.10.2
+(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
+(cd "${ROOT}/local/local-proxy" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-proxy" ./cmd/local-proxy)
+(cd "${ROOT}/backend/core" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/core" .)
+(cd "${ROOT}/backend/scan-control-plane" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/scan-control-plane" ./cmd/scan-control-plane)
+(cd "${ROOT}/backend/file-watcher" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/file-watcher" ./cmd/main.go)
+GOBIN="${RUNTIME_ROOT}/bin" "${GO_BIN}" install "${GO_INSTALL_FLAGS[@]}" github.com/f1bonacc1/process-compose@v1.116.0
+GOBIN="${RUNTIME_ROOT}/bin" "${GO_BIN}" install "${GO_INSTALL_FLAGS[@]}" github.com/caddyserver/caddy/v2/cmd/caddy@v2.10.2
 
 echo "==> Building frontend desktop dist"
 (cd "${ROOT}/frontend" && CI=true VITE_LAZYMIND_MODE=desktop "${PNPM_BIN}" install --frozen-lockfile --prefer-offline)
@@ -91,6 +124,8 @@ rm -rf "${RUNTIME_ROOT}/python/algorithm"
 "${RUNTIME_ROOT}/python/algorithm/bin/lazyllm" install rag
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
 make_internal_symlinks_relative "${RUNTIME_ROOT}"
+echo "==> Pruning Python runtime bytecode and test packages"
+prune_python_runtime "${RUNTIME_ROOT}/python"
 
 echo "==> Staging runtime app files"
 rsync -a --delete \
@@ -107,8 +142,15 @@ rsync -a --delete \
   --exclude ".pnpm-store" \
   --exclude ".cache" \
   --exclude "desktop/dist" \
+  --exclude "/frontend/src" \
+  --exclude "/frontend/public" \
+  --exclude "/frontend/scripts" \
+  --exclude "/algorithm/lazyllm/docs" \
+  --exclude "/backend/core/core" \
   "${ROOT}/" "${RUNTIME_ROOT}/app/"
 
+prune_runtime_app "${RUNTIME_ROOT}/app"
+assert_desktop_runtime_app "${RUNTIME_ROOT}/app"
 node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" "${RUNTIME_ROOT}"
 
 echo "==> Copying runtime into Electron resources staging"

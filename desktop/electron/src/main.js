@@ -18,13 +18,14 @@ const startupLogPath = path.join(logsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", "local-runtime-manager");
 const maxStartupLogEntries = 1200;
+const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";
+const forceExitDelayMs = 1500;
 
 let mainWindow;
 let runtimeProcess;
 let runtimeProcessExit = null;
 let guardProcess;
 let currentStatus = null;
-let shutdownPromise = null;
 let isQuitting = false;
 let allowWindowClose = false;
 let startupLogEntries = [];
@@ -57,6 +58,14 @@ function sidecarEnv() {
     LAZYMIND_RUNTIME_ROOT: runtimeRoot,
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
     VITE_LAZYMIND_MODE: "desktop",
+    PYTHONDONTWRITEBYTECODE: "1",
+  };
+}
+
+function sidecarShutdownEnv() {
+  return {
+    ...sidecarEnv(),
+    LAZYMIND_LOCAL_DOWN_TIMEOUT: desktopShutdownTimeout,
   };
 }
 
@@ -196,7 +205,7 @@ function startGuard() {
     return;
   }
   guardProcess = spawn(sidecarPath, sidecarArgs("guard", ["--owner-pid", String(process.pid)]), {
-    env: sidecarEnv(),
+    env: sidecarShutdownEnv(),
     stdio: "ignore",
     detached: true,
   });
@@ -206,12 +215,53 @@ function startGuard() {
   guardProcess.unref();
 }
 
-function stopGuard() {
-  if (!guardProcess) {
+function detachRuntimeMonitor() {
+  const proc = runtimeProcess;
+  if (!proc) {
     return;
   }
-  guardProcess.kill();
-  guardProcess = null;
+  runtimeProcess = null;
+  proc.stdout?.removeAllListeners("data");
+  proc.stderr?.removeAllListeners("data");
+  proc.removeAllListeners("exit");
+  proc.removeAllListeners("error");
+  proc.stdout?.destroy();
+  proc.stderr?.destroy();
+  try {
+    proc.kill("SIGTERM");
+  } catch (error) {
+    appendStartupLog("error", `failed to stop desktop runtime monitor: ${serializeError(error)}`);
+  }
+  proc.unref?.();
+}
+
+function spawnDetachedShutdownHelper(reason) {
+  if (!fs.existsSync(sidecarPath)) {
+    return false;
+  }
+  ensureRuntimeDirs();
+  const shutdownLog = path.join(logsDir, "desktop-shutdown.log");
+  const outFd = fs.openSync(shutdownLog, "a");
+  const errFd = fs.openSync(shutdownLog, "a");
+  try {
+    fs.appendFileSync(
+      shutdownLog,
+      `[${new Date().toISOString()}] [desktop] detached shutdown requested: ${reason}; timeout=${desktopShutdownTimeout}\n`,
+    );
+    const child = spawn(sidecarPath, sidecarArgs("down"), {
+      env: sidecarShutdownEnv(),
+      stdio: ["ignore", outFd, errFd],
+      detached: true,
+    });
+    child.once("error", (error) => {
+      appendStartupLog("error", `failed to spawn detached desktop shutdown: ${serializeError(error)}`);
+    });
+    child.unref();
+    return true;
+  } finally {
+    fs.closeSync(outFd);
+    fs.closeSync(errFd);
+  }
 }
 
 async function readStatus() {
@@ -354,72 +404,24 @@ function startRuntime() {
   });
 }
 
-function waitForRuntimeProcessExit(timeoutMs = 5000) {
-  const proc = runtimeProcess;
-  if (!proc) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      appendStartupLog("desktop", "desktop runtime sidecar did not exit after shutdown; terminating it");
-      try {
-        proc.kill("SIGTERM");
-      } catch (error) {
-        appendStartupLog("error", `failed to terminate desktop runtime sidecar: ${serializeError(error)}`);
-      }
-      finish();
-    }, timeoutMs);
-    proc.once("exit", finish);
-  });
-}
-
-function shutdownRuntime() {
-  if (shutdownPromise) {
-    return shutdownPromise;
-  }
-  shutdownPromise = (async () => {
-    if (!fs.existsSync(sidecarPath)) {
-      stopGuard();
-      return;
-    }
-    let downSucceeded = false;
-    try {
-      appendStartupLog("desktop", "stopping desktop runtime");
-      await runSidecar("down");
-      downSucceeded = true;
-    } catch (error) {
-      appendStartupLog("error", `failed to stop desktop runtime: ${serializeError(error)}`);
-      console.error("Failed to stop LazyMind desktop runtime:", error);
-    }
-    if (downSucceeded) {
-      await waitForRuntimeProcessExit();
-      stopGuard();
-    }
-  })().finally(() => {
-    shutdownPromise = null;
-  });
-  return shutdownPromise;
-}
-
-async function requestQuit() {
+function beginFastQuit(reason = "quit") {
   if (isQuitting) {
     return;
   }
   isQuitting = true;
-  await shutdownRuntime();
   allowWindowClose = true;
+  appendStartupLog("desktop", `quitting LazyMind Desktop (${reason}); runtime cleanup continues in background`);
+  const guardWillCleanUp = Boolean(guardProcess);
+  if (!guardWillCleanUp) {
+    spawnDetachedShutdownHelper(reason);
+  }
+  detachRuntimeMonitor();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.destroy();
   }
+  setTimeout(() => {
+    app.exit(0);
+  }, forceExitDelayMs).unref();
   app.quit();
 }
 
@@ -502,7 +504,7 @@ function loadingHTML() {
       padding-bottom: 76px;
       transition: padding-bottom 180ms ease;
     }
-    body.drawer-open main { padding-bottom: 340px; }
+    body.drawer-open main { padding-bottom: 450px; }
     section { width: min(500px, calc(100vw - 64px)); }
     h1 { font-size: 24px; font-weight: 650; margin: 0 0 12px; letter-spacing: 0; }
     p { font-size: 14px; line-height: 1.6; color: #4b5563; margin: 0; }
@@ -539,7 +541,7 @@ function loadingHTML() {
       left: 0;
       right: 0;
       bottom: 0;
-      height: 330px;
+      height: 440px;
       background: #ffffff;
       border-top: 1px solid #d9dee7;
       transform: translateY(100%);
@@ -638,7 +640,6 @@ function loadingHTML() {
         <div class="kv">
           <div class="kv-row"><div class="kv-label">Runtime directory</div><div id="runtimePath" class="kv-value">-</div></div>
           <div class="kv-row"><div class="kv-label">Data directory</div><div id="dataPath" class="kv-value">-</div></div>
-          <div class="kv-row"><div class="kv-label">Logs directory</div><div id="logsPath" class="kv-value">-</div></div>
         </div>
         <div id="steps" class="steps"></div>
       </div>
@@ -656,7 +657,6 @@ function loadingHTML() {
       phase: document.getElementById("phase"),
       runtimePath: document.getElementById("runtimePath"),
       dataPath: document.getElementById("dataPath"),
-      logsPath: document.getElementById("logsPath"),
       log: document.getElementById("log"),
       steps: document.getElementById("steps"),
       copyLogs: document.getElementById("copyLogs"),
@@ -706,7 +706,6 @@ function loadingHTML() {
       els.phase.textContent = startup.phase || startup.status || "Starting";
       els.runtimePath.textContent = paths.runtimeRoot || "-";
       els.dataPath.textContent = paths.dataDir || "-";
-      els.logsPath.textContent = paths.logsDir || "-";
       const services = status.services || {};
       els.steps.innerHTML = stepNames.map(([key, label]) => {
         const serviceStatus = services[key]?.status || "pending";
@@ -756,7 +755,7 @@ async function createWindow() {
       return;
     }
     event.preventDefault();
-    requestQuit();
+    beginFastQuit("window close");
   });
   await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
   broadcastStartupDiagnostics();
@@ -823,6 +822,6 @@ app.on("window-all-closed", () => {
 app.on("before-quit", (event) => {
   if (!isQuitting) {
     event.preventDefault();
-    requestQuit();
+    beginFastQuit("app quit");
   }
 });

@@ -18,6 +18,7 @@
     "appId": "ai.lazymind.desktop",
     "productName": "LazyMind",
     "artifactName": "LazyMind-${os}-${arch}.${ext}",
+    "asar": true,
     "directories": {
       "output": "../dist"
     },
