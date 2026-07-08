@@ -212,6 +212,7 @@ interface Props {
   onSlotsChange?: (slots: Array<{ id: string }>) => void;
   onCompositeLayoutChange?: (value: CompositePanelNode) => void;
   onCompositeTabPositionChange?: (pos: PluginUiTab['composite_tab_position']) => void;
+  extraRightAction?: React.ReactNode;
 }
 
 export default function UiWysiwygPreview({
@@ -234,6 +235,7 @@ export default function UiWysiwygPreview({
   onSlotsChange,
   onCompositeLayoutChange,
   onCompositeTabPositionChange,
+  extraRightAction,
 }: Props) {
   const tabs = pluginModel.ui?.tabs ?? [];
   const uiSlots: Record<string, WidgetConfig> = (pluginModel.ui?.slots ?? {}) as Record<string, WidgetConfig>;
@@ -371,6 +373,7 @@ export default function UiWysiwygPreview({
               />
             </div>
           )}
+          {extraRightAction}
         </div>
       </div>
 

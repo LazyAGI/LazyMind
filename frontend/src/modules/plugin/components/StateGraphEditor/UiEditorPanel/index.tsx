@@ -153,14 +153,6 @@ export default function UiEditorPanel({
             }
           }}
         >
-          <Button
-            type="text"
-            size="small"
-            icon={fullscreen ? <CompressOutlined /> : <ExpandOutlined />}
-            className="uep-expand-btn"
-            onClick={() => setFullscreen((v) => !v)}
-            title={fullscreen ? '退出全屏' : '全屏预览'}
-          />
           <UiWysiwygPreview
             pluginModel={pluginModel}
             activeTabId={activeTabId}
@@ -181,6 +173,16 @@ export default function UiEditorPanel({
             onCompositeLayoutChange={handleCompositeLayoutChange}
             onCompositeTabPositionChange={handleCompositeTabPositionChange}
             editorMode
+            extraRightAction={
+              <Button
+                type="text"
+                size="small"
+                icon={fullscreen ? <CompressOutlined /> : <ExpandOutlined />}
+                className="uep-expand-btn"
+                onClick={() => setFullscreen((v) => !v)}
+                title={fullscreen ? '退出全屏' : '全屏预览'}
+              />
+            }
           />
         </div>
 
