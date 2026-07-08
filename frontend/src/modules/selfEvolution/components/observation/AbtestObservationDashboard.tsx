@@ -6,13 +6,9 @@ import { axiosInstance } from "@/components/request";
 import {
   AGENT_API_BASE,
   getCatalogApiErrorMessage,
-  buildAbSummaryFromComparisonArtifact,
   buildAbSummaryReports,
-  buildAbCaseTraceMapFromComparisonArtifact,
-  buildAbCaseDetailItemFromComparisonCase,
   fetchThreadGateContent,
   isCanceledRequest,
-  parseAbtestComparisonArtifact,
   stringifyResultPayload,
 } from "../../shared";
 import { normalizeTraceObservation } from "../TraceObservationView";
@@ -55,21 +51,8 @@ export function AbtestObservationDashboard({
   toggleMenu?: () => void;
 }) {
   const { t } = useTranslation();
-  const abtestComparisonArtifact = useMemo(
-    () => parseAbtestComparisonArtifact(data),
-    [data],
-  );
-  const abSummary = useMemo(() => {
-    if (abtestComparisonArtifact) {
-      return buildAbSummaryFromComparisonArtifact(abtestComparisonArtifact);
-    }
-    return buildAbSummaryReports(data)[0];
-  }, [abtestComparisonArtifact, data]);
+  const abSummary = useMemo(() => buildAbSummaryReports(data)[0], [data]);
   const abtestId = useMemo(() => resolveAbtestIdFromPayload(data), [data]);
-  const comparisonTraceMap = useMemo(
-    () => buildAbCaseTraceMapFromComparisonArtifact(abtestComparisonArtifact),
-    [abtestComparisonArtifact],
-  );
   const [caseReloadToken, setCaseReloadToken] = useState(0);
   const [traceReloadToken, setTraceReloadToken] = useState(0);
   const [caseState, setCaseState] = useState<AbCaseListState>({
@@ -86,23 +69,16 @@ export function AbtestObservationDashboard({
       loading: false,
       loaded: false,
     });
-  const traceIdMap = useMemo(() => {
-    const merged = buildAbCaseTraceIdMap(evalReportsState.data);
-    comparisonTraceMap.forEach((value, key) => {
-      merged.set(key, { ...merged.get(key), ...value });
-    });
-    return merged;
-  }, [comparisonTraceMap, evalReportsState.data]);
-  const hasInlineTraceMap = comparisonTraceMap.size > 0;
+  const traceIdMap = useMemo(
+    () => buildAbCaseTraceIdMap(evalReportsState.data),
+    [evalReportsState.data],
+  );
   const rows = useMemo(() => {
-    if (abtestComparisonArtifact) {
-      return normalizeAbCaseRows(t, data);
-    }
     if (caseState.loaded && caseState.data) {
       return normalizeAbCaseRows(t, caseState.data);
     }
     return normalizeAbCaseRows(t, data);
-  }, [abtestComparisonArtifact, caseState.data, caseState.loaded, data, t]);
+  }, [caseState.data, caseState.loaded, data, t]);
   const selectedCaseObservation = useMemo(() => {
     const observation = normalizeTraceObservation(traceCompareState.data);
     return observation?.kind === "compare" ? observation : undefined;
@@ -110,21 +86,13 @@ export function AbtestObservationDashboard({
   const [selectedCaseId, setSelectedCaseId] = useState(rows[0]?.caseId || "");
   const selectedCase =
     rows.find((row) => row.caseId === selectedCaseId) || rows[0];
-  const selectedCaseItem = useMemo(() => {
-    if (selectedCase) {
-      const fromApi = findAbCaseDetailItem(caseState.data, selectedCase.caseId);
-      if (fromApi) {
-        return fromApi;
-      }
-    }
-    const comparisonCase = abtestComparisonArtifact?.caseRows.find(
-      (row) => row.caseId === selectedCase?.caseId,
-    );
-    if (comparisonCase) {
-      return buildAbCaseDetailItemFromComparisonCase(comparisonCase);
-    }
-    return undefined;
-  }, [abtestComparisonArtifact, caseState.data, selectedCase]);
+  const selectedCaseItem = useMemo(
+    () =>
+      selectedCase
+        ? findAbCaseDetailItem(caseState.data, selectedCase.caseId)
+        : undefined,
+    [caseState.data, selectedCase],
+  );
 
   useEffect(() => {
     if (!threadId) {
@@ -159,15 +127,6 @@ export function AbtestObservationDashboard({
   }, [threadId]);
 
   useEffect(() => {
-    if (abtestComparisonArtifact?.caseRows.length) {
-      setCaseState({
-        abtestId,
-        loading: false,
-        loaded: true,
-        totalSize: abtestComparisonArtifact.caseRows.length,
-      });
-      return;
-    }
     if (!threadId || !abtestId) {
       setCaseState({ loading: false, loaded: false });
       return;
@@ -218,7 +177,7 @@ export function AbtestObservationDashboard({
     return () => {
       controller.abort();
     };
-  }, [abtestComparisonArtifact, abtestId, caseReloadToken, threadId, t]);
+  }, [abtestId, caseReloadToken, threadId, t]);
 
   useEffect(() => {
     if (!threadId || !selectedCase?.caseId) {
@@ -229,7 +188,7 @@ export function AbtestObservationDashboard({
       });
       return;
     }
-    if (!hasInlineTraceMap && (evalReportsState.loading || !evalReportsState.loaded)) {
+    if (evalReportsState.loading || !evalReportsState.loaded) {
       setTraceCompareState({
         caseId: selectedCase.caseId,
         loading: true,
@@ -268,7 +227,7 @@ export function AbtestObservationDashboard({
 
     axiosInstance
       .get(
-        `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/traces:compare`,
+        `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/traces-compare`,
         {
           params: { a: aTraceId, b: bTraceId },
           signal: controller.signal,
@@ -307,7 +266,6 @@ export function AbtestObservationDashboard({
   }, [
     evalReportsState.loaded,
     evalReportsState.loading,
-    hasInlineTraceMap,
     selectedCase?.caseId,
     selectedCaseItem,
     threadId,
@@ -347,11 +305,10 @@ export function AbtestObservationDashboard({
           <Spin />
           <Text>{t("selfEvolutionRun.observation.loadingAbData")}</Text>
         </div>
-      ) : abSummary && rows.length > 0 ? (
+      ) : selectedCase ? (
         <div className="self-evolution-abtest-dashboard-grid">
           <AbReportPanel
             summary={abSummary}
-            comparisonArtifact={abtestComparisonArtifact}
             rows={rows}
             rowsError={caseState.error}
             rowsLoading={caseState.loading}
