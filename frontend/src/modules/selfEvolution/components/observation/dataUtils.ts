@@ -10,7 +10,6 @@ import {
   getStructuredArrayField,
   getStructuredRecordField,
   isRecord,
-  parseAbtestComparisonArtifact,
   unwrapGateEvalContent,
   type AbSummaryReport,
 } from "../../shared";
@@ -163,30 +162,6 @@ function normalizeAbCaseRowFromRecord(t: TFunction, item: Record<string, unknown
 }
 
 export function normalizeAbCaseRows(t: TFunction, value: unknown): AbCaseRow[] {
-  const comparison = parseAbtestComparisonArtifact(value);
-  if (comparison) {
-    return comparison.caseRows.map((row) => {
-      const delta = row.deltaOverall;
-      const outcomeTone: AbCaseRow["tone"] =
-        delta > 0 ? "up" : delta < 0 ? "down" : "flat";
-      const conclusion =
-        delta > 0
-          ? t("selfEvolutionRun.observation.bImprove")
-          : delta < 0
-            ? t("selfEvolutionRun.observation.bDegrade")
-            : t("selfEvolutionRun.observation.flat");
-      return {
-        caseId: row.caseId,
-        query: row.reason || "-",
-        aScore: row.originOverall,
-        bScore: row.candidateOverall,
-        delta,
-        conclusion,
-        tone: outcomeTone,
-      };
-    });
-  }
-
   return getAbCaseSourceRecords(value)
     .filter(isRecord)
     .map((item, index) => normalizeAbCaseRowFromRecord(t, item, index));
@@ -207,10 +182,6 @@ export function toAbMetricRows(summary: AbSummaryReport | undefined): AbMetricRo
 }
 
 export function resolveAbtestIdFromPayload(value: unknown): string | undefined {
-  const comparison = parseAbtestComparisonArtifact(value);
-  if (comparison?.runId && comparison.runId !== "-") {
-    return comparison.runId;
-  }
   const summary = buildAbSummaryReports(value)[0];
   if (!summary?.id || syntheticAbtestIdPattern.test(summary.id)) {
     return undefined;
