@@ -88,7 +88,7 @@ const (
 	authServiceLogFileName        = "auth-service.log"
 	coreLogFileName               = "core.log"
 	frontendLogFileName           = "frontend.log"
-	localProcessComposeBin        = ".lazymind-local/bin/process-compose"
+	localProcessComposeBin        = "local/runtime/bin/process-compose"
 	localProxyConfigName          = "local/local-proxy/configs/cloud-replace-kong.yaml"
 	localProxyScriptDirName       = "local/local-proxy/scripts"
 	localProxySourceDirName       = "local/local-proxy"
@@ -531,7 +531,7 @@ func defaultFileWatcherWatchHostDir(repoRoot string) string {
 func defaultFileWatcherBaseRoot(repoRoot string) string {
 	raw := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_BASE_ROOT"))
 	if raw == "" {
-		raw = filepath.Join(repoRoot, ".lazymind-local", "data", "stores", "scan", "file-watcher")
+		raw = filepath.Join(repoRoot, "local", "runtime", "data", "stores", "scan", "file-watcher")
 	}
 	if filepath.IsAbs(raw) {
 		return filepath.Clean(raw)
@@ -921,7 +921,7 @@ func normalizeRuntimeProfile(profile string) (string, error) {
 
 func defaultRuntimeRoot(profile string, repoRoot string) string {
 	if profile != "desktop" {
-		return filepath.Join(repoRoot, ".lazymind-local")
+		return filepath.Join(repoRoot, "local", "runtime")
 	}
 	return filepath.Join(hostHomeDir(), "Library", "Application Support", "LazyMind")
 }

@@ -31,10 +31,10 @@ func TestRuntimeConfigUsesLocalRuntimeRootAndManagerBinaryPaths(t *testing.T) {
 	if cfg.Profile != "local" {
 		t.Fatalf("profile = %q, want local", cfg.Profile)
 	}
-	if paths.RuntimeRoot != filepath.Join(repo, ".lazymind-local") {
+	if paths.RuntimeRoot != filepath.Join(repo, "local/runtime") {
 		t.Fatalf("runtime root = %q", paths.RuntimeRoot)
 	}
-	if localProcessComposeBin != ".lazymind-local/bin/process-compose" {
+	if localProcessComposeBin != "local/runtime/bin/process-compose" {
 		t.Fatalf("process-compose bin = %q", localProcessComposeBin)
 	}
 }
@@ -318,7 +318,7 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
-	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, ".lazymind-local", "bin", "local-runtime-manager"))
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local/runtime", "bin", "local-runtime-manager"))
 	var out strings.Builder
 	if err := manager.processCompose.WriteGeneratedConfig(&out, repo, paths, cfg, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
 		t.Fatalf("write generated config: %v", err)
@@ -349,7 +349,7 @@ func TestProcessComposeGOBINIsUnderLocalRuntimeRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("process compose GOBIN: %v", err)
 	}
-	want := filepath.Join(repo, ".lazymind-local", "bin")
+	want := filepath.Join(repo, "local/runtime", "bin")
 	if got != want {
 		t.Fatalf("GOBIN = %q, want %q", got, want)
 	}
@@ -530,7 +530,7 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
-	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, ".lazymind-local", "bin", "local-runtime-manager"))
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local/runtime", "bin", "local-runtime-manager"))
 	manager.probeAPI = func(port int, timeout time.Duration) bool { return false }
 	out, err := manager.Status(context.Background(), cfg, paths, true)
 	if err != nil {

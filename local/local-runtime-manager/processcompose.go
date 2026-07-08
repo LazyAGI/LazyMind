@@ -338,7 +338,7 @@ func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, paths RuntimeP
 		Name: "go",
 		Args: []string{"install", processComposePackage},
 		Dir:  repoRoot,
-		Env:  append(goToolEnv(RuntimePaths{RepoRoot: repoRoot, RuntimeRoot: filepath.Join(repoRoot, ".lazymind-local")}), "GOBIN="+gobin),
+		Env:  append(goToolEnv(RuntimePaths{RepoRoot: repoRoot, RuntimeRoot: filepath.Join(repoRoot, "local", "runtime")}), "GOBIN="+gobin),
 	})
 	if err != nil {
 		return fmt.Errorf("install process-compose failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
@@ -347,7 +347,7 @@ func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, paths RuntimeP
 }
 
 func processComposeGOBIN(repoRoot string) (string, error) {
-	return filepath.Abs(filepath.Join(repoRoot, ".lazymind-local", "bin"))
+	return filepath.Abs(filepath.Join(repoRoot, "local", "runtime", "bin"))
 }
 
 func quoteShellArg(value string) string {

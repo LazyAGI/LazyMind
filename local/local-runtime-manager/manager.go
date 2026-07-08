@@ -797,7 +797,7 @@ func (m *RuntimeManager) printReadySummary(cfg RuntimeConfig) {
 			_, _ = fmt.Fprintf(m.out, "frontend LAN: http://%s:%d\n", ip, cfg.FrontendPort)
 		}
 	}
-	_, _ = fmt.Fprintf(m.out, "status: .lazymind-local/bin/local-runtime-manager status --json\n")
+	_, _ = fmt.Fprintf(m.out, "status: local/runtime/bin/local-runtime-manager status --json\n")
 }
 
 func (m *RuntimeManager) printPortResolutionSummary(cfg RuntimeConfig) {
