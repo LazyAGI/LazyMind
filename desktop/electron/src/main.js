@@ -585,16 +585,6 @@ function loadingHTML() {
       min-width: 0;
       overflow: auto;
     }
-    .kv { display: grid; gap: 8px; margin-bottom: 16px; }
-    .kv-row { display: grid; gap: 2px; min-width: 0; }
-    .kv-label { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0; }
-    .kv-value {
-      color: #0f172a;
-      font-size: 12px;
-      line-height: 1.35;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      overflow-wrap: anywhere;
-    }
     .steps { display: grid; gap: 7px; }
     .step { display: flex; align-items: center; gap: 8px; color: #475569; font-size: 12px; min-width: 0; }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; flex: 0 0 auto; }
@@ -637,10 +627,6 @@ function loadingHTML() {
     </div>
     <div class="drawer-body">
       <div class="summary">
-        <div class="kv">
-          <div class="kv-row"><div class="kv-label">Runtime directory</div><div id="runtimePath" class="kv-value">-</div></div>
-          <div class="kv-row"><div class="kv-label">Data directory</div><div id="dataPath" class="kv-value">-</div></div>
-        </div>
         <div id="steps" class="steps"></div>
       </div>
       <pre id="log" class="log empty">Waiting for startup output...</pre>
@@ -655,8 +641,6 @@ function loadingHTML() {
       collapse: document.getElementById("collapse"),
       message: document.getElementById("message"),
       phase: document.getElementById("phase"),
-      runtimePath: document.getElementById("runtimePath"),
-      dataPath: document.getElementById("dataPath"),
       log: document.getElementById("log"),
       steps: document.getElementById("steps"),
       copyLogs: document.getElementById("copyLogs"),
@@ -696,7 +680,6 @@ function loadingHTML() {
       snapshot = next || snapshot;
       if (!snapshot) return;
       const startup = snapshot.startup || {};
-      const paths = snapshot.paths || {};
       const status = snapshot.status || {};
       els.body.classList.toggle("failed", startup.status === "failed");
       if (startup.status === "failed" || startup.status === "exited") {
@@ -704,8 +687,6 @@ function loadingHTML() {
       }
       els.message.textContent = startup.message || "Starting local desktop runtime...";
       els.phase.textContent = startup.phase || startup.status || "Starting";
-      els.runtimePath.textContent = paths.runtimeRoot || "-";
-      els.dataPath.textContent = paths.dataDir || "-";
       const services = status.services || {};
       els.steps.innerHTML = stepNames.map(([key, label]) => {
         const serviceStatus = services[key]?.status || "pending";
