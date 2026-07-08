@@ -202,46 +202,26 @@ interface AssignTarget {
   isComposite: boolean;
   blockPath?: number[];
   tabIdx?: number;
+  /** For composite tabs: the cardinality constraint derived from already-assigned slots.
+   *  undefined = no slots assigned yet (no constraint). */
+  listConstraint?: 'list' | 'single';
+}
+
+/** Collect all used slot ids and their paths from a composite tree. */
+function collectBoundSlots(node: CompositePanelNode): string[] {
+  const ids: string[] = [];
+  function walk(n: CompositePanelNode) {
+    if (n.slot) ids.push(n.slot);
+    if (n.tabs) n.tabs.forEach((t) => { if (t.slot) ids.push(t.slot); });
+    if (n.children) n.children.forEach(walk);
+  }
+  walk(node);
+  return ids;
 }
 
 /** Collect all assignable positions from a PluginUiTab list as flat entries. */
-function collectAssignTargets(tabs: PluginUiTab[]): AssignTarget[] {
+function collectAssignTargets(tabs: PluginUiTab[], slotMap: Record<string, SlotDef>): AssignTarget[] {
   const targets: AssignTarget[] = [];
-
-  function walkNode(
-    node: CompositePanelNode,
-    path: number[],
-    tabId: string,
-    tabLabel: string,
-    depth: number,
-  ) {
-    const isLeaf = !node.direction && !node.children?.length;
-    if (!isLeaf) {
-      (node.children ?? []).forEach((c, i) => walkNode(c, [...path, i], tabId, tabLabel, depth + 1));
-      return;
-    }
-    const blockLabel = node.label ?? `分块 ${path.map((p) => p + 1).join('-') || ''}`;
-    if (Array.isArray(node.tabs) && node.tabs.length > 0) {
-      node.tabs.forEach((t, idx) => {
-        targets.push({
-          key: `${tabId}::${path.join('/')}::tab::${idx}`,
-          label: `${tabLabel} › ${blockLabel} › ${t.label}`,
-          tabId,
-          isComposite: true,
-          blockPath: path,
-          tabIdx: idx,
-        });
-      });
-    } else {
-      targets.push({
-        key: `${tabId}::${path.join('/')}`,
-        label: `${tabLabel} › ${blockLabel}`,
-        tabId,
-        isComposite: true,
-        blockPath: path,
-      });
-    }
-  }
 
   for (const tab of tabs) {
     if (tab.layout !== 'composite') {
@@ -252,6 +232,58 @@ function collectAssignTargets(tabs: PluginUiTab[]): AssignTarget[] {
         isComposite: false,
       });
     } else if (tab.composite_layout?.direction) {
+      // Compute list constraint from already-bound slots in this composite tab
+      const boundIds = collectBoundSlots(tab.composite_layout);
+      let tabListConstraint: 'list' | 'single' | undefined;
+      for (const sid of boundIds) {
+        const def = slotMap[sid];
+        if (def) {
+          const c: 'list' | 'single' = def.cardinality === 'list' ? 'list' : 'single';
+          if (tabListConstraint === undefined) {
+            tabListConstraint = c;
+          }
+          // Once we have at least one bound slot, the constraint is set
+          break;
+        }
+      }
+
+      function walkNode(
+        node: CompositePanelNode,
+        path: number[],
+        tabId: string,
+        tabLabel: string,
+        depth: number,
+      ) {
+        const isLeaf = !node.direction && !node.children?.length;
+        if (!isLeaf) {
+          (node.children ?? []).forEach((c, i) => walkNode(c, [...path, i], tabId, tabLabel, depth + 1));
+          return;
+        }
+        const blockLabel = node.label ?? `分块 ${path.map((p) => p + 1).join('-') || ''}`;
+        if (Array.isArray(node.tabs) && node.tabs.length > 0) {
+          node.tabs.forEach((t, idx) => {
+            targets.push({
+              key: `${tabId}::${path.join('/')}::tab::${idx}`,
+              label: `${tabLabel} › ${blockLabel} › ${t.label}`,
+              tabId,
+              isComposite: true,
+              blockPath: path,
+              tabIdx: idx,
+              listConstraint: tabListConstraint,
+            });
+          });
+        } else {
+          targets.push({
+            key: `${tabId}::${path.join('/')}`,
+            label: `${tabLabel} › ${blockLabel}`,
+            tabId,
+            isComposite: true,
+            blockPath: path,
+            listConstraint: tabListConstraint,
+          });
+        }
+      }
+
       walkNode(tab.composite_layout, [], tab.id, tab.label ?? tab.id, 0);
     }
   }
@@ -364,6 +396,7 @@ interface ArtifactRowProps {
   uiMode?: boolean;
   tabs: PluginUiTab[];
   uiSlots: Record<string, WidgetConfig>;
+  slotMap: Record<string, SlotDef>;
   onUpdate: (id: string, patch: Partial<Omit<SlotDef, 'id'>>) => void;
   onDelete: (id: string) => void;
   onAssign: (target: AssignTarget, slotId: string, widget: WidgetConfig) => void;
@@ -372,7 +405,7 @@ interface ArtifactRowProps {
   onTabNavigate?: (tabId: string) => void;
 }
 
-function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, onAssign, onRemoveFromUi, onWidgetChange, onTabNavigate }: ArtifactRowProps) {
+function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onDelete, onAssign, onRemoveFromUi, onWidgetChange, onTabNavigate }: ArtifactRowProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<EditDraft>(EMPTY_DRAFT);
@@ -445,7 +478,8 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, on
   };
 
   const compatibleWidgets = SLOT_COMPATIBLE_WIDGETS[slotKey] ?? ['text-single'];
-  const assignTargets = collectAssignTargets(tabs);
+  const assignTargets = collectAssignTargets(tabs, slotMap);
+  const thisCardinality: 'list' | 'single' = art.cardinality === 'list' ? 'list' : 'single';
 
   return (
     <div
@@ -543,11 +577,29 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, on
           ) : (
             <Dropdown
               menu={{
-                items: assignTargets.map((target) => ({
-                  key: target.key,
-                  label: target.label,
-                  onClick: () => onAssign(target, art.id, { widgetType: selectedWidget } as WidgetConfig),
-                })),
+                items: assignTargets.map((target) => {
+                  const isDisabled =
+                    target.isComposite &&
+                    target.listConstraint !== undefined &&
+                    target.listConstraint !== thisCardinality;
+                  const disabledHint = isDisabled
+                    ? thisCardinality === 'list'
+                      ? '这个区域里已有「非列表」素材，Composite 要求所有素材类型一致——请加入同为「非列表」的素材，或先清空该区域再试'
+                      : '这个区域里已有「列表」素材，Composite 要求所有素材类型一致——请加入同为「列表」的素材，或先清空该区域再试'
+                    : undefined;
+                  return {
+                    key: target.key,
+                    disabled: isDisabled,
+                    label: disabledHint ? (
+                      <Tooltip title={disabledHint} placement='right'>
+                        <span style={{ color: '#bfbfbf', cursor: 'not-allowed', display: 'block' }}>
+                          {target.label}
+                        </span>
+                      </Tooltip>
+                    ) : target.label,
+                    onClick: isDisabled ? undefined : () => onAssign(target, art.id, { widgetType: selectedWidget } as WidgetConfig),
+                  };
+                }),
               }}
               trigger={['click']}
             >
@@ -571,6 +623,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
   const artifacts = Object.values(model.slots);
   const tabs: PluginUiTab[] = pluginModel?.ui?.tabs ?? [];
   const uiSlots: Record<string, WidgetConfig> = (pluginModel?.ui?.slots ?? {}) as Record<string, WidgetConfig>;
+  const slotMap: Record<string, SlotDef> = model.slots;
 
   const validateId = (id: string): string | undefined => {
     if (!id.trim()) return t('selfEvolutionRun.artifactPanelIdErrorEmpty');
@@ -705,6 +758,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
             uiMode={uiMode}
             tabs={tabs}
             uiSlots={uiSlots}
+            slotMap={slotMap}
             onUpdate={updateArtifact}
             onDelete={handleDelete}
             onAssign={assignSlot}

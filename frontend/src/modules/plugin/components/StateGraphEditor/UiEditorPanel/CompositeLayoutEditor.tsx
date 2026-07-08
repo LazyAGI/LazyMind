@@ -137,9 +137,8 @@ const TEMPLATES: Array<{ label: string; icon: React.ReactNode; node: CompositePa
 
 function TemplatePicker({ onSelect }: { onSelect: (node: CompositePanelNode) => void }) {
   return (
-    <div className='cle-step cle-step-2'>
+    <div className='cle-step cle-step-templates'>
       <div className='cle-step-title'>
-        <span className='cle-step-badge'>1</span>
         <span>选择布局模板</span>
       </div>
       <div className='cle-templates-grid'>
@@ -194,10 +193,9 @@ export default function CompositeLayoutEditor({
       {/* Canvas (visible once template is selected) */}
       {hasLayout && tab.composite_layout && (
         <div className='cle-step cle-step-canvas'>
-          <div className='cle-step-title'>
-            <span className='cle-step-badge'>2</span>
-            <span>可视化布局画布</span>
-            <div className='cle-canvas-actions'>
+          <div className='cle-composite-desc'>
+            <div className='cle-composite-desc-header'>
+              <span className='cle-composite-desc-title'>多素材联合展示</span>
               <Tooltip title='切换布局模板（重置）'>
                 <Button
                   size='small'
@@ -209,6 +207,11 @@ export default function CompositeLayoutEditor({
                 </Button>
               </Tooltip>
             </div>
+            <p className='cle-composite-desc-text'>
+              将多个「列表」素材放入同一个 Composite 后，页码栏会统一翻页——
+              选中第 N 页时，每个素材都展示其第 N 条数据，方便对比查看。
+              加入的素材要么全部是「列表」类型，要么全部不是。
+            </p>
           </div>
           <div className='cle-canvas-wrap'>
             <CompositeCanvas

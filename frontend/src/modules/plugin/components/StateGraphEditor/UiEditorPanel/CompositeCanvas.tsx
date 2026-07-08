@@ -180,6 +180,8 @@ interface LeafPaneProps {
   slotMap: Record<string, SlotDef>;
   uiSlots: Record<string, WidgetConfig>;
   usedSlotIds: Set<string>;
+  /** Cardinality constraint from sibling slots already bound in this composite. */
+  listConstraint?: 'list' | 'single';
   onChange: (updated: CompositePanelNode) => void;
   onRemove?: () => void;
   onSplitRow?: () => void;
@@ -187,12 +189,13 @@ interface LeafPaneProps {
   style?: CSSProperties;
 }
 
-function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSplitCol, style }: LeafPaneProps) {
+function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSplitCol, style, listConstraint }: LeafPaneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [activeTabIdx, setActiveTabIdx] = useState(0);
   const [renamingTabIdx, setRenamingTabIdx] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [pendingDropSlotId, setPendingDropSlotId] = useState<string | null>(null);
+  const [listConflictSlotId, setListConflictSlotId] = useState<string | null>(null);
   const [renamingBlock, setRenamingBlock] = useState(false);
   const [blockLabelValue, setBlockLabelValue] = useState('');
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -232,6 +235,16 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
     setIsDragOver(false);
     const slotId = e.dataTransfer.getData('application/x-slot-id');
     if (!slotId) return;
+
+    // Check list constraint
+    if (listConstraint !== undefined) {
+      const def = slotMap[slotId];
+      const incomingCardinality: 'list' | 'single' = def?.cardinality === 'list' ? 'list' : 'single';
+      if (incomingCardinality !== listConstraint) {
+        setListConflictSlotId(slotId);
+        return;
+      }
+    }
 
     // Check if the target already has a slot
     const targetHasSlot = isTabsNode
@@ -324,6 +337,22 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
         width={360}
       >
         此分块已绑定素材，确定要替换为新素材吗？
+      </Modal>
+
+      {/* List constraint conflict modal */}
+      <Modal
+        open={!!listConflictSlotId}
+        title='素材类型不兼容'
+        okText='我知道了'
+        cancelButtonProps={{ style: { display: 'none' } }}
+        onOk={() => setListConflictSlotId(null)}
+        onCancel={() => setListConflictSlotId(null)}
+        centered
+        width={400}
+      >
+        {listConstraint === 'list'
+          ? '这个 Composite 区域里已有「列表」素材。要保持同步翻页，所有素材必须同为「列表」类型。请改为拖入「列表」素材，或先清空区域内已有素材再重新选择。'
+          : 'Composite 区域里已有「非列表」素材。所有素材必须类型一致，请改为拖入「非列表」素材，或先清空区域内已有素材再重新选择。'}
       </Modal>
 
       {/* Toolbar */}
@@ -506,8 +535,35 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
 }
 
 // ---------------------------------------------------------------------------
-// Collect all used slot ids from a tree node
+// Collect list constraint from the tree (based on already-bound non-empty slots)
 // ---------------------------------------------------------------------------
+
+function collectListConstraint(node: CompositePanelNode, slotMap: Record<string, SlotDef>): 'list' | 'single' | undefined {
+  function walk(n: CompositePanelNode): 'list' | 'single' | undefined {
+    if (n.slot) {
+      const def = slotMap[n.slot];
+      if (def) return def.cardinality === 'list' ? 'list' : 'single';
+    }
+    if (n.tabs) {
+      for (const t of n.tabs) {
+        if (t.slot) {
+          const def = slotMap[t.slot];
+          if (def) return def.cardinality === 'list' ? 'list' : 'single';
+        }
+      }
+    }
+    if (n.children) {
+      for (const c of n.children) {
+        const result = walk(c);
+        if (result !== undefined) return result;
+      }
+    }
+    return undefined;
+  }
+  return walk(node);
+}
+
+
 
 function collectUsedSlotIds(node: CompositePanelNode): Set<string> {
   const ids = new Set<string>();
@@ -531,11 +587,12 @@ interface CanvasNodeProps {
   slotMap: Record<string, SlotDef>;
   uiSlots: Record<string, WidgetConfig>;
   rootUsedSlotIds: Set<string>;
+  listConstraint?: 'list' | 'single';
   onUpdate: (updated: CompositePanelNode) => void;
   onDelete?: () => void;
 }
 
-function CanvasNode({ node, parentDirection, depth = 0, slotMap, uiSlots, rootUsedSlotIds, onUpdate, onDelete }: CanvasNodeProps) {
+function CanvasNode({ node, parentDirection, depth = 0, slotMap, uiSlots, rootUsedSlotIds, listConstraint, onUpdate, onDelete }: CanvasNodeProps) {
   const elRef = useRef<HTMLDivElement>(null);
   const isLeaf = !node.direction && !node.children?.length;
 
@@ -560,6 +617,7 @@ function CanvasNode({ node, parentDirection, depth = 0, slotMap, uiSlots, rootUs
         slotMap={slotMap}
         uiSlots={uiSlots}
         usedSlotIds={rootUsedSlotIds}
+        listConstraint={listConstraint}
         onChange={onUpdate}
         onRemove={onDelete}
         onSplitRow={canSplitRow ? () => handleSplit('row') : undefined}
@@ -622,6 +680,7 @@ function CanvasNode({ node, parentDirection, depth = 0, slotMap, uiSlots, rootUs
             slotMap={slotMap}
             uiSlots={uiSlots}
             rootUsedSlotIds={rootUsedSlotIds}
+            listConstraint={listConstraint}
             onUpdate={(u) => handleUpdateChild(idx, u)}
             onDelete={children.length > 1 ? () => handleDeleteChild(idx) : undefined}
           />
@@ -648,6 +707,7 @@ export default function CompositeCanvas({
   onChange,
 }: Props) {
   const computedUsedSlotIds = externalUsedSlotIds ?? collectUsedSlotIds(node);
+  const listConstraint = slotMap ? collectListConstraint(node, slotMap) : undefined;
   const pageBarEl = onPageBarPositionChange ? (
     <PageBar position={pageBarPosition} onPositionChange={onPageBarPositionChange} />
   ) : null;
@@ -661,6 +721,7 @@ export default function CompositeCanvas({
           slotMap={slotMap}
           uiSlots={uiSlots}
           rootUsedSlotIds={computedUsedSlotIds}
+          listConstraint={listConstraint}
           onUpdate={onChange}
         />
       </div>

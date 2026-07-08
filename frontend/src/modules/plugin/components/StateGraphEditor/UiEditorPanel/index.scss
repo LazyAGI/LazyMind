@@ -344,6 +344,38 @@
 
 .cle-canvas-actions { margin-left: auto; }
 
+// ─── Composite desc block ─────────────────────────────────────────────────────
+.cle-composite-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: #f0f5ff;
+  border: 1px solid #bfd3f5;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.cle-composite-desc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cle-composite-desc-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1677ff;
+}
+
+.cle-composite-desc-text {
+  font-size: 12px;
+  color: #595959;
+  line-height: 1.6;
+  margin: 0;
+}
+
 .cle-canvas-wrap {
   flex: 1;
   overflow: hidden;
