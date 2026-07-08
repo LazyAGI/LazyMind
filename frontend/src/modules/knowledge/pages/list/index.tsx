@@ -1,4 +1,4 @@
-import { FC, useState, useEffect, useRef, MouseEvent } from "react";
+import { FC, useState, useEffect, useRef, useCallback, useMemo, MouseEvent } from "react";
 import {
   Alert,
   Button,
@@ -9,6 +9,8 @@ import {
   TablePaginationConfig,
   Select,
   Tag,
+  Space,
+  Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useNavigate } from "react-router-dom";
@@ -49,15 +51,36 @@ import { ListPageTable } from "@/components/ui";
 import EditTags from "@/modules/knowledge/pages/detail/components/KnowledgeTable/editTags";
 import type { TreeNode } from "@/modules/knowledge/pages/detail/components/KnowledgeTable";
 import { useTranslation } from "react-i18next";
-import { axiosInstance, BASE_URL } from "@/components/request";
+import { axiosInstance, BASE_URL, getLocalizedErrorMessage } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
 import {
   fetchModelFeatures,
   isImageEmbedRequired,
   MODEL_FEATURES_CHANGED_EVENT,
 } from "@/hooks/useModelFeatures";
+import { dataSourceScanApi } from "@/modules/dataSource/api/clients";
+import type { DataSourceItem, SourceType } from "@/modules/dataSource/constants/types";
+import { sourceTypeOptions } from "@/modules/dataSource/constants/sourceTypeOptions";
+import { mapScanSourceToDataSource } from "@/modules/dataSource/mappers/scanSourceToDataSource";
+import {
+  getFirstScanBinding,
+  type ScanV2Binding,
+  type ScanV2Source,
+} from "@/modules/dataSource/utils/scanAccessors";
+import {
+  getConnectionMeta,
+  getSourceTypeTitle,
+  getStatusMeta,
+  getSyncModeLabel,
+  normalizeDataSourceStatus,
+} from "@/modules/dataSource/utils/status";
 
 import "./index.scss";
+import "@/modules/dataSource/index.scss";
+
+const { Text } = Typography;
+
+type SourceCategory = "local" | "cloudArchive";
 
 type DocRow = {
   dataset_id?: string;
@@ -79,6 +102,10 @@ const KnowledgePage: FC = () => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const knowledgeSourceOptions = [
+    { value: "local", label: t("knowledge.localCreated") },
+    { value: "cloudArchive", label: t("knowledge.cloudArchiveCreated") },
+  ];
 
   const DocumentStageEnum = {
     WAITING: t("knowledge.stageParsing"),
@@ -115,6 +142,8 @@ const KnowledgePage: FC = () => {
   // Keep a local default option to avoid label flicker while tags are loading.
   const [tags, setTags] = useState<string[]>([ALL_TAGS]);
   const [knowledgeType, setKnowledgeType] = useState<string>("knowledgeBase");
+  const [sourceCategory, setSourceCategory] = useState<SourceCategory>("local");
+  const [cloudSources, setCloudSources] = useState<DataSourceItem[]>([]);
   const [showTagEditModal, setShowTagEditModal] = useState(false);
   const [tagEditRecord, setTagEditRecord] = useState<DocRow | null>(null);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
@@ -127,6 +156,9 @@ const KnowledgePage: FC = () => {
       getTableData();
     },
   });
+  const cloudSourceRequestSeqRef = useRef(0);
+  const isCloudArchiveView =
+    knowledgeType === "knowledgeBase" && sourceCategory === "cloudArchive";
   const createActionDisabled =
     embeddingReady === false || multimodalEmbeddingReady === false;
   const createActionDisabledTooltip = isAdmin ? (
@@ -217,7 +249,241 @@ const KnowledgePage: FC = () => {
     if (knowledgeType) {
       getTableData(1, pagination.pageSize);
     }
-  }, [knowledgeType]);
+  }, [knowledgeType, sourceCategory]);
+
+  const loadCloudSources = useCallback(
+    async (page = 1, pageSize = 10, keyword = "") => {
+      const requestSeq = cloudSourceRequestSeqRef.current + 1;
+      cloudSourceRequestSeqRef.current = requestSeq;
+      setLoading(true);
+
+      try {
+        const sourcesResponse = await dataSourceScanApi.listSources({
+          page,
+          pageSize,
+          keyword: keyword.trim() || undefined,
+        });
+        const sourceList = (sourcesResponse.data.items || []) as ScanV2Source[];
+        const nextSources = sourceList
+          .filter((source) => normalizeDataSourceStatus(source.status) !== "deleted")
+          .map((source) => mapScanSourceToDataSource(source, t));
+
+        if (cloudSourceRequestSeqRef.current !== requestSeq) {
+          return;
+        }
+
+        setCloudSources(nextSources);
+        setPagination({
+          current: page,
+          pageSize,
+          total: Number(sourcesResponse.data.total || 0),
+        });
+      } catch (error) {
+        if (cloudSourceRequestSeqRef.current !== requestSeq) {
+          return;
+        }
+        setCloudSources([]);
+        setPagination({
+          current: page,
+          pageSize,
+          total: 0,
+        });
+        message.error(
+          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+            t("common.requestFailed"),
+        );
+      } finally {
+        if (cloudSourceRequestSeqRef.current === requestSeq) {
+          setLoading(false);
+        }
+      }
+    },
+    [t],
+  );
+
+  const resolveCloudArchiveDatasetId = useCallback((record: DataSourceItem) => {
+    return `${record.datasetId || ""}`.trim();
+  }, []);
+
+  const navigateToKnowledgeDetail = useCallback(
+    (record: DataSourceItem) => {
+      const datasetId = resolveCloudArchiveDatasetId(record);
+      if (!datasetId) {
+        message.warning(t("knowledge.noData"));
+        return;
+      }
+      navigate({
+        pathname: `/lib/knowledge/detail/${datasetId}`,
+      });
+    },
+    [navigate, resolveCloudArchiveDatasetId, t],
+  );
+
+  const handleCloudArchiveEdit = useCallback(
+    async (record: DataSourceItem) => {
+      const sourceId = `${record.id || ""}`.trim();
+      if (!sourceId) {
+        message.warning(t("admin.dataSourceDetailNotFound"));
+        return;
+      }
+
+      try {
+        const [detailResponse, summaryResponse] = await Promise.all([
+          dataSourceScanApi.getSource({ sourceId }),
+          dataSourceScanApi.getSourceSummary({ sourceId }).catch(() => null),
+        ]);
+        const detailSource = {
+          ...record,
+          ...detailResponse.data.source,
+          summary: summaryResponse?.data,
+        } as ScanV2Source;
+        const bindings = (detailResponse.data.bindings || []) as ScanV2Binding[];
+        const mappedRecord = mapScanSourceToDataSource(
+          detailSource,
+          t,
+          record,
+          getFirstScanBinding(bindings),
+          bindings,
+        );
+        syncCreateVm.openEditWizard(mappedRecord);
+      } catch (error) {
+        message.error(
+          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+            t("common.requestFailed"),
+        );
+      }
+    },
+    [syncCreateVm, t],
+  );
+
+  const handleCloudArchiveDelete = useCallback(
+    (record: DataSourceItem) => {
+      const datasetId = resolveCloudArchiveDatasetId(record);
+      if (!datasetId) {
+        message.warning(t("knowledge.noData"));
+        return;
+      }
+
+      const knowledgeName = record.knowledgeBase || record.name || datasetId;
+      confirmRef.current?.onOpen({
+        id: datasetId,
+        title: t("knowledge.deleteTitle", { name: knowledgeName }),
+        content: t("knowledge.deleteContent"),
+        confirmText: t("knowledge.deleteConfirmText", {
+          name: knowledgeName,
+        }),
+      });
+    },
+    [resolveCloudArchiveDatasetId, t],
+  );
+
+  const cloudSourceColumns = useMemo<ColumnsType<DataSourceItem>>(
+    () => [
+      {
+        title: t("knowledge.knowledgeBaseName"),
+        dataIndex: "name",
+        key: "name",
+        width: 260,
+        render: (_value, record) => (
+          <div className="data-source-table-name">
+            <span className={`data-source-icon data-source-icon-${record.type}`}>
+              {sourceTypeOptions.find((item) => item.type === record.type)?.icon}
+            </span>
+            <div className="data-source-table-copy">
+              <Button
+                type="link"
+                className="data-source-link-button"
+                onClick={() => navigateToKnowledgeDetail(record)}
+              >
+                {record.name}
+              </Button>
+              <Tooltip title={record.description} placement="topLeft">
+                <Text type="secondary" className="data-source-ellipsis" tabIndex={0}>
+                  {record.description}
+                </Text>
+              </Tooltip>
+            </div>
+          </div>
+        ),
+      },
+      {
+        title: t("admin.dataSourceTableType"),
+        dataIndex: "type",
+        key: "type",
+        width: 150,
+        render: (type: SourceType) => (
+          <Tag className="data-source-type-tag">{getSourceTypeTitle(type, t)}</Tag>
+        ),
+      },
+      {
+        title: t("admin.dataSourceTableSyncStrategy"),
+        key: "syncMode",
+        width: 190,
+        render: (_value, record) => (
+          <div className="data-source-sync-cell">
+            <Text strong>{getSyncModeLabel(record.syncMode, t)}</Text>
+            <Text type="secondary">{record.scheduleLabel}</Text>
+          </div>
+        ),
+      },
+      {
+        title: t("admin.dataSourceTableConnectionStatus"),
+        key: "status",
+        width: 110,
+        render: (_value, record) => {
+          const statusMeta = getStatusMeta(record.status, t);
+          const connectionMeta = getConnectionMeta(record.connectionState, t);
+          return (
+            <Space direction="vertical" size={4}>
+              <Tag color={statusMeta.color}>{statusMeta.text}</Tag>
+              <Tag color={connectionMeta.color}>{connectionMeta.text}</Tag>
+            </Space>
+          );
+        },
+      },
+      {
+        title: t("admin.dataSourceTableLastSync"),
+        key: "lastSync",
+        width: 180,
+        render: (_value, record) => (
+          <div className="data-source-sync-cell">
+            <Text>{record.lastSync}</Text>
+            <Text type="secondary">{record.nextSync}</Text>
+          </div>
+        ),
+      },
+      {
+        title: t("common.actions"),
+        key: "actions",
+        width: 140,
+        fixed: "right",
+        className: "data-source-action-column",
+        render: (_value, record) => (
+          <Flex gap={10} wrap align="center">
+            <Button
+              className="link-btn"
+              type="link"
+              onClick={() => {
+                void handleCloudArchiveEdit(record);
+              }}
+            >
+              {t("common.edit")}
+            </Button>
+            <Button
+              className="link-btn"
+              type="link"
+              danger
+              onClick={() => handleCloudArchiveDelete(record)}
+            >
+              {t("common.delete")}
+            </Button>
+          </Flex>
+        ),
+      },
+    ],
+    [handleCloudArchiveDelete, handleCloudArchiveEdit, navigateToKnowledgeDetail, t],
+  );
+
   const handleOpenTagEdit = (record: DocRow) => {
     setTagEditRecord(record);
     setShowTagEditModal(true);
@@ -577,6 +843,7 @@ const KnowledgePage: FC = () => {
 
   const initData = () => {
     setDataSource([]);
+    setCloudSources([]);
     setPagination({
       current: 1,
       pageSize: 10,
@@ -586,6 +853,11 @@ const KnowledgePage: FC = () => {
 
   function getTableData(page = 1, pageSize = pagination.pageSize) {
     const values = form.getFieldsValue();
+
+    if (knowledgeType === "knowledgeBase" && sourceCategory === "cloudArchive") {
+      void loadCloudSources(page, pageSize || 10, values.keyword || "");
+      return;
+    }
 
     const newPagination = {
       ...pagination,
@@ -612,7 +884,7 @@ const KnowledgePage: FC = () => {
         })
         .then((res) => {
           handleSuccess(
-            res.data.datasets || [],
+            (res.data.datasets as unknown as Dataset[]) || [],
             res.data.total_size || 0,
             newPagination,
           );
@@ -761,9 +1033,11 @@ const KnowledgePage: FC = () => {
       <Form className="list-header" form={form}>
         <ListPageHeader
           placeholder={
-            knowledgeType === "knowledgeBase"
-              ? t("knowledge.searchPlaceholder")
-              : t("knowledge.searchDocPlaceholder")
+            isCloudArchiveView
+              ? t("admin.dataSourceAssetSearchPlaceholder")
+              : knowledgeType === "knowledgeBase"
+                ? t("knowledge.searchPlaceholder")
+                : t("knowledge.searchDocPlaceholder")
           }
           searchKey="keyword"
           btnText={t("knowledge.createKnowledgeBase")}
@@ -778,26 +1052,47 @@ const KnowledgePage: FC = () => {
           extra={
             <>
               {knowledgeType === "knowledgeBase" && (
-                <Form.Item
-                  label={t("knowledge.tags")}
-                  name="tags"
-                  style={{ marginBottom: 0 }}
-                  initialValue={ALL_TAGS}
-                >
-                  <Select
-                    className="ghost-custom-border !w-[260px]"
-                    options={tags.map((tag) => ({
-                      label: tag === ALL_TAGS ? t("knowledge.allTags") : tag,
-                      value: tag,
-                    }))}
-                    placeholder={t("knowledge.selectTag")}
-                    allowClear
-                    variant="borderless"
-                    onChange={() => {
-                      getTableData();
-                    }}
-                  />
-                </Form.Item>
+                <>
+                  {sourceCategory === "local" && (
+                    <Form.Item
+                      label={t("knowledge.tags")}
+                      name="tags"
+                      style={{ marginBottom: 0 }}
+                      initialValue={ALL_TAGS}
+                    >
+                      <Select
+                        className="ghost-custom-border !w-[260px]"
+                        options={tags.map((tag) => ({
+                          label: tag === ALL_TAGS ? t("knowledge.allTags") : tag,
+                          value: tag,
+                        }))}
+                        placeholder={t("knowledge.selectTag")}
+                        allowClear
+                        variant="borderless"
+                        onChange={() => {
+                          getTableData();
+                        }}
+                      />
+                    </Form.Item>
+                  )}
+                  <Form.Item
+                    label={t("knowledge.sourceCategory")}
+                    name="sourceCategory"
+                    style={{ marginBottom: 0 }}
+                    initialValue="local"
+                  >
+                    <Select
+                      className="ghost-custom-border !w-[220px]"
+                      popupMatchSelectWidth={145}
+                      options={knowledgeSourceOptions}
+                      variant="borderless"
+                      onChange={(value: SourceCategory) => {
+                        setSourceCategory(value);
+                        initData();
+                      }}
+                    />
+                  </Form.Item>
+                </>
               )}
             </>
           }
@@ -810,9 +1105,13 @@ const KnowledgePage: FC = () => {
               ].map(({ key, value }) => ({ label: value, value: key }))}
               variant="borderless"
               onChange={(key) => {
-                form.resetFields(["keyword", "tags"]);
+                form.resetFields(["keyword", "tags", "sourceCategory"]);
                 initData();
-                form.setFieldsValue({ tags: ALL_TAGS });
+                form.setFieldsValue({
+                  tags: ALL_TAGS,
+                  sourceCategory: "local",
+                });
+                setSourceCategory("local");
                 setKnowledgeType(key);
               }}
               value={knowledgeType}
@@ -821,16 +1120,23 @@ const KnowledgePage: FC = () => {
         />
       </Form>
       <ListPageTable
+        className={isCloudArchiveView ? "data-source-asset-table" : undefined}
         rowKey={
-          knowledgeType === "knowledgeBase" ? "dataset_id" : "document_id"
+          isCloudArchiveView
+            ? "id"
+            : knowledgeType === "knowledgeBase"
+              ? "dataset_id"
+              : "document_id"
         }
         columns={
-          (knowledgeType === "knowledgeBase"
-            ? columns
-            : knowledgeColumns) as ColumnsType<any>
+          (isCloudArchiveView
+            ? cloudSourceColumns
+            : knowledgeType === "knowledgeBase"
+              ? columns
+              : knowledgeColumns) as ColumnsType<any>
         }
         loading={loading}
-        dataSource={dataSource}
+        dataSource={isCloudArchiveView ? cloudSources : dataSource}
         expandable={{ showExpandColumn: false }}
         pagination={{
           ...pagination,
@@ -839,6 +1145,7 @@ const KnowledgePage: FC = () => {
         }}
         onChange={onTableChange}
         scroll={{
+          x: isCloudArchiveView ? 1200 : undefined,
           y: "calc(100vh - 260px)",
         }}
       />

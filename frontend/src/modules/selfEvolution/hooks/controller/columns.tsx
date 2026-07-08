@@ -1,11 +1,54 @@
 import type { ColumnsType } from "antd/es/table";
 import type { AbComparisonRow } from "../../shared";
+import { getStepStatusLabel } from "../../shared/runtimeState";
 import type {
   TFunction,
   DatasetCasePreviewRow,
+  DatasetStreamingRow,
+  EvalStreamingRow,
   PxCaseDetailRow,
   AnalysisCasePreviewRow,
 } from "./types";
+
+export function buildEvalStreamingColumns(t: TFunction): ColumnsType<EvalStreamingRow> {
+  return [
+    { title: "case", dataIndex: "caseId", key: "caseId", width: 116 },
+    {
+      title: t("selfEvolutionRun.evalStreamingColAnswer"),
+      dataIndex: "answerStatus",
+      key: "answerStatus",
+      width: 96,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+    {
+      title: t("selfEvolutionRun.evalStreamingColJudge"),
+      dataIndex: "judgeStatus",
+      key: "judgeStatus",
+      width: 96,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+  ];
+}
+
+export function buildDatasetStreamingColumns(t: TFunction): ColumnsType<DatasetStreamingRow> {
+  return [
+    { title: "case", dataIndex: "caseId", key: "caseId", width: 116 },
+    {
+      title: t("selfEvolutionRun.datasetStreamingColPrepare"),
+      dataIndex: "prepareStatus",
+      key: "prepareStatus",
+      width: 96,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+    {
+      title: t("selfEvolutionRun.datasetStreamingColGenerate"),
+      dataIndex: "generateStatus",
+      key: "generateStatus",
+      width: 96,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+  ];
+}
 
 export function buildDatasetCaseColumns(t: TFunction): ColumnsType<DatasetCasePreviewRow> {
   return [

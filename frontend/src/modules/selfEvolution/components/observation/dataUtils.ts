@@ -2,6 +2,7 @@ import {
   buildAbSummaryReports,
   formatMaybePValue,
   getAbtestResultRecords,
+  getGateEvalCaseCount,
   getNestedRecordField,
   getNumberField,
   getResultItems,
@@ -9,6 +10,7 @@ import {
   getStructuredArrayField,
   getStructuredRecordField,
   isRecord,
+  unwrapGateEvalContent,
   type AbSummaryReport,
 } from "../../shared";
 import type {
@@ -55,7 +57,15 @@ export function normalizeBadcaseRows(t: TFunction, value: unknown): CsvBadcaseRo
       ...(getStructuredArrayField(item, ["items"]) || []),
     ]);
   const rows = candidateRows.filter(isRecord).map((item, index): CsvBadcaseRow => {
-    const score = getNumberField(item, ["score", "metric_score", "answer_correctness", "value"]) ?? 0;
+    const score =
+      getNumberField(item, [
+        "score",
+        "metric_score",
+        "answer_correctness",
+        "value",
+        "overall",
+        "correctness",
+      ]) ?? 0;
     const failureType = getStringField(item, ["failure_type", "failure_reason", "fail_reason", "category"]) || t("selfEvolutionRun.observation.pendingAnalysis");
     return {
       caseId: getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${String(index + 1).padStart(3, "0")}`,
@@ -250,6 +260,17 @@ function getPrimaryEvalReportRecord(value: unknown) {
 }
 
 export function normalizeEvalReportSummary(value: unknown): EvalReportSummary {
+  const gateRecord = unwrapGateEvalContent(value);
+  if (gateRecord) {
+    return {
+      reportId: getStringField(gateRecord, ["run_id", "algo_id"]) || "-",
+      dataset: getStringField(gateRecord, ["algo_id"]) || "-",
+      correctRate: getNumberField(gateRecord, ["correct_rate", "avg_correctness"]),
+      badCaseCount: getGateEvalCaseCount(gateRecord),
+      traceCoverageRate: undefined,
+    };
+  }
+
   const row = getPrimaryEvalReportRecord(value);
   const data = getStructuredRecordField(row, ["data"]) || getNestedRecordField(row, ["data"]);
   const metrics = getStructuredRecordField(data, ["metrics"]) || getNestedRecordField(data, ["metrics"]);

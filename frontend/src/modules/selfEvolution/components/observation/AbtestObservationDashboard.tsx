@@ -6,12 +6,16 @@ import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import {
   AGENT_API_BASE,
   buildAbSummaryReports,
-  createCoreAgentGeneratedApiClient,
+  fetchThreadGateContent,
   isCanceledRequest,
   stringifyResultPayload,
 } from "../../shared";
 import { normalizeTraceObservation } from "../TraceObservationView";
-import type { AbCaseListState, AbTraceCompareState, EvalReportsTraceState } from "./types";
+import type {
+  AbCaseListState,
+  AbTraceCompareState,
+  EvalReportsTraceState,
+} from "./types";
 import {
   AB_CASE_DETAIL_PAGE_SIZE,
   buildAbCaseTraceIdMap,
@@ -54,15 +58,20 @@ export function AbtestObservationDashboard({
     loading: false,
     loaded: false,
   });
-  const [traceCompareState, setTraceCompareState] = useState<AbTraceCompareState>({
-    loading: false,
-    loaded: false,
-  });
-  const [evalReportsState, setEvalReportsState] = useState<EvalReportsTraceState>({
-    loading: false,
-    loaded: false,
-  });
-  const traceIdMap = useMemo(() => buildAbCaseTraceIdMap(evalReportsState.data), [evalReportsState.data]);
+  const [traceCompareState, setTraceCompareState] =
+    useState<AbTraceCompareState>({
+      loading: false,
+      loaded: false,
+    });
+  const [evalReportsState, setEvalReportsState] =
+    useState<EvalReportsTraceState>({
+      loading: false,
+      loaded: false,
+    });
+  const traceIdMap = useMemo(
+    () => buildAbCaseTraceIdMap(evalReportsState.data),
+    [evalReportsState.data],
+  );
   const rows = useMemo(() => {
     if (caseState.loaded && caseState.data) {
       return normalizeAbCaseRows(t, caseState.data);
@@ -74,9 +83,13 @@ export function AbtestObservationDashboard({
     return observation?.kind === "compare" ? observation : undefined;
   }, [traceCompareState.data]);
   const [selectedCaseId, setSelectedCaseId] = useState(rows[0]?.caseId || "");
-  const selectedCase = rows.find((row) => row.caseId === selectedCaseId) || rows[0];
+  const selectedCase =
+    rows.find((row) => row.caseId === selectedCaseId) || rows[0];
   const selectedCaseItem = useMemo(
-    () => (selectedCase ? findAbCaseDetailItem(caseState.data, selectedCase.caseId) : undefined),
+    () =>
+      selectedCase
+        ? findAbCaseDetailItem(caseState.data, selectedCase.caseId)
+        : undefined,
     [caseState.data, selectedCase],
   );
 
@@ -89,15 +102,16 @@ export function AbtestObservationDashboard({
     const controller = new AbortController();
     setEvalReportsState((prev) => ({ ...prev, loading: true }));
 
-    axiosInstance
-      .get(`${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/eval-reports`, {
-        signal: controller.signal,
-      })
-      .then((response) => {
+    fetchThreadGateContent(threadId, "eval-reports", { signal: controller.signal })
+      .then((data) => {
         if (controller.signal.aborted) {
           return;
         }
-        setEvalReportsState({ loading: false, loaded: true, data: response.data });
+        setEvalReportsState({
+          loading: false,
+          loaded: true,
+          data,
+        });
       })
       .catch((error) => {
         if (isCanceledRequest(error) || controller.signal.aborted) {
@@ -126,14 +140,13 @@ export function AbtestObservationDashboard({
       error: undefined,
     }));
 
-    createCoreAgentGeneratedApiClient()
-      .apiCoreAgentThreadsThreadIdResultsAbtestsAbtestIdCaseDetailsGet(
+    axiosInstance
+      .get(
+        `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/abtests/${encodeURIComponent(abtestId)}/case-details`,
         {
-          threadId,
-          abtestId,
-          pageSize: AB_CASE_DETAIL_PAGE_SIZE,
+          params: { page_size: AB_CASE_DETAIL_PAGE_SIZE },
+          signal: controller.signal,
         },
-        { signal: controller.signal },
       )
       .then((response) => {
         if (controller.signal.aborted) {
@@ -156,7 +169,10 @@ export function AbtestObservationDashboard({
           abtestId,
           loading: false,
           loaded: true,
-          error: getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.abCaseDetailLoadFailed")),
+          error: getLocalizedErrorMessage(
+            error,
+            t("selfEvolutionRun.observation.abCaseDetailLoadFailed"),
+          ),
         }));
       });
 
@@ -167,7 +183,11 @@ export function AbtestObservationDashboard({
 
   useEffect(() => {
     if (!threadId || !selectedCase?.caseId) {
-      setTraceCompareState({ loading: false, loaded: false, error: t("selfEvolutionRun.observation.noTraceId") });
+      setTraceCompareState({
+        loading: false,
+        loaded: false,
+        error: t("selfEvolutionRun.observation.noTraceId"),
+      });
       return;
     }
     if (evalReportsState.loading || !evalReportsState.loaded) {
@@ -179,7 +199,11 @@ export function AbtestObservationDashboard({
       return;
     }
 
-    const { a: aTraceId, b: bTraceId } = resolveCaseTraceIds(selectedCaseItem, selectedCase.caseId, traceIdMap);
+    const { a: aTraceId, b: bTraceId } = resolveCaseTraceIds(
+      selectedCaseItem,
+      selectedCase.caseId,
+      traceIdMap,
+    );
     if (!aTraceId || !bTraceId || aTraceId === "-" || bTraceId === "-") {
       setTraceCompareState({
         caseId: selectedCase.caseId,
@@ -203,14 +227,13 @@ export function AbtestObservationDashboard({
       bTraceId,
     });
 
-    createCoreAgentGeneratedApiClient()
-      .apiCoreAgentThreadsThreadIdResultsTracesCompareGet(
+    axiosInstance
+      .get(
+        `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/traces-compare`,
         {
-          threadId,
-          a: aTraceId,
-          b: bTraceId,
+          params: { a: aTraceId, b: bTraceId },
+          signal: controller.signal,
         },
-        { signal: controller.signal },
       )
       .then((response) => {
         if (controller.signal.aborted) {
@@ -233,7 +256,10 @@ export function AbtestObservationDashboard({
           caseId: selectedCase.caseId,
           loading: false,
           loaded: true,
-          error: getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.abTraceCompareLoadFailed")),
+          error: getLocalizedErrorMessage(
+            error,
+            t("selfEvolutionRun.observation.abTraceCompareLoadFailed"),
+          ),
           aTraceId,
           bTraceId,
         });
@@ -262,10 +288,20 @@ export function AbtestObservationDashboard({
   return (
     <div className="self-evolution-abtest-dashboard">
       <header className="self-evolution-eval-dashboard-head">
-        <ObservationHeaderControls isMenuCollapsed={isMenuCollapsed} toggleMenu={toggleMenu} onBack={onBack} />
+        <ObservationHeaderControls
+          isMenuCollapsed={isMenuCollapsed}
+          toggleMenu={toggleMenu}
+          onBack={onBack}
+        />
         <div className="self-evolution-eval-dashboard-head-right">
           {threadId && <Tag>{`thread ${threadId}`}</Tag>}
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>{t("selfEvolutionRun.observation.refresh")}</Button>
+          <Button
+            icon={<ReloadOutlined />}
+            loading={loading}
+            onClick={onReload}
+          >
+            {t("selfEvolutionRun.observation.refresh")}
+          </Button>
         </div>
       </header>
       {notice && !loading && <Alert type="warning" showIcon message={notice} />}
@@ -296,7 +332,10 @@ export function AbtestObservationDashboard({
           />
         </div>
       ) : (
-        <section className="self-evolution-observation-json-card" aria-label={t("selfEvolutionRun.observation.rawAbDataAria")}>
+        <section
+          className="self-evolution-observation-json-card"
+          aria-label={t("selfEvolutionRun.observation.rawAbDataAria")}
+        >
           <div className="self-evolution-observation-data-head">
             <div>
               <Text strong>{t("selfEvolutionRun.observation.rawData")}</Text>

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Alert, Button, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -10,6 +10,7 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { CsvBadcaseRow, EvalReportSummary } from "./types";
+import { EVAL_BADCASE_PAGE_SIZE } from "./dataUtils";
 import { formatOptionalPercent } from "./traceUtils";
 
 const { Text, Title } = Typography;
@@ -54,7 +55,21 @@ export function EvalReportPanel({
   onReloadRows: () => void;
 }) {
   const { t } = useTranslation();
+  const [currentPage, setCurrentPage] = useState(1);
   const selectedRow = rows.find((item) => item.caseId === selectedCaseId) || rows[0];
+  const pagedRows = useMemo(() => {
+    const start = (currentPage - 1) * EVAL_BADCASE_PAGE_SIZE;
+    return rows.slice(start, start + EVAL_BADCASE_PAGE_SIZE);
+  }, [currentPage, rows]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [summary.reportId]);
+
+  useEffect(() => {
+    const lastPage = Math.max(1, Math.ceil(rows.length / EVAL_BADCASE_PAGE_SIZE));
+    setCurrentPage((page) => Math.min(page, lastPage));
+  }, [rows.length]);
   const columns: ColumnsType<CsvBadcaseRow> = [
     { title: "Case", dataIndex: "caseId", key: "caseId", width: 104 },
     {
@@ -148,9 +163,16 @@ export function EvalReportPanel({
             size="small"
             rowKey="caseId"
             columns={columns}
-            dataSource={rows}
+            dataSource={pagedRows}
             loading={rowsLoading}
-            pagination={false}
+            pagination={{
+              current: currentPage,
+              pageSize: EVAL_BADCASE_PAGE_SIZE,
+              total: rows.length,
+              showSizeChanger: false,
+              showQuickJumper: false,
+              onChange: (page) => setCurrentPage(page),
+            }}
             rowClassName={(row) => row.caseId === selectedCaseId ? "is-selected" : ""}
             scroll={{ x: 1052 }}
             onRow={(row) => ({

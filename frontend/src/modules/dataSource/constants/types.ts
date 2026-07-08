@@ -144,6 +144,7 @@ export interface DataSourceItem {
   rootPath?: string;
   targetRef?: string;
   targetRefs?: string[];
+  targetLabels?: Record<string, string>;
   targetType?: CloudTargetType;
   targetTypes?: Record<string, CloudTargetType>;
   authConnectionId?: string;

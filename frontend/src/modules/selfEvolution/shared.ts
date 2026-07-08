@@ -14,5 +14,8 @@ export * from "./shared/progress";
 export * from "./shared/runtimeState";
 export * from "./shared/dashboardActivity";
 export * from "./shared/caseProgress";
+export * from "./shared/projectionEvents";
 export * from "./shared/dashboard";
+export * from "./shared/gateApi";
+export * from "./shared/evalGateContent";
 export * from "./shared/thread";

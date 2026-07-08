@@ -1,5 +1,19 @@
 import type { ReactNode } from "react";
-import type { WorkflowResultKind, WorkflowStep } from "../../shared";
+import type { StepStatus, WorkflowResultKind, WorkflowStep } from "../../shared";
+
+export type DatasetStreamingRow = {
+  key: string;
+  caseId: string;
+  generateStatus?: StepStatus;
+  prepareStatus?: StepStatus;
+};
+
+export type EvalStreamingRow = {
+  key: string;
+  caseId: string;
+  answerStatus?: StepStatus;
+  judgeStatus?: StepStatus;
+};
 
 export type DatasetCasePreviewRow = {
   key: string;
@@ -79,6 +93,7 @@ export type EvalReportBadCasesState = {
 export type ThreadStepSummary = {
   stepId: string;
   title?: string;
+  stage?: string;
   status?: string;
   active: boolean;
   orderIndex?: number;

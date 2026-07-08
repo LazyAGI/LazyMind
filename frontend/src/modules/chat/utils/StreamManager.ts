@@ -32,6 +32,19 @@ class StreamManager {
     sse: SSE,
     callbacks: StreamCallbacks,
   ): void {
+    this.streams.forEach((existing, existingConversationId) => {
+      if (existingConversationId !== conversationId) {
+        try {
+          existing.close();
+        } catch (error) {
+          console.warn("Failed to close stale stream:", error);
+        }
+        this.streams.delete(existingConversationId);
+        this.callbacks.delete(existingConversationId);
+        this.streamStates.delete(existingConversationId);
+      }
+    });
+
     const existingStream = this.streams.get(conversationId);
     if (existingStream) {
       const oldCallbacks = this.callbacks.get(conversationId);

@@ -1,6 +1,7 @@
 import { type EvoCaseProgressGroup, type EvoCaseProgressItem, type NormalizedThreadEvent, type StepStatus, type WorkflowResultKind } from "./types";
 import { t } from "./i18n";
 import { getEventArtifactId, getEventCaseId, getEventFlowKind, getEventPayloadData, getEventRuntimeArtifactId, getNestedRecordField, getOperationRunId, getStringField } from "./fields";
+import { isTerminalThreadEvent, resolveTerminalStepStatusFromFlowStatus, getFlowStatusFromPayload } from "./threadEvents";
 
 export type CaseProgressState = {
   caseId: string;
@@ -27,7 +28,7 @@ export function getCaseProgressActionStatus(event: NormalizedThreadEvent): StepS
   const eventData = getEventPayloadData(event.payload);
   const after = getNestedRecordField(eventData, ["after"]);
   const status = getStringField(eventData, ["status"]) || getStringField(after, ["status"]);
-  if (event.action === "finish" || status === "success" || status === "ended" || status === "skipped") {
+  if (event.action === "finish" || event.action === "completed" || status === "success" || status === "ended" || status === "skipped") {
     return "done";
   }
   if (event.action === "failed" || status === "failed") {
@@ -136,6 +137,10 @@ export function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCas
     } else if (caseId && flowKind === "dataset.generate_case") {
       Object.entries(datasetGlobal).forEach(([step, value]) => updateCaseStep(datasetCases, caseId, step, value, event.timestamp));
       updateCaseStep(datasetCases, caseId, "generate", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "eval" && flowKind === "eval.answer") {
+      updateCaseStep(evalCases, caseId, "rag", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "eval" && flowKind === "eval.judge") {
+      updateCaseStep(evalCases, caseId, "judge", status, event.timestamp, artifactId);
     } else if (caseId && event.stage === "eval" && flowKind === "eval.answer_and_judge") {
       updateCaseStep(evalCases, caseId, "rag", status, event.timestamp, artifactId);
       updateCaseStep(evalCases, caseId, "judge", status, event.timestamp, artifactId);
@@ -148,6 +153,43 @@ export function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCas
       if (analysisStep) {
         updateCaseStep(analysisCases, caseId, analysisStep, status, event.timestamp, artifactId);
       }
+    }
+  });
+  const applyTerminalStageFailure = (
+    stage: EvoCaseProgressGroup["stage"],
+    cases: Map<string, CaseProgressState>,
+    steps: readonly string[],
+    terminalStatus: StepStatus,
+    updatedAt?: string,
+  ) => {
+    cases.forEach((item, caseId) => {
+      steps.forEach((step) => {
+        const current = item.steps[step];
+        if (current === "running" || current === "pending" || !current) {
+          updateCaseStep(cases, caseId, step, terminalStatus, updatedAt);
+        }
+      });
+    });
+  };
+  events.forEach((event) => {
+    if (!isTerminalThreadEvent(event.type)) {
+      return;
+    }
+    const terminalStatus = resolveTerminalStepStatusFromFlowStatus(
+      getFlowStatusFromPayload(event.payload),
+    );
+    if (terminalStatus !== "failed" && terminalStatus !== "canceled") {
+      return;
+    }
+    const stage = event.stage;
+    if (stage === "dataset") {
+      applyTerminalStageFailure("dataset", datasetCases, datasetCaseSteps, terminalStatus, event.timestamp);
+    } else if (stage === "eval") {
+      applyTerminalStageFailure("eval", evalCases, evalCaseSteps, terminalStatus, event.timestamp);
+    } else if (stage === "analysis") {
+      applyTerminalStageFailure("analysis", analysisCases, analysisCaseSteps, terminalStatus, event.timestamp);
+    } else if (stage === "abtest") {
+      applyTerminalStageFailure("abtest", abtestCases, evalCaseSteps, terminalStatus, event.timestamp);
     }
   });
   const groups: EvoCaseProgressGroup[] = [

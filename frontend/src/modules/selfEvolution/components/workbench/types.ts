@@ -12,6 +12,7 @@ import type {
   WorkflowResultKind,
   WorkflowStep as SelfEvolutionRuntimeWorkflowStep,
 } from "../../shared";
+import type { DatasetStreamingRow, EvalStreamingRow } from "../../hooks/controller/types";
 
 export type SelfEvolutionSessionSummary = {
   id: string;
@@ -87,8 +88,14 @@ export type SelfEvolutionWorkbenchViewProps = {
   onOpenCaseArtifact: (kind: WorkflowResultKind, artifactId: string, title: string, caseId?: string) => void;
   onWorkbenchTabChange: (tab?: SelfEvolutionWorkbenchTab) => void;
   onCloseArtifactPanel: () => void;
+  canViewStageArtifact?: boolean;
+  viewStageArtifactKind?: WorkflowResultKind;
   onCloseHistorySessionModal: () => void;
   onRetryThreadHistoryList: () => void;
   onCancelCreateSession: () => void;
   onConfirmCreateSession: () => void;
+  streamingDatasetRows?: DatasetStreamingRow[];
+  streamingDatasetProgress?: { current: number; total: number };
+  streamingEvalRows?: EvalStreamingRow[];
+  streamingEvalProgress?: { current: number; total: number };
 };

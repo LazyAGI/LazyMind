@@ -74,6 +74,12 @@ export function useFeishuTargetTree({
     setFeishuTargetLoading(false);
   };
 
+  const seedFeishuTargetTree = (nodes: FeishuTargetTreeNode[]) => {
+    feishuTargetRequestSeqRef.current += 1;
+    setFeishuTargetTreeData(nodes);
+    setFeishuTargetLoading(false);
+  };
+
   const loadFeishuTargetOptions = async (keyword = "") => {
     const requestSeq = feishuTargetRequestSeqRef.current + 1;
     feishuTargetRequestSeqRef.current = requestSeq;
@@ -228,5 +234,6 @@ export function useFeishuTargetTree({
     handleSearchFeishuTargetOptions,
     handleLoadFeishuTargetChildren,
     resetFeishuTargetBrowseOptions,
+    seedFeishuTargetTree,
   };
 }

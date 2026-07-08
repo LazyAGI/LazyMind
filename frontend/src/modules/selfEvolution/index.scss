@@ -1801,6 +1801,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   min-width: 0;
 
   button {
@@ -2762,6 +2763,7 @@
   font-weight: 600;
 }
 
+.self-evolution-dataset-streaming,
 .self-evolution-dataset-preview {
   margin-top: 0;
   width: 100%;
@@ -2859,6 +2861,53 @@
   .ant-table-tbody > tr > td {
     color: #4f6480;
     font-size: 12px;
+  }
+}
+
+.self-evolution-dataset-streaming-table.ant-table-wrapper {
+  .ant-table-tbody > tr > td {
+    vertical-align: top;
+  }
+}
+
+.self-evolution-dataset-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e3eefb;
+}
+
+.self-evolution-dataset-page-indicator {
+  min-width: 88px;
+  text-align: center;
+  color: #4f6480;
+  font-size: 12px;
+}
+
+.self-evolution-dataset-page-btn {
+  min-width: 72px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid #c9dcf7;
+  border-radius: 8px;
+  background: #fff;
+  color: #24507a;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    border-color: #8eb6ea;
+    background: #f3f8ff;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
   }
 }
 
@@ -5305,6 +5354,36 @@
   flex-direction: column;
   gap: 3px;
   padding: 2px 6px 8px 26px;
+}
+
+.self-evolution-artifact-item-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  &.is-active .self-evolution-artifact-item {
+    border-color: #8ebeff;
+    background: #eaf4ff;
+    box-shadow: inset 3px 0 0 #1e6dde;
+  }
+}
+
+.self-evolution-artifact-item-action {
+  align-self: flex-end;
+  border: 1px solid #c9dcf5;
+  border-radius: 999px;
+  background: #f7fbff;
+  color: #1e6dde;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 10px;
+
+  &:hover,
+  &:focus-visible {
+    background: #eaf4ff;
+    outline: none;
+  }
 }
 
 .self-evolution-artifact-item {

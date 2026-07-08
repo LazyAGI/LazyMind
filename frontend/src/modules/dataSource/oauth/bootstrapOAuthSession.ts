@@ -8,6 +8,7 @@ import {
   consumeFeishuDataSourceWizardDraft,
 } from "./storage";
 import type {
+  CloudDataSourceProvider,
   FeishuDataSourceConnection,
   FeishuDataSourceOAuthMessage,
 } from "./types";
@@ -23,6 +24,7 @@ export { consumeFeishuDataSourceWizardDraft } from "./storage";
 interface BootstrapOAuthSessionOptions {
   form: FormInstance<SourceFormValues>;
   setAuthSelectModalOpen: Dispatch<SetStateAction<boolean>>;
+  setAuthSelectProvider?: Dispatch<SetStateAction<CloudDataSourceProvider | null>>;
   setWizardMode: Dispatch<SetStateAction<"create" | "edit">>;
   setWizardOpen: Dispatch<SetStateAction<boolean>>;
   setWizardStep: Dispatch<SetStateAction<number>>;
@@ -42,6 +44,7 @@ interface BootstrapOAuthSessionOptions {
 export function bootstrapOAuthSession({
   form,
   setAuthSelectModalOpen,
+  setAuthSelectProvider,
   setWizardMode,
   setWizardOpen,
   setWizardStep,
@@ -63,6 +66,9 @@ export function bootstrapOAuthSession({
     const normalizedWizardStep = Math.min(Math.max(draft.wizardStep, 0), 1);
     if (draft.authSelectModalOpen !== undefined) {
       setAuthSelectModalOpen(Boolean(draft.authSelectModalOpen));
+    }
+    if (setAuthSelectProvider && draft.authSelectProvider) {
+      setAuthSelectProvider(draft.authSelectProvider);
     }
     setWizardMode(draft.wizardMode);
     setWizardOpen(shouldOpenWizardFromDraft(draft, storedResult?.status === "success"));

@@ -27,7 +27,9 @@ import { parseFeishuOAuthCallbackInput } from "../../utils/feishuAccount";
 import { mapScanSyncDetail } from "../../mappers/scanDocument";
 import {
   CLOUD_DOCUMENTS_FEISHU_SETUP_PATH,
+  CLOUD_DOCUMENTS_NOTION_SETUP_PATH,
 } from "@/modules/modelProvider/utils/cloudDocumentUrls";
+import type { FeishuDataSourceWizardDraft } from "@/modules/dataSource/common/feishuOAuth";
 import type { ManagementContext } from "./context";
 
 export function createWizardFlow(ctx: ManagementContext) {
@@ -37,6 +39,7 @@ export function createWizardFlow(ctx: ManagementContext) {
     form,
     setCreateProviderModalOpen,
     setAuthSelectModalOpen,
+    setAuthSelectProvider,
     setWizardMode,
     setEditingId,
     setWizardStep,
@@ -48,6 +51,23 @@ export function createWizardFlow(ctx: ManagementContext) {
     setManualOauthCallbackValue,
     setManualOauthSubmitting,
   } = ctx;
+
+  const buildAuthSelectWizardDraft = (
+    provider: CloudDataSourceProvider,
+  ): FeishuDataSourceWizardDraft => ({
+    authSelectModalOpen: true,
+    authSelectProvider: provider,
+    wizardOpen: false,
+    wizardStep: ctx.wizardStep,
+    wizardMode: ctx.wizardMode,
+    selectedType: ctx.selectedType,
+    editingId: ctx.editingId,
+    validatedAgentId: ctx.validatedAgentId,
+    oauthState: ctx.oauthState,
+    connectionVerified: ctx.connectionVerified,
+    oauthConnection: ctx.oauthConnection,
+    formValues: form.getFieldsValue(true),
+  });
 
   const handleSelectType = (type: SourceType) => {
     if (type === "local" && !ctx.canCreateLocalSource) {
@@ -122,6 +142,7 @@ export function createWizardFlow(ctx: ManagementContext) {
     setEditingId(null);
     setCreateProviderModalOpen(false);
     setAuthSelectModalOpen(false);
+    setAuthSelectProvider(null);
     ctx.applySourceType(type);
     setWizardStep(1);
     setWizardOpen(true);
@@ -146,13 +167,15 @@ export function createWizardFlow(ctx: ManagementContext) {
 
     if (type === "feishu" && ctx.isFeishuAuthValid) {
       setCreateProviderModalOpen(false);
+      setAuthSelectProvider("feishu");
       setAuthSelectModalOpen(true);
       return;
     }
 
     if (type === "notion" && ctx.isNotionAuthValid) {
       setCreateProviderModalOpen(false);
-      openSourceCreateWizard("notion", { connection: ctx.notionOauthConnection });
+      setAuthSelectProvider("notion");
+      setAuthSelectModalOpen(true);
       return;
     }
 
@@ -180,28 +203,42 @@ export function createWizardFlow(ctx: ManagementContext) {
     connection: FeishuDataSourceConnection,
   ) => {
     setAuthSelectModalOpen(false);
+    setAuthSelectProvider(null);
     openSourceCreateWizard("feishu", { connection });
+  };
+
+  const handleSelectNotionAuthConnection = (
+    connection: FeishuDataSourceConnection,
+  ) => {
+    setAuthSelectModalOpen(false);
+    setAuthSelectProvider(null);
+    openSourceCreateWizard("notion", { connection });
   };
 
   const handleManageFeishuAuth = () => {
     ctx.openCloudSetupModal("feishu", "auth");
   };
 
+  const handleAddFeishuAuthFromSelect = () => {
+    saveFeishuDataSourceWizardDraft(buildAuthSelectWizardDraft("feishu"));
+    setAuthSelectModalOpen(false);
+    ctx.openCloudSetupModal("feishu", "auth");
+  };
+
+  const handleAddNotionAuthFromSelect = () => {
+    saveFeishuDataSourceWizardDraft(buildAuthSelectWizardDraft("notion"));
+    setAuthSelectModalOpen(false);
+    ctx.openCloudSetupModal("notion", "auth");
+  };
+
   const handleOpenFeishuGuideFromAuthSelect = () => {
-    saveFeishuDataSourceWizardDraft({
-      authSelectModalOpen: true,
-      wizardOpen: false,
-      wizardStep: ctx.wizardStep,
-      wizardMode: ctx.wizardMode,
-      selectedType: ctx.selectedType,
-      editingId: ctx.editingId,
-      validatedAgentId: ctx.validatedAgentId,
-      oauthState: ctx.oauthState,
-      connectionVerified: ctx.connectionVerified,
-      oauthConnection: ctx.oauthConnection,
-      formValues: form.getFieldsValue(true),
-    });
+    saveFeishuDataSourceWizardDraft(buildAuthSelectWizardDraft("feishu"));
     navigate(`${CLOUD_DOCUMENTS_FEISHU_SETUP_PATH}?from=create-source`);
+  };
+
+  const handleOpenNotionGuideFromAuthSelect = () => {
+    saveFeishuDataSourceWizardDraft(buildAuthSelectWizardDraft("notion"));
+    navigate(`${CLOUD_DOCUMENTS_NOTION_SETUP_PATH}?from=create-source`);
   };
 
   const handleSubmitManualOauthCallback = async () => {
@@ -413,8 +450,12 @@ export function createWizardFlow(ctx: ManagementContext) {
     openSourceCreateWizard,
     handleCreateProviderSelect,
     handleSelectFeishuAuthConnection,
+    handleSelectNotionAuthConnection,
     handleManageFeishuAuth,
+    handleAddFeishuAuthFromSelect,
+    handleAddNotionAuthFromSelect,
     handleOpenFeishuGuideFromAuthSelect,
+    handleOpenNotionGuideFromAuthSelect,
     handleSubmitManualOauthCallback,
     openDetailPage,
     openDatabaseConnectionConfig,

@@ -68,6 +68,8 @@ export function useDataSourceManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [createProviderModalOpen, setCreateProviderModalOpen] = useState(false);
   const [authSelectModalOpen, setAuthSelectModalOpen] = useState(false);
+  const [authSelectProvider, setAuthSelectProvider] =
+    useState<CloudDataSourceProvider | null>(null);
   const [oauthState, setOauthState] = useState<OAuthState>("pending");
   const [connectionVerified, setConnectionVerified] = useState(false);
   const [oauthConnection, setOauthConnection] =
@@ -86,6 +88,7 @@ export function useDataSourceManagement() {
   );
   const [notionOauthConnection, setNotionOauthConnection] =
     useState<FeishuDataSourceConnection | null>(null);
+  const [notionAuthAccounts, setNotionAuthAccounts] = useState<FeishuAuthAccount[]>([]);
   const [cloudSetupProvider, setCloudSetupProvider] =
     useState<CloudDataSourceProvider>("feishu");
   const [feishuSetupModalOpen, setFeishuSetupModalOpen] = useState(false);
@@ -128,10 +131,12 @@ export function useDataSourceManagement() {
     (account) =>
       account.status === "connected" && Boolean(account.connection?.connectionId),
   );
+  const validNotionAccounts = notionAuthAccounts.filter(
+    (account) =>
+      account.status === "connected" && Boolean(account.connection?.connectionId),
+  );
   const isFeishuAuthValid = validFeishuAccounts.length > 0;
-  const isNotionAuthValid =
-    notionOauthConnection?.status === "connected" &&
-    Boolean(notionOauthConnection.connectionId);
+  const isNotionAuthValid = validNotionAccounts.length > 0;
 
   const getPreferredLocalAgentId = () => {
     const currentLocalSource =
@@ -173,6 +178,7 @@ export function useDataSourceManagement() {
     handleSearchFeishuTargetOptions,
     handleLoadFeishuTargetChildren,
     resetFeishuTargetBrowseOptions,
+    seedFeishuTargetTree,
   } = useFeishuTargetTree({ t, feishuTargetType, getActiveFeishuAuthConnectionId });
 
   // Build the shared context once per render with all state, setters and refs,
@@ -215,6 +221,8 @@ export function useDataSourceManagement() {
     setCreateProviderModalOpen,
     authSelectModalOpen,
     setAuthSelectModalOpen,
+    authSelectProvider,
+    setAuthSelectProvider,
     cloudSetupProvider,
     setCloudSetupProvider,
     feishuSetupModalOpen,
@@ -241,6 +249,8 @@ export function useDataSourceManagement() {
     setOauthConnection,
     notionOauthConnection,
     setNotionOauthConnection,
+    notionAuthAccounts,
+    setNotionAuthAccounts,
     feishuAuthAccounts,
     setFeishuAuthAccounts,
     editingFeishuAccountId,
@@ -267,6 +277,7 @@ export function useDataSourceManagement() {
     feishuTargetTreeData,
     resetLocalPathBrowseOptions,
     resetFeishuTargetBrowseOptions,
+    seedFeishuTargetTree,
   });
   Object.assign(ctx, createListActions(ctx));
   Object.assign(ctx, createOAuthEngine(ctx));
@@ -278,6 +289,7 @@ export function useDataSourceManagement() {
     bootstrapOAuthSession({
       form,
       setAuthSelectModalOpen,
+      setAuthSelectProvider,
       setWizardMode,
       setWizardOpen,
       setWizardStep,
@@ -336,7 +348,7 @@ export function useDataSourceManagement() {
   useEffect(() => {
     void ctx.refreshSources(false);
     void ctx.refreshFeishuAuthAccounts();
-    void ctx.refreshNotionAuthConnection();
+    void ctx.refreshNotionAuthAccounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -421,6 +433,7 @@ export function useDataSourceManagement() {
     setCreateProviderModalOpen,
     authSelectModalOpen,
     setAuthSelectModalOpen,
+    authSelectProvider,
     manualOauthModalOpen,
     setManualOauthModalOpen,
     manualOauthCallbackValue,
@@ -442,6 +455,7 @@ export function useDataSourceManagement() {
     isFeishuAuthValid,
     isNotionAuthValid,
     validFeishuAccounts,
+    validNotionAccounts,
     localPathOptions,
     localPathLoading,
     loadLocalPathOptions,
@@ -457,7 +471,11 @@ export function useDataSourceManagement() {
     openSourceCreateWizard: ctx.openSourceCreateWizard,
     handleCreateProviderSelect: ctx.handleCreateProviderSelect,
     handleOpenFeishuGuideFromAuthSelect: ctx.handleOpenFeishuGuideFromAuthSelect,
+    handleAddFeishuAuthFromSelect: ctx.handleAddFeishuAuthFromSelect,
+    handleAddNotionAuthFromSelect: ctx.handleAddNotionAuthFromSelect,
     handleSelectFeishuAuthConnection: ctx.handleSelectFeishuAuthConnection,
+    handleSelectNotionAuthConnection: ctx.handleSelectNotionAuthConnection,
+    handleOpenNotionGuideFromAuthSelect: ctx.handleOpenNotionGuideFromAuthSelect,
     handleSubmitManualOauthCallback: ctx.handleSubmitManualOauthCallback,
     handleCloseWizard: ctx.handleCloseWizard,
     handleNextStep: ctx.handleNextStep,

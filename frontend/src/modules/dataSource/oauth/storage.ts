@@ -163,6 +163,19 @@ export function consumeCloudDataSourceOAuthResult(provider: CloudDataSourceProvi
   }
 }
 
+export function peekFeishuDataSourceWizardDraft(): FeishuDataSourceWizardDraft | null {
+  const raw = sessionStorage.getItem(DRAFT_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as FeishuDataSourceWizardDraft;
+  } catch {
+    return null;
+  }
+}
+
 export function saveFeishuDataSourceWizardDraft(
   payload: FeishuDataSourceWizardDraft,
 ) {

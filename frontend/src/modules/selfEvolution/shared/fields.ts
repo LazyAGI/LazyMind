@@ -66,6 +66,16 @@ export function isEmptyResultPayload(value: unknown) {
     return value.length === 0 || value.every(isEmptyResultPayload);
   }
   if (isRecord(value)) {
+    if (Array.isArray(value.cases) || typeof value.case_num === "number" || getStringField(value, ["run_id"])) {
+      return false;
+    }
+    const content = getNestedRecordField(value, ["content"]);
+    if (
+      content &&
+      (Array.isArray(content.cases) || typeof content.case_num === "number")
+    ) {
+      return false;
+    }
     const nestedItems = getResultItems(value);
     return nestedItems.length === 0 && Object.keys(value).length === 0;
   }
@@ -215,8 +225,8 @@ export function getThreadEventTypeFromPayload(payload: Record<string, unknown> |
   const directTag = getStringField(payload, ["tag", "type"]);
   const nestedTag = getStringField(eventEnvelope, ["tag", "type"]);
   const eventName =
-    getStringField(payload, ["event_name", "event", "kind", "name"]) ||
-    getStringField(eventEnvelope, ["event_name", "event", "kind", "name"]);
+    getStringField(payload, ["event_type", "eventType", "event_name", "event", "kind", "name"]) ||
+    getStringField(eventEnvelope, ["event_type", "eventType", "event_name", "event", "kind", "name"]);
   const stage =
     getStringField(payload, ["stage"]) ||
     getStringField(eventEnvelope, ["stage"]);
@@ -233,9 +243,9 @@ export function getThreadEventContentFromPayload(payload: Record<string, unknown
   const eventPayload = getEventPayloadData(eventEnvelope) || getEventPayloadData(payload);
 
   return (
-    getNestedStringField(payload, ["message", "content", "text", "reply", "thought", "delta"]) ||
-    getNestedStringField(eventEnvelope, ["message", "content", "text", "reply", "thought", "delta"]) ||
-    getNestedStringField(eventPayload, ["message", "content", "text", "reply", "thought", "delta"])
+    getNestedStringField(payload, ["message", "content", "text", "reply", "thought", "delta", "assistant_text"]) ||
+    getNestedStringField(eventEnvelope, ["message", "content", "text", "reply", "thought", "delta", "assistant_text"]) ||
+    getNestedStringField(eventPayload, ["message", "content", "text", "reply", "thought", "delta", "assistant_text"])
   );
 }
 
@@ -247,18 +257,23 @@ export function getOperationRunId(payload: Record<string, unknown> | undefined) 
 
 export function getEventFlowKind(payload: Record<string, unknown> | undefined) {
   const data = getEventPayloadData(payload);
-  const value = getStringField(data, ["flow_kind"]) || getStringField(payload, ["flow_kind"]);
+  const value =
+    getStringField(payload, ["event_type", "eventType"]) ||
+    getStringField(data, ["flow_kind"]) ||
+    getStringField(payload, ["flow_kind"]);
   return ({
     load_corpus: "dataset.load_corpus",
     build_corpus_snapshot: "dataset.build_corpus_snapshot",
     generate_case: "dataset.generate_case",
+    prepare_case: "dataset.prepare_case",
     assemble: "dataset.assemble",
   } as Record<string, string>)[value || ""] || value;
 }
 
 export function getEventCaseId(payload: Record<string, unknown> | undefined) {
   const data = getEventPayloadData(payload);
-  return getStringField(data, ["case_id"]) || getStringField(payload, ["case_id"]);
+  const caseRecord = getNestedRecordField(payload, ["case"]) || getNestedRecordField(data, ["case"]);
+  return getStringField(data, ["case_id"]) || getStringField(caseRecord, ["id"]) || getStringField(payload, ["case_id"]);
 }
 
 export function getEventCaseProgress(payload: Record<string, unknown> | undefined): { current: number; total?: number } | undefined {
