@@ -79,15 +79,3 @@ export function serializePluginModel(model: PluginModel, graphModel?: GraphModel
     quotingType: '"',
   });
 }
-
-/**
- * Normalize layout value from YAML: 'list' is the legacy name for 'vertical'.
- * All other values pass through unchanged.
- */
-export function normalizeTabLayout(
-  layout: string | undefined,
-): 'vertical' | 'grid' | 'horizontal' | 'composite' | undefined {
-  if (layout === 'list') return 'vertical';
-  if (layout === 'vertical' || layout === 'grid' || layout === 'horizontal' || layout === 'composite') return layout;
-  return undefined;
-}

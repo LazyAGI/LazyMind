@@ -1,5 +1,5 @@
 import { PictureOutlined, FileOutlined } from '@ant-design/icons';
-import type { WidgetConfig, WidgetType } from '../core/pluginModel';
+import type { WidgetConfig } from '../core/pluginModel';
 import './UiWysiwygPreview.scss';
 
 const LOREM_TEXT =
@@ -179,18 +179,4 @@ export default function WidgetPlaceholder({ widgetConfig, label }: Props) {
     default:
       return null;
   }
-}
-
-/** Get a default WidgetConfig for a given slot type+cardinality. */
-export function getDefaultWidget(type: string, cardinality: string | undefined): WidgetConfig {
-  const key = `${type}/${cardinality ?? 'single'}`;
-  const widgetType: WidgetType =
-    (key === 'text/single' ? 'text-single'
-      : key === 'text/list' ? 'text-list'
-      : key === 'image/single' ? 'image-single'
-      : key === 'image/list' ? 'image-gallery'
-      : key === 'file/single' || key === 'file/list' ? 'file-card'
-      : key === 'json/single' || key === 'json/list' ? 'json-block'
-      : 'text-single');
-  return { widgetType } as WidgetConfig;
 }

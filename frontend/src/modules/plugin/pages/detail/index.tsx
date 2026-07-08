@@ -17,7 +17,7 @@ const GENERATING_STATUSES = new Set(['generating', 'skeleton_done', 'state_done'
 // state_done means plugin.yaml + state.yml are ready even though Phase 3 is still running.
 const EDITOR_READY_STATUSES = new Set(['state_done', 'done']);
 
-type GeneratePhase = 'skeleton' | 'state_machine' | 'scenario_scripts' | 'done' | 'failed' | 'idle';
+type GeneratePhase = 'skeleton' | 'scenario_scripts' | 'done' | 'failed' | 'idle';
 
 function resolvePhase(status: string): GeneratePhase {
   switch (status) {
@@ -37,7 +37,6 @@ function resolvePhase(status: string): GeneratePhase {
 
 const PHASE_MESSAGES: Record<GeneratePhase, string> = {
   skeleton: 'AI 正在分析需求、生成插件骨架（slots / steps）…',
-  state_machine: 'AI 正在生成状态机执行逻辑（transitions / prompts）…',
   scenario_scripts: 'AI 正在生成 scenario.md 与脚本文件，编辑器可以提前使用…',
   done: '',
   failed: '',
