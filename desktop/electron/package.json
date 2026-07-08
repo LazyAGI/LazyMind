@@ -1,6 +1,8 @@
 {
   "name": "lazymind-desktop",
   "version": "0.1.0",
+  "description": "Production-ready enterprise knowledge-base and RAG chat platform with automated RAG quality optimization.",
+  "author": "LazyAGI",
   "private": true,
   "main": "src/main.js",
   "type": "commonjs",
@@ -31,6 +33,7 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "icon": "assets/LazyMind.icns",
       "target": [
         "dir"
       ],

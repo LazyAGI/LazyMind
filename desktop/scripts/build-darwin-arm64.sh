@@ -6,6 +6,7 @@ BUILD_ROOT="${ROOT}/desktop/build/darwin-arm64"
 RUNTIME_ROOT="${BUILD_ROOT}/runtime"
 DIST_ROOT="${ROOT}/desktop/dist"
 APP_RUNTIME_ROOT="${DIST_ROOT}/runtime"
+APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
 
 GO_BIN="${GO:-go}"
 PNPM_BIN="${PNPM:-pnpm}"
@@ -116,6 +117,10 @@ mkdir -p "${DIST_ROOT}"
 rsync -a --delete "${RUNTIME_ROOT}/" "${APP_RUNTIME_ROOT}/"
 
 echo "==> Packaging Electron app"
+if [[ ! -f "${APP_ICON}" ]]; then
+  echo "App icon not found: ${APP_ICON}" >&2
+  exit 1
+fi
 (cd "${ROOT}/desktop/electron" && CI=true "${PNPM_BIN}" install --frozen-lockfile=false --prefer-offline)
 if ! (cd "${ROOT}/desktop/electron" && node -e 'require("electron")' >/dev/null 2>&1); then
   (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" rebuild electron)
