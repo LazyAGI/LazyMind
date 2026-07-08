@@ -3,12 +3,8 @@ import {
   ColumnWidthOutlined,
   LayoutOutlined,
   ReloadOutlined,
-  VerticalAlignTopOutlined,
-  VerticalAlignBottomOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
 } from '@ant-design/icons';
-import type { PluginUiTab, CompositePanelNode } from '../core/pluginModel';
+import type { PluginUiTab, WidgetConfig, CompositePanelNode } from '../core/pluginModel';
 import type { SlotDef } from '../core/model';
 import CompositeCanvas from './CompositeCanvas';
 
@@ -19,9 +15,66 @@ import CompositeCanvas from './CompositeCanvas';
 interface Props {
   tab: PluginUiTab;
   slotMap: Record<string, SlotDef>;
+  uiSlots: Record<string, WidgetConfig>;
   onChange: (layout: CompositePanelNode) => void;
-  onTabPositionChange: (pos: PluginUiTab['composite_tab_position']) => void;
+  onPageBarPositionChange: (pos: PluginUiTab['composite_tab_position']) => void;
 }
+
+// ---------------------------------------------------------------------------
+// SVG layout preview thumbnails
+// ---------------------------------------------------------------------------
+
+const W = 48;
+const H = 36;
+const PAD = 3;
+const R = 2;
+const FILL = '#d9e3f0';
+const STROKE = '#a0b4cc';
+
+function Rect({ x, y, w, h }: { x: number; y: number; w: number; h: number }) {
+  return <rect x={x} y={y} width={w} height={h} rx={R} fill={FILL} stroke={STROKE} strokeWidth={0.8} />;
+}
+
+const LayoutIcons: Record<string, React.ReactNode> = {
+  single: (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+      <Rect x={PAD} y={PAD} w={W - PAD * 2} h={H - PAD * 2} />
+    </svg>
+  ),
+  double: (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+      <Rect x={PAD} y={PAD} w={(W - PAD * 2 - 3) / 2} h={H - PAD * 2} />
+      <Rect x={PAD + (W - PAD * 2 - 3) / 2 + 3} y={PAD} w={(W - PAD * 2 - 3) / 2} h={H - PAD * 2} />
+    </svg>
+  ),
+  topbottom: (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+      <Rect x={PAD} y={PAD} w={W - PAD * 2} h={(H - PAD * 2 - 3) / 2} />
+      <Rect x={PAD} y={PAD + (H - PAD * 2 - 3) / 2 + 3} w={W - PAD * 2} h={(H - PAD * 2 - 3) / 2} />
+    </svg>
+  ),
+  tshape: (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+      <Rect x={PAD} y={PAD} w={W - PAD * 2} h={(H - PAD * 2) * 0.55} />
+      <Rect x={PAD} y={PAD + (H - PAD * 2) * 0.55 + 3} w={(W - PAD * 2 - 3) / 2} h={(H - PAD * 2) * 0.45 - 3} />
+      <Rect x={PAD + (W - PAD * 2 - 3) / 2 + 3} y={PAD + (H - PAD * 2) * 0.55 + 3} w={(W - PAD * 2 - 3) / 2} h={(H - PAD * 2) * 0.45 - 3} />
+    </svg>
+  ),
+  invtshape: (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+      <Rect x={PAD} y={PAD} w={(W - PAD * 2 - 3) / 2} h={(H - PAD * 2) * 0.45} />
+      <Rect x={PAD + (W - PAD * 2 - 3) / 2 + 3} y={PAD} w={(W - PAD * 2 - 3) / 2} h={(H - PAD * 2) * 0.45} />
+      <Rect x={PAD} y={PAD + (H - PAD * 2) * 0.45 + 3} w={W - PAD * 2} h={(H - PAD * 2) * 0.55 - 3} />
+    </svg>
+  ),
+  lshape: (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+      <Rect x={PAD} y={PAD} w={(W - PAD * 2) * 0.45} h={(H - PAD * 2 - 3) / 2} />
+      <Rect x={PAD} y={PAD + (H - PAD * 2 - 3) / 2 + 3} w={(W - PAD * 2) * 0.45} h={(H - PAD * 2 - 3) / 2} />
+      <Rect x={PAD + (W - PAD * 2) * 0.45 + 3} y={PAD} w={(W - PAD * 2) * 0.55 - 3} h={H - PAD * 2} />
+    </svg>
+  ),
+};
 
 // ---------------------------------------------------------------------------
 // Layout templates
@@ -30,22 +83,22 @@ interface Props {
 const TEMPLATES: Array<{ label: string; icon: React.ReactNode; node: CompositePanelNode }> = [
   {
     label: '单列',
-    icon: '▭',
+    icon: LayoutIcons.single,
     node: { direction: 'row', children: [{ slot: '', weight: 1 }] },
   },
   {
-    label: '双列',
-    icon: '▭▭',
+    label: '多列',
+    icon: LayoutIcons.double,
     node: { direction: 'row', children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
   },
   {
-    label: '上下',
-    icon: '▬/▬',
+    label: '多行',
+    icon: LayoutIcons.topbottom,
     node: { direction: 'column', children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
   },
   {
     label: 'T 形',
-    icon: '▬/▭▭',
+    icon: LayoutIcons.tshape,
     node: {
       direction: 'column',
       children: [
@@ -56,7 +109,7 @@ const TEMPLATES: Array<{ label: string; icon: React.ReactNode; node: CompositePa
   },
   {
     label: '倒 T 形',
-    icon: '▭▭/▬',
+    icon: LayoutIcons.invtshape,
     node: {
       direction: 'column',
       children: [
@@ -67,7 +120,7 @@ const TEMPLATES: Array<{ label: string; icon: React.ReactNode; node: CompositePa
   },
   {
     label: 'L 形',
-    icon: '▭/▭▭',
+    icon: LayoutIcons.lshape,
     node: {
       direction: 'row',
       children: [
@@ -79,60 +132,14 @@ const TEMPLATES: Array<{ label: string; icon: React.ReactNode; node: CompositePa
 ];
 
 // ---------------------------------------------------------------------------
-// Step 1: Page-bar position selector (required, no toggle)
-// ---------------------------------------------------------------------------
-
-function PageBarPositionStep({
-  position,
-  onPositionChange,
-}: {
-  position: PluginUiTab['composite_tab_position'];
-  onPositionChange: (pos: PluginUiTab['composite_tab_position']) => void;
-}) {
-  const positions: Array<{ value: PluginUiTab['composite_tab_position']; icon: React.ReactNode; label: string }> = [
-    { value: 'top', icon: <VerticalAlignTopOutlined />, label: '顶部' },
-    { value: 'bottom', icon: <VerticalAlignBottomOutlined />, label: '底部' },
-    { value: 'left', icon: <MenuFoldOutlined />, label: '左侧' },
-    { value: 'right', icon: <MenuUnfoldOutlined />, label: '右侧' },
-  ];
-
-  return (
-    <div className='cle-step cle-step-1'>
-      <div className='cle-step-title'>
-        <span className='cle-step-badge'>1</span>
-        <span>Page 条位置</span>
-      </div>
-      <div className='cle-tab-positions'>
-        {positions.map((p) => (
-          <Tooltip key={p.value} title={p.label}>
-            <button
-              type='button'
-              className={`cle-tab-pos-btn${position === p.value ? ' cle-tab-pos-btn--active' : ''}`}
-              onClick={() => onPositionChange(p.value)}
-              aria-pressed={position === p.value}
-            >
-              {p.icon}
-              <span>{p.label}</span>
-            </button>
-          </Tooltip>
-        ))}
-      </div>
-      <p className='cle-step-hint'>
-        Page 数量由运行时 slot 数据条数决定，此处只配置 page 条位置。
-      </p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Step 2: Template picker
+// Step 1: Template picker
 // ---------------------------------------------------------------------------
 
 function TemplatePicker({ onSelect }: { onSelect: (node: CompositePanelNode) => void }) {
   return (
     <div className='cle-step cle-step-2'>
       <div className='cle-step-title'>
-        <span className='cle-step-badge'>2</span>
+        <span className='cle-step-badge'>1</span>
         <span>选择布局模板</span>
       </div>
       <div className='cle-templates-grid'>
@@ -159,19 +166,15 @@ function TemplatePicker({ onSelect }: { onSelect: (node: CompositePanelNode) => 
 export default function CompositeLayoutEditor({
   tab,
   slotMap,
+  uiSlots,
   onChange,
-  onTabPositionChange,
+  onPageBarPositionChange,
 }: Props) {
-  // Treat layout as "set" only when there are actual children to display
   const hasLayout = !!(
     tab.composite_layout?.direction &&
     tab.composite_layout.children &&
     tab.composite_layout.children.length > 0
   );
-
-  const handleTabPositionChange = (pos: PluginUiTab['composite_tab_position']) => {
-    onTabPositionChange(pos);
-  };
 
   const handleSelectTemplate = (node: CompositePanelNode) => {
     onChange(node);
@@ -183,18 +186,12 @@ export default function CompositeLayoutEditor({
 
   return (
     <div className='cle-root'>
-      {/* Step 1: Page-bar position (required) */}
-      <PageBarPositionStep
-        position={tab.composite_tab_position ?? 'top'}
-        onPositionChange={handleTabPositionChange}
-      />
-
-      {/* Step 2: Template picker (shown until a template is selected) */}
+      {/* Step 1: Template picker (shown until a template is selected) */}
       {!hasLayout && (
         <TemplatePicker onSelect={handleSelectTemplate} />
       )}
 
-      {/* Steps 3–5: Canvas (visible once template is selected) */}
+      {/* Canvas (visible once template is selected) */}
       {hasLayout && tab.composite_layout && (
         <div className='cle-step cle-step-canvas'>
           <div className='cle-step-title'>
@@ -217,12 +214,15 @@ export default function CompositeLayoutEditor({
             <CompositeCanvas
               node={tab.composite_layout}
               slotMap={slotMap}
+              uiSlots={uiSlots}
+              pageBarPosition={tab.composite_tab_position ?? 'bottom'}
+              onPageBarPositionChange={onPageBarPositionChange}
               onChange={onChange}
             />
           </div>
           <p className='cle-step-hint'>
             <ColumnWidthOutlined /> 拖拽分割线调整各分块比例；
-            <LayoutOutlined /> 点击 Tab 按钮可将分块变为 Tab 切换区域；
+            <LayoutOutlined /> 点击「+ Tab」按钮可将分块变为 Tab 切换区域；
             将左侧素材拖入各分块完成绑定。
           </p>
         </div>

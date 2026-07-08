@@ -537,7 +537,9 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       delete snapPositionRef.current[node.id];
 
       const m = modelRef.current;
-      const newLayout = { ...m.layout, [node.id]: pos };
+      // Preserve existing width so drag-stop doesn't reset a resized node back to default.
+      const existingEntry = m.layout[node.id];
+      const newLayout = { ...m.layout, [node.id]: { ...(existingEntry ?? {}), ...pos } };
       // If we snapped, also update the ReactFlow node state so it stays at the
       // snapped position (ReactFlow resets to its own tracked pos on drag-stop).
       if (snapped) {

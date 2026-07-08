@@ -17,15 +17,12 @@ import {
   rectSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable';
-import { Button, Empty } from 'antd';
-import { CloseOutlined, FileTextOutlined } from '@ant-design/icons';
-import type { PluginUiTab, WidgetConfig, WidgetType, CompositePanelNode } from '../core/pluginModel';
-import { SLOT_DEFAULT_WIDGET } from '../core/pluginModel';
+import { Empty } from 'antd';
+import { FileTextOutlined } from '@ant-design/icons';
+import type { PluginUiTab, WidgetConfig, CompositePanelNode } from '../core/pluginModel';
 import type { SlotDef } from '../core/model';
 import { SLOT_TYPE_ICONS } from './slotTypeIcon';
 import UiWidgetCard from './UiWidgetCard';
-import WidgetSelector from './WidgetSelector';
-import WidgetConfigPanel from './WidgetConfigPanel';
 import CompositeLayoutEditor from './CompositeLayoutEditor';
 
 interface Props {
@@ -33,8 +30,10 @@ interface Props {
   slotMap: Record<string, SlotDef>;
   /** ui.slots map from PluginModel. */
   uiSlots: Record<string, WidgetConfig>;
+  gridCols?: number;
+  selectedSlotId: string | null;
+  onSelectSlot: (slotId: string | null) => void;
   onSlotsChange: (slots: Array<{ id: string }>) => void;
-  onUiSlotsChange: (slotId: string, widget: WidgetConfig | undefined) => void;
   onCompositeLayoutChange: (value: CompositePanelNode) => void;
   onCompositeTabPositionChange: (pos: PluginUiTab['composite_tab_position']) => void;
 }
@@ -43,13 +42,14 @@ export default function UiEditorCanvas({
   tab,
   slotMap,
   uiSlots,
+  gridCols,
+  selectedSlotId,
+  onSelectSlot,
   onSlotsChange,
-  onUiSlotsChange,
   onCompositeLayoutChange,
   onCompositeTabPositionChange,
 }: Props) {
   const [isDragOver, setIsDragOver] = useState(false);
-  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [overDragId, setOverDragId] = useState<string | null>(null);
 
@@ -77,11 +77,7 @@ export default function UiEditorCanvas({
 
   const handleRemove = (slotId: string) => {
     onSlotsChange(tabSlots.filter((s) => s.id !== slotId));
-    if (selectedSlotId === slotId) setSelectedSlotId(null);
-  };
-
-  const handleWidgetChange = (slotId: string, widget: WidgetConfig) => {
-    onUiSlotsChange(slotId, widget);
+    if (selectedSlotId === slotId) onSelectSlot(null);
   };
 
   const handleExternalDragOver = (e: React.DragEvent) => {
@@ -103,7 +99,10 @@ export default function UiEditorCanvas({
     if (!slotId) return;
 
     if (tab.layout === 'composite') {
-      if (!slotIds.includes(slotId)) {
+      // Only do bookkeeping here; the inner LeafPane already handled the actual drop
+      if (!e.defaultPrevented && !slotIds.includes(slotId)) {
+        onSlotsChange([...tabSlots, { id: slotId }]);
+      } else if (!slotIds.includes(slotId)) {
         onSlotsChange([...tabSlots, { id: slotId }]);
       }
     } else {
@@ -120,16 +119,8 @@ export default function UiEditorCanvas({
     : tab.layout === 'grid' ? rectSortingStrategy
     : verticalListSortingStrategy;
 
-  const selectedSlotDef = selectedSlotId ? slotMap[selectedSlotId] : undefined;
-  const selectedType = selectedSlotDef?.type ?? 'text';
-  const selectedCardinality = selectedSlotDef?.cardinality;
-  const selectedSlotKey = `${selectedType}/${selectedCardinality ?? 'single'}`;
-  const selectedDefaultWidget = (SLOT_DEFAULT_WIDGET[selectedSlotKey] ?? 'text-single') as WidgetType;
-  const selectedWidget: WidgetConfig = (selectedSlotId ? uiSlots[selectedSlotId] : undefined) ?? ({ widgetType: selectedDefaultWidget } as WidgetConfig);
-  const selectedLabel = selectedSlotDef?.label ?? selectedSlotId ?? '';
-  const selectedIcon = SLOT_TYPE_ICONS[selectedType] ?? <FileTextOutlined />;
-
   const activeDragDef = activeDragId ? slotMap[activeDragId] : undefined;
+  const isHorizontal = tab.layout === 'horizontal';
 
   if (tab.layout === 'composite') {
     return (
@@ -143,8 +134,9 @@ export default function UiEditorCanvas({
           key={`${tab.id}-composite`}
           tab={tab}
           slotMap={slotMap}
+          uiSlots={uiSlots}
           onChange={onCompositeLayoutChange}
-          onTabPositionChange={onCompositeTabPositionChange}
+          onPageBarPositionChange={onCompositeTabPositionChange}
         />
       </div>
     );
@@ -166,96 +158,64 @@ export default function UiEditorCanvas({
     );
   }
 
-  const isHorizontal = tab.layout === 'horizontal';
-
   return (
-    <div className={`uep-canvas-with-props${selectedSlotId ? ' uep-canvas-with-props--open' : ''}`}>
-      <div
-        className={`uep-canvas uep-canvas--${tab.layout ?? 'vertical'}${dropClass}`}
-        onDragOver={handleExternalDragOver}
-        onDragLeave={handleExternalDragLeave}
-        onDrop={handleDrop}
+    <div className={`uep-canvas uep-canvas--${tab.layout ?? 'vertical'}${dropClass}`}
+      onDragOver={handleExternalDragOver}
+      onDragLeave={handleExternalDragLeave}
+      onDrop={handleDrop}
+    >
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
       >
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext items={slotIds} strategy={sortingStrategy}>
-            <div className={`uep-canvas-slots uep-canvas-slots--${tab.layout ?? 'vertical'}`}>
-              {tabSlots.map((s, idx) => {
-                const isDragTarget = overDragId === s.id && activeDragId !== s.id;
-                const activeIdx = slotIds.indexOf(activeDragId ?? '');
-                const showBefore = isDragTarget && activeIdx > idx;
-                const showAfter = isDragTarget && activeIdx < idx;
+        <SortableContext items={slotIds} strategy={sortingStrategy}>
+          <div
+            className={`uep-canvas-slots uep-canvas-slots--${tab.layout ?? 'vertical'}`}
+            style={tab.layout === 'grid' && gridCols ? { '--uep-grid-cols': `repeat(${gridCols}, 1fr)` } as React.CSSProperties : undefined}
+          >
+            {tabSlots.map((s, idx) => {
+              const isDragTarget = overDragId === s.id && activeDragId !== s.id;
+              const activeIdx = slotIds.indexOf(activeDragId ?? '');
+              const showBefore = isDragTarget && activeIdx > idx;
+              const showAfter = isDragTarget && activeIdx < idx;
 
-                return (
-                  <div
-                    key={s.id}
-                    className={`uep-widget-card-wrapper${isDragTarget ? ' uep-widget-card-wrapper--drag-over' : ''}`}
-                    data-show-before={showBefore ? (isHorizontal ? 'left' : 'top') : undefined}
-                    data-show-after={showAfter ? (isHorizontal ? 'right' : 'bottom') : undefined}
-                  >
-                    <UiWidgetCard
-                      slotId={s.id}
-                      slotDef={slotMap[s.id]}
-                      widget={uiSlots[s.id]}
-                      isSelected={selectedSlotId === s.id}
-                      onSelect={setSelectedSlotId}
-                      onRemove={handleRemove}
-                      onWidgetChange={handleWidgetChange}
-                    />
-                  </div>
-                );
-              })}
+              return (
+                <div
+                  key={s.id}
+                  className={`uep-widget-card-wrapper${isDragTarget ? ' uep-widget-card-wrapper--drag-over' : ''}`}
+                  data-show-before={showBefore ? (isHorizontal ? 'left' : 'top') : undefined}
+                  data-show-after={showAfter ? (isHorizontal ? 'right' : 'bottom') : undefined}
+                >
+                  <UiWidgetCard
+                    slotId={s.id}
+                    slotDef={slotMap[s.id]}
+                    widget={uiSlots[s.id]}
+                    isSelected={selectedSlotId === s.id}
+                    onSelect={onSelectSlot}
+                    onRemove={handleRemove}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </SortableContext>
+
+        <DragOverlay>
+          {activeDragId && tabSlots.find((s) => s.id === activeDragId) ? (
+            <div className="uep-drag-ghost">
+              <span className="uep-drag-ghost-icon">
+                {SLOT_TYPE_ICONS[activeDragDef?.type ?? 'text'] ?? <FileTextOutlined />}
+              </span>
+              <span className="uep-drag-ghost-label">
+                {activeDragDef?.label ?? activeDragId}
+              </span>
             </div>
-          </SortableContext>
-
-          <DragOverlay>
-            {activeDragId && tabSlots.find((s) => s.id === activeDragId) ? (
-              <div className="uep-drag-ghost">
-                <span className="uep-drag-ghost-icon">
-                  {SLOT_TYPE_ICONS[activeDragDef?.type ?? 'text'] ?? <FileTextOutlined />}
-                </span>
-                <span className="uep-drag-ghost-label">
-                  {activeDragDef?.label ?? activeDragId}
-                </span>
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-      </div>
-
-      {selectedSlotId && (
-        <div className="uep-props-panel">
-          <div className="uep-props-panel-header">
-            <span className="uep-props-panel-icon">{selectedIcon}</span>
-            <span className="uep-props-panel-title">{selectedLabel}</span>
-            <WidgetSelector
-              slotType={selectedType}
-              cardinality={selectedCardinality}
-              value={selectedWidget.widgetType}
-              onChange={(newType) => handleWidgetChange(selectedSlotId, { widgetType: newType } as WidgetConfig)}
-              size="small"
-            />
-            <Button
-              type="text"
-              size="small"
-              icon={<CloseOutlined />}
-              onClick={() => setSelectedSlotId(null)}
-              className="uep-props-panel-close"
-            />
-          </div>
-          <div className="uep-props-panel-body">
-            <WidgetConfigPanel
-              config={selectedWidget}
-              onChange={(next) => handleWidgetChange(selectedSlotId, next)}
-            />
-          </div>
-        </div>
-      )}
+          ) : null}
+        </DragOverlay>
+      </DndContext>
     </div>
   );
 }

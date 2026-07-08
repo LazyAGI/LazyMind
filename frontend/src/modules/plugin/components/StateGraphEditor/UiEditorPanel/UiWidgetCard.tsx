@@ -7,7 +7,6 @@ import type { WidgetConfig, WidgetType } from '../core/pluginModel';
 import { SLOT_DEFAULT_WIDGET } from '../core/pluginModel';
 import { SLOT_TYPE_ICONS } from './slotTypeIcon';
 import WidgetPlaceholder from './WidgetPlaceholder';
-import WidgetSelector from './WidgetSelector';
 
 interface Props {
   slotId: string;
@@ -16,10 +15,9 @@ interface Props {
   isSelected?: boolean;
   onSelect?: (slotId: string) => void;
   onRemove: (slotId: string) => void;
-  onWidgetChange?: (slotId: string, widget: WidgetConfig) => void;
 }
 
-export default function UiWidgetCard({ slotId, slotDef, widget, isSelected, onSelect, onRemove, onWidgetChange }: Props) {
+export default function UiWidgetCard({ slotId, slotDef, widget, isSelected, onSelect, onRemove }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: slotId });
 
@@ -38,11 +36,6 @@ export default function UiWidgetCard({ slotId, slotDef, widget, isSelected, onSe
   const defaultWidgetType = (SLOT_DEFAULT_WIDGET[slotKey] ?? 'text-single') as WidgetType;
   const activeWidget: WidgetConfig = widget ?? ({ widgetType: defaultWidgetType } as WidgetConfig);
 
-  const handleWidgetTypeChange = (newType: WidgetType) => {
-    const newWidget: WidgetConfig = { widgetType: newType } as WidgetConfig;
-    onWidgetChange?.(slotId, newWidget);
-  };
-
   return (
     <div
       ref={setNodeRef}
@@ -58,13 +51,6 @@ export default function UiWidgetCard({ slotId, slotDef, widget, isSelected, onSe
         </span>
         <span className="uep-widget-icon">{icon}</span>
         <span className="uep-widget-label">{label}</span>
-        <WidgetSelector
-          slotType={type}
-          cardinality={cardinality}
-          value={activeWidget.widgetType}
-          onChange={handleWidgetTypeChange}
-          size="small"
-        />
         <Tooltip title="从当前 Tab 移除">
           <Button
             type="text"

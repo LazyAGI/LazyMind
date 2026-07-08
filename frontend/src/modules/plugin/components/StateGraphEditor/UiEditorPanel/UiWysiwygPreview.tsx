@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Dropdown, Input, InputNumber } from 'antd';
 import type { InputRef, MenuProps } from 'antd';
 import { PlusOutlined, EllipsisOutlined } from '@ant-design/icons';
@@ -53,7 +53,6 @@ function renderCompositeNode(
   uiSlots: Record<string, WidgetConfig>,
   slotMap: Record<string, SlotDef>,
   pluginSlotMap: Record<string, PluginSlotDef>,
-  totalWeight: number,
 ): React.ReactNode {
   if (node.slot) {
     const widget = getWidgetConfig(node.slot, uiSlots, slotMap, pluginSlotMap);
@@ -91,7 +90,7 @@ function renderCompositeNode(
               className='wywp-composite-cell'
               style={node.direction === 'row' ? { flexBasis: `${pct}%`, flexGrow: child.weight ?? 1 } : { flex: child.weight ?? 1 }}
             >
-              {renderCompositeNode(child, uiSlots, slotMap, pluginSlotMap, child.weight ?? 1)}
+              {renderCompositeNode(child, uiSlots, slotMap, pluginSlotMap)}
             </div>
           );
         })}
@@ -112,8 +111,9 @@ interface TabContentProps {
   slotMap: Record<string, SlotDef>;
   pluginSlotMap: Record<string, PluginSlotDef>;
   gridCols?: number;
+  selectedSlotId?: string | null;
+  onSelectSlot?: (slotId: string | null) => void;
   onSlotsChange?: (slots: Array<{ id: string }>) => void;
-  onUiSlotsChange?: (slotId: string, widget: WidgetConfig | undefined) => void;
   onCompositeLayoutChange?: (value: CompositePanelNode) => void;
   onCompositeTabPositionChange?: (pos: PluginUiTab['composite_tab_position']) => void;
 }
@@ -124,8 +124,9 @@ function TabContent({
   slotMap,
   pluginSlotMap,
   gridCols,
+  selectedSlotId,
+  onSelectSlot,
   onSlotsChange,
-  onUiSlotsChange,
   onCompositeLayoutChange,
   onCompositeTabPositionChange,
 }: TabContentProps) {
@@ -134,14 +135,16 @@ function TabContent({
   }
 
   // Editable canvas
-  if (onSlotsChange && onUiSlotsChange && onCompositeLayoutChange && onCompositeTabPositionChange) {
+  if (onSlotsChange && onCompositeLayoutChange && onCompositeTabPositionChange) {
     return (
       <UiEditorCanvas
         tab={tab}
         slotMap={slotMap}
         uiSlots={uiSlots}
+        gridCols={gridCols}
+        selectedSlotId={selectedSlotId ?? null}
+        onSelectSlot={onSelectSlot ?? (() => {})}
         onSlotsChange={onSlotsChange}
-        onUiSlotsChange={onUiSlotsChange}
         onCompositeLayoutChange={onCompositeLayoutChange}
         onCompositeTabPositionChange={onCompositeTabPositionChange}
       />
@@ -153,7 +156,7 @@ function TabContent({
     if (tab.composite_layout?.direction) {
       return (
         <div className='wywp-layout-composite'>
-          {renderCompositeNode(tab.composite_layout, uiSlots, slotMap, pluginSlotMap, 1)}
+          {renderCompositeNode(tab.composite_layout, uiSlots, slotMap, pluginSlotMap)}
         </div>
       );
     }
@@ -194,6 +197,11 @@ interface Props {
   activeTabId?: string;
   activeLayout?: PluginUiTab['layout'];
   activeGridCols?: number;
+  editorMode?: boolean;
+  selectedSlotId?: string | null;
+  onSelectSlot?: (slotId: string | null) => void;
+  autoEditTabId?: string;
+  onAutoEditDone?: () => void;
   slotMap: Record<string, SlotDef>;
   onTabSelect?: (tabId: string) => void;
   onAddTab?: () => void;
@@ -202,7 +210,6 @@ interface Props {
   onLayoutChange?: (layout: PluginUiTab['layout']) => void;
   onGridColsChange?: (gridCols: number | null) => void;
   onSlotsChange?: (slots: Array<{ id: string }>) => void;
-  onUiSlotsChange?: (slotId: string, widget: WidgetConfig | undefined) => void;
   onCompositeLayoutChange?: (value: CompositePanelNode) => void;
   onCompositeTabPositionChange?: (pos: PluginUiTab['composite_tab_position']) => void;
 }
@@ -212,6 +219,11 @@ export default function UiWysiwygPreview({
   activeTabId,
   activeLayout = 'vertical',
   activeGridCols,
+  editorMode = false,
+  selectedSlotId,
+  onSelectSlot,
+  autoEditTabId,
+  onAutoEditDone,
   slotMap,
   onTabSelect,
   onAddTab,
@@ -220,7 +232,6 @@ export default function UiWysiwygPreview({
   onLayoutChange,
   onGridColsChange,
   onSlotsChange,
-  onUiSlotsChange,
   onCompositeLayoutChange,
   onCompositeTabPositionChange,
 }: Props) {
@@ -240,6 +251,16 @@ export default function UiWysiwygPreview({
     setEditValue(tab.label ?? tab.id);
     setTimeout(() => inputRef.current?.focus(), 30);
   };
+
+  useEffect(() => {
+    if (!autoEditTabId) return;
+    const tab = tabs.find((t) => t.id === autoEditTabId);
+    if (tab) {
+      startEdit(tab);
+      onAutoEditDone?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoEditTabId]);
 
   const commitEdit = (tabId: string) => {
     onRenameTab?.(tabId, editValue.trim() || tabId);
@@ -362,18 +383,21 @@ export default function UiWysiwygPreview({
             slotMap={slotMap}
             pluginSlotMap={pluginSlotMap}
             gridCols={activeGridCols}
+            selectedSlotId={selectedSlotId}
+            onSelectSlot={onSelectSlot}
             onSlotsChange={onSlotsChange}
-            onUiSlotsChange={onUiSlotsChange}
             onCompositeLayoutChange={onCompositeLayoutChange}
             onCompositeTabPositionChange={onCompositeTabPositionChange}
           />
         )}
       </div>
 
-      <div className="wywp-footer">
-        <button type="button" className="wywp-btn wywp-btn--ghost">重试</button>
-        <button type="button" className="wywp-btn wywp-btn--primary">继续</button>
-      </div>
+      {!editorMode && (
+        <div className="wywp-footer">
+          <button type="button" className="wywp-btn wywp-btn--ghost">重试</button>
+          <button type="button" className="wywp-btn wywp-btn--primary">继续</button>
+        </div>
+      )}
     </div>
   );
 }
