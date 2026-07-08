@@ -316,11 +316,11 @@ func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, paths RuntimeP
 	if _, ok := m.runner.(*ExecRunner); !ok {
 		return nil
 	}
+	if paths.ResourcesRoot != "" && !pathIsUnderRoot(paths.ProcessComposeBin, paths.ResourcesRoot) {
+		return fmt.Errorf("process-compose binary not found in runtime resources: %s", paths.ProcessComposeBin)
+	}
 	if info, err := os.Stat(paths.ProcessComposeBin); err == nil && !info.IsDir() {
 		return nil
-	}
-	if paths.ResourcesRoot != "" && !pathIsUnderRoot(paths.ProcessComposeBin, paths.RuntimeRoot) {
-		return fmt.Errorf("process-compose binary not found in runtime resources: %s", paths.ProcessComposeBin)
 	}
 	repoRoot := paths.RepoRoot
 	candidate := filepath.Join(repoRoot, localProcessComposeBin)

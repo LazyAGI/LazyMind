@@ -52,9 +52,9 @@ export function resolveRuntimeFeatures(
 
   return {
     hideEvo: explicitHideEvo ?? isLocalLike,
-    hideRegister: isDesktop,
-    hideCloudAdmin: isDesktop,
-    localAutoLogin: isDesktop,
+    hideRegister: isLocalLike,
+    hideCloudAdmin: isLocalLike,
+    localAutoLogin: isLocalLike,
     desktopAutoLogin: isDesktop,
     hideDesktopUserControls: isDesktop,
     allowFolderPicker: isDesktop,

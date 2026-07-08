@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -528,13 +529,20 @@ func defaultFileWatcherWatchHostDir(repoRoot string) string {
 	return filepath.Clean(raw)
 }
 
-func defaultFileWatcherBaseRoot(repoRoot string) string {
+func defaultFileWatcherBaseRoot(profile string, repoRoot string, runtimeRoot string) string {
 	raw := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_BASE_ROOT"))
 	if raw == "" {
-		raw = filepath.Join(repoRoot, "local", "runtime", "data", "stores", "scan", "file-watcher")
+		if profile == "desktop" {
+			raw = filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher")
+		} else {
+			raw = filepath.Join(repoRoot, "local", "runtime", "data", "stores", "scan", "file-watcher")
+		}
 	}
 	if filepath.IsAbs(raw) {
 		return filepath.Clean(raw)
+	}
+	if profile == "desktop" {
+		return filepath.Clean(filepath.Join(runtimeRoot, raw))
 	}
 	return filepath.Clean(filepath.Join(repoRoot, raw))
 }
@@ -723,7 +731,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		FileWatcherLog:           filepath.Join(runtimeRoot, "logs", fileWatcherProcessName+".log"),
 		FileWatcherPIDFile:       filepath.Join(runtimeRoot, "run", fileWatcherProcessName+".pid"),
 		FileWatcherBin:           filepath.Join(runtimeRoot, "bin", fileWatcherProcessName),
-		FileWatcherBaseRoot:      defaultFileWatcherBaseRoot(root),
+		FileWatcherBaseRoot:      defaultFileWatcherBaseRoot(profile, root, runtimeRoot),
 		FrontendLog:              filepath.Join(runtimeRoot, "logs", frontendLogFileName),
 		DocServerLog:             filepath.Join(runtimeRoot, "logs", docServerProcessName+".log"),
 		ProcessorServerLog:       filepath.Join(runtimeRoot, "logs", processorServerProcessName+".log"),
@@ -923,7 +931,22 @@ func defaultRuntimeRoot(profile string, repoRoot string) string {
 	if profile != "desktop" {
 		return filepath.Join(repoRoot, "local", "runtime")
 	}
-	return filepath.Join(hostHomeDir(), "Library", "Application Support", "LazyMind")
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(hostHomeDir(), "Library", "Application Support", "LazyMind")
+	case "windows":
+		appData := strings.TrimSpace(os.Getenv("APPDATA"))
+		if appData == "" {
+			appData = filepath.Join(hostHomeDir(), "AppData", "Roaming")
+		}
+		return filepath.Join(appData, "LazyMind")
+	default:
+		configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
+		if configHome == "" {
+			configHome = filepath.Join(hostHomeDir(), ".config")
+		}
+		return filepath.Join(configHome, "LazyMind")
+	}
 }
 
 func firstNonEmpty(values ...string) string {

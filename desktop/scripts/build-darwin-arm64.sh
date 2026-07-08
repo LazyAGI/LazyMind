@@ -42,7 +42,7 @@ make_internal_symlinks_relative() {
       "${root}/"*)
         local relative_target
         relative_target="$(
-          node -e 'const path = require("path"); console.log(path.relative(path.dirname(process.argv[1]), process.argv[2]) || ".")' \
+          node -e 'const path = require("path"); const [link, target] = process.argv.slice(-2); console.log(path.relative(path.dirname(link), target) || ".")' \
             "${link}" \
             "${target}"
         )"

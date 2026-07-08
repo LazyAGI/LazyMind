@@ -634,7 +634,7 @@ export default function MainLayout() {
             {desktopSessionGate.loading ? <Spin /> : null}
             <div className="desktop-session-title">LazyMind</div>
             <div className="desktop-session-message">
-              {desktopSessionGate.error || "Preparing desktop session..."}
+              {desktopSessionGate.error || t("layout.preparingDesktopSession", "Preparing desktop session...")}
             </div>
             {desktopSessionGate.error ? (
               <Button
@@ -642,7 +642,7 @@ export default function MainLayout() {
                 loading={desktopSessionGate.loading}
                 onClick={desktopSessionGate.retry}
               >
-                Retry
+                {t("common.retry", "Retry")}
               </Button>
             ) : null}
           </div>

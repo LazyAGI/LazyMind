@@ -43,7 +43,7 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	resources := filepath.Join(repo, "desktop-runtime")
-	runtimeRoot := filepath.Join(repo, "desktop-state")
+	runtimeRoot := filepath.Join(t.TempDir(), "desktop-state")
 	if err := os.MkdirAll(filepath.Join(resources, "bin"), 0o755); err != nil {
 		t.Fatalf("mkdir resources: %v", err)
 	}
@@ -96,6 +96,12 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	}
 	if paths.AlgorithmPython != filepath.Join(resources, "python", "algorithm", "bin", "python") {
 		t.Fatalf("algorithm python = %q", paths.AlgorithmPython)
+	}
+	if paths.FileWatcherBaseRoot != filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher") {
+		t.Fatalf("file watcher base root = %q", paths.FileWatcherBaseRoot)
+	}
+	if strings.HasPrefix(paths.FileWatcherBaseRoot, repo+string(os.PathSeparator)) {
+		t.Fatalf("desktop file watcher base root must not be under bundled repo root: %q", paths.FileWatcherBaseRoot)
 	}
 }
 
@@ -352,6 +358,33 @@ func TestProcessComposeGOBINIsUnderLocalRuntimeRoot(t *testing.T) {
 	want := filepath.Join(repo, "local/runtime", "bin")
 	if got != want {
 		t.Fatalf("GOBIN = %q, want %q", got, want)
+	}
+}
+
+func TestProcessComposeDesktopRequiresBundledBinaryUnderResourcesRoot(t *testing.T) {
+	root := t.TempDir()
+	wrongProcessComposeBin := filepath.Join(root, "runtime", "bin", "process-compose")
+	if err := os.MkdirAll(filepath.Dir(wrongProcessComposeBin), 0o755); err != nil {
+		t.Fatalf("mkdir wrong process-compose dir: %v", err)
+	}
+	if err := os.WriteFile(wrongProcessComposeBin, []byte("process-compose"), 0o755); err != nil {
+		t.Fatalf("write wrong process-compose binary: %v", err)
+	}
+	paths := RuntimePaths{
+		RepoRoot:           filepath.Join(root, "app"),
+		RuntimeRoot:        filepath.Join(root, "runtime"),
+		ResourcesRoot:      filepath.Join(root, "resources"),
+		ProcessComposeBin:  wrongProcessComposeBin,
+		ProcessComposeHome: filepath.Join(root, "runtime", "data", "homes", "process-compose"),
+	}
+	manager := NewProcessComposeManager(&ExecRunner{}, filepath.Join(paths.ResourcesRoot, "bin", "local-runtime-manager"))
+
+	err := manager.EnsureBinary(context.Background(), paths)
+	if err == nil {
+		t.Fatalf("expected missing desktop process-compose outside resources root to fail")
+	}
+	if !strings.Contains(err.Error(), "runtime resources") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

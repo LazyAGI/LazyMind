@@ -204,11 +204,36 @@ function startGuard() {
   if (guardProcess || !fs.existsSync(sidecarPath)) {
     return;
   }
-  guardProcess = spawn(sidecarPath, sidecarArgs("guard", ["--owner-pid", String(process.pid)]), {
-    env: sidecarShutdownEnv(),
-    stdio: "ignore",
-    detached: true,
-  });
+  ensureRuntimeDirs();
+  const shutdownLog = path.join(logsDir, "desktop-shutdown.log");
+  let errFd = "ignore";
+  try {
+    errFd = fs.openSync(shutdownLog, "a");
+    fs.appendFileSync(
+      shutdownLog,
+      `[${new Date().toISOString()}] [desktop] guard started for owner pid ${process.pid}; timeout=${desktopShutdownTimeout}\n`,
+    );
+  } catch (error) {
+    if (typeof errFd === "number") {
+      fs.closeSync(errFd);
+    }
+    appendStartupLog("error", `failed to open desktop runtime guard log: ${serializeError(error)}`);
+    errFd = "ignore";
+  }
+  try {
+    guardProcess = spawn(sidecarPath, sidecarArgs("guard", ["--owner-pid", String(process.pid)]), {
+      env: sidecarShutdownEnv(),
+      stdio: ["ignore", "ignore", errFd],
+      detached: true,
+    });
+  } catch (error) {
+    appendStartupLog("error", `failed to start desktop runtime guard: ${serializeError(error)}`);
+    return;
+  } finally {
+    if (typeof errFd === "number") {
+      fs.closeSync(errFd);
+    }
+  }
   guardProcess.once("exit", () => {
     guardProcess = null;
   });
@@ -288,6 +313,7 @@ function desktopAuthBaseUrl(status) {
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
     ...options,
+    signal: options.signal || AbortSignal.timeout(15000),
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {}),
