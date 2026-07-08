@@ -15,20 +15,6 @@ export type EvalStreamingRow = {
   judgeStatus?: StepStatus;
 };
 
-export type AbtestStreamingRow = {
-  key: string;
-  caseId: string;
-  answerStatus?: StepStatus;
-  judgeStatus?: StepStatus;
-};
-
-export type AnalysisStreamingRow = {
-  key: string;
-  caseId: string;
-  traceSummaryStatus?: StepStatus;
-  classifyCaseStatus?: StepStatus;
-};
-
 export type DatasetCasePreviewRow = {
   key: string;
   caseId: string;
@@ -47,18 +33,6 @@ export type AnalysisCasePreviewRow = {
   confidence: string;
   lossScore: string;
   quality: string;
-};
-
-export type AnalysisActionableCaseRow = {
-  key: string;
-  caseId: string;
-  issueType: string;
-  affectedBlock: string;
-  failureMode: string;
-  confidence: string;
-  reason: string;
-  clusterId: string;
-  outlierScore: string;
 };
 
 export type AnalysisCategorySummaryRow = {
