@@ -33,6 +33,8 @@ interface Props {
   onUiModelChange?: (ui: PluginModel['ui']) => void;
   /** Navigate to the tab where a slot lives. */
   onTabNavigate?: (tabId: string) => void;
+  /** When true, hide all editing controls. */
+  readonly?: boolean;
 }
 
 interface EditDraft {
@@ -403,9 +405,10 @@ interface ArtifactRowProps {
   onRemoveFromUi: (slotId: string) => void;
   onWidgetChange: (slotId: string, widget: WidgetConfig) => void;
   onTabNavigate?: (tabId: string) => void;
+  readonly?: boolean;
 }
 
-function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onDelete, onAssign, onRemoveFromUi, onWidgetChange, onTabNavigate }: ArtifactRowProps) {
+function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onDelete, onAssign, onRemoveFromUi, onWidgetChange, onTabNavigate, readonly = false }: ArtifactRowProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<EditDraft>(EMPTY_DRAFT);
@@ -499,10 +502,12 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
           {cardinalityLabel && <span className="artifact-item-cardinality">{cardinalityLabel}</span>}
         </span>
         <div className="artifact-item-actions">
-          <Button size="small" type="text" className="artifact-item-edit-btn" onClick={startEdit}>
-            {t('selfEvolutionRun.artifactPanelEdit')}
-          </Button>
-          {!uiMode && (
+          {!readonly && (
+            <Button size="small" type="text" className="artifact-item-edit-btn" onClick={startEdit}>
+              {t('selfEvolutionRun.artifactPanelEdit')}
+            </Button>
+          )}
+          {!uiMode && !readonly && (
             <Popconfirm
               title={t('selfEvolutionRun.artifactPanelDeleteConfirm', { id: art.id })}
               onConfirm={() => onDelete(art.id)}
@@ -615,7 +620,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, inline, pluginModel, onUiModelChange, onTabNavigate }: Props) {
+export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, inline, pluginModel, onUiModelChange, onTabNavigate, readonly = false }: Props) {
   const { t } = useTranslation();
   const [newDraft, setNewDraft] = useState<EditDraft>(EMPTY_DRAFT);
   const [adding, setAdding] = useState(false);
@@ -765,6 +770,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
             onRemoveFromUi={removeSlotFromUi}
             onWidgetChange={updateWidget}
             onTabNavigate={onTabNavigate}
+            readonly={readonly}
           />
         ))}
 
@@ -782,7 +788,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
         )}
       </div>
 
-      {!adding && (
+      {!adding && !readonly && (
         <div className="artifact-panel-footer">
           <Button
             type="dashed"

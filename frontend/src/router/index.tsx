@@ -49,6 +49,7 @@ import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
 
 const PluginDetailPage = lazy(() => import("@/modules/plugin/pages/detail"));
+const BuiltinPluginDetailPage = lazy(() => import("@/modules/plugin/pages/builtin-detail"));
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
@@ -162,6 +163,7 @@ export default function AppRouter() {
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
           <Route path="memory-management/plugins" element={<Navigate to="/memory-management/skills?skillView=plugins" replace />} />
+          <Route path="memory-management/plugins/builtin/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><BuiltinPluginDetailPage /></Suspense>} />
           <Route path="memory-management/plugins/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><PluginDetailPage /></Suspense>} />
           {runtimeFeatures.hideEvo ? (
             <Route

@@ -3,6 +3,7 @@ package plugin
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,19 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 )
+
+// uuidPattern matches a standard UUID v4 string (8-4-4-4-12 hex digits with hyphens).
+var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// isBuiltinPluginID returns true when id does not look like a UUID.
+// Built-in plugin IDs are human-readable strings (e.g. "image-plugin"),
+// while user draft IDs are always UUID v4 strings generated on creation.
+// This check is a first-line defence; the DB query's WHERE created_by=userID
+// would reject any mistaken match anyway, but returning 403 explicitly avoids
+// confusing "not found" responses and makes the intent clear.
+func isBuiltinPluginID(id string) bool {
+	return !uuidPattern.MatchString(strings.ToLower(id))
+}
 
 // draftResponse is the JSON shape returned for a single PluginDraft.
 type draftResponse struct {
@@ -179,6 +193,10 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "draft_id required", http.StatusBadRequest)
 		return
 	}
+	if isBuiltinPluginID(draftID) {
+		common.ReplyErr(w, "built-in plugins cannot be modified", http.StatusForbidden)
+		return
+	}
 
 	var body struct {
 		Content            *string `json:"content"`
@@ -256,6 +274,10 @@ func DeletePluginDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "draft_id required", http.StatusBadRequest)
 		return
 	}
+	if isBuiltinPluginID(draftID) {
+		common.ReplyErr(w, "built-in plugins cannot be modified", http.StatusForbidden)
+		return
+	}
 
 	result := store.DB().Where("id = ? AND created_by = ?", draftID, userID).Delete(&orm.PluginDraft{})
 	if result.Error != nil {
@@ -279,6 +301,10 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 	userID := common.UserID(r)
 	if draftID == "" {
 		common.ReplyErr(w, "draft_id required", http.StatusBadRequest)
+		return
+	}
+	if isBuiltinPluginID(draftID) {
+		common.ReplyErr(w, "built-in plugins cannot be modified", http.StatusForbidden)
 		return
 	}
 

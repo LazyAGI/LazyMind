@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button, Checkbox, Input, Select, Switch, Tooltip } from 'antd';
 import {
   CloseOutlined,
@@ -14,9 +14,13 @@ import { VIRTUAL_END, VIRTUAL_START, isHiddenId } from '../core/model';
 import type { PluginModel } from '../core/pluginModel';
 import type { ScenarioData } from '../ScenarioEditor';
 import PromptEditor from './PromptEditor';
+import { listToolAssets } from '@/modules/memory/toolApi';
 import './NodePropertiesPanel.scss';
 
 const STEP_ID_REGEX = /^[a-zA-Z0-9_]+$/;
+
+// Module-level cache so the tool list is fetched once per session.
+let _cachedSystemTools: Array<{ label: string; name: string }> | null = null;
 
 interface Props {
   node: StepNode;
@@ -32,6 +36,8 @@ interface Props {
   onDelete: (nodeId: string) => void;
   /** When true the "添加分支" button is disabled (node is a parallel-fork child). */
   disableAddTransition?: boolean;
+  /** When true all editing controls are disabled (read-only view). */
+  readonly?: boolean;
 }
 
 interface SectionProps {
@@ -73,7 +79,7 @@ function FieldRow({ label, tip, children }: { label: string; tip: string; childr
   );
 }
 
-export default function NodePropertiesPanel({ node, model, pluginModel, scenarioData, onScenarioChange, onClose, onChange, onDelete, disableAddTransition }: Props) {
+export default function NodePropertiesPanel({ node, model, pluginModel, scenarioData, onScenarioChange, onClose, onChange, onDelete, disableAddTransition, readonly = false }: Props) {
   const { t } = useTranslation();
   // Derive allowSkip directly from node.skipif so it stays in sync when node
   // prop updates. Using local state here caused the checkbox and model to
@@ -83,6 +89,20 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
   const [idDraft, setIdDraft] = useState<string>(isHiddenId(node.id) ? '' : node.id);
   // Set when the upstream rejects the id (e.g. duplicate).
   const [idConflict, setIdConflict] = useState(false);
+
+  const [systemTools, setSystemTools] = useState<Array<{ label: string; name: string }>>(_cachedSystemTools ?? []);
+
+  useEffect(() => {
+    if (_cachedSystemTools) {
+      setSystemTools(_cachedSystemTools);
+      return;
+    }
+    listToolAssets().then((tools) => {
+      // StructuredAsset: id = tool name (API 'name' field), name = display label
+      _cachedSystemTools = tools.map((tool) => ({ label: tool.name || tool.id, name: tool.id }));
+      setSystemTools(_cachedSystemTools);
+    }).catch(() => {});
+  }, []);
 
   // Keep draft in sync when node.id changes from outside (e.g. undo, external rename),
   // but only when the user isn't actively typing.
@@ -107,12 +127,28 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
   const availableInputSlots = slotOptions.filter((o) => !usedInputSlots.has(o.value));
   const availableOutputSlots = slotOptions.filter((o) => !usedOutputSlots.has(o.value));
 
-  // Tool function options from plugin.yaml tool_scripts[].functions; fall back to existing node.tools values.
-  const toolFunctionOptions: { label: string; value: string }[] = pluginModel?.tool_scripts
-    ? pluginModel.tool_scripts.flatMap((ts) =>
-        ts.functions.map((fn) => ({ label: fn, value: fn })),
-      )
-    : (node.tools ?? []).map((t) => ({ label: t, value: t }));
+  // Grouped tool options: system tools first, then plugin script functions.
+  const pluginFunctions: string[] = pluginModel?.tool_scripts
+    ? pluginModel.tool_scripts.flatMap((ts) => ts.functions)
+    : [];
+  const toolFunctionOptions: Array<{ label: string; options: { label: string; value: string }[] }> = [];
+  if (systemTools.length > 0) {
+    toolFunctionOptions.push({
+      label: '系统工具',
+      options: systemTools.map((t) => ({ label: `${t.label} (${t.name})`, value: t.name })),
+    });
+  }
+  if (pluginFunctions.length > 0) {
+    toolFunctionOptions.push({
+      label: '插件工具',
+      options: pluginFunctions.map((fn) => ({ label: fn, value: fn })),
+    });
+  }
+  // Flat fallback when both groups are empty (e.g. loading), keep existing values selectable.
+  const flatFallbackOptions: Array<{ label: string; options: { label: string; value: string }[] }> =
+    toolFunctionOptions.length === 0 && (node.tools?.length ?? 0) > 0
+      ? [{ label: '已选工具', options: (node.tools ?? []).map((t) => ({ label: t, value: t })) }]
+      : [];
 
   const update = (patch: Partial<StepNode>) => onChange({ ...node, ...patch });
 
@@ -222,17 +258,19 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
             <Input
               value={idDraft}
               status={stepIdError ? 'error' : undefined}
+              readOnly={readonly}
               onChange={(e) => {
+                if (readonly) return;
                 setIdDraft(e.target.value);
                 setIdConflict(false);
               }}
               onFocus={() => setIdFocused(true)}
               onBlur={() => {
                 setIdFocused(false);
-                commitIdDraft();
+                if (!readonly) commitIdDraft();
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') commitIdDraft();
+                if (e.key === 'Enter' && !readonly) commitIdDraft();
               }}
               placeholder={t('selfEvolutionRun.stateGraphFieldStepIdPlaceholder')}
               size="small"
@@ -250,7 +288,8 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
           <FieldRow label={t('selfEvolutionRun.stateGraphFieldLabel')} tip={t('selfEvolutionRun.stateGraphFieldLabelTip')}>
             <Input
               value={node.label}
-              onChange={(e) => update({ label: e.target.value })}
+              readOnly={readonly}
+              onChange={(e) => { if (!readonly) update({ label: e.target.value }); }}
               placeholder={t('selfEvolutionRun.stateGraphFieldLabelPlaceholder')}
               size="small"
             />
@@ -258,7 +297,9 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
           <FieldRow label={t('selfEvolutionRun.stateGraphFieldDesc')} tip={t('selfEvolutionRun.stateGraphFieldDescTip')}>
             <Input.TextArea
               value={scenarioData?.stepDescriptions[node.id] ?? ''}
+              readOnly={readonly}
               onChange={(e) => {
+                if (readonly) return;
                 if (onScenarioChange && scenarioData) {
                   onScenarioChange({
                     ...scenarioData,
@@ -275,11 +316,12 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
           <FieldRow label={t('selfEvolutionRun.stateGraphExecutionMode')} tip={t('selfEvolutionRun.stateGraphFieldModeTip')}>
             <Select
               value={node.mode}
+              disabled={readonly}
               options={[
                 { label: t('selfEvolutionRun.stateGraphModeHumanDesc'), value: 'human' },
                 { label: t('selfEvolutionRun.stateGraphModeAutoDesc'), value: 'auto' },
               ]}
-              onChange={(val) => update({ mode: val })}
+              onChange={(val) => { if (!readonly) update({ mode: val }); }}
               size="small"
               style={{ width: '100%' }}
             />
@@ -322,7 +364,8 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                   danger
                   size="small"
                   icon={<CloseOutlined />}
-                  onClick={() => update({ inputs: node.inputs.filter((_, i) => i !== idx) })}
+                  disabled={readonly}
+                  onClick={() => { if (!readonly) update({ inputs: node.inputs.filter((_, i) => i !== idx) }); }}
                 />
               </div>
             ))}
@@ -331,8 +374,8 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
               size="small"
               icon={<PlusOutlined />}
               block
-              disabled={availableInputSlots.length === 0}
-              onClick={() => update({ inputs: [...node.inputs, { slot: '', required: false }] })}
+              disabled={readonly || availableInputSlots.length === 0}
+              onClick={() => { if (!readonly) update({ inputs: [...node.inputs, { slot: '', required: false }] }); }}
               style={{ marginTop: 4 }}
             >
               {slotOptions.length === 0
@@ -376,7 +419,8 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                   danger
                   size="small"
                   icon={<CloseOutlined />}
-                  onClick={() => update({ outputs: node.outputs.filter((_, i) => i !== idx) })}
+                  disabled={readonly}
+                  onClick={() => { if (!readonly) update({ outputs: node.outputs.filter((_, i) => i !== idx) }); }}
                 />
               </div>
             ))}
@@ -385,8 +429,8 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
               size="small"
               icon={<PlusOutlined />}
               block
-              disabled={availableOutputSlots.length === 0}
-              onClick={() => update({ outputs: [...node.outputs, { slot: '', required: true }] })}
+              disabled={readonly || availableOutputSlots.length === 0}
+              onClick={() => { if (!readonly) update({ outputs: [...node.outputs, { slot: '', required: true }] }); }}
               style={{ marginTop: 4 }}
             >
               {slotOptions.length === 0
@@ -520,8 +564,9 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
             <Select
               mode="tags"
               value={node.tools ?? []}
-              options={toolFunctionOptions}
-              onChange={(val) => update({ tools: val.length > 0 ? val : undefined })}
+              options={toolFunctionOptions.length > 0 ? toolFunctionOptions : flatFallbackOptions}
+              disabled={readonly}
+              onChange={(val) => { if (!readonly) update({ tools: val.length > 0 ? val : undefined }); }}
               placeholder={t('selfEvolutionRun.stateGraphFieldToolsPlaceholder')}
               size="small"
               style={{ width: '100%', marginTop: 4 }}
@@ -542,9 +587,11 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
 
       {/* footer */}
       <div className="node-props-panel-footer">
-        <Button danger size="small" block icon={<DeleteOutlined />} onClick={() => onDelete(node.id)}>
-          {t('selfEvolutionRun.stateGraphDeleteStep')}
-        </Button>
+        {!readonly && (
+          <Button danger size="small" block icon={<DeleteOutlined />} onClick={() => onDelete(node.id)}>
+            {t('selfEvolutionRun.stateGraphDeleteStep')}
+          </Button>
+        )}
       </div>
     </div>
   );

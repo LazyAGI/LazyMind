@@ -12,10 +12,11 @@ export interface PluginInfoModalProps {
   onCancel: () => void;
   pluginModel: PluginModel;
   scenarioData: ScenarioData;
-  onSave: (pm: PluginModel, sd: ScenarioData) => Promise<void>;
+  onSave?: (pm: PluginModel, sd: ScenarioData) => Promise<void>;
+  readonly?: boolean;
 }
 
-export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioData, onSave }: PluginInfoModalProps) {
+export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioData, onSave, readonly = false }: PluginInfoModalProps) {
   const [saving, setSaving] = useState(false);
   const [pluginId, setPluginId] = useState('');
   const [pluginName, setPluginName] = useState('');
@@ -79,10 +80,16 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
       onCancel={onCancel}
       width={560}
       footer={
-        <div className="pim-footer">
-          <Button onClick={onCancel}>取消</Button>
-          <Button type="primary" loading={saving} onClick={handleSave}>保存</Button>
-        </div>
+        readonly ? (
+          <div className="pim-footer">
+            <Button onClick={onCancel}>关闭</Button>
+          </div>
+        ) : (
+          <div className="pim-footer">
+            <Button onClick={onCancel}>取消</Button>
+            <Button type="primary" loading={saving} onClick={handleSave}>保存</Button>
+          </div>
+        )
       }
       destroyOnClose
     >
@@ -98,7 +105,9 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
           <div className="pim-row-input">
             <Input
               value={pluginId}
+              readOnly={readonly}
               onChange={(e) => {
+                if (readonly) return;
                 setPluginId(e.target.value);
                 setIdError(validateId(e.target.value));
               }}
@@ -120,7 +129,8 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
           <div className="pim-row-input">
             <Input
               value={pluginName}
-              onChange={(e) => setPluginName(e.target.value)}
+              readOnly={readonly}
+              onChange={(e) => { if (!readonly) setPluginName(e.target.value); }}
               placeholder="例如：图片处理插件"
             />
           </div>
@@ -131,7 +141,8 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
           <div className="pim-block-label">插件描述</div>
           <Input.TextArea
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            readOnly={readonly}
+            onChange={(e) => { if (!readonly) setDescription(e.target.value); }}
             placeholder="简短描述插件的用途…"
             autoSize={{ minRows: 3, maxRows: 6 }}
           />
@@ -147,7 +158,8 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
           </div>
           <Input.TextArea
             value={whenToUse}
-            onChange={(e) => setWhenToUse(e.target.value)}
+            readOnly={readonly}
+            onChange={(e) => { if (!readonly) setWhenToUse(e.target.value); }}
             placeholder="Describe in English when this plugin should be triggered…"
             autoSize={{ minRows: 3, maxRows: 6 }}
           />
@@ -158,7 +170,8 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
           <div className="pim-block-label">场景描述</div>
           <Input.TextArea
             value={overview}
-            onChange={(e) => setOverview(e.target.value)}
+            readOnly={readonly}
+            onChange={(e) => { if (!readonly) setOverview(e.target.value); }}
             placeholder="描述该插件适用的业务场景…"
             autoSize={{ minRows: 3, maxRows: 6 }}
           />
@@ -169,7 +182,8 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
           <div className="pim-block-label">注意事项</div>
           <Input.TextArea
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            readOnly={readonly}
+            onChange={(e) => { if (!readonly) setNotes(e.target.value); }}
             placeholder="补充使用时需要注意的事项…"
             autoSize={{ minRows: 2, maxRows: 4 }}
           />

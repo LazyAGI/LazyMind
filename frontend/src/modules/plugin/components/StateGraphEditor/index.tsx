@@ -71,6 +71,8 @@ interface Props {
   onClose?: () => void;
   /** When false, the empty-canvas hint is suppressed (user already has experience). */
   showEmptyHint?: boolean;
+  /** When true, all editing is disabled. onSave is ignored and all inputs become read-only. */
+  readonly?: boolean;
 }
 
 function parseScriptFiles(raw: string): Record<string, string> {
@@ -113,6 +115,7 @@ export default function StateGraphEditor({
   onSave,
   onClose,
   showEmptyHint = true,
+  readonly = false,
 }: Props) {
   const [contentTab, setContentTab] = useState<ContentTab>('statemachine');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
@@ -201,6 +204,7 @@ export default function StateGraphEditor({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        if (readonly) return;
         e.preventDefault();
         if (historyIndexRef.current < 0) return;
         const prev = historyRef.current[historyIndexRef.current];
@@ -211,13 +215,14 @@ export default function StateGraphEditor({
         triggerAutoSave(prev, pluginModelRef.current, scenarioDataRef.current, scriptsContentRef.current);
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        if (readonly) return;
         e.preventDefault();
         void doSave(modelRef.current, pluginModelRef.current, scenarioDataRef.current, scriptsContentRef.current);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [triggerAutoSave, doSave]);
+  }, [triggerAutoSave, doSave, readonly]);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -387,9 +392,13 @@ export default function StateGraphEditor({
   const scriptFiles = parseScriptFiles(scriptsContent);
 
   // Derive yaml text for code view of state.yml (x-layout is internal, not shown to users)
-  const stateYamlForCode = serializeModel(model, false);
+  const stateYamlForCode = readonly
+    ? (initialStateYaml ?? serializeModel(model, false))
+    : serializeModel(model, false);
   // scenario.md text
-  const scenarioMdForCode = serializeScenario(model.nodes, scenarioData);
+  const scenarioMdForCode = readonly
+    ? (initialScenarioContent ?? serializeScenario(model.nodes, scenarioData))
+    : serializeScenario(model.nodes, scenarioData);
   // plugin.yaml text
   const pluginYamlForCode = serializePluginModel(pluginModel, model);
 
@@ -420,7 +429,7 @@ export default function StateGraphEditor({
           {pluginName && <span className="sge-plugin-name">{pluginName}</span>}
         </div>
         <div className="sge-topbar-right">
-          {onSave && (
+          {!readonly && onSave && (
             <span className="sge-autosave-status">
               {saveStatus === 'pending' && <span className="sge-autosave-pending">待保存…</span>}
               {saveStatus === 'saving' && <span className="sge-autosave-saving"><LoadingOutlined /> 保存中…</span>}
@@ -428,6 +437,7 @@ export default function StateGraphEditor({
               {saveStatus === 'error' && <span className="sge-autosave-error">保存失败</span>}
             </span>
           )}
+          {readonly && <span className="sge-readonly-badge">只读</span>}
           <Button size="small" icon={<SettingOutlined />} onClick={() => setPluginInfoOpen(true)}>
             插件配置
           </Button>
@@ -469,7 +479,7 @@ export default function StateGraphEditor({
           </div>
         </div>
         <div className="sge-toolbar2-right">
-          {contentTab === 'statemachine' && viewMode === 'preview' && (
+          {!readonly && contentTab === 'statemachine' && viewMode === 'preview' && (
             <>
               <Button
                 size="small"
@@ -484,6 +494,16 @@ export default function StateGraphEditor({
               </Button>
             </>
           )}
+          {readonly && contentTab === 'statemachine' && viewMode === 'preview' && (
+            <Button
+              size="small"
+              icon={<AppstoreOutlined />}
+              onClick={() => setShowArtifacts((v) => !v)}
+              type={showArtifacts ? 'primary' : 'default'}
+            >
+              素材{slotCount > 0 && <span className="sge-artifact-count">{slotCount}</span>}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -495,11 +515,12 @@ export default function StateGraphEditor({
               <GraphCanvas
                 model={model}
                 errors={errors}
-                onModelChange={updateModel}
+                onModelChange={readonly ? () => {} : updateModel}
                 pluginModel={pluginModel}
                 scenarioData={scenarioData}
-                onScenarioChange={handleScenarioChange}
+                onScenarioChange={readonly ? undefined : handleScenarioChange}
                 canvasRef={canvasRef}
+                readonly={readonly}
               />
               {model.nodes.length === 0 && showEmptyHint && (
                 <div className="sge-empty-state" aria-hidden="true">
@@ -518,7 +539,8 @@ export default function StateGraphEditor({
                 <ArtifactPanel
                   model={model}
                   onClose={() => setShowArtifacts(false)}
-                  onModelChange={updateModelFromUpdater}
+                  onModelChange={readonly ? () => {} : updateModelFromUpdater}
+                  readonly={readonly}
                 />
               )}
             </div>
@@ -531,10 +553,11 @@ export default function StateGraphEditor({
             <UiEditorPanel
               graphModel={model}
               pluginModel={pluginModel}
-              onGraphModelChange={updateModelFromUpdater}
-              onPluginModelChange={handlePluginModelChange}
+              onGraphModelChange={readonly ? () => {} : updateModelFromUpdater}
+              onPluginModelChange={readonly ? () => {} : handlePluginModelChange}
               activeTabId={uiActiveTabId}
               onActiveTabChange={setUiActiveTabId}
+              readonly={readonly}
             />
           </div>
         )}
@@ -598,7 +621,8 @@ export default function StateGraphEditor({
                 key={activeCodeFile === 'layout.json' ? `layout.json-${JSON.stringify(model.layout)}` : activeCodeFile}
                 value={getCodeFileContent(activeCodeFile)}
                 onChange={(text) => {
-                  if (activeCodeFile === 'layout.json') return; // read-only debug view
+                  if (readonly) return;
+                  if (activeCodeFile === 'layout.json') return;
                   if (activeCodeFile === 'state.yml') {
                     handleYamlChange(text);
                   } else if (activeCodeFile === 'plugin.yaml') {
@@ -610,7 +634,7 @@ export default function StateGraphEditor({
                   }
                 }}
                 errors={activeCodeFile === 'state.yml' ? errors : []}
-                readOnly={activeCodeFile === 'layout.json'}
+                readOnly={readonly || activeCodeFile === 'layout.json'}
                 language={
                   activeCodeFile.endsWith('.md')
                     ? 'markdown'
@@ -629,7 +653,8 @@ export default function StateGraphEditor({
         onCancel={() => setPluginInfoOpen(false)}
         pluginModel={pluginModel}
         scenarioData={scenarioData}
-        onSave={handlePluginInfoSave}
+        onSave={readonly ? undefined : handlePluginInfoSave}
+        readonly={readonly}
       />
     </div>
   );

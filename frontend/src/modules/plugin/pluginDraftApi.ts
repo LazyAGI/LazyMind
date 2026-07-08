@@ -2,6 +2,46 @@ import { axiosInstance, BASE_URL } from '@/components/request';
 
 const coreBasePath = `${BASE_URL}/api/core`;
 
+// ─── Built-in plugin types ────────────────────────────────────────────────────
+
+export interface BuiltinPluginStep {
+  id: string;
+  label: string;
+}
+
+export interface BuiltinPluginSlot {
+  id: string;
+  label: string;
+  type: string;
+  cardinality: string;
+}
+
+export interface BuiltinPluginUiTabSlot {
+  id: string;
+}
+
+export interface BuiltinPluginUiTab {
+  id: string;
+  label: string;
+  layout: string;
+  slots: BuiltinPluginUiTabSlot[];
+}
+
+export interface BuiltinPlugin {
+  id: string;
+  name: string;
+  description: string;
+  steps: BuiltinPluginStep[];
+  slots?: BuiltinPluginSlot[];
+  ui?: { tabs: BuiltinPluginUiTab[] };
+  i18n?: Record<string, unknown>;
+  // Raw YAML texts returned by the backend (populated when fetching single plugin).
+  plugin_yaml_raw?: string;
+  state_yaml_raw?: string;
+  scenario_raw?: string;
+  scripts_raw?: string;
+}
+
 export interface PluginDraftRecord {
   id: string;
   name: string;
@@ -95,4 +135,18 @@ export async function aiGeneratePluginDraft(
     payload,
   );
   return resp.data.data;
+}
+
+// ─── Built-in plugin API ──────────────────────────────────────────────────────
+
+export async function listBuiltinPlugins(): Promise<BuiltinPlugin[]> {
+  const resp = await axiosInstance.get<{ plugins: BuiltinPlugin[] }>(`${coreBasePath}/plugins`);
+  // The endpoint returns { plugins: [...] } directly (not wrapped in { code, data }).
+  const data = (resp.data as unknown as { plugins?: BuiltinPlugin[] });
+  return data.plugins ?? [];
+}
+
+export async function getBuiltinPlugin(pluginId: string): Promise<BuiltinPlugin> {
+  const resp = await axiosInstance.get<unknown>(`${coreBasePath}/plugins/${pluginId}`);
+  return resp.data as BuiltinPlugin;
 }

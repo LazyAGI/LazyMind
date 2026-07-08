@@ -24,7 +24,8 @@ interface RawStep {
 
 interface RawYaml {
   'x-layout'?: Record<string, { x?: number; y?: number; w?: number }>;
-  steps?: unknown[];
+  /** Array format (AI-generated drafts): list of step objects. */
+  steps?: unknown[] | Record<string, unknown>;
   /** Legacy flat key (pre-refactor). Superseded by transitions.__start__. */
   start_transitions?: unknown;
   /** Canonical format: keyed transition lists per node id. __start__ holds entry transitions. */
@@ -141,14 +142,24 @@ export function parseYaml(yamlText: string): GraphModel | null {
   const topLevelTransitions = (raw.transitions && typeof raw.transitions === 'object')
     ? raw.transitions as Record<string, unknown>
     : undefined;
-  if (Array.isArray(raw.steps)) {
-    for (const step of raw.steps) {
-      if (step !== null && typeof step === 'object') {
-        const parsed = parseStep(step as RawStep, topLevelTransitions);
-        // Skip virtual terminal nodes — they are always rendered as built-in terminals
-        if (parsed && parsed.id !== VIRTUAL_START && parsed.id !== VIRTUAL_END) {
-          nodes.push(parsed);
-        }
+
+  // steps can be either an array (AI-generated drafts) or a dict (hand-authored plugins).
+  const stepsIterable: Array<[string | null, unknown]> = Array.isArray(raw.steps)
+    ? raw.steps.map((s) => [null, s] as [null, unknown])
+    : (raw.steps && typeof raw.steps === 'object')
+      ? Object.entries(raw.steps as Record<string, unknown>).map(([k, v]) => [k, v])
+      : [];
+
+  for (const [dictKey, step] of stepsIterable) {
+    if (step !== null && typeof step === 'object') {
+      // When steps is a dict, inject the key as the step id if the step object has no id.
+      const rawStep: RawStep = (dictKey !== null && !('id' in (step as object)))
+        ? { ...(step as RawStep), id: dictKey }
+        : step as RawStep;
+      const parsed = parseStep(rawStep, topLevelTransitions);
+      // Skip virtual terminal nodes — they are always rendered as built-in terminals
+      if (parsed && parsed.id !== VIRTUAL_START && parsed.id !== VIRTUAL_END) {
+        nodes.push(parsed);
       }
     }
   }

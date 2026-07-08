@@ -50,6 +50,8 @@ interface Props {
   pluginModel?: PluginModel;
   scenarioData?: ScenarioData;
   onScenarioChange?: (data: ScenarioData) => void;
+  canvasRef?: React.Ref<CanvasHandle>;
+  readonly?: boolean;
 }
 
 const nodeTypes: NodeTypes = {
@@ -227,7 +229,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
   return edges;
 }
 
-function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, onScenarioChange }: Props, ref: React.Ref<CanvasHandle>) {
+function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, onScenarioChange, readonly = false }: Props, ref: React.Ref<CanvasHandle>) {
   const { screenToFlowPosition, zoomIn, zoomOut, getZoom } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
   const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides } = useAlignmentGuides();
@@ -977,6 +979,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           onChange={handleNodePropertyChange}
           onDelete={handleNodeDelete}
           disableAddTransition={selectedIsParallelChild}
+          readonly={readonly}
         />
       )}
     </div>

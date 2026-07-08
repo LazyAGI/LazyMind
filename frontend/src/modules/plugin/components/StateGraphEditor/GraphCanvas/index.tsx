@@ -18,6 +18,7 @@ interface Props {
   scenarioData?: ScenarioData;
   onScenarioChange?: (data: ScenarioData) => void;
   canvasRef?: React.Ref<CanvasHandle>;
+  readonly?: boolean;
 }
 
 export default function GraphCanvas(props: Props) {

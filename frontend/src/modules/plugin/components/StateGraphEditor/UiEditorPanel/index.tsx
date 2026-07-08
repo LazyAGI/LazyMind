@@ -22,6 +22,7 @@ interface Props {
   onPluginModelChange: (m: PluginModel) => void;
   activeTabId: string | undefined;
   onActiveTabChange: (tabId: string | undefined) => void;
+  readonly?: boolean;
 }
 
 export default function UiEditorPanel({
@@ -31,6 +32,7 @@ export default function UiEditorPanel({
   onPluginModelChange,
   activeTabId,
   onActiveTabChange,
+  readonly = false,
 }: Props) {
   const [fullscreen, setFullscreen] = useState(false);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
@@ -132,6 +134,7 @@ export default function UiEditorPanel({
             activeTabId={activeTabId}
             onUiModelChange={handleUiChange}
             onTabNavigate={onActiveTabChange}
+            readonly={readonly}
           />
         </div>
 
@@ -160,19 +163,19 @@ export default function UiEditorPanel({
             activeGridCols={activeTab?.gridCols}
             slotMap={slotMap}
             selectedSlotId={selectedSlotId}
-            onSelectSlot={setSelectedSlotId}
+            onSelectSlot={readonly ? () => {} : setSelectedSlotId}
             autoEditTabId={autoEditTabId}
             onAutoEditDone={() => setAutoEditTabId(undefined)}
             onTabSelect={onActiveTabChange}
-            onAddTab={handleAddTab}
-            onRenameTab={handleRenameTab}
-            onDeleteTab={handleDeleteTab}
-            onLayoutChange={handleLayoutChange}
-            onGridColsChange={handleGridColsChange}
-            onSlotsChange={handleSlotsChange}
-            onCompositeLayoutChange={handleCompositeLayoutChange}
-            onCompositeTabPositionChange={handleCompositeTabPositionChange}
-            editorMode
+            onAddTab={readonly ? () => {} : handleAddTab}
+            onRenameTab={readonly ? () => {} : handleRenameTab}
+            onDeleteTab={readonly ? () => {} : handleDeleteTab}
+            onLayoutChange={readonly ? () => {} : handleLayoutChange}
+            onGridColsChange={readonly ? () => {} : handleGridColsChange}
+            onSlotsChange={readonly ? () => {} : handleSlotsChange}
+            onCompositeLayoutChange={readonly ? () => {} : handleCompositeLayoutChange}
+            onCompositeTabPositionChange={readonly ? () => {} : handleCompositeTabPositionChange}
+            editorMode={!readonly}
             extraRightAction={
               <Button
                 type="text"
