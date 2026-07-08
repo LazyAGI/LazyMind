@@ -263,8 +263,11 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   // as deps (avoids re-creating callbacks on every model change).
   const modelRef = useRef(model);
   const onModelChangeRef = useRef(onModelChange);
-  useEffect(() => { modelRef.current = model; }, [model]);
-  useEffect(() => { onModelChangeRef.current = onModelChange; }, [onModelChange]);
+  // Update synchronously (not via useEffect) so that any Canvas callback fired
+  // in the same render cycle always reads the latest model, even before React
+  // has committed and run effects. useEffect would lag by one commit.
+  modelRef.current = model;
+  onModelChangeRef.current = onModelChange;
 
   // Keep nodeErrorMap in a ref so stable callbacks can always read the latest value.
   const nodeErrorMapRef = useRef(nodeErrorMap);
@@ -370,10 +373,13 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       const selectedSet = new Set(currentNodes.filter((n) => n.selected).map((n) => n.id));
       return newNodes.map((n) => {
         const current = currentById.get(n.id);
-        const preservedWidth = current?.width ?? n.width;
-        const preservedHeight = current?.height; // undefined → ReactFlow measures from DOM
+        // Prefer our own nodeWidth over ReactFlow's measured node.width — ReactFlow
+        // may re-measure from the DOM and overwrite the resize value we set, while
+        // nodeWidth is only ever updated by our own resize callbacks.
         const preservedNodeWidth = (current?.data as { nodeWidth?: number } | undefined)?.nodeWidth
           ?? (n.data as { nodeWidth?: number }).nodeWidth;
+        const preservedWidth = preservedNodeWidth ?? current?.width ?? n.width;
+        const preservedHeight = current?.height; // undefined → ReactFlow measures from DOM
         return {
           ...n,
           width: preservedWidth,
@@ -570,21 +576,24 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     (nodeId: string, width: number) => {
       const m = modelRef.current;
       const w = Math.max(NODE_MIN_WIDTH, width);
-      // Fall back to the ReactFlow node's current position if not yet in layout.
-      setNodes((nds) => {
-        const rfNode = nds.find((n) => n.id === nodeId);
-        const pos = m.layout[nodeId] ?? rfNode?.position ?? { x: 0, y: 0 };
-        const newLayout = { ...m.layout, [nodeId]: { ...pos, width: w } };
-        skipSyncRef.current = true;
-        onModelChangeRef.current({ ...m, layout: newLayout });
-        return nds.map((n) =>
+      // Read current node position from the snapshot synchronously before setNodes.
+      // Do NOT call onModelChangeRef or mutate skipSyncRef inside the setNodes updater
+      // (updaters must be pure functions; side effects there are unsafe in concurrent React).
+      const rfNodes = allNodesFromStore;
+      const rfNode = rfNodes.find((n) => n.id === nodeId);
+      const pos = m.layout[nodeId] ?? rfNode?.position ?? { x: 0, y: 0 };
+      const newLayout = { ...m.layout, [nodeId]: { ...pos, width: w } };
+      skipSyncRef.current = true;
+      onModelChangeRef.current({ ...m, layout: newLayout });
+      setNodes((nds) =>
+        nds.map((n) =>
           n.id === nodeId
             ? { ...n, width: w, data: { ...n.data, nodeWidth: w } }
             : n,
-        );
-      });
+        ),
+      );
     },
-    [setNodes],
+    [setNodes, allNodesFromStore],
   );
   // Wire the stable ref to the real implementation now that setNodes is available.
   handleNodeResizeEndRef.current = handleNodeResizeEnd;

@@ -22,7 +22,9 @@ const TYPE_LABEL_KEYS: Record<string, string> = {
 interface Props {
   model: GraphModel;
   onClose: () => void;
-  onModelChange: (model: GraphModel) => void;
+  /** Accepts a functional updater so callers always operate on the latest model,
+   *  avoiding stale-closure overwrites when layout/width was updated since last render. */
+  onModelChange: (updater: (prev: GraphModel) => GraphModel) => void;
   uiMode?: boolean;
   /** When true, renders as an inline block (position: static) instead of the default floating overlay */
   inline?: boolean;
@@ -382,31 +384,35 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
       allow_manual_add: isList ? newDraft.allow_manual_add : undefined,
       summary_max_chars: (!isNaN(maxChars) && maxChars > 0) ? maxChars : undefined,
     };
-    onModelChange({ ...model, slots: { ...model.slots, [newDraft.id]: newSlot } });
+    onModelChange((prev) => ({ ...prev, slots: { ...prev.slots, [newDraft.id]: newSlot } }));
     setNewDraft(EMPTY_DRAFT);
     setAdding(false);
   };
 
   const handleDelete = (id: string) => {
-    const newSlots = { ...model.slots };
-    delete newSlots[id];
-    const newNodes = model.nodes.map((n) => ({
-      ...n,
-      inputs: n.inputs.filter((r) => r.slot !== id),
-      outputs: n.outputs.filter((r) => r.slot !== id),
-    }));
-    onModelChange({ ...model, slots: newSlots, nodes: newNodes });
+    onModelChange((prev) => {
+      const newSlots = { ...prev.slots };
+      delete newSlots[id];
+      const newNodes = prev.nodes.map((n) => ({
+        ...n,
+        inputs: n.inputs.filter((r) => r.slot !== id),
+        outputs: n.outputs.filter((r) => r.slot !== id),
+      }));
+      return { ...prev, slots: newSlots, nodes: newNodes };
+    });
   };
 
   const updateArtifact = (id: string, patch: Partial<Omit<SlotDef, 'id'>>) => {
-    const current = model.slots[id];
-    const updated: SlotDef = { ...current, ...patch };
-    if ('cardinality' in patch && patch.cardinality !== 'list') {
-      updated.cardinality = undefined;
-      updated.ordered = undefined;
-      updated.allow_manual_add = undefined;
-    }
-    onModelChange({ ...model, slots: { ...model.slots, [id]: updated } });
+    onModelChange((prev) => {
+      const current = prev.slots[id];
+      const updated: SlotDef = { ...current, ...patch };
+      if ('cardinality' in patch && patch.cardinality !== 'list') {
+        updated.cardinality = undefined;
+        updated.ordered = undefined;
+        updated.allow_manual_add = undefined;
+      }
+      return { ...prev, slots: { ...prev.slots, [id]: updated } };
+    });
   };
 
   const joinTab = (slotId: string, tabId: string, widget: WidgetConfig) => {

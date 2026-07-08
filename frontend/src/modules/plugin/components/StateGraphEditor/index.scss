@@ -260,6 +260,10 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 4px 12px 2px;
+
+  &--dev {
+    color: #d46b08;
+  }
 }
 
 .sge-code-file-item {

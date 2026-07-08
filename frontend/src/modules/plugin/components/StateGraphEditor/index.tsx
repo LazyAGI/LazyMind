@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, message, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
+import { isDeveloperModeActive } from '@/utils/developerMode';
 import {
   CheckCircleOutlined,
   LoadingOutlined,
@@ -246,6 +247,16 @@ export default function StateGraphEditor({
     triggerAutoSave(nextModel, pluginModelRef.current, scenarioDataRef.current, scriptsContentRef.current);
   }, [triggerAutoSave]);
 
+  // Functional-updater variant: applies an updater to the LATEST modelRef.current,
+  // not to the stale React state. Used by ArtifactPanel so that slot changes never
+  // overwrite layout.width values that were written since the last render.
+  const updateModelFromUpdater = useCallback(
+    (updater: (prev: GraphModel) => GraphModel) => {
+      updateModel(updater(modelRef.current));
+    },
+    [updateModel],
+  );
+
   const handleYamlChange = useCallback((text: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
@@ -385,11 +396,13 @@ export default function StateGraphEditor({
   // All files available in the file tree (code mode)
   const coreFiles: CodeFile[] = ['state.yml', 'plugin.yaml', 'scenario.md'];
   const scriptFilePaths = Object.keys(scriptFiles);
+  const devMode = isDeveloperModeActive();
 
   const getCodeFileContent = (file: CodeFile): string => {
     if (file === 'plugin.yaml') return pluginYamlForCode;
     if (file === 'state.yml') return stateYamlForCode;
     if (file === 'scenario.md') return scenarioMdForCode;
+    if (file === 'layout.json') return JSON.stringify(model.layout, null, 2);
     return scriptFiles[file] ?? '';
   };
 
@@ -505,7 +518,7 @@ export default function StateGraphEditor({
                 <ArtifactPanel
                   model={model}
                   onClose={() => setShowArtifacts(false)}
-                  onModelChange={updateModel}
+                  onModelChange={updateModelFromUpdater}
                 />
               )}
             </div>
@@ -518,7 +531,7 @@ export default function StateGraphEditor({
             <UiEditorPanel
               graphModel={model}
               pluginModel={pluginModel}
-              onGraphModelChange={updateModel}
+              onGraphModelChange={updateModelFromUpdater}
               onPluginModelChange={handlePluginModelChange}
               activeTabId={uiActiveTabId}
               onActiveTabChange={setUiActiveTabId}
@@ -566,13 +579,26 @@ export default function StateGraphEditor({
                   ))}
                 </div>
               )}
+              {devMode && (
+                <div className="sge-code-sidebar-section">
+                  <span className="sge-code-sidebar-label sge-code-sidebar-label--dev">调试</span>
+                  <div
+                    className={`sge-code-file-item${activeCodeFile === 'layout.json' ? ' sge-code-file-item--active' : ''}`}
+                    onClick={() => setActiveCodeFile('layout.json')}
+                  >
+                    <FileOutlined className="sge-code-file-icon" />
+                    <span className="sge-code-file-name">layout.json</span>
+                  </div>
+                </div>
+              )}
             </div>
             {/* Right: editor */}
             <div className="sge-code-editor">
               <YamlEditor
-                key={activeCodeFile}
+                key={activeCodeFile === 'layout.json' ? `layout.json-${JSON.stringify(model.layout)}` : activeCodeFile}
                 value={getCodeFileContent(activeCodeFile)}
                 onChange={(text) => {
+                  if (activeCodeFile === 'layout.json') return; // read-only debug view
                   if (activeCodeFile === 'state.yml') {
                     handleYamlChange(text);
                   } else if (activeCodeFile === 'plugin.yaml') {
@@ -584,7 +610,7 @@ export default function StateGraphEditor({
                   }
                 }}
                 errors={activeCodeFile === 'state.yml' ? errors : []}
-                readOnly={false}
+                readOnly={activeCodeFile === 'layout.json'}
                 language={
                   activeCodeFile.endsWith('.md')
                     ? 'markdown'

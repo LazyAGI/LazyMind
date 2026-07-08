@@ -11,7 +11,7 @@ function nextTabId() {
 interface Props {
   graphModel: GraphModel;
   pluginModel: PluginModel;
-  onGraphModelChange: (m: GraphModel) => void;
+  onGraphModelChange: (updater: (prev: GraphModel) => GraphModel) => void;
   onPluginModelChange: (m: PluginModel) => void;
   activeTabId: string | undefined;
   onActiveTabChange: (tabId: string | undefined) => void;
