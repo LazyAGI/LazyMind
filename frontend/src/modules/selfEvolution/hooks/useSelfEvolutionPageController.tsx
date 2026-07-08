@@ -44,7 +44,6 @@ import {
   TraceObservationView,
 } from "../components/TraceObservationView";
 import { AnalysisCategoryPieChart } from "../components/AnalysisCategoryPieChart";
-import { AbtestComparisonPanel } from "../components/workbench/AbtestComparisonPanel";
 import {
   type SelfEvolutionFinalResultSummary,
   type SelfEvolutionObservationKind,
@@ -132,7 +131,6 @@ import {
   getStructuredRecordField,
   getDiffLineType,
   getShortLabel,
-  getInlineDiffText,
   parseUnifiedDiff,
   buildDiffFileTree,
   buildAbCategoryComparisons,
@@ -140,7 +138,6 @@ import {
   formatMetricSummary,
   formatAbMetricLabel,
   buildAbSummaryReports,
-  parseAbtestComparisonArtifact,
   formatMaybePValue,
   parseSSEFrame,
   isDoneSSEFrame,
@@ -156,7 +153,6 @@ import {
   buildEvoProcessDashboard,
   buildTerminalStatusByStage,
   getPendingCheckpointWaitPrompt,
-  requiresManualCheckpointAction,
   isThreadEventAfter,
   reduceWorkflowRuntimeState,
   getThreadTitleFromHistoryPayload,
@@ -168,21 +164,19 @@ import {
   applyThreadStepStatusToWorkflowSteps,
   getStageLabel,
   toThreadEventStage,
+  getProjectionEventType,
+  getEventCaseId,
   fetchThreadGateContent,
   getGateEvalCaseCount,
   getGateEvalCaseRecords,
   hasEmbeddedGateEvalCases,
   type ThreadEventStage,
 } from "../shared";
-import { buildRepairTraceRows, isRepairTraceRawEventType } from "../shared/repairTrace";
 import {
   type DatasetCasePreviewRow,
   type DatasetStreamingRow,
   type EvalStreamingRow,
-  type AbtestStreamingRow,
-  type AnalysisStreamingRow,
   type AnalysisCasePreviewRow,
-  type AnalysisActionableCaseRow,
   type PxCaseDetailRow,
   type ArtifactPanelItem,
   type CaseArtifactState,
@@ -221,9 +215,6 @@ import {
   fetchAllEvalReportBadCases,
   buildPxCaseDetailRows,
   buildAnalysisCategorySummaryRows,
-  extractAnalysisSummaryContent,
-  buildAnalysisActionableCaseRows,
-  buildAffectedBlockCountRows,
   extractDatasetArtifactData,
   buildDatasetCasePreviewRows,
   buildDatasetQuestionTypeCounts,
@@ -232,26 +223,18 @@ import {
   getStreamingDatasetProgress,
   buildStreamingEvalCaseRows,
   getStreamingEvalProgress,
-  buildStreamingAbtestCaseRows,
-  getStreamingAbtestProgress,
-  buildStreamingAnalysisCaseRows,
-  getStreamingAnalysisProgress,
-  buildCompletedFlowCheckpointPrompt,
+  buildPausedFlowCheckpointPrompt,
   getCheckpointWaitingStep,
   resolveStepListCheckpointPrompt,
   isCheckpointPromptSuperseded,
   buildCheckpointPromptForCompletedStage,
   markThreadStepStageCompleted,
-  resolveArtifactItemForThreadStep,
-  resolveThreadStepViewStage,
-  buildThreadStepEventsStreamUrl,
   resolveCheckpointAwareStepStatus,
 } from "./controller/helpers";
 import {
   buildDatasetCaseColumns,
   buildPxCaseDetailColumns,
   buildAnalysisCaseColumns,
-  buildAnalysisActionableCaseColumns,
   buildAbComparisonColumns,
 } from "./controller/columns";
 
@@ -384,7 +367,6 @@ export function SelfEvolutionPageController({
   const processedWorkflowEventKeysRef = useRef<Set<string>>(new Set());
   const pendingNextStepRunIdRef = useRef<string>();
   const isAdvancingToNextStepRef = useRef(false);
-  const autoContinuedCheckpointKeyRef = useRef("");
   const streamingStageCompletedRef = useRef<Partial<Record<ThreadEventStage, boolean>>>({});
   const loadingThreadStepIdRef = useRef<string>();
   const restoreRequestIdRef = useRef(0);
@@ -593,14 +575,6 @@ export function SelfEvolutionPageController({
     () => getStreamingEvalProgress(threadEvents),
     [threadEvents],
   );
-  const streamingAbtestProgress = useMemo(
-    () => getStreamingAbtestProgress(threadEvents),
-    [threadEvents],
-  );
-  const streamingAnalysisProgress = useMemo(
-    () => getStreamingAnalysisProgress(threadEvents),
-    [threadEvents],
-  );
   const checkpointWaitingStepId = useMemo(
     () => getCheckpointWaitingStep(threadStepList)?.stepId,
     [threadStepList],
@@ -688,6 +662,8 @@ export function SelfEvolutionPageController({
       setLiveCheckpointWaitPrompt(
         (prev) => prev ?? buildCheckpointPromptForCompletedStage(completedStage),
       );
+      threadEventsAbortRef.current?.controller.abort();
+      threadEventsAbortRef.current = null;
     },
     [],
   );
@@ -705,12 +681,12 @@ export function SelfEvolutionPageController({
   }, [applyLocalStageStreamCompletion, streamingDatasetProgress]);
 
   useEffect(() => {
-    const { current, total } = streamingAnalysisProgress;
+    const { current, total } = streamingEvalProgress;
     if (!total || current < total) {
       return;
     }
-    applyLocalStageStreamCompletion("analysis");
-  }, [applyLocalStageStreamCompletion, streamingAnalysisProgress]);
+    applyLocalStageStreamCompletion("eval");
+  }, [applyLocalStageStreamCompletion, streamingEvalProgress]);
 
   const isSendDisabled = !prompt.trim() || isSendingMessage;
   const activeStepText = useMemo(() => {
@@ -743,51 +719,6 @@ export function SelfEvolutionPageController({
   const streamingEvalRows = useMemo<EvalStreamingRow[]>(
     () => buildStreamingEvalCaseRows(threadEvents),
     [threadEvents],
-  );
-
-  useEffect(() => {
-    const { current, total } = streamingEvalProgress;
-    if (!total || current < total) {
-      return;
-    }
-    const allJudged =
-      streamingEvalRows.length >= total &&
-      streamingEvalRows.every((row) => row.judgeStatus === "done");
-    if (!allJudged) {
-      return;
-    }
-    applyLocalStageStreamCompletion("eval");
-  }, [applyLocalStageStreamCompletion, streamingEvalProgress, streamingEvalRows]);
-
-  const streamingAbtestRows = useMemo<AbtestStreamingRow[]>(
-    () => buildStreamingAbtestCaseRows(threadEvents),
-    [threadEvents],
-  );
-
-  useEffect(() => {
-    const { current, total } = streamingAbtestProgress;
-    if (!total || current < total) {
-      return;
-    }
-    const allJudged =
-      streamingAbtestRows.length >= total &&
-      streamingAbtestRows.every((row) => row.judgeStatus === "done");
-    if (!allJudged) {
-      return;
-    }
-    applyLocalStageStreamCompletion("abtest");
-  }, [applyLocalStageStreamCompletion, streamingAbtestProgress, streamingAbtestRows]);
-
-  const streamingAnalysisRows = useMemo<AnalysisStreamingRow[]>(
-    () => buildStreamingAnalysisCaseRows(threadEvents),
-    [threadEvents],
-  );
-  const repairTraceRows = useMemo(
-    () =>
-      buildRepairTraceRows(threadEvents, {
-        repairStepStatus: threadStepStatusByStage.repair,
-      }),
-    [threadEvents, threadStepStatusByStage.repair],
   );
   const datasetDownloadFileName = useMemo(() => {
     const normalizedEvalName =
@@ -893,22 +824,6 @@ export function SelfEvolutionPageController({
       workflowResults["analysis-reports"].data;
     return isRecord(directReport) ? [directReport] : [];
   }, [workflowResults["analysis-reports"].data]);
-  const analysisSummaryContent = useMemo(
-    () => extractAnalysisSummaryContent(workflowResults["analysis-reports"].data),
-    [workflowResults["analysis-reports"].data],
-  );
-  const analysisActionableCaseRows = useMemo<AnalysisActionableCaseRow[]>(
-    () => buildAnalysisActionableCaseRows(analysisSummaryContent),
-    [analysisSummaryContent],
-  );
-  const affectedBlockCountRows = useMemo(
-    () =>
-      buildAffectedBlockCountRows(
-        analysisSummaryContent,
-        t("selfEvolutionRun.uncategorized"),
-      ),
-    [analysisSummaryContent, t],
-  );
   const analysisReportData = useMemo(() => {
     const row = analysisArtifactItems.find(
       (item) =>
@@ -956,25 +871,14 @@ export function SelfEvolutionPageController({
   );
   const [highlightedAnalysisCategory, setHighlightedAnalysisCategory] =
     useState<string | null>(null);
-  const hasNewAnalysisSummary =
-    analysisActionableCaseRows.length > 0 || affectedBlockCountRows.length > 0;
-  const hasLegacyAnalysisStructuredReport =
-    analysisCategoryRows.length > 0 || analysisCaseRows.length > 0;
   const hasAnalysisStructuredReport =
-    hasNewAnalysisSummary || hasLegacyAnalysisStructuredReport;
+    analysisCategoryRows.length > 0 || analysisCaseRows.length > 0;
   const analysisCaseColumns = useMemo<ColumnsType<AnalysisCasePreviewRow>>(
     () => buildAnalysisCaseColumns(t),
     [t],
   );
-  const analysisActionableCaseColumns = useMemo<
-    ColumnsType<AnalysisActionableCaseRow>
-  >(() => buildAnalysisActionableCaseColumns(t), [t]);
   const abSummaryReports = useMemo<AbSummaryReport[]>(
     () => buildAbSummaryReports(workflowResults.abtests.data),
-    [workflowResults.abtests.data],
-  );
-  const abtestComparisonArtifact = useMemo(
-    () => parseAbtestComparisonArtifact(workflowResults.abtests.data),
     [workflowResults.abtests.data],
   );
   const abTraceObservation = useMemo(
@@ -1115,8 +1019,8 @@ export function SelfEvolutionPageController({
   }, [abCategoryComparisons]);
   const directFetchedDiffText = useMemo(
     () =>
-      getInlineDiffText(workflowResults.diffs.data) ||
       getResultStringField(workflowResults.diffs.data, [
+        "diff",
         "patch",
         "content",
         "text",
@@ -1157,17 +1061,6 @@ export function SelfEvolutionPageController({
   const activeDiffFile =
     parsedDiffFiles.find((item) => item.id === activeDiffFileId) ||
     parsedDiffFiles[0];
-
-  useEffect(() => {
-    if (parsedDiffFiles.length === 0) {
-      setActiveDiffFileId("");
-      return;
-    }
-    if (!parsedDiffFiles.some((file) => file.id === activeDiffFileId)) {
-      setActiveDiffFileId(parsedDiffFiles[0].id);
-    }
-  }, [activeDiffFileId, parsedDiffFiles]);
-
   const activeSession =
     chatSessions.find((item) => item.id === activeSessionId) || chatSessions[0];
   const activeMessages = activeSession?.messages ?? [];
@@ -1247,7 +1140,8 @@ export function SelfEvolutionPageController({
   ]);
   const shouldShowCheckpointPrompt =
     !isAutoInteractionActive ||
-    requiresManualCheckpointAction(pendingCheckpointWaitPrompt);
+    pendingCheckpointWaitPrompt?.kind === "failure" ||
+    pendingCheckpointWaitPrompt?.command === "确认切流";
   const displayedCheckpointWaitPrompt = shouldShowCheckpointPrompt
     ? pendingCheckpointWaitPrompt
     : undefined;
@@ -1274,12 +1168,8 @@ export function SelfEvolutionPageController({
   );
   const fetchDiffDownloadText = useCallback(
     async (resultData: unknown, signal?: AbortSignal) => {
-      const inlineDiffText = getInlineDiffText(resultData);
-      if (inlineDiffText) {
-        return inlineDiffText;
-      }
-
       const directDiffText = getResultStringField(resultData, [
+        "diff",
         "patch",
         "content",
         "text",
@@ -2339,9 +2229,9 @@ export function SelfEvolutionPageController({
       if (terminalStatus) {
         setTerminalFlowStepStatus(terminalStatus);
       }
-      const completedCheckpointPrompt = buildCompletedFlowCheckpointPrompt(event);
-      if (completedCheckpointPrompt) {
-        setLiveCheckpointWaitPrompt((prev) => prev ?? completedCheckpointPrompt);
+      const pausedCheckpointPrompt = buildPausedFlowCheckpointPrompt(event);
+      if (pausedCheckpointPrompt) {
+        setLiveCheckpointWaitPrompt((prev) => prev ?? pausedCheckpointPrompt);
       }
       const completedStage = toThreadEventStage(event.stage);
       if (completedStage) {
@@ -2366,10 +2256,28 @@ export function SelfEvolutionPageController({
       return;
     }
 
-    // Repair internal trace is rendered by RepairTraceStreamPanel; step progress
-    // still comes from thread step list / events:stream, not event-trace rows.
-    if (isRepairTraceRawEventType(event.type)) {
-      return;
+    const projectionEventType = getProjectionEventType(
+      event.payload,
+      event.type,
+    );
+    if (projectionEventType === "step.transition") {
+      const summary = getNestedRecordField(event.payload, ["summary"]);
+      const nextStage = getStringField(summary, ["next_stage"]);
+      const completedStage = toThreadEventStage(event.stage);
+      const nextStageNormalized = toThreadEventStage(nextStage);
+      if (completedStage && nextStageNormalized) {
+        setLiveCheckpointWaitPrompt({
+          kind: "checkpoint",
+          message: t("selfEvolutionRun.checkpointStageDoneConfirmNext", {
+            stageLabel: getStageLabel(String(event.stage)),
+          }),
+          completedStage,
+          completedStageLabel: getStageLabel(String(event.stage)),
+          nextStage: nextStageNormalized,
+          nextOperationLabel: getStageLabel(nextStage || ""),
+          command: t("selfEvolutionRun.continueExecution"),
+        });
+      }
     }
 
     setWorkflowRuntimeState((prev) => reduceWorkflowRuntimeState(prev, event));
@@ -2585,11 +2493,9 @@ export function SelfEvolutionPageController({
     signal: AbortSignal,
     allowRefresh = true,
   ): Promise<Response> => {
-    const step = threadStepListRef.current.steps.find(
-      (item) => item.stepId === stepId,
-    );
+    const query = new URLSearchParams({ step_id: stepId });
     const response = await fetch(
-      buildThreadStepEventsStreamUrl(threadId, stepId, step),
+      `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/events:stream?${query}`,
       {
         method: "GET",
         headers: {
@@ -2681,11 +2587,9 @@ export function SelfEvolutionPageController({
     setCaseArtifact(undefined);
     setActiveArtifactKind(undefined);
 
-    const viewStage = resolveThreadStepViewStage(
-      step,
-      workflowStepId,
-      workflowStepStageMap,
-    );
+    const viewStage = workflowStepId
+      ? workflowStepStageMap[workflowStepId]
+      : undefined;
 
     try {
       prepareThreadStepStreamView(viewStage);
@@ -3190,22 +3094,25 @@ export function SelfEvolutionPageController({
       if (
         !nextTerminalFlowStepStatus &&
         !pendingCheckpoint &&
-        isCheckpointGateFlowStatus(restoredFlowStatus)
+        normalizeThreadStepStatus(restoredFlowStatus) === "paused"
       ) {
         const currentStep = toThreadEventStage(
           getNestedStringField(threadRecord, ["current_step", "currentStep"]) ||
-            (isRecord(threadPayload)
-              ? getNestedStringField(threadPayload, [
-                  "current_step",
-                  "currentStep",
-                ])
-              : undefined),
+            getNestedStringField(threadPayload as ThreadRestorePayload, [
+              "current_step",
+              "currentStep",
+            ]),
         );
         if (currentStep) {
-          const checkpointPrompt =
-            buildCheckpointPromptForCompletedStage(currentStep);
-          if (checkpointPrompt) {
-            setLiveCheckpointWaitPrompt((prev) => prev ?? checkpointPrompt);
+          const pausedCheckpointPrompt = buildPausedFlowCheckpointPrompt({
+            stage: currentStep,
+            payload: {
+              status: restoredFlowStatus,
+              current_step: currentStep,
+            },
+          });
+          if (pausedCheckpointPrompt) {
+            setLiveCheckpointWaitPrompt((prev) => prev ?? pausedCheckpointPrompt);
           }
         }
       }
@@ -3443,117 +3350,14 @@ export function SelfEvolutionPageController({
     );
   };
 
-  const continueThreadExecution = async () => {
-    const activeThreadId = activeSession?.threadId || routeThreadId;
-    if (!activeThreadId) {
-      appendSystemMessage(
-        t("selfEvolutionRun.startFlowBeforeMessage"),
-        activeSessionId,
-      );
-      return;
-    }
-    if (isSendingMessage || isAdvancingToNextStepRef.current) {
-      return;
-    }
-
-    const checkpointNextStage = pendingCheckpointWaitPrompt?.nextStage;
+  const onContinueCheckpoint = (command?: string) => {
     const nextStepRunId = resolveContinueThreadStepId(threadStepListRef.current);
     if (nextStepRunId) {
       pendingNextStepRunIdRef.current = nextStepRunId;
     }
     setLiveCheckpointWaitPrompt(undefined);
-    setTerminalFlowStepStatus(undefined);
-    setIsSendingMessage(true);
-    try {
-      const requestedCommandId = buildStartThreadCommandId();
-      await axiosInstance.post(
-        `${AGENT_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/continue`,
-        { command_id: requestedCommandId },
-      );
-      const refreshedStepList = await refreshThreadStepList(activeThreadId);
-      const latestStepRunId =
-        pendingNextStepRunIdRef.current || nextStepRunId;
-      const latestStep = refreshedStepList.steps.find(
-        (step) => step.stepId === latestStepRunId,
-      );
-      const activeStep = refreshedStepList.steps.find(
-        (step) => step.active || isThreadStepRunning(step),
-      );
-      const latestViewStage =
-        (latestStep
-          ? resolveThreadStepViewStage(latestStep)
-          : undefined) ||
-        checkpointNextStage ||
-        (activeStep ? resolveThreadStepViewStage(activeStep) : undefined);
-
-      setSelectedThreadStepId(undefined);
-      setLoadingThreadStepId(undefined);
-      loadingThreadStepIdRef.current = undefined;
-      setSelectedViewStage(latestViewStage);
-      await subscribePendingNextStepRunOrRestoreLatest(
-        activeThreadId,
-        activeSessionId,
-      );
-    } catch (error) {
-      appendSystemMessage(
-        getLocalizedErrorMessage(
-          error,
-          t("selfEvolutionRun.continueFailed"),
-        ) || t("selfEvolutionRun.continueFailed"),
-        activeSessionId,
-      );
-    } finally {
-      setIsSendingMessage(false);
-    }
+    void onSend(command ?? t("selfEvolutionRun.continueExecution"));
   };
-
-  const onContinueCheckpoint = () => {
-    void continueThreadExecution();
-  };
-
-  useEffect(() => {
-    autoContinuedCheckpointKeyRef.current = "";
-  }, [activeSessionId, routeThreadId]);
-
-  useEffect(() => {
-    if (!isAutoMode || !pendingCheckpointWaitPrompt) {
-      return;
-    }
-    if (requiresManualCheckpointAction(pendingCheckpointWaitPrompt)) {
-      return;
-    }
-    if (isSendingMessage || isAdvancingToNextStepRef.current || isRestoringThread) {
-      return;
-    }
-    if (
-      isCheckpointPromptSuperseded(
-        pendingCheckpointWaitPrompt,
-        threadStepList,
-        threadStepStatusByStage,
-      )
-    ) {
-      return;
-    }
-
-    const checkpointKey = [
-      pendingCheckpointWaitPrompt.completedStage || "",
-      pendingCheckpointWaitPrompt.nextStage || "",
-      pendingCheckpointWaitPrompt.taskId || "",
-      pendingCheckpointWaitPrompt.command || "",
-    ].join("|");
-    if (autoContinuedCheckpointKeyRef.current === checkpointKey) {
-      return;
-    }
-    autoContinuedCheckpointKeyRef.current = checkpointKey;
-    onContinueCheckpoint();
-  }, [
-    isAutoMode,
-    isRestoringThread,
-    isSendingMessage,
-    pendingCheckpointWaitPrompt,
-    threadStepList,
-    threadStepStatusByStage,
-  ]);
 
   const onConfirmIntentCheckpoint = () => {
     void onSend(t("selfEvolutionRun.confirmExecution"));
@@ -4978,97 +4782,6 @@ export function SelfEvolutionPageController({
       <div className="self-evolution-analysis-body">
         {hasAnalysisStructuredReport ? (
           <>
-            {hasNewAnalysisSummary ? (
-              <>
-                {affectedBlockCountRows.length > 0 && (
-                  <div className="self-evolution-analysis-category-section">
-                    <div className="self-evolution-analysis-section-head">
-                      <Text strong>
-                        {t("selfEvolutionRun.affectedBlockDist")}
-                      </Text>
-                      <Text>
-                        {t("selfEvolutionRun.categoryCountLabel", {
-                          count: affectedBlockCountRows.length,
-                        })}
-                      </Text>
-                    </div>
-                    <div className="self-evolution-analysis-category-panel">
-                      <div className="self-evolution-px-legend is-compact">
-                        {affectedBlockCountRows.map((item) => (
-                          <div
-                            key={`affected-block-legend-${item.key}`}
-                            className={`self-evolution-px-legend-item${highlightedAnalysisCategory === item.key ? " is-active" : ""}`}
-                            onMouseEnter={() =>
-                              setHighlightedAnalysisCategory(item.key)
-                            }
-                            onMouseLeave={() =>
-                              setHighlightedAnalysisCategory(null)
-                            }
-                            onFocus={() =>
-                              setHighlightedAnalysisCategory(item.key)
-                            }
-                            onBlur={() => setHighlightedAnalysisCategory(null)}
-                            role="button"
-                            tabIndex={0}
-                          >
-                            <span
-                              className="self-evolution-px-legend-dot"
-                              style={{ backgroundColor: item.color }}
-                            />
-                            <span className="self-evolution-px-legend-label">
-                              {item.category}
-                            </span>
-                            <span className="self-evolution-px-legend-value">
-                              {item.ratio}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="self-evolution-analysis-category-chart-wrap">
-                        <AnalysisCategoryPieChart
-                          rows={affectedBlockCountRows}
-                          highlightedCategory={highlightedAnalysisCategory}
-                          onCategoryHover={setHighlightedAnalysisCategory}
-                          className="self-evolution-analysis-category-echart"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <div className="self-evolution-analysis-case-section">
-                  <div className="self-evolution-analysis-section-head">
-                    <Text strong>
-                      {t("selfEvolutionRun.actionableCasesTitle")}
-                    </Text>
-                    <Text>
-                      {t("selfEvolutionRun.resultItemCount", {
-                        count: analysisActionableCaseRows.length,
-                      })}
-                    </Text>
-                  </div>
-                  {analysisActionableCaseRows.length > 0 ? (
-                    <Table<AnalysisActionableCaseRow>
-                      className="self-evolution-dataset-table self-evolution-analysis-table"
-                      size="small"
-                      rowKey="key"
-                      columns={analysisActionableCaseColumns}
-                      dataSource={analysisActionableCaseRows}
-                      pagination={{
-                        pageSize: 10,
-                        size: "small",
-                        showSizeChanger: false,
-                      }}
-                      scroll={{ x: 1240, y: 330 }}
-                    />
-                  ) : (
-                    <Paragraph className="self-evolution-px-empty">
-                      {t("selfEvolutionRun.noActionableCases")}
-                    </Paragraph>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
             {analysisCategoryRows.length > 0 && (
               <div className="self-evolution-analysis-category-section">
                 <div className="self-evolution-analysis-section-head">
@@ -5137,7 +4850,7 @@ export function SelfEvolutionPageController({
                   columns={analysisCaseColumns}
                   dataSource={analysisCaseRows}
                   pagination={{
-                    pageSize: 10,
+                    pageSize: 8,
                     size: "small",
                     showSizeChanger: false,
                   }}
@@ -5149,8 +4862,6 @@ export function SelfEvolutionPageController({
                 </Paragraph>
               )}
             </div>
-              </>
-            )}
           </>
         ) : workflowResults["analysis-reports"].loaded ||
           workflowResults["analysis-reports"].loading ||
@@ -5884,7 +5595,6 @@ export function SelfEvolutionPageController({
       !workflowResults.abtests.loading &&
       !workflowResults.abtests.error &&
       !abSummaryReports.length &&
-      !abtestComparisonArtifact &&
       isEmptyResultPayload(workflowResults.abtests.data) &&
       !abCategoryComparisons.length
     )
@@ -5896,8 +5606,6 @@ export function SelfEvolutionPageController({
       >
         {workflowResults.abtests.loading || workflowResults.abtests.error ? (
           renderWorkflowResultPayload("abtests")
-        ) : workflowResults.abtests.loaded && abtestComparisonArtifact ? (
-          <AbtestComparisonPanel artifact={abtestComparisonArtifact} />
         ) : workflowResults.abtests.loaded &&
           abTraceObservation &&
           abSummaryReports.length === 0 ? (
@@ -6029,12 +5737,7 @@ export function SelfEvolutionPageController({
   const threadStepNavigationItems = threadStepList.steps.map((step, index) => ({
     step,
     index,
-    item: resolveArtifactItemForThreadStep(
-      step,
-      index,
-      artifactItems,
-      stageArtifactKindMap,
-    ),
+    item: artifactItems[index],
   }));
   const highlightedThreadStepId =
     selectedThreadStepId ??
@@ -6434,7 +6137,8 @@ export function SelfEvolutionPageController({
           onPromptChange: setPrompt,
           onSend: (command) => void onSend(command),
           onConfirmIntentCheckpoint: () => void onConfirmIntentCheckpoint(),
-          onContinueCheckpoint: () => void onContinueCheckpoint(),
+          onContinueCheckpoint: (command?: string) =>
+            void onContinueCheckpoint(command),
           onOpenArtifact: openWorkflowArtifact,
           onOpenObservation: openObservationPage,
           onOpenCaseArtifact: openCaseArtifact,
@@ -6450,11 +6154,6 @@ export function SelfEvolutionPageController({
           streamingDatasetProgress,
           streamingEvalRows,
           streamingEvalProgress,
-          streamingAbtestRows,
-          streamingAbtestProgress,
-          streamingAnalysisRows,
-          streamingAnalysisProgress,
-          repairTraceRows,
         },
       })}
     </>
