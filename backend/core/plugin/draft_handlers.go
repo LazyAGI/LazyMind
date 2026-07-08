@@ -12,39 +12,44 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/log"
 	"lazymind/core/store"
 )
 
 // draftResponse is the JSON shape returned for a single PluginDraft.
 type draftResponse struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	Content           string `json:"content"`
-	PluginYAMLContent string `json:"plugin_yaml_content"`
-	StateYAMLContent  string `json:"state_yaml_content"`
-	ScenarioContent   string `json:"scenario_content"`
-	ScriptsContent    string `json:"scripts_content"`
-	GenerateStatus    string `json:"generate_status"`
-	GenerateError     string `json:"generate_error"`
-	CreatedBy         string `json:"created_by"`
-	CreatedAt         string `json:"created_at"`
-	UpdatedAt         string `json:"updated_at"`
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Content            string `json:"content"`
+	PluginYAMLContent  string `json:"plugin_yaml_content"`
+	StateYAMLContent   string `json:"state_yaml_content"`
+	StateLayoutContent string `json:"state_layout_content"`
+	ScenarioContent    string `json:"scenario_content"`
+	ScriptsContent     string `json:"scripts_content"`
+	GenerateStatus     string `json:"generate_status"`
+	GenerateError      string `json:"generate_error"`
+	Version            int    `json:"version"`
+	CreatedBy          string `json:"created_by"`
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
 }
 
 func toDraftResponse(d orm.PluginDraft) draftResponse {
 	return draftResponse{
-		ID:                d.ID,
-		Name:              d.Name,
-		Content:           d.Content,
-		PluginYAMLContent: d.PluginYAMLContent,
-		StateYAMLContent:  d.StateYAMLContent,
-		ScenarioContent:   d.ScenarioContent,
-		ScriptsContent:    d.ScriptsContent,
-		GenerateStatus:    d.GenerateStatus,
-		GenerateError:     d.GenerateError,
-		CreatedBy:         d.CreatedBy,
-		CreatedAt:         d.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:         d.UpdatedAt.Format(time.RFC3339),
+		ID:                 d.ID,
+		Name:               d.Name,
+		Content:            d.Content,
+		PluginYAMLContent:  d.PluginYAMLContent,
+		StateYAMLContent:   d.StateYAMLContent,
+		StateLayoutContent: d.StateLayoutContent,
+		ScenarioContent:    d.ScenarioContent,
+		ScriptsContent:     d.ScriptsContent,
+		GenerateStatus:     d.GenerateStatus,
+		GenerateError:      d.GenerateError,
+		Version:            d.Version,
+		CreatedBy:          d.CreatedBy,
+		CreatedAt:          d.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:          d.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -156,8 +161,18 @@ func GetPluginDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 // SavePluginDraft handles POST /plugin-drafts/{draft_id}:save
-// Body: { "content": "...", "plugin_yaml_content": "...", "state_yaml_content": "...", "scenario_content": "...", "scripts_content": "..." }
-// Persists all provided fields; absent fields are left unchanged.
+//
+//	Body: {
+//	  "content": "...",
+//	  "plugin_yaml_content": "...",
+//	  "state_yaml_content": "...",
+//	  "state_layout_content": "...",   // no version check, last-write-wins
+//	  "scenario_content": "...",
+//	  "scripts_content": "...",
+//	  "version": 3                      // required when sending plugin_yaml_content or state_yaml_content
+//	}
+//
+// Returns 409 Conflict when version is stale (another write already incremented it).
 func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 	draftID := common.PathVar(r, "draft_id")
 	userID := common.UserID(r)
@@ -167,11 +182,15 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Content           *string `json:"content"`
-		PluginYAMLContent *string `json:"plugin_yaml_content"`
-		StateYAMLContent  *string `json:"state_yaml_content"`
-		ScenarioContent   *string `json:"scenario_content"`
-		ScriptsContent    *string `json:"scripts_content"`
+		Content            *string `json:"content"`
+		PluginYAMLContent  *string `json:"plugin_yaml_content"`
+		StateYAMLContent   *string `json:"state_yaml_content"`
+		StateLayoutContent *string `json:"state_layout_content"`
+		ScenarioContent    *string `json:"scenario_content"`
+		ScriptsContent     *string `json:"scripts_content"`
+		// Version is the caller's last-known version. Required when writing
+		// plugin_yaml_content or state_yaml_content; ignored otherwise.
+		Version *int `json:"version"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
@@ -185,6 +204,19 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// --- Optimistic-lock check for versioned fields ---
+	needsVersionCheck := body.PluginYAMLContent != nil || body.StateYAMLContent != nil
+	if needsVersionCheck {
+		if body.Version == nil {
+			common.ReplyErr(w, "version is required when saving plugin_yaml_content or state_yaml_content", http.StatusBadRequest)
+			return
+		}
+		if *body.Version != draft.Version {
+			common.ReplyErrWithData(w, "conflict", toDraftResponse(draft), http.StatusConflict)
+			return
+		}
+	}
+
 	updates := map[string]any{"updated_at": time.Now().UTC()}
 	if body.Content != nil {
 		updates["content"] = *body.Content
@@ -195,22 +227,97 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 	if body.StateYAMLContent != nil {
 		updates["state_yaml_content"] = *body.StateYAMLContent
 	}
+	if body.StateLayoutContent != nil {
+		updates["state_layout_content"] = *body.StateLayoutContent
+	}
 	if body.ScenarioContent != nil {
 		updates["scenario_content"] = *body.ScenarioContent
 	}
 	if body.ScriptsContent != nil {
 		updates["scripts_content"] = *body.ScriptsContent
 	}
-
-	if err := db.Model(&draft).Updates(updates).Error; err != nil {
-		common.ReplyErr(w, "save failed", http.StatusInternalServerError)
-		return
+	newVersion := draft.Version
+	if needsVersionCheck {
+		newVersion = draft.Version + 1
+		updates["version"] = newVersion
 	}
 
-	// Reload to get the updated values.
-	if err := db.Where("id = ?", draftID).First(&draft).Error; err != nil {
-		common.ReplyErr(w, "reload failed", http.StatusInternalServerError)
-		return
+	// --- Write buffer (P2): write to state store first; flush worker syncs to DB ---
+	// Build the buffer fields map (content field is not buffered — it's legacy and small).
+	bufFields := map[string]any{}
+	if body.PluginYAMLContent != nil {
+		bufFields[bufFieldPluginYAML] = *body.PluginYAMLContent
+	}
+	if body.StateYAMLContent != nil {
+		bufFields[bufFieldStateYAML] = *body.StateYAMLContent
+	}
+	if body.StateLayoutContent != nil {
+		bufFields[bufFieldStateLayout] = *body.StateLayoutContent
+	}
+	if body.ScenarioContent != nil {
+		bufFields[bufFieldScenario] = *body.ScenarioContent
+	}
+	if body.ScriptsContent != nil {
+		bufFields[bufFieldScripts] = *body.ScriptsContent
+	}
+
+	bufVersion := 0
+	if needsVersionCheck {
+		bufVersion = newVersion
+	}
+
+	usedBuffer := false
+	if len(bufFields) > 0 && store.State() != nil {
+		if err := draftBufferWrite(r.Context(), store.State(), draftID, bufFields, bufVersion); err == nil {
+			// Buffer write succeeded: update version in DB immediately so the
+			// next request sees the correct version, but skip the heavy content update.
+			dbVersionUpdates := map[string]any{"updated_at": time.Now().UTC()}
+			if needsVersionCheck {
+				dbVersionUpdates["version"] = newVersion
+			}
+			// Also persist content (legacy field) and any fields NOT going through the buffer.
+			if body.Content != nil {
+				dbVersionUpdates["content"] = *body.Content
+			}
+			if err2 := db.Model(&draft).Updates(dbVersionUpdates).Error; err2 != nil {
+				// Fall through to full DB write below.
+				log.Logger.Warn().Err(err2).Str("draft_id", draftID).Msg("[draft_buffer] version update failed; falling back to full DB write")
+			} else {
+				usedBuffer = true
+				// Optimistically update the local draft struct so the response is correct.
+				draft.Version = newVersion
+				if body.PluginYAMLContent != nil {
+					draft.PluginYAMLContent = *body.PluginYAMLContent
+				}
+				if body.StateYAMLContent != nil {
+					draft.StateYAMLContent = *body.StateYAMLContent
+				}
+				if body.StateLayoutContent != nil {
+					draft.StateLayoutContent = *body.StateLayoutContent
+				}
+				if body.ScenarioContent != nil {
+					draft.ScenarioContent = *body.ScenarioContent
+				}
+				if body.ScriptsContent != nil {
+					draft.ScriptsContent = *body.ScriptsContent
+				}
+			}
+		} else {
+			log.Logger.Warn().Err(err).Str("draft_id", draftID).Msg("[draft_buffer] buffer write failed; falling back to full DB write")
+		}
+	}
+
+	if !usedBuffer {
+		// Direct DB write (fallback or state store unavailable).
+		if err := db.Model(&draft).Updates(updates).Error; err != nil {
+			common.ReplyErr(w, "save failed", http.StatusInternalServerError)
+			return
+		}
+		// Reload to return the authoritative post-save state.
+		if err := db.Where("id = ?", draftID).First(&draft).Error; err != nil {
+			common.ReplyErr(w, "reload failed", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	common.ReplyOK(w, toDraftResponse(draft))

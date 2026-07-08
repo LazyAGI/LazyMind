@@ -53,6 +53,9 @@ export interface SavePayload {
   pluginYaml: string;
   scenarioContent: string;
   scriptsContent: string;
+  // Layout-only field: JSON-serialized GraphModel.layout (node positions/widths).
+  // Stored in a separate DB column with last-write-wins; no version check.
+  stateLayoutContent: string;
 }
 
 interface Props {
@@ -155,10 +158,11 @@ export default function StateGraphEditor({
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
 
   const buildPayload = useCallback((m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string): SavePayload => ({
-    stateYaml: serializeModel(m, true),
+    stateYaml: serializeModel(m, false),
     pluginYaml: serializePluginModel(pm, m),
     scenarioContent: serializeScenario(m.nodes, sd),
     scriptsContent: sc,
+    stateLayoutContent: JSON.stringify(m.layout),
   }), []);
 
   const doSave = useCallback(async (m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string) => {
@@ -249,7 +253,20 @@ export default function StateGraphEditor({
   const handlePluginModelChange = useCallback((pm: PluginModel) => {
     setPluginModel(pm);
     pluginModelRef.current = pm;
-    triggerAutoSave(modelRef.current, pm, scenarioDataRef.current, scriptsContentRef.current);
+    // Sync slots into GraphModel so serializePluginModel always reads the latest slot
+    // definitions regardless of whether the change came from the UI editor or code editor.
+    const slots: Record<string, import('./core/model').SlotDef> = {};
+    for (const s of pm.slots) {
+      slots[s.id] = {
+        id: s.id, type: s.type, label: s.label,
+        cardinality: s.cardinality, ordered: s.ordered,
+        allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+      };
+    }
+    const updatedModel: GraphModel = { ...modelRef.current, slots };
+    modelRef.current = updatedModel;
+    setModelState(updatedModel);
+    triggerAutoSave(updatedModel, pm, scenarioDataRef.current, scriptsContentRef.current);
   }, [triggerAutoSave]);
 
   const handleScenarioChange = useCallback((sd: ScenarioData) => {
@@ -339,8 +356,8 @@ export default function StateGraphEditor({
   const slotCount = Object.keys(model.slots).length;
   const scriptFiles = parseScriptFiles(scriptsContent);
 
-  // Derive yaml text for code view of state.yml (live)
-  const stateYamlForCode = serializeModel(model, false);
+  // Derive yaml text for code view of state.yml (includes x-layout for display only)
+  const stateYamlForCode = serializeModel(model, true);
   // scenario.md text
   const scenarioMdForCode = serializeScenario(model.nodes, scenarioData);
   // plugin.yaml text

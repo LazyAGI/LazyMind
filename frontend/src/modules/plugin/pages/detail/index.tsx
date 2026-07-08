@@ -56,6 +56,9 @@ export default function PluginDetailPage() {
   }, []);
 
   const [draft, setDraft] = useState<PluginDraftRecord | null>(null);
+  const draftRef = useRef<PluginDraftRecord | null>(null);
+  // Keep ref in sync for use in handleSave (avoids stale closure over version).
+  useEffect(() => { draftRef.current = draft; }, [draft]);
   const [loading, setLoading] = useState(true);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
@@ -127,12 +130,30 @@ export default function PluginDetailPage() {
   const handleSave = useCallback(
     async (payload: SavePayload) => {
       if (!pluginId) return;
-      await updatePluginDraftContent(pluginId, {
-        state_yaml_content: payload.stateYaml,
-        plugin_yaml_content: payload.pluginYaml,
-        scenario_content: payload.scenarioContent,
-        scripts_content: payload.scriptsContent,
-      });
+      const currentVersion = draftRef.current?.version ?? 1;
+      let updated: PluginDraftRecord;
+      try {
+        updated = await updatePluginDraftContent(pluginId, {
+          state_yaml_content: payload.stateYaml,
+          state_layout_content: payload.stateLayoutContent,
+          plugin_yaml_content: payload.pluginYaml,
+          scenario_content: payload.scenarioContent,
+          scripts_content: payload.scriptsContent,
+          version: currentVersion,
+        });
+      } catch (err: unknown) {
+        // 409 Conflict: AI write bumped the version. Refresh draft version silently so
+        // the next save attempt uses the correct version, then rethrow so the editor
+        // shows "保存失败".
+        const status = (err as { response?: { status?: number; data?: { data?: PluginDraftRecord } } })?.response?.status;
+        if (status === 409) {
+          const latest = (err as { response: { data: { data: PluginDraftRecord } } }).response?.data?.data;
+          if (latest) setDraft(latest);
+          message.warning('内容已被 AI 更新，正在重试保存…');
+        }
+        throw err;
+      }
+      setDraft(updated);
     },
     [pluginId],
   );
@@ -161,7 +182,24 @@ export default function PluginDetailPage() {
   const isPhase3Running = draft.generate_status === 'state_done';
 
   // Determine which YAML content to use
-  const stateYaml = draft.state_yaml_content || draft.content || undefined;
+  // state_layout_content stores x-layout JSON separately; merge it into stateYaml
+  // so the editor initializes with correct node positions.
+  const rawStateYaml = draft.state_yaml_content || draft.content || undefined;
+  let stateYaml = rawStateYaml;
+  if (rawStateYaml && draft.state_layout_content) {
+    try {
+      const layoutObj = JSON.parse(draft.state_layout_content) as Record<string, { x: number; y: number; w?: number }>;
+      if (Object.keys(layoutObj).length > 0) {
+        // Prepend x-layout block to state YAML so the parser picks it up.
+        const layoutYaml = `x-layout:\n${Object.entries(layoutObj)
+          .map(([id, pos]) => `  ${id}: { x: ${pos.x}, y: ${pos.y}${pos.w != null ? `, w: ${pos.w}` : ''} }`)
+          .join('\n')}\n`;
+        stateYaml = layoutYaml + rawStateYaml;
+      }
+    } catch {
+      // ignore malformed layout JSON
+    }
+  }
   let pluginYaml = draft.plugin_yaml_content || undefined;
   if (!pluginYaml && draft.name) {
     pluginYaml = `name: "${draft.name.replace(/"/g, '\\"')}"\n`;

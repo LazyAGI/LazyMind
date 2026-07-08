@@ -10,6 +10,9 @@ export interface PluginDraftRecord {
   // Split content columns (available after migration 20260706120000).
   plugin_yaml_content: string;
   state_yaml_content: string;
+  // Layout-only column (migration 20260708120000): x-layout JSON extracted from state.yml.
+  // Saved independently with last-write-wins; no version check.
+  state_layout_content: string;
   scenario_content: string;
   scripts_content: string;
   // '' | 'generating' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
@@ -22,6 +25,8 @@ export interface PluginDraftRecord {
   generate_status: string;
   // Non-empty when generate_status === 'failed'; may also contain non-fatal Phase 3 warnings when 'done'.
   generate_error: string;
+  // Optimistic-lock version. Increment on every save that touches plugin_yaml_content or state_yaml_content.
+  version: number;
   created_at: string;
   updated_at: string;
   created_by: string;
@@ -60,8 +65,12 @@ export interface UpdateDraftPayload {
   content?: string;
   plugin_yaml_content?: string;
   state_yaml_content?: string;
+  // Layout-only save: no version check on the server side.
+  state_layout_content?: string;
   scenario_content?: string;
   scripts_content?: string;
+  // Required when sending plugin_yaml_content or state_yaml_content; ignored otherwise.
+  version?: number;
 }
 
 export async function updatePluginDraftContent(id: string, payload: UpdateDraftPayload | string): Promise<PluginDraftRecord> {

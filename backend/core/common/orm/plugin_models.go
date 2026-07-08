@@ -125,11 +125,20 @@ type PluginDraft struct {
 	//   'failed'       — A phase failed; see generate_error for details
 	PluginYAMLContent string `gorm:"column:plugin_yaml_content;type:text;not null;default:''"`
 	StateYAMLContent  string `gorm:"column:state_yaml_content;type:text;not null;default:''"`
-	ScenarioContent   string `gorm:"column:scenario_content;type:text;not null;default:''"`
-	ScriptsContent    string `gorm:"column:scripts_content;type:text;not null;default:'{}'"`
-	GenerateStatus    string `gorm:"column:generate_status;type:varchar(16);not null;default:''"`
+	// StateLayoutContent stores only the x-layout JSON (node positions/widths) extracted
+	// from state.yml. Separated so layout drag-saves never contend with AI writes.
+	// Saved with last-write-wins; no version check needed (single-user, AI never writes this).
+	StateLayoutContent string `gorm:"column:state_layout_content;type:text;not null;default:''"`
+	ScenarioContent    string `gorm:"column:scenario_content;type:text;not null;default:''"`
+	ScriptsContent     string `gorm:"column:scripts_content;type:text;not null;default:'{}'"`
+	GenerateStatus     string `gorm:"column:generate_status;type:varchar(16);not null;default:''"`
 	// GenerateError stores the last error message when GenerateStatus = 'failed' (migration 20260707120000).
 	GenerateError string `gorm:"column:generate_error;type:text;not null;default:''"`
+	// Version is an optimistic-lock counter. SavePluginDraft increments it on every
+	// successful write to plugin_yaml_content or state_yaml_content and rejects saves
+	// that arrive with a stale version (returns 409 Conflict).
+	// AI generate_job writes bypass the version check (it only writes its own fields).
+	Version int `gorm:"column:version;type:int;not null;default:1"`
 }
 
 func (PluginDraft) TableName() string { return "plugin_drafts" }
