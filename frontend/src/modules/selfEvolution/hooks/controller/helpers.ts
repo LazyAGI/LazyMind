@@ -26,7 +26,6 @@ import {
   getCompletedProgressSnapshot,
   t,
   isCheckpointGateFlowStatus,
-  getFlowStatusFromPayload,
   resolveTerminalStepStatusFromFlowStatus,
   type ThreadEventStage,
   type WorkflowRuntimeState,
@@ -39,11 +38,9 @@ import type {
   ThreadStepListState,
   PxCaseDetailRow,
   AnalysisCategorySummaryRow,
-  AnalysisActionableCaseRow,
   DatasetCasePreviewRow,
   DatasetStreamingRow,
   EvalStreamingRow,
-  AbtestStreamingRow,
   AnalysisStreamingRow,
 } from "./types";
 import { analysisCategoryColors } from "./constants";
@@ -475,10 +472,7 @@ export function buildStreamingEvalCaseRows(events: NormalizedThreadEvent[]): Eva
   return Array.from(rows.values()).sort((left, right) => left.order - right.order);
 }
 
-function collectStreamingEvalProgressFromEvents(
-  events: NormalizedThreadEvent[],
-  eventTypes: Set<string>,
-) {
+export function getStreamingEvalProgress(events: NormalizedThreadEvent[]) {
   let current = 0;
   let total = 0;
   events.forEach((event) => {
@@ -486,15 +480,13 @@ function collectStreamingEvalProgressFromEvents(
       return;
     }
     const eventType = getStreamingEvalEventType(event);
-    if (!eventTypes.has(eventType)) {
+    if (!EVAL_STREAMING_EVENT_TYPES.has(eventType)) {
       return;
     }
     const progress = getNestedRecordField(event.payload, ["progress"]);
     const eventData = getEventPayloadData(event.payload);
-    const nextCurrent =
-      getNumberField(progress, ["current"]) ?? getNumberField(eventData, ["current"]);
-    const nextTotal =
-      getNumberField(progress, ["total"]) ?? getNumberField(eventData, ["total", "case_num"]);
+    const nextCurrent = getNumberField(progress, ["current"]) ?? getNumberField(eventData, ["current"]);
+    const nextTotal = getNumberField(progress, ["total"]) ?? getNumberField(eventData, ["total", "case_num"]);
     if (typeof nextCurrent === "number") {
       current = Math.max(current, nextCurrent);
     }
@@ -503,136 +495,6 @@ function collectStreamingEvalProgressFromEvents(
     }
   });
   return { current, total };
-}
-
-export function getStreamingEvalProgress(events: NormalizedThreadEvent[]) {
-  const judgeProgress = collectStreamingEvalProgressFromEvents(
-    events,
-    new Set(["eval.judge", "eval.answer_and_judge"]),
-  );
-  if (judgeProgress.total > 0) {
-    return judgeProgress;
-  }
-  return collectStreamingEvalProgressFromEvents(events, new Set(["eval.answer"]));
-}
-
-const ABTEST_STREAMING_EVENT_TYPES = new Set([
-  "abtest.candidate_answer",
-  "abtest.candidate_rag_answer",
-  "abtest.candidate_judge",
-]);
-
-function getStreamingAbtestEventType(event: NormalizedThreadEvent) {
-  return (
-    getStringField(event.payload, ["event_type"]) ||
-    getEventFlowKind(event.payload) ||
-    event.type
-  );
-}
-
-function resolveAbtestStreamingStep(eventType: string): "answer" | "judge" | undefined {
-  if (eventType === "abtest.candidate_answer" || eventType === "abtest.candidate_rag_answer") {
-    return "answer";
-  }
-  if (eventType === "abtest.candidate_judge") {
-    return "judge";
-  }
-  return undefined;
-}
-
-export function buildStreamingAbtestCaseRows(events: NormalizedThreadEvent[]): AbtestStreamingRow[] {
-  const rows = new Map<string, AbtestStreamingRow & { order: number }>();
-
-  events.forEach((event, index) => {
-    if (event.stage !== "abtest") {
-      return;
-    }
-    const eventType = getStreamingAbtestEventType(event);
-    if (!ABTEST_STREAMING_EVENT_TYPES.has(eventType)) {
-      return;
-    }
-    const step = resolveAbtestStreamingStep(eventType);
-    if (!step) {
-      return;
-    }
-
-    const caseId = getEventCaseId(event.payload);
-    if (!caseId) {
-      return;
-    }
-
-    const status = getStreamingDatasetCaseEventStatus(event);
-    if (status !== "running" && status !== "done") {
-      return;
-    }
-
-    const caseRecord = getNestedRecordField(event.payload, ["case"]);
-    const caseIndex =
-      getNumberField(caseRecord, ["index"]) ?? getNumberField(event.payload, ["case_index"]);
-    const existing = rows.get(caseId);
-    const row: AbtestStreamingRow & { order: number } = {
-      key: caseId,
-      caseId,
-      answerStatus: existing?.answerStatus,
-      judgeStatus: existing?.judgeStatus,
-      order: existing?.order ?? caseIndex ?? index,
-    };
-
-    if (step === "answer") {
-      row.answerStatus = status;
-    }
-    if (step === "judge") {
-      row.judgeStatus = status;
-    }
-
-    rows.set(caseId, row);
-  });
-
-  return Array.from(rows.values()).sort((left, right) => left.order - right.order);
-}
-
-function collectStreamingAbtestProgressFromEvents(
-  events: NormalizedThreadEvent[],
-  eventTypes: Set<string>,
-) {
-  let current = 0;
-  let total = 0;
-  events.forEach((event) => {
-    if (event.stage !== "abtest") {
-      return;
-    }
-    const eventType = getStreamingAbtestEventType(event);
-    if (!eventTypes.has(eventType)) {
-      return;
-    }
-    const progress = getNestedRecordField(event.payload, ["progress"]);
-    const eventData = getEventPayloadData(event.payload);
-    const nextCurrent =
-      getNumberField(progress, ["current"]) ?? getNumberField(eventData, ["current"]);
-    const nextTotal =
-      getNumberField(progress, ["total"]) ?? getNumberField(eventData, ["total", "case_num"]);
-    if (typeof nextCurrent === "number") {
-      current = Math.max(current, nextCurrent);
-    }
-    if (typeof nextTotal === "number") {
-      total = Math.max(total, nextTotal);
-    }
-  });
-  return { current, total };
-}
-
-export function getStreamingAbtestProgress(events: NormalizedThreadEvent[]) {
-  const judgeProgress = collectStreamingAbtestProgressFromEvents(
-    events,
-    new Set(["abtest.candidate_judge"]),
-  );
-  if (judgeProgress.total > 0) {
-    return judgeProgress;
-  }
-  return collectStreamingAbtestProgressFromEvents(
-    events,
-    new Set(["abtest.candidate_answer", "abtest.candidate_rag_answer"]),
-  );
 }
 
 export function buildDatasetCasePreviewRowFromArtifact(caseId: string, value: unknown): Partial<DatasetCasePreviewRow> {
@@ -781,23 +643,6 @@ export function getSilentRestoreRequestConfig(signal?: AbortSignal) {
   return { signal, silentError: true } as Parameters<typeof axiosInstance.get>[1];
 }
 
-export function shouldUseEventTraceStream(step?: ThreadStepSummary): boolean {
-  const stage = step ? toThreadEventStage(step.stage || step.title) : undefined;
-  return stage === "repair";
-}
-
-export function buildThreadStepEventsStreamUrl(
-  threadId: string,
-  stepId: string,
-  step?: ThreadStepSummary,
-): string {
-  const streamSegment = shouldUseEventTraceStream(step)
-    ? "event-trace:stream"
-    : "events:stream";
-  const query = new URLSearchParams({ step_id: stepId });
-  return `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/${streamSegment}?${query}`;
-}
-
 export function normalizeThreadStepListPayload(payload: ThreadRestorePayload): ThreadStepListState {
   const payloadRecord = isRecord(payload) ? payload : undefined;
   const activeStepId = getNestedStringField(payloadRecord, ["active_step_id", "activeStepId"]);
@@ -915,38 +760,6 @@ const THREAD_EVENT_STAGE_ORDER: ThreadEventStage[] = [
   "repair",
   "abtest",
 ];
-
-export function resolveArtifactItemForThreadStep<T extends { kind: string }>(
-  step: ThreadStepSummary,
-  fallbackIndex: number,
-  artifactItems: T[],
-  stageKindMap: Record<string, string>,
-): T | undefined {
-  const stage = toThreadEventStage(step.stage || step.title);
-  if (stage) {
-    const kind = stageKindMap[stage];
-    if (kind) {
-      const matched = artifactItems.find((item) => item.kind === kind);
-      if (matched) {
-        return matched;
-      }
-    }
-  }
-  return artifactItems[fallbackIndex];
-}
-
-export function resolveThreadStepViewStage(
-  step: ThreadStepSummary,
-  workflowStepId?: string,
-  workflowStepStageMap?: Record<string, string>,
-): ThreadEventStage | undefined {
-  return (
-    toThreadEventStage(step.stage || step.title) ||
-    (workflowStepId && workflowStepStageMap
-      ? toThreadEventStage(workflowStepStageMap[workflowStepId])
-      : undefined)
-  );
-}
 
 export function sortThreadStepsByOrder(steps: ThreadStepSummary[]) {
   return [...steps].sort((left, right) => {
@@ -1178,10 +991,11 @@ export function resolveStepListCheckpointPrompt(
   );
 }
 
-export function buildCompletedFlowCheckpointPrompt(
+export function buildPausedFlowCheckpointPrompt(
   event: Pick<NormalizedThreadEvent, "stage" | "payload">,
 ): CheckpointWaitPrompt | undefined {
-  if (getFlowStatusFromPayload(event.payload) !== "completed" || !event.stage) {
+  const flowStatus = getStringField(event.payload, ["status", "state"])?.trim().toLowerCase();
+  if (flowStatus !== "paused" || !event.stage) {
     return undefined;
   }
 
@@ -1504,11 +1318,14 @@ export function getAnalysisCategoryCount(value: unknown) {
   return undefined;
 }
 
-function buildKeyedCountSummaryRows(
-  counts: Record<string, unknown> | undefined,
-  uncategorizedLabel: string,
+export function buildAnalysisCategorySummaryRows(
+  summary: Record<string, unknown> | undefined,
+  uncategorizedLabel = "Uncategorized",
 ): AnalysisCategorySummaryRow[] {
-  const countedRows = Object.entries(counts || {})
+  const coarseCounts =
+    getStructuredRecordField(summary, ["coarse_category_counts", "coarseCategoryCounts"]) ||
+    getNestedRecordField(summary, ["coarse_category_counts", "coarseCategoryCounts"]);
+  const countedRows = Object.entries(coarseCounts || {})
     .map(([category, value]) => ({
       category,
       count: getAnalysisCategoryCount(value),
@@ -1526,121 +1343,4 @@ function buildKeyedCountSummaryRows(
       ratioValue: total > 0 ? item.count / total : 0,
       color: analysisCategoryColors[index % analysisCategoryColors.length],
     }));
-}
-
-export function extractAnalysisSummaryContent(
-  data: unknown,
-): Record<string, unknown> | undefined {
-  if (!isRecord(data)) {
-    return undefined;
-  }
-
-  const directId = getStringField(data, ["id"]);
-  if (
-    directId === "analysis.summary" ||
-    data.actionable_cases !== undefined ||
-    data.actionable_case !== undefined ||
-    data.affected_block_counts !== undefined
-  ) {
-    return data;
-  }
-
-  const content =
-    getStructuredRecordField(data, ["content"]) ||
-    getNestedRecordField(data, ["content"]);
-  if (isRecord(content)) {
-    const nested = extractAnalysisSummaryContent(content);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  const items = getResultItems(data).filter(isRecord);
-  for (const item of items) {
-    const artifactId =
-      getResultStringField(item, ["artifact_id", "artifactId", "id"]) || "";
-    if (
-      artifactId !== "analysis.summary" &&
-      artifactId !== "classification_report"
-    ) {
-      continue;
-    }
-    const nestedData =
-      getStructuredRecordField(item, ["data"]) ||
-      getNestedRecordField(item, ["data"]) ||
-      item;
-    const nested = extractAnalysisSummaryContent(nestedData);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return undefined;
-}
-
-export function buildAnalysisActionableCaseRows(
-  content: Record<string, unknown> | undefined,
-): AnalysisActionableCaseRow[] {
-  const cases =
-    getStructuredArrayField(content, ["actionable_cases", "actionable_case"]) ||
-    [];
-  return cases
-    .filter(isRecord)
-    .map((item, index) => ({
-      key:
-        getStringField(item, ["case_id", "id"]) ||
-        `actionable-case-${index + 1}`,
-      caseId:
-        getStringField(item, ["case_id", "id"]) || `case_${index + 1}`,
-      issueType: getStringField(item, ["issue_type", "issueType"]) || "-",
-      affectedBlock:
-        getStringField(item, ["affected_block", "affectedBlock"]) || "-",
-      failureMode:
-        getStringField(item, ["failure_mode", "failureMode"]) || "-",
-      confidence: getStringField(item, ["confidence"]) || "-",
-      reason:
-        getStringField(item, ["reason", "root_cause_reason", "rootCauseReason"]) ||
-        "-",
-      clusterId: getStringField(item, ["cluster_id", "clusterId"]) || "-",
-      outlierScore: String(getNumberField(item, ["outlier_score", "outlierScore"]) ?? "-"),
-    }));
-}
-
-export function buildAffectedBlockCountRows(
-  content: Record<string, unknown> | undefined,
-  uncategorizedLabel = "Uncategorized",
-): AnalysisCategorySummaryRow[] {
-  const counts =
-    getStructuredRecordField(content, [
-      "affected_block_counts",
-      "affectedBlockCounts",
-    ]) ||
-    getNestedRecordField(content, [
-      "affected_block_counts",
-      "affectedBlockCounts",
-    ]);
-  if (counts && Object.keys(counts).length > 0) {
-    return buildKeyedCountSummaryRows(counts, uncategorizedLabel);
-  }
-
-  const fallbackCounts =
-    getStructuredRecordField(content, [
-      "issue_category_counts",
-      "issueCategoryCounts",
-    ]) ||
-    getNestedRecordField(content, [
-      "issue_category_counts",
-      "issueCategoryCounts",
-    ]);
-  return buildKeyedCountSummaryRows(fallbackCounts, uncategorizedLabel);
-}
-
-export function buildAnalysisCategorySummaryRows(
-  summary: Record<string, unknown> | undefined,
-  uncategorizedLabel = "Uncategorized",
-): AnalysisCategorySummaryRow[] {
-  const coarseCounts =
-    getStructuredRecordField(summary, ["coarse_category_counts", "coarseCategoryCounts"]) ||
-    getNestedRecordField(summary, ["coarse_category_counts", "coarseCategoryCounts"]);
-  return buildKeyedCountSummaryRows(coarseCounts, uncategorizedLabel);
 }
