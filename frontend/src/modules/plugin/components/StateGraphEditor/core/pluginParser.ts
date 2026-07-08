@@ -1,5 +1,5 @@
 import jsYaml from 'js-yaml';
-import type { PluginModel, PluginSlotDef, PluginToolScript, PluginUiTab, WidgetConfig, CompositePanelNode } from './pluginModel';
+import type { PluginModel, PluginSlotDef, PluginToolScript, PluginUiTab, WidgetConfig, CompositePanelNode, CompositeTab } from './pluginModel';
 
 interface RawPluginYaml {
   id?: unknown;
@@ -32,7 +32,8 @@ function migrateLegacyCompositeLayout(raw: unknown): CompositePanelNode {
       if (n.slot && typeof n.slot === 'object' && !Array.isArray(n.slot) && 'tabs' in (n.slot as object)) {
         const tabsRaw = (n.slot as Record<string, unknown>).tabs;
         const tabIds = Array.isArray(tabsRaw) ? tabsRaw.map((t) => typeof t === 'string' ? t : String(t)) : [];
-        return { tabs: tabIds, weight: typeof n.weight === 'number' ? n.weight : 1 };
+        const tabs: CompositeTab[] = tabIds.map((id, idx) => ({ label: `Tab ${idx + 1}`, slot: id }));
+        return { tabs, weight: typeof n.weight === 'number' ? n.weight : 1 };
       }
       const slotId = typeof n.slot === 'string' ? n.slot : '';
       return { slot: slotId, weight: typeof n.weight === 'number' ? n.weight : 1 };
@@ -40,6 +41,21 @@ function migrateLegacyCompositeLayout(raw: unknown): CompositePanelNode {
     return { slot: '', weight: 1 };
   });
   return { direction: 'row', children };
+}
+
+/** Migrate CompositeTab fields: if tabs is string[], convert to CompositeTab[]. */
+function migrateCompositeTabs(node: CompositePanelNode): CompositePanelNode {
+  const migrated: CompositePanelNode = { ...node };
+  if (Array.isArray(node.tabs)) {
+    const rawTabs = node.tabs as unknown[];
+    if (rawTabs.length > 0 && typeof rawTabs[0] === 'string') {
+      migrated.tabs = (rawTabs as string[]).map((id, idx) => ({ label: `Tab ${idx + 1}`, slot: id }));
+    }
+  }
+  if (node.children) {
+    migrated.children = node.children.map(migrateCompositeTabs);
+  }
+  return migrated;
 }
 
 function parseSlots(raw: unknown): PluginSlotDef[] {
@@ -157,7 +173,7 @@ function parseUiTabs(raw: unknown): { tabs: PluginUiTab[]; slots?: Record<string
       if (Array.isArray(t.composite_layout)) {
         compositeLayout = migrateLegacyCompositeLayout(t.composite_layout);
       } else if (typeof t.composite_layout === 'object' && 'direction' in (t.composite_layout as object)) {
-        compositeLayout = t.composite_layout as CompositePanelNode;
+        compositeLayout = migrateCompositeTabs(t.composite_layout as CompositePanelNode);
       }
     }
 

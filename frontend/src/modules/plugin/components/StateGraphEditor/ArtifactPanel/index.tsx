@@ -3,7 +3,7 @@ import { Button, Checkbox, Input, InputNumber, Select, Tooltip, Empty, Dropdown,
 import { PlusOutlined, CloseOutlined, CheckOutlined, DownOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { SlotDef, GraphModel } from '../core/model';
-import type { PluginModel, PluginUiTab, WidgetConfig, WidgetType } from '../core/pluginModel';
+import type { PluginModel, PluginUiTab, WidgetConfig, WidgetType, CompositePanelNode } from '../core/pluginModel';
 import { SLOT_DEFAULT_WIDGET, SLOT_COMPATIBLE_WIDGETS } from '../core/pluginModel';
 import WidgetSelector from '../UiEditorPanel/WidgetSelector';
 import './index.scss';
@@ -31,6 +31,8 @@ interface Props {
   pluginModel?: PluginModel;
   activeTabId?: string;
   onUiModelChange?: (ui: PluginModel['ui']) => void;
+  /** Navigate to the tab where a slot lives. */
+  onTabNavigate?: (tabId: string) => void;
 }
 
 interface EditDraft {
@@ -57,6 +59,204 @@ const EMPTY_DRAFT: EditDraft = {
 /** Returns true if any step node uses slotId as an input. */
 function isUsedAsInput(model: GraphModel, slotId: string): boolean {
   return model.nodes.some((n) => n.inputs.some((r) => r.slot === slotId));
+}
+
+// ── Composite layout helpers ─────────────────────────────────────────────────
+
+/** Describes where a slot lives within the plugin UI. */
+type SlotLocation =
+  | { kind: 'simple'; tabId: string; tabLabel: string }
+  | { kind: 'composite-block'; tabId: string; tabLabel: string; blockPath: number[]; blockLabel?: string }
+  | {
+      kind: 'composite-tab';
+      tabId: string;
+      tabLabel: string;
+      blockPath: number[];
+      blockLabel?: string;
+      tabIdx: number;
+      innerTabLabel: string;
+    };
+
+/** Walk a composite tree and find the path where slotId lives. */
+function findInComposite(
+  node: CompositePanelNode,
+  slotId: string,
+  path: number[] = [],
+): { path: number[]; tabIdx?: number } | null {
+  if (node.slot === slotId) return { path };
+  if (node.tabs) {
+    const idx = node.tabs.findIndex((t) => t.slot === slotId);
+    if (idx >= 0) return { path, tabIdx: idx };
+  }
+  if (node.children) {
+    for (let i = 0; i < node.children.length; i++) {
+      const found = findInComposite(node.children[i], slotId, [...path, i]);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** Get the block node at a given path in the composite tree. */
+function getNodeAtPath(root: CompositePanelNode, path: number[]): CompositePanelNode | null {
+  let cur: CompositePanelNode = root;
+  for (const idx of path) {
+    if (!cur.children?.[idx]) return null;
+    cur = cur.children[idx];
+  }
+  return cur;
+}
+
+/** Find where a slot lives across all PluginUiTabs. */
+function findSlotLocation(slotId: string, tabs: PluginUiTab[]): SlotLocation | null {
+  for (const tab of tabs) {
+    // Simple (non-composite) tabs
+    if (tab.layout !== 'composite') {
+      if (tab.slots.some((s) => s.id === slotId)) {
+        return { kind: 'simple', tabId: tab.id, tabLabel: tab.label ?? tab.id };
+      }
+      continue;
+    }
+    // Composite tab
+    if (!tab.composite_layout) continue;
+    const found = findInComposite(tab.composite_layout, slotId);
+    if (!found) continue;
+    const blockNode = getNodeAtPath(tab.composite_layout, found.path);
+    const blockLabel = blockNode?.label;
+    if (found.tabIdx !== undefined) {
+      const innerTabLabel = blockNode?.tabs?.[found.tabIdx]?.label ?? `Tab ${found.tabIdx + 1}`;
+      return {
+        kind: 'composite-tab',
+        tabId: tab.id,
+        tabLabel: tab.label ?? tab.id,
+        blockPath: found.path,
+        blockLabel,
+        tabIdx: found.tabIdx,
+        innerTabLabel,
+      };
+    }
+    return {
+      kind: 'composite-block',
+      tabId: tab.id,
+      tabLabel: tab.label ?? tab.id,
+      blockPath: found.path,
+      blockLabel,
+    };
+  }
+  return null;
+}
+
+/** Format a location as a human-readable string. */
+function formatLocation(loc: SlotLocation): string {
+  if (loc.kind === 'simple') return loc.tabLabel;
+  const parts: string[] = [loc.tabLabel];
+  if (loc.blockLabel) parts.push(loc.blockLabel);
+  if (loc.kind === 'composite-tab') parts.push(loc.innerTabLabel);
+  return parts.join(' › ');
+}
+
+/** Remove a slot from the composite tree immutably. */
+function removeFromComposite(node: CompositePanelNode, slotId: string): CompositePanelNode {
+  if (node.slot === slotId) return { ...node, slot: '' };
+  if (node.tabs) {
+    if (node.tabs.some((t) => t.slot === slotId)) {
+      return { ...node, tabs: node.tabs.map((t) => t.slot === slotId ? { ...t, slot: '' } : t) };
+    }
+  }
+  if (node.children) {
+    return { ...node, children: node.children.map((c) => removeFromComposite(c, slotId)) };
+  }
+  return node;
+}
+
+/** Assign a slot to a position in the composite tree immutably.
+ *  blockPath: path to the leaf node; tabIdx: if set, assign to that tab slot; else assign to node.slot.
+ */
+function assignInComposite(
+  node: CompositePanelNode,
+  blockPath: number[],
+  tabIdx: number | undefined,
+  slotId: string,
+): CompositePanelNode {
+  if (blockPath.length === 0) {
+    if (tabIdx !== undefined && node.tabs) {
+      const newTabs = node.tabs.map((t, i) => i === tabIdx ? { ...t, slot: slotId } : t);
+      return { ...node, tabs: newTabs };
+    }
+    return { ...node, slot: slotId };
+  }
+  if (!node.children) return node;
+  const [head, ...rest] = blockPath;
+  const newChildren = node.children.map((c, i) =>
+    i === head ? assignInComposite(c, rest, tabIdx, slotId) : c,
+  );
+  return { ...node, children: newChildren };
+}
+
+// ── Assignment target descriptors (for the cascade dropdown) ─────────────────
+
+interface AssignTarget {
+  key: string;
+  label: string;
+  tabId: string;
+  isComposite: boolean;
+  blockPath?: number[];
+  tabIdx?: number;
+}
+
+/** Collect all assignable positions from a PluginUiTab list as flat entries. */
+function collectAssignTargets(tabs: PluginUiTab[]): AssignTarget[] {
+  const targets: AssignTarget[] = [];
+
+  function walkNode(
+    node: CompositePanelNode,
+    path: number[],
+    tabId: string,
+    tabLabel: string,
+    depth: number,
+  ) {
+    const isLeaf = !node.direction && !node.children?.length;
+    if (!isLeaf) {
+      (node.children ?? []).forEach((c, i) => walkNode(c, [...path, i], tabId, tabLabel, depth + 1));
+      return;
+    }
+    const blockLabel = node.label ?? `分块 ${path.map((p) => p + 1).join('-') || ''}`;
+    if (Array.isArray(node.tabs) && node.tabs.length > 0) {
+      node.tabs.forEach((t, idx) => {
+        targets.push({
+          key: `${tabId}::${path.join('/')}::tab::${idx}`,
+          label: `${tabLabel} › ${blockLabel} › ${t.label}`,
+          tabId,
+          isComposite: true,
+          blockPath: path,
+          tabIdx: idx,
+        });
+      });
+    } else {
+      targets.push({
+        key: `${tabId}::${path.join('/')}`,
+        label: `${tabLabel} › ${blockLabel}`,
+        tabId,
+        isComposite: true,
+        blockPath: path,
+      });
+    }
+  }
+
+  for (const tab of tabs) {
+    if (tab.layout !== 'composite') {
+      targets.push({
+        key: tab.id,
+        label: tab.label ?? tab.id,
+        tabId: tab.id,
+        isComposite: false,
+      });
+    } else if (tab.composite_layout?.direction) {
+      walkNode(tab.composite_layout, [], tab.id, tab.label ?? tab.id, 0);
+    }
+  }
+
+  return targets;
 }
 
 // ── EditForm ────────────────────────────────────────────────────────────────
@@ -166,17 +366,17 @@ interface ArtifactRowProps {
   uiSlots: Record<string, WidgetConfig>;
   onUpdate: (id: string, patch: Partial<Omit<SlotDef, 'id'>>) => void;
   onDelete: (id: string) => void;
-  onJoinTab: (slotId: string, tabId: string, widget: WidgetConfig) => void;
-  onLeaveTab: (slotId: string, tabId: string) => void;
-  onWidgetChange: (slotId: string, tabId: string, widget: WidgetConfig) => void;
+  onAssign: (target: AssignTarget, slotId: string, widget: WidgetConfig) => void;
+  onRemoveFromUi: (slotId: string) => void;
+  onWidgetChange: (slotId: string, widget: WidgetConfig) => void;
+  onTabNavigate?: (tabId: string) => void;
 }
 
-function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, onJoinTab, onLeaveTab, onWidgetChange }: ArtifactRowProps) {
+function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, onAssign, onRemoveFromUi, onWidgetChange, onTabNavigate }: ArtifactRowProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<EditDraft>(EMPTY_DRAFT);
 
-  // Selected widget type for this slot when joining a tab
   const slotKey = `${art.type}/${art.cardinality ?? 'single'}`;
   const defaultWidgetType: WidgetType = (SLOT_DEFAULT_WIDGET[slotKey] ?? 'text-single') as WidgetType;
   const [selectedWidget, setSelectedWidget] = useState<WidgetType>(defaultWidgetType);
@@ -186,9 +386,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, on
     return isUsedAsInput(model, art.id);
   };
 
-  // Find which tab (if any) this slot currently belongs to — at most one tab.
-  const currentTab = tabs.find((tab) => tab.slots.some((s) => s.id === art.id)) ?? null;
-  const currentTabSlot = currentTab?.slots.find((s) => s.id === art.id);
+  const currentLocation = findSlotLocation(art.id, tabs);
 
   const startEdit = () => {
     setDraft({
@@ -219,7 +417,6 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, on
 
   const typeLabel = t(TYPE_LABEL_KEYS[art.type] ?? 'selfEvolutionRun.stateGraphArtifactTypeText');
   const cardinalityLabel = art.cardinality === 'list' ? `(${t('selfEvolutionRun.artifactPanelFieldIsList')})` : '';
-
   const displayName = art.label || art.id;
   const idLabel = art.label ? `(${art.id})` : '';
   const resolvedAllowManualAdd = art.cardinality === 'list'
@@ -248,6 +445,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, on
   };
 
   const compatibleWidgets = SLOT_COMPATIBLE_WIDGETS[slotKey] ?? ['text-single'];
+  const assignTargets = collectAssignTargets(tabs);
 
   return (
     <div
@@ -295,8 +493,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, on
       </div>
       {uiMode && (
         <div className="artifact-item-line2">
-          {/* Widget selector — only show compatible types */}
-          {compatibleWidgets.length > 1 && !currentTab && (
+          {compatibleWidgets.length > 1 && !currentLocation && (
             <WidgetSelector
               slotType={art.type}
               cardinality={art.cardinality}
@@ -305,42 +502,57 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, on
               size="small"
             />
           )}
-          {/* Widget selector for already-joined tab slot */}
-          {compatibleWidgets.length > 1 && currentTab && currentTabSlot && (
+          {compatibleWidgets.length > 1 && currentLocation && (
             <WidgetSelector
               slotType={art.type}
               cardinality={art.cardinality}
               value={uiSlots[art.id]?.widgetType as WidgetType | undefined}
-              onChange={(wt) => {
-                const newWidget: WidgetConfig = { widgetType: wt } as WidgetConfig;
-                onWidgetChange(art.id, currentTab.id, newWidget);
-              }}
+              onChange={(wt) => onWidgetChange(art.id, { widgetType: wt } as WidgetConfig)}
               size="small"
             />
           )}
-          {currentTab ? (
-            <Button
-              size="small"
-              type="link"
-              className="artifact-row-join artifact-row-join--active"
-              icon={<CheckOutlined />}
-              onClick={() => onLeaveTab(art.id, currentTab.id)}
-            >
-              {t('selfEvolutionRun.artifactPanelJoinedTab', { tabLabel: currentTab.label ?? currentTab.id })}
-            </Button>
+          {currentLocation ? (
+            <div className="artifact-row-joined">
+              <button
+                type="button"
+                className="artifact-row-joined-label"
+                onClick={() => onTabNavigate?.(currentLocation.tabId)}
+                title="点击跳转到对应 Tab"
+              >
+                <CheckOutlined className="artifact-row-joined-check" />
+                已加入：{formatLocation(currentLocation)}
+              </button>
+              <Popconfirm
+                title="移出此素材？"
+                description="素材将从当前位置移出，不会删除素材本身。"
+                onConfirm={() => onRemoveFromUi(art.id)}
+                okText="确认移出"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                placement="left"
+              >
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<CloseOutlined />}
+                  className="artifact-row-joined-remove"
+                  title="移出"
+                />
+              </Popconfirm>
+            </div>
           ) : (
             <Dropdown
               menu={{
-                items: tabs.map((tab) => ({
-                  key: tab.id,
-                  label: tab.label ?? tab.id,
-                  onClick: () => onJoinTab(art.id, tab.id, { widgetType: selectedWidget } as WidgetConfig),
+                items: assignTargets.map((target) => ({
+                  key: target.key,
+                  label: target.label,
+                  onClick: () => onAssign(target, art.id, { widgetType: selectedWidget } as WidgetConfig),
                 })),
               }}
               trigger={['click']}
             >
               <Button size="small" className="artifact-row-join">
-                {t('selfEvolutionRun.artifactPanelJoinTab')} <DownOutlined />
+                加入 <DownOutlined />
               </Button>
             </Dropdown>
           )}
@@ -351,7 +563,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, onUpdate, onDelete, on
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, inline, pluginModel, onUiModelChange }: Props) {
+export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, inline, pluginModel, onUiModelChange, onTabNavigate }: Props) {
   const { t } = useTranslation();
   const [newDraft, setNewDraft] = useState<EditDraft>(EMPTY_DRAFT);
   const [adding, setAdding] = useState(false);
@@ -415,26 +627,44 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
     });
   };
 
-  const joinTab = (slotId: string, tabId: string, widget: WidgetConfig) => {
+  const assignSlot = (target: AssignTarget, slotId: string, widget: WidgetConfig) => {
     if (!pluginModel || !onUiModelChange) return;
-    const newTabs = tabs.map((tab) =>
-      tab.id === tabId && !tab.slots.some((s) => s.id === slotId)
-        ? { ...tab, slots: [...tab.slots, { id: slotId }] }
-        : tab,
-    );
     const nextUiSlots = { ...(pluginModel.ui?.slots ?? {}), [slotId]: widget };
-    onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs, slots: nextUiSlots });
+
+    if (!target.isComposite) {
+      // Simple tab: add to tab.slots
+      const newTabs = tabs.map((tab) =>
+        tab.id === target.tabId && !tab.slots.some((s) => s.id === slotId)
+          ? { ...tab, slots: [...tab.slots, { id: slotId }] }
+          : tab,
+      );
+      onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs, slots: nextUiSlots });
+    } else {
+      // Composite tab: assign slot into the tree
+      const newTabs = tabs.map((tab) => {
+        if (tab.id !== target.tabId || !tab.composite_layout) return tab;
+        const newLayout = assignInComposite(tab.composite_layout, target.blockPath!, target.tabIdx, slotId);
+        return { ...tab, composite_layout: newLayout };
+      });
+      onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs, slots: nextUiSlots });
+    }
   };
 
-  const leaveTab = (slotId: string, tabId: string) => {
+  const removeSlotFromUi = (slotId: string) => {
     if (!pluginModel || !onUiModelChange) return;
-    const newTabs = tabs.map((tab) =>
-      tab.id === tabId ? { ...tab, slots: tab.slots.filter((s) => s.id !== slotId) } : tab,
-    );
+    // Remove from simple tabs
+    const newTabs = tabs.map((tab) => {
+      if (tab.layout !== 'composite') {
+        return { ...tab, slots: tab.slots.filter((s) => s.id !== slotId) };
+      }
+      if (!tab.composite_layout) return tab;
+      const newLayout = removeFromComposite(tab.composite_layout, slotId);
+      return { ...tab, composite_layout: newLayout };
+    });
     onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs: newTabs });
   };
 
-  const updateWidget = (slotId: string, _tabId: string, widget: WidgetConfig) => {
+  const updateWidget = (slotId: string, widget: WidgetConfig) => {
     if (!pluginModel || !onUiModelChange) return;
     const nextUiSlots = { ...(pluginModel.ui?.slots ?? {}), [slotId]: widget };
     onUiModelChange({ ...(pluginModel.ui ?? { tabs: [] }), tabs, slots: nextUiSlots });
@@ -477,9 +707,10 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
             uiSlots={uiSlots}
             onUpdate={updateArtifact}
             onDelete={handleDelete}
-            onJoinTab={joinTab}
-            onLeaveTab={leaveTab}
+            onAssign={assignSlot}
+            onRemoveFromUi={removeSlotFromUi}
             onWidgetChange={updateWidget}
+            onTabNavigate={onTabNavigate}
           />
         ))}
 

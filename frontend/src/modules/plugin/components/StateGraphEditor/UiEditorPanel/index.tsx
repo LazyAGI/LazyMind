@@ -131,6 +131,7 @@ export default function UiEditorPanel({
             pluginModel={pluginModel}
             activeTabId={activeTabId}
             onUiModelChange={handleUiChange}
+            onTabNavigate={onActiveTabChange}
           />
         </div>
 

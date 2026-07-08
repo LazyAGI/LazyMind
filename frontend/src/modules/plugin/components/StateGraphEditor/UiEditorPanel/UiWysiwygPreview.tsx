@@ -61,15 +61,15 @@ function renderCompositeNode(
   }
 
   if (node.tabs && node.tabs.length > 0) {
-    const firstSlot = node.tabs[0];
-    const widget = getWidgetConfig(firstSlot, uiSlots, slotMap, pluginSlotMap);
-    const label = resolveSlot(firstSlot, slotMap, pluginSlotMap).label;
+    const firstTab = node.tabs[0];
+    const widget = firstTab.slot ? getWidgetConfig(firstTab.slot, uiSlots, slotMap, pluginSlotMap) : { widgetType: 'text-single' as const };
+    const label = firstTab.slot ? resolveSlot(firstTab.slot, slotMap, pluginSlotMap).label : firstTab.label;
     return (
       <div className='wywp-composite-tabs'>
         <div className='wywp-composite-tab-bar'>
-          {node.tabs.map((slotId) => (
-            <span key={slotId} className='wywp-composite-tab-chip'>
-              {resolveSlot(slotId, slotMap, pluginSlotMap).label}
+          {node.tabs.map((tab, idx) => (
+            <span key={idx} className='wywp-composite-tab-chip'>
+              {tab.label}
             </span>
           ))}
         </div>

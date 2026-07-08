@@ -102,6 +102,12 @@ export type WidgetConfig =
 
 // ── Composite layout tree (format C) ─────────────────────────────────────────
 
+/** A single named tab inside a composite leaf pane. */
+export interface CompositeTab {
+  label: string;
+  slot: string;
+}
+
 /**
  * Recursive tree node for composite_layout (format C).
  * Exactly one of { slot, tabs, direction+children } should be set.
@@ -109,8 +115,10 @@ export type WidgetConfig =
 export interface CompositePanelNode {
   /** Leaf: single slot id. */
   slot?: string;
-  /** Leaf: tab-switching area, each item is a slot id. */
-  tabs?: string[];
+  /** Leaf: tab-switching area. */
+  tabs?: CompositeTab[];
+  /** Human-readable name for this block (optional). */
+  label?: string;
   /** Container: split direction. */
   direction?: 'row' | 'column';
   children?: CompositePanelNode[];

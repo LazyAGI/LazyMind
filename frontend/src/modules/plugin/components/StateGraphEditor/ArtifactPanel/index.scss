@@ -239,3 +239,59 @@
     color: #52c41a;
   }
 }
+
+.artifact-row-joined {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.artifact-row-joined-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0 4px;
+  height: 22px;
+  font-size: 12px;
+  color: #1677ff;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+  transition: background 0.12s;
+
+  &:hover {
+    background: #f0f5ff;
+    text-decoration: underline;
+  }
+}
+
+.artifact-row-joined-check {
+  color: #52c41a;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.artifact-row-joined-remove {
+  color: #bfbfbf;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+
+  &:hover {
+    color: #ff4d4f;
+    background: #fff1f0;
+  }
+}

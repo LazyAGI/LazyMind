@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState, Fragment } from 'react';
 import type { CSSProperties } from 'react';
-import { PlusOutlined, CloseOutlined, SettingOutlined, SplitCellsOutlined } from '@ant-design/icons';
-import { Button, Popconfirm, Popover, Select, Tooltip } from 'antd';
-import type { CompositePanelNode, WidgetConfig } from '../core/pluginModel';
+import { PlusOutlined, CloseOutlined, SettingOutlined, SplitCellsOutlined, EditOutlined } from '@ant-design/icons';
+import { Button, Input, Modal, Popconfirm, Popover, Tooltip } from 'antd';
+import type { CompositePanelNode, CompositeTab, WidgetConfig } from '../core/pluginModel';
 import type { SlotDef } from '../core/model';
 import WidgetPlaceholder from './WidgetPlaceholder';
 
@@ -23,7 +23,7 @@ interface Props {
 }
 
 // ---------------------------------------------------------------------------
-// DividerHandle — draggable splitter between siblings
+// DividerHandle
 // ---------------------------------------------------------------------------
 
 interface DividerHandleProps {
@@ -33,7 +33,6 @@ interface DividerHandleProps {
 
 function DividerHandle({ direction, onDrag }: DividerHandleProps) {
   const startPos = useRef<number>(0);
-  // Always hold the latest onDrag so the mousemove closure never goes stale.
   const onDragRef = useRef(onDrag);
   onDragRef.current = onDrag;
 
@@ -70,7 +69,7 @@ function DividerHandle({ direction, onDrag }: DividerHandleProps) {
 }
 
 // ---------------------------------------------------------------------------
-// PageBar — page navigation strip with dock-side setting
+// PageBar
 // ---------------------------------------------------------------------------
 
 interface PageBarProps {
@@ -83,11 +82,10 @@ function PageBar({ position, onPositionChange }: PageBarProps) {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
 
-  // Mock pages: total 8, current is 4
   const totalPages = 8;
   const currentPage = 4;
-  const COLLAPSED_RADIUS = 2; // show ±2 around current when collapsed
-  const MAX_EXPANDED = 10;    // cap how many pages show when hovered
+  const COLLAPSED_RADIUS = 2;
+  const MAX_EXPANDED = 10;
 
   const directions: Array<{ value: PageBarPosition; label: string }> = [
     { value: 'top', label: '顶部' },
@@ -98,7 +96,6 @@ function PageBar({ position, onPositionChange }: PageBarProps) {
 
   const allPages = Array.from({ length: totalPages }, (_, i) => i + 1);
 
-  // When expanded: show up to MAX_EXPANDED pages centered around current.
   const expandedPages = (() => {
     if (totalPages <= MAX_EXPANDED) return allPages;
     const half = Math.floor(MAX_EXPANDED / 2);
@@ -140,12 +137,9 @@ function PageBar({ position, onPositionChange }: PageBarProps) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Up / Left arrow */}
       <button type='button' className='cc-pagebar-arrow' aria-label='上一页'>
         {isCol ? '∧' : '‹'}
       </button>
-
-      {/* Page numbers */}
       <div className={`cc-pagebar-pages cc-pagebar-pages--${isCol ? 'col' : 'row'}`}>
         {showTopEllipsis && <span className='cc-pagebar-ellipsis'>{isCol ? '⋮' : '…'}</span>}
         {visiblePages.map((p) => (
@@ -159,13 +153,9 @@ function PageBar({ position, onPositionChange }: PageBarProps) {
         ))}
         {showBottomEllipsis && <span className='cc-pagebar-ellipsis'>{isCol ? '⋮' : '…'}</span>}
       </div>
-
-      {/* Down / Right arrow */}
       <button type='button' className='cc-pagebar-arrow' aria-label='下一页'>
         {isCol ? '∨' : '›'}
       </button>
-
-      {/* Settings */}
       <Popover
         content={popoverContent}
         trigger='click'
@@ -182,7 +172,7 @@ function PageBar({ position, onPositionChange }: PageBarProps) {
 }
 
 // ---------------------------------------------------------------------------
-// LeafPane — a single pane that can hold a slot or a tabs group
+// LeafPane
 // ---------------------------------------------------------------------------
 
 interface LeafPaneProps {
@@ -192,21 +182,25 @@ interface LeafPaneProps {
   usedSlotIds: Set<string>;
   onChange: (updated: CompositePanelNode) => void;
   onRemove?: () => void;
-  /** Direction to split (add sibling). undefined = splitting is not available */
   onSplitRow?: () => void;
   onSplitCol?: () => void;
   style?: CSSProperties;
 }
 
-function LeafPane({ node, slotMap, uiSlots, usedSlotIds, onChange, onRemove, onSplitRow, onSplitCol, style }: LeafPaneProps) {
+function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSplitCol, style }: LeafPaneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [activeTabIdx, setActiveTabIdx] = useState(0);
-  const isTabsNode = Array.isArray(node.tabs);
-  const hasContent = isTabsNode ? (node.tabs!.length > 0) : !!node.slot;
+  const [renamingTabIdx, setRenamingTabIdx] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [pendingDropSlotId, setPendingDropSlotId] = useState<string | null>(null);
+  const [renamingBlock, setRenamingBlock] = useState(false);
+  const [blockLabelValue, setBlockLabelValue] = useState('');
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [confirmRemoveTabIdx, setConfirmRemoveTabIdx] = useState<number | null>(null);
 
-  const slotOptions = Object.values(slotMap)
-    .filter((s) => !usedSlotIds.has(s.id) || (node.slot === s.id))
-    .map((s) => ({ value: s.id, label: s.label ?? s.id }));
+  const isTabsNode = Array.isArray(node.tabs);
+  const tabs = node.tabs ?? [];
+  const hasContent = isTabsNode ? tabs.length > 0 : !!node.slot;
 
   const handleDragOver = (e: React.DragEvent) => {
     if (e.dataTransfer.types.includes('application/x-slot-id')) {
@@ -221,30 +215,90 @@ function LeafPane({ node, slotMap, uiSlots, usedSlotIds, onChange, onRemove, onS
     if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false);
   };
 
+  const doAssignSlot = (slotId: string) => {
+    if (isTabsNode) {
+      const idx = Math.min(activeTabIdx, tabs.length - 1);
+      if (idx < 0) return;
+      const updated = tabs.map((t, i) => i === idx ? { ...t, slot: slotId } : t);
+      onChange({ ...node, tabs: updated });
+    } else {
+      onChange({ ...node, slot: slotId });
+    }
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
     const slotId = e.dataTransfer.getData('application/x-slot-id');
     if (!slotId) return;
-    if (isTabsNode) {
-      if (!node.tabs!.includes(slotId)) onChange({ ...node, tabs: [...node.tabs!, slotId] });
+
+    // Check if the target already has a slot
+    const targetHasSlot = isTabsNode
+      ? (tabs[Math.min(activeTabIdx, tabs.length - 1)]?.slot ?? '') !== ''
+      : !!node.slot;
+
+    if (targetHasSlot) {
+      setPendingDropSlotId(slotId);
     } else {
-      onChange({ ...node, slot: slotId });
+      doAssignSlot(slotId);
     }
   };
 
-  const handleRemoveTab = (slotId: string) => {
-    onChange({ ...node, tabs: node.tabs!.filter((t) => t !== slotId) });
-  };
-
-  const handleToggleTabs = (enabled: boolean) => {
-    if (enabled) {
-      onChange({ ...node, tabs: node.slot ? [node.slot] : [], slot: undefined });
+  const handleAddTab = () => {
+    if (!isTabsNode) {
+      // Convert to tabs mode: create 2 tabs, first inherits current slot
+      const tab1: CompositeTab = { label: 'Tab 1', slot: node.slot ?? '' };
+      const tab2: CompositeTab = { label: 'Tab 2', slot: '' };
+      onChange({ ...node, tabs: [tab1, tab2], slot: undefined });
+      setActiveTabIdx(1);
+      // Auto-rename Tab 2
+      setRenamingTabIdx(1);
+      setRenameValue('Tab 2');
     } else {
-      onChange({ ...node, tabs: undefined, slot: node.tabs?.[0] ?? '' });
+      // Add one more tab
+      const newLabel = `Tab ${tabs.length + 1}`;
+      const newTab: CompositeTab = { label: newLabel, slot: '' };
+      const newTabs = [...tabs, newTab];
+      onChange({ ...node, tabs: newTabs });
+      const newIdx = newTabs.length - 1;
+      setActiveTabIdx(newIdx);
+      setRenamingTabIdx(newIdx);
+      setRenameValue(newLabel);
     }
   };
+
+  const handleRemoveTab = (idx: number) => {
+    const newTabs = tabs.filter((_, i) => i !== idx);
+    if (newTabs.length <= 1) {
+      // Collapse back to single-slot (keep the remaining tab's slot, or the one before)
+      const remaining = newTabs[0];
+      onChange({ ...node, tabs: undefined, slot: remaining?.slot ?? '' });
+      setActiveTabIdx(0);
+    } else {
+      onChange({ ...node, tabs: newTabs });
+      setActiveTabIdx((prev) => Math.min(prev, newTabs.length - 1));
+    }
+    if (renamingTabIdx === idx) setRenamingTabIdx(null);
+  };
+
+  const commitTabRename = (idx: number) => {
+    const updated = tabs.map((t, i) => i === idx ? { ...t, label: renameValue.trim() || t.label } : t);
+    onChange({ ...node, tabs: updated });
+    setRenamingTabIdx(null);
+  };
+
+  const startBlockRename = () => {
+    setBlockLabelValue(node.label ?? '');
+    setRenamingBlock(true);
+  };
+
+  const commitBlockRename = () => {
+    onChange({ ...node, label: blockLabelValue.trim() || undefined });
+    setRenamingBlock(false);
+  };
+
+  const blockLabel = node.label ?? '';
 
   return (
     <div
@@ -254,94 +308,191 @@ function LeafPane({ node, slotMap, uiSlots, usedSlotIds, onChange, onRemove, onS
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* Overwrite confirmation modal */}
+      <Modal
+        open={!!pendingDropSlotId}
+        title='确认覆盖'
+        okText='确认覆盖'
+        cancelText='取消'
+        okButtonProps={{ danger: true }}
+        onOk={() => {
+          if (pendingDropSlotId) doAssignSlot(pendingDropSlotId);
+          setPendingDropSlotId(null);
+        }}
+        onCancel={() => setPendingDropSlotId(null)}
+        centered
+        width={360}
+      >
+        此分块已绑定素材，确定要替换为新素材吗？
+      </Modal>
+
+      {/* Toolbar */}
       <div className='cc-leaf-toolbar'>
-        <Tooltip title={isTabsNode ? '添加新 Tab' : '升级为 Tab 区域'}>
+        {/* Block label / rename */}
+        <div className='cc-leaf-block-label'>
+          {renamingBlock ? (
+            <Input
+              size='small'
+              autoFocus
+              value={blockLabelValue}
+              onChange={(e) => setBlockLabelValue(e.target.value)}
+              onBlur={commitBlockRename}
+              onPressEnter={commitBlockRename}
+              className='cc-leaf-block-label-input'
+              placeholder='分块名称'
+            />
+          ) : (
+            <span
+              className='cc-leaf-block-label-text'
+              title='双击重命名'
+              onDoubleClick={startBlockRename}
+            >
+              {blockLabel || <span className='cc-leaf-block-label-placeholder'>分块</span>}
+              <EditOutlined className='cc-leaf-block-label-edit-icon' onClick={startBlockRename} />
+            </span>
+          )}
+        </div>
+
+        <div
+          className={`cc-leaf-toolbar-actions${actionsOpen ? ' cc-leaf-toolbar-actions--open' : ''}`}
+          onMouseEnter={() => setActionsOpen(true)}
+          onMouseLeave={() => setActionsOpen(false)}
+        >
+          {/* Expanded action buttons — slide in on hover */}
+          <div className='cc-leaf-toolbar-expanded'>
+            <Tooltip title={isTabsNode ? '新增 Tab 页' : '开启 Tab（新增 2 个）'} placement='top'>
+              <Button
+                size='small'
+                type='text'
+                onClick={() => { handleAddTab(); setActionsOpen(false); }}
+                className='cc-leaf-action-btn cc-leaf-action-btn--tab'
+              >Tab</Button>
+            </Tooltip>
+            {onSplitRow && (
+              <Tooltip title='向右拆分' placement='top'>
+                <Button
+                  size='small'
+                  type='text'
+                  icon={<SplitCellsOutlined />}
+                  onClick={() => { onSplitRow(); setActionsOpen(false); }}
+                  className='cc-leaf-action-btn'
+                />
+              </Tooltip>
+            )}
+            {onSplitCol && (
+              <Tooltip title='向下拆分' placement='top'>
+                <Button
+                  size='small'
+                  type='text'
+                  icon={<SplitCellsOutlined rotate={90} />}
+                  onClick={() => { onSplitCol(); setActionsOpen(false); }}
+                  className='cc-leaf-action-btn'
+                />
+              </Tooltip>
+            )}
+          </div>
+          {/* Always-visible + trigger */}
           <Button
             size='small'
             type='text'
             icon={<PlusOutlined />}
-            onClick={() => {
-              if (!isTabsNode) {
-                handleToggleTabs(true);
-              } else {
-                const unused = Object.values(slotMap).find(
-                  (s) => !usedSlotIds.has(s.id) || node.tabs?.includes(s.id)
-                );
-                if (unused) onChange({ ...node, tabs: [...(node.tabs ?? []), unused.id] });
-              }
-            }}
-            className='cc-leaf-tab-toggle'
-          >+ Tab</Button>
-        </Tooltip>
-        {onSplitRow && (
-          <Tooltip title='向右拆分，在右侧新增一块'>
-            <Button size='small' type='text' icon={<SplitCellsOutlined />} onClick={onSplitRow} className='cc-leaf-split-btn' />
-          </Tooltip>
-        )}
-        {onSplitCol && (
-          <Tooltip title='向下拆分，在下方新增一块'>
-            <Button size='small' type='text' icon={<SplitCellsOutlined rotate={90} />} onClick={onSplitCol} className='cc-leaf-split-btn' />
-          </Tooltip>
-        )}
-        {onRemove && (
-          <Popconfirm
-            title='确定移除此分块？'
-            description='移除后该分块绑定的内容将丢失。'
-            onConfirm={onRemove}
-            okText='确定移除'
-            cancelText='取消'
-            okButtonProps={{ danger: true }}
-          >
-            <Tooltip title='移除此分块'>
-              <Button size='small' type='text' danger icon={<CloseOutlined />} />
-            </Tooltip>
-          </Popconfirm>
-        )}
+            className='cc-leaf-add-trigger'
+          />
+          {onRemove && (
+            <Popconfirm
+              title='确定移除此分块？'
+              description='移除后该分块绑定的内容将丢失。'
+              onConfirm={onRemove}
+              okText='确定移除'
+              cancelText='取消'
+              okButtonProps={{ danger: true }}
+            >
+              <Tooltip title='移除此分块'>
+                <Button size='small' type='text' danger icon={<CloseOutlined />} className='cc-leaf-remove-btn' />
+              </Tooltip>
+            </Popconfirm>
+          )}
+        </div>
       </div>
 
-      {!isTabsNode && (
-        <div className='cc-leaf-slot-select'>
-          <Select
-            size='small'
-            value={node.slot || undefined}
-            placeholder='拖入素材或选择...'
-            options={slotOptions}
-            onChange={(v) => onChange({ ...node, slot: v ?? '' })}
-            allowClear
-            style={{ width: '100%' }}
-          />
-        </div>
-      )}
-
+      {/* Tabs mode */}
       {isTabsNode && (
         <div className='cc-leaf-tabs'>
           <div className='cc-leaf-tab-bar'>
-            {node.tabs!.map((slotId, idx) => (
+            {tabs.map((tab, idx) => (
               <div
-                key={slotId}
+                key={idx}
                 className={`cc-leaf-tab-chip${activeTabIdx === idx ? ' cc-leaf-tab-chip--active' : ''}`}
-                onClick={() => setActiveTabIdx(idx)}
+                onClick={() => { if (renamingTabIdx !== idx) setActiveTabIdx(idx); }}
               >
-                <span className='cc-leaf-tab-chip-label'>{slotMap[slotId]?.label ?? slotId}</span>
-                <Button size='small' type='text' icon={<CloseOutlined />} onClick={(e) => { e.stopPropagation(); handleRemoveTab(slotId); }} />
+                {renamingTabIdx === idx ? (
+                  <Input
+                    size='small'
+                    autoFocus
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={() => commitTabRename(idx)}
+                    onPressEnter={() => commitTabRename(idx)}
+                    onClick={(e) => e.stopPropagation()}
+                    className='cc-leaf-tab-chip-input'
+                  />
+                ) : (
+                  <span
+                    className='cc-leaf-tab-chip-label'
+                    onDoubleClick={(e) => { e.stopPropagation(); setRenamingTabIdx(idx); setRenameValue(tab.label); }}
+                  >
+                    {tab.label}
+                  </span>
+                )}
+                <Popconfirm
+                  title='删除此 Tab 页？'
+                  description={tabs.length <= 2 ? '删除后 Tab 模式将关闭，内容保留在分块中。' : undefined}
+                  open={confirmRemoveTabIdx === idx}
+                  onConfirm={(e) => { e?.stopPropagation(); handleRemoveTab(idx); setConfirmRemoveTabIdx(null); }}
+                  onCancel={(e) => { e?.stopPropagation(); setConfirmRemoveTabIdx(null); }}
+                  okText='确定删除'
+                  cancelText='取消'
+                  okButtonProps={{ danger: true }}
+                >
+                  <Button
+                    size='small'
+                    type='text'
+                    icon={<CloseOutlined />}
+                    onClick={(e) => { e.stopPropagation(); setConfirmRemoveTabIdx(idx); }}
+                    className='cc-leaf-tab-chip-close'
+                  />
+                </Popconfirm>
               </div>
             ))}
           </div>
-          {node.tabs!.length > 0 && (() => {
-            const activeSlotId = node.tabs![Math.min(activeTabIdx, node.tabs!.length - 1)];
-            const widget = uiSlots[activeSlotId] ?? { widgetType: 'text-single' as const };
-            const label = slotMap[activeSlotId]?.label ?? activeSlotId;
-            return <div className='cc-leaf-tab-preview'><WidgetPlaceholder widgetConfig={widget} label={label} /></div>;
+          {tabs.length > 0 && (() => {
+            const activeTab = tabs[Math.min(activeTabIdx, tabs.length - 1)];
+            if (!activeTab?.slot) {
+              return (
+                <div className='cc-leaf-placeholder'>
+                  <PlusOutlined /><span>拖入素材</span>
+                </div>
+              );
+            }
+            const widget = uiSlots[activeTab.slot] ?? { widgetType: 'text-single' as const };
+            const label = slotMap[activeTab.slot]?.label ?? activeTab.slot;
+            return (
+              <div className='cc-leaf-tab-preview'>
+                <WidgetPlaceholder widgetConfig={widget} label={label} />
+              </div>
+            );
           })()}
         </div>
       )}
 
-      {!hasContent && (
+      {/* Single slot mode — no slot yet */}
+      {!isTabsNode && !node.slot && (
         <div className='cc-leaf-placeholder'>
           <PlusOutlined /><span>拖入素材</span>
         </div>
       )}
 
+      {/* Single slot mode — has slot */}
       {!isTabsNode && node.slot && (
         <div className='cc-leaf-wysiwyg'>
           <WidgetPlaceholder
@@ -362,7 +513,7 @@ function collectUsedSlotIds(node: CompositePanelNode): Set<string> {
   const ids = new Set<string>();
   function walk(n: CompositePanelNode) {
     if (n.slot) ids.add(n.slot);
-    if (n.tabs) n.tabs.forEach((t) => ids.add(t));
+    if (n.tabs) n.tabs.forEach((t) => { if (t.slot) ids.add(t.slot); });
     if (n.children) n.children.forEach(walk);
   }
   walk(node);
@@ -394,14 +545,12 @@ function CanvasNode({ node, parentDirection, depth = 0, slotMap, uiSlots, rootUs
         direction: splitDir,
         weight: node.weight,
         children: [
-          { slot: node.slot, tabs: node.tabs, weight: 1 },
+          { slot: node.slot, tabs: node.tabs, label: node.label, weight: 1 },
           { slot: '', weight: 1 },
         ],
       });
     };
 
-    // depth < 2: allow both directions (nesting is still within the 2-level limit).
-    // depth === 2: only allow same-direction split (no further nesting).
     const canSplitRow = depth < 2 || parentDirection === 'row';
     const canSplitCol = depth < 2 || parentDirection === 'column';
 
@@ -432,7 +581,6 @@ function CanvasNode({ node, parentDirection, depth = 0, slotMap, uiSlots, rootUs
     const right = children[idx + 1];
     if (!left || !right) return;
 
-    // Convert pixel delta to weight delta relative to the total weight of all children.
     const allTotalW = children.reduce((s, c) => s + (c.weight ?? 1), 0);
     const deltaWeight = (delta / containerSize) * allTotalW;
 

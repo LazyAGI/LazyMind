@@ -598,11 +598,117 @@
   flex-shrink: 0;
 }
 
-.cc-leaf-tab-toggle { margin-right: auto; }
+.cc-leaf-block-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
 
-.cc-leaf-split-btn {
+  &-text {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #595959;
+    cursor: default;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &-placeholder {
+    font-style: italic;
+    color: #bfbfbf;
+    font-weight: 400;
+  }
+
+  &-edit-icon {
+    font-size: 11px;
+    color: #bfbfbf;
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity 0.12s, color 0.12s;
+    flex-shrink: 0;
+
+    &:hover { color: #1677ff; }
+  }
+
+  &-input {
+    font-size: 12px;
+    height: 22px;
+    padding: 0 4px;
+  }
+}
+
+.cc-leaf-block-label-text:hover .cc-leaf-block-label-edit-icon {
+  opacity: 1;
+}
+
+.cc-leaf-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.cc-leaf-toolbar-expanded {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width 0.18s ease, opacity 0.18s ease;
+  white-space: nowrap;
+}
+
+.cc-leaf-toolbar-actions--open .cc-leaf-toolbar-expanded {
+  max-width: 180px;
+  opacity: 1;
+}
+
+.cc-leaf-add-trigger {
   color: #8c8c8c;
+  flex-shrink: 0;
+
   &:hover { color: #1677ff; }
+}
+
+.cc-leaf-action-btn {
+  color: #595959;
+  font-size: 12px;
+  padding: 0 6px;
+
+  &--tab {
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+
+  &:hover { color: #1677ff; background: #f0f5ff; }
+}
+
+.cc-leaf-remove-btn {
+  flex-shrink: 0;
+}
+
+.cc-leaf-tab-chip-input {
+  width: 72px;
+  font-size: 12px;
+  height: 18px;
+  padding: 0 4px;
+}
+
+.cc-leaf-tab-chip-close {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
 }
 
 .cc-leaf-slot-select { flex-shrink: 0; }
@@ -677,10 +783,22 @@
   padding: 2px 4px 2px 8px;
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
+  position: relative;
 
   &--active {
     background: #e6f0ff;
     border-color: #1677ff;
+  }
+
+  .cc-leaf-tab-chip-close {
+    opacity: 0;
+    transition: opacity 0.12s;
+    pointer-events: none;
+  }
+
+  &:hover .cc-leaf-tab-chip-close {
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 
