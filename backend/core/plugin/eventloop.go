@@ -23,6 +23,10 @@ import (
 	"lazymind/core/taskcenter"
 )
 
+type chatStatusCacheEntry struct {
+	Status string `json:"status"`
+}
+
 // PluginStepParams are the task_created.params fields for plugin_step agent type.
 type PluginStepParams struct {
 	PluginID    string `json:"plugin_id"`
@@ -149,8 +153,9 @@ func HandlePluginStepCreated(
 		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusCompleted); uErr != nil {
 			fmt.Printf("[Plugin] __end__: failed to complete session %s: %v\n", sessionID, uErr)
 		}
-		// Sync TaskCenter status to completed.
-		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, sessionID, "completed")
+		// Sync TaskCenter status to succeeded.
+		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, sessionID, "succeeded")
+		clearGeneratingChatStatus(ctx, stateStore, convID)
 		return sessionID, taskID, true, nil
 	}
 
@@ -367,6 +372,25 @@ func OnSubAgentDone(
 		}
 	}
 
+	// Once a terminal plugin step succeeds, close the plugin session according
+	// to the state machine instead of requiring a follow-up ChatAgent turn to
+	// emit __end__.
+	if status == subagent.StatusSucceeded && isTerminalPluginStep(ctx, pctx.PluginID, pctx.StepID) {
+		if _, sErr := CreateSessionStep(ctx, db, pctx.SessionID, "__end__", "__end__", 1); sErr == nil {
+			_ = UpdateStepStatus(ctx, db, "__end__", StepStatusSucceeded)
+		}
+		_ = UpdateSessionCurrentStep(ctx, db, pctx.SessionID, "__end__")
+		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusCompleted)
+		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "succeeded")
+		clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
+		onSSE("plugin_completed", map[string]any{
+			"session_id": pctx.SessionID,
+			"step_id":    pctx.StepID,
+		})
+		go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+		return
+	}
+
 	// Determine mode: use context-level PluginMode (set from request body during HandlePluginStepCreated).
 	// Falls back to "dynamic" if not set. Env-var defaultMode() is no longer used.
 	mode := pctx.PluginMode
@@ -399,6 +423,30 @@ func OnSubAgentDone(
 	}
 	// Write content_snapshot to all selected revisions for this step.
 	go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+}
+
+func clearGeneratingChatStatus(ctx context.Context, stateStore state.Store, convID string) {
+	if stateStore == nil || strings.TrimSpace(convID) == "" {
+		return
+	}
+	key := fmt.Sprintf("rag/chat/status:%s", convID)
+	entries, err := stateStore.HGetAll(ctx, key)
+	if err != nil {
+		return
+	}
+	var fields []string
+	for historyID, raw := range entries {
+		var st chatStatusCacheEntry
+		if json.Unmarshal([]byte(raw), &st) != nil {
+			continue
+		}
+		if st.Status == "generating" {
+			fields = append(fields, historyID)
+		}
+	}
+	if len(fields) > 0 {
+		_ = stateStore.HDel(ctx, key, fields...)
+	}
 }
 
 // advanceAutoMode calls DriverAgent and forwards its natural-language assessment to ChatAgent.
@@ -823,6 +871,34 @@ func resolveSlotBinding(pluginID, slot string) (slotID, cardinality string) {
 		return "", ""
 	}
 	return result.SlotID, result.Cardinality
+}
+
+func isTerminalPluginStep(parentCtx context.Context, pluginID, stepID string) bool {
+	if pluginID == "" || stepID == "" {
+		return false
+	}
+	endpoint := common.ChatServiceEndpoint()
+	url := fmt.Sprintf("%s/api/plugins/%s", endpoint, pluginID)
+	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var spec pluginStateSpec
+	if json.NewDecoder(resp.Body).Decode(&spec) != nil {
+		return false
+	}
+	edges := spec.State.Transitions[stepID]
+	return len(edges) == 1 && edges[0].To == "__end__"
 }
 
 // defaultDriverMaxRetries is the global max retry count for DriverAgent RETRY verdicts.

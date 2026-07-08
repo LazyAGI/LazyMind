@@ -52,11 +52,12 @@ func TestRefreshStaticFileURL(t *testing.T) {
 
 	expired := "/static-files/" + rel + "?expires=1&sig=deadbeef"
 	refreshed := refreshStaticFileURL(expired)
-	if !strings.HasPrefix(refreshed, "/static-files/") || strings.Contains(refreshed, "expires=1") {
+	if !strings.HasPrefix(refreshed, "/static-files/") || refreshed == expired || strings.Contains(refreshed, "sig=deadbeef") {
 		t.Fatalf("expected refreshed signed url, got %q", refreshed)
 	}
 }
 
+func TestSignSegmentImageKeys(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
 

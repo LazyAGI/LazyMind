@@ -19,7 +19,7 @@ import (
 // resolveValuePaths normalises a human-uploaded value by ensuring it carries a stable
 // absolute path when the value contains a local file path.
 // Signed URL generation is intentionally NOT done here — signed URLs expire and must
-// be generated fresh on every API response (see signArtifactImagePath called from
+// be generated fresh on every API response (see enrichArtifactValue called from
 // enrichSlots and GetSlotItemVersionsByIndex).
 // Values that are not JSON objects with a path field are returned unchanged.
 func resolveValuePaths(raw json.RawMessage) json.RawMessage {
@@ -43,9 +43,8 @@ func resolveValuePaths(raw json.RawMessage) json.RawMessage {
 	return out
 }
 
-// signArtifactImagePath enriches an artifact value with a signed URL when it contains
-// a local file path. Delegates to subagent.SignArtifactImageValue.
-func signArtifactImagePath(raw json.RawMessage, contentType string) json.RawMessage {
+// enrichArtifactValue enriches artifact values with fresh browser-accessible signed URLs.
+func enrichArtifactValue(raw json.RawMessage, contentType string) json.RawMessage {
 	return subagent.SignArtifactImageValue(contentType, raw)
 }
 
@@ -56,6 +55,7 @@ type sessionDTO struct {
 	PluginID       string    `json:"plugin_id"`
 	Status         string    `json:"status"`
 	CurrentStepID  string    `json:"current_step_id"`
+	IntentContext  string    `json:"intent_context,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Slots          []slotDTO `json:"slots,omitempty"`
@@ -64,11 +64,12 @@ type sessionDTO struct {
 
 // stepDTO summarises one plugin_session_steps row (used for dependency validation).
 type stepDTO struct {
-	StepID    string    `json:"step_id"`
-	Attempt   int       `json:"attempt"`
-	TaskID    string    `json:"task_id"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	StepID        string    `json:"step_id"`
+	Attempt       int       `json:"attempt"`
+	TaskID        string    `json:"task_id"`
+	Status        string    `json:"status"`
+	IntentContext string    `json:"intent_context,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // slotDTO represents a currently-selected slot revision, with its artifact value inline.
@@ -84,13 +85,13 @@ type slotDTO struct {
 	ArtifactValue json.RawMessage `json:"artifact_value,omitempty"`
 	Caption       *string         `json:"caption,omitempty"`
 	ChangeSource  string          `json:"change_source,omitempty"`
+	StepID        string          `json:"step_id,omitempty"`
 	RevisionCount int             `json:"revision_count,omitempty"`
 	OrderVersion  *int            `json:"order_version,omitempty"`
 
 	// Internal fields — used by enrichSlots, never serialised to the client.
 	ArtifactSeq     *int            `json:"-"`
 	HumanArtifactID *string         `json:"-"`
-	StepID          string          `json:"-"`
 	Attempt         int             `json:"-"`
 	ContentSnapshot json.RawMessage `json:"-"`
 }
@@ -102,6 +103,7 @@ func toSessionDTO(s *orm.PluginSession) sessionDTO {
 		PluginID:       s.PluginID,
 		Status:         s.Status,
 		CurrentStepID:  s.CurrentStepID,
+		IntentContext:  s.IntentContext,
 		CreatedAt:      s.CreatedAt,
 		UpdatedAt:      s.UpdatedAt,
 	}
@@ -245,7 +247,7 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 			haErr := db.WithContext(ctx).Where("id = ?", *slot.HumanArtifactID).First(&ha).Error
 			if haErr == nil {
 				resolvedContentType = resolveContentType(ha.ContentType, ha.Value)
-				resolved = signArtifactImagePath(ha.Value, resolvedContentType)
+				resolved = enrichArtifactValue(ha.Value, resolvedContentType)
 				resolvedCaption = ha.Caption
 			} else {
 				fmt.Printf("[enrichSlots] WARN: HumanArtifactID=%s not found for slot_id=%s list_index=%v: %v\n",
@@ -262,7 +264,7 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 					if artifactsByTask[k][j].Seq == *slot.ArtifactSeq {
 						a := &artifactsByTask[k][j]
 						resolvedContentType = resolveContentType(a.ContentType, a.Value)
-						resolved = signArtifactImagePath(a.Value, resolvedContentType)
+						resolved = enrichArtifactValue(a.Value, resolvedContentType)
 						resolvedCaption = a.Caption
 						break
 					}
@@ -279,7 +281,7 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 
 		// Legacy fallback: ContentSnapshot for pre-migration rows.
 		if resolved == nil && len(slot.ContentSnapshot) > 0 {
-			resolved = signArtifactImagePath(slot.ContentSnapshot, "")
+			resolved = enrichArtifactValue(slot.ContentSnapshot, "")
 		}
 
 		if resolved == nil {
@@ -375,15 +377,18 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	dto := toSessionDTO(s)
 	// Load slots inline.
-	revisions, _ := LoadSelectedSlots(ctx, db, sessionID)
+	revisions, _ := LoadDisplaySlots(ctx, db, sessionID)
 	for i := range revisions {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
 	}
 	enrichSlots(ctx, db, sessionID, dto.Slots)
 	// Load steps inline (used by Python Layer-2 dependency validation).
 	steps, _ := ListSteps(ctx, db, sessionID)
+	intentMap := buildStepIntentMap(ctx, db, sessionID)
 	for i := range steps {
-		dto.Steps = append(dto.Steps, toStepDTO(&steps[i]))
+		step := toStepDTO(&steps[i])
+		step.IntentContext = intentMap[steps[i].StepID]
+		dto.Steps = append(dto.Steps, step)
 	}
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
@@ -414,7 +419,7 @@ func GetSessionSlots(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "session not found", http.StatusNotFound)
 		return
 	}
-	revisions, err := LoadSelectedSlots(ctx, db, sessionID)
+	revisions, err := LoadDisplaySlots(ctx, db, sessionID)
 	if err != nil {
 		common.ReplyErr(w, "query slots failed", http.StatusInternalServerError)
 		return
@@ -560,8 +565,11 @@ func GetActiveConversationSession(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, map[string]any{"session": nil})
 		return
 	}
+	if s.Status == SessionStatusActive {
+		healStaleActiveSession(r.Context(), db, s)
+	}
 	dto := toSessionDTO(s)
-	revisions, _ := LoadSelectedSlots(r.Context(), db, s.ID)
+	revisions, _ := LoadDisplaySlots(r.Context(), db, s.ID)
 	for i := range revisions {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
 	}
@@ -593,7 +601,7 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto := toSessionDTO(s)
-	revisions, _ := LoadSelectedSlots(r.Context(), db, s.ID)
+	revisions, _ := LoadDisplaySlots(r.Context(), db, s.ID)
 	for i := range revisions {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
 	}
@@ -1050,6 +1058,9 @@ func GetPluginInfo(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "build upstream request failed", http.StatusInternalServerError)
 		return
 	}
+	if lang := r.Header.Get("Accept-Language"); lang != "" {
+		req.Header.Set("Accept-Language", lang)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		common.ReplyErr(w, "upstream request failed", http.StatusBadGateway)
@@ -1088,6 +1099,9 @@ func ListPlugins(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		common.ReplyErr(w, "build upstream request failed", http.StatusInternalServerError)
 		return
+	}
+	if lang := r.Header.Get("Accept-Language"); lang != "" {
+		req.Header.Set("Accept-Language", lang)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

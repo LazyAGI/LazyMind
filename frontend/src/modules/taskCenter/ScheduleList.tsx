@@ -234,7 +234,7 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
 
   const statusOptions = [
     { text: t('taskCenter.statusRunning'), value: 'running' },
-    { text: t('taskCenter.statusCompleted'), value: 'completed' },
+    { text: t('taskCenter.statusCompleted'), value: 'succeeded' },
     { text: t('taskCenter.statusFailed'), value: 'failed' },
     { text: t('taskCenter.statusInterrupted'), value: 'interrupted' },
     { text: t('taskCenter.statusCanceled'), value: 'canceled' },
@@ -265,7 +265,7 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
       filteredValue: statusFilter,
       onFilter: (value, record) => record.status === value,
       render: (v: string) => (
-        <Tag color={v === 'completed' ? 'green' : v === 'failed' ? 'red' : 'blue'}>
+        <Tag color={v === 'succeeded' ? 'green' : v === 'failed' ? 'red' : 'blue'}>
           {t(`taskCenter.status${capitalize(v)}`) || v}
         </Tag>
       ),
@@ -276,7 +276,7 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
       width: 80,
       render: (steps: Task['steps']) => {
         if (!steps?.length) return '—';
-        const done = steps.filter((s) => s.status === 'completed' || s.status === 'succeeded').length;
+        const done = steps.filter((s) => s.status === 'succeeded').length;
         return `${done}/${steps.length}`;
       },
     },

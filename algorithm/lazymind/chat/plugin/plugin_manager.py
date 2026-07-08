@@ -598,8 +598,11 @@ def build_advance_step_tool(
 
     advance_step.__doc__ = (
         'Advance the active plugin step synchronously and return the result.\n\n'
-        'ONLY use this when running multiple steps in one turn. Otherwise use\n'
-        '`advance_step_and_hand_off`.\n\n'
+        'ONLY use this for intermediate steps when the user explicitly asks to\n'
+        'run multiple plugin steps in one chat turn. Do NOT use it for ordinary\n'
+        '"continue"/"next step" requests, single-step advancement, or terminal\n'
+        'final-step advancement. If you are going to call only one advancement\n'
+        'tool, use `advance_step_and_hand_off` instead.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
         '    step_id (str): Step to advance to (see list above).\n'
@@ -620,7 +623,6 @@ def _wait_for_step_done(step_id: str, trigger_result: str, timeout: float = 600.
     message arrives on the step_done queue.
     """
     import time
-    import json
     try:
         from lazyllm.common.queue import FileSystemQueue
         cfg = _agentic_config()
@@ -1007,7 +1009,12 @@ def resolve_plugin_injection(
                     'internally decided is part of a larger multi-step plan. If the user\'s '
                     'request involves multiple steps and only one of those steps would use a '
                     'plugin, do NOT trigger the plugin. Never infer plugin intent from '
-                    'indirect or implicit cues.\n\n'
+                    'indirect or implicit cues.\n'
+                    'When a plugin does match the user\'s primary and direct intent, call '
+                    'the matching `trigger_<plugin>_plugin` tool before using `ask_user`. '
+                    'Do not ask clarification questions first just because optional details '
+                    'are missing; pass the user\'s exact original request to the plugin so its '
+                    'workflow can collect context or proceed with sensible defaults.\n\n'
                 ) + '\n\n---\n\n'.join(s for s in scenarios if s)
     else:
         # No plugin_context provided: still inject cold-start triggers
@@ -1026,7 +1033,12 @@ def resolve_plugin_injection(
                 'internally decided is part of a larger multi-step plan. If the user\'s '
                 'request involves multiple steps and only one of those steps would use a '
                 'plugin, do NOT trigger the plugin. Never infer plugin intent from '
-                'indirect or implicit cues.\n\n'
+                'indirect or implicit cues.\n'
+                'When a plugin does match the user\'s primary and direct intent, call '
+                'the matching `trigger_<plugin>_plugin` tool before using `ask_user`. '
+                'Do not ask clarification questions first just because optional details '
+                'are missing; pass the user\'s exact original request to the plugin so its '
+                'workflow can collect context or proceed with sensible defaults.\n\n'
             ) + '\n\n---\n\n'.join(s for s in scenarios if s)
 
     return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
@@ -1091,7 +1103,12 @@ def _build_step_status_section(
         lines.append('> Any step-status information in the conversation history is OUTDATED. Use only this section.')
 
         if current_step:
-            lines.append(f'\nCurrent step (pending execution this turn): **{_label(current_step)}**')
+            lines.append(f'\nCurrent plugin step state: **{_label(current_step)}**')
+            lines.append(
+                'This is the step the session is currently positioned at; it is not automatically '
+                'the next action target. If the user clearly wants to proceed and does not modify '
+                'the existing intent, choose from "Next forward steps" below.'
+            )
         else:
             lines.append('\nCurrent step: pipeline not yet started')
 
@@ -1111,7 +1128,7 @@ def _build_step_status_section(
         if sm and current_step:
             forward = [s for s in sm.get_reachable_steps(current_step) if s not in sm._RESERVED]
             if forward:
-                lines.append('Next forward steps (after current_step succeeds): '
+                lines.append('Next forward steps (valid targets for continuing): '
                              + ', '.join(_label(s) for s in forward))
 
         return '\n'.join(lines)
@@ -1143,10 +1160,17 @@ def _build_mode_guidance(
         'step becomes available only AFTER `current_step` succeeds.\n'
         'Never skip steps — do not call a downstream step while an upstream step is\n'
         'still pending.\n\n'
-        '### Rule 3 — "继续" interpretation\n'
-        'When the user says "继续" (or similar) with no other context, advance\n'
-        '`current_step` (the pending step shown in the step-status block). Do NOT\n'
-        'jump ahead to a later step, even if earlier steps already have artifacts.\n'
+        '### Rule 3 — Workflow advancement requests\n'
+        'If the user clearly asks to proceed with the existing plugin workflow and\n'
+        'does not add new requirements, corrections, or dissatisfaction signals,\n'
+        'you MUST advance the workflow by calling `advance_step_and_hand_off`.\n'
+        'Select the target from "Next forward steps (valid targets for continuing)"\n'
+        'in the step-status block. If multiple forward targets are listed, choose\n'
+        'the target whose transition condition best matches the current artifacts\n'
+        'and user intent; if the choice is genuinely ambiguous, ask the user.\n'
+        'Do NOT reply only with prose such as "正在生成..." without calling a tool.\n'
+        'Do NOT pass the current plugin step state unless it is explicitly listed\n'
+        'as a valid forward or rewind target.\n'
     )
     common = (
         '\n\n## Plugin execution guidance\n\n'
@@ -1165,23 +1189,25 @@ def _build_mode_guidance(
             terminal_hint = (
                 f'\n\n## Terminal steps (last steps before pipeline completion)\n\n'
                 f'The following steps lead directly to the end of the pipeline: {names}.\n'
-                'After one of these steps **succeeds**, immediately call '
-                '`advance_step_and_hand_off(step_id="__end__")` in the same turn '
-                'using `advance_step` (synchronous) so the pipeline completes without '
-                'requiring the user to click "继续" after the final step.\n\n'
-                'Concretely: use `advance_step(step_id=<terminal_step>, ...)` to run the '
-                'terminal step and wait for its result, then call '
-                '`advance_step_and_hand_off(step_id="__end__")` to close the session.\n'
-                'Only do this when the terminal step is the **last** planned step — '
-                'if the user wants to review results first, revert to `advance_step_and_hand_off`.'
+                'Treat terminal steps like any other single-step advancement: call '
+                '`advance_step_and_hand_off(step_id=<terminal_step>, ...)` and stop. '
+                'Do NOT use synchronous `advance_step` just because a step is terminal, '
+                'and do NOT keep the main chat turn open just to close `__end__`.\n\n'
+                'Pipeline completion is handled after the terminal step result is produced. '
+                'If another tool call is needed later to close `__end__`, it must be driven '
+                'by the normal plugin event loop or a later explicit user action, not by '
+                'blocking the current chat stream.'
             )
         common += (
             '- `advance_step`: Queue a step and WAIT for result (dynamic mode only). '
-            'Use only when running multiple steps in one turn '
-            '(e.g. user said "re-run steps 1 to 3" — use advance_step for steps 1..N-1, '
-            'then advance_step_and_hand_off for the last step).\n\n'
-            'After each step in dynamic mode, default to advance_step_and_hand_off so the user '
-            'can review the result and decide the next action.\n\n'
+            'Use only when the user explicitly asks to run multiple plugin steps in one '
+            'chat turn (for example, "连续执行后面三步" or "run steps 1 through 3 without '
+            'stopping"). In that case, use `advance_step` only for intermediate steps, '
+            'then use `advance_step_and_hand_off` for the final step of that turn.\n'
+            'For ordinary "继续", "下一步", single-step requests, and terminal/final-step '
+            'requests, you MUST call `advance_step_and_hand_off` and stop after the call.\n\n'
+            'After each step in dynamic mode, default to `advance_step_and_hand_off` so '
+            'the user can review the result and decide the next action.\n\n'
             'When a step is interrupted and user says "继续": call advance_step_and_hand_off with '
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
             'and only produce missing outputs (resume from checkpoint)."\n'

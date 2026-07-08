@@ -933,12 +933,15 @@ func LoadSelectedSlots(ctx context.Context, db *gorm.DB, sessionID string) ([]or
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
+	return orderSlotRevisions(ctx, db, sessionID, rows), nil
+}
 
+func orderSlotRevisions(ctx context.Context, db *gorm.DB, sessionID string, rows []orm.PluginSlotRevision) []orm.PluginSlotRevision {
 	// Re-sort each slot's items by their position in plugin_slot_order.order_list.
 	var orders []orm.PluginSlotOrder
 	if err := db.WithContext(ctx).Where("session_id = ?", sessionID).Find(&orders).Error; err != nil {
 		// On error fall back to the already-loaded list_index order.
-		return rows, nil
+		return rows
 	}
 	orderListBySlot := map[string][]int{}
 	for i := range orders {
@@ -948,7 +951,7 @@ func LoadSelectedSlots(ctx context.Context, db *gorm.DB, sessionID string) ([]or
 		}
 	}
 	if len(orderListBySlot) == 0 {
-		return rows, nil
+		return rows
 	}
 
 	// Build position map: slotID + list_index → sort_order (1-based).
@@ -1004,7 +1007,60 @@ func LoadSelectedSlots(ctx context.Context, db *gorm.DB, sessionID string) ([]or
 	for _, g := range groups {
 		result = append(result, g.items...)
 	}
-	return result, nil
+	return result
+}
+
+// LoadDisplaySlots returns the selected slot revisions plus the latest revision written
+// by each step attempt. The selected rows still define the current artifact value; the
+// extra step-scoped rows let the UI render each step tab as it looked when that step ran.
+func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.PluginSlotRevision, error) {
+	selected, err := LoadSelectedSlots(ctx, db, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	var revisions []orm.PluginSlotRevision
+	if err := db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
+		Order("step_id ASC, slot_id ASC, list_index ASC, attempt DESC, revision DESC").
+		Find(&revisions).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]orm.PluginSlotRevision, 0, len(selected)+len(revisions))
+	seenIDs := make(map[string]bool, len(selected)+len(revisions))
+	seenDisplayItem := map[string]bool{}
+	for _, row := range selected {
+		result = append(result, row)
+		seenIDs[row.ID] = true
+		seenDisplayItem[slotDisplayKey(row)] = true
+	}
+
+	for _, row := range revisions {
+		if row.StepID == "__end__" {
+			continue
+		}
+		key := slotDisplayKey(row)
+		if seenDisplayItem[key] {
+			continue
+		}
+		seenDisplayItem[key] = true
+		if seenIDs[row.ID] {
+			continue
+		}
+		result = append(result, row)
+		seenIDs[row.ID] = true
+	}
+
+	return orderSlotRevisions(ctx, db, sessionID, result), nil
+}
+
+func slotDisplayKey(row orm.PluginSlotRevision) string {
+	key := row.StepID + "|" + row.SlotID + "|"
+	if row.ListIndex != nil {
+		key += fmt.Sprint(*row.ListIndex)
+	}
+	return key
 }
 
 // IsNotFound reports whether err is a gorm record-not-found error.

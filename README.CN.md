@@ -97,7 +97,7 @@ Kong API Gateway + JWT/RBAC 四层鉴权：前端 → Kong RBAC → Core ACL →
 
 ## 快速开始
 
-**前置条件：** Docker & Docker Compose
+**本地运行前置条件：** Go、Python 3、uv、pnpm 和 Node.js。
 
 ### 第一步 — 申请 MinerU API Key（高质量 PDF 解析）
 
@@ -114,7 +114,7 @@ export LAZYLLM_MINERU_API_KEY=你的mineru_key
 ### 第二步 — 启动服务
 
 ```bash
-make up-build
+make up-build-local
 ```
 
 启动后访问：
@@ -127,6 +127,12 @@ make up-build
 登录后进入模型设置页面，使用第一步申请的 API Key 配置**大模型（LLM）**、**视觉模型（VLM）** 和 **Reranker 模型**。
 
 环境变量配置与完整示例见 [`docs/quick_start.CN.md`](docs/quick_start.CN.md)。
+
+停止本地运行：
+
+```bash
+make down-local
+```
 
 ---
 
@@ -152,15 +158,16 @@ make test-hermetic
 
 | 场景 | 命令 |
 |------|------|
-| 标准启动 | `make up` |
-| 本地运行模式（SQLite 状态后端，无 Redis） | `make up-build LAZYMIND_RUNTIME_MODE=local` |
-| 构建镜像并启动 | `make up-build` |
+| 宿主机本地运行（SQLite 状态后端，无容器） | `make up-build-local` |
+| 停止本地运行 | `make down-local` |
+| 容器栈启动 | `make up` |
+| 构建镜像并启动容器栈 | `make up-build` |
 | 私有化部署 MinerU OCR | `make up LAZYMIND_DEPLOY_MINERU=1` |
 | 私有化部署 PaddleOCR  | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | 外接 Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | 开启存储 Dashboard | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 
-`LAZYMIND_RUNTIME_MODE=local` 会应用本地 compose override，把 chat/auth/subagent 等短生命周期状态写入 SQLite，并把 Redis 服务缩放为 0。不设置该变量，或设置为 `LAZYMIND_RUNTIME_MODE=cloud`，则使用默认 Redis 状态后端。
+`make up-build-local` 会通过 `.lazymind-local/bin/local-runtime-manager` 在宿主机上直接运行 LazyMind。生成的程序、运行状态、依赖、日志和启动配置都会放在 `.lazymind-local/` 下。local Python runtime 会安装到 `.lazymind-local/runtimes/python`，服务依赖放在 `.lazymind-local/deps/`，运行数据放在 `.lazymind-local/data/`；pnpm、uv、pip、corepack 和 Go 等构建期工具缓存使用用户级默认缓存，不写入 `.lazymind-local/`。整个 `.lazymind-local/` 目录可以删除后重建。
 
 ---
 

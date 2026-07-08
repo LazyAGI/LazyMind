@@ -419,15 +419,16 @@ func TestWriteSlotRevision_PartialRetry_ReplacesTargetIndex(t *testing.T) {
 	if len(selected) != 3 {
 		t.Fatalf("expected 3 selected rows after partial retry, got %d", len(selected))
 	}
-	// The selected row for index 1 must be the new one (revision 4).
+	// The selected row for index 1 must be the new one. List item revision
+	// counters are scoped to (slot_id, list_index), so this is v2 for index 1.
 	var idx1Rev int
 	for _, s := range selected {
 		if s.ListIndex != nil && *s.ListIndex == 1 {
 			idx1Rev = s.Revision
 		}
 	}
-	if idx1Rev != 4 {
-		t.Fatalf("expected index-1 revision to be 4 (new), got %d", idx1Rev)
+	if idx1Rev != 2 {
+		t.Fatalf("expected index-1 revision to be 2 (new), got %d", idx1Rev)
 	}
 }
 
@@ -451,5 +452,105 @@ func TestLoadSelectedSlots_EmptySession(t *testing.T) {
 	}
 	if len(slots) != 0 {
 		t.Fatalf("expected empty, got %d rows", len(slots))
+	}
+}
+
+func TestLoadDisplaySlots_IncludesLatestRevisionPerStep(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "ps-display", ConversationID: "conv-1", PluginID: "writer-plugin",
+	}); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	for _, step := range []struct {
+		id      string
+		attempt int
+		taskID  string
+	}{
+		{id: "build_context", attempt: 1, taskID: "task-build"},
+		{id: "generate_outline", attempt: 1, taskID: "task-outline-1"},
+		{id: "generate_outline", attempt: 2, taskID: "task-outline-2"},
+		{id: "generate_draft", attempt: 1, taskID: "task-draft"},
+	} {
+		if _, err := CreateSessionStep(ctx, db.DB, "ps-display", step.id, step.taskID, step.attempt); err != nil {
+			t.Fatalf("step %s/%d: %v", step.id, step.attempt, err)
+		}
+	}
+
+	writes := []struct {
+		stepID  string
+		attempt int
+	}{
+		{stepID: "build_context", attempt: 1},
+		{stepID: "generate_outline", attempt: 1},
+		{stepID: "generate_outline", attempt: 2},
+		{stepID: "generate_draft", attempt: 1},
+	}
+	for _, write := range writes {
+		if _, err := WriteSlotRevision(ctx, db.DB,
+			"ps-display", "writing_context_slot", "writing_context",
+			write.stepID, write.attempt, "single", nil); err != nil {
+			t.Fatalf("write %s/%d: %v", write.stepID, write.attempt, err)
+		}
+	}
+
+	selected, err := LoadSelectedSlots(ctx, db.DB, "ps-display")
+	if err != nil {
+		t.Fatalf("LoadSelectedSlots: %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("expected 1 selected row, got %d", len(selected))
+	}
+	if selected[0].StepID != "generate_draft" {
+		t.Fatalf("expected generate_draft selected, got %s", selected[0].StepID)
+	}
+
+	display, err := LoadDisplaySlots(ctx, db.DB, "ps-display")
+	if err != nil {
+		t.Fatalf("LoadDisplaySlots: %v", err)
+	}
+	byStep := map[string]orm.PluginSlotRevision{}
+	for _, row := range display {
+		if row.SlotID == "writing_context_slot" {
+			byStep[row.StepID] = row
+		}
+	}
+	for _, stepID := range []string{"build_context", "generate_outline", "generate_draft"} {
+		if _, ok := byStep[stepID]; !ok {
+			t.Fatalf("expected display row for %s, got %#v", stepID, byStep)
+		}
+	}
+	if byStep["generate_outline"].Attempt != 2 {
+		t.Fatalf("expected latest generate_outline attempt 2, got %d", byStep["generate_outline"].Attempt)
+	}
+	if !byStep["generate_draft"].Selected {
+		t.Fatalf("expected selected row to stay selected")
+	}
+	if byStep["build_context"].Selected || byStep["generate_outline"].Selected {
+		t.Fatalf("expected historical display rows to remain unselected")
+	}
+
+	outlineRev := byStep["generate_outline"].Revision
+	if _, err := RollbackSlotRevision(ctx, db.DB,
+		"ps-display", "writing_context_slot", nil, outlineRev, "test"); err != nil {
+		t.Fatalf("rollback generate_outline: %v", err)
+	}
+	display, err = LoadDisplaySlots(ctx, db.DB, "ps-display")
+	if err != nil {
+		t.Fatalf("LoadDisplaySlots after rollback: %v", err)
+	}
+	outlineRows := 0
+	for _, row := range display {
+		if row.SlotID == "writing_context_slot" && row.StepID == "generate_outline" {
+			outlineRows++
+			if !row.Selected {
+				t.Fatalf("expected rolled-back generate_outline row to be selected")
+			}
+		}
+	}
+	if outlineRows != 1 {
+		t.Fatalf("expected one generate_outline display row after rollback, got %d", outlineRows)
 	}
 }

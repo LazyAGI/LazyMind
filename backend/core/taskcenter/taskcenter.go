@@ -62,7 +62,6 @@ func UpdateTaskStatus(ctx context.Context, db *gorm.DB, id, status string) error
 
 // UpdateTaskStatusBySession updates the TaskCenter record whose plugin_session_id matches.
 // Used by the plugin EventLoop to sync task status when a session completes or fails.
-// Terminal status is unified as "completed" (not "succeeded").
 func UpdateTaskStatusBySession(ctx context.Context, db *gorm.DB, sessionID, status string) error {
 	updates := map[string]any{
 		"status":     status,
@@ -73,7 +72,7 @@ func UpdateTaskStatusBySession(ctx context.Context, db *gorm.DB, sessionID, stat
 		updates["finished_at"] = now
 	}
 	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("plugin_session_id = ? AND status NOT IN ('completed','failed','canceled')", sessionID).
+		Where("plugin_session_id = ? AND status NOT IN ('succeeded','failed','canceled')", sessionID).
 		Updates(updates).Error
 }
 
@@ -90,7 +89,7 @@ func CancelTask(ctx context.Context, db *gorm.DB, userID, id string) error {
 
 func isTerminal(status string) bool {
 	switch status {
-	case "completed", "succeeded", "failed", "canceled":
+	case "succeeded", "failed", "canceled":
 		return true
 	}
 	return false
@@ -235,7 +234,7 @@ func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) [
 //
 //  1. Plugin task (plugin_session_id set): derive from plugin_sessions.status.
 //  2. No plugin: check whether chat_histories has a row for this conversation.
-//     - Row exists  → SSE finished and was persisted → "completed".
+//     - Row exists  → SSE finished and was persisted → "succeeded".
 //     - No row, task is older than 2 h → timed out with no output → "failed".
 //     - No row, task is recent → still running → keep "running".
 func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) string {
@@ -257,7 +256,7 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 			case "waiting":
 				return "waiting"
 			case "completed":
-				return "completed"
+				return "succeeded"
 			case "failed":
 				return "failed"
 			}
@@ -275,7 +274,7 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 		Where("conversation_id = ?", t.ConversationID).
 		Count(&histCount)
 	if histCount > 0 {
-		return "completed"
+		return "succeeded"
 	}
 	if time.Since(t.CreatedAt) > 2*time.Hour {
 		return "failed"

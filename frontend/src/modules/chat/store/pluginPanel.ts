@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { PluginInfoApi, PluginSessionApi, TempUploadServiceApi } from "@/modules/chat/utils/request";
+import i18n from "@/i18n";
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 
 export function buildPluginSearchConfig(
@@ -155,6 +156,7 @@ export interface SlotRevision {
   order_version?: number;
   selected: boolean;
   slot: string;
+  step_id?: string;
   created_at: string;
   /** Artifact content type returned by the backend (e.g. 'text', 'image', 'file'). */
   content_type?: string;
@@ -181,9 +183,10 @@ export interface PluginSession {
   slots?: SlotRevision[];
   /** Steps for this session, used in completed/waiting state to render rollback step list. */
   steps?: PluginSessionStep[];
-  /** The tab currently focused by the user — forwarded to the AI in plugin_context. */
+  /** UI focus state mirrored onto the session for legacy readers; the source of
+   *  truth lives in `focusedTabByConversation` / `focusedSortOrderByConversation`
+   *  so it survives `setSession()` refreshes. */
   focusedTab?: string;
-  /** The sort_order item currently focused by the user — forwarded to the AI. */
   focusedSortOrder?: number;
 }
 
@@ -251,6 +254,8 @@ export interface InnerTabsNode {
 
 export interface TabDef {
   id: string;
+  /** Optional workflow step id represented by this tab. Falls back to id when omitted. */
+  step_id?: string;
   label: string;
   layout?: 'grid' | 'list' | 'vertical' | 'composite' | 'horizontal';
   slots: SlotDef[];
@@ -296,6 +301,11 @@ interface PluginStore {
   // Cached dismissed sessions per conversation. Survives component remounts.
   dismissedSessionsByConversation: Record<string, Array<{ session_id: string; plugin_id: string }>>;
 
+  /** UI focus state keyed by conversation_id; held outside `sessionByConversation`
+   *  so server refreshes don't overwrite the user's tab / sort_order focus. */
+  focusedTabByConversation: Record<string, string | undefined>;
+  focusedSortOrderByConversation: Record<string, number | undefined>;
+
   setSession: (conversationId: string, session: PluginSession | null) => void;
   updateSlot: (conversationId: string, slot: SlotRevision) => void;
   loadActiveSession: (conversationId: string) => Promise<void>;
@@ -317,7 +327,8 @@ interface PluginStore {
   // Phase 4: new item creation and caption editing.
   createSlotItem: (sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number, contentType?: string) => Promise<void>;
   patchSlotCaption: (sessionId: string, slotId: string, listIndex: number, caption: string) => Promise<void>;
-  // Track focused tab and sort_order for the AI.
+  // Track focused tab and sort_order for the AI. Held in sibling maps so the
+  // value persists across `setSession()` refreshes that would otherwise wipe it.
   setFocusedTab: (conversationId: string, tabId: string) => void;
   setFocusedSortOrder: (conversationId: string, sortOrder: number | undefined) => void;
 }
@@ -330,6 +341,8 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
   slotOrderCache: {},
   dismissedRefreshTrigger: {},
   dismissedSessionsByConversation: {},
+  focusedTabByConversation: {},
+  focusedSortOrderByConversation: {},
 
   bumpDismissedRefresh: (conversationId) => {
     set((s) => ({
@@ -480,14 +493,18 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
   },
 
   fetchPluginUI: async (pluginId) => {
-    // Return cached value if already fetched.
-    const cached = get().pluginUIByPlugin[pluginId];
+    const lang = i18n.language || "";
+    const cacheKey = `${pluginId}:${lang}`;
+    // Return cached value if already fetched for this language.
+    const cached = get().pluginUIByPlugin[cacheKey];
     if (cached) return cached;
     try {
-      const res = await PluginInfoApi().getPlugin(pluginId);
+      const res = await PluginInfoApi().getPlugin(pluginId, {
+        headers: lang ? { "Accept-Language": lang } : undefined,
+      });
       const ui: PluginUI = res?.data?.data?.ui ?? res?.data?.ui ?? {};
       set((state) => ({
-        pluginUIByPlugin: { ...state.pluginUIByPlugin, [pluginId]: ui },
+        pluginUIByPlugin: { ...state.pluginUIByPlugin, [cacheKey]: ui },
       }));
       return ui;
     } catch {
@@ -550,26 +567,42 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
 
   setFocusedTab: (conversationId, tabId) => {
     set((state) => {
+      // Write to the sibling map; mirror onto the session as a fallback so
+      // legacy readers (chatLayout request assembly) still see the value.
+      const nextFocusedMap = {
+        ...state.focusedTabByConversation,
+        [conversationId]: tabId,
+      };
       const session = state.sessionByConversation[conversationId];
-      if (!session) return state;
+      const nextSessionMap = session
+        ? {
+            ...state.sessionByConversation,
+            [conversationId]: { ...session, focusedTab: tabId },
+          }
+        : state.sessionByConversation;
       return {
-        sessionByConversation: {
-          ...state.sessionByConversation,
-          [conversationId]: { ...session, focusedTab: tabId },
-        },
+        focusedTabByConversation: nextFocusedMap,
+        sessionByConversation: nextSessionMap,
       };
     });
   },
 
   setFocusedSortOrder: (conversationId, sortOrder) => {
     set((state) => {
+      const nextFocusedMap = {
+        ...state.focusedSortOrderByConversation,
+        [conversationId]: sortOrder,
+      };
       const session = state.sessionByConversation[conversationId];
-      if (!session) return state;
+      const nextSessionMap = session
+        ? {
+            ...state.sessionByConversation,
+            [conversationId]: { ...session, focusedSortOrder: sortOrder },
+          }
+        : state.sessionByConversation;
       return {
-        sessionByConversation: {
-          ...state.sessionByConversation,
-          [conversationId]: { ...session, focusedSortOrder: sortOrder },
-        },
+        focusedSortOrderByConversation: nextFocusedMap,
+        sessionByConversation: nextSessionMap,
       };
     });
   },

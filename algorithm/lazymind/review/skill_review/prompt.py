@@ -8,7 +8,7 @@ from typing import Any
 
 def skill_extraction_gate_prompt(trajectory: str) -> str:
     return f"""
-You are an expert Agent Experience Evaluation Engine, your task is to decide whether this trajectory should enter the skill mining pipeline. 
+You are an expert Agent Experience Evaluation Engine, your task is to decide whether this trajectory should enter the skill mining pipeline.
 The goal is NOT to preserve conversation history; it is to find reusable procedural knowledge, reasoning patterns, execution strategies, correction behaviors, or failure patterns that can generalize to future tasks.
 
 # Extraction Threshold (Balanced)

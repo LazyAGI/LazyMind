@@ -1,18 +1,16 @@
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
+
+const caddyInstallAttempts = 3
 
 type FrontendManager struct {
 	runner CommandRunner
@@ -31,19 +29,32 @@ func (m *FrontendManager) Run(ctx context.Context, cfg RuntimeConfig, paths Runt
 	}
 
 	frontendDir := filepath.Join(paths.RepoRoot, "frontend")
-	install := Command{Name: "pnpm", Args: []string{"install", "--frozen-lockfile"}, Dir: frontendDir}
-	if res, err := m.runner.Run(ctx, install); err != nil {
-		return fmt.Errorf("frontend dependency install failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+	if err := prepareFrontendNodeModules(paths, frontendDir); err != nil {
+		return err
+	}
+	install := Command{
+		Name: "pnpm",
+		Args: append([]string{"install", "--frozen-lockfile", "--prefer-offline", "--reporter", "append-only"}, pnpmLocalCacheArgs(paths)...),
+		Dir:  frontendDir,
+		Env:  pnpmLocalCacheEnv(paths),
+	}
+	if err := m.runFrontendCommand(ctx, install, envDuration("LAZYMIND_FRONTEND_INSTALL_TIMEOUT", 15*time.Minute), "frontend dependency install"); err != nil {
+		return err
+	}
+	if ready, reason, err := frontendNodeModulesReady(paths, frontendDir); err != nil {
+		return err
+	} else if !ready {
+		return fmt.Errorf("frontend dependency install completed but node_modules is not usable: %s", reason)
 	}
 
 	build := Command{
 		Name: "pnpm",
 		Args: []string{"build"},
 		Dir:  frontendDir,
-		Env:  frontendBuildEnv(),
+		Env:  append(pnpmLocalCacheEnv(paths), frontendBuildEnv()...),
 	}
-	if res, err := m.runner.Run(ctx, build); err != nil {
-		return fmt.Errorf("frontend build failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+	if err := m.runFrontendCommand(ctx, build, envDuration("LAZYMIND_FRONTEND_BUILD_TIMEOUT", 10*time.Minute), "frontend build"); err != nil {
+		return err
 	}
 
 	if err := writeCaddyfile(paths, cfg); err != nil {
@@ -60,39 +71,39 @@ func (m *FrontendManager) Run(ctx context.Context, cfg RuntimeConfig, paths Runt
 		Dir:  paths.RepoRoot,
 	}
 	if res, err := m.runner.Run(ctx, run); err != nil {
-		return fmt.Errorf("frontend caddy exited: %w (%s)", err, strings.TrimSpace(res.Stderr))
+		return fmt.Errorf("frontend caddy exited: %w (%s)", err, commandResultDetail(res))
+	}
+	return nil
+}
+
+func (m *FrontendManager) runFrontendCommand(ctx context.Context, cmd Command, timeout time.Duration, description string) error {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	if streamer, ok := m.runner.(CommandStreamer); ok {
+		if err := streamer.Stream(ctx, cmd, os.Stdout, os.Stderr); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("%s timed out after %s", description, timeout)
+			}
+			return fmt.Errorf("%s failed: %w", description, err)
+		}
+		return nil
+	}
+	if res, err := m.runner.Run(ctx, cmd); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("%s timed out after %s (%s)", description, timeout, commandResultDetail(res))
+		}
+		return fmt.Errorf("%s failed: %w (%s)", description, err, commandResultDetail(res))
 	}
 	return nil
 }
 
 func (m *FrontendManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	if err := paths.EnsureAllDirs(); err != nil {
-		return err
-	}
-	script := `
-port="$1"
-config="$2"
-if command -v lsof >/dev/null 2>&1; then
-  for pid in $(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sort -u); do
-    cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    case "$cmd" in
-      *caddy*"$config"*|*caddy*)
-        echo "Stopping frontend Caddy on :$port ($pid)..."
-        kill "$pid" 2>/dev/null || true
-        ;;
-    esac
-  done
-fi
-exit 0
-`
-	res, err := m.runner.Run(ctx, Command{
-		Name: "sh",
-		Args: []string{"-c", script, "frontend-down", strconv.Itoa(cfg.FrontendPort), paths.CaddyConfig},
-		Dir:  paths.RepoRoot,
-	})
-	if err != nil {
-		return fmt.Errorf("stop frontend failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
-	}
+	_ = ctx
+	_ = cfg
+	_ = paths
 	return nil
 }
 
@@ -108,6 +119,152 @@ func frontendBuildEnv() []string {
 		}
 	}
 	return env
+}
+
+func pnpmLocalCacheArgs(paths RuntimePaths) []string {
+	return []string{
+		"--virtual-store-dir", filepath.Join(frontendRuntimeNodeModules(paths), ".pnpm"),
+	}
+}
+
+func pnpmLocalCacheEnv(paths RuntimePaths) []string {
+	return append(hostToolEnv(paths),
+		"CI=true",
+		"COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
+		"NPM_CONFIG_UPDATE_NOTIFIER=false",
+		"npm_config_yes=true",
+	)
+}
+
+func prepareFrontendNodeModules(paths RuntimePaths, frontendDir string) error {
+	nodeModules := filepath.Join(frontendDir, "node_modules")
+	runtimeNodeModules := frontendRuntimeNodeModules(paths)
+	if err := os.MkdirAll(runtimeNodeModules, 0o755); err != nil {
+		return fmt.Errorf("create frontend runtime node_modules: %w", err)
+	}
+	if target, ok := symlinkTarget(nodeModules); ok {
+		if filepath.Clean(target) == filepath.Clean(runtimeNodeModules) {
+			if ready, _, err := frontendNodeModulesReady(paths, frontendDir); err != nil {
+				return err
+			} else if !ready {
+				if err := os.RemoveAll(runtimeNodeModules); err != nil {
+					return fmt.Errorf("recreate stale frontend runtime node_modules: %w", err)
+				}
+				if err := os.MkdirAll(runtimeNodeModules, 0o755); err != nil {
+					return fmt.Errorf("recreate frontend runtime node_modules: %w", err)
+				}
+			}
+			return nil
+		}
+		if err := os.Remove(nodeModules); err != nil {
+			return fmt.Errorf("remove stale frontend node_modules symlink: %w", err)
+		}
+	} else if _, err := os.Stat(nodeModules); err == nil {
+		ready, _, err := frontendNodeModulesReady(paths, frontendDir)
+		if err != nil {
+			return err
+		}
+		if err := os.RemoveAll(nodeModules); err != nil {
+			return fmt.Errorf("move frontend node_modules into local runtime root: %w", err)
+		}
+		if ready {
+			_ = os.RemoveAll(runtimeNodeModules)
+			if err := os.MkdirAll(runtimeNodeModules, 0o755); err != nil {
+				return fmt.Errorf("recreate frontend runtime node_modules: %w", err)
+			}
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("inspect frontend node_modules: %w", err)
+	}
+	if err := os.Symlink(runtimeNodeModules, nodeModules); err != nil {
+		return fmt.Errorf("link frontend node_modules to local runtime root: %w", err)
+	}
+	return nil
+}
+
+func symlinkTarget(path string) (string, bool) {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return "", false
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(path), target)
+	}
+	return target, true
+}
+
+func frontendRuntimeNodeModules(paths RuntimePaths) string {
+	return paths.FrontendNodeModules
+}
+
+func frontendNodeModulesReady(paths RuntimePaths, frontendDir string) (bool, string, error) {
+	nodeModules := filepath.Join(frontendDir, "node_modules")
+	if _, err := os.Stat(nodeModules); err != nil {
+		if os.IsNotExist(err) {
+			return false, "node_modules is missing", nil
+		}
+		return false, "", fmt.Errorf("inspect frontend node_modules: %w", err)
+	}
+	modulesYAML := filepath.Join(nodeModules, ".modules.yaml")
+	content, err := os.ReadFile(modulesYAML)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, ".modules.yaml is missing", nil
+		}
+		return false, "", fmt.Errorf("read frontend pnpm metadata: %w", err)
+	}
+	metadata := filepath.ToSlash(string(content))
+	virtualStoreDir := filepath.ToSlash(filepath.Join(frontendRuntimeNodeModules(paths), ".pnpm"))
+	if !metadataContainsAnyPath(metadata, virtualStoreDir, relativePathOrEmpty(nodeModules, filepath.Join(frontendRuntimeNodeModules(paths), ".pnpm")), relativePathOrEmpty(frontendRuntimeNodeModules(paths), filepath.Join(frontendRuntimeNodeModules(paths), ".pnpm"))) {
+		return false, "pnpm virtualStoreDir does not point at frontend runtime node_modules", nil
+	}
+	for _, required := range []string{
+		filepath.Join(nodeModules, ".bin", "vite"),
+		filepath.Join(nodeModules, "vite", "bin", "vite.js"),
+	} {
+		if _, err := os.Stat(required); err != nil {
+			if os.IsNotExist(err) {
+				return false, fmt.Sprintf("%s is missing or points to a missing file", required), nil
+			}
+			return false, "", fmt.Errorf("inspect frontend dependency %s: %w", required, err)
+		}
+	}
+	return true, "", nil
+}
+
+func relativePathOrEmpty(base string, target string) string {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
+func metadataContainsAnyPath(metadata string, paths ...string) bool {
+	for _, path := range paths {
+		if path != "" && strings.Contains(metadata, filepath.ToSlash(path)) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandResultDetail(res CommandResult) string {
+	detail := strings.TrimSpace(res.Stderr)
+	if detail == "" {
+		detail = strings.TrimSpace(res.Stdout)
+	}
+	if detail == "" {
+		return "no command output"
+	}
+	if len(detail) > 4000 {
+		return detail[:4000] + "...(truncated)"
+	}
+	return detail
 }
 
 func writeCaddyfile(paths RuntimePaths, cfg RuntimeConfig) error {
@@ -157,74 +314,31 @@ func (m *FrontendManager) ensureCaddy(ctx context.Context, cfg RuntimeConfig, pa
 	if info, err := os.Stat(paths.CaddyBin); err == nil && !info.IsDir() {
 		return paths.CaddyBin, nil
 	}
-	if runtime.GOOS != "linux" {
-		return "", fmt.Errorf("automatic Caddy download is only supported on linux in this local profile; set %s", caddyBinEnvVar)
+	goBin := strings.TrimSpace(os.Getenv("GO"))
+	if goBin == "" {
+		goBin = "go"
 	}
-	switch runtime.GOARCH {
-	case "amd64", "arm64":
-	default:
-		return "", fmt.Errorf("automatic Caddy download does not support %s/%s; set %s", runtime.GOOS, runtime.GOARCH, caddyBinEnvVar)
-	}
-	if err := downloadCaddy(ctx, cfg.CaddyVersion, runtime.GOOS, runtime.GOARCH, paths.CaddyBin); err != nil {
+	if err := os.MkdirAll(filepath.Dir(paths.CaddyBin), 0o755); err != nil {
 		return "", err
 	}
-	return paths.CaddyBin, nil
-}
-
-func caddyArchiveURL(version, goos, goarch string) string {
-	return fmt.Sprintf("https://github.com/caddyserver/caddy/releases/download/v%s/caddy_%s_%s_%s.tar.gz", version, version, goos, goarch)
-}
-
-func downloadCaddy(ctx context.Context, version, goos, goarch, dest string) error {
-	url := caddyArchiveURL(version, goos, goarch)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
+	install := Command{
+		Name: goBin,
+		Args: []string{"install", "github.com/caddyserver/caddy/v2/cmd/caddy@v" + cfg.CaddyVersion},
+		Dir:  paths.RepoRoot,
+		Env:  append(goToolEnv(paths), "GOBIN="+paths.BinDir),
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("download Caddy %s failed: %w", version, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download Caddy %s failed: HTTP %d from %s", version, resp.StatusCode, url)
-	}
-
-	gzr, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read Caddy archive: %w", err)
-	}
-	defer gzr.Close()
-
-	tr := tar.NewReader(gzr)
-	tmp := dest + ".tmp"
-	defer os.Remove(tmp)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
+	var lastErr error
+	var lastDetail string
+	for attempt := 1; attempt <= caddyInstallAttempts; attempt++ {
+		res, err := m.runner.Run(ctx, install)
+		if err == nil {
+			return paths.CaddyBin, nil
+		}
+		lastErr = err
+		lastDetail = commandResultDetail(res)
+		if ctx.Err() != nil {
 			break
 		}
-		if err != nil {
-			return fmt.Errorf("extract Caddy archive: %w", err)
-		}
-		if filepath.Base(hdr.Name) != "caddy" || hdr.FileInfo().IsDir() {
-			continue
-		}
-		out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-		if err != nil {
-			return err
-		}
-		if _, err := io.Copy(out, tr); err != nil {
-			_ = out.Close()
-			return fmt.Errorf("write Caddy binary: %w", err)
-		}
-		if err := out.Close(); err != nil {
-			return err
-		}
-		if err := os.Rename(tmp, dest); err != nil {
-			return err
-		}
-		return os.Chmod(dest, 0o755)
 	}
-	return fmt.Errorf("Caddy archive did not contain caddy binary")
+	return "", fmt.Errorf("install Caddy failed after %d attempt(s): %w (%s)", caddyInstallAttempts, lastErr, lastDetail)
 }

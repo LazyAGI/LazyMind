@@ -88,7 +88,7 @@ def _build_artifact_value(value: Any, content_type: str):
         full = os.path.join(ctx.workspace_path, rel)
         if os.path.exists(full):
             size = os.path.getsize(full)
-        return {'filename': os.path.basename(rel), 'path': rel, 'size': size}, 'file'
+        return {'filename': os.path.basename(rel), 'path': full, 'size': size}, 'file'
     if content_type == 'file_list':
         items = value if isinstance(value, list) else [value]
         paths: List[str] = []

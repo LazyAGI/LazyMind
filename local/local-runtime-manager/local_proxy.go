@@ -33,6 +33,7 @@ func (m *LocalProxyManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 		Name: goBin,
 		Args: []string{"build", "-buildvcs=false", "-o", paths.LocalProxyBin, "./cmd/local-proxy"},
 		Dir:  filepath.Join(paths.RepoRoot, localProxySourceDirName),
+		Env:  goToolEnv(paths),
 	}
 	if res, err := m.runner.Run(ctx, build); err != nil {
 		return fmt.Errorf("build local-proxy failed: %w (%s)", err, strings.TrimSpace(res.Stderr))

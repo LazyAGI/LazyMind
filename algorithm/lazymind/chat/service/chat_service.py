@@ -24,6 +24,11 @@ from lazymind.chat.service.component import (
     filter_tools,
     normalize_history_for_agent,
 )
+from lazymind.chat.service.component.status_retry import (
+    _new_react_agent,
+    build_status_retry_query,
+    is_status_only_answer,
+)
 from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.utils import (
     SensitiveFilter,
@@ -579,6 +584,34 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                         # 'final' -- payload is already the resolved result value;
                         # if future.result() raised, drive_agent propagated it before yielding.
                         final_result = payload
+
+                if translator.tool_call_turns == 0 and is_status_only_answer(final_result):
+                    LOG.info(
+                        f'[ChatServer] [STATUS_ONLY_RETRY] [sid={conversation.session_id}] '
+                        f'[result={str(final_result)[:120]}]'
+                    )
+                    retry_query = build_status_retry_query(agent_query)
+                    retry_agent = _new_react_agent(
+                        all_tools=all_tools,
+                        query=query,
+                        runtime_prompt=runtime_prompt,
+                        agent=agent,
+                        config=_cfg,
+                        fs=FS,
+                        stop_tools=stop_tools,
+                    )
+                    async for kind, payload in drive_agent(retry_agent, retry_query, history=agent_history):
+                        if kind == 'event':
+                            for frame in translator.feed(payload):
+                                cost = round(time.time() - start_time, 3)
+                                yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='RETRY_FEED')
+                        else:
+                            LOG.info(
+                                f'[ChatServer] [DBG_AGENT_FINAL_RETRY] [sid={conversation.session_id}] '
+                                f'[tool_call_turns={translator.tool_call_turns}] '
+                                f'[result_type={type(payload).__name__}] [result={str(payload)[:200]}]'
+                            )
+                            final_result = payload
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)

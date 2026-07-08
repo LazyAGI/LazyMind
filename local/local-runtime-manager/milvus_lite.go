@@ -53,6 +53,7 @@ func (m *MilvusLiteManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 		_ = killAlgorithmProcess(cmd.Process)
 		return err
 	}
+	registerLocalProcess(paths, milvusLiteProcessName, cmd.Process.Pid, []int{cfg.ModeProfile.VectorStore.Port}, append([]string{paths.AlgorithmPython}, cmd.Args...))
 
 	waitErr := make(chan error, 1)
 	go func() {
@@ -61,11 +62,13 @@ func (m *MilvusLiteManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 	if err := waitForMilvusLiteReady(ctx, cfg.ModeProfile.VectorStore.Port, waitErr); err != nil {
 		_ = killAlgorithmProcess(cmd.Process)
 		_ = os.Remove(paths.MilvusLitePIDFile)
+		unregisterLocalProcess(paths, milvusLiteProcessName, cmd.Process.Pid)
 		return err
 	}
 
 	err := <-waitErr
 	_ = os.Remove(paths.MilvusLitePIDFile)
+	unregisterLocalProcess(paths, milvusLiteProcessName, cmd.Process.Pid)
 	if ctx.Err() != nil {
 		return nil
 	}

@@ -97,7 +97,7 @@ For the full service dependency graph, environment variables, and request auth c
 
 ## Quick Start
 
-**Prerequisites:** Docker & Docker Compose
+**Local prerequisites:** Go, Python 3, uv, pnpm, and Node.js.
 
 ### Step 1 — Get a MinerU API key (for high-quality PDF parsing)
 
@@ -114,7 +114,7 @@ export LAZYLLM_MINERU_API_KEY=your_mineru_key
 ### Step 2 — Start the stack
 
 ```bash
-make up-build
+make up-build-local
 ```
 
 After startup:
@@ -127,6 +127,12 @@ After startup:
 Log in and go to the model settings page to configure your **LLM**, **VLM**, **enbed**, **cross_embed** and **Reranker** models using the API key from Step 1.
 
 For environment setup and detailed examples, see [`docs/quick_start.md`](docs/quick_start.md).
+
+To stop the local runtime:
+
+```bash
+make down-local
+```
 
 ---
 
@@ -152,14 +158,15 @@ make test-hermetic
 
 | Scenario | Command |
 |----------|---------|
-| Standard | `make up` |
-| Local runtime (SQLite state backend, no Redis) | `make up-build LAZYMIND_RUNTIME_MODE=local` |
+| Local runtime on host (SQLite state backend, no containers) | `make up-build-local` |
+| Stop local runtime | `make down-local` |
+| Container stack | `make up` |
 | Deploy MinerU OCR (on-prem) | `make up LAZYMIND_DEPLOY_MINERU=1` |
 | Deploy PaddleOCR (on-prem) | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | External Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | Enable store dashboards | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 
-`LAZYMIND_RUNTIME_MODE=local` applies the local compose override, stores short-lived chat/auth/subagent state in SQLite, and scales the Redis service to 0. Omit it, or set `LAZYMIND_RUNTIME_MODE=cloud`, to run the default Redis-backed stack where Redis is required.
+`make up-build-local` runs LazyMind directly on the host through `.lazymind-local/bin/local-runtime-manager`. Generated binaries, runtime state, dependencies, logs, and startup configuration are stored under `.lazymind-local/`. The local Python runtime is installed under `.lazymind-local/runtimes/python`, with service dependencies under `.lazymind-local/deps/`; runtime data is kept under `.lazymind-local/data/`. Build-time tool caches such as pnpm, uv, pip, corepack, and Go caches use their user-level defaults instead of `.lazymind-local/`. The whole `.lazymind-local/` directory can be deleted and rebuilt.
 
 ---
 

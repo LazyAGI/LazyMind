@@ -315,7 +315,7 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
           options={[
             { value: '', label: t('taskCenter.statusAll') },
             { value: 'running', label: t('taskCenter.statusRunning') },
-            { value: 'completed', label: t('taskCenter.statusCompleted') },
+            { value: 'succeeded', label: t('taskCenter.statusCompleted') },
             { value: 'failed', label: t('taskCenter.statusFailed') },
             { value: 'canceled', label: t('taskCenter.statusCanceled') },
           ]}

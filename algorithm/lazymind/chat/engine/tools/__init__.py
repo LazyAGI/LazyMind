@@ -16,6 +16,7 @@ from .skill_editor import skill_editor
 from .system_query import SystemQueryToolGroup
 from .vocab_learn import vocab_learn
 from .web_search import url_fetch
+from .writer import WriterToolGroup
 
 __all__ = [
     'build_schedule_tool_group',
@@ -33,4 +34,5 @@ __all__ = [
     'SystemQueryToolGroup',
     'vocab_learn',
     'url_fetch',
+    'WriterToolGroup',
 ]
