@@ -140,7 +140,7 @@ export function validateStateGraph(model: GraphModel): ValidationError[] {
     });
   }
 
-  // V7: input slots must be produced by topologically prior nodes
+  // V7: required input slots must be produced by topologically prior nodes
   if (cycleNodes.size === 0) {
     const topoOrder = topoSort(nodes, outgoing);
     const produced = new Set<string>();
@@ -148,7 +148,8 @@ export function validateStateGraph(model: GraphModel): ValidationError[] {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) continue;
       for (const inp of node.inputs) {
-        if (!produced.has(inp.slot)) {
+        // Only enforce slot-produced constraint for required inputs.
+        if (inp.required && !produced.has(inp.slot)) {
           errors.push({
             code: 'V7_INPUT_NOT_PRODUCED',
             message: `节点 "${nodeId}" 引用的输入 slot "${inp.slot}" 未由前序节点产出`,

@@ -144,6 +144,31 @@
   flex-shrink: 0;
 }
 
+/* Help icon after capsule groups */
+.sge-tab-help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid #bfbfbf;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8c8c8c;
+  cursor: default;
+  margin-left: 6px;
+  flex-shrink: 0;
+  line-height: 1;
+  user-select: none;
+  transition: border-color 0.15s, color 0.15s;
+
+  &:hover {
+    border-color: #1677ff;
+    color: #1677ff;
+  }
+}
+
 .sge-artifact-count {
   display: inline-block;
   background: #1677ff;

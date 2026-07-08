@@ -332,43 +332,48 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
         <Section title={t('selfEvolutionRun.stateGraphSectionMaterials')}>
           <div className="npp-field-block">
             <LabelWithTip label={t('selfEvolutionRun.stateGraphArtifactInputs')} tip={t('selfEvolutionRun.stateGraphInputsTip')} />
-            {node.inputs.map((ref, idx) => (
-              <div key={idx} className="npp-slot-ref-row">
-                <Select
-                  value={ref.slot}
-                  options={slotOptions}
-                  onChange={(val) => {
-                    const next = [...node.inputs];
-                    next[idx] = { ...ref, slot: val };
-                    update({ inputs: next });
-                  }}
-                  placeholder={t('selfEvolutionRun.stateGraphArtifacts')}
-                  size="small"
-                  style={{ flex: 1 }}
-                />
-                <Tooltip title={t('selfEvolutionRun.stateGraphSlotRequired')}>
-                  <Switch
+            {node.inputs.map((ref, idx) => {
+              const slotLabel = slotOptions.find((o) => o.value === ref.slot)?.label ?? ref.slot;
+              return (
+                <div key={idx} className="npp-slot-ref-row">
+                  <Tooltip title={slotLabel} placement="top">
+                    <Select
+                      value={ref.slot}
+                      options={slotOptions}
+                      onChange={(val) => {
+                        const next = [...node.inputs];
+                        next[idx] = { ...ref, slot: val };
+                        update({ inputs: next });
+                      }}
+                      placeholder={t('selfEvolutionRun.stateGraphArtifacts')}
+                      size="small"
+                      className="npp-slot-select"
+                    />
+                  </Tooltip>
+                  <Tooltip title={t('selfEvolutionRun.stateGraphSlotRequired')}>
+                    <Switch
+                      size="small"
+                      checked={ref.required}
+                      onChange={(checked) => {
+                        const next = [...node.inputs];
+                        next[idx] = { ...ref, required: checked };
+                        update({ inputs: next });
+                      }}
+                      checkedChildren={t('selfEvolutionRun.stateGraphSlotRequired')}
+                      unCheckedChildren={t('selfEvolutionRun.stateGraphSlotOptional')}
+                    />
+                  </Tooltip>
+                  <Button
+                    type="text"
+                    danger
                     size="small"
-                    checked={ref.required}
-                    onChange={(checked) => {
-                      const next = [...node.inputs];
-                      next[idx] = { ...ref, required: checked };
-                      update({ inputs: next });
-                    }}
-                    checkedChildren={t('selfEvolutionRun.stateGraphSlotRequired')}
-                    unCheckedChildren={t('selfEvolutionRun.stateGraphSlotOptional')}
+                    icon={<CloseOutlined />}
+                    disabled={readonly}
+                    onClick={() => { if (!readonly) update({ inputs: node.inputs.filter((_, i) => i !== idx) }); }}
                   />
-                </Tooltip>
-                <Button
-                  type="text"
-                  danger
-                  size="small"
-                  icon={<CloseOutlined />}
-                  disabled={readonly}
-                  onClick={() => { if (!readonly) update({ inputs: node.inputs.filter((_, i) => i !== idx) }); }}
-                />
-              </div>
-            ))}
+                </div>
+              );
+            })}
             <Button
               type="dashed"
               size="small"
@@ -387,50 +392,42 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
           </div>
           <div className="npp-field-block" style={{ marginTop: 10 }}>
             <LabelWithTip label={t('selfEvolutionRun.stateGraphArtifactOutputs')} tip={t('selfEvolutionRun.stateGraphOutputsTip')} />
-            {node.outputs.map((ref, idx) => (
-              <div key={idx} className="npp-slot-ref-row">
-                <Select
-                  value={ref.slot}
-                  options={slotOptions}
-                  onChange={(val) => {
-                    const next = [...node.outputs];
-                    next[idx] = { ...ref, slot: val };
-                    update({ outputs: next });
-                  }}
-                  placeholder={t('selfEvolutionRun.stateGraphArtifacts')}
-                  size="small"
-                  style={{ flex: 1 }}
-                />
-                <Tooltip title={t('selfEvolutionRun.stateGraphSlotRequired')}>
-                  <Switch
+            {node.outputs.map((ref, idx) => {
+              const slotLabel = slotOptions.find((o) => o.value === ref.slot)?.label ?? ref.slot;
+              return (
+                <div key={idx} className="npp-slot-ref-row">
+                  <Tooltip title={slotLabel} placement="top">
+                    <Select
+                      value={ref.slot}
+                      options={slotOptions}
+                      onChange={(val) => {
+                        const next = [...node.outputs];
+                        next[idx] = { ...ref, slot: val };
+                        update({ outputs: next });
+                      }}
+                      placeholder={t('selfEvolutionRun.stateGraphArtifacts')}
+                      size="small"
+                      className="npp-slot-select"
+                    />
+                  </Tooltip>
+                  <Button
+                    type="text"
+                    danger
                     size="small"
-                    checked={ref.required}
-                    onChange={(checked) => {
-                      const next = [...node.outputs];
-                      next[idx] = { ...ref, required: checked };
-                      update({ outputs: next });
-                    }}
-                    checkedChildren={t('selfEvolutionRun.stateGraphSlotRequired')}
-                    unCheckedChildren={t('selfEvolutionRun.stateGraphSlotOptional')}
+                    icon={<CloseOutlined />}
+                    disabled={readonly}
+                    onClick={() => { if (!readonly) update({ outputs: node.outputs.filter((_, i) => i !== idx) }); }}
                   />
-                </Tooltip>
-                <Button
-                  type="text"
-                  danger
-                  size="small"
-                  icon={<CloseOutlined />}
-                  disabled={readonly}
-                  onClick={() => { if (!readonly) update({ outputs: node.outputs.filter((_, i) => i !== idx) }); }}
-                />
-              </div>
-            ))}
+                </div>
+              );
+            })}
             <Button
               type="dashed"
               size="small"
               icon={<PlusOutlined />}
               block
               disabled={readonly || availableOutputSlots.length === 0}
-              onClick={() => { if (!readonly) update({ outputs: [...node.outputs, { slot: '', required: true }] }); }}
+              onClick={() => { if (!readonly) update({ outputs: [...node.outputs, { slot: '', required: false }] }); }}
               style={{ marginTop: 4 }}
             >
               {slotOptions.length === 0

@@ -218,6 +218,23 @@
   margin-top: 4px;
 }
 
+/* Slot Select: fixed width, truncate overflow text */
+.npp-slot-select {
+  flex: 1;
+  min-width: 0;
+
+  .ant-select-selector {
+    overflow: hidden;
+  }
+
+  .ant-select-selection-item {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+}
+
 /* ── PromptEditor ── */
 .pe-wrapper {
   position: relative;

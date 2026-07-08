@@ -457,10 +457,16 @@ export default function StateGraphEditor({
                 disabled={viewMode === 'code'}
                 aria-disabled={viewMode === 'code'}
               >
-                {tab === 'statemachine' ? '状态机' : tab === 'ui' ? 'UI' : '说明文档'}
+                {tab === 'statemachine' ? '流程图' : tab === 'ui' ? 'UI' : '说明文档'}
               </button>
             ))}
           </div>
+          <Tooltip
+            title="流程图定义任务的执行过程，每一步会产生一些素材；UI只定义这些素材如何组织和展示，不参与和展示流程的执行过程"
+            placement="bottom"
+          >
+            <span className="sge-tab-help-icon">?</span>
+          </Tooltip>
           <span className="sge-tab-divider" />
           {/* Capsule group 2: view mode */}
           <div className="sge-segmented">

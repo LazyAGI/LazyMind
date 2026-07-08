@@ -69,7 +69,7 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
       step.inputs = node.inputs.map((ref) => ({ slot: ref.slot, required: ref.required }));
     }
     if (node.outputs.length > 0) {
-      step.outputs = node.outputs.map((ref) => ({ slot: ref.slot, required: ref.required }));
+      step.outputs = node.outputs.map((ref) => ref.slot);
     }
     // transitions are serialized in the top-level transitions block, not inline here
     return step;
