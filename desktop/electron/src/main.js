@@ -17,7 +17,11 @@ const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
 
 let mainWindow;
 let runtimeProcess;
+let guardProcess;
 let currentStatus = null;
+let shutdownPromise = null;
+let isQuitting = false;
+let allowWindowClose = false;
 
 function sidecarArgs(command, extra = []) {
   return [
@@ -53,6 +57,29 @@ function runSidecar(command, extra = []) {
   });
 }
 
+function startGuard() {
+  if (guardProcess || !fs.existsSync(sidecarPath)) {
+    return;
+  }
+  guardProcess = spawn(sidecarPath, sidecarArgs("guard", ["--owner-pid", String(process.pid)]), {
+    env: sidecarEnv(),
+    stdio: "ignore",
+    detached: true,
+  });
+  guardProcess.once("exit", () => {
+    guardProcess = null;
+  });
+  guardProcess.unref();
+}
+
+function stopGuard() {
+  if (!guardProcess) {
+    return;
+  }
+  guardProcess.kill();
+  guardProcess = null;
+}
+
 async function readStatus() {
   const stdout = await runSidecar("status", ["--json"]);
   currentStatus = JSON.parse(stdout);
@@ -60,6 +87,7 @@ async function readStatus() {
 }
 
 function startRuntime() {
+  startGuard();
   if (runtimeProcess) {
     return;
   }
@@ -71,6 +99,44 @@ function startRuntime() {
   runtimeProcess.once("exit", () => {
     runtimeProcess = null;
   });
+}
+
+function shutdownRuntime() {
+  if (shutdownPromise) {
+    return shutdownPromise;
+  }
+  shutdownPromise = (async () => {
+    if (!fs.existsSync(sidecarPath)) {
+      stopGuard();
+      return;
+    }
+    let downSucceeded = false;
+    try {
+      await runSidecar("down");
+      downSucceeded = true;
+    } catch (error) {
+      console.error("Failed to stop LazyMind desktop runtime:", error);
+    }
+    if (downSucceeded) {
+      stopGuard();
+    }
+  })().finally(() => {
+    shutdownPromise = null;
+  });
+  return shutdownPromise;
+}
+
+async function requestQuit() {
+  if (isQuitting) {
+    return;
+  }
+  isQuitting = true;
+  await shutdownRuntime();
+  allowWindowClose = true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.destroy();
+  }
+  app.quit();
 }
 
 async function waitForRuntimeReady() {
@@ -125,6 +191,13 @@ async function createWindow() {
       sandbox: false,
     },
   });
+  mainWindow.on("close", (event) => {
+    if (allowWindowClose) {
+      return;
+    }
+    event.preventDefault();
+    requestQuit();
+  });
   await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
   try {
     const status = await waitForRuntimeReady();
@@ -168,12 +241,11 @@ ipcMain.handle("lazymind:exportDiagnostics", async () => {
 
 app.whenReady().then(createWindow);
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  app.quit();
 });
-app.on("before-quit", () => {
-  if (fs.existsSync(sidecarPath)) {
-    execFile(sidecarPath, sidecarArgs("down"), { env: sidecarEnv() }, () => {});
+app.on("before-quit", (event) => {
+  if (!isQuitting) {
+    event.preventDefault();
+    requestQuit();
   }
 });

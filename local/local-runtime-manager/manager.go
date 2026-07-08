@@ -155,7 +155,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := m.killStaleRuntimeProcesses(ctx, stateCfg, paths); err != nil {
 		return err
 	}
-	freshCfg, paths, err = NewRuntimeConfig("", paths.RepoRoot)
+	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       cfg.Profile,
+		RepoRoot:      paths.RepoRoot,
+		RuntimeRoot:   cfg.RuntimeRoot,
+		ResourcesRoot: cfg.ResourcesRoot,
+	})
 	if err != nil {
 		return err
 	}

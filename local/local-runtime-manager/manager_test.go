@@ -253,6 +253,64 @@ func TestCLIAcceptsDesktopProfileFlag(t *testing.T) {
 	}
 }
 
+func TestRuntimeGuardRunsDownWhenOwnerExits(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	calls := 0
+	aliveCalls := 0
+	err = runRuntimeGuard(context.Background(), cfg, paths, 12345, time.Millisecond,
+		func(pid int) bool {
+			if pid != 12345 {
+				t.Fatalf("owner pid = %d, want 12345", pid)
+			}
+			aliveCalls++
+			return aliveCalls == 1
+		},
+		func(_ context.Context, gotCfg RuntimeConfig, gotPaths RuntimePaths) error {
+			calls++
+			if gotCfg.Profile != cfg.Profile || gotPaths.RuntimeRoot != paths.RuntimeRoot {
+				t.Fatalf("guard passed unexpected runtime config")
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("runtime guard: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("down calls = %d, want 1", calls)
+	}
+}
+
+func TestRuntimeGuardContextCancelDoesNotRunDown(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := 0
+	err = runRuntimeGuard(ctx, cfg, paths, 12345, time.Millisecond,
+		func(int) bool { return true },
+		func(context.Context, RuntimeConfig, RuntimePaths) error {
+			calls++
+			return nil
+		},
+	)
+	if err == nil {
+		t.Fatal("expected context cancellation")
+	}
+	if calls != 0 {
+		t.Fatalf("down calls = %d, want 0", calls)
+	}
+}
+
 func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

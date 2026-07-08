@@ -17,7 +17,7 @@
     "productName": "LazyMind",
     "artifactName": "LazyMind-${os}-${arch}.${ext}",
     "directories": {
-      "output": "../dist/mac-arm64"
+      "output": "../dist"
     },
     "files": [
       "src/**/*",

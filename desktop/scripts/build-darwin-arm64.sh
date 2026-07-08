@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_ROOT="${ROOT}/.lazymind-desktop/build/macos-arm64"
+BUILD_ROOT="${ROOT}/.lazymind-desktop/build/darwin-arm64"
 RUNTIME_ROOT="${BUILD_ROOT}/runtime"
 DIST_ROOT="${ROOT}/desktop/dist"
 APP_RUNTIME_ROOT="${DIST_ROOT}/runtime"
@@ -57,11 +57,12 @@ mkdir -p "${DIST_ROOT}"
 rsync -a --delete "${RUNTIME_ROOT}/" "${APP_RUNTIME_ROOT}/"
 
 echo "==> Packaging Electron app"
-(cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" install --frozen-lockfile=false)
+(cd "${ROOT}/desktop/electron" && CI=true "${PNPM_BIN}" install --frozen-lockfile=false)
+(cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" rebuild electron)
 (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run pack:mac:arm64)
 
 APP_PATH="${DIST_ROOT}/mac-arm64/LazyMind.app"
-ZIP_PATH="${DIST_ROOT}/LazyMind-macOS-arm64.zip"
+ZIP_PATH="${DIST_ROOT}/LazyMind-darwin-arm64.zip"
 if [[ ! -d "${APP_PATH}" ]]; then
   if [[ -d "${DIST_ROOT}/mac-arm64" ]]; then
     APP_PATH="$(find "${DIST_ROOT}/mac-arm64" -maxdepth 3 -type d -name "LazyMind.app" -print -quit)"

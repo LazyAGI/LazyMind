@@ -11,12 +11,12 @@ Planned first target:
 Build entry:
 
 ```bash
-make desktop-macos-arm64
+make desktop-darwin-arm64
 ```
 
 Expected output:
 
 ```text
 desktop/dist/mac-arm64/LazyMind.app
-desktop/dist/LazyMind-macOS-arm64.zip
+desktop/dist/LazyMind-darwin-arm64.zip
 ```

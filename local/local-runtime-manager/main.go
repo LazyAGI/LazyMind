@@ -102,6 +102,16 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 			return err
 		}
 		return manager.RunServiceAction(ctx, cfg, paths, service, action)
+	case "guard":
+		ownerPID, opts, err := parseGuardArgs(args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
+		if err != nil {
+			return err
+		}
+		return runRuntimeGuard(ctx, cfg, paths, ownerPID, defaultGuardPollInterval, ownerProcessAlive, manager.Down)
 	case "internal":
 		return c.runInternal(ctx, manager, args[1:])
 	default:
@@ -258,6 +268,23 @@ func parseServiceArgs(args []string, out io.Writer) (string, string, RuntimeConf
 	return *service, *action, opts(), nil
 }
 
+func parseGuardArgs(args []string, out io.Writer) (int, RuntimeConfigOptions, error) {
+	fs := flag.NewFlagSet("guard", flag.ContinueOnError)
+	fs.SetOutput(out)
+	ownerPID := fs.Int("owner-pid", 0, "")
+	opts := addRuntimeFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return 0, RuntimeConfigOptions{}, err
+	}
+	if len(fs.Args()) != 0 {
+		return 0, RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
+	}
+	if *ownerPID <= 0 {
+		return 0, RuntimeConfigOptions{}, fmt.Errorf("--owner-pid must be positive")
+	}
+	return *ownerPID, opts(), nil
+}
+
 func addRuntimeFlags(fs *flag.FlagSet) func() RuntimeConfigOptions {
 	repoRoot := fs.String("repo-root", "", "")
 	profile := fs.String("profile", "", "")
@@ -280,5 +307,6 @@ func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "  local-runtime-manager status --json\n")
 	_, _ = io.WriteString(c.out, "  local-runtime-manager reset --scope kb|all\n")
 	_, _ = io.WriteString(c.out, "  local-runtime-manager service --name file-watcher --action build|start|stop\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager guard --owner-pid <pid>\n")
 	_, _ = io.WriteString(c.out, "  local-runtime-manager internal local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|scan-control-plane-run|scan-control-plane-down|file-watcher-run|file-watcher-down|frontend-run|frontend-down|milvus-lite-run|milvus-lite-down|algorithm-run|algorithm-down\n")
 }

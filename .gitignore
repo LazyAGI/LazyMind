@@ -33,6 +33,7 @@ wget-log
 .cursor
 .codex
 .worktrees/
+.lazymind-desktop/
 .codex-gocache/
 .codex-gomodcache/
 .reasonix

@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local down-local reset-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-stop-if-present desktop-macos-arm64 desktop-run
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local down-local reset-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-clean
 .DEFAULT_GOAL := help
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -179,7 +179,9 @@ help:
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
 	@echo "  make up-build-local - Build/start local LazyMind without containers"
-	@echo "  make desktop-macos-arm64 - Build macOS arm64 Desktop app"
+	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
+	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
+	@echo "  make desktop-clean - Remove all Desktop generated outputs"
 	@echo "  make down-local - Stop local LazyMind runtime"
 	@echo "  make reset-local - Stop local runtime and remove .lazymind-local"
 	@echo "  make down       - Stop Cloud/Kong compose services"
@@ -373,17 +375,6 @@ file-watcher-run: file-watcher-stop file-watcher-dirs
 file-watcher-start: file-watcher-build
 	@$(MAKE) --no-print-directory file-watcher-run
 
-desktop-stop-if-present:
-	@if [ -x scripts/desktop-down.sh ]; then \
-		echo "🛑 Stopping Desktop runtime via scripts/desktop-down.sh..."; \
-		scripts/desktop-down.sh || true; \
-	elif [ -x desktop/scripts/down.sh ]; then \
-		echo "🛑 Stopping Desktop runtime via desktop/scripts/down.sh..."; \
-		desktop/scripts/down.sh || true; \
-	else \
-		echo "ℹ️  No Desktop stop hook found; skipping"; \
-	fi
-
 up:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
@@ -427,14 +418,24 @@ local-runtime-manager-build:
 	@mkdir -p "$(dir $(LOCAL_RUNTIME_MANAGER_BIN))"
 	@cd local/local-runtime-manager && $(GO) build -buildvcs=false -o "$(LOCAL_RUNTIME_MANAGER_BIN)" .
 
-desktop-macos-arm64:
-	@bash desktop/scripts/build-macos-arm64.sh
+desktop-darwin-arm64:
+	@bash desktop/scripts/build-darwin-arm64.sh
 
-desktop-run:
-	@LAZYMIND_DESKTOP_REPO_ROOT="$(CURDIR)" \
-		LAZYMIND_DESKTOP_RESOURCES_ROOT="$(CURDIR)/desktop/dist/runtime" \
-		LAZYMIND_DESKTOP_RUNTIME_ROOT="$(CURDIR)/.lazymind-desktop/dev-runtime" \
-		pnpm --dir desktop/electron start
+desktop-darwin-arm64-clean:
+	@echo "🧹 Removing Darwin arm64 Desktop generated outputs..."
+	@rm -rf \
+		"$(CURDIR)/.lazymind-desktop/build/darwin-arm64" \
+		"$(CURDIR)/.lazymind-desktop/build/macos-arm64" \
+		"$(CURDIR)/desktop/dist" \
+		"$(CURDIR)/desktop/electron/node_modules"
+
+desktop-clean:
+	@echo "🧹 Removing Desktop generated outputs..."
+	@rm -rf \
+		"$(CURDIR)/.lazymind-desktop" \
+		"$(CURDIR)/desktop/dist" \
+		"$(CURDIR)/desktop/electron/node_modules" \
+		"$(CURDIR)/frontend/dist"
 
 up-build-local: local-runtime-manager-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
