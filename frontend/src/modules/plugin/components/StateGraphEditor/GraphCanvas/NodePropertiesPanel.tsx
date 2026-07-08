@@ -340,6 +340,11 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                     <Select
                       value={ref.slot}
                       options={slotOptions}
+                      optionRender={(opt) => (
+                        <Tooltip title={String(opt.label)} placement="left" mouseEnterDelay={0.3}>
+                          <span className="npp-select-option-text">{opt.label}</span>
+                        </Tooltip>
+                      )}
                       onChange={(val) => {
                         const next = [...node.inputs];
                         next[idx] = { ...ref, slot: val };
@@ -400,6 +405,11 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                     <Select
                       value={ref.slot}
                       options={slotOptions}
+                      optionRender={(opt) => (
+                        <Tooltip title={String(opt.label)} placement="left" mouseEnterDelay={0.3}>
+                          <span className="npp-select-option-text">{opt.label}</span>
+                        </Tooltip>
+                      )}
                       onChange={(val) => {
                         const next = [...node.outputs];
                         next[idx] = { ...ref, slot: val };
@@ -449,34 +459,43 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
               )}
             </div>
             <div className="npp-transitions" style={{ marginTop: 6 }}>
-              {node.transitions.map((tr, idx) => (
+              {node.transitions.map((tr, idx) => {
+                const transitionOptions = [
+                  ...model.nodes.filter((n) => n.id !== node.id).map((n) => ({ label: n.label, value: n.id })),
+                  { label: t('selfEvolutionRun.stateGraphFlowEnd'), value: VIRTUAL_END },
+                ];
+                return (
                 <div key={idx} className="node-props-transition-row">
                   <Select
                     value={tr.to}
-                    options={[
-                      ...model.nodes.filter((n) => n.id !== node.id).map((n) => ({ label: n.label, value: n.id })),
-                      { label: t('selfEvolutionRun.stateGraphFlowEnd'), value: VIRTUAL_END },
-                    ]}
+                    options={transitionOptions}
+                    optionRender={(opt) => (
+                      <Tooltip title={String(opt.label)} placement="left" mouseEnterDelay={0.3}>
+                        <span className="npp-select-option-text">{opt.label}</span>
+                      </Tooltip>
+                    )}
                     onChange={(val) => {
                       const next = [...node.transitions];
                       next[idx] = { ...tr, to: val };
                       update({ transitions: next });
                     }}
-                    style={{ flex: 1 }}
+                    className="npp-slot-select"
                     size="small"
                     placeholder={t('selfEvolutionRun.stateGraphFlowNextPlaceholder')}
                   />
-                  <Input
-                    value={tr.condition}
-                    onChange={(e) => {
-                      const next = [...node.transitions];
-                      next[idx] = { ...tr, condition: e.target.value };
-                      update({ transitions: next });
-                    }}
-                    style={{ flex: 2, marginLeft: 4 }}
-                    size="small"
-                    placeholder={t('selfEvolutionRun.stateGraphFlowConditionPlaceholder')}
-                  />
+                  <Tooltip title={tr.condition || undefined} placement="top" mouseEnterDelay={0.5}>
+                    <Input
+                      value={tr.condition}
+                      onChange={(e) => {
+                        const next = [...node.transitions];
+                        next[idx] = { ...tr, condition: e.target.value };
+                        update({ transitions: next });
+                      }}
+                      style={{ flex: 2, marginLeft: 4, minWidth: 0 }}
+                      size="small"
+                      placeholder={t('selfEvolutionRun.stateGraphFlowConditionPlaceholder')}
+                    />
+                  </Tooltip>
                   <Button
                     type="text"
                     danger
@@ -486,7 +505,7 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                     aria-label={t('selfEvolutionRun.stateGraphAddBranch')}
                   />
                 </div>
-              ))}
+              ); })}
               <Tooltip title={disableAddTransition ? t('selfEvolutionRun.stateGraphAddBranchDisabledTip') : undefined}>
                 <Button
                   type="dashed"

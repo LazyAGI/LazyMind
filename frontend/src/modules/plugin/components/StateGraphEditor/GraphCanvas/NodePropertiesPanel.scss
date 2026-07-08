@@ -235,6 +235,15 @@
   }
 }
 
+/* Option label text inside optionRender — fills the item and truncates */
+.npp-select-option-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
 /* ── PromptEditor ── */
 .pe-wrapper {
   position: relative;

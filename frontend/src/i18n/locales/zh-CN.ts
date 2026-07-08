@@ -367,7 +367,7 @@ const zhCN = {
       toolsModuleTitle: "工具",
       toolsModuleDesc: "集中管理搜索引擎、学术检索、内置系统工具和 MCP 服务。",
       toolsCategoryTitle: "搜索引擎",
-      toolsCategoryDesc: "集中管理 Bing、Google Custom Search、Bocha、Tavily 等网页搜索服务 Key。",
+      toolsCategoryDesc: "集中管理 Bing、Google Custom Search、Bocha、Tavily 等网页搜索服务 Key。新手建议使用 Tavily，配置简单，每天还有免费额度。",
       searchEngineSearchPlaceholder: "搜索搜索引擎",
       academicCategoryTitle: "学术检索",
       academicCategoryDesc: "集中管理 Sciverse 等科研论文检索服务，用于学术问答与论文调研。",

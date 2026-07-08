@@ -17,6 +17,8 @@ import {
   RightOutlined,
   FolderOpenOutlined,
   UnorderedListOutlined,
+  HistoryOutlined,
+  BookOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -155,7 +157,7 @@ export default function MainLayout() {
       icon: <DatabaseOutlined />,
     },
     {
-      key: "/model-providers/models",
+      key: "/model-providers/default-services",
       label: t("layout.modelProviderManagement"),
       icon: <ApiOutlined />,
     },
@@ -379,9 +381,9 @@ export default function MainLayout() {
           <span>{t("layout.memoryManagement")}</span>
         </div>
         {[
-          { key: "/memory-management/skills", label: t("admin.memoryTabSkills") },
-          { key: "/memory-management/experience", label: t("admin.memoryTabExperience") },
-          { key: "/memory-management/glossary", label: t("admin.memoryTabGlossary") },
+          { key: "/memory-management/skills", label: t("admin.memoryTabSkills"), icon: <AppstoreOutlined /> },
+          { key: "/memory-management/experience", label: t("admin.memoryTabExperience"), icon: <HistoryOutlined /> },
+          { key: "/memory-management/glossary", label: t("admin.memoryTabGlossary"), icon: <BookOutlined /> },
         ].map((item) => (
           <Button
             key={item.key}
@@ -389,6 +391,7 @@ export default function MainLayout() {
             className="sider-module-popover-item sider-module-popover-item--sub"
             onClick={() => handleModuleNavigate(item.key)}
           >
+            {item.icon}
             {item.label}
           </Button>
         ))}
