@@ -10,6 +10,9 @@ import (
 )
 
 const (
+	runtimeProfileEnvVar          = "LAZYMIND_RUNTIME_PROFILE"
+	runtimeRootEnvVar             = "LAZYMIND_RUNTIME_ROOT"
+	runtimeResourcesRootEnvVar    = "LAZYMIND_RUNTIME_RESOURCES_ROOT"
 	localPortsPinnedEnvVar        = "LAZYMIND_LOCAL_PORTS_PINNED"
 	processComposePortEnvVar      = "LAZYMIND_PROCESS_COMPOSE_PORT"
 	localUpTimeoutEnvVar          = "LAZYMIND_LOCAL_UP_TIMEOUT"
@@ -109,6 +112,7 @@ const (
 
 type RuntimePaths struct {
 	RepoRoot                 string
+	ResourcesRoot            string
 	RuntimeRoot              string
 	CacheDir                 string
 	DataDir                  string
@@ -124,6 +128,7 @@ type RuntimePaths struct {
 	RunDirTokenFile          string
 	UpLockFile               string
 	LogFilePath              string
+	ProcessComposeBin        string
 	ProcessComposePIDFile    string
 	LocalProxyLog            string
 	AuthServiceLog           string
@@ -190,6 +195,7 @@ type RuntimePaths struct {
 type RuntimeConfig struct {
 	Profile            string
 	RepoRoot           string
+	ResourcesRoot      string
 	RuntimeRoot        string
 	ModeProfile        RuntimeModeProfileConfig
 	ProcessComposePort int
@@ -201,6 +207,13 @@ type RuntimeConfig struct {
 	Algorithm          AlgorithmConfig
 	FileWatcher        FileWatcherConfig
 	PortResolutions    []PortResolution `json:"-"`
+}
+
+type RuntimeConfigOptions struct {
+	Profile       string
+	RepoRoot      string
+	RuntimeRoot   string
+	ResourcesRoot string
 }
 
 type LocalProxyConfig struct {
@@ -632,14 +645,22 @@ func resolveRepoRoot(start string) (string, error) {
 }
 
 func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths, error) {
-	profile = "local"
-	resolved, err := resolveRepoRoot(repoRootHint)
+	return NewRuntimeConfigWithOptions(RuntimeConfigOptions{Profile: profile, RepoRoot: repoRootHint})
+}
+
+func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, RuntimePaths, error) {
+	profile, err := normalizeRuntimeProfile(firstNonEmpty(opts.Profile, os.Getenv(runtimeProfileEnvVar), "local"))
+	if err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
+	}
+	resolved, err := resolveRepoRoot(opts.RepoRoot)
 	if err != nil {
 		return RuntimeConfig{}, RuntimePaths{}, err
 	}
 
 	root := filepath.Clean(resolved)
-	runtimeRoot := filepath.Join(root, ".lazymind-local")
+	resourcesRoot := cleanOptionalPath(firstNonEmpty(opts.ResourcesRoot, os.Getenv(runtimeResourcesRootEnvVar), root))
+	runtimeRoot := cleanOptionalPath(firstNonEmpty(opts.RuntimeRoot, os.Getenv(runtimeRootEnvVar), defaultRuntimeRoot(profile, root)))
 	cacheRoot := filepath.Join(runtimeRoot, "cache")
 	dataRoot := filepath.Join(runtimeRoot, "data")
 	depsRoot := filepath.Join(runtimeRoot, "deps")
@@ -648,6 +669,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 	frontendNodeModules := filepath.Join(depsRoot, "node", "frontend")
 	p := RuntimePaths{
 		RepoRoot:                 root,
+		ResourcesRoot:            resourcesRoot,
 		RuntimeRoot:              runtimeRoot,
 		CacheDir:                 cacheRoot,
 		DataDir:                  dataRoot,
@@ -663,6 +685,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		RunDirTokenFile:          filepath.Join(runtimeRoot, "run", tokenFileName),
 		UpLockFile:               filepath.Join(runtimeRoot, "run", upLockFileName),
 		LogFilePath:              filepath.Join(runtimeRoot, "logs", logFileName),
+		ProcessComposeBin:        filepath.Join(runtimeRoot, "bin", "process-compose"),
 		ProcessComposePIDFile:    filepath.Join(runtimeRoot, "run", "process-compose.pid"),
 		LocalProxyLog:            filepath.Join(runtimeRoot, "logs", localProxyLogFileName),
 		AuthServiceLog:           filepath.Join(runtimeRoot, "logs", authServiceLogFileName),
@@ -725,6 +748,11 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		FrontendNodeModules:      frontendNodeModules,
 		AlgorithmPIDDir:          filepath.Join(runtimeRoot, "run", "algorithm"),
 	}
+	if profile == "desktop" {
+		if err := applyDesktopManifestPaths(&p); err != nil {
+			return RuntimeConfig{}, RuntimePaths{}, err
+		}
+	}
 	ports := newLocalPortAllocator()
 	networkProfile, err := localNetworkProfile()
 	if err != nil {
@@ -783,6 +811,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 	return RuntimeConfig{
 		Profile:            profile,
 		RepoRoot:           p.RepoRoot,
+		ResourcesRoot:      p.ResourcesRoot,
 		RuntimeRoot:        runtimeRoot,
 		ModeProfile:        localRuntimeModeProfile(milvusPort, milvusLiteDBPath),
 		ProcessComposePort: processComposePort,
@@ -826,6 +855,98 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		},
 		PortResolutions: ports.resolutions,
 	}, p, nil
+}
+
+func applyDesktopManifestPaths(paths *RuntimePaths) error {
+	manifest, err := loadRuntimeManifest(paths.ResourcesRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	joinResource := func(value string) string {
+		if value == "" {
+			return ""
+		}
+		if filepath.IsAbs(value) {
+			return filepath.Clean(value)
+		}
+		return filepath.Join(paths.ResourcesRoot, value)
+	}
+	if value := joinResource(manifest.Binaries[processComposeServiceName]); value != "" {
+		paths.ProcessComposeBin = value
+	}
+	if value := joinResource(manifest.Binaries[localProxyProcessName]); value != "" {
+		paths.LocalProxyBin = value
+	}
+	if value := joinResource(manifest.Binaries[coreProcessName]); value != "" {
+		paths.CoreBin = value
+	}
+	if value := joinResource(manifest.Binaries[scanControlPlaneProcessName]); value != "" {
+		paths.ScanControlPlaneBin = value
+	}
+	if value := joinResource(manifest.Binaries[fileWatcherProcessName]); value != "" {
+		paths.FileWatcherBin = value
+	}
+	if value := joinResource(manifest.Binaries["caddy"]); value != "" {
+		paths.CaddyBin = value
+	}
+	if value := joinResource(manifest.Paths.LocalProxyConfig); value != "" {
+		paths.LocalProxyConfig = value
+	}
+	if value := joinResource(manifest.Paths.PythonRuntime); value != "" {
+		paths.PythonRuntimeDir = value
+	}
+	if value := joinResource(manifest.Paths.AuthServiceVenv); value != "" {
+		paths.AuthServiceVenvDir = value
+	}
+	if value := joinResource(manifest.Paths.AlgorithmVenv); value != "" {
+		paths.AlgorithmVenv = value
+		paths.AlgorithmPython = filepath.Join(value, "bin", "python")
+	}
+	return nil
+}
+
+func normalizeRuntimeProfile(profile string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", "local":
+		return "local", nil
+	case "desktop":
+		return "desktop", nil
+	default:
+		return "", fmt.Errorf("%s must be local or desktop", runtimeProfileEnvVar)
+	}
+}
+
+func defaultRuntimeRoot(profile string, repoRoot string) string {
+	if profile != "desktop" {
+		return filepath.Join(repoRoot, ".lazymind-local")
+	}
+	return filepath.Join(hostHomeDir(), "Library", "Application Support", "LazyMind")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func cleanOptionalPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(path)
 }
 
 func (p RuntimePaths) EnsureAllDirs() error {

@@ -94,7 +94,7 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 	if err := ensureAlgorithmDataDirs(paths); err != nil {
 		return err
 	}
-	if err := m.preparePython(ctx, paths, cfg.Algorithm.EnableEvo); err != nil {
+	if err := m.preparePython(ctx, cfg, paths, cfg.Algorithm.EnableEvo); err != nil {
 		return err
 	}
 	if err := m.waitForDependencies(ctx, cfg, spec.Name); err != nil {
@@ -213,7 +213,13 @@ func killAlgorithmProcess(proc *os.Process) error {
 	return proc.Kill()
 }
 
-func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
+func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, includeEvo bool) error {
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(paths.AlgorithmPython); err == nil && !info.IsDir() {
+			return nil
+		}
+		return fmt.Errorf("desktop algorithm Python not found: %s", paths.AlgorithmPython)
+	}
 	if err := ensureLazyLLMSubmodule(ctx, m.runner, paths.RepoRoot); err != nil {
 		return err
 	}

@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local down-local reset-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-stop-if-present
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local down-local reset-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-stop-if-present desktop-macos-arm64 desktop-run
 .DEFAULT_GOAL := help
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -179,6 +179,7 @@ help:
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
 	@echo "  make up-build-local - Build/start local LazyMind without containers"
+	@echo "  make desktop-macos-arm64 - Build macOS arm64 Desktop app"
 	@echo "  make down-local - Stop local LazyMind runtime"
 	@echo "  make reset-local - Stop local runtime and remove .lazymind-local"
 	@echo "  make down       - Stop Cloud/Kong compose services"
@@ -425,6 +426,15 @@ up-build:
 local-runtime-manager-build:
 	@mkdir -p "$(dir $(LOCAL_RUNTIME_MANAGER_BIN))"
 	@cd local/local-runtime-manager && $(GO) build -buildvcs=false -o "$(LOCAL_RUNTIME_MANAGER_BIN)" .
+
+desktop-macos-arm64:
+	@bash desktop/scripts/build-macos-arm64.sh
+
+desktop-run:
+	@LAZYMIND_DESKTOP_REPO_ROOT="$(CURDIR)" \
+		LAZYMIND_DESKTOP_RESOURCES_ROOT="$(CURDIR)/desktop/dist/runtime" \
+		LAZYMIND_DESKTOP_RUNTIME_ROOT="$(CURDIR)/.lazymind-desktop/dev-runtime" \
+		pnpm --dir desktop/electron start
 
 up-build-local: local-runtime-manager-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up

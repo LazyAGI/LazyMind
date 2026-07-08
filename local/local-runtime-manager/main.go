@@ -45,31 +45,31 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 
 	switch args[0] {
 	case "up":
-		repoRoot, err := parseCommonArgs("up", args[1:], c.errOut)
+		opts, err := parseCommonArgs("up", args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig("", repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
 		return manager.Up(ctx, cfg, paths)
 	case "down":
-		repoRoot, err := parseCommonArgs("down", args[1:], c.errOut)
+		opts, err := parseCommonArgs("down", args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig("", repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
 		return manager.Down(ctx, cfg, paths)
 	case "status":
-		asJSON, repoRoot, err := parseStatusArgs(args[1:], c.errOut)
+		asJSON, opts, err := parseStatusArgs(args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig("", repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
@@ -83,21 +83,21 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		}
 		return nil
 	case "reset":
-		scope, repoRoot, err := parseResetArgs(args[1:], c.errOut)
+		scope, opts, err := parseResetArgs(args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig("", repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
 		return manager.Reset(ctx, cfg, paths, scope)
 	case "service":
-		service, action, repoRoot, err := parseServiceArgs(args[1:], c.errOut)
+		service, action, opts, err := parseServiceArgs(args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig("", repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
@@ -119,11 +119,11 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 	sub := args[0]
 	subArgs := args[1:]
 	if sub == "algorithm-run" || sub == "algorithm-down" {
-		service, repoRoot, err := parseAlgorithmInternalArgs(sub, subArgs, c.errOut)
+		service, opts, err := parseAlgorithmInternalArgs(sub, subArgs, c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig("", repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
@@ -132,11 +132,11 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		}
 		return manager.algorithm.Down(ctx, paths, service)
 	}
-	repoRoot, err := parseCommonArgs("internal", subArgs, c.errOut)
+	opts, err := parseCommonArgs("internal", subArgs, c.errOut)
 	if err != nil {
 		return err
 	}
-	cfg, paths, err := NewRuntimeConfig("", repoRoot)
+	cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 	if err != nil {
 		return err
 	}
@@ -175,87 +175,102 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 	}
 }
 
-func parseAlgorithmInternalArgs(name string, args []string, out io.Writer) (string, string, error) {
+func parseAlgorithmInternalArgs(name string, args []string, out io.Writer) (string, RuntimeConfigOptions, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(out)
 	service := fs.String("service", "", "")
-	repoRoot := fs.String("repo-root", "", "")
+	opts := addRuntimeFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return "", "", err
+		return "", RuntimeConfigOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return "", RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
 	if *service == "" {
-		return "", "", fmt.Errorf("--service is required")
+		return "", RuntimeConfigOptions{}, fmt.Errorf("--service is required")
 	}
-	return *service, *repoRoot, nil
+	return *service, opts(), nil
 }
 
-func parseCommonArgs(name string, args []string, out io.Writer) (string, error) {
+func parseCommonArgs(name string, args []string, out io.Writer) (RuntimeConfigOptions, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(out)
-	repoRoot := fs.String("repo-root", "", "")
+	opts := addRuntimeFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return "", err
+		return RuntimeConfigOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
-	return *repoRoot, nil
+	return opts(), nil
 }
 
-func parseStatusArgs(args []string, out io.Writer) (bool, string, error) {
+func parseStatusArgs(args []string, out io.Writer) (bool, RuntimeConfigOptions, error) {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(out)
 	asJSON := fs.Bool("json", false, "")
-	repoRoot := fs.String("repo-root", "", "")
+	opts := addRuntimeFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return false, "", err
+		return false, RuntimeConfigOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return false, "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return false, RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
-	return *asJSON, *repoRoot, nil
+	return *asJSON, opts(), nil
 }
 
-func parseResetArgs(args []string, out io.Writer) (ResetScope, string, error) {
+func parseResetArgs(args []string, out io.Writer) (ResetScope, RuntimeConfigOptions, error) {
 	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
 	fs.SetOutput(out)
 	scopeText := fs.String("scope", string(ResetScopeKB), "")
-	repoRoot := fs.String("repo-root", "", "")
+	opts := addRuntimeFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return "", "", err
+		return "", RuntimeConfigOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return "", RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
 	scope, err := parseResetScope(*scopeText)
 	if err != nil {
-		return "", "", err
+		return "", RuntimeConfigOptions{}, err
 	}
-	return scope, *repoRoot, nil
+	return scope, opts(), nil
 }
 
-func parseServiceArgs(args []string, out io.Writer) (string, string, string, error) {
+func parseServiceArgs(args []string, out io.Writer) (string, string, RuntimeConfigOptions, error) {
 	fs := flag.NewFlagSet("service", flag.ContinueOnError)
 	fs.SetOutput(out)
 	service := fs.String("name", "", "")
 	action := fs.String("action", "", "")
-	repoRoot := fs.String("repo-root", "", "")
+	opts := addRuntimeFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return "", "", "", err
+		return "", "", RuntimeConfigOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return "", "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return "", "", RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
 	if strings.TrimSpace(*service) == "" {
-		return "", "", "", fmt.Errorf("--name is required")
+		return "", "", RuntimeConfigOptions{}, fmt.Errorf("--name is required")
 	}
 	if strings.TrimSpace(*action) == "" {
-		return "", "", "", fmt.Errorf("--action is required")
+		return "", "", RuntimeConfigOptions{}, fmt.Errorf("--action is required")
 	}
-	return *service, *action, *repoRoot, nil
+	return *service, *action, opts(), nil
+}
+
+func addRuntimeFlags(fs *flag.FlagSet) func() RuntimeConfigOptions {
+	repoRoot := fs.String("repo-root", "", "")
+	profile := fs.String("profile", "", "")
+	runtimeRoot := fs.String("runtime-root", "", "")
+	resourcesRoot := fs.String("resources-root", "", "")
+	return func() RuntimeConfigOptions {
+		return RuntimeConfigOptions{
+			Profile:       *profile,
+			RepoRoot:      *repoRoot,
+			RuntimeRoot:   *runtimeRoot,
+			ResourcesRoot: *resourcesRoot,
+		}
+	}
 }
 
 func (c *CLI) usage() {

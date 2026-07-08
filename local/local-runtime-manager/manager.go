@@ -122,7 +122,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := m.killStaleRuntimeProcesses(ctx, cfg, paths); err != nil {
 		return err
 	}
-	freshCfg, paths, err = NewRuntimeConfig("", paths.RepoRoot)
+	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       cfg.Profile,
+		RepoRoot:      paths.RepoRoot,
+		RuntimeRoot:   cfg.RuntimeRoot,
+		ResourcesRoot: cfg.ResourcesRoot,
+	})
 	if err != nil {
 		return err
 	}
@@ -192,6 +197,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 
 	state.Profile = cfg.Profile
 	state.RepoRoot = cfg.RepoRoot
+	state.ResourcesRoot = cfg.ResourcesRoot
 	state.RuntimeRoot = cfg.RuntimeRoot
 	state.ProcessCompose.APIPort = cfg.ProcessComposePort
 	state.ProcessCompose.APIRoot = "http://127.0.0.1:" + strconv.Itoa(cfg.ProcessComposePort)
@@ -981,17 +987,22 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 	if state.RepoRoot == "" {
 		state.RepoRoot = cfg.RepoRoot
 	}
+	if state.ResourcesRoot == "" {
+		state.ResourcesRoot = cfg.ResourcesRoot
+	}
 	if state.RuntimeRoot == "" {
 		state.RuntimeRoot = cfg.RuntimeRoot
 	}
 
 	resp := StatusResponse{
-		Runtime:        "local",
+		Runtime:        state.Profile,
 		Profile:        state.Profile,
 		OverallStatus:  state.OverallStatus,
 		RepoRoot:       state.RepoRoot,
+		ResourcesRoot:  state.ResourcesRoot,
 		RuntimeRoot:    state.RuntimeRoot,
 		ProcessCompose: state.ProcessCompose,
+		Config:         snapshotRuntimeConfig(cfg),
 		Services:       state.Services,
 	}
 	if resp.Services == nil {
@@ -1145,6 +1156,7 @@ func (m *RuntimeManager) humanStatus(resp StatusResponse) string {
 		fmt.Sprintf("profile: %s", resp.Profile),
 		fmt.Sprintf("overallStatus: %s", resp.OverallStatus),
 		fmt.Sprintf("repoRoot: %s", resp.RepoRoot),
+		fmt.Sprintf("resourcesRoot: %s", resp.ResourcesRoot),
 		fmt.Sprintf("runtimeRoot: %s", resp.RuntimeRoot),
 	}
 	for name, svc := range resp.Services {

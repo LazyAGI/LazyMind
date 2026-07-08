@@ -43,7 +43,7 @@ func (m *CoreServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 			return err
 		}
 	}
-	if err := m.buildCore(ctx, paths); err != nil {
+	if err := m.buildCore(ctx, cfg, paths); err != nil {
 		return err
 	}
 	if err := m.waitForCoreDatabase(ctx, cfg, paths); err != nil {
@@ -90,7 +90,13 @@ func (m *CoreServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 	return nil
 }
 
-func (m *CoreServiceManager) buildCore(ctx context.Context, paths RuntimePaths) error {
+func (m *CoreServiceManager) buildCore(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(paths.CoreBin); err == nil && !info.IsDir() {
+			return nil
+		}
+		return fmt.Errorf("desktop core binary not found: %s", paths.CoreBin)
+	}
 	if err := os.MkdirAll(filepath.Dir(paths.CoreBin), 0o755); err != nil {
 		return err
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -35,6 +36,66 @@ func TestRuntimeConfigUsesLocalRuntimeRootAndManagerBinaryPaths(t *testing.T) {
 	}
 	if localProcessComposeBin != ".lazymind-local/bin/process-compose" {
 		t.Fatalf("process-compose bin = %q", localProcessComposeBin)
+	}
+}
+
+func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	resources := filepath.Join(repo, "desktop-runtime")
+	runtimeRoot := filepath.Join(repo, "desktop-state")
+	if err := os.MkdirAll(filepath.Join(resources, "bin"), 0o755); err != nil {
+		t.Fatalf("mkdir resources: %v", err)
+	}
+	manifest := `{
+	  "version": 1,
+	  "profile": "desktop",
+	  "platform": "` + runtime.GOOS + `",
+	  "arch": "` + runtime.GOARCH + `",
+	  "binaries": {
+	    "process-supervisor": "bin/process-compose",
+	    "local-proxy": "bin/local-proxy",
+	    "core": "bin/core",
+	    "scan-control-plane": "bin/scan-control-plane",
+	    "file-watcher": "bin/file-watcher",
+	    "caddy": "bin/caddy"
+	  },
+	  "paths": {
+	    "pythonRuntime": "python/runtime",
+	    "authServiceVenv": "python/auth-service",
+	    "algorithmVenv": "python/algorithm",
+	    "localProxyConfig": "app/local/local-proxy/configs/cloud-replace-kong.yaml"
+	  }
+	}`
+	if err := os.WriteFile(filepath.Join(resources, runtimeManifestFileName), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       "desktop",
+		RepoRoot:      repo,
+		RuntimeRoot:   runtimeRoot,
+		ResourcesRoot: resources,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.Profile != "desktop" {
+		t.Fatalf("profile = %q, want desktop", cfg.Profile)
+	}
+	if paths.RuntimeRoot != runtimeRoot {
+		t.Fatalf("runtime root = %q, want %q", paths.RuntimeRoot, runtimeRoot)
+	}
+	if paths.ResourcesRoot != resources {
+		t.Fatalf("resources root = %q, want %q", paths.ResourcesRoot, resources)
+	}
+	if paths.ProcessComposeBin != filepath.Join(resources, "bin", "process-compose") {
+		t.Fatalf("process-compose bin = %q", paths.ProcessComposeBin)
+	}
+	if paths.LocalProxyBin != filepath.Join(resources, "bin", "local-proxy") {
+		t.Fatalf("local-proxy bin = %q", paths.LocalProxyBin)
+	}
+	if paths.AlgorithmPython != filepath.Join(resources, "python", "algorithm", "bin", "python") {
+		t.Fatalf("algorithm python = %q", paths.AlgorithmPython)
 	}
 }
 
@@ -182,11 +243,13 @@ func TestEnsureAllDirsUsesOnlyApprovedTopLevelDirs(t *testing.T) {
 	}
 }
 
-func TestCLIRejectsProfileFlag(t *testing.T) {
+func TestCLIAcceptsDesktopProfileFlag(t *testing.T) {
 	cli := NewCLI(io.Discard, io.Discard, &fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
-	profileFlag := "--" + "profile"
-	if err := cli.Run(context.Background(), []string{"status", profileFlag, "linux-browser"}); err == nil {
-		t.Fatal("expected profile flag to be rejected")
+	if err := cli.Run(context.Background(), []string{"status", "--profile", "desktop"}); err != nil {
+		t.Fatalf("expected desktop profile flag to be accepted: %v", err)
+	}
+	if err := cli.Run(context.Background(), []string{"status", "--profile", "linux-browser"}); err == nil {
+		t.Fatal("expected invalid profile flag to be rejected")
 	}
 }
 
@@ -271,7 +334,7 @@ func TestProcessComposeDownStreamsOutputWhenRunnerSupportsIt(t *testing.T) {
 	}
 	runner := &fakeStreamRunner{fakeRunner: fakeRunner{t: t}}
 	runner.streamHandlers = append(runner.streamHandlers, func(cmd Command) error {
-		assertCommand(t, cmd, processComposeCommand(repo),
+		assertCommand(t, cmd, processComposeCommand(paths),
 			"-p", strconv.Itoa(cfg.ProcessComposePort),
 			"--token-file", paths.RunDirTokenFile,
 			"down",
