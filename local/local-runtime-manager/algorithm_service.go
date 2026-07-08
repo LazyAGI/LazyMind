@@ -437,6 +437,17 @@ func ensureLazyLLMSubmodule(ctx context.Context, runner CommandRunner, repoRoot 
 	return fmt.Errorf("algorithm/lazyllm submodule is still not checked out after git submodule update --init algorithm/lazyllm")
 }
 
+func ensureLazyLLMSource(ctx context.Context, runner CommandRunner, repoRoot string, profile string) error {
+	required := filepath.Join(repoRoot, "algorithm", "lazyllm", "lazyllm")
+	if info, err := os.Stat(required); err == nil && info.IsDir() {
+		return nil
+	}
+	if profile == "desktop" {
+		return fmt.Errorf("desktop runtime is missing bundled algorithm/lazyllm source; rebuild the app with algorithm/lazyllm submodule initialized")
+	}
+	return ensureLazyLLMSubmodule(ctx, runner, repoRoot)
+}
+
 func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) []string {
 	pythonPath := strings.Join([]string{
 		filepath.Join(paths.RepoRoot, "algorithm", "lazyllm"),

@@ -175,7 +175,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := writeServiceEndpointFiles(paths, serviceEndpointsFromConfig(cfg)); err != nil {
 		return err
 	}
-	if err := ensureLazyLLMSubmodule(ctx, m.runner, paths.RepoRoot); err != nil {
+	if err := ensureLazyLLMSource(ctx, m.runner, paths.RepoRoot, cfg.Profile); err != nil {
 		return err
 	}
 
@@ -297,7 +297,27 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	m.printReadySummary(cfg)
+	if cfg.Profile == "desktop" {
+		return m.waitForDesktopRuntimeStop(ctx, paths)
+	}
 	return nil
+}
+
+func (m *RuntimeManager) waitForDesktopRuntimeStop(ctx context.Context, paths RuntimePaths) error {
+	m.progressf("desktop runtime monitor active")
+	ticker := time.NewTicker(m.pollInterval)
+	defer ticker.Stop()
+	for {
+		state, err := readRuntimeState(paths.StateFile)
+		if err == nil && (state.OverallStatus == "stopped" || state.OverallStatus == "failed") {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int, timeout time.Duration, pidFile string) error {
@@ -1131,18 +1151,27 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			resp.OverallStatus = "stale"
 		}
 	} else {
-		if resp.OverallStatus == "ready" || resp.OverallStatus == "running" || resp.OverallStatus == "starting" {
+		if m.checkRuntimeReady(ctx, cfg, paths) {
+			resp.OverallStatus = "ready"
+			s := resp.Services[processComposeServiceName]
+			if s.Status == "running" || s.Status == "starting" || s.Status == "stale" {
+				s.Status = "stopped"
+			}
+			resp.Services[processComposeServiceName] = s
+		} else if resp.OverallStatus == "ready" || resp.OverallStatus == "running" || resp.OverallStatus == "starting" {
 			resp.OverallStatus = "stale"
 		} else if resp.OverallStatus == "" {
 			resp.OverallStatus = "stopped"
 		}
-		s := resp.Services[processComposeServiceName]
-		if s.Status == "running" || s.Status == "starting" {
-			s.Status = "stale"
-		} else if s.Status == "" || s.Status == "unknown" {
-			s.Status = "stopped"
+		if resp.OverallStatus != "ready" {
+			s := resp.Services[processComposeServiceName]
+			if s.Status == "running" || s.Status == "starting" {
+				s.Status = "stale"
+			} else if s.Status == "" || s.Status == "unknown" {
+				s.Status = "stopped"
+			}
+			resp.Services[processComposeServiceName] = s
 		}
-		resp.Services[processComposeServiceName] = s
 	}
 
 	if !asJSON {

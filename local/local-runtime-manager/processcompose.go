@@ -237,7 +237,7 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 		cmd.Env = append(os.Environ(), processComposeRuntimeEnv(paths)...)
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err := cmd.Start(); err != nil {
 			_ = logFile.Close()
 			return fmt.Errorf("process-compose up failed: %w", err)

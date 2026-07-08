@@ -193,7 +193,7 @@ help:
 	@echo "  make up-build-local - Build/start local LazyMind without containers"
 	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
 	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
-	@echo "  make desktop-cache-clean - Remove Desktop build caches"
+	@echo "  make desktop-cache-clean - Remove repo-local Desktop caches, if any"
 	@echo "  make desktop-clean - Remove all Desktop generated outputs"
 	@echo "  make down-local - Stop local LazyMind runtime"
 	@echo "  make reset-local - Stop local runtime and remove local/runtime"
@@ -448,7 +448,7 @@ desktop-darwin-arm64-clean:
 	done
 
 desktop-cache-clean:
-	@echo "🧹 Removing Desktop build caches..."
+	@echo "🧹 Removing repo-local Desktop caches, if any..."
 	@for path in \
 		"$(CURDIR)/desktop/cache"; do \
 		if [ -e "$$path" ]; then \

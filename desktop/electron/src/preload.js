@@ -8,4 +8,14 @@ contextBridge.exposeInMainWorld("lazymindDesktop", {
   resetRuntime: (scope) => ipcRenderer.invoke("lazymind:resetRuntime", scope),
   selectFolder: () => ipcRenderer.invoke("lazymind:selectFolder"),
   exportDiagnostics: () => ipcRenderer.invoke("lazymind:exportDiagnostics"),
+  startupDiagnostics: () => ipcRenderer.invoke("lazymind:startupDiagnostics"),
+  copyStartupLogs: () => ipcRenderer.invoke("lazymind:copyStartupLogs"),
+  onStartupDiagnosticsUpdate: (handler) => {
+    if (typeof handler !== "function") {
+      return () => {};
+    }
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on("lazymind:startupDiagnosticsUpdate", listener);
+    return () => ipcRenderer.removeListener("lazymind:startupDiagnosticsUpdate", listener);
+  },
 });
