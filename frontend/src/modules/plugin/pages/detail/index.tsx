@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { Alert, Breadcrumb, Button, Modal, Input, Spin, message } from 'antd';
 import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft } from '../../pluginDraftApi';
 import type { PluginDraftRecord } from '../../pluginDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
@@ -40,21 +41,28 @@ function resolvePhase(status: string): GeneratePhase {
   }
 }
 
-const PHASE_MESSAGES: Record<GeneratePhase, string> = {
-  brief: 'AI 正在分析需求、生成设计草稿…',
-  skeleton: 'AI 正在生成插件骨架（slots / steps）…',
-  scenario_scripts: 'AI 正在生成 scenario.md 与脚本文件，编辑器可以提前使用…',
-  repairing: 'AI 修复中，请稍后…',
-  done: '',
-  failed: '',
-  idle: '',
-};
+
+
 
 export default function PluginDetailPage() {
   const { pluginId } = useParams<{ pluginId: string }>();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   useOutletContext<{ isMenuCollapsed: boolean; toggleMenu: () => void }>();
+
+  const getPhaseMessage = (phase: GeneratePhase): string => {
+    const map: Record<GeneratePhase, string> = {
+      brief: t('selfEvolutionRun.pluginDetailPhaseBrief'),
+      skeleton: t('selfEvolutionRun.pluginDetailPhaseSkeleton'),
+      scenario_scripts: t('selfEvolutionRun.pluginDetailPhaseScenarioScripts'),
+      repairing: t('selfEvolutionRun.pluginDetailPhaseRepairing'),
+      done: '',
+      failed: '',
+      idle: '',
+    };
+    return map[phase] ?? '';
+  };
 
   // Plugin editor opens as a Drawer over the content area; no need to collapse the sidebar.
 
@@ -123,7 +131,7 @@ export default function PluginDetailPage() {
       setDraft(data);
       setNameValue(data.name);
     } catch {
-      message.error('加载插件草稿失败');
+      message.error(t('selfEvolutionRun.pluginDetailLoadFailed'));
     } finally {
       setLoading(false);
     }
@@ -177,9 +185,9 @@ export default function PluginDetailPage() {
                 });
                 void warningKey; // used only for type-check
               }
-              message.error('AI 修复未通过校验，请查看错误提示后重试');
+              message.error(t('selfEvolutionRun.pluginDetailRepairValidationFailed'));
             } else {
-              message.success('AI 修复完成');
+              message.success(t('selfEvolutionRun.pluginDetailRepairSuccess'));
             }
           }
         }
@@ -218,7 +226,7 @@ export default function PluginDetailPage() {
       }
       startPolling();
     } catch {
-      message.error('重新生成失败，请稍后重试');
+      message.error(t('selfEvolutionRun.pluginDetailRegenerateFailed'));
     } finally {
       setIsRegenerating(false);
     }
@@ -250,7 +258,7 @@ export default function PluginDetailPage() {
       setDraft(updated);
       startPolling();
     } catch {
-      message.error('修复请求失败，请稍后重试');
+      message.error(t('selfEvolutionRun.pluginDetailRepairRequestFailed'));
       setRepairSubmitting(false);
       // Reset prevStatusRef since we never entered repairing state.
       prevStatusRef.current = '';
@@ -290,13 +298,13 @@ export default function PluginDetailPage() {
         if (status === 409) {
           const body = (err as { response: { data: { message?: string; data?: PluginDraftRecord } } }).response?.data;
           if (body?.message && body.message.includes('plugin id already exists')) {
-            message.error('插件标识已被你的其他插件使用，请修改插件标识后重新保存');
+            message.error(t('selfEvolutionRun.pluginDetailPluginIdDuplicate'));
             throw err;
           }
           // Version conflict: update local version and let editor retry.
           const latest = body?.data;
           if (latest) setDraft(latest);
-          message.warning('内容已被 AI 更新，正在重试保存…');
+          message.warning(t('selfEvolutionRun.pluginDetailAiUpdatedRetrying'));
         }
         throw err;
       }
@@ -310,7 +318,7 @@ export default function PluginDetailPage() {
       <div className="plugin-editor-overlay">
         <div className="plugin-editor-mask" />
         <div className="plugin-editor-panel">
-          <div className="plugin-detail-loading"><Spin tip="加载中..." /></div>
+          <div className="plugin-detail-loading"><Spin tip={t('selfEvolutionRun.pluginDetailLoading')} /></div>
         </div>
       </div>
     );
@@ -321,7 +329,7 @@ export default function PluginDetailPage() {
       <div className="plugin-editor-overlay">
         <div className="plugin-editor-mask" />
         <div className="plugin-editor-panel">
-          <div className="plugin-detail-error"><p>插件草稿不存在</p></div>
+          <div className="plugin-detail-error"><p>{t('selfEvolutionRun.pluginDetailNotFound')}</p></div>
         </div>
       </div>
     );
@@ -379,8 +387,8 @@ export default function PluginDetailPage() {
           type="info"
           icon={<SyncOutlined spin />}
           showIcon
-          message={PHASE_MESSAGES.scenario_scripts}
-          description="插件骨架和状态机已就绪，你可以提前预览和编辑，scenario.md 与脚本文件稍后自动填入。"
+          message={getPhaseMessage('scenario_scripts')}
+          description={t('selfEvolutionRun.pluginDetailPhase3Banner')}
         />
       )}
 
@@ -391,11 +399,11 @@ export default function PluginDetailPage() {
           showIcon
           closable
           onClose={() => dismissBanner('failed')}
-          message="生成失败，你可以手动编辑或重新生成"
+          message={t('selfEvolutionRun.pluginDetailFailedBanner')}
           description={draft.generate_error || undefined}
           action={
             <Button size="small" loading={isRegenerating} disabled={isRepairing} onClick={handleRegenerate}>
-              重新生成
+              {t('selfEvolutionRun.pluginDetailRegenerate')}
             </Button>
           }
         />
@@ -408,7 +416,7 @@ export default function PluginDetailPage() {
           showIcon
           closable
           onClose={() => dismissBanner('generate_error')}
-          message="生成完成（部分阶段有警告）"
+          message={t('selfEvolutionRun.pluginDetailGenerateWarningBanner')}
           description={draft.generate_error}
         />
       )}
@@ -420,7 +428,7 @@ export default function PluginDetailPage() {
           showIcon
           closable
           onClose={() => dismissBanner(`generate_warning:${contentKey(draft.generate_warning)}`)}
-          message={draft.generate_warning.startsWith('[修复失败]') ? 'AI 修复失败，以下原因导致校验仍未通过' : 'AI 生成了部分内容，以下字段可能需要补充或由 AI 修复'}
+          message={draft.generate_warning.startsWith('[修复失败]') ? t('selfEvolutionRun.pluginDetailRepairFailedBanner') : t('selfEvolutionRun.pluginDetailPartialContentBanner')}
           description={draft.generate_warning}
         />
       )}
@@ -437,26 +445,26 @@ export default function PluginDetailPage() {
       >
         <div className="plugin-generate-progress-body">
           <Spin size="large" />
-          <p className="plugin-generate-progress-title">{PHASE_MESSAGES[phase] || 'AI 正在生成插件内容…'}</p>
+          <p className="plugin-generate-progress-title">{getPhaseMessage(phase)}</p>
           <div className="plugin-generate-phase-steps">
             <div className={`phase-step ${phase === 'brief' ? 'active' : phase === 'skeleton' || phase === 'scenario_scripts' || phase === 'done' ? 'done' : ''}`}>
               {phase === 'brief' ? <SyncOutlined spin /> : <CheckCircleOutlined />}
-              {' 阶段 0：分析需求 & 生成设计草稿'}
+              {' '}{t('selfEvolutionRun.pluginDetailGeneratePhase0')}
             </div>
             <div className={`phase-step ${phase === 'skeleton' ? 'active' : phase === 'scenario_scripts' || phase === 'done' ? 'done' : ''}`}>
               {phase === 'skeleton' ? <SyncOutlined spin /> : phase === 'scenario_scripts' || phase === 'done' ? <CheckCircleOutlined /> : null}
-              {' 阶段 1：生成插件骨架'}
+              {' '}{t('selfEvolutionRun.pluginDetailGeneratePhase1')}
             </div>
             <div className={`phase-step ${phase === 'scenario_scripts' ? 'active' : phase === 'done' ? 'done' : ''}`}>
               {phase === 'scenario_scripts' ? <SyncOutlined spin /> : phase === 'done' ? <CheckCircleOutlined /> : null}
-              {' 阶段 2：生成状态机'}
+              {' '}{t('selfEvolutionRun.pluginDetailGeneratePhase2')}
             </div>
             <div className={`phase-step ${phase === 'scenario_scripts' ? 'active' : phase === 'done' ? 'done' : ''}`}>
               {phase === 'scenario_scripts' ? <SyncOutlined spin /> : phase === 'done' ? <CheckCircleOutlined /> : null}
-              {' 阶段 3：生成文档 & 脚本'}
+              {' '}{t('selfEvolutionRun.pluginDetailGeneratePhase3')}
             </div>
           </div>
-          <p className="plugin-generate-progress-hint">生成过程通常需要 30–90 秒，请耐心等待…</p>
+          <p className="plugin-generate-progress-hint">{t('selfEvolutionRun.pluginDetailGenerateHint')}</p>
         </div>
       </Modal>
 
@@ -465,14 +473,14 @@ export default function PluginDetailPage() {
           {editorReady && isPhase3Running && (
             <div className="plugin-detail-phase-steps plugin-detail-phase-steps--inline">
               <div className="phase-step phase-step--done">
-                <CheckCircleOutlined /> 骨架
+                <CheckCircleOutlined /> {t('selfEvolutionRun.pluginDetailPhaseLabelSkeleton')}
               </div>
               <div className="phase-step phase-step--done">
-                <CheckCircleOutlined /> 状态机
+                <CheckCircleOutlined /> {t('selfEvolutionRun.pluginDetailPhaseLabelStatemachine')}
               </div>
               <div className="phase-step active">
                 <SyncOutlined spin />
-                {' 文档 & 脚本'}
+                {' '}{t('selfEvolutionRun.pluginDetailPhaseLabelDocs')}
               </div>
             </div>
           )}
@@ -490,7 +498,7 @@ export default function PluginDetailPage() {
             pluginName={
               <Breadcrumb
                 items={[
-                  { title: '我的插件', href: '/memory-management/plugins' },
+                  { title: t('selfEvolutionRun.pluginDetailMyPlugins'), href: '/memory-management/plugins' },
                   {
                     title: editingName ? (
                       <Input
@@ -507,7 +515,7 @@ export default function PluginDetailPage() {
                         type="button"
                         className="plugin-detail-name"
                         onClick={() => setEditingName(true)}
-                        title="点击编辑名称"
+                        title={t('selfEvolutionRun.pluginDetailEditNameTitle')}
                       >
                         {breadcrumbLabel}
                       </button>
@@ -524,7 +532,7 @@ export default function PluginDetailPage() {
       {/* AI Repair Modal */}
       <Modal
         open={repairModalOpen}
-        title={`AI 修复 — ${repairTarget === 'scenario' ? '说明文档' : repairTarget === 'ui' ? 'UI 配置' : '流程图'}`}
+        title={`${t('selfEvolutionRun.pluginDetailRepairModalTitle')} — ${repairTarget === 'scenario' ? t('selfEvolutionRun.pluginDetailRepairTargetScenario') : repairTarget === 'ui' ? t('selfEvolutionRun.pluginDetailRepairTargetUi') : t('selfEvolutionRun.pluginDetailRepairTargetStatemachine')}`}
         onCancel={() => {
           if (repairSubmitting || isRepairing) return;
           setRepairModalOpen(false);
@@ -534,26 +542,26 @@ export default function PluginDetailPage() {
         closable={!repairSubmitting && !isRepairing}
         maskClosable={false}
         footer={repairSubmitting || isRepairing ? null : (
-          <Button type="primary" onClick={handleRepair}>开始修复</Button>
+          <Button type="primary" onClick={handleRepair}>{t('selfEvolutionRun.pluginDetailRepairSubmit')}</Button>
         )}
       >
         {(repairSubmitting || isRepairing) ? (
           <div style={{ textAlign: 'center', padding: '32px 0' }}>
             <SyncOutlined spin style={{ fontSize: 36, color: '#1677ff' }} />
-            <p style={{ marginTop: 16, fontSize: 15, fontWeight: 500 }}>AI 修复中，请稍后…</p>
+            <p style={{ marginTop: 16, fontSize: 15, fontWeight: 500 }}>{t('selfEvolutionRun.pluginDetailRepairInProgress')}</p>
             <p style={{ marginTop: 4, color: '#8c8c8c', fontSize: 13 }}>
               {repairTarget === 'scenario'
-                ? '正在重新生成说明文档，通常需要 10–60 秒。'
+                ? t('selfEvolutionRun.pluginDetailRepairProgressScenario')
                 : repairTarget === 'ui'
-                  ? '正在分析并修复 UI 配置，通常需要 10–60 秒。'
-                  : '正在分析并修复素材引用和流程图结构，通常需要 10–60 秒。'}
+                  ? t('selfEvolutionRun.pluginDetailRepairProgressUi')
+                  : t('selfEvolutionRun.pluginDetailRepairProgressStatemachine')}
             </p>
           </div>
         ) : (
           <>
             {repairValidationErrors.length > 0 && (
               <>
-                <p style={{ marginBottom: 6 }}>以下校验错误将自动作为修复依据：</p>
+                <p style={{ marginBottom: 6 }}>{t('selfEvolutionRun.pluginDetailRepairValidationBasis')}</p>
                 <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, fontSize: 13, color: 'var(--color-text-secondary, #888)' }}>
                   {repairValidationErrors.map((e, i) => (
                     <li key={i}>{e.message}</li>
@@ -561,9 +569,9 @@ export default function PluginDetailPage() {
                 </ul>
               </>
             )}
-            <p style={{ marginBottom: 8 }}>你也可以补充说明（可选）：</p>
+            <p style={{ marginBottom: 8 }}>{t('selfEvolutionRun.pluginDetailRepairHintLabel')}</p>
             <Input.TextArea
-              placeholder={repairTarget === 'scenario' ? '例如：补充每个步骤的说明，让用户理解如何使用这个插件' : '例如：帮我补全 __start__ 的连线，确保流程可以正常启动'}
+              placeholder={repairTarget === 'scenario' ? t('selfEvolutionRun.pluginDetailRepairScenarioPlaceholder') : t('selfEvolutionRun.pluginDetailRepairStatePlaceholder')}
               value={repairHint}
               onChange={(e) => setRepairHint(e.target.value)}
               rows={3}

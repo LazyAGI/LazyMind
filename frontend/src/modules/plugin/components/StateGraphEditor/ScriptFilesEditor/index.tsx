@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Input, Tooltip, message } from 'antd';
 import { PlusOutlined, DeleteOutlined, FileOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type * as monacoType from 'monaco-editor';
 import './index.scss';
 
@@ -87,6 +88,7 @@ function MonacoEditor({ value, onChange, language }: { value: string; onChange: 
 }
 
 export default function ScriptFilesEditor({ value, onChange }: Props) {
+  const { t } = useTranslation();
   const [scripts, setScripts] = useState<Record<string, string>>(() => parseScripts(value));
   const [selectedPath, setSelectedPath] = useState<string | null>(() => {
     const paths = Object.keys(parseScripts(value));
@@ -110,7 +112,7 @@ export default function ScriptFilesEditor({ value, onChange }: Props) {
     if (!name) return;
     const path = name.startsWith('scripts/') ? name : `scripts/${name}`;
     if (scripts[path] !== undefined) {
-      message.warning('文件已存在');
+      message.warning(t('selfEvolutionRun.scriptFilesExists'));
       return;
     }
     const next = { ...scripts, [path]: '' };
@@ -137,8 +139,8 @@ export default function ScriptFilesEditor({ value, onChange }: Props) {
       {/* Left: file tree */}
       <div className="sfe-sidebar">
         <div className="sfe-sidebar-header">
-          <span className="sfe-sidebar-title">脚本文件</span>
-          <Tooltip title="新建文件">
+          <span className="sfe-sidebar-title">{t('selfEvolutionRun.scriptFilesTitle')}</span>
+          <Tooltip title={t('selfEvolutionRun.scriptFilesNewFile')}>
             <Button
               type="text"
               size="small"
@@ -158,11 +160,11 @@ export default function ScriptFilesEditor({ value, onChange }: Props) {
               onPressEnter={handleAddFile}
               onBlur={() => { if (!newFileName.trim()) setAddingFile(false); }}
             />
-            <Button size="small" type="primary" onClick={handleAddFile}>添加</Button>
+            <Button size="small" type="primary" onClick={handleAddFile}>{t('selfEvolutionRun.scriptFilesAdd')}</Button>
           </div>
         )}
         {paths.length === 0 && !addingFile && (
-          <p className="sfe-empty-hint">暂无脚本文件</p>
+          <p className="sfe-empty-hint">{t('selfEvolutionRun.scriptFilesEmpty')}</p>
         )}
         {paths.map((path) => (
           <div
@@ -195,7 +197,7 @@ export default function ScriptFilesEditor({ value, onChange }: Props) {
           />
         ) : (
           <div className="sfe-editor-placeholder">
-            <p>选择左侧文件开始编辑，或点击 + 新建脚本文件</p>
+            <p>{t('selfEvolutionRun.scriptFilesPlaceholder')}</p>
           </div>
         )}
       </div>

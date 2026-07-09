@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { Breadcrumb, Skeleton, Alert } from 'antd';
+import { useTranslation } from 'react-i18next';
 import { getBuiltinPlugin } from '../../pluginDraftApi';
 import type { BuiltinPlugin } from '../../pluginDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
@@ -8,6 +9,7 @@ import StateGraphEditor from '../../components/StateGraphEditor';
 export default function BuiltinPluginDetailPage() {
   const { pluginId } = useParams<{ pluginId: string }>();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { isMenuCollapsed, toggleMenu } = useOutletContext<{
     isMenuCollapsed: boolean;
     toggleMenu: () => void;
@@ -23,7 +25,7 @@ export default function BuiltinPluginDetailPage() {
     setError(null);
     getBuiltinPlugin(pluginId)
       .then((data) => setPlugin(data))
-      .catch(() => setError('内置插件加载失败'))
+      .catch(() => setError(t('selfEvolutionRun.builtinPluginLoadFailed')))
       .finally(() => setLoading(false));
   }, [pluginId]);
 
@@ -45,13 +47,13 @@ export default function BuiltinPluginDetailPage() {
       <div style={{ padding: 24 }}>
         <Alert
           type="error"
-          message={error ?? '内置插件不存在'}
+          message={error ?? t('selfEvolutionRun.builtinPluginNotFound')}
           action={
             <button
               style={{ cursor: 'pointer', background: 'none', border: 'none', color: '#1677ff' }}
               onClick={() => navigate('/memory-management/skills?skillView=plugins')}
             >
-              返回列表
+              {t('selfEvolutionRun.builtinPluginBackToList')}
             </button>
           }
         />
@@ -62,7 +64,7 @@ export default function BuiltinPluginDetailPage() {
   const pluginName = (
     <Breadcrumb
       items={[
-        { title: <a onClick={() => navigate('/memory-management/skills?skillView=plugins')}>插件列表</a> },
+      { title: <a onClick={() => navigate('/memory-management/skills?skillView=plugins')}>{t('selfEvolutionRun.builtinPluginListBreadcrumb')}</a> },
         { title: plugin.name || plugin.id },
       ]}
     />

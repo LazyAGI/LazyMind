@@ -251,10 +251,10 @@ def _check_skeleton_missing(plugin_dict: Dict[str, Any]) -> List[str]:
             for f in _REQUIRED_SKELETON_STEP_FIELDS:
                 if not step.get(f):
                     missing.append(f'plugin.steps[{i}].{f}')
-    # Warn-level: ui.tabs block presence check
+    # Blocking: ui.tabs must be present for the frontend to render the layout
     ui = plugin_dict.get('ui')
     if not isinstance(ui, dict) or not ui.get('tabs'):
-        missing.append('plugin.ui.tabs (warn: ui tabs block missing, frontend cannot render layout)')
+        missing.append('plugin.ui.tabs (ui tabs block missing, frontend cannot render layout)')
     return missing
 
 
@@ -779,6 +779,26 @@ async def generate_skeleton(req: SkeletonRequest) -> SkeletonResponse:
                     _WIDGET_TYPE_DEFAULTS.get((slot_type, 'single'), 'text-single'),
                 )
                 ui_slots[slot_id] = {'widgetType': widget}
+
+        # Fallback: if ui.tabs is missing or empty, generate one tab per slot
+        # in declaration order so the frontend always has something to render.
+        if not ui.get('tabs'):
+            auto_tabs = []
+            for slot in slots_list:
+                if not isinstance(slot, dict):
+                    continue
+                slot_id = slot.get('id')
+                if not slot_id:
+                    continue
+                auto_tabs.append({
+                    'id': f'tab_{slot_id}',
+                    'label': slot.get('label') or slot_id,
+                    'layout': 'vertical',
+                    'slots': [{'id': slot_id}],
+                })
+            if auto_tabs:
+                ui['tabs'] = auto_tabs
+                logger.info('[staged/skeleton] auto-generated %d ui.tabs from slots', len(auto_tabs))
 
     plugin_yaml = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
     return SkeletonResponse(plugin_yaml=plugin_yaml)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, message, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
+import { useTranslation } from 'react-i18next';
 import { isDeveloperModeActive } from '@/utils/developerMode';
 import {
   CheckCircleOutlined,
@@ -142,6 +143,7 @@ export default function StateGraphEditor({
   onArtifactsChange,
   designBriefContent,
 }: Props) {
+  const { t } = useTranslation();
   const [contentTab, setContentTab] = useState<ContentTab>('statemachine');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   // In code mode, the active file is tracked independently of contentTab
@@ -218,7 +220,7 @@ export default function StateGraphEditor({
       setSaveStatus('saved');
     } catch {
       setSaveStatus('error');
-      message.error('保存失败，请重试');
+      message.error(t('selfEvolutionRun.sgeSaveFailed'));
     }
   }, [buildPayload]);
 
@@ -315,10 +317,10 @@ export default function StateGraphEditor({
         setErrors(validateStateGraph(mergedModel));
         triggerAutoSave(mergedModel, pluginModelRef.current, scenarioDataRef.current, scriptsContentRef.current);
       } else {
-        setErrors([{ code: 'V10_YAML_SYNTAX', message: 'YAML 语法错误，请检查格式' }]);
+        setErrors([{ code: 'V10_YAML_SYNTAX', message: t('selfEvolutionRun.sgeYamlSyntaxError') }]);
       }
     }, 500);
-  }, [triggerAutoSave]);
+  }, [triggerAutoSave, t]);
 
   const handlePluginModelChange = useCallback((pm: PluginModel) => {
     setPluginModel(pm);
@@ -372,7 +374,7 @@ export default function StateGraphEditor({
       setErrors((prev) => {
         const alreadyHas = prev.some((e) => e.code === 'V10_PLUGIN_YAML_SYNTAX');
         if (alreadyHas) return prev;
-        return [...prev, { code: 'V10_PLUGIN_YAML_SYNTAX', message: 'plugin.yaml 语法错误，请检查格式' }];
+        return [...prev, { code: 'V10_PLUGIN_YAML_SYNTAX', message: t('selfEvolutionRun.sgePluginYamlSyntaxError') }];
       });
     }
   }, [triggerAutoSave]);
@@ -453,12 +455,12 @@ export default function StateGraphEditor({
 
 
   return (
-    <div ref={editorRootRef} className="state-graph-editor" aria-label="插件编辑器">
+    <div ref={editorRootRef} className="state-graph-editor" aria-label={t('selfEvolutionRun.sgeEditorAriaLabel')}>
       {/* ── Row 1: back/breadcrumb left, save status + plugin config right ── */}
       <div className="sge-topbar">
         <div className="sge-topbar-left">
           {onClose && (
-            <button className="sge-back-btn" onClick={onClose} aria-label="返回">
+            <button className="sge-back-btn" onClick={onClose} aria-label={t('selfEvolutionRun.sgeBackAriaLabel')}>
               ←
             </button>
           )}
@@ -467,15 +469,15 @@ export default function StateGraphEditor({
         <div className="sge-topbar-right">
           {!readonly && onSave && (
             <span className="sge-autosave-status">
-              {saveStatus === 'pending' && <span className="sge-autosave-pending">待保存…</span>}
-              {saveStatus === 'saving' && <span className="sge-autosave-saving"><LoadingOutlined /> 保存中…</span>}
-              {saveStatus === 'saved' && <span className="sge-autosave-saved"><CheckCircleOutlined /> 已保存</span>}
-              {saveStatus === 'error' && <span className="sge-autosave-error">保存失败</span>}
+              {saveStatus === 'pending' && <span className="sge-autosave-pending">{t('selfEvolutionRun.sgeSavePending')}</span>}
+              {saveStatus === 'saving' && <span className="sge-autosave-saving"><LoadingOutlined /> {t('selfEvolutionRun.sgeSaving')}</span>}
+              {saveStatus === 'saved' && <span className="sge-autosave-saved"><CheckCircleOutlined /> {t('selfEvolutionRun.sgeSaved')}</span>}
+              {saveStatus === 'error' && <span className="sge-autosave-error">{t('selfEvolutionRun.sgeSaveError')}</span>}
             </span>
           )}
-          {readonly && <span className="sge-readonly-badge">只读</span>}
+          {readonly && <span className="sge-readonly-badge">{t('selfEvolutionRun.sgeReadonlyBadge')}</span>}
           <Button size="small" icon={<SettingOutlined />} onClick={() => setPluginInfoOpen(true)}>
-            插件配置
+            {t('selfEvolutionRun.sgePluginConfigBtn')}
           </Button>
         </div>
       </div>
@@ -493,12 +495,12 @@ export default function StateGraphEditor({
                 disabled={viewMode === 'code' || viewMode === 'brief'}
                 aria-disabled={viewMode === 'code' || viewMode === 'brief'}
               >
-                {tab === 'statemachine' ? '流程图' : tab === 'ui' ? 'UI' : '说明文档'}
+                {tab === 'statemachine' ? t('selfEvolutionRun.sgeTabStatemachine') : tab === 'ui' ? t('selfEvolutionRun.sgeTabUi') : t('selfEvolutionRun.sgeTabScenario')}
               </button>
             ))}
           </div>
           <Tooltip
-            title="流程图定义任务的执行过程，每一步会产生一些素材；UI只定义这些素材如何组织和展示，不参与和展示流程的执行过程"
+            title={t('selfEvolutionRun.sgeTabHelpTooltip')}
             placement="bottom"
           >
             <span className="sge-tab-help-icon">?</span>
@@ -510,20 +512,20 @@ export default function StateGraphEditor({
               className={`sge-seg-btn${viewMode === 'preview' ? ' sge-seg-btn--active' : ''}`}
               onClick={handleExitCode}
             >
-              预览
+              {t('selfEvolutionRun.sgeViewPreview')}
             </button>
             <button
               className={`sge-seg-btn${viewMode === 'code' ? ' sge-seg-btn--active' : ''}`}
               onClick={handleEnterCode}
             >
-              代码
+              {t('selfEvolutionRun.sgeViewCode')}
             </button>
             {designBriefContent && (
               <button
                 className={`sge-seg-btn${viewMode === 'brief' ? ' sge-seg-btn--active' : ''}`}
                 onClick={() => setViewMode('brief')}
               >
-                草稿
+                {t('selfEvolutionRun.sgeViewBrief')}
               </button>
             )}
           </div>
@@ -533,7 +535,7 @@ export default function StateGraphEditor({
             <>
               {onRepair && (
                 <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('statemachine', errors)}>
-                  AI 修复
+                  {t('selfEvolutionRun.sgeAiRepairBtn')}
                 </Button>
               )}
               <Button
@@ -542,10 +544,10 @@ export default function StateGraphEditor({
                 onClick={() => toggleArtifacts()}
                 type={showArtifacts ? 'primary' : 'default'}
               >
-                素材{slotCount > 0 && <span className="sge-artifact-count">{slotCount}</span>}
+                {t('selfEvolutionRun.sgeArtifactsBtn')}{slotCount > 0 && <span className="sge-artifact-count">{slotCount}</span>}
               </Button>
               <Button size="small" icon={<PlusOutlined />} onClick={handleAddNode}>
-                添加步骤
+                {t('selfEvolutionRun.sgeAddStepBtn')}
               </Button>
             </>
           )}
@@ -556,17 +558,17 @@ export default function StateGraphEditor({
               onClick={() => toggleArtifacts()}
               type={showArtifacts ? 'primary' : 'default'}
             >
-              素材{slotCount > 0 && <span className="sge-artifact-count">{slotCount}</span>}
+              {t('selfEvolutionRun.sgeArtifactsBtn')}{slotCount > 0 && <span className="sge-artifact-count">{slotCount}</span>}
             </Button>
           )}
           {!readonly && contentTab === 'ui' && viewMode === 'preview' && onRepair && (
             <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('ui')}>
-              AI 修复
+              {t('selfEvolutionRun.sgeAiRepairBtn')}
             </Button>
           )}
           {!readonly && contentTab === 'scenario' && viewMode === 'preview' && onRepair && (
             <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('scenario')}>
-              AI 修复
+              {t('selfEvolutionRun.sgeAiRepairBtn')}
             </Button>
           )}
         </div>
@@ -590,13 +592,13 @@ export default function StateGraphEditor({
               {model.nodes.length === 0 && showEmptyHint && (
                 <div className="sge-empty-state" aria-hidden="true">
                   <div className="sge-empty-state-content">
-                    <p className="sge-empty-state-title">用流程图描述你的工作</p>
+                    <p className="sge-empty-state-title">{t('selfEvolutionRun.sgeEmptyStateTitle')}</p>
                     <ol className="sge-empty-state-list">
-                      <li>点击「添加步骤」创建一个步骤，每个步骤代表一个执行环节</li>
-                      <li>点击「素材」定义步骤间传递的内容，如文字、图片、文件等</li>
-                      <li>拖拽步骤上的连接点来连接各步骤，表示执行顺序</li>
+                      <li>{t('selfEvolutionRun.sgeEmptyStateStep1')}</li>
+                      <li>{t('selfEvolutionRun.sgeEmptyStateStep2')}</li>
+                      <li>{t('selfEvolutionRun.sgeEmptyStateStep3')}</li>
                     </ol>
-                    <p className="sge-empty-state-hint">也可以双击画布空白处快速添加步骤 · 添加第一个步骤后提示消失</p>
+                    <p className="sge-empty-state-hint">{t('selfEvolutionRun.sgeEmptyStateHint')}</p>
                   </div>
                 </div>
               )}
@@ -638,7 +640,7 @@ export default function StateGraphEditor({
             {/* Left: file tree */}
             <div className="sge-code-sidebar">
               <div className="sge-code-sidebar-section">
-                <span className="sge-code-sidebar-label">核心文件</span>
+                <span className="sge-code-sidebar-label">{t('selfEvolutionRun.sgeCodeSidebarCore')}</span>
                 {coreFiles.map((file) => (
                   <div
                     key={file}
@@ -652,7 +654,7 @@ export default function StateGraphEditor({
               </div>
               {scriptFilePaths.length > 0 && (
                 <div className="sge-code-sidebar-section">
-                  <span className="sge-code-sidebar-label">脚本文件</span>
+                <span className="sge-code-sidebar-label">{t('selfEvolutionRun.sgeCodeSidebarScript')}</span>
                   {scriptFilePaths.map((path) => (
                     <div
                       key={path}
@@ -669,7 +671,7 @@ export default function StateGraphEditor({
               )}
               {devMode && (
                 <div className="sge-code-sidebar-section">
-                  <span className="sge-code-sidebar-label sge-code-sidebar-label--dev">调试</span>
+                  <span className="sge-code-sidebar-label sge-code-sidebar-label--dev">{t('selfEvolutionRun.sgeCodeSidebarDebug')}</span>
                   <div
                     className={`sge-code-file-item${activeCodeFile === 'layout.json' ? ' sge-code-file-item--active' : ''}`}
                     onClick={() => setActiveCodeFile('layout.json')}

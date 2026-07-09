@@ -4,6 +4,7 @@ import {
   LayoutOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { PluginUiTab, WidgetConfig, CompositePanelNode } from '../core/pluginModel';
 import type { SlotDef } from '../core/model';
 import CompositeCanvas from './CompositeCanvas';
@@ -80,54 +81,30 @@ const LayoutIcons: Record<string, React.ReactNode> = {
 // Layout templates
 // ---------------------------------------------------------------------------
 
-const TEMPLATES: Array<{ label: string; icon: React.ReactNode; node: CompositePanelNode }> = [
+const TEMPLATE_NODES: CompositePanelNode[] = [
+  { direction: 'row', children: [{ slot: '', weight: 1 }] },
+  { direction: 'row', children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
+  { direction: 'column', children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
   {
-    label: '单列',
-    icon: LayoutIcons.single,
-    node: { direction: 'row', children: [{ slot: '', weight: 1 }] },
+    direction: 'column',
+    children: [
+      { slot: '', weight: 2 },
+      { direction: 'row', weight: 1, children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
+    ],
   },
   {
-    label: '多列',
-    icon: LayoutIcons.double,
-    node: { direction: 'row', children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
+    direction: 'column',
+    children: [
+      { direction: 'row', weight: 1, children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
+      { slot: '', weight: 2 },
+    ],
   },
   {
-    label: '多行',
-    icon: LayoutIcons.topbottom,
-    node: { direction: 'column', children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
-  },
-  {
-    label: 'T 形',
-    icon: LayoutIcons.tshape,
-    node: {
-      direction: 'column',
-      children: [
-        { slot: '', weight: 2 },
-        { direction: 'row', weight: 1, children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
-      ],
-    },
-  },
-  {
-    label: '倒 T 形',
-    icon: LayoutIcons.invtshape,
-    node: {
-      direction: 'column',
-      children: [
-        { direction: 'row', weight: 1, children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
-        { slot: '', weight: 2 },
-      ],
-    },
-  },
-  {
-    label: 'L 形',
-    icon: LayoutIcons.lshape,
-    node: {
-      direction: 'row',
-      children: [
-        { direction: 'column', weight: 1, children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
-        { slot: '', weight: 1 },
-      ],
-    },
+    direction: 'row',
+    children: [
+      { direction: 'column', weight: 1, children: [{ slot: '', weight: 1 }, { slot: '', weight: 1 }] },
+      { slot: '', weight: 1 },
+    ],
   },
 ];
 
@@ -135,14 +112,15 @@ const TEMPLATES: Array<{ label: string; icon: React.ReactNode; node: CompositePa
 // Step 1: Template picker
 // ---------------------------------------------------------------------------
 
-function TemplatePicker({ onSelect }: { onSelect: (node: CompositePanelNode) => void }) {
+function TemplatePicker({ templates, onSelect }: { templates: Array<{ label: string; icon: React.ReactNode; node: CompositePanelNode }>; onSelect: (node: CompositePanelNode) => void }) {
+  const { t } = useTranslation();
   return (
     <div className='cle-step cle-step-templates'>
       <div className='cle-step-title'>
-        <span>选择布局模板</span>
+        <span>{t('selfEvolutionRun.cleSelectTemplate')}</span>
       </div>
       <div className='cle-templates-grid'>
-        {TEMPLATES.map((tpl) => (
+        {templates.map((tpl) => (
           <button
             key={tpl.label}
             type='button'
@@ -169,6 +147,16 @@ export default function CompositeLayoutEditor({
   onChange,
   onPageBarPositionChange,
 }: Props) {
+  const { t } = useTranslation();
+
+  const TEMPLATES: Array<{ label: string; icon: React.ReactNode; node: CompositePanelNode }> = [
+    { label: t('selfEvolutionRun.cleTemplateLabel1'), icon: LayoutIcons.single, node: TEMPLATE_NODES[0] },
+    { label: t('selfEvolutionRun.cleTemplateLabel2'), icon: LayoutIcons.double, node: TEMPLATE_NODES[1] },
+    { label: t('selfEvolutionRun.cleTemplateLabel3'), icon: LayoutIcons.topbottom, node: TEMPLATE_NODES[2] },
+    { label: t('selfEvolutionRun.cleTemplateLabel4'), icon: LayoutIcons.tshape, node: TEMPLATE_NODES[3] },
+    { label: t('selfEvolutionRun.cleTemplateLabel5'), icon: LayoutIcons.invtshape, node: TEMPLATE_NODES[4] },
+    { label: t('selfEvolutionRun.cleTemplateLabel6'), icon: LayoutIcons.lshape, node: TEMPLATE_NODES[5] },
+  ];
   const hasLayout = !!(
     tab.composite_layout?.direction &&
     tab.composite_layout.children &&
@@ -187,7 +175,7 @@ export default function CompositeLayoutEditor({
     <div className='cle-root'>
       {/* Step 1: Template picker (shown until a template is selected) */}
       {!hasLayout && (
-        <TemplatePicker onSelect={handleSelectTemplate} />
+        <TemplatePicker templates={TEMPLATES} onSelect={handleSelectTemplate} />
       )}
 
       {/* Canvas (visible once template is selected) */}
@@ -195,22 +183,20 @@ export default function CompositeLayoutEditor({
         <div className='cle-step cle-step-canvas'>
           <div className='cle-composite-desc'>
             <div className='cle-composite-desc-header'>
-              <span className='cle-composite-desc-title'>多素材联合展示</span>
-              <Tooltip title='切换布局模板（重置）'>
+              <span className='cle-composite-desc-title'>{t('selfEvolutionRun.cleCompositeDescTitle')}</span>
+              <Tooltip title={t('selfEvolutionRun.cleResetTooltip')}>
                 <Button
                   size='small'
                   icon={<ReloadOutlined />}
                   onClick={handleReset}
                   danger
                 >
-                  重置布局
+                  {t('selfEvolutionRun.cleResetLayout')}
                 </Button>
               </Tooltip>
             </div>
             <p className='cle-composite-desc-text'>
-              将多个「列表」素材放入同一个 Composite 后，页码栏会统一翻页——
-              选中第 N 页时，每个素材都展示其第 N 条数据，方便对比查看。
-              加入的素材要么全部是「列表」类型，要么全部不是。
+              {t('selfEvolutionRun.cleCompositeDescText')}
             </p>
           </div>
           <div className='cle-canvas-wrap'>
@@ -224,9 +210,8 @@ export default function CompositeLayoutEditor({
             />
           </div>
           <p className='cle-step-hint'>
-            <ColumnWidthOutlined /> 拖拽分割线调整各分块比例；
-            <LayoutOutlined /> 点击「+ Tab」按钮可将分块变为 Tab 切换区域；
-            将左侧素材拖入各分块完成绑定。
+            <ColumnWidthOutlined /> {t('selfEvolutionRun.cleHintResize')}&nbsp;
+            <LayoutOutlined /> {t('selfEvolutionRun.cleHintTab')}
           </p>
         </div>
       )}

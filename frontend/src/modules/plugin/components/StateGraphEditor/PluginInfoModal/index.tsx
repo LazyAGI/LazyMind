@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, Input, Button, Tooltip, message, Spin } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { PluginModel } from '../core/pluginModel';
 import type { ScenarioData } from '../ScenarioEditor';
 import { polishPluginInfo, type PolishableField } from '../../../pluginDraftApi';
@@ -27,6 +28,7 @@ export interface PluginInfoModalProps {
 }
 
 export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioData, onSave, readonly = false }: PluginInfoModalProps) {
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [pluginId, setPluginId] = useState('');
   const [pluginName, setPluginName] = useState('');
@@ -51,8 +53,8 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
   }, [open, pluginModel, scenarioData]);
 
   const validateId = (val: string) => {
-    if (!val.trim()) return '插件标识不能为空';
-    if (!PLUGIN_ID_REGEX.test(val.trim())) return '必须以英文字母开头，只能包含英文字母、数字、连字符和下划线';
+    if (!val.trim()) return t('selfEvolutionRun.pluginInfoIdRequired');
+    if (!PLUGIN_ID_REGEX.test(val.trim())) return t('selfEvolutionRun.pluginInfoIdInvalid');
     return '';
   };
 
@@ -86,7 +88,7 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
       const result = await polishPluginInfo({ fields: currentFields, target_fields: [field] });
       if (result[field]) setFieldValue(field, result[field]!);
     } catch {
-      message.error('润色失败，请稍后重试');
+      message.error(t('selfEvolutionRun.pluginInfoPolishFailed'));
     } finally {
       setPolishingFields(prev => {
         const next = new Set(prev);
@@ -110,7 +112,7 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
         if (result[field]) setFieldValue(field, result[field]!);
       }
     } catch {
-      message.error('一键润色失败，请稍后重试');
+      message.error(t('selfEvolutionRun.pluginInfoPolishAllFailed'));
     } finally {
       setPolishingAll(false);
     }
@@ -136,10 +138,10 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
         overview: overview.trim(),
         notes: notes.trim(),
       };
-      await onSave(newPm, newSd);
+      if (onSave) await onSave(newPm, newSd);
       onCancel();
     } catch {
-      message.error('保存失败');
+      message.error(t('selfEvolutionRun.pluginInfoSaveFailed'));
     } finally {
       setSaving(false);
     }
@@ -151,13 +153,13 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
     if (readonly || !hasValue) return null;
     const isLoading = polishingFields.has(field);
     return (
-      <Tooltip title="智能润色">
+      <Tooltip title={t('selfEvolutionRun.pluginInfoPolishTooltip')}>
         <button
           className={`pim-polish-btn${isLoading ? ' pim-polish-btn--loading' : ''}`}
           onClick={() => handlePolishField(field)}
           disabled={isLoading || isAnyPolishing}
           type="button"
-          aria-label="智能润色"
+          aria-label={t('selfEvolutionRun.pluginInfoPolishTooltip')}
         >
           {isLoading ? <Spin size="small" /> : <SparkleIcon />}
         </button>
@@ -167,19 +169,19 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
 
   return (
     <Modal
-      title="插件信息"
+      title={t('selfEvolutionRun.pluginInfoModalTitle')}
       open={open}
       onCancel={onCancel}
       width={560}
       footer={
         readonly ? (
           <div className="pim-footer">
-            <Button onClick={onCancel}>关闭</Button>
+            <Button onClick={onCancel}>{t('selfEvolutionRun.pluginInfoCloseBtn')}</Button>
           </div>
         ) : (
           <div className="pim-footer">
-            <Button onClick={onCancel}>取消</Button>
-            <Tooltip title="对所有非空字段一键智能润色">
+            <Button onClick={onCancel}>{t('selfEvolutionRun.pluginInfoCancelBtn')}</Button>
+            <Tooltip title={t('selfEvolutionRun.pluginInfoPolishAllTooltip')}>
               <Button
                 className="pim-polish-all-btn"
                 icon={<SparkleIcon />}
@@ -187,10 +189,10 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
                 disabled={isAnyPolishing}
                 onClick={handlePolishAll}
               >
-                一键润色
+                {t('selfEvolutionRun.pluginInfoPolishAllBtn')}
               </Button>
             </Tooltip>
-            <Button type="primary" loading={saving} onClick={handleSave}>保存</Button>
+            <Button type="primary" loading={saving} onClick={handleSave}>{t('selfEvolutionRun.pluginInfoSaveBtn')}</Button>
           </div>
         )
       }
@@ -200,8 +202,8 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
         {/* 插件标识 */}
         <div className="pim-row">
           <div className="pim-row-label">
-            插件标识
-            <Tooltip title="用于系统识别，英文字母开头，只含英文/数字/连字符/下划线">
+            {t('selfEvolutionRun.pluginInfoFieldPluginId')}
+            <Tooltip title={t('selfEvolutionRun.pluginInfoFieldPluginIdTooltip')}>
               <QuestionCircleOutlined className="pim-tip-icon" />
             </Tooltip>
           </div>
@@ -214,7 +216,7 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
                 setPluginId(e.target.value);
                 setIdError(validateId(e.target.value));
               }}
-              placeholder="在此输入插件标识，需有场景语义，如插件的英文名称"
+              placeholder={t('selfEvolutionRun.pluginInfoFieldPluginIdPlaceholder')}
               status={idError ? 'error' : undefined}
             />
             {idError && <span className="pim-field-error">{idError}</span>}
@@ -224,8 +226,8 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
         {/* 显示名称 */}
         <div className="pim-row">
           <div className="pim-row-label">
-            显示名称
-            <Tooltip title="展示给用户看的名称">
+            {t('selfEvolutionRun.pluginInfoFieldDisplayName')}
+            <Tooltip title={t('selfEvolutionRun.pluginInfoFieldDisplayNameTooltip')}>
               <QuestionCircleOutlined className="pim-tip-icon" />
             </Tooltip>
           </div>
@@ -234,7 +236,7 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
               value={pluginName}
               readOnly={readonly}
               onChange={(e) => { if (!readonly) setPluginName(e.target.value); }}
-              placeholder="例如：图片处理插件"
+              placeholder={t('selfEvolutionRun.pluginInfoExamplePlaceholder')}
             />
           </div>
         </div>
@@ -242,14 +244,14 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
         {/* 插件描述 */}
         <div className="pim-block">
           <div className="pim-block-label">
-            插件描述
+            {t('selfEvolutionRun.pluginInfoFieldDescription')}
             {renderPolishIcon('description', !!description.trim())}
           </div>
           <Input.TextArea
             value={description}
             readOnly={readonly || polishingFields.has('description') || polishingAll}
             onChange={(e) => { if (!readonly) setDescription(e.target.value); }}
-            placeholder="简短描述插件的用途…"
+            placeholder={t('selfEvolutionRun.pluginInfoFieldDescriptionPlaceholder')}
             autoSize={{ minRows: 3, maxRows: 6 }}
           />
         </div>
@@ -257,8 +259,8 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
         {/* 触发条件 */}
         <div className="pim-block">
           <div className="pim-block-label">
-            触发条件（请用英文描述）
-            <Tooltip title="描述什么情况下 AI 应该调用此插件">
+            {t('selfEvolutionRun.pluginInfoFieldWhenToUse')}
+            <Tooltip title={t('selfEvolutionRun.pluginInfoFieldWhenToUseTooltip')}>
               <QuestionCircleOutlined className="pim-tip-icon" />
             </Tooltip>
             {renderPolishIcon('when_to_use', !!whenToUse.trim())}
@@ -267,7 +269,7 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
             value={whenToUse}
             readOnly={readonly || polishingFields.has('when_to_use') || polishingAll}
             onChange={(e) => { if (!readonly) setWhenToUse(e.target.value); }}
-            placeholder="Describe in English when this plugin should be triggered…"
+            placeholder={t('selfEvolutionRun.pluginInfoFieldWhenToUsePlaceholder')}
             autoSize={{ minRows: 3, maxRows: 6 }}
           />
         </div>
@@ -275,14 +277,14 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
         {/* 场景描述 */}
         <div className="pim-block">
           <div className="pim-block-label">
-            场景描述
+            {t('selfEvolutionRun.pluginInfoFieldOverview')}
             {renderPolishIcon('overview', !!overview.trim())}
           </div>
           <Input.TextArea
             value={overview}
             readOnly={readonly || polishingFields.has('overview') || polishingAll}
             onChange={(e) => { if (!readonly) setOverview(e.target.value); }}
-            placeholder="描述该插件适用的业务场景…"
+            placeholder={t('selfEvolutionRun.pluginInfoFieldOverviewPlaceholder')}
             autoSize={{ minRows: 3, maxRows: 6 }}
           />
         </div>
@@ -290,14 +292,14 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
         {/* 注意事项 */}
         <div className="pim-block">
           <div className="pim-block-label">
-            注意事项
+            {t('selfEvolutionRun.pluginInfoFieldNotes')}
             {renderPolishIcon('notes', !!notes.trim())}
           </div>
           <Input.TextArea
             value={notes}
             readOnly={readonly || polishingFields.has('notes') || polishingAll}
             onChange={(e) => { if (!readonly) setNotes(e.target.value); }}
-            placeholder="补充使用时需要注意的事项…"
+            placeholder={t('selfEvolutionRun.pluginInfoFieldNotesPlaceholder')}
             autoSize={{ minRows: 2, maxRows: 4 }}
           />
         </div>

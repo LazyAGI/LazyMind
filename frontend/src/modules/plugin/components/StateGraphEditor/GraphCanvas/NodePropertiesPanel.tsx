@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button, Checkbox, Input, Select, Switch, Tooltip } from 'antd';
+import { useTranslation } from 'react-i18next';
 import {
   CloseOutlined,
   PlusOutlined,
@@ -8,7 +9,6 @@ import {
   RightOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
-import { useTranslation } from 'react-i18next';
 import type { StepNode, GraphModel } from '../core/model';
 import { VIRTUAL_END, VIRTUAL_START, isHiddenId } from '../core/model';
 import type { PluginModel } from '../core/pluginModel';
@@ -134,20 +134,20 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
   const toolFunctionOptions: Array<{ label: string; options: { label: string; value: string }[] }> = [];
   if (systemTools.length > 0) {
     toolFunctionOptions.push({
-      label: '系统工具',
+       label: t('selfEvolutionRun.nodePropsSysTools'),
       options: systemTools.map((t) => ({ label: `${t.label} (${t.name})`, value: t.name })),
     });
   }
   if (pluginFunctions.length > 0) {
     toolFunctionOptions.push({
-      label: '插件工具',
+       label: t('selfEvolutionRun.nodePropsPluginTools'),
       options: pluginFunctions.map((fn) => ({ label: fn, value: fn })),
     });
   }
   // Flat fallback when both groups are empty (e.g. loading), keep existing values selectable.
   const flatFallbackOptions: Array<{ label: string; options: { label: string; value: string }[] }> =
     toolFunctionOptions.length === 0 && (node.tools?.length ?? 0) > 0
-      ? [{ label: '已选工具', options: (node.tools ?? []).map((t) => ({ label: t, value: t })) }]
+       ? [{ label: t('selfEvolutionRun.nodePropsSelectedTools'), options: (node.tools ?? []).map((t: string) => ({ label: t, value: t })) }]
       : [];
 
   const update = (patch: Partial<StepNode>) => onChange({ ...node, ...patch });
@@ -170,10 +170,10 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
   // __start__ virtual node: render a minimal panel with only flow/route controls.
   if (node.id === VIRTUAL_START) {
     return (
-      <div className="node-props-panel" role="complementary" aria-label="起始节点属性" onDoubleClick={(e) => e.stopPropagation()}>
+      <div className="node-props-panel" role="complementary" aria-label={t('selfEvolutionRun.nodePropsStartNodeAriaLabel')} onDoubleClick={(e) => e.stopPropagation()}>
         <div className="node-props-panel-header">
-          <span className="node-props-panel-title">起始节点</span>
-          <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label="关闭" />
+          <span className="node-props-panel-title">{t('selfEvolutionRun.nodePropsStartNodeTitle')}</span>
+          <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label={t('selfEvolutionRun.nodePropsCloseAriaLabel')} />
         </div>
         <div className="node-props-panel-body">
           <Section title={t('selfEvolutionRun.stateGraphSectionFlow')}>

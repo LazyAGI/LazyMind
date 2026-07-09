@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, Input, Button, Select, Tooltip, message } from 'antd';
 import { FileTextOutlined, ThunderboltOutlined, BulbOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { createPluginDraft, aiGeneratePluginDraft, updatePluginDraftContent, deletePluginDraft } from '../../pluginDraftApi';
 import { listSkillAssetsPage } from '@/modules/memory/skillApi';
 import { serializePluginModel } from '../StateGraphEditor/core/pluginSerializer';
@@ -17,29 +18,30 @@ interface NewPluginModalProps {
   onCreated: (draftId: string) => void;
 }
 
-const MODE_CARDS: { mode: CreateMode; icon: React.ReactNode; title: string; desc: string; badge?: string }[] = [
-  {
-    mode: 'ai',
-    icon: <BulbOutlined />,
-    title: '描述需求',
-    desc: '用自然语言描述目标，AI 帮你生成',
-  },
-  {
-    mode: 'skill',
-    icon: <ThunderboltOutlined />,
-    title: '从技能转化',
-    desc: '选择已有技能，AI 将其转化为可执行插件',
-  },
-  {
-    mode: 'blank',
-    icon: <FileTextOutlined />,
-    title: '空白创建',
-    desc: '从空白开始，手动搭建工作流',
-    badge: '不推荐',
-  },
-];
-
 export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginModalProps) {
+  const { t } = useTranslation();
+
+  const MODE_CARDS: { mode: CreateMode; icon: React.ReactNode; title: string; desc: string; badge?: string }[] = [
+    {
+      mode: 'ai',
+      icon: <BulbOutlined />,
+      title: t('selfEvolutionRun.newPluginModeAiTitle'),
+      desc: t('selfEvolutionRun.newPluginModeAiDesc'),
+    },
+    {
+      mode: 'skill',
+      icon: <ThunderboltOutlined />,
+      title: t('selfEvolutionRun.newPluginModeSkillTitle'),
+      desc: t('selfEvolutionRun.newPluginModeSkillDesc'),
+    },
+    {
+      mode: 'blank',
+      icon: <FileTextOutlined />,
+      title: t('selfEvolutionRun.newPluginModeBlankTitle'),
+      desc: t('selfEvolutionRun.newPluginModeBlankDesc'),
+      badge: t('selfEvolutionRun.newPluginModeBlankBadge'),
+    },
+  ];
   const [mode, setMode] = useState<CreateMode>('ai');
 
   // skill mode: selected skill
@@ -121,19 +123,19 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
   const handleCreate = async () => {
     const trimmedId = pluginId.trim();
     if (!trimmedId) {
-      setIdError('请输入插件标识');
+      setIdError(t('selfEvolutionRun.newPluginIdErrorEmpty'));
       return;
     }
     if (!PLUGIN_ID_REGEX.test(trimmedId)) {
-      setIdError('必须以英文字母开头，只能包含英文字母、数字、连字符和下划线');
+      setIdError(t('selfEvolutionRun.newPluginIdErrorInvalid'));
       return;
     }
     if (mode === 'ai' && !description.trim()) {
-      message.warning('请填写需求描述');
+      message.warning(t('selfEvolutionRun.newPluginDescRequired'));
       return;
     }
     if (mode === 'skill' && !skillId) {
-      message.warning('请选择一个技能');
+      message.warning(t('selfEvolutionRun.newPluginSkillRequired'));
       return;
     }
 
@@ -158,7 +160,7 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
       reset();
       onCreated(draft.id);
     } catch {
-      message.error('创建失败，请重试');
+      message.error(t('selfEvolutionRun.newPluginCreateFailed'));
       if (draftId) {
         deletePluginDraft(draftId).catch(() => {});
       }
@@ -171,14 +173,14 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
 
   return (
     <Modal
-      title="新插件"
+      title={t('selfEvolutionRun.newPluginModalTitle')}
       open={open}
       onCancel={handleCancel}
       footer={
         <div className="npm-footer">
-          <Button onClick={handleCancel}>取消</Button>
+          <Button onClick={handleCancel}>{t('selfEvolutionRun.newPluginCancelBtn')}</Button>
           <Button type="primary" loading={creating} disabled={!canCreate} onClick={() => void handleCreate()}>
-            创建
+            {t('selfEvolutionRun.newPluginCreateBtn')}
           </Button>
         </div>
       }
@@ -188,7 +190,7 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
     >
       <div className="npm-body">
         {/* Mode selector — always on top */}
-        <p className="npm-section-label">选择创建方式</p>
+        <p className="npm-section-label">{t('selfEvolutionRun.newPluginSelectMode')}</p>
         <div className="npm-mode-cards">
           {MODE_CARDS.map((card) => (
             <button
@@ -210,7 +212,7 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
           <div className="npm-expand">
             <Select
               showSearch
-              placeholder="搜索并选择技能"
+              placeholder={t('selfEvolutionRun.newPluginSkillSearchPlaceholder')}
               value={skillId}
               onChange={handleSkillChange}
               onSearch={handleSkillSearch}
@@ -227,14 +229,7 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
         {mode === 'ai' && (
           <div className="npm-expand">
             <Input.TextArea
-              placeholder={[
-                '请描述你想创建的插件，越详细越好，例如：',
-                '· 场景：用于什么业务场景，解决什么问题',
-                '· 输入：用户需要提供什么内容（文件、文本、图片等）',
-                '· 步骤：大致分几个处理步骤，每步做什么',
-                '· 触发条件：什么情况下应该使用这个插件',
-                '· 不适用场景：什么情况下不应启用',
-              ].join('\n')}
+              placeholder={t('selfEvolutionRun.newPluginAiPlaceholder')}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               autoSize={{ minRows: 5, maxRows: 10 }}
@@ -247,8 +242,8 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
           <div className="npm-fields npm-expand">
             <div className="npm-field-row">
               <div className="npm-field-label">
-                插件标识 <span className="npm-required-mark">*</span>
-                <Tooltip title="用于系统识别，英文字母开头，只含英文/数字/连字符/下划线">
+                {t('selfEvolutionRun.newPluginFieldPluginId')} <span className="npm-required-mark">*</span>
+                <Tooltip title={t('selfEvolutionRun.newPluginFieldPluginIdTooltip')}>
                   <QuestionCircleOutlined className="npm-tip-icon" />
                 </Tooltip>
               </div>
@@ -260,11 +255,11 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
                     setPluginId(e.target.value);
                     setIdError(
                       e.target.value.trim() && !PLUGIN_ID_REGEX.test(e.target.value.trim())
-                        ? '必须以英文字母开头，只能包含英文字母、数字、连字符和下划线'
+                        ? t('selfEvolutionRun.newPluginIdErrorInvalid')
                         : '',
                     );
                   }}
-                  placeholder="在此输入插件标识，需有场景语义，如插件的英文名称"
+                  placeholder={t('selfEvolutionRun.newPluginFieldPluginIdPlaceholder')}
                   status={idError ? 'error' : undefined}
                   onPressEnter={() => void handleCreate()}
                 />
@@ -273,8 +268,8 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
             </div>
             <div className="npm-field-row">
               <div className="npm-field-label">
-                显示名称
-                <Tooltip title="选填，不填则使用插件标识作为名称">
+                {t('selfEvolutionRun.newPluginFieldDisplayName')}
+                <Tooltip title={t('selfEvolutionRun.newPluginFieldDisplayNameTooltip')}>
                   <QuestionCircleOutlined className="npm-tip-icon" />
                 </Tooltip>
               </div>
@@ -282,7 +277,7 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={pluginId.trim() ? `默认使用插件标识「${pluginId.trim()}」` : '插件名称（如：合同审阅助手）'}
+                  placeholder={pluginId.trim() ? t('selfEvolutionRun.newPluginFieldDisplayNamePlaceholderWithId', { id: pluginId.trim() }) : t('selfEvolutionRun.newPluginFieldDisplayNamePlaceholder')}
                   onPressEnter={() => void handleCreate()}
                 />
               </div>

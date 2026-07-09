@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ReactFlow,
   Background,
@@ -98,7 +99,7 @@ function v11RejectReason(model: GraphModel, srcId: string, tgtId: string): strin
     for (const n of model.nodes) {
       const isParallelFork = (n.route === 'all' || !n.route) && n.transitions.length > 1;
       if (isParallelFork && n.transitions.some((t) => t.to === srcId)) {
-        return `步骤 "${srcId}" 是并行分支子步骤，不允许再有多个出口（禁止二次分叉）`;
+        return `step "${srcId}" is a parallel fork child and cannot have multiple exits`;
       }
     }
   }
@@ -108,7 +109,7 @@ function v11RejectReason(model: GraphModel, srcId: string, tgtId: string): strin
   if (srcIsParallelForkAfter) {
     const tgtNode = model.nodes.find((n) => n.id === tgtId);
     if (tgtNode && tgtNode.transitions.length > 0) {
-      return `步骤 "${tgtId}" 已有出口，不能作为并行分支的子步骤（禁止二次分叉）`;
+      return `step "${tgtId}" already has exits and cannot be a parallel fork child`;
     }
   }
 
@@ -230,6 +231,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
 }
 
 function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, onScenarioChange, readonly = false }: Props, ref: React.Ref<CanvasHandle>) {
+  const { t } = useTranslation();
   const { screenToFlowPosition, zoomIn, zoomOut, getZoom } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
   const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides } = useAlignmentGuides();
@@ -698,7 +700,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     const newId = `step_${uuidv4().slice(0, 6)}`;
     const newNode: StepNode = {
       id: newId,
-      label: '新步骤',
+      label: t('selfEvolutionRun.canvasNewStepLabel'),
       mode: 'human',
       inputs: [],
       outputs: [],
@@ -734,7 +736,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       const newId = `step_${uuidv4().slice(0, 6)}`;
       const newNode: StepNode = {
         id: newId,
-        label: '新步骤',
+        label: t('selfEvolutionRun.canvasNewStepLabel'),
         mode: 'human',
         inputs: [],
         outputs: [],
@@ -920,7 +922,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       onDoubleClick={onDoubleClick}
       tabIndex={0}
       role="application"
-      aria-label="状态机画布，双击空白处新建节点"
+      aria-label={t('selfEvolutionRun.canvasAriaLabel')}
     >
       <ReactFlow
         nodes={nodes}

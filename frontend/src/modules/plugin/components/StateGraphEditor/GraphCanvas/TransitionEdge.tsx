@@ -2,6 +2,7 @@ import { memo, useRef, useState } from 'react';
 import { EdgeLabelRenderer, getBezierPath } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 import { Input } from 'antd';
+import { useTranslation } from 'react-i18next';
 import { EditOutlined } from '@ant-design/icons';
 
 export interface TransitionEdgeData extends Record<string, unknown> {
@@ -11,8 +12,7 @@ export interface TransitionEdgeData extends Record<string, unknown> {
   onConditionChange: (sourceId: string, targetId: string, condition: string) => void;
 }
 
-function TransitionEdgeComponent({
-  id,
+function TransitionEdgeComponent({  id,
   sourceX,
   sourceY,
   targetX,
@@ -24,6 +24,7 @@ function TransitionEdgeComponent({
   source,
   target,
 }: EdgeProps) {
+  const { t } = useTranslation();
   const edgeData = data as unknown as TransitionEdgeData | undefined;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -117,7 +118,7 @@ function TransitionEdgeComponent({
                 onPressEnter={commitEdit}
                 onKeyDown={(e) => { if (e.key === 'Escape') { setEditing(false); setHovered(false); } }}
                 style={{ width: 160, fontSize: 12 }}
-                placeholder="输入跳转条件"
+                 placeholder={t('selfEvolutionRun.transitionConditionPlaceholder')}
               />
             ) : (
               <button
@@ -127,11 +128,11 @@ function TransitionEdgeComponent({
                   setDraft(condition);
                   setEditing(true);
                 }}
-                title="点击编辑条件"
+                title={t('selfEvolutionRun.transitionEdgeClickToEdit')}
               >
                 <EditOutlined className="transition-edge-popover-icon" />
                 <span className="transition-edge-popover-text">
-                  {condition || <span className="transition-edge-popover-empty">点击添加条件</span>}
+                  {condition || <span className="transition-edge-popover-empty">{t('selfEvolutionRun.transitionEdgeClickToAddCondition')}</span>}
                 </span>
               </button>
             )}

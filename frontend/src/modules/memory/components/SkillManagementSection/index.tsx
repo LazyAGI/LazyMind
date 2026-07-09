@@ -427,7 +427,7 @@ export default function SkillManagementSection() {
             aria-selected={skillView === "plugins"}
             onClick={() => setSkillView("plugins")}
           >
-            我的插件
+            {t("admin.memorySkillViewPlugins")}
           </button>
         </div>
 
@@ -450,7 +450,7 @@ export default function SkillManagementSection() {
               icon={<PlusOutlined />}
               onClick={() => setNewPluginOpen(true)}
             >
-              新建插件
+              {t("admin.memoryPluginNewButton")}
             </Button>
           ) : null}
         </div>

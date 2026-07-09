@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { SlotDef } from '../core/model';
 
 interface Props {
@@ -48,7 +49,7 @@ function serializeDOM(container: HTMLElement): string {
 
 // ── DOM builder ──────────────────────────────────────────────────────────────
 
-function buildChip(slotId: string, label: string, onDelete: (id: string) => void): HTMLElement {
+function buildChip(slotId: string, label: string, deleteAriaLabel: string, onDelete: (id: string) => void): HTMLElement {
   const chip = document.createElement('span');
   chip.className = 'pe-chip';
   chip.contentEditable = 'false';
@@ -62,7 +63,7 @@ function buildChip(slotId: string, label: string, onDelete: (id: string) => void
   const btn = document.createElement('button');
   btn.className = 'pe-chip-del';
   btn.type = 'button';
-  btn.setAttribute('aria-label', `删除 ${label}`);
+      btn.setAttribute('aria-label', deleteAriaLabel);
   btn.innerHTML = '×';
   btn.addEventListener('mousedown', (e) => {
     e.preventDefault();
@@ -77,6 +78,7 @@ function rebuildDOM(
   el: HTMLElement,
   raw: string,
   slotLabel: (id: string) => string,
+  deleteAriaLabel: (label: string) => string,
   onDelete: (id: string) => void,
 ) {
   el.innerHTML = '';
@@ -84,7 +86,7 @@ function rebuildDOM(
     if (seg.kind === 'text') {
       el.appendChild(document.createTextNode(seg.text));
     } else {
-      el.appendChild(buildChip(seg.id, slotLabel(seg.id), onDelete));
+      el.appendChild(buildChip(seg.id, slotLabel(seg.id), deleteAriaLabel(slotLabel(seg.id)), onDelete));
     }
   }
 }
@@ -92,6 +94,7 @@ function rebuildDOM(
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function PromptEditor({ value, onChange, slots, placeholder }: Props) {
+  const { t } = useTranslation();
   const editorRef = useRef<HTMLDivElement>(null);
   const [dropdown, setDropdown] = useState<{ top: number; left: number } | null>(null);
   const [query, setQuery] = useState('');
@@ -120,7 +123,7 @@ export default function PromptEditor({ value, onChange, slots, placeholder }: Pr
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
-    rebuildDOM(el, value, slotLabel, handleDeleteChip);
+    rebuildDOM(el, value, slotLabel, (lbl) => t('selfEvolutionRun.promptEditorDeleteSlot', { label: lbl }), handleDeleteChip);
     lastEmittedRef.current = value;
     mountedRef.current = true;
   // Only run on mount — intentionally empty deps except stable refs
@@ -135,7 +138,7 @@ export default function PromptEditor({ value, onChange, slots, placeholder }: Pr
     // If the incoming value is what we just emitted, skip — this is the echo-back
     if (value === lastEmittedRef.current) return;
     // Genuine external change: rebuild DOM
-    rebuildDOM(el, value, slotLabel, handleDeleteChip);
+    rebuildDOM(el, value, slotLabel, (lbl) => t('selfEvolutionRun.promptEditorDeleteSlot', { label: lbl }), handleDeleteChip);
     lastEmittedRef.current = value;
   }, [value, slotLabel, handleDeleteChip]);
 
@@ -189,7 +192,7 @@ export default function PromptEditor({ value, onChange, slots, placeholder }: Pr
     }
 
     // Insert chip node
-    const chip = buildChip(slotId, slotLabel(slotId), handleDeleteChip);
+    const chip = buildChip(slotId, slotLabel(slotId), t('selfEvolutionRun.promptEditorDeleteSlot', { label: slotLabel(slotId) }), handleDeleteChip);
     const finalSel = window.getSelection();
     if (finalSel && finalSel.rangeCount > 0) {
       const r = finalSel.getRangeAt(0);
@@ -285,7 +288,7 @@ export default function PromptEditor({ value, onChange, slots, placeholder }: Pr
         className={`pe-editor${isEmpty ? ' pe-editor--empty' : ''}`}
         contentEditable
         suppressContentEditableWarning
-        data-placeholder={placeholder ?? '输入提示词，用 { 插入素材引用'}
+        data-placeholder={placeholder ?? t('selfEvolutionRun.promptEditorPlaceholder')}
         onKeyDown={handleKeyDown}
         onInput={handleInput}
         onBlur={() => setTimeout(closeDropdown, 150)}

@@ -1,6 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Button, Tooltip } from 'antd';
+import { useTranslation } from 'react-i18next';
 import { CloseOutlined, HolderOutlined, FileTextOutlined } from '@ant-design/icons';
 import type { SlotDef } from '../core/model';
 import type { WidgetConfig, WidgetType } from '../core/pluginModel';
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export default function UiWidgetCard({ slotId, slotDef, widget, isSelected, onSelect, onRemove }: Props) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: slotId });
 
@@ -46,19 +48,19 @@ export default function UiWidgetCard({ slotId, slotDef, widget, isSelected, onSe
     >
       {/* Zone 1: Header */}
       <div className="uep-widget-card-header">
-        <span className="uep-widget-drag" {...listeners} aria-label="拖拽排序" onClick={(e) => e.stopPropagation()}>
+         <span className="uep-widget-drag" {...listeners} aria-label={t('selfEvolutionRun.uiWidgetDragAriaLabel')} onClick={(e) => e.stopPropagation()}>
           <HolderOutlined />
         </span>
         <span className="uep-widget-icon">{icon}</span>
         <span className="uep-widget-label">{label}</span>
-        <Tooltip title="从当前 Tab 移除">
+         <Tooltip title={t('selfEvolutionRun.uiWidgetRemoveTooltip')}>
           <Button
             type="text"
             size="small"
             icon={<CloseOutlined />}
             className="uep-widget-remove"
             onClick={(e) => { e.stopPropagation(); onRemove(slotId); }}
-            aria-label={`移除 ${label}`}
+             aria-label={t('selfEvolutionRun.uiWidgetRemoveAriaLabel', { label })}
           />
         </Tooltip>
       </div>

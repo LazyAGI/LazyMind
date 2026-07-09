@@ -1,5 +1,6 @@
 import { Tabs, Empty } from 'antd';
 import { FileTextOutlined, PictureOutlined, FileOutlined, CodeOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { PluginModel } from '../core/pluginModel';
 import './index.scss';
 
@@ -14,19 +15,20 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
   json: <CodeOutlined />,
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  text: '文本',
-  image: '图片',
-  file: '文件',
-  json: 'JSON',
-};
-
 export default function UiPreviewPanel({ model }: Props) {
+  const { t } = useTranslation();
+
+  const TYPE_LABELS: Record<string, string> = {
+    text: t('selfEvolutionRun.uiPreviewTypeText'),
+    image: t('selfEvolutionRun.uiPreviewTypeImage'),
+    file: t('selfEvolutionRun.uiPreviewTypeFile'),
+    json: 'JSON',
+  };
   if (!model.ui?.tabs || model.ui.tabs.length === 0) {
     return (
       <div className="ui-preview-panel ui-preview-panel--empty">
-        <Empty description="当前插件未配置 UI 布局" />
-        <p className="upp-hint">在「插件配置」Tab 的 UI 布局区域中添加 Tab 和素材来配置 UI</p>
+        <Empty description={t('selfEvolutionRun.uiPreviewNoLayout')} />
+        <p className="upp-hint">{t('selfEvolutionRun.uiPreviewHint')}</p>
       </div>
     );
   }
@@ -35,7 +37,7 @@ export default function UiPreviewPanel({ model }: Props) {
 
   return (
     <div className="ui-preview-panel">
-      <p className="upp-readonly-note">只读预览 — 展示用户在插件运行时看到的 UI 布局</p>
+      <p className="upp-readonly-note">{t('selfEvolutionRun.uiPreviewReadonlyNote')}</p>
       <Tabs
         items={model.ui.tabs.map((tab) => ({
           key: tab.id,
@@ -43,7 +45,7 @@ export default function UiPreviewPanel({ model }: Props) {
           children: (
             <div className={`upp-tab-content upp-layout-${tab.layout ?? 'list'}`}>
               {tab.slots.length === 0 ? (
-                <p className="upp-hint">此 Tab 暂无素材</p>
+                <p className="upp-hint">{t('selfEvolutionRun.uiPreviewNoSlots')}</p>
               ) : (
                 tab.slots.map((s) => {
                   const def = slotMap[s.id];
@@ -55,7 +57,7 @@ export default function UiPreviewPanel({ model }: Props) {
                       <span className="upp-slot-label">{def?.label ?? s.id}</span>
                       <span className="upp-slot-type">{typeLabel}</span>
                       {def?.cardinality === 'list' && (
-                        <span className="upp-slot-cardinality">列表</span>
+                        <span className="upp-slot-cardinality">{t('selfEvolutionRun.uiPreviewSlotList')}</span>
                       )}
                     </div>
                   );

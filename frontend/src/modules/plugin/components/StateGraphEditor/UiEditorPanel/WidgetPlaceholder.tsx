@@ -1,11 +1,7 @@
 import { PictureOutlined, FileOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { WidgetConfig } from '../core/pluginModel';
 import './UiWysiwygPreview.scss';
-
-const LOREM_TEXT =
-  '这是一段示例文本，用于模拟插件运行时的真实内容。在实际使用中，此处将展示由 AI 自动生成或用户手动填写的文字内容。';
-
-const LOREM_SHORT = '示例文本内容段落，包含分析结果或描述信息。';
 
 const JSON_SAMPLE = `{\n  "key": "value",\n  "items": [1, 2, 3],\n  "status": "success"\n}`;
 
@@ -15,6 +11,7 @@ interface Props {
 }
 
 function TextSinglePlaceholder({ config, label }: { config: Extract<WidgetConfig, { widgetType: 'text-single' }>; label?: string }) {
+  const { t } = useTranslation();
   const style: React.CSSProperties = {};
   if (config.maxHeight) style.maxHeight = config.maxHeight;
   return (
@@ -24,13 +21,14 @@ function TextSinglePlaceholder({ config, label }: { config: Extract<WidgetConfig
         className={`wp-text-single${config.readOnly ? ' wp-text-single--readonly' : ''}`}
         style={style}
       >
-        {LOREM_TEXT}
+        {t('selfEvolutionRun.widgetPlaceholderLoremText')}
       </div>
     </div>
   );
 }
 
 function TextListPlaceholder({ config, label }: { config: Extract<WidgetConfig, { widgetType: 'text-list' }>; label?: string }) {
+  const { t } = useTranslation();
   const items = 3;
   const gridCols = config.gridMaxCols ?? 2;
   const containerClass = [
@@ -49,11 +47,11 @@ function TextListPlaceholder({ config, label }: { config: Extract<WidgetConfig, 
         {Array.from({ length: items }).map((_, i) => (
           <div key={i} className="wp-text-list-item">
             <span className="wp-text-list-badge">{i + 1}</span>
-            {LOREM_SHORT}
+            {t('selfEvolutionRun.widgetPlaceholderLoremShort')}
           </div>
         ))}
         {config.showAddButton !== false && (
-          <button type="button" className="wp-add-btn">+ 新增</button>
+          <button type="button" className="wp-add-btn">+ {t('selfEvolutionRun.widgetPlaceholderAddNew')}</button>
         )}
       </div>
     </div>
@@ -61,20 +59,22 @@ function TextListPlaceholder({ config, label }: { config: Extract<WidgetConfig, 
 }
 
 function TextMarkdownPlaceholder({ config, label }: { config: Extract<WidgetConfig, { widgetType: 'text-markdown' }>; label?: string }) {
+  const { t } = useTranslation();
   const style: React.CSSProperties = {};
   if (config.maxHeight) style.maxHeight = config.maxHeight;
   return (
     <div className="wp-root">
       {label && <div className="wp-label">{label}</div>}
       <div className="wp-text-markdown" style={style}>
-        <p><strong>示例标题</strong></p>
-        <p>这是一段 <em>Markdown</em> 格式的示例文本，支持 <strong>加粗</strong>、斜体等格式。</p>
+        <p><strong>{t('selfEvolutionRun.widgetPlaceholderMarkdownTitle')}</strong></p>
+        <p>{t('selfEvolutionRun.widgetPlaceholderMarkdownBody')}</p>
       </div>
     </div>
   );
 }
 
 function ImageSinglePlaceholder({ config, label }: { config: Extract<WidgetConfig, { widgetType: 'image-single' }>; label?: string }) {
+  const { t } = useTranslation();
   const style: React.CSSProperties = {};
   if (config.imageHeight) style.height = config.imageHeight;
   return (
@@ -82,13 +82,14 @@ function ImageSinglePlaceholder({ config, label }: { config: Extract<WidgetConfi
       {label && <div className="wp-label">{label}</div>}
       <div className="wp-image-single" style={style}>
         <PictureOutlined />
-        <span style={{ fontSize: 12 }}>{label ?? '图片'}</span>
+        <span style={{ fontSize: 12 }}>{label ?? t('selfEvolutionRun.widgetPlaceholderImageLabel')}</span>
       </div>
     </div>
   );
 }
 
 function ImageGalleryPlaceholder({ config, label }: { config: Extract<WidgetConfig, { widgetType: 'image-gallery' }>; label?: string }) {
+  const { t } = useTranslation();
   const cardW = config.itemWidth ?? 180;
   const cardH = config.itemHeight ?? 140;
   const isGrid = config.itemLayout === 'grid';
@@ -116,7 +117,7 @@ function ImageGalleryPlaceholder({ config, label }: { config: Extract<WidgetConf
             style={{ width: cardW, height: cardH, border: '1.5px dashed #d9d9d9', color: '#bfbfbf', fontSize: 12, gap: 4 }}
           >
             <span style={{ fontSize: 20 }}>+</span>
-            <span>新增附件</span>
+            <span>{t('selfEvolutionRun.widgetPlaceholderAddAttachment')}</span>
           </div>
         )}
       </div>
@@ -125,18 +126,19 @@ function ImageGalleryPlaceholder({ config, label }: { config: Extract<WidgetConf
 }
 
 function FileCardPlaceholder({ config, label }: { config: Extract<WidgetConfig, { widgetType: 'file-card' }>; label?: string }) {
+  const { t } = useTranslation();
   return (
     <div className="wp-root">
       {label && <div className="wp-label">{label}</div>}
       <div className={`wp-file-card${config.readOnly ? ' wp-file-card--readonly' : ''}`}>
         <FileOutlined className="wp-file-icon" />
         <div className="wp-file-info">
-          <span className="wp-file-name">{label ?? '文件'} 示例文件.pdf</span>
+          <span className="wp-file-name">{label ?? t('selfEvolutionRun.widgetPlaceholderFileLabel')} {t('selfEvolutionRun.widgetPlaceholderSampleFileName')}</span>
           <span className="wp-file-size">128 KB</span>
         </div>
         <div className="wp-file-actions">
-          <button type="button" className="wp-file-action-btn">预览</button>
-          <button type="button" className="wp-file-action-btn">下载</button>
+          <button type="button" className="wp-file-action-btn">{t('selfEvolutionRun.widgetPlaceholderPreview')}</button>
+          <button type="button" className="wp-file-action-btn">{t('selfEvolutionRun.widgetPlaceholderDownload')}</button>
         </div>
       </div>
     </div>

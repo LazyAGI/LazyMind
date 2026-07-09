@@ -3,6 +3,7 @@ import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { Tag, Tooltip } from 'antd';
 import { RobotOutlined, UserOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { ValidationError } from '../core/validator';
 import { isHiddenId } from '../core/model';
 
@@ -44,9 +45,10 @@ function OutputChips({ outputs, outputLabels, containerWidth }: {
   outputLabels: Record<string, string>;
   containerWidth: number;
 }) {
+  const { t } = useTranslation();
   if (outputs.length === 0) return null;
 
-  // Available width minus "产出：" prefix (~32px)
+  // Available width minus output prefix (~32px)
   const available = containerWidth - 20;
   const PLUS_CHIP_WIDTH = 32;
 
@@ -78,7 +80,7 @@ function OutputChips({ outputs, outputLabels, containerWidth }: {
 
   return (
     <div className="step-node-outputs">
-      <span className="step-node-outputs-prefix">产出</span>
+      <span className="step-node-outputs-prefix">{t('selfEvolutionRun.stepNodeOutputPrefix')}</span>
       {visibleLabels.map((lbl, i) => {
         const isTruncated = shown === 1 && lbl.length * 6 + 16 > available;
         return (
@@ -99,6 +101,7 @@ function OutputChips({ outputs, outputLabels, containerWidth }: {
 }
 
 function StepNodeComponent({ data, selected }: NodeProps) {
+  const { t } = useTranslation();
   const nodeData = data as unknown as StepNodeData;
   const { hasError, errorMessages, mode, label, id, route, skipif, transitions,
           outputs, outputLabels, nodeWidth, onResizeEnd, onResizeDrag, getZoom } = nodeData;
@@ -165,7 +168,7 @@ function StepNodeComponent({ data, selected }: NodeProps) {
           hasError ? 'has-error' : '',
           isSkippable ? 'is-skippable' : '',
         ].filter(Boolean).join(' ')}
-        aria-label={`步骤节点: ${String(label)}`}
+        aria-label={t('selfEvolutionRun.stepNodeAriaLabel', { label: String(label) })}
       >
         <Handle
           type="target"
@@ -178,18 +181,18 @@ function StepNodeComponent({ data, selected }: NodeProps) {
           <span className="step-node-id">{isHiddenId(id) ? '' : String(id)}</span>
           <div className="step-node-badges">
             {isChoice && (
-              <Tooltip title="条件路由：选择一个出口">
-                <span className="step-node-badge step-node-badge--choice" aria-label="条件路由">◇</span>
+              <Tooltip title={t('selfEvolutionRun.stepNodeChoiceTooltip')}>
+                <span className="step-node-badge step-node-badge--choice" aria-label={t('selfEvolutionRun.stepNodeChoiceTooltip')}>◇</span>
               </Tooltip>
             )}
             {isParallel && (
-              <Tooltip title="并行触发：同时触发所有出口">
-                <span className="step-node-badge step-node-badge--parallel" aria-label="并行触发">⑂</span>
+              <Tooltip title={t('selfEvolutionRun.stepNodeParallelTooltip')}>
+                <span className="step-node-badge step-node-badge--parallel" aria-label={t('selfEvolutionRun.stepNodeParallelTooltip')}>⑂</span>
               </Tooltip>
             )}
             {isSkippable && (
-              <Tooltip title={`可跳过：${skipif}`}>
-                <span className="step-node-badge step-node-badge--skip" aria-label="可跳过">↷</span>
+              <Tooltip title={t('selfEvolutionRun.stepNodeSkippableTooltip', { skipif })}>
+                <span className="step-node-badge step-node-badge--skip" aria-label={t('selfEvolutionRun.stepNodeSkippableTooltip', { skipif })}>↷</span>
               </Tooltip>
             )}
             <Tag
@@ -220,9 +223,10 @@ export const StepNodeRenderer = memo(StepNodeComponent);
 
 // Virtual terminal node: __start__ or __end__ — rendered as a card (not a dot)
 export function TerminalNode({ data }: NodeProps) {
+  const { t } = useTranslation();
   const nodeData = data as unknown as { type: 'start' | 'end' };
   const isStart = nodeData.type === 'start';
-  const label = isStart ? '开始' : '结束';
+  const label = isStart ? t('selfEvolutionRun.stepNodeStart') : t('selfEvolutionRun.stepNodeEnd');
   return (
     <div className={`terminal-node terminal-node--${nodeData.type}`} aria-label={label}>
       {!isStart && <Handle type="target" position={Position.Left} className="step-node-handle" />}

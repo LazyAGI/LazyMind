@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Spin } from 'antd';
+import { useTranslation } from 'react-i18next';
 import type { GraphModel } from '../core/model';
 import type { ValidationError } from '../core/validator';
 import type { PluginModel } from '../core/pluginModel';
@@ -22,11 +23,12 @@ interface Props {
 }
 
 export default function GraphCanvas(props: Props) {
+  const { t } = useTranslation();
   return (
     <Suspense
       fallback={
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-          <Spin tip="加载画布..." />
+          <Spin tip={t('selfEvolutionRun.graphCanvasLoading')} />
         </div>
       }
     >
