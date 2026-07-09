@@ -87,6 +87,7 @@ func localRuntimeEnv(cfg RuntimeConfig) []string {
 	return []string{
 		runtimeProfileEnvVar + "=" + cfg.Profile,
 		runtimeRootEnvVar + "=" + cfg.RuntimeRoot,
+		localBuildRootEnvVar + "=" + cfg.BuildRoot,
 		runtimeResourcesRootEnvVar + "=" + cfg.ResourcesRoot,
 		processComposePortEnvVar + "=" + strconv.Itoa(cfg.ProcessComposePort),
 		frontendPortEnvVar + "=" + strconv.Itoa(cfg.FrontendPort),

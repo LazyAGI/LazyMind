@@ -289,12 +289,14 @@ func addRuntimeFlags(fs *flag.FlagSet) func() RuntimeConfigOptions {
 	repoRoot := fs.String("repo-root", "", "")
 	profile := fs.String("profile", "", "")
 	runtimeRoot := fs.String("runtime-root", "", "")
+	buildRoot := fs.String("build-root", "", "")
 	resourcesRoot := fs.String("resources-root", "", "")
 	return func() RuntimeConfigOptions {
 		return RuntimeConfigOptions{
 			Profile:       *profile,
 			RepoRoot:      *repoRoot,
 			RuntimeRoot:   *runtimeRoot,
+			BuildRoot:     *buildRoot,
 			ResourcesRoot: *resourcesRoot,
 		}
 	}

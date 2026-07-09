@@ -8,8 +8,12 @@ import (
 func processTextMatchesRuntime(paths RuntimePaths, parts ...string) bool {
 	text := strings.Join(parts, " ")
 	repo := filepath.Clean(paths.RepoRoot)
+	buildRoot := filepath.Clean(paths.BuildRoot)
 	runtimeRoot := filepath.Clean(paths.RuntimeRoot)
 	resourcesRoot := filepath.Clean(paths.ResourcesRoot)
+	if buildRoot != "." && strings.Contains(text, buildRoot) {
+		return true
+	}
 	if strings.Contains(text, runtimeRoot) {
 		return true
 	}

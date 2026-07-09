@@ -92,6 +92,9 @@ func TestAuthServiceInstallRequirementsUsesUVOnly(t *testing.T) {
 					if pathIsUnderRoot(value, paths.RuntimeRoot) {
 						t.Fatalf("%s = %q is under runtime root %q", key, value, paths.RuntimeRoot)
 					}
+					if pathIsUnderRoot(value, paths.BuildRoot) {
+						t.Fatalf("%s = %q is under build root %q", key, value, paths.BuildRoot)
+					}
 				}
 			}
 			return CommandResult{}, nil

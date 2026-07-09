@@ -13,6 +13,7 @@ import (
 const (
 	runtimeProfileEnvVar          = "LAZYMIND_RUNTIME_PROFILE"
 	runtimeRootEnvVar             = "LAZYMIND_RUNTIME_ROOT"
+	localBuildRootEnvVar          = "LAZYMIND_LOCAL_BUILD_ROOT"
 	runtimeResourcesRootEnvVar    = "LAZYMIND_RUNTIME_RESOURCES_ROOT"
 	localPortsPinnedEnvVar        = "LAZYMIND_LOCAL_PORTS_PINNED"
 	processComposePortEnvVar      = "LAZYMIND_PROCESS_COMPOSE_PORT"
@@ -90,7 +91,7 @@ const (
 	authServiceLogFileName        = "auth-service.log"
 	coreLogFileName               = "core.log"
 	frontendLogFileName           = "frontend.log"
-	localProcessComposeBin        = "local/.bin/process-compose"
+	localProcessComposeBin        = "local/build/bin/process-compose"
 	localProxyConfigName          = "local/local-proxy/configs/cloud-replace-kong.yaml"
 	localProxyScriptDirName       = "local/local-proxy/scripts"
 	localProxySourceDirName       = "local/local-proxy"
@@ -115,6 +116,7 @@ const (
 type RuntimePaths struct {
 	RepoRoot                 string
 	ResourcesRoot            string
+	BuildRoot                string
 	RuntimeRoot              string
 	CacheDir                 string
 	DataDir                  string
@@ -137,6 +139,7 @@ type RuntimePaths struct {
 	AuthServicePIDFile       string
 	AuthServiceVenvDir       string
 	PythonRuntimeDir         string
+	NodeRuntimeDir           string
 	PythonStateDir           string
 	UVCacheDir               string
 	PipCacheDir              string
@@ -197,6 +200,7 @@ type RuntimePaths struct {
 type RuntimeConfig struct {
 	Profile            string
 	RepoRoot           string
+	BuildRoot          string
 	ResourcesRoot      string
 	RuntimeRoot        string
 	ModeProfile        RuntimeModeProfileConfig
@@ -215,6 +219,7 @@ type RuntimeConfigOptions struct {
 	Profile       string
 	RepoRoot      string
 	RuntimeRoot   string
+	BuildRoot     string
 	ResourcesRoot string
 }
 
@@ -663,11 +668,16 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 
 	root := filepath.Clean(resolved)
 	resourcesRoot := cleanOptionalPath(firstNonEmpty(opts.ResourcesRoot, os.Getenv(runtimeResourcesRootEnvVar), root))
+	defaultBuildRoot := filepath.Join(root, "local", "build")
+	if profile == "desktop" {
+		defaultBuildRoot = resourcesRoot
+	}
+	buildRoot := cleanOptionalPath(firstNonEmpty(opts.BuildRoot, os.Getenv(localBuildRootEnvVar), defaultBuildRoot))
 	pathLayout := defaultRuntimePathLayout()
 	runtimeRoot := cleanOptionalPath(firstNonEmpty(opts.RuntimeRoot, os.Getenv(runtimeRootEnvVar), pathLayout.DataRoot))
 	cacheRoot := cleanOptionalPath(pathLayout.CacheRoot)
 	dataRoot := filepath.Join(runtimeRoot, "data")
-	depsRoot := filepath.Join(runtimeRoot, "deps")
+	depsRoot := filepath.Join(buildRoot, "deps")
 	sqliteRoot := envText(localSQLiteDirEnvVar, filepath.Join(dataRoot, "stores", "sqlite"))
 	uploadRoot := filepath.Join(runtimeRoot, "data", "core", "uploads")
 	frontendNodeModules := filepath.Join(depsRoot, "node", "frontend")
@@ -675,6 +685,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	p := RuntimePaths{
 		RepoRoot:                 root,
 		ResourcesRoot:            resourcesRoot,
+		BuildRoot:                buildRoot,
 		RuntimeRoot:              runtimeRoot,
 		CacheDir:                 cacheRoot,
 		DataDir:                  dataRoot,
@@ -684,19 +695,20 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		RunDir:                   filepath.Join(runtimeRoot, "run"),
 		ConfigDir:                filepath.Join(runtimeRoot, "config"),
 		GeneratedDir:             filepath.Join(runtimeRoot, "generated"),
-		BinDir:                   filepath.Join(runtimeRoot, "bin"),
+		BinDir:                   filepath.Join(buildRoot, "bin"),
 		StateFile:                filepath.Join(runtimeRoot, "state", stateFileName),
 		ProcessRegistryFile:      filepath.Join(runtimeRoot, "run", "processes.json"),
 		RunDirTokenFile:          filepath.Join(runtimeRoot, "run", tokenFileName),
 		UpLockFile:               filepath.Join(runtimeRoot, "run", upLockFileName),
 		LogFilePath:              filepath.Join(logsRoot, logFileName),
-		ProcessComposeBin:        filepath.Join(runtimeRoot, "bin", "process-compose"),
+		ProcessComposeBin:        filepath.Join(buildRoot, "bin", "process-compose"),
 		ProcessComposePIDFile:    filepath.Join(runtimeRoot, "run", "process-compose.pid"),
 		LocalProxyLog:            filepath.Join(logsRoot, localProxyLogFileName),
 		AuthServiceLog:           filepath.Join(logsRoot, authServiceLogFileName),
 		AuthServicePIDFile:       filepath.Join(runtimeRoot, "run", "auth-service.pid"),
 		AuthServiceVenvDir:       filepath.Join(depsRoot, "python", "auth-service"),
-		PythonRuntimeDir:         filepath.Join(runtimeRoot, "runtimes", "python"),
+		PythonRuntimeDir:         filepath.Join(buildRoot, "runtimes", "python"),
+		NodeRuntimeDir:           filepath.Join(buildRoot, "runtimes", "node"),
 		PythonStateDir:           filepath.Join(runtimeRoot, "state", "python"),
 		UVCacheDir:               filepath.Join(defaultHostCacheDir(hostHomeDir()), "uv"),
 		PipCacheDir:              filepath.Join(defaultHostCacheDir(hostHomeDir()), "pip"),
@@ -708,7 +720,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		AuthServiceDBPath:        filepath.Join(sqliteRoot, "auth", "authservice.db"),
 		CoreLog:                  filepath.Join(logsRoot, coreLogFileName),
 		CorePIDFile:              filepath.Join(runtimeRoot, "run", "core.pid"),
-		CoreBin:                  filepath.Join(runtimeRoot, "bin", "core"),
+		CoreBin:                  filepath.Join(buildRoot, "bin", "core"),
 		CoreStateDir:             filepath.Join(dataRoot, "stores", "sqlite", "core-state"),
 		CoreDBPath:               filepath.Join(sqliteRoot, "core", "core.db"),
 		LazyLLMDBPath:            filepath.Join(sqliteRoot, "lazyllm", "app.db"),
@@ -722,12 +734,12 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		ScanDBPath:               filepath.Join(sqliteRoot, "scan", "scan_control_plane.db"),
 		ScanControlPlaneLog:      filepath.Join(logsRoot, scanControlPlaneProcessName+".log"),
 		ScanControlPlanePIDFile:  filepath.Join(runtimeRoot, "run", scanControlPlaneProcessName+".pid"),
-		ScanControlPlaneBin:      filepath.Join(runtimeRoot, "bin", scanControlPlaneProcessName),
+		ScanControlPlaneBin:      filepath.Join(buildRoot, "bin", scanControlPlaneProcessName),
 		ScanControlPlaneStateDir: filepath.Join(dataRoot, "stores", "sqlite", "scan-state"),
 		ScanControlPlaneTempDir:  filepath.Join(runtimeRoot, "tmp", scanControlPlaneProcessName, "sourceengine"),
 		FileWatcherLog:           filepath.Join(logsRoot, fileWatcherProcessName+".log"),
 		FileWatcherPIDFile:       filepath.Join(runtimeRoot, "run", fileWatcherProcessName+".pid"),
-		FileWatcherBin:           filepath.Join(runtimeRoot, "bin", fileWatcherProcessName),
+		FileWatcherBin:           filepath.Join(buildRoot, "bin", fileWatcherProcessName),
 		FileWatcherBaseRoot:      defaultFileWatcherBaseRoot(runtimeRoot),
 		FrontendLog:              filepath.Join(logsRoot, frontendLogFileName),
 		DocServerLog:             filepath.Join(logsRoot, docServerProcessName+".log"),
@@ -739,8 +751,8 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		MilvusLiteLog:            filepath.Join(logsRoot, milvusLiteProcessName+".log"),
 		MilvusLitePIDFile:        filepath.Join(runtimeRoot, "run", milvusLiteProcessName+".pid"),
 		MilvusLiteDBPath:         filepath.Join(dataRoot, "stores", "milvus", "lazymind.db"),
-		LocalProxyBin:            filepath.Join(runtimeRoot, "bin", "local-proxy"),
-		CaddyBin:                 filepath.Join(runtimeRoot, "bin", "caddy"),
+		LocalProxyBin:            filepath.Join(buildRoot, "bin", "local-proxy"),
+		CaddyBin:                 filepath.Join(buildRoot, "bin", "caddy"),
 		LocalProxyConfig:         filepath.Join(root, localProxyConfigName),
 		LocalProxyStopScript:     filepath.Join(root, localProxyScriptDirName, "stop.sh"),
 		CaddyConfig:              filepath.Join(runtimeRoot, "generated", "Caddyfile"),
@@ -816,6 +828,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	return RuntimeConfig{
 		Profile:            profile,
 		RepoRoot:           p.RepoRoot,
+		BuildRoot:          p.BuildRoot,
 		ResourcesRoot:      p.ResourcesRoot,
 		RuntimeRoot:        runtimeRoot,
 		ModeProfile:        localRuntimeModeProfile(milvusPort, milvusLiteDBPath),
@@ -1017,6 +1030,7 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		p.ProcessComposeHome,
 		p.ServiceHome,
 		p.PythonRuntimeDir,
+		p.NodeRuntimeDir,
 		p.PythonStateDir,
 		filepath.Dir(p.AuthServicePIDFile),
 		p.AuthServiceStateDir,

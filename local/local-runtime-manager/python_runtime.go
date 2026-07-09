@@ -40,7 +40,7 @@ func ensureLocalPythonRuntime(ctx context.Context, runner CommandRunner, paths R
 		if python == "" {
 			return fmt.Errorf("find local Python %s returned an empty path", version)
 		}
-		if err := ensurePathUnderRoot(python, paths.RuntimeRoot); err != nil {
+		if err := ensurePathUnderRoot(python, paths.BuildRoot); err != nil {
 			return fmt.Errorf("local Python %s is not self-contained: %w", version, err)
 		}
 		return nil

@@ -56,6 +56,9 @@ func TestRuntimeConfigUsesPlatformUserPathsByDefault(t *testing.T) {
 	if paths.RuntimeRoot != layout.DataRoot {
 		t.Fatalf("runtime root = %q, want %q", paths.RuntimeRoot, layout.DataRoot)
 	}
+	if paths.BuildRoot != filepath.Join(repo, "local", "build") {
+		t.Fatalf("build root = %q, want %q", paths.BuildRoot, filepath.Join(repo, "local", "build"))
+	}
 	if paths.LogsDir != layout.LogsRoot {
 		t.Fatalf("logs dir = %q, want %q", paths.LogsDir, layout.LogsRoot)
 	}
@@ -67,6 +70,9 @@ func TestRuntimeConfigUsesPlatformUserPathsByDefault(t *testing.T) {
 	}
 	if strings.HasPrefix(paths.RuntimeRoot, repo+string(os.PathSeparator)) {
 		t.Fatalf("default runtime root must not be under repo: %q", paths.RuntimeRoot)
+	}
+	if !strings.HasPrefix(paths.BuildRoot, repo+string(os.PathSeparator)) {
+		t.Fatalf("default build root must be under repo: %q", paths.BuildRoot)
 	}
 }
 
@@ -185,6 +191,9 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	}
 	if paths.ResourcesRoot != resources {
 		t.Fatalf("resources root = %q, want %q", paths.ResourcesRoot, resources)
+	}
+	if paths.BuildRoot != resources {
+		t.Fatalf("build root = %q, want %q", paths.BuildRoot, resources)
 	}
 	if paths.ProcessComposeBin != filepath.Join(resources, "bin", "process-compose") {
 		t.Fatalf("process-compose bin = %q", paths.ProcessComposeBin)
@@ -324,15 +333,12 @@ func TestEnsureAllDirsUsesOnlyApprovedTopLevelDirs(t *testing.T) {
 		t.Fatalf("ensure all dirs: %v", err)
 	}
 	allowed := map[string]bool{
-		"bin":       true,
 		"cache":     true,
 		"config":    true,
 		"data":      true,
-		"deps":      true,
 		"generated": true,
 		"logs":      true,
 		"run":       true,
-		"runtimes":  true,
 		"state":     true,
 		"tmp":       true,
 	}
@@ -450,12 +456,14 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	}
 }
 
-func TestProcessComposeGOBINIsUnderLocalRuntimeRoot(t *testing.T) {
+func TestProcessComposeGOBINIsUnderLocalBuildRoot(t *testing.T) {
 	repo := t.TempDir()
+	buildRoot := filepath.Join(t.TempDir(), "build")
 	paths := RuntimePaths{
 		RepoRoot:          repo,
 		RuntimeRoot:       filepath.Join(t.TempDir(), "runtime"),
-		ProcessComposeBin: filepath.Join(t.TempDir(), "runtime", "bin", "process-compose"),
+		BuildRoot:         buildRoot,
+		ProcessComposeBin: filepath.Join(buildRoot, "bin", "process-compose"),
 	}
 	got, err := processComposeGOBIN(paths)
 	if err != nil {
@@ -585,6 +593,9 @@ func TestProcessComposeEnvPinsAllPlannedPorts(t *testing.T) {
 	}
 	if env[localPortsPinnedEnvVar] != "1" {
 		t.Fatalf("%s = %q, want 1", localPortsPinnedEnvVar, env[localPortsPinnedEnvVar])
+	}
+	if env[localBuildRootEnvVar] != paths.BuildRoot {
+		t.Fatalf("%s = %q, want %q", localBuildRootEnvVar, env[localBuildRootEnvVar], paths.BuildRoot)
 	}
 	if env["HOME"] != paths.ServiceHome {
 		t.Fatalf("HOME = %q, want %q", env["HOME"], paths.ServiceHome)
@@ -717,29 +728,37 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	}
 }
 
-func TestDerivedToolInstallPathsStayUnderLocalRuntimeRoot(t *testing.T) {
+func TestDerivedToolInstallPathsUseLocalBuildRoot(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	_, paths, err := NewRuntimeConfig("", repo)
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
-	for _, path := range []string{paths.BinDir, paths.GeneratedDir, paths.StateDir, paths.RunDir, paths.ConfigDir, paths.AuthServiceVenvDir, paths.AlgorithmVenv, paths.FrontendNodeModules, paths.MilvusLiteDBPath, paths.FileWatcherBaseRoot} {
+	for _, path := range []string{paths.BinDir, paths.DepsDir, paths.AuthServiceVenvDir, paths.AlgorithmVenv, paths.FrontendNodeModules, paths.PythonRuntimeDir, paths.NodeRuntimeDir} {
+		if !strings.HasPrefix(path, paths.BuildRoot+string(os.PathSeparator)) {
+			t.Fatalf("%s is outside build root %s", path, paths.BuildRoot)
+		}
+	}
+	for _, path := range []string{paths.GeneratedDir, paths.StateDir, paths.RunDir, paths.ConfigDir, paths.MilvusLiteDBPath, paths.FileWatcherBaseRoot, paths.PythonStateDir} {
 		if !strings.HasPrefix(path, paths.RuntimeRoot+string(os.PathSeparator)) {
 			t.Fatalf("%s is outside runtime root %s", path, paths.RuntimeRoot)
 		}
 	}
-	if paths.AuthServiceVenvDir != filepath.Join(paths.RuntimeRoot, "deps", "python", "auth-service") {
+	if paths.AuthServiceVenvDir != filepath.Join(paths.BuildRoot, "deps", "python", "auth-service") {
 		t.Fatalf("auth-service venv = %q", paths.AuthServiceVenvDir)
 	}
-	if paths.AlgorithmVenv != filepath.Join(paths.RuntimeRoot, "deps", "python", "algorithm") {
+	if paths.AlgorithmVenv != filepath.Join(paths.BuildRoot, "deps", "python", "algorithm") {
 		t.Fatalf("algorithm venv = %q", paths.AlgorithmVenv)
 	}
-	if paths.FrontendNodeModules != filepath.Join(paths.RuntimeRoot, "deps", "node", "frontend") {
+	if paths.FrontendNodeModules != filepath.Join(paths.BuildRoot, "deps", "node", "frontend") {
 		t.Fatalf("frontend node_modules = %q", paths.FrontendNodeModules)
 	}
-	if paths.PythonRuntimeDir != filepath.Join(paths.RuntimeRoot, "runtimes", "python") {
+	if paths.PythonRuntimeDir != filepath.Join(paths.BuildRoot, "runtimes", "python") {
 		t.Fatalf("python runtime dir = %q", paths.PythonRuntimeDir)
+	}
+	if paths.NodeRuntimeDir != filepath.Join(paths.BuildRoot, "runtimes", "node") {
+		t.Fatalf("node runtime dir = %q", paths.NodeRuntimeDir)
 	}
 	if paths.PythonStateDir != filepath.Join(paths.RuntimeRoot, "state", "python") {
 		t.Fatalf("python state dir = %q", paths.PythonStateDir)
@@ -756,7 +775,7 @@ func TestGoToolEnvUsesHostCacheOutsideRuntimeRoot(t *testing.T) {
 	hostHome := filepath.Join(t.TempDir(), "host-home")
 	t.Setenv(localHostHomeEnvVar, hostHome)
 	t.Setenv("HOME", paths.ServiceHome)
-	t.Setenv("GOCACHE", filepath.Join(paths.RuntimeRoot, "Library", "Caches", "go-build"))
+	t.Setenv("GOCACHE", filepath.Join(paths.BuildRoot, "cache", "go-build"))
 	t.Setenv("GOMODCACHE", filepath.Join(paths.RuntimeRoot, "go", "pkg", "mod"))
 
 	env := map[string]string{}
@@ -769,6 +788,9 @@ func TestGoToolEnvUsesHostCacheOutsideRuntimeRoot(t *testing.T) {
 	for _, key := range []string{"GOCACHE", "GOMODCACHE"} {
 		if pathIsUnderRoot(env[key], paths.RuntimeRoot) {
 			t.Fatalf("%s = %q is under runtime root %q", key, env[key], paths.RuntimeRoot)
+		}
+		if pathIsUnderRoot(env[key], paths.BuildRoot) {
+			t.Fatalf("%s = %q is under build root %q", key, env[key], paths.BuildRoot)
 		}
 		if !strings.HasPrefix(env[key], hostHome+string(os.PathSeparator)) {
 			t.Fatalf("%s = %q, want under host home %q", key, env[key], hostHome)
@@ -875,6 +897,9 @@ func TestPNPMLocalCacheEnvIsNonInteractive(t *testing.T) {
 	for _, key := range []string{"HOME", "XDG_CACHE_HOME"} {
 		if pathIsUnderRoot(env[key], paths.RuntimeRoot) {
 			t.Fatalf("%s = %q is under runtime root %q", key, env[key], paths.RuntimeRoot)
+		}
+		if pathIsUnderRoot(env[key], paths.BuildRoot) {
+			t.Fatalf("%s = %q is under build root %q", key, env[key], paths.BuildRoot)
 		}
 	}
 	for _, key := range []string{"PNPM_HOME", "NPM_CONFIG_STORE_DIR"} {

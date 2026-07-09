@@ -171,7 +171,7 @@ func prepareFrontendNodeModules(paths RuntimePaths, frontendDir string) error {
 			return err
 		}
 		if err := os.RemoveAll(nodeModules); err != nil {
-			return fmt.Errorf("move frontend node_modules into local runtime root: %w", err)
+			return fmt.Errorf("move frontend node_modules into local build root: %w", err)
 		}
 		if ready {
 			_ = os.RemoveAll(runtimeNodeModules)
@@ -183,7 +183,7 @@ func prepareFrontendNodeModules(paths RuntimePaths, frontendDir string) error {
 		return fmt.Errorf("inspect frontend node_modules: %w", err)
 	}
 	if err := os.Symlink(runtimeNodeModules, nodeModules); err != nil {
-		return fmt.Errorf("link frontend node_modules to local runtime root: %w", err)
+		return fmt.Errorf("link frontend node_modules to local build root: %w", err)
 	}
 	return nil
 }

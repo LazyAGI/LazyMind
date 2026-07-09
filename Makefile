@@ -1,10 +1,10 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local up-build-local-lan down-local reset-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
 LOCAL_CONFIG_ENV_EXAMPLE ?= local/config.env.example
-_LOCAL_CONFIG_TARGETS := local-runtime-manager-build up-build-local down-local reset-local reset-kb reset-all fresh-start
+_LOCAL_CONFIG_TARGETS := local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset reset-kb reset-all fresh-start
 _NEEDS_LOCAL_CONFIG := $(filter $(_LOCAL_CONFIG_TARGETS),$(MAKECMDGOALS))
 ifneq (,$(_NEEDS_LOCAL_CONFIG))
 _LOCAL_CONFIG_BOOTSTRAP := $(shell if [ ! -f "$(LOCAL_CONFIG_ENV)" ]; then mkdir -p "$(dir $(LOCAL_CONFIG_ENV))"; cp "$(LOCAL_CONFIG_ENV_EXAMPLE)" "$(LOCAL_CONFIG_ENV)"; fi)
@@ -20,7 +20,12 @@ export DOCKER_BUILDKIT ?= 1
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 GO ?= go
-LOCAL_RUNTIME_MANAGER_BIN ?= $(CURDIR)/local/.bin/local-runtime-manager
+export LAZYMIND_LOCAL_BUILD_ROOT ?= $(CURDIR)/local/build
+LOCAL_RUNTIME_MANAGER_BIN ?= $(LAZYMIND_LOCAL_BUILD_ROOT)/bin/local-runtime-manager
+ifeq ($(LOCAL_RUNTIME_MANAGER_BIN),$(CURDIR)/local/.bin/local-runtime-manager)
+override LOCAL_RUNTIME_MANAGER_BIN := $(CURDIR)/local/build/bin/local-runtime-manager
+endif
+LOCAL_BUILD_DIR := $(CURDIR)/local/build
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
 comma := ,
 
@@ -58,7 +63,7 @@ endif
 #        make up COMPOSE_PROJECT=myproj    →  docker compose -p myproj up -d
 #        make down                         →  docker compose down
 #        make down COMPOSE_PROJECT=myproj  →  docker compose -p myproj down
-#        make up-build-local               → use local host-process runtime
+#        make local-up                     → use local host-process runtime
 # ---------------------------------------------------------------------------
 _COMPOSE_PROJECT_FLAG := $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),)
 _COMPOSE_DEFAULT := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT_FLAG)
@@ -188,14 +193,15 @@ help:
 	@echo "                    Use SERVICES=svc1,svc2 to start specific services only"
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
-	@echo "  make up-build-local - Build/start local LazyMind without containers"
-	@echo "  make up-build-local-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
+	@echo "  make local-up - Build/start local LazyMind without containers"
+	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
 	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
 	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
 	@echo "  make desktop-cache-clean - Remove repo-local Desktop caches, if any"
 	@echo "  make desktop-clean - Remove all Desktop generated outputs"
-	@echo "  make down-local - Stop local LazyMind runtime"
-	@echo "  make reset-local - Stop local runtime and clear configured local state"
+	@echo "  make local-down - Stop local LazyMind runtime"
+	@echo "  make local-clean - Remove repo-local local/build application artifacts"
+	@echo "  make local-reset - Stop local runtime, clear user-path runtime data, and remove local/build"
 	@echo "  make down       - Stop Cloud/Kong compose services"
 	@echo "                    Use SERVICES=svc1,svc2 to stop specific services only"
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
@@ -471,27 +477,36 @@ desktop-clean:
 		fi; \
 	done
 
-up-build-local: local-runtime-manager-build
+local-up: local-runtime-manager-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
 
-up-build-local-lan: local-runtime-manager-build
+local-up-lan: local-runtime-manager-build
 	@LAZYMIND_LOCAL_NETWORK_PROFILE=lan LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN=true "$(LOCAL_RUNTIME_MANAGER_BIN)" up
 
-down-local:
+local-down:
 	@if [ -x "$(LOCAL_RUNTIME_MANAGER_BIN)" ]; then \
 		"$(LOCAL_RUNTIME_MANAGER_BIN)" down; \
 	else \
 		echo "ℹ️  No Local Runtime manager found; skipping"; \
 	fi
 
-reset-local:
+local-clean:
+	@echo "🧹 Removing repo-local application artifacts: $(LOCAL_BUILD_DIR)"
+	@if [ -e "$(LOCAL_BUILD_DIR)" ]; then \
+		chflags -R nouchg "$(LOCAL_BUILD_DIR)" 2>/dev/null || true; \
+		chmod -R u+rwX "$(LOCAL_BUILD_DIR)" 2>/dev/null || true; \
+		rm -rf "$(LOCAL_BUILD_DIR)"; \
+	fi
+
+local-reset: local-runtime-manager-build
 	@if [ -x "$(LOCAL_RUNTIME_MANAGER_BIN)" ]; then \
 		"$(LOCAL_RUNTIME_MANAGER_BIN)" reset --scope all || \
 			echo "⚠️  Local Runtime manager reset timed out or failed"; \
 	else \
 		echo "ℹ️  No Local Runtime manager found; skipping reset"; \
 	fi
-	@echo "✅ Local runtime reset. Run 'make up-build-local' to rebuild it."
+	@$(MAKE) --no-print-directory local-clean
+	@echo "✅ Local runtime reset. Run 'make local-up' to rebuild it."
 
 clear:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \

@@ -47,9 +47,9 @@ const manifest = {
   paths: {
     appRoot: "app",
     frontendDist: "app/frontend/dist",
-    pythonRuntime: "python/runtime",
-    authServiceVenv: "python/auth-service",
-    algorithmVenv: "python/algorithm",
+    pythonRuntime: "runtimes/python",
+    authServiceVenv: "deps/python/auth-service",
+    algorithmVenv: "deps/python/algorithm",
     localProxyConfig: "app/local/local-proxy/configs/cloud-replace-kong.yaml"
   },
   services: {

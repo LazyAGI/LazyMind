@@ -187,6 +187,7 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 	env = append(env,
 		runtimeProfileEnvVar+"="+cfg.Profile,
 		runtimeRootEnvVar+"="+cfg.RuntimeRoot,
+		localBuildRootEnvVar+"="+cfg.BuildRoot,
 		runtimeResourcesRootEnvVar+"="+cfg.ResourcesRoot,
 		localPortsPinnedEnvVar+"=1",
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
