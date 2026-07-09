@@ -167,7 +167,7 @@ make test-hermetic
 | 外接 Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | 开启存储 Dashboard | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 
-`make up-build-local` 会通过 `.lazymind-local/bin/local-runtime-manager` 在宿主机上直接运行 LazyMind。生成的程序、运行状态、依赖、日志和启动配置都会放在 `.lazymind-local/` 下。local Python runtime 会安装到 `.lazymind-local/runtimes/python`，服务依赖放在 `.lazymind-local/deps/`，运行数据放在 `.lazymind-local/data/`；pnpm、uv、pip、corepack 和 Go 等构建期工具缓存使用用户级默认缓存，不写入 `.lazymind-local/`。整个 `.lazymind-local/` 目录可以删除后重建。
+`make up-build-local` 会通过 `local/runtime/bin/local-runtime-manager` 在宿主机上直接运行 LazyMind。如果 `local/config.env` 不存在，Make 会从 `local/config.env.example` 复制一份，并用它作为 local build/run 配置。生成的程序、运行状态、依赖、日志和启动配置都会放在 `local/runtime/` 下。local Python runtime 会安装到 `local/runtime/runtimes/python`，服务依赖放在 `local/runtime/deps/`，运行数据放在 `local/runtime/data/`；pnpm、uv、pip、corepack 和 Go 等构建期工具缓存使用用户级默认缓存，不写入 `local/runtime/`。整个 `local/runtime/` 目录可以删除后重建。
 
 ---
 

@@ -31,7 +31,7 @@ func (m *MilvusLiteManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 		return err
 	}
 	algorithm := NewAlgorithmServiceManager(m.runner)
-	if err := algorithm.preparePython(ctx, paths, false); err != nil {
+	if err := algorithm.preparePython(ctx, cfg, paths, false); err != nil {
 		return err
 	}
 

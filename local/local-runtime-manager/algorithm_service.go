@@ -94,7 +94,7 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 	if err := ensureAlgorithmDataDirs(paths); err != nil {
 		return err
 	}
-	if err := m.preparePython(ctx, paths, cfg.Algorithm.EnableEvo); err != nil {
+	if err := m.preparePython(ctx, cfg, paths, cfg.Algorithm.EnableEvo); err != nil {
 		return err
 	}
 	if err := m.waitForDependencies(ctx, cfg, spec.Name); err != nil {
@@ -213,7 +213,13 @@ func killAlgorithmProcess(proc *os.Process) error {
 	return proc.Kill()
 }
 
-func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
+func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, includeEvo bool) error {
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(paths.AlgorithmPython); err == nil && !info.IsDir() {
+			return nil
+		}
+		return fmt.Errorf("desktop algorithm Python not found: %s", paths.AlgorithmPython)
+	}
 	if err := ensureLazyLLMSubmodule(ctx, m.runner, paths.RepoRoot); err != nil {
 		return err
 	}
@@ -429,6 +435,17 @@ func ensureLazyLLMSubmodule(ctx context.Context, runner CommandRunner, repoRoot 
 		return nil
 	}
 	return fmt.Errorf("algorithm/lazyllm submodule is still not checked out after git submodule update --init algorithm/lazyllm")
+}
+
+func ensureLazyLLMSource(ctx context.Context, runner CommandRunner, repoRoot string, profile string) error {
+	required := filepath.Join(repoRoot, "algorithm", "lazyllm", "lazyllm")
+	if info, err := os.Stat(required); err == nil && info.IsDir() {
+		return nil
+	}
+	if profile == "desktop" {
+		return fmt.Errorf("desktop runtime is missing bundled algorithm/lazyllm source; rebuild the app with algorithm/lazyllm submodule initialized")
+	}
+	return ensureLazyLLMSubmodule(ctx, runner, repoRoot)
 }
 
 func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) []string {

@@ -25,18 +25,24 @@ func (m *LocalProxyManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 		return err
 	}
 
-	goBin := strings.TrimSpace(os.Getenv("GO"))
-	if goBin == "" {
-		goBin = "go"
-	}
-	build := Command{
-		Name: goBin,
-		Args: []string{"build", "-buildvcs=false", "-o", paths.LocalProxyBin, "./cmd/local-proxy"},
-		Dir:  filepath.Join(paths.RepoRoot, localProxySourceDirName),
-		Env:  goToolEnv(paths),
-	}
-	if res, err := m.runner.Run(ctx, build); err != nil {
-		return fmt.Errorf("build local-proxy failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(paths.LocalProxyBin); err != nil || info.IsDir() {
+			return fmt.Errorf("desktop local-proxy binary not found: %s", paths.LocalProxyBin)
+		}
+	} else {
+		goBin := strings.TrimSpace(os.Getenv("GO"))
+		if goBin == "" {
+			goBin = "go"
+		}
+		build := Command{
+			Name: goBin,
+			Args: []string{"build", "-buildvcs=false", "-o", paths.LocalProxyBin, "./cmd/local-proxy"},
+			Dir:  filepath.Join(paths.RepoRoot, localProxySourceDirName),
+			Env:  goToolEnv(paths),
+		}
+		if res, err := m.runner.Run(ctx, build); err != nil {
+			return fmt.Errorf("build local-proxy failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+		}
 	}
 
 	run := Command{
@@ -79,6 +85,9 @@ func localProxyEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 
 func localRuntimeEnv(cfg RuntimeConfig) []string {
 	return []string{
+		runtimeProfileEnvVar + "=" + cfg.Profile,
+		runtimeRootEnvVar + "=" + cfg.RuntimeRoot,
+		runtimeResourcesRootEnvVar + "=" + cfg.ResourcesRoot,
 		processComposePortEnvVar + "=" + strconv.Itoa(cfg.ProcessComposePort),
 		frontendPortEnvVar + "=" + strconv.Itoa(cfg.FrontendPort),
 		frontendLANOriginEnvVar + "=" + frontendLANOrigin(cfg),

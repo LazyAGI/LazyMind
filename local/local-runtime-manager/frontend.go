@@ -29,32 +29,38 @@ func (m *FrontendManager) Run(ctx context.Context, cfg RuntimeConfig, paths Runt
 	}
 
 	frontendDir := filepath.Join(paths.RepoRoot, "frontend")
-	if err := prepareFrontendNodeModules(paths, frontendDir); err != nil {
-		return err
-	}
-	install := Command{
-		Name: "pnpm",
-		Args: append([]string{"install", "--frozen-lockfile", "--prefer-offline", "--reporter", "append-only"}, pnpmLocalCacheArgs(paths)...),
-		Dir:  frontendDir,
-		Env:  pnpmLocalCacheEnv(paths),
-	}
-	if err := m.runFrontendCommand(ctx, install, envDuration("LAZYMIND_FRONTEND_INSTALL_TIMEOUT", 15*time.Minute), "frontend dependency install"); err != nil {
-		return err
-	}
-	if ready, reason, err := frontendNodeModulesReady(paths, frontendDir); err != nil {
-		return err
-	} else if !ready {
-		return fmt.Errorf("frontend dependency install completed but node_modules is not usable: %s", reason)
-	}
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(filepath.Join(frontendDir, "dist", "index.html")); err != nil || info.IsDir() {
+			return fmt.Errorf("desktop frontend dist not found: %s", filepath.Join(frontendDir, "dist"))
+		}
+	} else {
+		if err := prepareFrontendNodeModules(paths, frontendDir); err != nil {
+			return err
+		}
+		install := Command{
+			Name: "pnpm",
+			Args: append([]string{"install", "--frozen-lockfile", "--prefer-offline", "--reporter", "append-only"}, pnpmLocalCacheArgs(paths)...),
+			Dir:  frontendDir,
+			Env:  pnpmLocalCacheEnv(paths),
+		}
+		if err := m.runFrontendCommand(ctx, install, envDuration("LAZYMIND_FRONTEND_INSTALL_TIMEOUT", 15*time.Minute), "frontend dependency install"); err != nil {
+			return err
+		}
+		if ready, reason, err := frontendNodeModulesReady(paths, frontendDir); err != nil {
+			return err
+		} else if !ready {
+			return fmt.Errorf("frontend dependency install completed but node_modules is not usable: %s", reason)
+		}
 
-	build := Command{
-		Name: "pnpm",
-		Args: []string{"build"},
-		Dir:  frontendDir,
-		Env:  append(pnpmLocalCacheEnv(paths), frontendBuildEnv()...),
-	}
-	if err := m.runFrontendCommand(ctx, build, envDuration("LAZYMIND_FRONTEND_BUILD_TIMEOUT", 10*time.Minute), "frontend build"); err != nil {
-		return err
+		build := Command{
+			Name: "pnpm",
+			Args: []string{"build"},
+			Dir:  frontendDir,
+			Env:  append(pnpmLocalCacheEnv(paths), frontendBuildEnv()...),
+		}
+		if err := m.runFrontendCommand(ctx, build, envDuration("LAZYMIND_FRONTEND_BUILD_TIMEOUT", 10*time.Minute), "frontend build"); err != nil {
+			return err
+		}
 	}
 
 	if err := writeCaddyfile(paths, cfg); err != nil {
@@ -313,6 +319,9 @@ func (m *FrontendManager) ensureCaddy(ctx context.Context, cfg RuntimeConfig, pa
 	}
 	if info, err := os.Stat(paths.CaddyBin); err == nil && !info.IsDir() {
 		return paths.CaddyBin, nil
+	}
+	if cfg.Profile == "desktop" {
+		return "", fmt.Errorf("desktop Caddy binary not found: %s", paths.CaddyBin)
 	}
 	goBin := strings.TrimSpace(os.Getenv("GO"))
 	if goBin == "" {

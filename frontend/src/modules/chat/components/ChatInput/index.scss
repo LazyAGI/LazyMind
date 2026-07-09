@@ -249,12 +249,16 @@
       .input-bottom-actions {
         display: flex;
         align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
 
         .input-bottom-actions-left {
           display: flex;
           align-items: center;
           gap: 9px;
           flex: 1;
+          min-width: 0;
+          flex-wrap: wrap;
 
           .input-bottom-actions-left-item {
             /* Frame 1312321162 */
@@ -323,11 +327,16 @@
                 transform: none;
               }
             }
+
+            &.skill-deposit-action {
+              white-space: nowrap;
+            }
           }
         }
         .input-bottom-actions-right {
           display: flex;
           gap: 8px;
+          margin-left: auto;
 
           .input-bottom-actions-right-item {
             cursor: pointer;

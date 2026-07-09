@@ -166,7 +166,7 @@ make test-hermetic
 | External Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | Enable store dashboards | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 
-`make up-build-local` runs LazyMind directly on the host through `.lazymind-local/bin/local-runtime-manager`. Generated binaries, runtime state, dependencies, logs, and startup configuration are stored under `.lazymind-local/`. The local Python runtime is installed under `.lazymind-local/runtimes/python`, with service dependencies under `.lazymind-local/deps/`; runtime data is kept under `.lazymind-local/data/`. Build-time tool caches such as pnpm, uv, pip, corepack, and Go caches use their user-level defaults instead of `.lazymind-local/`. The whole `.lazymind-local/` directory can be deleted and rebuilt.
+`make up-build-local` runs LazyMind directly on the host through `local/runtime/bin/local-runtime-manager`. If `local/config.env` does not exist, Make copies it from `local/config.env.example` and uses it for local build/run configuration. Generated binaries, runtime state, dependencies, logs, and startup configuration are stored under `local/runtime/`. The local Python runtime is installed under `local/runtime/runtimes/python`, with service dependencies under `local/runtime/deps/`; runtime data is kept under `local/runtime/data/`. Build-time tool caches such as pnpm, uv, pip, corepack, and Go caches use their user-level defaults instead of `local/runtime/`. The whole `local/runtime/` directory can be deleted and rebuilt.
 
 ---
 

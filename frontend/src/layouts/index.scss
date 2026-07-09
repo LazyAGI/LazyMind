@@ -5,6 +5,35 @@
   overflow: hidden;
 }
 
+.desktop-session-gate {
+  height: 100vh;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f7f8fa;
+  color: #1f2937;
+}
+
+.desktop-session-panel {
+  width: min(420px, calc(100vw - 48px));
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+}
+
+.desktop-session-title {
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.desktop-session-message {
+  color: #4b5563;
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .main-layout-content,
 .main-layout-body {
   min-width: 0;

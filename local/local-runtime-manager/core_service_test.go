@@ -14,7 +14,7 @@ func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
 	manager := NewCoreServiceManager(runner)
-	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
 		return CommandResult{}, nil
 	})
 
-	if err := manager.buildCore(context.Background(), paths); err != nil {
+	if err := manager.buildCore(context.Background(), cfg, paths); err != nil {
 		t.Fatalf("build core: %v", err)
 	}
 	runner.assertCommandCount(1)

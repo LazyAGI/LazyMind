@@ -4,6 +4,10 @@ import { message } from "antd";
 import { AgentAppsAuth } from "@/components/auth";
 import i18n from "@/i18n";
 import { getApiBaseUrl } from "@/runtime/apiBase";
+import {
+  isDesktopSessionEnabled,
+  restoreDesktopSessionAndGetToken,
+} from "@/runtime/desktopSession";
 
 export const BASE_URL = getApiBaseUrl();
 
@@ -178,10 +182,26 @@ function isRefreshEndpoint(url?: string): boolean {
   return url.includes("/auth/refresh") || url.includes("/auth/login") || url.includes("/auth/logout");
 }
 
+async function restoreDesktopSessionAndRetry(
+  originalRequest?: InternalAxiosRequestConfig & { _desktopRetry?: boolean },
+) {
+  if (!isDesktopSessionEnabled()) {
+    return null;
+  }
+  if (!originalRequest) {
+    return null;
+  }
+  const token = await restoreDesktopSessionAndGetToken();
+  originalRequest._desktopRetry = true;
+  originalRequest.headers = originalRequest.headers ?? {};
+  originalRequest.headers.authorization = `Bearer ${token}`;
+  return axiosInstance(originalRequest);
+}
+
 export const handleError = async (error: AxiosError) => {
   if (isCanceledError(error)) return Promise.reject(error);
   
-  const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; silentError?: boolean };
+  const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _desktopRetry?: boolean; silentError?: boolean };
   const silentError = Boolean(originalRequest?.silentError);
   
   if (error.response) {
@@ -206,6 +226,14 @@ export const handleError = async (error: AxiosError) => {
       }
     } else if (error.response.status === 401) {
       if (isRefreshEndpoint(originalRequest?.url)) {
+        if (isDesktopSessionEnabled()) {
+          try {
+            await restoreDesktopSessionAndGetToken();
+          } catch (desktopSessionError) {
+            console.error("Desktop admin session restore failed:", desktopSessionError);
+          }
+          return Promise.reject(error);
+        }
         if (AgentAppsAuth.isLoggedIn()) {
           message.warning(i18n.t("auth.sessionExpired"));
         }
@@ -214,6 +242,16 @@ export const handleError = async (error: AxiosError) => {
       }
 
       if (!originalRequest || originalRequest._retry) {
+        if (isDesktopSessionEnabled() && originalRequest && !originalRequest._desktopRetry) {
+          try {
+            const desktopRetryResponse = await restoreDesktopSessionAndRetry(originalRequest);
+            if (desktopRetryResponse) {
+              return desktopRetryResponse;
+            }
+          } catch (desktopSessionError) {
+            console.error("Desktop admin session restore failed:", desktopSessionError);
+          }
+        }
         if (AgentAppsAuth.isLoggedIn()) {
           message.warning(i18n.t("auth.authFailedRelogin"));
         }
@@ -248,6 +286,19 @@ export const handleError = async (error: AxiosError) => {
         return await axiosInstance(originalRequest);
       } catch (refreshError) {
         console.error("Token refresh failed:", refreshError);
+
+        if (isDesktopSessionEnabled()) {
+          try {
+            const token = await restoreDesktopSessionAndGetToken();
+            processQueue(token);
+            originalRequest.headers = originalRequest.headers ?? {};
+            originalRequest.headers.authorization = `Bearer ${token}`;
+            originalRequest._desktopRetry = true;
+            return await axiosInstance(originalRequest);
+          } catch (desktopSessionError) {
+            console.error("Desktop admin session restore failed:", desktopSessionError);
+          }
+        }
         
         refreshQueue.forEach((cb) => {
           cb("");

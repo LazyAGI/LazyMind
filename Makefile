@@ -1,6 +1,18 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local down-local reset-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-stop-if-present
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local down-local reset-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
+
+LOCAL_CONFIG_ENV ?= local/config.env
+LOCAL_CONFIG_ENV_EXAMPLE ?= local/config.env.example
+_LOCAL_CONFIG_TARGETS := local-runtime-manager-build up-build-local down-local reset-local reset-kb reset-all fresh-start
+_NEEDS_LOCAL_CONFIG := $(filter $(_LOCAL_CONFIG_TARGETS),$(MAKECMDGOALS))
+ifneq (,$(_NEEDS_LOCAL_CONFIG))
+_LOCAL_CONFIG_BOOTSTRAP := $(shell if [ ! -f "$(LOCAL_CONFIG_ENV)" ]; then mkdir -p "$(dir $(LOCAL_CONFIG_ENV))"; cp "$(LOCAL_CONFIG_ENV_EXAMPLE)" "$(LOCAL_CONFIG_ENV)"; fi)
+ifneq (,$(wildcard $(LOCAL_CONFIG_ENV)))
+include $(LOCAL_CONFIG_ENV)
+export $(shell sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' $(LOCAL_CONFIG_ENV))
+endif
+endif
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
 # (which often times out in restricted networks). Override with: make up DOCKER_BUILDKIT=1
@@ -8,9 +20,9 @@ export DOCKER_BUILDKIT ?= 1
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 GO ?= go
-LOCAL_RUNTIME_MANAGER_BIN ?= $(CURDIR)/.lazymind-local/bin/local-runtime-manager
+LOCAL_RUNTIME_MANAGER_BIN ?= $(CURDIR)/local/runtime/bin/local-runtime-manager
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
-export LAZYMIND_LOCAL_MILVUS_DB_PATH ?= $(CURDIR)/.lazymind-local/data/stores/milvus/lazymind.db
+export LAZYMIND_LOCAL_MILVUS_DB_PATH ?= $(CURDIR)/local/runtime/data/stores/milvus/lazymind.db
 comma := ,
 
 # ---------------------------------------------------------------------------
@@ -61,7 +73,7 @@ _COMPOSE := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT
 # Keep its writable roots under the compose volume root by default.
 # LAZYMIND_FILE_WATCHER_BASE_ROOT is exported as a compose-friendly path;
 # internal Makefile bookkeeping uses the resolved absolute path below.
-export LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./.lazymind-local/data/stores/scan/file-watcher
+export LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./local/runtime/data/stores/scan/file-watcher
 LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS := $(abspath $(LAZYMIND_FILE_WATCHER_BASE_ROOT))
 export LAZYMIND_FILE_WATCHER_MODE ?= container
 
@@ -179,8 +191,12 @@ help:
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
 	@echo "  make up-build-local - Build/start local LazyMind without containers"
+	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
+	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
+	@echo "  make desktop-cache-clean - Remove repo-local Desktop caches, if any"
+	@echo "  make desktop-clean - Remove all Desktop generated outputs"
 	@echo "  make down-local - Stop local LazyMind runtime"
-	@echo "  make reset-local - Stop local runtime and remove .lazymind-local"
+	@echo "  make reset-local - Stop local runtime and remove local/runtime"
 	@echo "  make down       - Stop Cloud/Kong compose services"
 	@echo "                    Use SERVICES=svc1,svc2 to stop specific services only"
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
@@ -372,17 +388,6 @@ file-watcher-run: file-watcher-stop file-watcher-dirs
 file-watcher-start: file-watcher-build
 	@$(MAKE) --no-print-directory file-watcher-run
 
-desktop-stop-if-present:
-	@if [ -x scripts/desktop-down.sh ]; then \
-		echo "🛑 Stopping Desktop runtime via scripts/desktop-down.sh..."; \
-		scripts/desktop-down.sh || true; \
-	elif [ -x desktop/scripts/down.sh ]; then \
-		echo "🛑 Stopping Desktop runtime via desktop/scripts/down.sh..."; \
-		desktop/scripts/down.sh || true; \
-	else \
-		echo "ℹ️  No Desktop stop hook found; skipping"; \
-	fi
-
 up:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
@@ -426,6 +431,47 @@ local-runtime-manager-build:
 	@mkdir -p "$(dir $(LOCAL_RUNTIME_MANAGER_BIN))"
 	@cd local/local-runtime-manager && $(GO) build -buildvcs=false -o "$(LOCAL_RUNTIME_MANAGER_BIN)" .
 
+desktop-darwin-arm64:
+	@bash desktop/scripts/build-darwin-arm64.sh
+
+desktop-darwin-arm64-clean:
+	@echo "🧹 Removing Darwin arm64 Desktop generated outputs..."
+	@for path in \
+		"$(CURDIR)/desktop/build/darwin-arm64" \
+		"$(CURDIR)/desktop/dist" \
+		"$(CURDIR)/desktop/electron/node_modules"; do \
+		if [ -e "$$path" ]; then \
+			chflags -R nouchg "$$path" 2>/dev/null || true; \
+			chmod -R u+rwX "$$path" 2>/dev/null || true; \
+			rm -rf "$$path"; \
+		fi; \
+	done
+
+desktop-cache-clean:
+	@echo "🧹 Removing repo-local Desktop caches, if any..."
+	@for path in \
+		"$(CURDIR)/desktop/cache"; do \
+		if [ -e "$$path" ]; then \
+			chflags -R nouchg "$$path" 2>/dev/null || true; \
+			chmod -R u+rwX "$$path" 2>/dev/null || true; \
+			rm -rf "$$path"; \
+		fi; \
+	done
+
+desktop-clean:
+	@echo "🧹 Removing Desktop generated outputs..."
+	@for path in \
+		"$(CURDIR)/desktop/build" \
+		"$(CURDIR)/desktop/dist" \
+		"$(CURDIR)/desktop/electron/node_modules" \
+		"$(CURDIR)/frontend/dist"; do \
+		if [ -e "$$path" ]; then \
+			chflags -R nouchg "$$path" 2>/dev/null || true; \
+			chmod -R u+rwX "$$path" 2>/dev/null || true; \
+			rm -rf "$$path"; \
+		fi; \
+	done
+
 up-build-local: local-runtime-manager-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
 
@@ -443,8 +489,8 @@ reset-local:
 	else \
 		echo "ℹ️  No Local Runtime manager found; skipping stop"; \
 	fi
-	@echo "🧹 Removing .lazymind-local runtime directory..."
-	@rm -rf .lazymind-local
+	@echo "🧹 Removing local/runtime runtime directory..."
+	@rm -rf local/runtime
 	@echo "✅ Local runtime reset. Run 'make up-build-local' to rebuild it."
 
 clear:

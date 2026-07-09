@@ -781,6 +781,21 @@ const zhCN = {
     conversationGroupEarlier: "以前",
     noConversations: "暂无对话",
     promptTemplate: "常用话术",
+    skillDeposit: "沉淀经验",
+    skillDepositReadyTooltip: "可将当前会话沉淀为可复用经验",
+    skillDepositDisabledTooltip: "还需要{{missing}}",
+    skillDepositMissingSeparator: "、",
+    skillDepositMissingUserTurns: "{{count}} 个用户轮次",
+    skillDepositMissingToolTurns: "{{count}} 个工具调用轮次",
+    skillDepositReminder:
+      "这次会话已经形成了一些可复用经验，可以沉淀为 skill，方便以后复用。",
+    skillDepositAlreadyRequestedTooltip:
+      "上一轮已发起沉淀经验，无需重复沉淀",
+    skillDepositPrompt:
+      "请把当前会话沉淀为 skill。\n\n" +
+      "- 适合沉淀：必须调用 skill_editor 创建或更新 skill，不要只口头总结。\n" +
+      "- 不适合沉淀：直接说明原因。\n" +
+      "- 只有 skill_editor 返回成功后，才可以说已新增或修改 skill；否则说明未沉淀成功。",
     conversationConfig: "对话配置",
     conversationConfigPluginMode: "人工干预模式",
     conversationConfigPluginModeDynamic: "智能判断 (Dynamic)",
@@ -2360,6 +2375,25 @@ const zhCN = {
     memorySkillDraftDiscardFailed: "丢弃技能草稿失败",
     memorySkillDraftPreviewFailed: "加载技能草稿失败",
     memorySkillDraftDefaultInstruction: "请根据已接受的建议生成技能草稿。",
+    memoryManualSkillReviewTitle: "手动 Skill Review",
+    memoryManualSkillReviewCount: "已有 {{count}} 条可沉淀经验的会话",
+    memoryManualSkillReviewEmpty: "暂无可沉淀经验的会话",
+    memoryManualSkillReviewNoContent: "继续使用工具完成任务后，这里会自动出现可沉淀内容。",
+    memoryManualSkillReviewReady: "将历史可沉淀会话沉淀为可复用经验",
+    memoryManualSkillReviewRun: "沉淀经验",
+    memoryManualSkillReviewRefresh: "刷新可沉淀会话数量",
+    memoryManualSkillReviewLoadFailed: "加载可沉淀会话数量失败",
+    memoryManualSkillReviewRunFailed: "手动 Skill Review 发起失败",
+    memoryManualSkillReviewStarted: "已发起 Skill Review，通常需要 2～3 分钟，请稍候。",
+    memoryManualSkillReviewRunningHint:
+      "正在分析历史会话并生成 skill 建议，通常需要 2～3 分钟。完成后会自动刷新结果，请勿重复点击。",
+    memoryManualSkillReviewDone: "本次 Skill Review 已完成",
+    memoryManualSkillReviewNewSkills: "新增 skill",
+    memoryManualSkillReviewUpdatedSkills: "修改已有 skill",
+    memoryManualSkillReviewNoResult: "本次 Review 暂未产生新 skill 或修改建议",
+    memoryManualSkillReviewConfirmHint: "如需确认，请在技能列表中查看待确认变更。",
+    memoryManualSkillReviewFailed: "本次 Skill Review 失败",
+    memoryManualSkillReviewSkipped: "本次 Skill Review 已跳过",
     memoryPreferenceDraftEmpty: "当前没有待确认的使用习惯草稿",
     memoryPreferenceDraftStatus: "草稿状态：{{status}}",
     memoryPreferenceDraftVersion: "草稿版本：{{version}}",

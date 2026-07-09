@@ -59,6 +59,7 @@ type ChatChunkResponse struct {
 	PromptQuestions   []string           `json:"prompt_questions,omitempty"`
 	ReasoningContent  string             `json:"reasoning_content,omitempty"`
 	ThinkingDurationS int64              `json:"thinking_duration_s,omitempty"`
+	ToolCallTurns     int                `json:"tool_call_turns,omitempty"`
 	TaskCreated       *TaskCreatedNotice `json:"task_created,omitempty"`
 	AskPending        *AskPendingEvent   `json:"ask_pending,omitempty"`
 }

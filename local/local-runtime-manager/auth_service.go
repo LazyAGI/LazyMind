@@ -146,6 +146,12 @@ func (m *AuthServiceManager) Down(ctx context.Context, cfg RuntimeConfig, paths 
 
 func (m *AuthServiceManager) preparePythonEnv(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	python := authServicePythonPath(paths)
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(python); err == nil && !info.IsDir() {
+			return nil
+		}
+		return fmt.Errorf("desktop auth-service Python not found: %s", python)
+	}
 	if _, err := os.Stat(python); err != nil {
 		if err := m.createPythonEnv(ctx, cfg, paths); err != nil {
 			return err

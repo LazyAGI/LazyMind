@@ -1,0 +1,44 @@
+{
+  "name": "lazymind-desktop",
+  "version": "0.1.0",
+  "description": "Production-ready enterprise knowledge-base and RAG chat platform with automated RAG quality optimization.",
+  "author": "LazyAGI",
+  "private": true,
+  "main": "src/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "pack:mac:arm64": "electron-builder --mac --arm64 --dir"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "ai.lazymind.desktop",
+    "productName": "LazyMind",
+    "artifactName": "LazyMind-${os}-${arch}.${ext}",
+    "asar": true,
+    "directories": {
+      "output": "../dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/runtime",
+        "to": "runtime"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/LazyMind.icns",
+      "target": [
+        "dir"
+      ],
+      "identity": null
+    }
+  }
+}
