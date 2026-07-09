@@ -122,7 +122,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := m.killStaleRuntimeProcesses(ctx, cfg, paths); err != nil {
 		return err
 	}
-	freshCfg, paths, err = NewRuntimeConfig("", paths.RepoRoot)
+	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       cfg.Profile,
+		RepoRoot:      paths.RepoRoot,
+		RuntimeRoot:   cfg.RuntimeRoot,
+		ResourcesRoot: cfg.ResourcesRoot,
+	})
 	if err != nil {
 		return err
 	}
@@ -150,7 +155,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := m.killStaleRuntimeProcesses(ctx, stateCfg, paths); err != nil {
 		return err
 	}
-	freshCfg, paths, err = NewRuntimeConfig("", paths.RepoRoot)
+	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       cfg.Profile,
+		RepoRoot:      paths.RepoRoot,
+		RuntimeRoot:   cfg.RuntimeRoot,
+		ResourcesRoot: cfg.ResourcesRoot,
+	})
 	if err != nil {
 		return err
 	}
@@ -165,7 +175,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := writeServiceEndpointFiles(paths, serviceEndpointsFromConfig(cfg)); err != nil {
 		return err
 	}
-	if err := ensureLazyLLMSubmodule(ctx, m.runner, paths.RepoRoot); err != nil {
+	if err := ensureLazyLLMSource(ctx, m.runner, paths.RepoRoot, cfg.Profile); err != nil {
 		return err
 	}
 
@@ -192,6 +202,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 
 	state.Profile = cfg.Profile
 	state.RepoRoot = cfg.RepoRoot
+	state.ResourcesRoot = cfg.ResourcesRoot
 	state.RuntimeRoot = cfg.RuntimeRoot
 	state.ProcessCompose.APIPort = cfg.ProcessComposePort
 	state.ProcessCompose.APIRoot = "http://127.0.0.1:" + strconv.Itoa(cfg.ProcessComposePort)
@@ -286,7 +297,27 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	m.printReadySummary(cfg)
+	if cfg.Profile == "desktop" {
+		return m.waitForDesktopRuntimeStop(ctx, paths)
+	}
 	return nil
+}
+
+func (m *RuntimeManager) waitForDesktopRuntimeStop(ctx context.Context, paths RuntimePaths) error {
+	m.progressf("desktop runtime monitor active")
+	ticker := time.NewTicker(m.pollInterval)
+	defer ticker.Stop()
+	for {
+		state, err := readRuntimeState(paths.StateFile)
+		if err == nil && (state.OverallStatus == "stopped" || state.OverallStatus == "failed") {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int, timeout time.Duration, pidFile string) error {
@@ -786,7 +817,7 @@ func (m *RuntimeManager) printReadySummary(cfg RuntimeConfig) {
 			_, _ = fmt.Fprintf(m.out, "frontend LAN: http://%s:%d\n", ip, cfg.FrontendPort)
 		}
 	}
-	_, _ = fmt.Fprintf(m.out, "status: .lazymind-local/bin/local-runtime-manager status --json\n")
+	_, _ = fmt.Fprintf(m.out, "status: local/runtime/bin/local-runtime-manager status --json\n")
 }
 
 func (m *RuntimeManager) printPortResolutionSummary(cfg RuntimeConfig) {
@@ -981,17 +1012,22 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 	if state.RepoRoot == "" {
 		state.RepoRoot = cfg.RepoRoot
 	}
+	if state.ResourcesRoot == "" {
+		state.ResourcesRoot = cfg.ResourcesRoot
+	}
 	if state.RuntimeRoot == "" {
 		state.RuntimeRoot = cfg.RuntimeRoot
 	}
 
 	resp := StatusResponse{
-		Runtime:        "local",
+		Runtime:        state.Profile,
 		Profile:        state.Profile,
 		OverallStatus:  state.OverallStatus,
 		RepoRoot:       state.RepoRoot,
+		ResourcesRoot:  state.ResourcesRoot,
 		RuntimeRoot:    state.RuntimeRoot,
 		ProcessCompose: state.ProcessCompose,
+		Config:         snapshotRuntimeConfig(cfg),
 		Services:       state.Services,
 	}
 	if resp.Services == nil {
@@ -1115,18 +1151,27 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			resp.OverallStatus = "stale"
 		}
 	} else {
-		if resp.OverallStatus == "ready" || resp.OverallStatus == "running" || resp.OverallStatus == "starting" {
+		if m.checkRuntimeReady(ctx, cfg, paths) {
+			resp.OverallStatus = "ready"
+			s := resp.Services[processComposeServiceName]
+			if s.Status == "running" || s.Status == "starting" || s.Status == "stale" {
+				s.Status = "stopped"
+			}
+			resp.Services[processComposeServiceName] = s
+		} else if resp.OverallStatus == "ready" || resp.OverallStatus == "running" || resp.OverallStatus == "starting" {
 			resp.OverallStatus = "stale"
 		} else if resp.OverallStatus == "" {
 			resp.OverallStatus = "stopped"
 		}
-		s := resp.Services[processComposeServiceName]
-		if s.Status == "running" || s.Status == "starting" {
-			s.Status = "stale"
-		} else if s.Status == "" || s.Status == "unknown" {
-			s.Status = "stopped"
+		if resp.OverallStatus != "ready" {
+			s := resp.Services[processComposeServiceName]
+			if s.Status == "running" || s.Status == "starting" {
+				s.Status = "stale"
+			} else if s.Status == "" || s.Status == "unknown" {
+				s.Status = "stopped"
+			}
+			resp.Services[processComposeServiceName] = s
 		}
-		resp.Services[processComposeServiceName] = s
 	}
 
 	if !asJSON {
@@ -1145,6 +1190,7 @@ func (m *RuntimeManager) humanStatus(resp StatusResponse) string {
 		fmt.Sprintf("profile: %s", resp.Profile),
 		fmt.Sprintf("overallStatus: %s", resp.OverallStatus),
 		fmt.Sprintf("repoRoot: %s", resp.RepoRoot),
+		fmt.Sprintf("resourcesRoot: %s", resp.ResourcesRoot),
 		fmt.Sprintf("runtimeRoot: %s", resp.RuntimeRoot),
 	}
 	for name, svc := range resp.Services {

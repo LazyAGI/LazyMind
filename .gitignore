@@ -83,10 +83,12 @@ lazyllm_cpp.egg-info/
 .venv-test/
 data/
 volumes/
-.lazymind-local/
+local/config.env
+local/runtime/
+desktop/build/
+desktop/cache/
 local/bin/process-compose
 .conda
-local/local-runtime-manager/lazymind-local
 
 # evo runtime artifacts
 evo/output/

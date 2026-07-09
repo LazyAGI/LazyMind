@@ -465,6 +465,7 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 		RawContent:     "记住这个是王牌超",
 		Content:        "记住这个是王牌超",
 		Result:         "好的",
+		ToolCallTurns:  8,
 		Ext:            ext,
 		TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}).Error; err != nil {
@@ -484,7 +485,8 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	var resp struct {
 		ConversationID string `json:"conversation_id"`
 		History        []struct {
-			Input []map[string]any `json:"input"`
+			Input         []map[string]any `json:"input"`
+			ToolCallTurns int              `json:"tool_call_turns"`
 		} `json:"history"`
 		TotalSize int `json:"total_size"`
 	}
@@ -505,6 +507,9 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	}
 	if got := resp.History[0].Input[1]["uri"]; got != "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a.jpg" {
 		t.Fatalf("expected image uri in history response, got %#v", got)
+	}
+	if got := resp.History[0].ToolCallTurns; got != 8 {
+		t.Fatalf("expected tool_call_turns 8, got %d", got)
 	}
 }
 

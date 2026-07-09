@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -28,24 +29,420 @@ func TestCountSkillReviewHistoryStatsFiltersUserAndHalfOpenWindow(t *testing.T) 
 	start := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	insertConversation(t, db, "conv-u1", "user-1", start)
+	insertConversation(t, db, "conv-at-end", "user-1", end)
+	insertConversation(t, db, "conv-before", "user-1", start.Add(-time.Nanosecond))
 	insertConversation(t, db, "conv-u2", "user-2", start)
 
-	insertHistory(t, db, "h-start", "conv-u1", start, "at start", "", 2)
-	insertHistory(t, db, "h-mid-content", "conv-u1", start.Add(10*time.Minute), "", "content fallback", 1)
-	insertHistory(t, db, "h-empty", "conv-u1", start.Add(20*time.Minute), "", "", 3)
-	insertHistory(t, db, "h-end", "conv-u1", end, "at end", "", 9)
-	insertHistory(t, db, "h-before", "conv-u1", start.Add(-time.Nanosecond), "before", "", 9)
+	insertHistory(t, db, "h-before-history", "conv-u1", start.Add(-time.Nanosecond), "before history", "", 2)
+	insertHistory(t, db, "h-end-history", "conv-u1", end, "end history", "", 1)
+	insertHistory(t, db, "h-conv-at-end", "conv-at-end", end, "conversation at end", "", 9)
+	insertHistory(t, db, "h-conv-before", "conv-before", start, "conversation before", "", 9)
 	insertHistory(t, db, "h-other-user", "conv-u2", start.Add(15*time.Minute), "other", "", 9)
 
-	stats, err := CountSkillReviewHistoryStats(ctx, db, "user-1", start, end)
+	stats, err := CountSkillReviewHistoryStats(ctx, db, "user-1", start, end, 2, 6)
 	if err != nil {
 		t.Fatalf("count stats: %v", err)
 	}
 	if stats.UserTurnCount != 2 {
 		t.Fatalf("expected 2 user turns, got %d", stats.UserTurnCount)
 	}
-	if stats.ToolCallCount != 6 {
-		t.Fatalf("expected tool call sum 6, got %d", stats.ToolCallCount)
+	if stats.ToolCallCount != 3 {
+		t.Fatalf("expected tool call sum 3, got %d", stats.ToolCallCount)
+	}
+	if stats.QualifiedSessionCount != 0 {
+		t.Fatalf("expected no qualified session, got %d", stats.QualifiedSessionCount)
+	}
+}
+
+func TestCountSkillReviewHistoryStatsCountsTrajectoryToolCalls(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	ctx := context.Background()
+	start := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	insertConversation(t, db, "conv-u1", "user-1", start.Add(10*time.Minute))
+	insertHistoryWithResult(
+		t,
+		db,
+		"h-multi-tool",
+		"conv-u1",
+		start.Add(10*time.Minute),
+		"turn one",
+		"",
+		toolCallResultTags("h-multi-tool", 5),
+		0,
+	)
+	insertHistory(t, db, "h-two", "conv-u1", start.Add(20*time.Minute), "turn two", "", 2)
+	insertHistory(t, db, "h-three", "conv-u1", start.Add(30*time.Minute), "turn three", "", 1)
+
+	stats, err := CountSkillReviewHistoryStats(ctx, db, "user-1", start, end, 3, 8)
+	if err != nil {
+		t.Fatalf("count stats: %v", err)
+	}
+	if stats.UserTurnCount != 3 || stats.ToolCallCount != 8 || stats.QualifiedSessionCount != 1 {
+		t.Fatalf("expected trajectory-style 3/8/1, got %#v", stats)
+	}
+}
+
+func TestCountSkillReviewHistoryStatsDoesNotCombineWeakConversations(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	ctx := context.Background()
+	start := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	insertSkillReviewConversation(t, db, "conv-a", "user-1", start.Add(10*time.Minute), 1, 3)
+	insertSkillReviewConversation(t, db, "conv-b", "user-1", start.Add(20*time.Minute), 1, 3)
+	insertSkillReviewConversation(t, db, "conv-c", "user-1", start.Add(30*time.Minute), 1, 2)
+
+	stats, err := CountSkillReviewHistoryStats(ctx, db, "user-1", start, end, 3, 8)
+	if err != nil {
+		t.Fatalf("count stats: %v", err)
+	}
+	if stats.UserTurnCount != 3 || stats.ToolCallCount != 8 {
+		t.Fatalf("expected aggregate 3/8, got user=%d tool=%d", stats.UserTurnCount, stats.ToolCallCount)
+	}
+	if stats.QualifiedSessionCount != 0 {
+		t.Fatalf("weak conversations must not count as qualified sessions, got %d", stats.QualifiedSessionCount)
+	}
+}
+
+func TestDefaultSkillReviewStageQuantityThresholds(t *testing.T) {
+	cfg := DefaultConfig()
+	if len(cfg.Stages) != 3 {
+		t.Fatalf("expected 3 stages, got %d", len(cfg.Stages))
+	}
+	want := []int{5, 10, 20}
+	for index, threshold := range want {
+		if cfg.Stages[index].QuantityThreshold != threshold {
+			t.Fatalf("stage %d quantity threshold: got %d want %d", index, cfg.Stages[index].QuantityThreshold, threshold)
+		}
+	}
+}
+
+func TestManualSkillReviewSummaryCountsDepositableSessions(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	start := now.Add(-2 * time.Hour)
+	insertSkillReviewConversation(t, db, "conv-qualified", "user-1", start.Add(10*time.Minute), 3, 8)
+	insertSkillReviewConversation(t, db, "conv-weak-a", "user-1", start.Add(20*time.Minute), 1, 3)
+	insertSkillReviewConversation(t, db, "conv-weak-b", "user-1", start.Add(30*time.Minute), 2, 4)
+	insertSkillReviewConversation(t, db, "conv-other", "user-2", start.Add(40*time.Minute), 3, 8)
+	insertSchedulerState(t, db, orm.SkillReviewSchedulerState{
+		UserID:        "user-1",
+		LastWindowEnd: start,
+		NextRunAt:     now.Add(time.Hour),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+
+	summary, err := buildManualSkillReviewSummary(ctx, db, "user-1", DefaultConfig(), now)
+	if err != nil {
+		t.Fatalf("build summary: %v", err)
+	}
+	if summary.QualifiedSessionCount != 1 {
+		t.Fatalf("expected one qualified session, got %#v", summary)
+	}
+	if summary.UserTurnCount != 6 || summary.ToolCallCount != 15 {
+		t.Fatalf("expected aggregate counts preserved for observability, got %#v", summary)
+	}
+	if !summary.WindowStart.Equal(start) || !summary.WindowEnd.Equal(now) {
+		t.Fatalf("unexpected window: %#v", summary)
+	}
+	if summary.MinUserTurns != 3 || summary.MinToolTurns != 8 || summary.QuantityThreshold != 1 {
+		t.Fatalf("unexpected thresholds: %#v", summary)
+	}
+}
+
+func TestManualSkillReviewSummarySettlesDoneActiveTask(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	start := now.Add(-2 * time.Hour)
+	windowEnd := now.Add(-10 * time.Minute)
+	insertSkillReviewConversation(t, db, "conv-reviewed", "user-1", start.Add(10*time.Minute), 3, 8)
+	insertTask(t, db, orm.ResourceUpdateTask{
+		ID:           "done-active-task",
+		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
+		ResourceType: orm.ResourceUpdateResourceTypeSkill,
+		UserID:       "user-1",
+		TriggerType:  orm.ResourceUpdateTriggerTypeManual,
+		TriggerID:    "skill-review:done-active-task",
+		Status:       orm.ResourceUpdateTaskStatusDone,
+		RequestJSON: marshalJSON(t, skillGenerateRequestJSON{
+			RequestID:    "done-request",
+			UserID:       "user-1",
+			StartTime:    formatTaskTime(start),
+			EndTime:      formatTaskTime(windowEnd),
+			WindowFrozen: true,
+		}),
+		NextRunAt:  start,
+		CreatedAt:  start,
+		UpdatedAt:  windowEnd,
+		FinishedAt: ptrTime(windowEnd),
+	})
+	insertSchedulerState(t, db, orm.SkillReviewSchedulerState{
+		UserID:        "user-1",
+		LastWindowEnd: start,
+		NextRunAt:     now.Add(time.Hour),
+		ActiveTaskID:  "done-active-task",
+		CreatedAt:     start,
+		UpdatedAt:     windowEnd,
+	})
+
+	summary, err := buildManualSkillReviewSummary(ctx, db, "user-1", DefaultConfig(), now)
+	if err != nil {
+		t.Fatalf("build summary: %v", err)
+	}
+	if summary.QualifiedSessionCount != 0 || !summary.WindowStart.Equal(windowEnd) || summary.RunningTask != nil {
+		t.Fatalf("expected done active task to be settled before summary, got %#v", summary)
+	}
+	var state orm.SkillReviewSchedulerState
+	if err := db.First(&state, "user_id = ?", "user-1").Error; err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state.ActiveTaskID != "" || !state.LastWindowEnd.Equal(windowEnd) {
+		t.Fatalf("expected state window advanced after summary settlement, got %#v", state)
+	}
+}
+
+func TestCreateManualSkillReviewTaskFreezesWindowAndBlocksDuplicate(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	start := now.Add(-2 * time.Hour)
+	insertSkillReviewConversation(t, db, "conv-qualified", "user-1", start.Add(10*time.Minute), 3, 8)
+	insertSchedulerState(t, db, orm.SkillReviewSchedulerState{
+		UserID:        "user-1",
+		LastWindowEnd: start,
+		NextRunAt:     now.Add(time.Hour),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+
+	task, summary, err := createManualSkillReviewTask(ctx, db, "user-1", DefaultConfig(), now)
+	if err != nil {
+		t.Fatalf("create manual task: %v", err)
+	}
+	if task.TriggerType != orm.ResourceUpdateTriggerTypeManual ||
+		task.TaskType != orm.ResourceUpdateTaskTypeGenerateReview ||
+		task.ResourceType != orm.ResourceUpdateResourceTypeSkill ||
+		task.Status != orm.ResourceUpdateTaskStatusPending {
+		t.Fatalf("unexpected manual task: %#v", task)
+	}
+	if summary.QualifiedSessionCount != 1 || summary.RunningTask == nil || summary.RunningTask.ID != task.ID || summary.RunningRequestID == "" {
+		t.Fatalf("unexpected summary after manual run: %#v", summary)
+	}
+	var frozen skillGenerateRequestJSON
+	if err := json.Unmarshal(task.RequestJSON, &frozen); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if !frozen.WindowFrozen ||
+		frozen.StartTriggerReason != "manual" ||
+		frozen.TriggerReason != "manual" ||
+		frozen.QuantityThreshold != 1 ||
+		frozen.QualifiedSessionCount != 1 ||
+		frozen.RequestID != summary.RunningRequestID ||
+		frozen.StartTime != formatTaskTime(start) ||
+		frozen.EndTime != formatTaskTime(now) {
+		t.Fatalf("unexpected frozen request: %#v", frozen)
+	}
+	var state orm.SkillReviewSchedulerState
+	if err := db.First(&state, "user_id = ?", "user-1").Error; err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state.ActiveTaskID != task.ID {
+		t.Fatalf("expected manual task to become active task, got %#v", state)
+	}
+
+	if _, _, err := createManualSkillReviewTask(ctx, db, "user-1", DefaultConfig(), now); !errors.Is(err, errReviewConflict) {
+		t.Fatalf("expected duplicate manual run to conflict, got %v", err)
+	}
+}
+
+func TestCreateManualSkillReviewTaskReleasesTerminalActiveTask(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	start := now.Add(-2 * time.Hour)
+	insertSkillReviewConversation(t, db, "conv-qualified", "user-1", start.Add(10*time.Minute), 3, 8)
+	insertTask(t, db, orm.ResourceUpdateTask{
+		ID:           "failed-active-task",
+		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
+		ResourceType: orm.ResourceUpdateResourceTypeSkill,
+		UserID:       "user-1",
+		TriggerType:  orm.ResourceUpdateTriggerTypeScheduled,
+		TriggerID:    "skill-review:failed-active-task",
+		Status:       orm.ResourceUpdateTaskStatusFailed,
+		ErrorCode:    "skill_review_call_failed",
+		ErrorMessage: "chat service refused connection",
+		RequestJSON: marshalJSON(t, skillGenerateRequestJSON{
+			RequestID:    "failed-request",
+			UserID:       "user-1",
+			StartTime:    formatTaskTime(start),
+			EndTime:      formatTaskTime(now.Add(-time.Hour)),
+			WindowFrozen: true,
+		}),
+		NextRunAt:  now.Add(-time.Hour),
+		CreatedAt:  now.Add(-time.Hour),
+		UpdatedAt:  now.Add(-time.Hour),
+		FinishedAt: ptrTime(now.Add(-30 * time.Minute)),
+	})
+	insertSchedulerState(t, db, orm.SkillReviewSchedulerState{
+		UserID:           "user-1",
+		LastWindowEnd:    start,
+		NextRunAt:        now.Add(time.Hour),
+		ActiveTaskID:     "failed-active-task",
+		LastErrorCode:    "skill_review_call_failed",
+		LastErrorMessage: "chat service refused connection",
+		CreatedAt:        now.Add(-time.Hour),
+		UpdatedAt:        now.Add(-time.Hour),
+	})
+
+	task, summary, err := createManualSkillReviewTask(ctx, db, "user-1", DefaultConfig(), now)
+	if err != nil {
+		t.Fatalf("create manual task with terminal active task: %v", err)
+	}
+	if task.TriggerType != orm.ResourceUpdateTriggerTypeManual || summary.RunningTask == nil || summary.RunningTask.ID != task.ID {
+		t.Fatalf("unexpected manual task after releasing terminal active task: task=%#v summary=%#v", task, summary)
+	}
+	var state orm.SkillReviewSchedulerState
+	if err := db.First(&state, "user_id = ?", "user-1").Error; err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state.ActiveTaskID != task.ID || state.LastErrorCode != "" || state.LastErrorMessage != "" {
+		t.Fatalf("expected manual task to replace failed active task, got %#v", state)
+	}
+}
+
+func TestSkillReviewTaskListIncludesPendingAndDoneCoreTaskUntilRunStats(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	createSkillReviewResultsTable(t, db)
+	createSkillReviewRunStatsTable(t, db)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	insertTask(t, db, orm.ResourceUpdateTask{
+		ID:           "pending-task",
+		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
+		ResourceType: orm.ResourceUpdateResourceTypeSkill,
+		UserID:       "user-1",
+		TriggerType:  orm.ResourceUpdateTriggerTypeManual,
+		TriggerID:    "skill_review_manual:user-1:req-pending",
+		Status:       orm.ResourceUpdateTaskStatusPending,
+		RequestJSON: marshalJSON(t, skillGenerateRequestJSON{
+			RequestID:    "req-pending",
+			UserID:       "user-1",
+			WindowFrozen: true,
+		}),
+		NextRunAt: now,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	insertTask(t, db, orm.ResourceUpdateTask{
+		ID:           "manual-task",
+		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
+		ResourceType: orm.ResourceUpdateResourceTypeSkill,
+		UserID:       "user-1",
+		TriggerType:  orm.ResourceUpdateTriggerTypeManual,
+		TriggerID:    "skill_review_manual:user-1:req-1",
+		Status:       orm.ResourceUpdateTaskStatusDone,
+		RequestJSON: marshalJSON(t, skillGenerateRequestJSON{
+			RequestID:    "req-1",
+			UserID:       "user-1",
+			WindowFrozen: true,
+		}),
+		NextRunAt:  now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		StartedAt:  ptrTime(now),
+		FinishedAt: ptrTime(now.Add(time.Second)),
+	})
+
+	resp, err := buildSkillReviewTaskList(ctx, db, "user-1", orm.ResourceUpdateTaskStatusRunning, "", 1, 1000)
+	if err != nil {
+		t.Fatalf("build task list: %v", err)
+	}
+	if resp.Total != 2 || len(resp.Items) != 2 {
+		t.Fatalf("expected pending and done core task to stay in running list, got %#v", resp)
+	}
+	statuses := make(map[string]string, len(resp.Items))
+	for _, item := range resp.Items {
+		statuses[item.RequestID] = item.Status
+	}
+	if statuses["req-pending"] != orm.ResourceUpdateTaskStatusPending ||
+		statuses["req-1"] != orm.ResourceUpdateTaskStatusRunning {
+		t.Fatalf("unexpected running list statuses: %#v", statuses)
+	}
+
+	filtered, err := buildSkillReviewTaskList(ctx, db, "user-1", orm.ResourceUpdateTaskStatusRunning, "req-1", 1, 1000)
+	if err != nil {
+		t.Fatalf("build request filtered task list: %v", err)
+	}
+	if filtered.Total != 1 || len(filtered.Items) != 1 || filtered.Items[0].RequestID != "req-1" {
+		t.Fatalf("expected request filter to keep only req-1, got %#v", filtered)
+	}
+}
+
+func TestSkillReviewTaskListDropsCompletedRunFromRunningFilter(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	createSkillReviewResultsTable(t, db)
+	createSkillReviewRunStatsTable(t, db)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	insertTask(t, db, orm.ResourceUpdateTask{
+		ID:           "manual-task",
+		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
+		ResourceType: orm.ResourceUpdateResourceTypeSkill,
+		UserID:       "user-1",
+		TriggerType:  orm.ResourceUpdateTriggerTypeManual,
+		TriggerID:    "skill_review_manual:user-1:req-1",
+		Status:       orm.ResourceUpdateTaskStatusDone,
+		RequestJSON: marshalJSON(t, skillGenerateRequestJSON{
+			RequestID:    "req-1",
+			UserID:       "user-1",
+			WindowFrozen: true,
+		}),
+		NextRunAt:  now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		StartedAt:  ptrTime(now),
+		FinishedAt: ptrTime(now.Add(time.Second)),
+	})
+	insertFullSkillReviewResult(t, db, SkillReviewResult{
+		ID:           "result-1",
+		SkillName:    "bill-check",
+		Type:         skillReviewTypeNew,
+		UserID:       "user-1",
+		RequestID:    "req-1",
+		SkillContent: skillContent("bill-check", "Use calculator tools."),
+		ReviewStatus: reviewStatusAccepted,
+		Time:         now.Add(time.Minute),
+	})
+	insertSkillReviewRunStats(t, db, map[string]any{
+		"id":          "stats-1",
+		"requestid":   "req-1",
+		"userid":      "user-1",
+		"status":      "completed",
+		"started_at":  "2026-06-09T10:00:00Z",
+		"duration_ms": 94000,
+		"summary":     `{"error":null}`,
+	})
+
+	running, err := buildSkillReviewTaskList(ctx, db, "user-1", orm.ResourceUpdateTaskStatusRunning, "req-1", 1, 1000)
+	if err != nil {
+		t.Fatalf("build running task list: %v", err)
+	}
+	if running.Total != 0 || len(running.Items) != 0 {
+		t.Fatalf("expected completed run to leave running list, got %#v", running)
+	}
+
+	all, err := buildSkillReviewTaskList(ctx, db, "user-1", "", "req-1", 1, 1000)
+	if err != nil {
+		t.Fatalf("build all task list: %v", err)
+	}
+	if all.Total != 1 || len(all.Items) != 1 ||
+		all.Items[0].Status != orm.ResourceUpdateTaskStatusDone ||
+		all.Items[0].RunStatus != "completed" ||
+		all.Items[0].ResultCount != 1 {
+		t.Fatalf("unexpected completed task status: %#v", all)
 	}
 }
 
@@ -54,7 +451,7 @@ func TestSkillPreflightFreezesRequestAndSkipsWhenBelowThreshold(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	start := now.Add(-time.Hour)
-	insertConversation(t, db, "conv-u1", "user-1", now)
+	insertConversation(t, db, "conv-u1", "user-1", start.Add(10*time.Minute))
 	insertHistory(t, db, "h-low", "conv-u1", start.Add(10*time.Minute), "one turn", "", 0)
 	insertSchedulerState(t, db, orm.SkillReviewSchedulerState{
 		UserID:        "user-1",
@@ -87,6 +484,7 @@ func TestSkillPreflightFreezesRequestAndSkipsWhenBelowThreshold(t *testing.T) {
 	worker := NewWorker(db, Config{
 		MinUserTurns:       2,
 		MinToolTurns:       1,
+		Stages:             []Stage{{Window: time.Hour, Interval: time.Hour, QuantityThreshold: 1, Successes: 0}},
 		WorkerBatchSize:    1,
 		WorkerLockTTL:      time.Minute,
 		MaxAttempts:        2,
@@ -122,7 +520,8 @@ func TestSkillPreflightFreezesRequestAndSkipsWhenBelowThreshold(t *testing.T) {
 	if err := json.Unmarshal(got.RequestJSON, &frozen); err != nil {
 		t.Fatalf("unmarshal frozen request: %v", err)
 	}
-	if !frozen.WindowFrozen || frozen.RequestID == "" || frozen.UserTurnCount != 1 || frozen.ToolCallCount != 0 {
+	if !frozen.WindowFrozen || frozen.RequestID == "" || frozen.UserTurnCount != 1 || frozen.ToolCallCount != 0 ||
+		frozen.QualifiedSessionCount != 0 || frozen.QuantityThreshold != 1 {
 		t.Fatalf("unexpected frozen request: %#v", frozen)
 	}
 	if frozen.StartTime != formatTaskTime(start) || frozen.EndTime != formatTaskTime(now) {
@@ -137,7 +536,7 @@ func TestSkillWorkerCallsReviewAndExpiresOnlyStillPendingResults(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	start := now.Add(-2 * time.Hour)
-	insertConversation(t, db, "conv-u1", "user-1", now)
+	insertConversation(t, db, "conv-u1", "user-1", start.Add(10*time.Minute))
 	insertHistory(t, db, "h1", "conv-u1", start.Add(10*time.Minute), "turn one", "", 1)
 	insertHistory(t, db, "h2", "conv-u1", start.Add(20*time.Minute), "turn two", "", 1)
 	insertSchedulerState(t, db, orm.SkillReviewSchedulerState{
@@ -176,6 +575,7 @@ func TestSkillWorkerCallsReviewAndExpiresOnlyStillPendingResults(t *testing.T) {
 	worker := NewWorker(db, Config{
 		MinUserTurns:     2,
 		MinToolTurns:     2,
+		Stages:           []Stage{{Window: time.Hour, Interval: time.Hour, QuantityThreshold: 1, Successes: 0}},
 		WorkerBatchSize:  1,
 		WorkerLockTTL:    time.Minute,
 		MaxAttempts:      2,
@@ -188,7 +588,7 @@ func TestSkillWorkerCallsReviewAndExpiresOnlyStillPendingResults(t *testing.T) {
 	}
 	worker.callers.Skill = func(_ context.Context, req algo.SkillReviewRequest) (*algo.SkillReviewResponse, int, error) {
 		captured = req
-		return &algo.SkillReviewResponse{Code: 0, Data: algo.SkillReviewData{Status: "running", RequestID: req.RequestID}}, 200, nil
+		return &algo.SkillReviewResponse{Code: 0, Data: algo.SkillReviewData{Status: "completed", RequestID: req.RequestID}}, 200, nil
 	}
 
 	result, err := worker.RunOnce(ctx)
@@ -207,6 +607,9 @@ func TestSkillWorkerCallsReviewAndExpiresOnlyStillPendingResults(t *testing.T) {
 	}
 	if strings.Contains(string(capturedBody), "user_turn_count") || strings.Contains(string(capturedBody), "tool_call_count") {
 		t.Fatalf("skill review request must not expose internal threshold counts: %s", string(capturedBody))
+	}
+	if captured.MinUserTurns != 2 || captured.MinToolTurns != 2 {
+		t.Fatalf("skill review request should use backend thresholds, got %#v", captured)
 	}
 	if strings.Join(captured.PendingSkillIDs, ",") != "pending-1,pending-2" {
 		t.Fatalf("unexpected pending skill ids: %v", captured.PendingSkillIDs)
@@ -234,12 +637,72 @@ func TestSkillWorkerCallsReviewAndExpiresOnlyStillPendingResults(t *testing.T) {
 	}
 }
 
+func TestSkillWorkerPassesManualThresholds(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	createSkillReviewResultsTable(t, db)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	start := now.Add(-time.Hour)
+	insertTask(t, db, orm.ResourceUpdateTask{
+		ID:           "manual-skill-task",
+		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
+		ResourceType: orm.ResourceUpdateResourceTypeSkill,
+		UserID:       "user-1",
+		TriggerType:  orm.ResourceUpdateTriggerTypeManual,
+		TriggerID:    "skill-review:manual-skill-task",
+		Status:       orm.ResourceUpdateTaskStatusPending,
+		RequestJSON: marshalJSON(t, skillGenerateRequestJSON{
+			RequestID:             "manual-request",
+			UserID:                "user-1",
+			StartTime:             formatTaskTime(start),
+			EndTime:               formatTaskTime(now),
+			QuantityThreshold:     1,
+			QualifiedSessionCount: 1,
+			StartTriggerReason:    "manual",
+			WindowFrozen:          true,
+		}),
+		NextRunAt: now,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+
+	var captured algo.SkillReviewRequest
+	worker := NewWorker(db, Config{
+		MinUserTurns:     3,
+		MinToolTurns:     8,
+		WorkerBatchSize:  1,
+		WorkerLockTTL:    time.Minute,
+		MaxAttempts:      1,
+		RetryBackoffBase: time.Minute,
+		RetryBackoffMax:  time.Minute,
+	}, "worker-manual-skill")
+	worker.clock = func() time.Time { return now }
+	worker.loadLLMConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+		return nil, nil
+	}
+	worker.callers.Skill = func(_ context.Context, req algo.SkillReviewRequest) (*algo.SkillReviewResponse, int, error) {
+		captured = req
+		return &algo.SkillReviewResponse{Code: 0, Data: algo.SkillReviewData{Status: "running", RequestID: req.RequestID}}, 200, nil
+	}
+
+	result, err := worker.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("worker run: %v", err)
+	}
+	if result.Done != 1 {
+		t.Fatalf("expected one done task, got %#v", result)
+	}
+	if captured.RequestID != "manual-request" || captured.MinUserTurns != 3 || captured.MinToolTurns != 8 {
+		t.Fatalf("unexpected manual skill review request: %#v", captured)
+	}
+}
+
 func TestSchedulerCreatesOneActiveTaskAndSettlesDoneTask(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	start := now.Add(-2 * time.Hour)
-	insertConversation(t, db, "conv-u1", "user-1", now)
+	insertConversation(t, db, "conv-u1", "user-1", start.Add(10*time.Minute))
 	insertHistory(t, db, "h1", "conv-u1", start.Add(10*time.Minute), "turn one", "", 1)
 	insertHistory(t, db, "h2", "conv-u1", start.Add(20*time.Minute), "turn two", "", 1)
 	insertSchedulerState(t, db, orm.SkillReviewSchedulerState{
@@ -259,7 +722,7 @@ func TestSchedulerCreatesOneActiveTaskAndSettlesDoneTask(t *testing.T) {
 		QuantityCheckInterval: time.Second,
 		MinInterval:           time.Second,
 		MaxWindow:             24 * time.Hour,
-		Stages:                []Stage{{Window: 4 * time.Hour, Interval: time.Hour, Successes: 1}, {Window: 8 * time.Hour, Interval: 2 * time.Hour, Successes: 0}},
+		Stages:                []Stage{{Window: 4 * time.Hour, Interval: time.Hour, QuantityThreshold: 1, Successes: 1}, {Window: 8 * time.Hour, Interval: 2 * time.Hour, QuantityThreshold: 2, Successes: 0}},
 	}, "scheduler-1")
 	scheduler.clock = func() time.Time { return now }
 
@@ -321,8 +784,9 @@ func TestSchedulerDoesNotAdvanceWindowWhenThresholdNotReached(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	start := now.Add(-2 * time.Hour)
-	insertConversation(t, db, "conv-u1", "user-1", now)
-	insertHistory(t, db, "h1", "conv-u1", start.Add(10*time.Minute), "turn one", "", 0)
+	insertSkillReviewConversation(t, db, "conv-a", "user-1", start.Add(10*time.Minute), 1, 3)
+	insertSkillReviewConversation(t, db, "conv-b", "user-1", start.Add(20*time.Minute), 1, 3)
+	insertSkillReviewConversation(t, db, "conv-c", "user-1", start.Add(30*time.Minute), 1, 2)
 	insertSchedulerState(t, db, orm.SkillReviewSchedulerState{
 		UserID:        "user-1",
 		LastWindowEnd: start,
@@ -335,12 +799,12 @@ func TestSchedulerDoesNotAdvanceWindowWhenThresholdNotReached(t *testing.T) {
 		SchedulerBatchSize:    10,
 		SchedulerLockTTL:      time.Minute,
 		SchedulerRetryDelay:   time.Minute,
-		MinUserTurns:          2,
-		MinToolTurns:          1,
+		MinUserTurns:          3,
+		MinToolTurns:          8,
 		QuantityCheckInterval: time.Second,
 		MinInterval:           time.Second,
 		MaxWindow:             24 * time.Hour,
-		Stages:                []Stage{{Window: 4 * time.Hour, Interval: time.Hour, Successes: 0}},
+		Stages:                []Stage{{Window: 4 * time.Hour, Interval: time.Hour, QuantityThreshold: 1, Successes: 0}},
 	}, "scheduler-threshold")
 	scheduler.clock = func() time.Time { return now }
 
@@ -947,14 +1411,15 @@ func TestListSkillReviewResultsFiltersSkillName(t *testing.T) {
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "target-1", UserID: "user-1", SkillName: "git-workflow", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("git-workflow", "target"), Time: now})
+	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "target-1", UserID: "user-1", RequestID: "request-a", SkillName: "git-workflow", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("git-workflow", "target"), Time: now})
+	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "target-other-request", UserID: "user-1", RequestID: "request-b", SkillName: "git-workflow", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("git-workflow", "other request"), Time: now})
 	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "other-skill", UserID: "user-1", SkillName: "release-check", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("release-check", "other"), Time: now})
 	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "other-user", UserID: "user-2", SkillName: "git-workflow", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("git-workflow", "other user"), Time: now})
 	if err := db.Exec("UPDATE skill_review_results SET summary = NULL WHERE id = ?", "target-1").Error; err != nil {
 		t.Fatalf("set summary null: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/core/skill-review-results?review_status=pending&type=patch&skill_name=git-workflow", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/core/skill-review-results?review_status=pending&type=patch&skill_name=git-workflow&requestid=request-a", nil)
 	req.Header.Set("X-User-Id", "user-1")
 	rec := httptest.NewRecorder()
 
@@ -1254,13 +1719,22 @@ func insertConversation(t *testing.T, db *gorm.DB, id, userID string, now time.T
 }
 
 func insertHistory(t *testing.T, db *gorm.DB, id, convID string, createTime time.Time, rawContent, content string, toolCallTurns int) {
+	insertHistoryWithResult(t, db, id, convID, createTime, rawContent, content, toolCallResultTags(id, toolCallTurns), toolCallTurns)
+}
+
+func insertHistoryWithResult(t *testing.T, db *gorm.DB, id, convID string, createTime time.Time, rawContent, content, result string, toolCallTurns int) {
 	t.Helper()
+	storedContent := content
+	if storedContent == "" {
+		storedContent = rawContent
+	}
 	err := db.Create(&orm.ChatHistory{
 		ID:             id,
 		Seq:            int(createTime.Unix()),
 		ConversationID: convID,
 		RawContent:     rawContent,
-		Content:        content,
+		Content:        storedContent,
+		Result:         result,
 		ToolCallTurns:  toolCallTurns,
 		TimeMixin: orm.TimeMixin{
 			CreateTime: createTime,
@@ -1269,6 +1743,46 @@ func insertHistory(t *testing.T, db *gorm.DB, id, convID string, createTime time
 	}).Error
 	if err != nil {
 		t.Fatalf("insert history %s: %v", id, err)
+	}
+}
+
+func toolCallResultTags(prefix string, count int) string {
+	if count <= 0 {
+		return ""
+	}
+	var builder strings.Builder
+	for index := 0; index < count; index++ {
+		fmt.Fprintf(
+			&builder,
+			`<tool_call>{"id":"%s-call-%d","name":"calculator","arguments":{}}</tool_call>`,
+			prefix,
+			index+1,
+		)
+	}
+	return builder.String()
+}
+
+func insertSkillReviewConversation(t *testing.T, db *gorm.DB, convID, userID string, start time.Time, userTurns, toolTurns int) {
+	t.Helper()
+	insertConversation(t, db, convID, userID, start)
+	for i := 0; i < userTurns; i++ {
+		turnToolCalls := 0
+		if i == 0 {
+			turnToolCalls = toolTurns
+		}
+		insertHistory(
+			t,
+			db,
+			fmt.Sprintf("%s-h-%d", convID, i),
+			convID,
+			start.Add(time.Duration(i)*time.Minute),
+			fmt.Sprintf("turn %d", i+1),
+			"",
+			turnToolCalls,
+		)
+	}
+	if userTurns == 0 && toolTurns > 0 {
+		insertHistory(t, db, convID+"-tool-only", convID, start, "", "", toolTurns)
 	}
 }
 
@@ -1296,6 +1810,10 @@ func marshalJSON(t *testing.T, v any) json.RawMessage {
 	return body
 }
 
+func ptrTime(v time.Time) *time.Time {
+	return &v
+}
+
 func assertRequestJSONHasNoSensitiveFields(t *testing.T, body json.RawMessage) {
 	t.Helper()
 	text := string(body)
@@ -1309,7 +1827,7 @@ func assertRequestJSONHasNoSensitiveFields(t *testing.T, body json.RawMessage) {
 func createSkillReviewResultsTable(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	if err := db.Exec(`
-CREATE TABLE skill_review_results (
+	CREATE TABLE skill_review_results (
 	id varchar(128) PRIMARY KEY,
 	skill_name varchar(255) NOT NULL,
 	type varchar(32) NOT NULL,
@@ -1321,6 +1839,22 @@ CREATE TABLE skill_review_results (
 	time datetime NOT NULL
 )`).Error; err != nil {
 		t.Fatalf("create skill_review_results: %v", err)
+	}
+}
+
+func createSkillReviewRunStatsTable(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if err := db.Exec(`
+	CREATE TABLE skill_review_run_stats (
+		id varchar(128) PRIMARY KEY,
+		requestid varchar(128) NOT NULL,
+		userid varchar(255) NOT NULL,
+		status varchar(32) NOT NULL,
+		started_at text NOT NULL,
+		duration_ms integer NOT NULL DEFAULT 0,
+		summary json NOT NULL
+	)`).Error; err != nil {
+		t.Fatalf("create skill_review_run_stats: %v", err)
 	}
 }
 
@@ -1340,6 +1874,13 @@ CREATE TABLE memory_review (
 	time datetime NOT NULL
 )`).Error; err != nil {
 		t.Fatalf("create memory_review: %v", err)
+	}
+}
+
+func insertSkillReviewRunStats(t *testing.T, db *gorm.DB, row map[string]any) {
+	t.Helper()
+	if err := db.Table("skill_review_run_stats").Create(row).Error; err != nil {
+		t.Fatalf("insert skill review run stats: %v", err)
 	}
 }
 

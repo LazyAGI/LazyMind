@@ -52,6 +52,44 @@ type skillReviewResultResponse struct {
 	Time           time.Time `json:"time"`
 }
 
+type skillReviewSummaryResponse struct {
+	QualifiedSessionCount int           `json:"qualified_session_count"`
+	UserTurnCount         int           `json:"user_turn_count"`
+	ToolCallCount         int           `json:"tool_call_count"`
+	MinUserTurns          int           `json:"min_user_turns"`
+	MinToolTurns          int           `json:"min_tool_turns"`
+	QuantityThreshold     int           `json:"quantity_threshold"`
+	WindowStart           time.Time     `json:"window_start"`
+	WindowEnd             time.Time     `json:"window_end"`
+	RunningTask           *taskResponse `json:"running_task,omitempty"`
+	RunningRequestID      string        `json:"running_requestid,omitempty"`
+}
+
+type skillReviewRunResponse struct {
+	Task      taskResponse               `json:"task"`
+	Summary   skillReviewSummaryResponse `json:"summary"`
+	RequestID string                     `json:"requestid"`
+}
+
+type skillReviewTaskStatusResponse struct {
+	Task        taskResponse `json:"task"`
+	RequestID   string       `json:"requestid"`
+	Status      string       `json:"status"`
+	RunStatus   string       `json:"run_status,omitempty"`
+	ResultCount int64        `json:"result_count"`
+}
+
+type skillReviewTaskListResponse struct {
+	Items    []skillReviewTaskStatusResponse `json:"items"`
+	Page     int                             `json:"page"`
+	PageSize int                             `json:"page_size"`
+	Total    int64                           `json:"total"`
+}
+
+type skillReviewRunStatsRow struct {
+	Status string `gorm:"column:status"`
+}
+
 type memoryReviewResultResponse struct {
 	ID             string          `json:"id"`
 	UserID         string          `json:"user_id"`
@@ -143,6 +181,9 @@ func ListSkillReviewResults(w http.ResponseWriter, r *http.Request) {
 	if skillName := strings.TrimSpace(r.URL.Query().Get("skill_name")); skillName != "" {
 		query = query.Where("skill_name = ?", skillName)
 	}
+	if requestID := strings.TrimSpace(r.URL.Query().Get("requestid")); requestID != "" {
+		query = query.Where("requestid = ?", requestID)
+	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		common.ReplyErr(w, "query skill review results failed", http.StatusInternalServerError)
@@ -161,6 +202,172 @@ func ListSkillReviewResults(w http.ResponseWriter, r *http.Request) {
 		items = append(items, skillResultToResponse(row))
 	}
 	common.ReplyOK(w, map[string]any{"items": items, "page": page, "page_size": pageSize, "total": total})
+}
+
+func GetSkillReviewSummary(w http.ResponseWriter, r *http.Request) {
+	db, userID, ok := requestDBAndUser(w, r)
+	if !ok {
+		return
+	}
+	summary, err := buildManualSkillReviewSummary(r.Context(), db, userID, DefaultConfig(), time.Now().UTC())
+	if err != nil {
+		common.ReplyErr(w, "query skill review summary failed", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, summary)
+}
+
+func RunSkillReview(w http.ResponseWriter, r *http.Request) {
+	db, userID, ok := requestDBAndUser(w, r)
+	if !ok {
+		return
+	}
+	task, summary, err := createManualSkillReviewTask(r.Context(), db, userID, DefaultConfig(), time.Now().UTC())
+	if err != nil {
+		switch {
+		case errors.Is(err, errReviewConflict), errors.Is(err, gorm.ErrDuplicatedKey):
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, errReviewInvalid):
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		default:
+			common.ReplyErr(w, "run skill review failed", http.StatusInternalServerError)
+		}
+		return
+	}
+	common.ReplyOK(w, skillReviewRunResponse{
+		Task:      taskToResponse(task),
+		Summary:   summary,
+		RequestID: summary.RunningRequestID,
+	})
+}
+
+func ListSkillReviewTasks(w http.ResponseWriter, r *http.Request) {
+	db, userID, ok := requestDBAndUser(w, r)
+	if !ok {
+		return
+	}
+	page := parsePositiveQueryInt(r.URL.Query().Get("page"), 1, 0)
+	pageSize := parsePositiveQueryInt(r.URL.Query().Get("page_size"), 20, 1000)
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	requestID := strings.TrimSpace(r.URL.Query().Get("requestid"))
+	resp, err := buildSkillReviewTaskList(r.Context(), db, userID, status, requestID, page, pageSize)
+	if err != nil {
+		mapReviewError(w, err, "skill review task")
+		return
+	}
+	common.ReplyOK(w, resp)
+}
+
+func buildSkillReviewTaskList(ctx context.Context, db *gorm.DB, userID, status, requestID string, page, pageSize int) (skillReviewTaskListResponse, error) {
+	var tasks []orm.ResourceUpdateTask
+	if err := db.WithContext(ctx).
+		Where(
+			"user_id = ? AND task_type = ? AND resource_type = ? AND trigger_type = ?",
+			strings.TrimSpace(userID),
+			orm.ResourceUpdateTaskTypeGenerateReview,
+			orm.ResourceUpdateResourceTypeSkill,
+			orm.ResourceUpdateTriggerTypeManual,
+		).
+		Order("created_at DESC").
+		Find(&tasks).Error; err != nil {
+		return skillReviewTaskListResponse{}, err
+	}
+
+	items := make([]skillReviewTaskStatusResponse, 0, len(tasks))
+	for _, task := range tasks {
+		item, err := buildSkillReviewTaskStatus(ctx, db, userID, task)
+		if err != nil {
+			return skillReviewTaskListResponse{}, err
+		}
+		if requestID != "" && item.RequestID != requestID {
+			continue
+		}
+		if status == "" ||
+			item.Status == status ||
+			(status == orm.ResourceUpdateTaskStatusRunning &&
+				(item.Status == orm.ResourceUpdateTaskStatusPending || item.Status == orm.ResourceUpdateTaskStatusRunning)) {
+			items = append(items, item)
+		}
+	}
+
+	total := len(items)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+
+	return skillReviewTaskListResponse{
+		Items:    items[start:end],
+		Page:     page,
+		PageSize: pageSize,
+		Total:    int64(total),
+	}, nil
+}
+
+func buildSkillReviewTaskStatus(ctx context.Context, db *gorm.DB, userID string, task orm.ResourceUpdateTask) (skillReviewTaskStatusResponse, error) {
+	requestID := skillTaskRequestID(task)
+	if strings.TrimSpace(requestID) == "" {
+		return skillReviewTaskStatusResponse{}, errReviewInvalid
+	}
+
+	resp := skillReviewTaskStatusResponse{
+		Task:      taskToResponse(task),
+		RequestID: requestID,
+		Status:    task.Status,
+	}
+	var resultCount int64
+	if err := db.WithContext(ctx).
+		Table("skill_review_results").
+		Where("userid = ? AND requestid = ?", strings.TrimSpace(userID), requestID).
+		Count(&resultCount).Error; err != nil {
+		return skillReviewTaskStatusResponse{}, err
+	}
+	resp.ResultCount = resultCount
+
+	var runStats skillReviewRunStatsRow
+	err := db.WithContext(ctx).
+		Table("skill_review_run_stats").
+		Select("status").
+		Where("userid = ? AND requestid = ?", strings.TrimSpace(userID), requestID).
+		Order("started_at DESC").
+		Take(&runStats).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if task.Status == orm.ResourceUpdateTaskStatusDone {
+			resp.Status = orm.ResourceUpdateTaskStatusRunning
+		}
+		return resp, nil
+	}
+	if err != nil {
+		return skillReviewTaskStatusResponse{}, err
+	}
+
+	resp.RunStatus = runStats.Status
+	resp.Status = skillReviewTaskStatusFromRunStats(task.Status, runStats.Status)
+	return resp, nil
+}
+
+func skillReviewTaskStatusFromRunStats(taskStatus, runStatus string) string {
+	switch taskStatus {
+	case orm.ResourceUpdateTaskStatusPending, orm.ResourceUpdateTaskStatusRunning,
+		orm.ResourceUpdateTaskStatusFailed, orm.ResourceUpdateTaskStatusSkipped:
+		return taskStatus
+	}
+	switch strings.TrimSpace(runStatus) {
+	case "completed":
+		return orm.ResourceUpdateTaskStatusDone
+	case "failed":
+		return orm.ResourceUpdateTaskStatusFailed
+	case "skipped":
+		return orm.ResourceUpdateTaskStatusSkipped
+	case "running":
+		return orm.ResourceUpdateTaskStatusRunning
+	default:
+		return orm.ResourceUpdateTaskStatusRunning
+	}
 }
 
 func GetSkillReviewResult(w http.ResponseWriter, r *http.Request) {

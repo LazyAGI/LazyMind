@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -30,11 +31,77 @@ func TestRuntimeConfigUsesLocalRuntimeRootAndManagerBinaryPaths(t *testing.T) {
 	if cfg.Profile != "local" {
 		t.Fatalf("profile = %q, want local", cfg.Profile)
 	}
-	if paths.RuntimeRoot != filepath.Join(repo, ".lazymind-local") {
+	if paths.RuntimeRoot != filepath.Join(repo, "local/runtime") {
 		t.Fatalf("runtime root = %q", paths.RuntimeRoot)
 	}
-	if localProcessComposeBin != ".lazymind-local/bin/process-compose" {
+	if localProcessComposeBin != "local/runtime/bin/process-compose" {
 		t.Fatalf("process-compose bin = %q", localProcessComposeBin)
+	}
+}
+
+func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	resources := filepath.Join(repo, "desktop-runtime")
+	runtimeRoot := filepath.Join(t.TempDir(), "desktop-state")
+	if err := os.MkdirAll(filepath.Join(resources, "bin"), 0o755); err != nil {
+		t.Fatalf("mkdir resources: %v", err)
+	}
+	manifest := `{
+	  "version": 1,
+	  "profile": "desktop",
+	  "platform": "` + runtime.GOOS + `",
+	  "arch": "` + runtime.GOARCH + `",
+	  "binaries": {
+	    "process-supervisor": "bin/process-compose",
+	    "local-proxy": "bin/local-proxy",
+	    "core": "bin/core",
+	    "scan-control-plane": "bin/scan-control-plane",
+	    "file-watcher": "bin/file-watcher",
+	    "caddy": "bin/caddy"
+	  },
+	  "paths": {
+	    "pythonRuntime": "python/runtime",
+	    "authServiceVenv": "python/auth-service",
+	    "algorithmVenv": "python/algorithm",
+	    "localProxyConfig": "app/local/local-proxy/configs/cloud-replace-kong.yaml"
+	  }
+	}`
+	if err := os.WriteFile(filepath.Join(resources, runtimeManifestFileName), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       "desktop",
+		RepoRoot:      repo,
+		RuntimeRoot:   runtimeRoot,
+		ResourcesRoot: resources,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.Profile != "desktop" {
+		t.Fatalf("profile = %q, want desktop", cfg.Profile)
+	}
+	if paths.RuntimeRoot != runtimeRoot {
+		t.Fatalf("runtime root = %q, want %q", paths.RuntimeRoot, runtimeRoot)
+	}
+	if paths.ResourcesRoot != resources {
+		t.Fatalf("resources root = %q, want %q", paths.ResourcesRoot, resources)
+	}
+	if paths.ProcessComposeBin != filepath.Join(resources, "bin", "process-compose") {
+		t.Fatalf("process-compose bin = %q", paths.ProcessComposeBin)
+	}
+	if paths.LocalProxyBin != filepath.Join(resources, "bin", "local-proxy") {
+		t.Fatalf("local-proxy bin = %q", paths.LocalProxyBin)
+	}
+	if paths.AlgorithmPython != filepath.Join(resources, "python", "algorithm", "bin", "python") {
+		t.Fatalf("algorithm python = %q", paths.AlgorithmPython)
+	}
+	if paths.FileWatcherBaseRoot != filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher") {
+		t.Fatalf("file watcher base root = %q", paths.FileWatcherBaseRoot)
+	}
+	if strings.HasPrefix(paths.FileWatcherBaseRoot, repo+string(os.PathSeparator)) {
+		t.Fatalf("desktop file watcher base root must not be under bundled repo root: %q", paths.FileWatcherBaseRoot)
 	}
 }
 
@@ -182,11 +249,71 @@ func TestEnsureAllDirsUsesOnlyApprovedTopLevelDirs(t *testing.T) {
 	}
 }
 
-func TestCLIRejectsProfileFlag(t *testing.T) {
+func TestCLIAcceptsDesktopProfileFlag(t *testing.T) {
 	cli := NewCLI(io.Discard, io.Discard, &fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
-	profileFlag := "--" + "profile"
-	if err := cli.Run(context.Background(), []string{"status", profileFlag, "linux-browser"}); err == nil {
-		t.Fatal("expected profile flag to be rejected")
+	if err := cli.Run(context.Background(), []string{"status", "--profile", "desktop"}); err != nil {
+		t.Fatalf("expected desktop profile flag to be accepted: %v", err)
+	}
+	if err := cli.Run(context.Background(), []string{"status", "--profile", "linux-browser"}); err == nil {
+		t.Fatal("expected invalid profile flag to be rejected")
+	}
+}
+
+func TestRuntimeGuardRunsDownWhenOwnerExits(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	calls := 0
+	aliveCalls := 0
+	err = runRuntimeGuard(context.Background(), cfg, paths, 12345, time.Millisecond,
+		func(pid int) bool {
+			if pid != 12345 {
+				t.Fatalf("owner pid = %d, want 12345", pid)
+			}
+			aliveCalls++
+			return aliveCalls == 1
+		},
+		func(_ context.Context, gotCfg RuntimeConfig, gotPaths RuntimePaths) error {
+			calls++
+			if gotCfg.Profile != cfg.Profile || gotPaths.RuntimeRoot != paths.RuntimeRoot {
+				t.Fatalf("guard passed unexpected runtime config")
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("runtime guard: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("down calls = %d, want 1", calls)
+	}
+}
+
+func TestRuntimeGuardContextCancelDoesNotRunDown(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := 0
+	err = runRuntimeGuard(ctx, cfg, paths, 12345, time.Millisecond,
+		func(int) bool { return true },
+		func(context.Context, RuntimeConfig, RuntimePaths) error {
+			calls++
+			return nil
+		},
+	)
+	if err == nil {
+		t.Fatal("expected context cancellation")
+	}
+	if calls != 0 {
+		t.Fatalf("down calls = %d, want 0", calls)
 	}
 }
 
@@ -197,7 +324,7 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
-	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, ".lazymind-local", "bin", "local-runtime-manager"))
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local/runtime", "bin", "local-runtime-manager"))
 	var out strings.Builder
 	if err := manager.processCompose.WriteGeneratedConfig(&out, repo, paths, cfg, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
 		t.Fatalf("write generated config: %v", err)
@@ -228,9 +355,36 @@ func TestProcessComposeGOBINIsUnderLocalRuntimeRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("process compose GOBIN: %v", err)
 	}
-	want := filepath.Join(repo, ".lazymind-local", "bin")
+	want := filepath.Join(repo, "local/runtime", "bin")
 	if got != want {
 		t.Fatalf("GOBIN = %q, want %q", got, want)
+	}
+}
+
+func TestProcessComposeDesktopRequiresBundledBinaryUnderResourcesRoot(t *testing.T) {
+	root := t.TempDir()
+	wrongProcessComposeBin := filepath.Join(root, "runtime", "bin", "process-compose")
+	if err := os.MkdirAll(filepath.Dir(wrongProcessComposeBin), 0o755); err != nil {
+		t.Fatalf("mkdir wrong process-compose dir: %v", err)
+	}
+	if err := os.WriteFile(wrongProcessComposeBin, []byte("process-compose"), 0o755); err != nil {
+		t.Fatalf("write wrong process-compose binary: %v", err)
+	}
+	paths := RuntimePaths{
+		RepoRoot:           filepath.Join(root, "app"),
+		RuntimeRoot:        filepath.Join(root, "runtime"),
+		ResourcesRoot:      filepath.Join(root, "resources"),
+		ProcessComposeBin:  wrongProcessComposeBin,
+		ProcessComposeHome: filepath.Join(root, "runtime", "data", "homes", "process-compose"),
+	}
+	manager := NewProcessComposeManager(&ExecRunner{}, filepath.Join(paths.ResourcesRoot, "bin", "local-runtime-manager"))
+
+	err := manager.EnsureBinary(context.Background(), paths)
+	if err == nil {
+		t.Fatalf("expected missing desktop process-compose outside resources root to fail")
+	}
+	if !strings.Contains(err.Error(), "runtime resources") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -271,7 +425,7 @@ func TestProcessComposeDownStreamsOutputWhenRunnerSupportsIt(t *testing.T) {
 	}
 	runner := &fakeStreamRunner{fakeRunner: fakeRunner{t: t}}
 	runner.streamHandlers = append(runner.streamHandlers, func(cmd Command) error {
-		assertCommand(t, cmd, processComposeCommand(repo),
+		assertCommand(t, cmd, processComposeCommand(paths),
 			"-p", strconv.Itoa(cfg.ProcessComposePort),
 			"--token-file", paths.RunDirTokenFile,
 			"down",
@@ -393,6 +547,35 @@ func TestKillStaleRuntimeProcessesStopsScannerOrphan(t *testing.T) {
 	}
 }
 
+func TestRuntimeManagerUpRequiresBundledLazyLLMSourceInDesktopProfile(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       "desktop",
+		RepoRoot:      repo,
+		RuntimeRoot:   filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	runner := &fakeRunner{t: t}
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		if cmd.Name == "git" {
+			t.Fatalf("desktop startup must not initialize git submodules: %v", cmd.Args)
+		}
+		t.Fatalf("desktop startup should fail before running commands when bundled lazyllm source is missing: %s %v", cmd.Name, cmd.Args)
+		return CommandResult{}, nil
+	})
+	manager := NewRuntimeManager(runner, filepath.Join(paths.BinDir, "local-runtime-manager"))
+
+	err = manager.Up(context.Background(), cfg, paths)
+	if err == nil || !strings.Contains(err.Error(), "missing bundled algorithm/lazyllm source") {
+		t.Fatalf("runtime manager up error = %v, want missing bundled lazyllm source", err)
+	}
+	runner.assertCommandCount(0)
+}
+
 func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -409,7 +592,7 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
-	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, ".lazymind-local", "bin", "local-runtime-manager"))
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local/runtime", "bin", "local-runtime-manager"))
 	manager.probeAPI = func(port int, timeout time.Duration) bool { return false }
 	out, err := manager.Status(context.Background(), cfg, paths, true)
 	if err != nil {

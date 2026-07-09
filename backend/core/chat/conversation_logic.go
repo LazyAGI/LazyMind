@@ -1295,6 +1295,7 @@ func streamSingleAnswer(
 			// Do not replay reasoning on final message frame.
 			ReasoningContent:  "",
 			ThinkingDurationS: int64(time.Since(thinkStart).Seconds()),
+			ToolCallTurns:     toolCallTurns,
 		})
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
@@ -1523,8 +1524,16 @@ dualPersist:
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
 	if reqCtx.Err() == nil {
-		writeSSEChunk(w, flusher, map[string]any{"finish_reason": "FINISH_REASON_STOP", "history_id": historyID})
-		writeSSEChunk(w, flusher, map[string]any{"finish_reason": "FINISH_REASON_STOP", "history_id": secondaryHistoryID})
+		writeSSEChunk(w, flusher, map[string]any{
+			"finish_reason":   "FINISH_REASON_STOP",
+			"history_id":      historyID,
+			"tool_call_turns": primaryToolCallTurns,
+		})
+		writeSSEChunk(w, flusher, map[string]any{
+			"finish_reason":   "FINISH_REASON_STOP",
+			"history_id":      secondaryHistoryID,
+			"tool_call_turns": secondaryToolCallTurns,
+		})
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 	}

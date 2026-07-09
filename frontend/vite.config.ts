@@ -5,6 +5,7 @@ import path from "node:path";
 
 const devProxyTarget =
   process.env.VITE_PROXY_TARGET || "http://localhost:5024";
+const isDesktopBuild = process.env.VITE_LAZYMIND_MODE === "desktop";
 
 function jsPreviewExcelShimPlugin(): Plugin {
   const RESOLVED_ID = "\0virtual:js-preview-excel-shim";
@@ -55,6 +56,18 @@ export default defineConfig({
   build: {
     outDir: "dist",
     rollupOptions: {
+      onwarn(warning, warn) {
+        if (
+          isDesktopBuild &&
+          warning.code === "MODULE_LEVEL_DIRECTIVE" &&
+          warning.message.includes('"use client"') &&
+          warning.id?.includes("node_modules")
+        ) {
+          return;
+        }
+
+        warn(warning);
+      },
       output: {
         manualChunks(id) {
           // Split monaco-editor into its own chunk to avoid bundling it with the main app.

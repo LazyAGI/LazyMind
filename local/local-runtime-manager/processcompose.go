@@ -185,6 +185,9 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 	env := append([]string{}, localRuntimeEnv(cfg)...)
 	env = append(env, serviceRuntimeEnv(paths)...)
 	env = append(env,
+		runtimeProfileEnvVar+"="+cfg.Profile,
+		runtimeRootEnvVar+"="+cfg.RuntimeRoot,
+		runtimeResourcesRootEnvVar+"="+cfg.ResourcesRoot,
 		localPortsPinnedEnvVar+"=1",
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
 		localAuthPortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
@@ -213,7 +216,7 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 }
 
 func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	if err := m.EnsureBinary(ctx, paths.RepoRoot); err != nil {
+	if err := m.EnsureBinary(ctx, paths); err != nil {
 		return err
 	}
 	args := []string{
@@ -229,12 +232,12 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 		if err != nil {
 			return err
 		}
-		cmd := exec.Command(processComposeCommand(paths.RepoRoot), args...)
+		cmd := exec.Command(processComposeCommand(paths), args...)
 		cmd.Dir = paths.RepoRoot
 		cmd.Env = append(os.Environ(), processComposeRuntimeEnv(paths)...)
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err := cmd.Start(); err != nil {
 			_ = logFile.Close()
 			return fmt.Errorf("process-compose up failed: %w", err)
@@ -244,7 +247,7 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 			_ = logFile.Close()
 			return err
 		}
-		registerLocalProcess(paths, processComposeServiceName, cmd.Process.Pid, []int{cfg.ProcessComposePort}, append([]string{processComposeCommand(paths.RepoRoot)}, args...))
+		registerLocalProcess(paths, processComposeServiceName, cmd.Process.Pid, []int{cfg.ProcessComposePort}, append([]string{processComposeCommand(paths)}, args...))
 		go func() {
 			_ = cmd.Wait()
 			_ = logFile.Close()
@@ -253,7 +256,7 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 		}()
 		return nil
 	}
-	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot, Env: processComposeRuntimeEnv(paths)})
+	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths), Args: args, Dir: paths.RepoRoot, Env: processComposeRuntimeEnv(paths)})
 	if err != nil {
 		return fmt.Errorf("process-compose up failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
@@ -265,7 +268,7 @@ func (m *ProcessComposeManager) FollowLogs(ctx context.Context, cfg RuntimeConfi
 }
 
 func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, stdout io.Writer, stderr io.Writer) error {
-	if err := m.EnsureBinary(ctx, paths.RepoRoot); err != nil {
+	if err := m.EnsureBinary(ctx, paths); err != nil {
 		return err
 	}
 	args := []string{
@@ -274,12 +277,12 @@ func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, pat
 		"down",
 	}
 	if streamer, ok := m.runner.(CommandStreamer); ok {
-		if err := streamer.Stream(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot, Env: processComposeRuntimeEnv(paths)}, stdout, stderr); err != nil {
+		if err := streamer.Stream(ctx, Command{Name: processComposeCommand(paths), Args: args, Dir: paths.RepoRoot, Env: processComposeRuntimeEnv(paths)}, stdout, stderr); err != nil {
 			return fmt.Errorf("process-compose down failed: %w", err)
 		}
 		return nil
 	}
-	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot, Env: processComposeRuntimeEnv(paths)})
+	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths), Args: args, Dir: paths.RepoRoot, Env: processComposeRuntimeEnv(paths)})
 	if res.Stdout != "" && stdout != nil {
 		_, _ = io.WriteString(stdout, res.Stdout)
 	}
@@ -309,10 +312,17 @@ func (m *ProcessComposeManager) ProbeAPI(port int, timeout time.Duration) bool {
 	return resp.StatusCode < 500
 }
 
-func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, repoRoot string) error {
+func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, paths RuntimePaths) error {
 	if _, ok := m.runner.(*ExecRunner); !ok {
 		return nil
 	}
+	if paths.ResourcesRoot != "" && !pathIsUnderRoot(paths.ProcessComposeBin, paths.ResourcesRoot) {
+		return fmt.Errorf("process-compose binary not found in runtime resources: %s", paths.ProcessComposeBin)
+	}
+	if info, err := os.Stat(paths.ProcessComposeBin); err == nil && !info.IsDir() {
+		return nil
+	}
+	repoRoot := paths.RepoRoot
 	candidate := filepath.Join(repoRoot, localProcessComposeBin)
 	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 		return nil
@@ -328,7 +338,7 @@ func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, repoRoot strin
 		Name: "go",
 		Args: []string{"install", processComposePackage},
 		Dir:  repoRoot,
-		Env:  append(goToolEnv(RuntimePaths{RepoRoot: repoRoot, RuntimeRoot: filepath.Join(repoRoot, ".lazymind-local")}), "GOBIN="+gobin),
+		Env:  append(goToolEnv(RuntimePaths{RepoRoot: repoRoot, RuntimeRoot: filepath.Join(repoRoot, "local", "runtime")}), "GOBIN="+gobin),
 	})
 	if err != nil {
 		return fmt.Errorf("install process-compose failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
@@ -337,7 +347,7 @@ func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, repoRoot strin
 }
 
 func processComposeGOBIN(repoRoot string) (string, error) {
-	return filepath.Abs(filepath.Join(repoRoot, ".lazymind-local", "bin"))
+	return filepath.Abs(filepath.Join(repoRoot, "local", "runtime", "bin"))
 }
 
 func quoteShellArg(value string) string {
@@ -355,8 +365,11 @@ func quoteShellArg(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
-func processComposeCommand(repoRoot string) string {
-	candidate := filepath.Join(repoRoot, localProcessComposeBin)
+func processComposeCommand(paths RuntimePaths) string {
+	if info, err := os.Stat(paths.ProcessComposeBin); err == nil && !info.IsDir() {
+		return paths.ProcessComposeBin
+	}
+	candidate := filepath.Join(paths.RepoRoot, localProcessComposeBin)
 	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 		return candidate
 	}

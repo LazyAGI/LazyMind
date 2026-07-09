@@ -41,7 +41,7 @@ func (m *ScanControlPlaneManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 	if err := os.MkdirAll(paths.ScanControlPlaneTempDir, 0o755); err != nil {
 		return err
 	}
-	if err := m.build(ctx, paths); err != nil {
+	if err := m.build(ctx, cfg, paths); err != nil {
 		return err
 	}
 	if err := m.waitForDatabase(ctx, cfg, paths); err != nil {
@@ -86,7 +86,13 @@ func (m *ScanControlPlaneManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 	return nil
 }
 
-func (m *ScanControlPlaneManager) build(ctx context.Context, paths RuntimePaths) error {
+func (m *ScanControlPlaneManager) build(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(paths.ScanControlPlaneBin); err == nil && !info.IsDir() {
+			return nil
+		}
+		return fmt.Errorf("desktop scan-control-plane binary not found: %s", paths.ScanControlPlaneBin)
+	}
 	goBin := strings.TrimSpace(os.Getenv("GO"))
 	if goBin == "" {
 		goBin = "go"
@@ -147,7 +153,7 @@ func (m *FileWatcherManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 			return err
 		}
 	}
-	if err := m.build(ctx, paths); err != nil {
+	if err := m.build(ctx, cfg, paths); err != nil {
 		return err
 	}
 
@@ -189,7 +195,13 @@ func (m *FileWatcherManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 	return nil
 }
 
-func (m *FileWatcherManager) build(ctx context.Context, paths RuntimePaths) error {
+func (m *FileWatcherManager) build(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(paths.FileWatcherBin); err == nil && !info.IsDir() {
+			return nil
+		}
+		return fmt.Errorf("desktop file-watcher binary not found: %s", paths.FileWatcherBin)
+	}
 	goBin := strings.TrimSpace(os.Getenv("GO"))
 	if goBin == "" {
 		goBin = "go"

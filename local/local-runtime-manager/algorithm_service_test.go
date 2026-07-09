@@ -24,7 +24,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 
 	runner := &fakeRunner{t: t}
 	manager := NewAlgorithmServiceManager(runner)
-	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 		},
 	)
 
-	if err := manager.preparePython(context.Background(), paths, false); err != nil {
+	if err := manager.preparePython(context.Background(), cfg, paths, false); err != nil {
 		t.Fatalf("prepare algorithm python: %v", err)
 	}
 	runner.assertCommandCount(7)

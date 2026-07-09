@@ -13,6 +13,7 @@ type RuntimeState struct {
 	Runtime        string                         `json:"runtime"`
 	Profile        string                         `json:"profile"`
 	RepoRoot       string                         `json:"repoRoot"`
+	ResourcesRoot  string                         `json:"resourcesRoot,omitempty"`
 	RuntimeRoot    string                         `json:"runtimeRoot"`
 	ProcessCompose ProcessComposeState            `json:"processCompose"`
 	Config         RuntimeConfigSnapshot          `json:"config,omitempty"`
@@ -56,8 +57,10 @@ type StatusResponse struct {
 	Profile        string                         `json:"profile"`
 	OverallStatus  string                         `json:"overallStatus"`
 	RepoRoot       string                         `json:"repoRoot"`
+	ResourcesRoot  string                         `json:"resourcesRoot,omitempty"`
 	RuntimeRoot    string                         `json:"runtimeRoot"`
 	ProcessCompose ProcessComposeState            `json:"processCompose"`
+	Config         RuntimeConfigSnapshot          `json:"config,omitempty"`
 	Services       map[string]RuntimeServiceState `json:"services"`
 }
 
@@ -85,11 +88,12 @@ func writeRuntimeState(path string, state RuntimeState) error {
 
 func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) RuntimeState {
 	return RuntimeState{
-		Version:     processComposeVersion,
-		Runtime:     "local",
-		Profile:     cfg.Profile,
-		RepoRoot:    cfg.RepoRoot,
-		RuntimeRoot: cfg.RuntimeRoot,
+		Version:       processComposeVersion,
+		Runtime:       cfg.Profile,
+		Profile:       cfg.Profile,
+		RepoRoot:      cfg.RepoRoot,
+		ResourcesRoot: cfg.ResourcesRoot,
+		RuntimeRoot:   cfg.RuntimeRoot,
 		ProcessCompose: ProcessComposeState{
 			APIPort:   apiPort,
 			APIRoot:   "http://127.0.0.1:" + itoa(apiPort),

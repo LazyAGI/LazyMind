@@ -59,7 +59,7 @@ func (m *RuntimeManager) RunServiceAction(ctx context.Context, cfg RuntimeConfig
 		if err := paths.EnsureAllDirs(); err != nil {
 			return err
 		}
-		return m.fileWatcher.build(ctx, paths)
+		return m.fileWatcher.build(ctx, cfg, paths)
 	case "start":
 		return m.fileWatcher.Run(ctx, cfg, paths)
 	case "stop":
