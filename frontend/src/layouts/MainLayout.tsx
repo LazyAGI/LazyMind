@@ -637,7 +637,7 @@ export default function MainLayout() {
             {desktopSessionGate.loading ? <Spin /> : null}
             <div className="desktop-session-title">LazyMind</div>
             <div className="desktop-session-message">
-              {desktopSessionGate.error || t("layout.preparingDesktopSession", "Preparing desktop session...")}
+              {desktopSessionGate.error || t("layout.preparingDesktopSession", "Preparing local session...")}
             </div>
             {desktopSessionGate.error ? (
               <Button

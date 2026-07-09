@@ -114,7 +114,14 @@ export default function AppRouter() {
           <Route path="lib/knowledge" element={<KnowledgeApp />}>
             <Route index element={<Navigate to="list" replace />} />
             <Route path="list" element={<KnowledgeList />} />
-            <Route path="auth/:id" element={<KnowledgeAuth />} />
+            {runtimeFeatures.hideUserGroupSurfaces ? (
+              <Route
+                path="auth/:id"
+                element={<Navigate to="/lib/knowledge/list" replace />}
+              />
+            ) : (
+              <Route path="auth/:id" element={<KnowledgeAuth />} />
+            )}
             <Route path="detail/:id" element={<KnowledgeDetail />} />
             <Route
               path="knowledge/:knowledgeBaseId/:knowledgeId"

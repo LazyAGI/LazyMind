@@ -31,7 +31,6 @@ let allowWindowClose = false;
 let startupLogEntries = [];
 let startupLogWriteFailed = false;
 let lastStartupError = null;
-let desktopAdminSessionPromise = null;
 let startupState = {
   status: "starting",
   phase: "Initializing",
@@ -293,90 +292,6 @@ async function readStatus() {
   const stdout = await runSidecar("status", ["--json"]);
   currentStatus = JSON.parse(stdout);
   return currentStatus;
-}
-
-function unwrapApiResponse(payload) {
-  if (payload && typeof payload === "object" && "data" in payload) {
-    return payload.data;
-  }
-  return payload;
-}
-
-function desktopAuthBaseUrl(status) {
-  const authPort = status?.config?.authService?.Port || status?.config?.authService?.port;
-  if (!authPort) {
-    throw new Error("Desktop auth-service port is not available");
-  }
-  return `http://127.0.0.1:${authPort}/api/authservice`;
-}
-
-async function fetchJson(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    signal: options.signal || AbortSignal.timeout(15000),
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  const text = await response.text();
-  let payload = null;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = text;
-    }
-  }
-  if (!response.ok) {
-    const detail = payload?.detail || payload?.message || text || response.statusText;
-    throw new Error(`Desktop auth request failed (${response.status}): ${detail}`);
-  }
-  return unwrapApiResponse(payload);
-}
-
-async function createDesktopAdminSession() {
-  const status = currentStatus || await readStatus();
-  const baseUrl = desktopAuthBaseUrl(status);
-  const username = String(process.env.LAZYMIND_BOOTSTRAP_ADMIN_USERNAME || "admin");
-  const password = String(process.env.LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD || "admin");
-
-  const login = await fetchJson(`${baseUrl}/auth/login`, {
-    method: "POST",
-    body: JSON.stringify({ username, password }),
-  });
-  if (!login?.access_token) {
-    throw new Error("Desktop admin login did not return an access token");
-  }
-
-  const currentUser = await fetchJson(`${baseUrl}/auth/me`, {
-    headers: {
-      Authorization: `Bearer ${login.access_token}`,
-    },
-  });
-
-  return {
-    token: login.access_token,
-    refreshToken: login.refresh_token,
-    username: currentUser?.username || username,
-    userId: currentUser?.user_id,
-    role: currentUser?.role || login.role,
-    email: currentUser?.email || undefined,
-    displayName: currentUser?.display_name || undefined,
-    tenantId: currentUser?.tenant_id || login.tenant_id || undefined,
-    dynamic: currentUser?.dynamic === true,
-    chatUnlikeSwitch: currentUser?.chat_unlike_switch === true,
-    timestamp: Date.now(),
-  };
-}
-
-function ensureDesktopAdminSession() {
-  if (!desktopAdminSessionPromise) {
-    desktopAdminSessionPromise = createDesktopAdminSession().finally(() => {
-      desktopAdminSessionPromise = null;
-    });
-  }
-  return desktopAdminSessionPromise;
 }
 
 function logStartupContext() {
@@ -797,7 +712,6 @@ ipcMain.handle("lazymind:selectFolder", async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 ipcMain.handle("lazymind:startupDiagnostics", () => startupDiagnosticsSnapshot());
-ipcMain.handle("lazymind:desktopAdminSession", () => ensureDesktopAdminSession());
 ipcMain.handle("lazymind:copyStartupLogs", () => {
   const text = startupLogEntries
     .map((entry) => `[${entry.ts}] [${entry.source}] ${entry.text}`)

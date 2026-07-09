@@ -230,7 +230,7 @@ export const handleError = async (error: AxiosError) => {
           try {
             await restoreDesktopSessionAndGetToken();
           } catch (desktopSessionError) {
-            console.error("Desktop admin session restore failed:", desktopSessionError);
+            console.error("Local admin session restore failed:", desktopSessionError);
           }
           return Promise.reject(error);
         }
@@ -249,7 +249,7 @@ export const handleError = async (error: AxiosError) => {
               return desktopRetryResponse;
             }
           } catch (desktopSessionError) {
-            console.error("Desktop admin session restore failed:", desktopSessionError);
+            console.error("Local admin session restore failed:", desktopSessionError);
           }
         }
         if (AgentAppsAuth.isLoggedIn()) {
@@ -296,7 +296,7 @@ export const handleError = async (error: AxiosError) => {
             originalRequest._desktopRetry = true;
             return await axiosInstance(originalRequest);
           } catch (desktopSessionError) {
-            console.error("Desktop admin session restore failed:", desktopSessionError);
+            console.error("Local admin session restore failed:", desktopSessionError);
           }
         }
         

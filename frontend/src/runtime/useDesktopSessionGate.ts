@@ -25,8 +25,8 @@ export function useDesktopSessionGate(
         await ensureDesktopSession({ force });
         await refreshLayoutUser();
       } catch (restoreError: any) {
-        console.error("Failed to restore desktop admin session:", restoreError);
-        setError(restoreError?.message || "Desktop session could not be restored.");
+        console.error("Failed to restore local admin session:", restoreError);
+        setError(restoreError?.message || "Local session could not be restored.");
       } finally {
         setLoading(false);
       }
@@ -52,8 +52,8 @@ export function useDesktopSessionGate(
       })
       .catch((restoreError: any) => {
         if (!cancelled) {
-          console.error("Failed to restore desktop admin session:", restoreError);
-          setError(restoreError?.message || "Desktop session could not be restored.");
+          console.error("Failed to restore local admin session:", restoreError);
+          setError(restoreError?.message || "Local session could not be restored.");
         }
       })
       .finally(() => {

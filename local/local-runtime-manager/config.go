@@ -19,6 +19,7 @@ const (
 	localUpTimeoutEnvVar          = "LAZYMIND_LOCAL_UP_TIMEOUT"
 	localDownTimeoutEnvVar        = "LAZYMIND_LOCAL_DOWN_TIMEOUT"
 	localNetworkProfileEnvVar     = "LAZYMIND_LOCAL_NETWORK_PROFILE"
+	localAutoLoginAllowLANEnvVar  = "LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN"
 	localProxyAddressEnvVar       = "LAZYMIND_LOCAL_PROXY_ADDRESS"
 	localProxyPortEnvVar          = "LAZYMIND_LOCAL_PROXY_PORT"
 	localAuthPortEnvVar           = "LAZYMIND_LOCAL_AUTH_PORT"

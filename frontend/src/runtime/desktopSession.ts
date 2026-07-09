@@ -1,5 +1,5 @@
 import { AgentAppsAuth, type UserInfo } from "@/components/auth";
-import { requestDesktopAdminSession } from "./desktopBridge";
+import { apiUrl } from "./apiBase";
 import { runtimeFeatures } from "./features";
 
 let desktopSessionPromise: Promise<UserInfo | null> | null = null;
@@ -9,7 +9,7 @@ export interface DesktopSessionOptions {
 }
 
 export function isDesktopSessionEnabled(): boolean {
-  return runtimeFeatures.desktopAutoLogin;
+  return runtimeFeatures.localAutoLogin;
 }
 
 export function shouldHideDesktopUserControls(): boolean {
@@ -30,9 +30,9 @@ export async function ensureDesktopSession(
 
   if (!desktopSessionPromise) {
     desktopSessionPromise = (async () => {
-      const session = await requestDesktopAdminSession();
+      const session = await requestLocalAdminSession();
       if (!session?.token) {
-        throw new Error("Desktop admin session did not return an access token");
+        throw new Error("Local admin session did not return an access token");
       }
       AgentAppsAuth.setUserInfo(session);
       return AgentAppsAuth.getUserInfo();
@@ -48,7 +48,26 @@ export async function restoreDesktopSessionAndGetToken(): Promise<string> {
   const userInfo = await ensureDesktopSession({ force: true });
   const token = userInfo?.token || "";
   if (!token) {
-    throw new Error("Desktop admin session did not return an access token");
+    throw new Error("Local admin session did not return an access token");
   }
   return token;
+}
+
+async function requestLocalAdminSession(): Promise<UserInfo> {
+  const response = await fetch(apiUrl("/_local/admin-session"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail =
+      payload?.detail ||
+      payload?.message ||
+      payload?.error ||
+      response.statusText;
+    throw new Error(`Local admin session request failed (${response.status}): ${detail}`);
+  }
+  return payload?.data || payload;
 }
