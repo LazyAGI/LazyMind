@@ -27,7 +27,7 @@ func (h *adminSessionHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	session, err := h.manager.Ensure(req.Context(), false)
+	session, err := h.manager.Ensure(req.Context(), forceAdminSessionRefresh(req))
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "admin session unavailable",
@@ -36,6 +36,15 @@ func (h *adminSessionHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, session)
+}
+
+func forceAdminSessionRefresh(req *http.Request) bool {
+	switch strings.ToLower(strings.TrimSpace(req.URL.Query().Get("force"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func requestFromLoopback(req *http.Request) bool {
