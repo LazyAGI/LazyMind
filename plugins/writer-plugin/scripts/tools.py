@@ -257,3 +257,114 @@ def writer_generate_writing_output(
         'writing_output': output_path,
         'writing_output_md': str(markdown_path),
     }
+
+
+def writer_build_revise_task(query: str) -> str:
+    """Build a revise-type WritingTask artifact and return its file path."""
+    content = WriterToolGroup().build_revise_task(query=query)
+    return _save_json_artifact('revise_task', content, writer_schema('task.WritingTask'))
+
+
+def writer_draft_to_doc_ir(draft_document_path: str) -> str:
+    """Convert the current draft into a DocIR artifact and return its file path."""
+    content = WriterToolGroup().draft_to_doc_ir(
+        draft_document_json=_read_json_string(draft_document_path),
+    )
+    return _save_json_artifact('doc_ir', content, writer_schema('docir.DocIR'))
+
+
+def writer_locate_revision_target(
+    revise_task_path: str,
+    doc_ir_path: str,
+    writing_context_path: str,
+) -> str:
+    """Locate revision target blocks and return the locate_result artifact path."""
+    content = WriterToolGroup().locate_revision_target(
+        writing_task_json=_read_json_string(revise_task_path),
+        doc_ir_json=_read_json_string(doc_ir_path),
+        writing_context_json=_read_json_string(writing_context_path),
+    )
+    return _save_json_artifact('locate_result', content, writer_schema('revision.LocateResult'))
+
+
+def writer_generate_modify_plan(
+    revise_task_path: str,
+    doc_ir_path: str,
+    locate_result_path: str,
+    writing_context_path: str,
+) -> str:
+    """Generate a modify plan and return the modify_plan artifact path."""
+    content = WriterToolGroup().generate_modify_plan(
+        writing_task_json=_read_json_string(revise_task_path),
+        doc_ir_json=_read_json_string(doc_ir_path),
+        locate_result_json=_read_json_string(locate_result_path),
+        writing_context_json=_read_json_string(writing_context_path),
+    )
+    return _save_json_artifact('modify_plan', content, writer_schema('revision.ModifyPlan'))
+
+
+def writer_generate_patch_set(
+    doc_ir_path: str,
+    modify_plan_path: str,
+    writing_context_path: str,
+) -> str:
+    """Generate a patch set and return the patch_set artifact path."""
+    content = WriterToolGroup().generate_patch_set(
+        doc_ir_json=_read_json_string(doc_ir_path),
+        modify_plan_json=_read_json_string(modify_plan_path),
+        writing_context_json=_read_json_string(writing_context_path),
+    )
+    return _save_json_artifact('patch_set', content, writer_schema('revision.PatchSet'))
+
+
+def writer_validate_patch_set(
+    patch_set_path: str,
+    revise_task_path: str,
+    writing_context_path: str,
+) -> str:
+    """Validate a patch set and return the patch_set_review artifact path."""
+    content = WriterToolGroup().validate_patch_set(
+        patch_set_json=_read_json_string(patch_set_path),
+        writing_context_json=_read_json_string(writing_context_path),
+        writing_task_json=_read_json_string(revise_task_path),
+    )
+    return _save_json_artifact('patch_set_review', content, writer_schema('quality.AuditResult'))
+
+
+def writer_apply_patch(
+    doc_ir_path: str,
+    patch_set_path: str,
+    writing_context_path: str,
+) -> dict:
+    """Apply a patch set and return patch_result and revised_doc_ir artifact paths."""
+    content = WriterToolGroup().apply_patch(
+        doc_ir_json=_read_json_string(doc_ir_path),
+        patch_set_json=_read_json_string(patch_set_path),
+        writing_context_json=_read_json_string(writing_context_path),
+    )
+    payload = _json_loads(content, {})
+    root = _workspace_root()
+    patch_result_path = save_artifact_json(
+        payload.get('patch_result') or {},
+        str(root / 'patch_result.json'),
+        schema_name=writer_schema('revision.PatchResult'),
+        created_by='writer-plugin-wrapper',
+    )
+    revised_doc_ir_path = save_artifact_json(
+        payload.get('revised_doc_ir') or {},
+        str(root / 'revised_doc_ir.json'),
+        schema_name=writer_schema('docir.DocIR'),
+        created_by='writer-plugin-wrapper',
+    )
+    return {
+        'patch_result': patch_result_path,
+        'revised_doc_ir': revised_doc_ir_path,
+    }
+
+
+def writer_doc_ir_to_draft(doc_ir_path: str) -> str:
+    """Convert a (revised) DocIR back into a DraftDocument artifact path."""
+    content = WriterToolGroup().doc_ir_to_draft(
+        doc_ir_json=_read_json_string(doc_ir_path),
+    )
+    return _save_json_artifact('draft_document', content, writer_schema('writing.DraftDocument'))
