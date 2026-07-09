@@ -23,6 +23,18 @@ import (
 // uuidPattern matches a standard UUID v4 string (8-4-4-4-12 hex digits with hyphens).
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+// pluginIDPattern extracts the `id:` field from plugin.yaml.
+// Matches bare or single/double-quoted values on a line of its own.
+var pluginIDPattern = regexp.MustCompile(`(?m)^id:\s*["']?([^"'\n]+?)["']?\s*$`)
+
+// extractPluginID returns the plugin id from a plugin.yaml string, or "" if not found.
+func extractPluginID(yamlContent string) string {
+	if m := pluginIDPattern.FindStringSubmatch(yamlContent); len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
 // isBuiltinPluginID returns true when id does not look like a UUID.
 // Built-in plugin IDs are human-readable strings (e.g. "image-plugin"),
 // while user draft IDs are always UUID v4 strings generated on creation.
@@ -263,6 +275,8 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.PluginYAMLContent != nil {
 		updates["plugin_yaml_content"] = *body.PluginYAMLContent
+		// Keep plugin_id in sync so the per-user unique index can enforce deduplication.
+		updates["plugin_id"] = extractPluginID(*body.PluginYAMLContent)
 	}
 	if body.StateYAMLContent != nil {
 		updates["state_yaml_content"] = *body.StateYAMLContent
@@ -281,6 +295,11 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.Model(&draft).Updates(updates).Error; err != nil {
+		if strings.Contains(err.Error(), "idx_plugin_drafts_user_plugin_id") ||
+			strings.Contains(err.Error(), "unique") && strings.Contains(err.Error(), "plugin_id") {
+			common.ReplyErr(w, "plugin id already exists for this user", http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "save failed", http.StatusInternalServerError)
 		return
 	}

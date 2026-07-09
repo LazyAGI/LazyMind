@@ -283,12 +283,18 @@ export default function PluginDetailPage() {
           version: currentVersion,
         });
       } catch (err: unknown) {
-        // 409 Conflict: AI write bumped the version. Refresh draft version silently so
-        // the next save attempt uses the correct version, then rethrow so the editor
-        // shows "保存失败".
-        const status = (err as { response?: { status?: number; data?: { data?: PluginDraftRecord } } })?.response?.status;
+        // 409 Conflict: two sub-cases.
+        // 1. Version conflict: AI write bumped the version — refresh draft and rethrow.
+        // 2. Plugin id duplicate: another draft by this user already uses the same plugin id.
+        const status = (err as { response?: { status?: number; data?: { message?: string; data?: PluginDraftRecord } } })?.response?.status;
         if (status === 409) {
-          const latest = (err as { response: { data: { data: PluginDraftRecord } } }).response?.data?.data;
+          const body = (err as { response: { data: { message?: string; data?: PluginDraftRecord } } }).response?.data;
+          if (body?.message && body.message.includes('plugin id already exists')) {
+            message.error('插件标识已被你的其他插件使用，请修改插件标识后重新保存');
+            throw err;
+          }
+          // Version conflict: update local version and let editor retry.
+          const latest = body?.data;
           if (latest) setDraft(latest);
           message.warning('内容已被 AI 更新，正在重试保存…');
         }
@@ -355,6 +361,11 @@ export default function PluginDetailPage() {
   if (!pluginYaml && draft.name) {
     pluginYaml = `name: "${draft.name.replace(/"/g, '\\"')}"\n`;
   }
+  // Extract plugin id from yaml for breadcrumb; fall back to draft.name.
+  const breadcrumbLabel = (() => {
+    const m = pluginYaml?.match(/^id:\s*["']?([^"'\n]+)["']?\s*$/m);
+    return m?.[1]?.trim() || draft.name;
+  })();
 
   return (
     <div className="plugin-editor-overlay">
@@ -474,18 +485,6 @@ export default function PluginDetailPage() {
               <Breadcrumb
                 items={[
                   { title: '我的插件', href: '/memory-management/plugins' },
-                  ...(draft.source_skill_id ? [{
-                    title: (
-                      <a
-                        href={`/memory-management/skill-management?skill_id=${draft.source_skill_id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ color: 'var(--color-text-secondary, #888)', fontSize: 12 }}
-                      >
-                        {draft.source_skill_name || '来源技能'}
-                      </a>
-                    ),
-                  }] : []),
                   {
                     title: editingName ? (
                       <Input
@@ -504,7 +503,7 @@ export default function PluginDetailPage() {
                         onClick={() => setEditingName(true)}
                         title="点击编辑名称"
                       >
-                        {nameValue}
+                        {breadcrumbLabel}
                       </button>
                     ),
                   },

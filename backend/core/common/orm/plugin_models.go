@@ -151,6 +151,11 @@ type PluginDraft struct {
 	// DesignBriefContent stores the Phase 0 design brief Markdown (migration 20260709140000).
 	// Empty for old drafts that were generated before Phase 0 was introduced.
 	DesignBriefContent string `gorm:"column:design_brief_content;type:text;not null;default:''"`
+	// PluginID mirrors the `id:` field inside PluginYAMLContent (migration 20260709150000).
+	// Kept in sync on every save that touches PluginYAMLContent.
+	// A partial unique index (created_by, plugin_id) WHERE plugin_id != '' enforces
+	// per-user uniqueness while allowing legacy empty-string rows to coexist.
+	PluginID string `gorm:"column:plugin_id;type:varchar(255);not null;default:''"`
 }
 
 func (PluginDraft) TableName() string { return "plugin_drafts" }
