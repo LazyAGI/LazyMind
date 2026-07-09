@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, Input, Button, Select, Tooltip, message } from 'antd';
 import { FileTextOutlined, ThunderboltOutlined, BulbOutlined, QuestionCircleOutlined } from '@ant-design/icons';
-import { createPluginDraft, aiGeneratePluginDraft, updatePluginDraftContent } from '../../pluginDraftApi';
+import { createPluginDraft, aiGeneratePluginDraft, updatePluginDraftContent, deletePluginDraft } from '../../pluginDraftApi';
 import { listSkillAssetsPage } from '@/modules/memory/skillApi';
 import { serializePluginModel } from '../StateGraphEditor/core/pluginSerializer';
 import { createEmptyPluginModel } from '../StateGraphEditor/core/pluginModel';
@@ -92,7 +92,7 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
   const handleSkillSearch = async (keyword: string) => {
     setSkillLoading(true);
     try {
-      const result = await listSkillAssetsPage({ keyword, page: 1, pageSize: 20 });
+      const result = await listSkillAssetsPage({ keyword, page: 1, pageSize: 20, excludeBuiltinTemplates: true });
       setSkillOptions(result.records.map((r) => ({ label: r.name, value: r.id })));
     } catch {
       // ignore
@@ -141,8 +141,10 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
     const effectiveName = name.trim() || trimmedId;
 
     setCreating(true);
+    let draftId: string | undefined;
     try {
       const draft = await createPluginDraft({ name: effectiveName, source_type: mode });
+      draftId = draft.id;
       const pm = { ...createEmptyPluginModel(), id: trimmedId, name: effectiveName };
       await updatePluginDraftContent(draft.id, {
         plugin_yaml_content: serializePluginModel(pm),
@@ -152,10 +154,14 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
       } else if (mode === 'skill' && skillId) {
         await aiGeneratePluginDraft(draft.id, { skill_id: skillId });
       }
+      draftId = undefined;
       reset();
       onCreated(draft.id);
     } catch {
       message.error('创建失败，请重试');
+      if (draftId) {
+        deletePluginDraft(draftId).catch(() => {});
+      }
     } finally {
       setCreating(false);
     }

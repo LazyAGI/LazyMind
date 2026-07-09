@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
+	"lazymind/core/skill"
 	"lazymind/core/store"
 )
 
@@ -41,6 +43,7 @@ type draftResponse struct {
 	StateLayoutContent string `json:"state_layout_content"`
 	ScenarioContent    string `json:"scenario_content"`
 	ScriptsContent     string `json:"scripts_content"`
+	DesignBriefContent string `json:"design_brief_content"`
 	GenerateStatus     string `json:"generate_status"`
 	GenerateError      string `json:"generate_error"`
 	GenerateWarning    string `json:"generate_warning"`
@@ -63,6 +66,7 @@ func toDraftResponse(d orm.PluginDraft) draftResponse {
 		StateLayoutContent: d.StateLayoutContent,
 		ScenarioContent:    d.ScenarioContent,
 		ScriptsContent:     d.ScriptsContent,
+		DesignBriefContent: d.DesignBriefContent,
 		GenerateStatus:     d.GenerateStatus,
 		GenerateError:      d.GenerateError,
 		GenerateWarning:    d.GenerateWarning,
@@ -356,16 +360,34 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 	skillContent := ""
 	skillName := ""
 	if body.SkillID != "" {
-		var skillRow struct {
-			Content string
-			Name    string
+		if skill.IsBuiltinSkillID(body.SkillID) {
+			content, sname, ok, loadErr := skill.GetBuiltinSkillContent(body.SkillID)
+			if loadErr != nil {
+				common.ReplyErr(w, "skill not found", http.StatusInternalServerError)
+				return
+			}
+			if !ok || content == "" {
+				common.ReplyErr(w, "skill not found", http.StatusNotFound)
+				return
+			}
+			skillContent = content
+			skillName = sname
+		} else {
+			var skillRow struct {
+				Content   string
+				SkillName string
+			}
+			if err := db.Raw("SELECT content, skill_name FROM skill_resources WHERE id = ?", body.SkillID).Scan(&skillRow).Error; err != nil {
+				common.ReplyErr(w, "skill not found", http.StatusInternalServerError)
+				return
+			}
+			if skillRow.Content == "" {
+				common.ReplyErr(w, "skill not found", http.StatusNotFound)
+				return
+			}
+			skillContent = skillRow.Content
+			skillName = skillRow.SkillName
 		}
-		if err := db.Raw("SELECT content, name FROM skill_resources WHERE id = ? AND owner_user_id = ?", body.SkillID, userID).Scan(&skillRow).Error; err != nil || skillRow.Content == "" {
-			common.ReplyErr(w, "skill not found", http.StatusBadRequest)
-			return
-		}
-		skillContent = skillRow.Content
-		skillName = skillRow.Name
 	}
 
 	sourceUpdates := map[string]any{
@@ -468,8 +490,8 @@ func PolishPluginDraftInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // AIRepairPluginDraft handles POST /plugin-drafts/{draft_id}:ai-repair
-// Body: { "repair_hint": "..." } (optional)
-// Loads the draft's current YAML, calls Python /repair endpoint, and updates state_yaml_content.
+// Enqueues an async repair job and returns immediately with status=repairing.
+// The client polls generate_status until it leaves the repairing state.
 func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
 	draftID := common.PathVar(r, "draft_id")
 	userID := common.UserID(r)
@@ -503,20 +525,6 @@ func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Lock the draft for the duration of the repair.
-	prevStatus := draft.GenerateStatus
-	if err := db.Model(&draft).Update("generate_status", generateStatusRepairing).Error; err != nil {
-		common.ReplyErr(w, "lock failed", http.StatusInternalServerError)
-		return
-	}
-	// Ensure we restore the status even if repair fails.
-	defer func() {
-		if draft.GenerateStatus == generateStatusRepairing {
-			_ = db.Model(&orm.PluginDraft{}).Where("id = ?", draftID).
-				Update("generate_status", prevStatus).Error
-		}
-	}()
-
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), db, userID)
 	if err != nil {
 		llmConfig = map[string]any{}
@@ -524,81 +532,51 @@ func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
 
 	var warnings []string
 	if draft.GenerateWarning != "" {
-		warnings = strings.Split(draft.GenerateWarning, "; ")
+		for _, w := range strings.Split(draft.GenerateWarning, "; ") {
+			// Strip stale repair-failure markers: they are not actionable context for the LLM.
+			if !strings.HasPrefix(w, "[修复失败]") {
+				warnings = append(warnings, w)
+			}
+		}
 	}
 
-	// Determine repair target: 'scenario' repairs scenario.md; everything else repairs state.yml.
-	target := strings.TrimSpace(body.Target)
-	repairHint := strings.TrimSpace(body.RepairHint)
+	log.Printf("[ai_repair] draft_id=%s target=%q hint_len=%d prev_status=%q warnings=%v plugin_yaml_empty=%v state_yaml_empty=%v",
+		draftID, body.Target, len(body.RepairHint), draft.GenerateStatus,
+		warnings, draft.PluginYAMLContent == "", draft.StateYAMLContent == "")
 
-	if target == "scenario" {
-		// Scenario repair: call the repair endpoint with scenario-focused hint.
-		scenarioHint := repairHint
-		if scenarioHint == "" {
-			scenarioHint = "Fix or complete the scenario.md documentation."
-		}
-		resp, repairErr := algo.RepairStateMachine(r.Context(), algo.RepairStateMachineRequest{
-			PluginYAML: draft.PluginYAMLContent,
-			StateYAML:  draft.StateYAMLContent,
-			RepairHint: scenarioHint,
-			Target:     "scenario",
-			Warnings:   warnings,
-			LLMConfig:  llmConfig,
-		})
-		if repairErr != nil {
-			common.ReplyErr(w, "scenario repair failed: "+repairErr.Error(), http.StatusInternalServerError)
-			return
-		}
-		updates := map[string]any{
-			"scenario_content":  resp.StateYAML,
-			"generate_status":   prevStatus,
-			"version":           draft.Version + 1,
-			"updated_at":        time.Now().UTC(),
-		}
-		if err := db.Model(&draft).Updates(updates).Error; err != nil {
-			common.ReplyErr(w, "save failed", http.StatusInternalServerError)
-			return
-		}
-		// Update in-memory so defer doesn't try to restore again.
-		draft.GenerateStatus = prevStatus
-	} else {
-		// State machine / UI repair: regenerate state.yml.
-		resp, repairErr := algo.RepairStateMachine(r.Context(), algo.RepairStateMachineRequest{
-			PluginYAML: draft.PluginYAMLContent,
-			StateYAML:  draft.StateYAMLContent,
-			RepairHint: repairHint,
-			Warnings:   warnings,
-			LLMConfig:  llmConfig,
-		})
-		if repairErr != nil {
-			common.ReplyErr(w, "repair failed: "+repairErr.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		newWarning := ""
-		if len(resp.RemainingWarnings) > 0 {
-			newWarning = strings.Join(resp.RemainingWarnings, "; ")
-		}
-
-		updates := map[string]any{
-			"state_yaml_content": resp.StateYAML,
-			"generate_warning":   newWarning,
-			"generate_status":    prevStatus,
-			"version":            draft.Version + 1,
-			"updated_at":         time.Now().UTC(),
-		}
-		if err := db.Model(&draft).Updates(updates).Error; err != nil {
-			common.ReplyErr(w, "save failed", http.StatusInternalServerError)
-			return
-		}
-		// Update in-memory so defer doesn't try to restore again.
-		draft.GenerateStatus = prevStatus
+	prevStatus := draft.GenerateStatus
+	payload := pluginDraftRepairPayload{
+		DraftID:    draftID,
+		UserID:     userID,
+		Target:     strings.TrimSpace(body.Target),
+		RepairHint: strings.TrimSpace(body.RepairHint),
+		Warnings:   warnings,
+		PrevStatus: prevStatus,
+		LLMConfig:  llmConfig,
 	}
 
-	if err := db.Where("id = ?", draftID).First(&draft).Error; err != nil {
-		common.ReplyErr(w, "reload failed", http.StatusInternalServerError)
+	// Set status to repairing before enqueueing so the client sees it immediately.
+	if err := db.Model(&draft).Update("generate_status", generateStatusRepairing).Error; err != nil {
+		common.ReplyErr(w, "lock failed", http.StatusInternalServerError)
 		return
 	}
 
+	if _, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{
+		JobType:      pluginDraftRepairJobType,
+		ResourceType: "plugin_draft",
+		ResourceID:   draftID,
+		Payload:      payload,
+		MaxAttempts:  1,
+		CreateUserID: userID,
+	}); err != nil {
+		// Roll back status if we can't enqueue.
+		log.Printf("[ai_repair] enqueue failed draft_id=%s err=%v, rolling back to prev_status=%q", draftID, err, prevStatus)
+		_ = db.Model(&draft).Update("generate_status", prevStatus)
+		common.ReplyErr(w, "enqueue failed", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[ai_repair] job enqueued draft_id=%s status=repairing", draftID)
+
+	draft.GenerateStatus = generateStatusRepairing
 	common.ReplyOK(w, toDraftResponse(draft))
 }

@@ -64,7 +64,7 @@
   position: fixed;
   top: 16px;
   inset-inline-start: 16px;
-  z-index: 30;
+  z-index: 110;
   width: 28px;
   height: 28px;
   border: 1px solid rgba(22, 119, 255, 0.18);
@@ -568,6 +568,7 @@
   min-height: 0;
   overflow: auto;
   background: #ffffff;
+  position: relative;
 }
 
 .main-layout-content.is-sidebar-collapsed {

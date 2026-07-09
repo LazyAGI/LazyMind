@@ -49,7 +49,7 @@ _PLUGIN_FORMAT_SPEC: str = _load_plugin_format_spec()
 
 # Top-level required fields
 _REQUIRED_PLUGIN_TOP = ['id', 'name', 'description', 'steps', 'slots']
-_REQUIRED_STATE_TOP = ['initial', 'transitions', 'steps']
+_REQUIRED_STATE_TOP = ['transitions', 'steps']
 
 # Required per-item fields (checked dynamically)
 _REQUIRED_SLOT_FIELDS = ['id', 'label', 'type', 'cardinality']

@@ -116,9 +116,10 @@ type PluginDraft struct {
 	CreatedAt time.Time `gorm:"column:created_at;not null"`
 	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
 	// Split content columns (migration 20260706120000).
-	// generate_status: '' | 'generating' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
+	// generate_status: '' | 'generating' | 'brief_done' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
 	//   ''             — never triggered AI generation
-	//   'generating'   — Phase 1 in progress
+	//   'generating'   — Phase 0 in progress (design brief)
+	//   'brief_done'   — Phase 0 complete; Phase 1 running
 	//   'skeleton_done' — Phase 1 complete (plugin.yaml available); Phase 2 running
 	//   'state_done'   — Phase 2 complete (state.yml available); Phase 3 running
 	//   'done'         — All phases complete
@@ -147,6 +148,9 @@ type PluginDraft struct {
 	SourceType      string `gorm:"column:source_type;type:varchar(16);not null;default:''"`
 	SourceSkillID   string `gorm:"column:source_skill_id;type:varchar(36);not null;default:''"`
 	SourceSkillName string `gorm:"column:source_skill_name;type:varchar(255);not null;default:''"`
+	// DesignBriefContent stores the Phase 0 design brief Markdown (migration 20260709140000).
+	// Empty for old drafts that were generated before Phase 0 was introduced.
+	DesignBriefContent string `gorm:"column:design_brief_content;type:text;not null;default:''"`
 }
 
 func (PluginDraft) TableName() string { return "plugin_drafts" }

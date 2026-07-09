@@ -55,9 +55,10 @@ export interface PluginDraftRecord {
   state_layout_content: string;
   scenario_content: string;
   scripts_content: string;
-  // '' | 'generating' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
+  // '' | 'generating' | 'brief_done' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
   //   ''              — AI generation never triggered
-  //   'generating'    — Phase 1 (skeleton) in progress
+  //   'generating'    — Phase 0 (design brief) in progress
+  //   'brief_done'    — Phase 0 complete; Phase 1 (skeleton) running
   //   'skeleton_done' — Phase 1 complete; plugin_yaml_content available; Phase 2 running
   //   'state_done'    — Phase 2 complete; state_yaml_content available; Phase 3 running; editor usable
   //   'done'          — All phases complete
@@ -67,6 +68,8 @@ export interface PluginDraftRecord {
   generate_error: string;
   // Non-empty when generate_status === 'done' but Phase 2 had non-fatal field warnings.
   generate_warning: string;
+  // Phase 0 design brief Markdown (migration 20260709140000). Empty for old drafts.
+  design_brief_content: string;
   // Source tracking.
   // 'ai' | 'skill' | 'blank' | '' (blank/unknown)
   source_type: string;

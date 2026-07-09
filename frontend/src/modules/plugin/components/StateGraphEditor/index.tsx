@@ -34,8 +34,8 @@ import './index.scss';
 
 // content tab: which "view" is active
 type ContentTab = 'statemachine' | 'ui' | 'scenario';
-// view mode: preview or code
-type ViewMode = 'preview' | 'code';
+// view mode: preview, code, or brief (AI design brief)
+type ViewMode = 'preview' | 'code' | 'brief';
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
 // code file derived from tab
@@ -77,11 +77,23 @@ interface Props {
   /** When true, all editing is disabled. onSave is ignored and all inputs become read-only. */
   readonly?: boolean;
   /**
+   * Initial visibility of the artifacts panel. Defaults to true.
+   * Pass false to keep the panel collapsed on remount (e.g. user closed it before a repair).
+   */
+  defaultShowArtifacts?: boolean;
+  /** Called when the artifacts panel is opened or closed. Parent can persist this. */
+  onArtifactsChange?: (show: boolean) => void;
+  /**
    * When provided, an "AI 修复" button appears in the toolbar of each content tab.
    * `target` indicates which part the user wants to repair.
    * `validationErrors` carries the current graph validation errors (only for 'statemachine' target).
    */
   onRepair?: (target: RepairTarget, validationErrors?: ValidationError[]) => void;
+  /**
+   * When provided, a "草稿" button appears in the view-mode capsule.
+   * Clicking it shows the design brief content rendered as pre-formatted text.
+   */
+  designBriefContent?: string;
 }
 
 function parseScriptFiles(raw: string): Record<string, string> {
@@ -125,14 +137,28 @@ export default function StateGraphEditor({
   onClose,
   showEmptyHint = true,
   readonly = false,
+  defaultShowArtifacts = false,
   onRepair,
+  onArtifactsChange,
+  designBriefContent,
 }: Props) {
   const [contentTab, setContentTab] = useState<ContentTab>('statemachine');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   // In code mode, the active file is tracked independently of contentTab
   const [activeCodeFile, setActiveCodeFile] = useState<CodeFile>('state.yml');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  const [showArtifacts, setShowArtifacts] = useState(true);
+  const [showArtifacts, setShowArtifacts] = useState(defaultShowArtifacts);
+  const toggleArtifacts = useCallback(() => {
+    setShowArtifacts((v) => {
+      const next = !v;
+      onArtifactsChange?.(next);
+      return next;
+    });
+  }, [onArtifactsChange]);
+  const closeArtifacts = useCallback(() => {
+    setShowArtifacts(false);
+    onArtifactsChange?.(false);
+  }, [onArtifactsChange]);
   const [pluginInfoOpen, setPluginInfoOpen] = useState(false);
   // Active UI tab — lifted from UiEditorPanel so TabBar removal doesn't lose state
   const [uiActiveTabId, setUiActiveTabId] = useState<string | undefined>(undefined);
@@ -492,6 +518,14 @@ export default function StateGraphEditor({
             >
               代码
             </button>
+            {designBriefContent && (
+              <button
+                className={`sge-seg-btn${viewMode === 'brief' ? ' sge-seg-btn--active' : ''}`}
+                onClick={() => setViewMode('brief')}
+              >
+                草稿
+              </button>
+            )}
           </div>
         </div>
         <div className="sge-toolbar2-right">
@@ -505,7 +539,7 @@ export default function StateGraphEditor({
               <Button
                 size="small"
                 icon={<AppstoreOutlined />}
-                onClick={() => setShowArtifacts((v) => !v)}
+                onClick={() => toggleArtifacts()}
                 type={showArtifacts ? 'primary' : 'default'}
               >
                 素材{slotCount > 0 && <span className="sge-artifact-count">{slotCount}</span>}
@@ -519,7 +553,7 @@ export default function StateGraphEditor({
             <Button
               size="small"
               icon={<AppstoreOutlined />}
-              onClick={() => setShowArtifacts((v) => !v)}
+              onClick={() => toggleArtifacts()}
               type={showArtifacts ? 'primary' : 'default'}
             >
               素材{slotCount > 0 && <span className="sge-artifact-count">{slotCount}</span>}
@@ -569,7 +603,7 @@ export default function StateGraphEditor({
               {showArtifacts && (
                 <ArtifactPanel
                   model={model}
-                  onClose={() => setShowArtifacts(false)}
+                  onClose={() => closeArtifacts()}
                   onModelChange={readonly ? () => {} : updateModelFromUpdater}
                   readonly={readonly}
                 />
@@ -675,6 +709,12 @@ export default function StateGraphEditor({
                 }
               />
             </div>
+          </div>
+        )}
+
+        {viewMode === 'brief' && designBriefContent && (
+          <div className="sge-brief-preview">
+            <pre className="sge-brief-content">{designBriefContent}</pre>
           </div>
         )}
       </div>
