@@ -1200,6 +1200,7 @@ const zhCN = {
     kbLoading: "加载中…",
     scheduleUploadFileBtn: "上传文件",
   },
+  knowledge: {
     list: "知识库列表",
     create: "创建知识库",
     detail: "知识库详情",
