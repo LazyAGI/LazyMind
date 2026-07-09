@@ -80,30 +80,25 @@ LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./data/scan
 LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS := $(abspath $(LAZYMIND_FILE_WATCHER_BASE_ROOT))
 export LAZYMIND_FILE_WATCHER_MODE ?= container
 
-# Auto-detect host OS for path style and default watch directory.
-# Override in .env or on the command line if needed.
+_COMPOSE_WATCH_TARGETS := up up-build file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop
+_NEEDS_COMPOSE_WATCH_CONFIG := $(filter $(_COMPOSE_WATCH_TARGETS),$(MAKECMDGOALS))
+ifneq (,$(_NEEDS_COMPOSE_WATCH_CONFIG))
+# Compose/file-watcher defaults only. Local runtime paths are resolved by
+# local-runtime-manager so make local-up/local-down/local-reset do not inherit
+# Makefile-derived watch paths.
 ifeq ($(OS),Windows_NT)
   export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= windows
   export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(USERPROFILE)/Documents/LazyMind
 else
-  _UNAME_S := $(shell uname -s 2>/dev/null)
-  _UNAME_R := $(shell uname -r 2>/dev/null | tr '[:upper:]' '[:lower:]')
-  ifeq ($(_UNAME_S),Darwin)
-    export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
-    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)/Documents/LazyMind
-  else ifneq (,$(findstring microsoft,$(_UNAME_R))$(findstring wsl,$(_UNAME_R)))
-    export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
-    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)/Documents/LazyMind
-  else
-    export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
-    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)/Documents/LazyMind
-  endif
+  export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
+  export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)/Documents/LazyMind
 endif
 
 _LAZYMIND_FW_WATCH_HOST_DIR_RAW := $(LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR)
 _LAZYMIND_FW_WATCH_HOST_DIR_ABS := $(abspath $(_LAZYMIND_FW_WATCH_HOST_DIR_RAW))
 override LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR := $(if $(filter windows,$(LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE)),$(_LAZYMIND_FW_WATCH_HOST_DIR_RAW),$(_LAZYMIND_FW_WATCH_HOST_DIR_ABS))
 export SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT := $(LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR)
+endif
 LAZYMIND_FILE_WATCHER_DIR := backend/file-watcher
 LAZYMIND_FILE_WATCHER_BIN := $(LAZYMIND_FILE_WATCHER_DIR)/file_watcher
 LAZYMIND_FILE_WATCHER_CONFIG := $(LAZYMIND_FILE_WATCHER_DIR)/configs/agent.yaml

@@ -547,6 +547,13 @@ func defaultFileWatcherBaseRoot(runtimeRoot string) string {
 	return filepath.Clean(filepath.Join(runtimeRoot, raw))
 }
 
+func defaultFileWatcherHostPathStyle() string {
+	if runtime.GOOS == "windows" {
+		return "windows"
+	}
+	return "posix"
+}
+
 func localRuntimeModeProfile(milvusPort int, milvusLiteDBPath string) RuntimeModeProfileConfig {
 	return RuntimeModeProfileConfig{
 		Name: "local",
@@ -869,7 +876,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 			AgentID:       envText("LAZYMIND_FILE_WATCHER_AGENT_ID", envText("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID", "file-watcher-local-001")),
 			AgentToken:    envText("LAZYMIND_FILE_WATCHER_AGENT_TOKEN", envText("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN", "my-secret-token")),
 			WatchHostDir:  defaultFileWatcherWatchHostDir(pathLayout.LocalImportRoot),
-			HostPathStyle: envText("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE", "posix"),
+			HostPathStyle: envText("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE", defaultFileWatcherHostPathStyle()),
 		},
 		PortResolutions: ports.resolutions,
 	}, p, nil
