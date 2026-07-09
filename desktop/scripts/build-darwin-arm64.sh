@@ -7,18 +7,29 @@ RUNTIME_ROOT="${BUILD_ROOT}/runtime"
 DIST_ROOT="${ROOT}/desktop/dist"
 APP_RUNTIME_ROOT="${DIST_ROOT}/runtime"
 APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
+SHA256SUMS_PATH="${DIST_ROOT}/SHA256SUMS.txt"
+BUILD_MANIFEST_PATH="${DIST_ROOT}/LazyMind-darwin-arm64.build.json"
 
 GO_BIN="${GO:-go}"
 PNPM_BIN="${PNPM:-pnpm}"
 UV_BIN="${UV:-uv}"
 GO_BUILD_FLAGS=(-trimpath -buildvcs=false -ldflags="-s -w")
 GO_INSTALL_FLAGS=(-trimpath -ldflags="-s -w")
+SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
 
 : "${ELECTRON_CACHE:=${HOME}/Library/Caches/electron}"
 : "${ELECTRON_BUILDER_CACHE:=${HOME}/Library/Caches/electron-builder}"
 export ELECTRON_CACHE
 export ELECTRON_BUILDER_CACHE
 export PYTHONDONTWRITEBYTECODE=1
+
+case "${SIGNING_MODE}" in
+  adhoc|none) ;;
+  *)
+    echo "LAZYMIND_DESKTOP_SIGNING_MODE must be adhoc or none, got: ${SIGNING_MODE}" >&2
+    exit 2
+    ;;
+esac
 
 remove_generated_path() {
   local target="$1"
@@ -80,6 +91,122 @@ prune_runtime_app() {
   fi
   remove_generated_path "${app_root}/algorithm/lazyllm/docs"
   remove_generated_path "${app_root}/backend/core/core"
+}
+
+sha256_file() {
+  shasum -a 256 "$1" | awk '{print $1}'
+}
+
+sign_app() {
+  local app_path="$1"
+  case "${SIGNING_MODE}" in
+    adhoc)
+      echo "==> Applying ad-hoc code signature"
+      xattr -cr "${app_path}" 2>/dev/null || true
+      codesign --force --deep --sign - "${app_path}"
+      codesign --verify --deep --strict --verbose=2 "${app_path}"
+      ;;
+    none)
+      echo "==> Skipping code signing (LAZYMIND_DESKTOP_SIGNING_MODE=none)"
+      ;;
+  esac
+}
+
+write_release_metadata() {
+  local app_path="$1"
+  local zip_path="$2"
+  local zip_hash
+  local git_commit
+  local git_dirty
+
+  zip_hash="$(sha256_file "${zip_path}")"
+  git_commit="$(git -C "${ROOT}" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+  if [[ -n "$(git -C "${ROOT}" status --short 2>/dev/null)" ]]; then
+    git_dirty="true"
+  else
+    git_dirty="false"
+  fi
+
+  {
+    printf '%s  %s\n' "${zip_hash}" "$(basename "${zip_path}")"
+  } > "${SHA256SUMS_PATH}"
+
+  BUILD_MANIFEST_PATH="${BUILD_MANIFEST_PATH}" \
+  ROOT="${ROOT}" \
+  APP_PATH="${app_path}" \
+  ZIP_PATH="${zip_path}" \
+  ZIP_HASH="${zip_hash}" \
+  GIT_COMMIT="${git_commit}" \
+  GIT_DIRTY="${git_dirty}" \
+  SIGNING_MODE="${SIGNING_MODE}" \
+  node -e '
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+
+function hashFileTree(root) {
+  const digest = crypto.createHash("sha256");
+
+  function walk(dir) {
+    const entries = fs.readdirSync(dir).sort((a, b) => a.localeCompare(b));
+    for (const entry of entries) {
+      const full = path.join(dir, entry);
+      const rel = path.relative(root, full);
+      const stat = fs.lstatSync(full);
+      digest.update(rel);
+      digest.update("\0");
+      if (stat.isDirectory()) {
+        digest.update("dir\0");
+        walk(full);
+      } else if (stat.isSymbolicLink()) {
+        digest.update("symlink\0");
+        digest.update(fs.readlinkSync(full));
+        digest.update("\0");
+      } else if (stat.isFile()) {
+        digest.update("file\0");
+        digest.update(fs.readFileSync(full));
+        digest.update("\0");
+      }
+    }
+  }
+
+  walk(root);
+  return digest.digest("hex");
+}
+
+const manifest = {
+  version: 1,
+  product: "LazyMind",
+  platform: "darwin",
+  arch: "arm64",
+  builtAt: new Date().toISOString(),
+  git: {
+    commit: process.env.GIT_COMMIT,
+    dirty: process.env.GIT_DIRTY === "true"
+  },
+  signing: {
+    mode: process.env.SIGNING_MODE,
+    note: process.env.SIGNING_MODE === "adhoc"
+      ? "Ad-hoc signed for internal testing. This is not Developer ID signing or notarization."
+      : "Unsigned internal testing build."
+  },
+  artifacts: {
+    app: {
+      path: path.relative(process.env.ROOT, process.env.APP_PATH),
+      treeSha256: hashFileTree(process.env.APP_PATH)
+    },
+    zip: {
+      path: path.relative(process.env.ROOT, process.env.ZIP_PATH),
+      sha256: process.env.ZIP_HASH
+    },
+    checksums: {
+      path: path.relative(process.env.ROOT, path.join(path.dirname(process.env.ZIP_PATH), "SHA256SUMS.txt"))
+    }
+  }
+};
+
+fs.writeFileSync(process.env.BUILD_MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+'
 }
 
 mkdir -p \
@@ -178,9 +305,16 @@ if [[ ! -d "${APP_PATH}" ]]; then
   fi
 fi
 if [[ -d "${APP_PATH}" ]]; then
-  ditto -c -k --keepParent "${APP_PATH}" "${ZIP_PATH}"
+  sign_app "${APP_PATH}"
+  xattr -cr "${APP_PATH}" 2>/dev/null || true
+  remove_generated_path "${ZIP_PATH}"
+  ditto -c -k --norsrc --keepParent "${APP_PATH}" "${ZIP_PATH}"
+  write_release_metadata "${APP_PATH}" "${ZIP_PATH}"
   echo "LazyMind.app: ${APP_PATH}"
   echo "Zip: ${ZIP_PATH}"
+  echo "Checksums: ${SHA256SUMS_PATH}"
+  echo "Build manifest: ${BUILD_MANIFEST_PATH}"
+  echo "Tester guide: ${ROOT}/desktop/RUN_ON_MAC.md"
 else
   echo "Expected app not found: ${APP_PATH}" >&2
   exit 1
