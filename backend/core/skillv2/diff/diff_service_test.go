@@ -138,7 +138,7 @@ func TestDiffFile_LargeText_DegradesWithoutCache(t *testing.T) {
 func TestDiffFile_NonUTF8_DegradesToBinary(t *testing.T) {
 	service := NewService(ServiceDeps{})
 	oldFS := fakeReadOnlySkillFS{entries: []EntryInfo{fileEntry("bad.txt", "h_old", false, "text")}, files: map[string][]byte{"bad.txt": []byte("ok\n")}}
-	newFS := fakeReadOnlySkillFS{entries: []EntryInfo{fileEntry("bad.txt", "h_bad", false, "text")}, files: map[string][]byte{"bad.txt": []byte{0xff, 0xfe, 0xfd}}}
+	newFS := fakeReadOnlySkillFS{entries: []EntryInfo{fileEntry("bad.txt", "h_bad", false, "text")}, files: map[string][]byte{"bad.txt": {0xff, 0xfe, 0xfd}}}
 
 	result, err := service.CompareFile(context.Background(), oldFS, newFS, DiffOptions{Path: "bad.txt"})
 	if err != nil {
