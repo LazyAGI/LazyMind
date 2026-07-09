@@ -112,6 +112,30 @@ sign_app() {
   esac
 }
 
+verify_zipped_app() {
+  local app_path="$1"
+  local zip_path="$2"
+  local temp_dir
+  local extracted_app
+
+  if [[ "${SIGNING_MODE}" == "none" ]]; then
+    echo "==> Skipping archived app signature verification (LAZYMIND_DESKTOP_SIGNING_MODE=none)"
+    return 0
+  fi
+  echo "==> Verifying archived app signature"
+  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/lazymind-archive-verify.XXXXXX")"
+  if ! ditto -x -k "${zip_path}" "${temp_dir}"; then
+    remove_generated_path "${temp_dir}"
+    return 1
+  fi
+  extracted_app="${temp_dir}/$(basename "${app_path}")"
+  if ! codesign --verify --deep --strict --verbose=2 "${extracted_app}"; then
+    remove_generated_path "${temp_dir}"
+    return 1
+  fi
+  remove_generated_path "${temp_dir}"
+}
+
 write_release_metadata() {
   local app_path="$1"
   local zip_path="$2"
@@ -316,7 +340,8 @@ fi
 if [[ -d "${APP_PATH}" ]]; then
   sign_app "${APP_PATH}"
   remove_generated_path "${ZIP_PATH}"
-  ditto -c -k --norsrc --keepParent "${APP_PATH}" "${ZIP_PATH}"
+  ditto -c -k --keepParent "${APP_PATH}" "${ZIP_PATH}"
+  verify_zipped_app "${APP_PATH}" "${ZIP_PATH}"
   write_release_metadata "${APP_PATH}" "${ZIP_PATH}"
   echo "LazyMind.app: ${APP_PATH}"
   echo "Zip: ${ZIP_PATH}"
