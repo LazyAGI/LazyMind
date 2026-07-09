@@ -137,3 +137,52 @@ func GenerateScenarioScripts(ctx context.Context, req GenerateScenarioScriptsReq
 	}
 	return resp, nil
 }
+
+// ---------------------------------------------------------------------------
+// Plugin info polish
+// ---------------------------------------------------------------------------
+
+const polishPluginInfoPath = "/api/chat/generate_plugin/polish_info"
+
+// PolishPluginInfoRequest matches the Python request body.
+type PolishPluginInfoRequest struct {
+	Fields       map[string]string `json:"fields"`
+	TargetFields []string          `json:"target_fields"`
+	LLMConfig    map[string]any    `json:"llm_config"`
+}
+
+// PolishPluginInfoResponse holds the polished field values (only target_fields are populated).
+type PolishPluginInfoResponse struct {
+	Description *string `json:"description,omitempty"`
+	WhenToUse   *string `json:"when_to_use,omitempty"`
+	Overview    *string `json:"overview,omitempty"`
+	Notes       *string `json:"notes,omitempty"`
+}
+
+// PolishPluginInfo proxies to the Python polish_info endpoint.
+func PolishPluginInfo(ctx context.Context, req PolishPluginInfoRequest) (*PolishPluginInfoResponse, error) {
+	req.LLMConfig = ensureLLMConfig(req.LLMConfig)
+	url := generateURL(polishPluginInfoPath)
+	var raw map[string]any
+	if err := common.ApiPost(ctx, url, req, nil, &raw, generateTimeout); err != nil {
+		return nil, err
+	}
+	// Unwrap data envelope if present
+	if data, ok := raw["data"].(map[string]any); ok {
+		raw = data
+	}
+	resp := &PolishPluginInfoResponse{}
+	if v, ok := raw["description"].(string); ok {
+		resp.Description = &v
+	}
+	if v, ok := raw["when_to_use"].(string); ok {
+		resp.WhenToUse = &v
+	}
+	if v, ok := raw["overview"].(string); ok {
+		resp.Overview = &v
+	}
+	if v, ok := raw["notes"].(string); ok {
+		resp.Notes = &v
+	}
+	return resp, nil
+}

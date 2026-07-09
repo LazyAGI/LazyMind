@@ -137,6 +137,23 @@ export async function aiGeneratePluginDraft(
   return resp.data.data;
 }
 
+export type PolishableField = 'description' | 'when_to_use' | 'overview' | 'notes';
+
+export interface PolishPluginInfoPayload {
+  fields: Partial<Record<PolishableField, string>>;
+  target_fields: PolishableField[];
+}
+
+export type PolishPluginInfoResponse = Partial<Record<PolishableField, string>>;
+
+export async function polishPluginInfo(payload: PolishPluginInfoPayload): Promise<PolishPluginInfoResponse> {
+  const resp = await axiosInstance.post<CoreResponse<PolishPluginInfoResponse>>(
+    `${coreBasePath}/plugin-drafts:polish-info`,
+    payload,
+  );
+  return resp.data.data;
+}
+
 // ─── Built-in plugin API ──────────────────────────────────────────────────────
 
 export async function listBuiltinPlugins(): Promise<BuiltinPlugin[]> {

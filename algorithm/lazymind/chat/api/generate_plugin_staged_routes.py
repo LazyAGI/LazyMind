@@ -52,10 +52,21 @@ logger = logging.getLogger(__name__)
 _SKELETON_SYSTEM = (
     'You are a LazyMind plugin authoring assistant.\n'
     'Your task is Phase 1 of a 3-phase plugin generation: produce a plugin.yaml SKELETON.\n\n'
-    'The skeleton must include:\n'
-    '  - id, name, description, when_to_use\n'
+    'The skeleton MUST include ALL of the following:\n'
+    '  - id, name, description\n'
+    '  - when_to_use — REQUIRED. Write in English. Use clear trigger conditions:\n'
+    '    "ONLY call this tool when ... Do NOT trigger if ..."\n'
     '  - slots list (each slot: id, label, type, cardinality)\n'
     '  - steps list (each step: id, label) — list of step IDs only, NO execution details\n'
+    '  - ui block — REQUIRED. Must contain:\n'
+    '      tabs: list of tab objects. Each tab must have id, label, layout, and slots.\n'
+    '      slots: map of slot_id → widget config, each with widgetType. Use these mappings:\n'
+    '        text + single   → text-single\n'
+    '        text + list     → text-list\n'
+    '        image + single  → image-single\n'
+    '        image + list    → image-gallery\n'
+    '        file  + *       → file-card\n'
+    '        json  + *       → json-block\n'
     '  - tool_scripts — ONLY include this section when the plugin genuinely needs custom Python\n'
     '    tools (external API calls, local data processing, complex computation).\n'
     '    DO NOT add tool_scripts for pure LLM reasoning/writing workflows.\n\n'
@@ -139,9 +150,21 @@ _SCENARIO_SCRIPTS_SYSTEM = (
 # Required field sets per phase
 # ---------------------------------------------------------------------------
 
-_REQUIRED_SKELETON_PLUGIN_TOP = ['id', 'name', 'description', 'steps', 'slots']
+_REQUIRED_SKELETON_PLUGIN_TOP = ['id', 'name', 'description', 'when_to_use', 'steps', 'slots']
 _REQUIRED_SKELETON_SLOT_FIELDS = ['id', 'label', 'type', 'cardinality']
 _REQUIRED_SKELETON_STEP_FIELDS = ['id', 'label']
+
+# widgetType mappings expected by the frontend
+_WIDGET_TYPE_DEFAULTS: Dict[str, str] = {
+    ('text', 'single'): 'text-single',
+    ('text', 'list'): 'text-list',
+    ('image', 'single'): 'image-single',
+    ('image', 'list'): 'image-gallery',
+    ('file', 'single'): 'file-card',
+    ('file', 'list'): 'file-card',
+    ('json', 'single'): 'json-block',
+    ('json', 'list'): 'json-block',
+}
 
 
 def _check_skeleton_missing(plugin_dict: Dict[str, Any]) -> List[str]:
@@ -168,6 +191,10 @@ def _check_skeleton_missing(plugin_dict: Dict[str, Any]) -> List[str]:
             for f in _REQUIRED_SKELETON_STEP_FIELDS:
                 if not step.get(f):
                     missing.append(f'plugin.steps[{i}].{f}')
+    # Warn-level: ui.tabs block presence check
+    ui = plugin_dict.get('ui')
+    if not isinstance(ui, dict) or not ui.get('tabs'):
+        missing.append('plugin.ui.tabs (warn: ui tabs block missing, frontend cannot render layout)')
     return missing
 
 
@@ -450,17 +477,38 @@ async def generate_skeleton(req: SkeletonRequest) -> SkeletonResponse:
     # Validate skeleton fields + patch retry
     for attempt in range(MAX_PATCH_RETRIES):
         missing = _check_skeleton_missing(plugin_dict)
-        if not missing:
+        # Separate blocking errors from warn-level ui.tabs issues
+        blocking = [m for m in missing if 'warn:' not in m]
+        if not blocking:
             break
-        logger.info('[staged/skeleton] attempt=%d missing: %s', attempt + 1, missing)
-        plugin_dict = _patch_skeleton(plugin_dict, missing, system_prompt)
+        logger.info('[staged/skeleton] attempt=%d missing: %s', attempt + 1, blocking)
+        plugin_dict = _patch_skeleton(plugin_dict, blocking, system_prompt)
     else:
         missing = _check_skeleton_missing(plugin_dict)
-        if missing:
+        blocking = [m for m in missing if 'warn:' not in m]
+        if blocking:
             raise HTTPException(
                 status_code=500,
-                detail=f'Phase 1: missing fields after retries: {missing}',
+                detail=f'Phase 1: missing fields after retries: {blocking}',
             )
+
+    # Auto-fill missing ui.slots[*].widgetType based on slot type+cardinality
+    slots_list = plugin_dict.get('slots', [])
+    if isinstance(slots_list, list):
+        ui = plugin_dict.setdefault('ui', {})
+        ui_slots = ui.setdefault('slots', {})
+        for slot in slots_list:
+            if not isinstance(slot, dict):
+                continue
+            slot_id = slot.get('id')
+            slot_type = (slot.get('type') or '').lower()
+            cardinality = (slot.get('cardinality') or 'single').lower()
+            if slot_id and slot_id not in ui_slots:
+                widget = _WIDGET_TYPE_DEFAULTS.get(
+                    (slot_type, cardinality),
+                    _WIDGET_TYPE_DEFAULTS.get((slot_type, 'single'), 'text-single'),
+                )
+                ui_slots[slot_id] = {'widgetType': widget}
 
     plugin_yaml = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
     return SkeletonResponse(plugin_yaml=plugin_yaml)
@@ -663,3 +711,94 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
             safe_scripts[filename] = current_code
 
     return ScenarioScriptsResponse(scenario_md=scenario_md, scripts=safe_scripts)
+
+
+# ---------------------------------------------------------------------------
+# Plugin info polish endpoint
+# ---------------------------------------------------------------------------
+
+_POLISH_FIELD_INSTRUCTIONS: Dict[str, str] = {
+    'description': (
+        'Polish this plugin description to be concise and professional. '
+        'Clearly describe what the plugin does in 1-2 sentences. '
+        'Output the polished text only, no extra explanation.'
+    ),
+    'when_to_use': (
+        'Polish this trigger condition. '
+        'IMPORTANT: Output in English only. '
+        'Use precise trigger language: start with "ONLY call this tool when ..." '
+        'and optionally add "Do NOT trigger if ...". '
+        'Output the polished text only, no extra explanation.'
+    ),
+    'overview': (
+        'Polish this scene overview. Keep the original meaning, improve clarity and '
+        'professional tone to fit a business scenario description. '
+        'Output the polished text only, no extra explanation.'
+    ),
+    'notes': (
+        'Polish these usage notes. Keep all original points, improve clarity and '
+        'organize them in a logical order. '
+        'Output the polished text only, no extra explanation.'
+    ),
+}
+
+_POLISH_SYSTEM = (
+    'You are a professional editor for AI plugin documentation. '
+    'Follow the field-specific instructions precisely and output only the polished text.'
+)
+
+
+class PolishInfoRequest(_LLMConfigMixin):
+    fields: Dict[str, str] = Field(default_factory=dict)
+    target_fields: List[str]
+
+
+class PolishInfoResponse(BaseModel):
+    description: Optional[str] = None
+    when_to_use: Optional[str] = None
+    overview: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.post(
+    '/api/chat/generate_plugin/polish_info',
+    response_model=PolishInfoResponse,
+    summary='Polish plugin info fields with AI',
+)
+async def polish_plugin_info(req: PolishInfoRequest) -> PolishInfoResponse:
+    """Polish one or more plugin info fields (description, when_to_use, overview, notes).
+
+    Each field is polished independently using a field-specific prompt.
+    Only fields listed in target_fields are processed and returned.
+    """
+    inject_model_config(req.llm_config or {})
+
+    allowed_fields = set(_POLISH_FIELD_INSTRUCTIONS.keys())
+    results: Dict[str, str] = {}
+
+    for field in req.target_fields:
+        if field not in allowed_fields:
+            logger.warning('[polish_info] skipping unknown field: %s', field)
+            continue
+        original = (req.fields.get(field) or '').strip()
+        if not original:
+            logger.warning('[polish_info] skipping empty field: %s', field)
+            continue
+
+        instruction = _POLISH_FIELD_INSTRUCTIONS[field]
+        prompt = (
+            f'{_POLISH_SYSTEM}\n\n'
+            f'{instruction}\n\n'
+            f'Original text:\n{original}'
+        )
+        polished = _call_llm(prompt).strip()
+        # Strip surrounding quotes that some models add
+        if len(polished) >= 2 and polished[0] == polished[-1] and polished[0] in ('"', "'"):
+            polished = polished[1:-1].strip()
+        if polished:
+            results[field] = polished
+        else:
+            logger.warning('[polish_info] LLM returned empty result for field: %s', field)
+            results[field] = original
+
+    return PolishInfoResponse(**results)

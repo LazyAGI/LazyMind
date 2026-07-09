@@ -63,3 +63,52 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+.pim-polish-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin-left: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #8c8c8c;
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+  vertical-align: middle;
+  line-height: 1;
+
+  &:hover:not(:disabled) {
+    color: #722ed1;
+    background: #f9f0ff;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  &--loading {
+    cursor: default;
+  }
+}
+
+.pim-sparkle-icon {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+.pim-polish-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  .pim-sparkle-icon {
+    width: 12px;
+    height: 12px;
+  }
+}

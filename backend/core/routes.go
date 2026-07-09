@@ -201,6 +201,7 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Plugin Drafts (user-created plugin authoring) -----
 	handleAPI(r, "GET", "/plugin-drafts", []string{"qa.read"}, plugin.ListPluginDrafts)
 	handleAPI(r, "POST", "/plugin-drafts", []string{"qa.write"}, plugin.CreatePluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts:polish-info", []string{"qa.write"}, plugin.PolishPluginDraftInfo)
 	handleAPI(r, "GET", "/plugin-drafts/{draft_id}", []string{"qa.read"}, plugin.GetPluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:save", []string{"qa.write"}, plugin.SavePluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-generate", []string{"qa.write"}, plugin.AIGeneratePluginDraft)

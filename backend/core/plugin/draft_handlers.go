@@ -10,9 +10,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"lazymind/core/algo"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
 
@@ -375,4 +377,45 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.ReplyOK(w, toDraftResponse(draft))
+}
+
+// PolishPluginDraftInfo handles POST /plugin-drafts:polish-info
+// Loads the current user's llm_config and proxies to the Python polish_info endpoint.
+// Body: { "fields": {...}, "target_fields": [...] }
+func PolishPluginDraftInfo(w http.ResponseWriter, r *http.Request) {
+	userID := common.UserID(r)
+	if userID == "" {
+		common.ReplyErr(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var body struct {
+		Fields       map[string]string `json:"fields"`
+		TargetFields []string          `json:"target_fields"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if len(body.TargetFields) == 0 {
+		common.ReplyErr(w, "target_fields is required", http.StatusBadRequest)
+		return
+	}
+
+	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
+	if err != nil {
+		llmConfig = map[string]any{}
+	}
+
+	resp, err := algo.PolishPluginInfo(r.Context(), algo.PolishPluginInfoRequest{
+		Fields:       body.Fields,
+		TargetFields: body.TargetFields,
+		LLMConfig:    llmConfig,
+	})
+	if err != nil {
+		common.ReplyErr(w, "polish failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	common.ReplyOK(w, resp)
 }
