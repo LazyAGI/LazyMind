@@ -36,7 +36,8 @@ type GenerateStateMachineRequest struct {
 
 // GenerateStateMachineResponse is the response body from Phase 2.
 type GenerateStateMachineResponse struct {
-	StateYAML string `json:"state_yaml"`
+	StateYAML string   `json:"state_yaml"`
+	Warnings  []string `json:"warnings"`
 }
 
 // GenerateScenarioScriptsRequest is the request body for Phase 3.
@@ -118,9 +119,21 @@ func GenerateStateMachine(ctx context.Context, req GenerateStateMachineRequest) 
 	if err := common.ApiPost(ctx, url, req, nil, &raw, generateTimeout); err != nil {
 		return nil, err
 	}
-	return &GenerateStateMachineResponse{
+	resp := &GenerateStateMachineResponse{
 		StateYAML: extractStringField(raw, "state_yaml"),
-	}, nil
+	}
+	// Extract warnings list from response (may be absent for older Python versions).
+	if data, ok := raw["data"].(map[string]any); ok {
+		raw = data
+	}
+	if warnRaw, ok := raw["warnings"].([]any); ok {
+		for _, w := range warnRaw {
+			if s, ok := w.(string); ok {
+				resp.Warnings = append(resp.Warnings, s)
+			}
+		}
+	}
+	return resp, nil
 }
 
 // GenerateScenarioScripts calls Phase 3: generate scenario.md and optional scripts.
@@ -134,6 +147,52 @@ func GenerateScenarioScripts(ctx context.Context, req GenerateScenarioScriptsReq
 	resp := &GenerateScenarioScriptsResponse{
 		ScenarioMD: extractStringField(raw, "scenario_md"),
 		Scripts:    extractScripts(raw),
+	}
+	return resp, nil
+}
+
+// ---------------------------------------------------------------------------
+// State machine repair
+// ---------------------------------------------------------------------------
+
+const repairStateMachinePath = "/api/chat/generate_plugin/repair"
+
+// RepairStateMachineRequest is the request body for the repair endpoint.
+type RepairStateMachineRequest struct {
+	PluginYAML  string         `json:"plugin_yaml"`
+	StateYAML   string         `json:"state_yaml"`
+	RepairHint  string         `json:"repair_hint,omitempty"`
+	Warnings    []string       `json:"warnings,omitempty"`
+	Target      string         `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
+	LLMConfig   map[string]any `json:"llm_config"`
+}
+
+// RepairStateMachineResponse is the response body from the repair endpoint.
+type RepairStateMachineResponse struct {
+	StateYAML         string   `json:"state_yaml"`
+	RemainingWarnings []string `json:"remaining_warnings"`
+}
+
+// RepairStateMachine calls the repair endpoint to fix an incomplete state.yml.
+func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*RepairStateMachineResponse, error) {
+	req.LLMConfig = ensureLLMConfig(req.LLMConfig)
+	url := generateURL(repairStateMachinePath)
+	var raw map[string]any
+	if err := common.ApiPost(ctx, url, req, nil, &raw, generateTimeout); err != nil {
+		return nil, err
+	}
+	if data, ok := raw["data"].(map[string]any); ok {
+		raw = data
+	}
+	resp := &RepairStateMachineResponse{
+		StateYAML: extractStringField(raw, "state_yaml"),
+	}
+	if warnRaw, ok := raw["remaining_warnings"].([]any); ok {
+		for _, w := range warnRaw {
+			if s, ok := w.(string); ok {
+				resp.RemainingWarnings = append(resp.RemainingWarnings, s)
+			}
+		}
 	}
 	return resp, nil
 }

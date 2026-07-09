@@ -65,6 +65,13 @@ export interface PluginDraftRecord {
   generate_status: string;
   // Non-empty when generate_status === 'failed'; may also contain non-fatal Phase 3 warnings when 'done'.
   generate_error: string;
+  // Non-empty when generate_status === 'done' but Phase 2 had non-fatal field warnings.
+  generate_warning: string;
+  // Source tracking.
+  // 'ai' | 'skill' | 'blank' | '' (blank/unknown)
+  source_type: string;
+  source_skill_id: string;
+  source_skill_name: string;
   // Optimistic-lock version. Increment on every save that touches plugin_yaml_content or state_yaml_content.
   version: number;
   created_at: string;
@@ -91,7 +98,7 @@ export async function listPluginDrafts(params: { page?: number; pageSize?: numbe
   return resp.data.data;
 }
 
-export async function createPluginDraft(payload: { name: string; content?: string }): Promise<PluginDraftRecord> {
+export async function createPluginDraft(payload: { name: string; content?: string; source_type?: string }): Promise<PluginDraftRecord> {
   const resp = await axiosInstance.post<CoreResponse<PluginDraftRecord>>(`${coreBasePath}/plugin-drafts`, payload);
   return resp.data.data;
 }
@@ -149,6 +156,26 @@ export type PolishPluginInfoResponse = Partial<Record<PolishableField, string>>;
 export async function polishPluginInfo(payload: PolishPluginInfoPayload): Promise<PolishPluginInfoResponse> {
   const resp = await axiosInstance.post<CoreResponse<PolishPluginInfoResponse>>(
     `${coreBasePath}/plugin-drafts:polish-info`,
+    payload,
+  );
+  return resp.data.data;
+}
+
+export interface RepairPluginDraftPayload {
+  repair_hint?: string;
+  // Which part to repair: 'statemachine' | 'ui' | 'scenario'
+  // 'statemachine' and 'ui' maps to state.yml repair; 'scenario' maps to scenario.md repair.
+  target?: string;
+}
+
+// Trigger AI repair for a plugin draft with warnings or incomplete state.yml.
+// Sends current YAML content to Python /repair endpoint and returns the patched draft.
+export async function repairPluginDraft(
+  id: string,
+  payload: RepairPluginDraftPayload,
+): Promise<PluginDraftRecord> {
+  const resp = await axiosInstance.post<CoreResponse<PluginDraftRecord>>(
+    `${coreBasePath}/plugin-drafts/${id}:ai-repair`,
     payload,
   );
   return resp.data.data;

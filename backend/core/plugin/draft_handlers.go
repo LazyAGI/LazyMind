@@ -43,10 +43,14 @@ type draftResponse struct {
 	ScriptsContent     string `json:"scripts_content"`
 	GenerateStatus     string `json:"generate_status"`
 	GenerateError      string `json:"generate_error"`
+	GenerateWarning    string `json:"generate_warning"`
 	Version            int    `json:"version"`
 	CreatedBy          string `json:"created_by"`
 	CreatedAt          string `json:"created_at"`
 	UpdatedAt          string `json:"updated_at"`
+	SourceType         string `json:"source_type"`
+	SourceSkillID      string `json:"source_skill_id"`
+	SourceSkillName    string `json:"source_skill_name"`
 }
 
 func toDraftResponse(d orm.PluginDraft) draftResponse {
@@ -61,10 +65,14 @@ func toDraftResponse(d orm.PluginDraft) draftResponse {
 		ScriptsContent:     d.ScriptsContent,
 		GenerateStatus:     d.GenerateStatus,
 		GenerateError:      d.GenerateError,
+		GenerateWarning:    d.GenerateWarning,
 		Version:            d.Version,
 		CreatedBy:          d.CreatedBy,
 		CreatedAt:          d.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:          d.UpdatedAt.Format(time.RFC3339),
+		SourceType:         d.SourceType,
+		SourceSkillID:      d.SourceSkillID,
+		SourceSkillName:    d.SourceSkillName,
 	}
 }
 
@@ -118,7 +126,7 @@ func ListPluginDrafts(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreatePluginDraft handles POST /plugin-drafts
-// Body: { "name": "...", "content": "..." }
+// Body: { "name": "...", "content": "...", "source_type": "blank|ai|skill" }
 func CreatePluginDraft(w http.ResponseWriter, r *http.Request) {
 	userID := common.UserID(r)
 	if userID == "" {
@@ -127,8 +135,9 @@ func CreatePluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name    string `json:"name"`
-		Content string `json:"content"`
+		Name       string `json:"name"`
+		Content    string `json:"content"`
+		SourceType string `json:"source_type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
@@ -139,14 +148,20 @@ func CreatePluginDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "name is required", http.StatusBadRequest)
 		return
 	}
+	// Validate source_type; default to blank for unknown values.
+	sourceType := body.SourceType
+	if sourceType != "ai" && sourceType != "skill" && sourceType != "blank" {
+		sourceType = ""
+	}
 
 	draft := orm.PluginDraft{
-		ID:        uuid.New().String(),
-		Name:      body.Name,
-		Content:   body.Content,
-		CreatedBy: userID,
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		ID:         uuid.New().String(),
+		Name:       body.Name,
+		Content:    body.Content,
+		SourceType: sourceType,
+		CreatedBy:  userID,
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
 	}
 
 	if err := store.DB().Create(&draft).Error; err != nil {
@@ -220,6 +235,12 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 	var draft orm.PluginDraft
 	if err := db.Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	// Reject saves while an AI repair is in progress to prevent overwriting in-flight changes.
+	if draft.GenerateStatus == generateStatusRepairing {
+		common.ReplyErr(w, "repair in progress, please wait", http.StatusConflict)
 		return
 	}
 
@@ -333,25 +354,51 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	skillContent := ""
+	skillName := ""
 	if body.SkillID != "" {
 		var skillRow struct {
 			Content string
+			Name    string
 		}
-		if err := db.Raw("SELECT content FROM skill_resources WHERE id = ? AND owner_user_id = ?", body.SkillID, userID).Scan(&skillRow).Error; err != nil || skillRow.Content == "" {
+		if err := db.Raw("SELECT content, name FROM skill_resources WHERE id = ? AND owner_user_id = ?", body.SkillID, userID).Scan(&skillRow).Error; err != nil || skillRow.Content == "" {
 			common.ReplyErr(w, "skill not found", http.StatusBadRequest)
 			return
 		}
 		skillContent = skillRow.Content
+		skillName = skillRow.Name
 	}
 
-	if err := db.Model(&draft).Updates(map[string]any{
+	sourceUpdates := map[string]any{
 		"generate_status": generateStatusGenerating,
 		"updated_at":      time.Now().UTC(),
-	}).Error; err != nil {
+	}
+	// Set source_type on first generation (don't overwrite if already set by CreatePluginDraft).
+	if draft.SourceType == "" {
+		if body.SkillID != "" {
+			sourceUpdates["source_type"] = "skill"
+		} else {
+			sourceUpdates["source_type"] = "ai"
+		}
+	}
+	if body.SkillID != "" && draft.SourceSkillID == "" {
+		sourceUpdates["source_skill_id"] = body.SkillID
+		sourceUpdates["source_skill_name"] = skillName
+	}
+
+	if err := db.Model(&draft).Updates(sourceUpdates).Error; err != nil {
 		common.ReplyErr(w, "update failed", http.StatusInternalServerError)
 		return
 	}
 	draft.GenerateStatus = generateStatusGenerating
+	if st, ok := sourceUpdates["source_type"].(string); ok {
+		draft.SourceType = st
+	}
+	if sid, ok := sourceUpdates["source_skill_id"].(string); ok {
+		draft.SourceSkillID = sid
+	}
+	if sn, ok := sourceUpdates["source_skill_name"].(string); ok {
+		draft.SourceSkillName = sn
+	}
 
 	_, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{
 		JobType:      pluginDraftGenerateJobType,
@@ -418,4 +465,140 @@ func PolishPluginDraftInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.ReplyOK(w, resp)
+}
+
+// AIRepairPluginDraft handles POST /plugin-drafts/{draft_id}:ai-repair
+// Body: { "repair_hint": "..." } (optional)
+// Loads the draft's current YAML, calls Python /repair endpoint, and updates state_yaml_content.
+func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
+	draftID := common.PathVar(r, "draft_id")
+	userID := common.UserID(r)
+	if draftID == "" {
+		common.ReplyErr(w, "draft_id required", http.StatusBadRequest)
+		return
+	}
+	if isBuiltinPluginID(draftID) {
+		common.ReplyErr(w, "built-in plugins cannot be modified", http.StatusForbidden)
+		return
+	}
+
+	var body struct {
+		RepairHint string `json:"repair_hint"`
+		Target     string `json:"target"` // 'statemachine' | 'ui' | 'scenario'
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	db := store.DB()
+	var draft orm.PluginDraft
+	if err := db.Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	if draft.PluginYAMLContent == "" || draft.StateYAMLContent == "" {
+		common.ReplyErr(w, "draft has no generated content to repair", http.StatusBadRequest)
+		return
+	}
+
+	// Lock the draft for the duration of the repair.
+	prevStatus := draft.GenerateStatus
+	if err := db.Model(&draft).Update("generate_status", generateStatusRepairing).Error; err != nil {
+		common.ReplyErr(w, "lock failed", http.StatusInternalServerError)
+		return
+	}
+	// Ensure we restore the status even if repair fails.
+	defer func() {
+		if draft.GenerateStatus == generateStatusRepairing {
+			_ = db.Model(&orm.PluginDraft{}).Where("id = ?", draftID).
+				Update("generate_status", prevStatus).Error
+		}
+	}()
+
+	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), db, userID)
+	if err != nil {
+		llmConfig = map[string]any{}
+	}
+
+	var warnings []string
+	if draft.GenerateWarning != "" {
+		warnings = strings.Split(draft.GenerateWarning, "; ")
+	}
+
+	// Determine repair target: 'scenario' repairs scenario.md; everything else repairs state.yml.
+	target := strings.TrimSpace(body.Target)
+	repairHint := strings.TrimSpace(body.RepairHint)
+
+	if target == "scenario" {
+		// Scenario repair: call the repair endpoint with scenario-focused hint.
+		scenarioHint := repairHint
+		if scenarioHint == "" {
+			scenarioHint = "Fix or complete the scenario.md documentation."
+		}
+		resp, repairErr := algo.RepairStateMachine(r.Context(), algo.RepairStateMachineRequest{
+			PluginYAML: draft.PluginYAMLContent,
+			StateYAML:  draft.StateYAMLContent,
+			RepairHint: scenarioHint,
+			Target:     "scenario",
+			Warnings:   warnings,
+			LLMConfig:  llmConfig,
+		})
+		if repairErr != nil {
+			common.ReplyErr(w, "scenario repair failed: "+repairErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		updates := map[string]any{
+			"scenario_content":  resp.StateYAML,
+			"generate_status":   prevStatus,
+			"version":           draft.Version + 1,
+			"updated_at":        time.Now().UTC(),
+		}
+		if err := db.Model(&draft).Updates(updates).Error; err != nil {
+			common.ReplyErr(w, "save failed", http.StatusInternalServerError)
+			return
+		}
+		// Update in-memory so defer doesn't try to restore again.
+		draft.GenerateStatus = prevStatus
+	} else {
+		// State machine / UI repair: regenerate state.yml.
+		resp, repairErr := algo.RepairStateMachine(r.Context(), algo.RepairStateMachineRequest{
+			PluginYAML: draft.PluginYAMLContent,
+			StateYAML:  draft.StateYAMLContent,
+			RepairHint: repairHint,
+			Warnings:   warnings,
+			LLMConfig:  llmConfig,
+		})
+		if repairErr != nil {
+			common.ReplyErr(w, "repair failed: "+repairErr.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		newWarning := ""
+		if len(resp.RemainingWarnings) > 0 {
+			newWarning = strings.Join(resp.RemainingWarnings, "; ")
+		}
+
+		updates := map[string]any{
+			"state_yaml_content": resp.StateYAML,
+			"generate_warning":   newWarning,
+			"generate_status":    prevStatus,
+			"version":            draft.Version + 1,
+			"updated_at":         time.Now().UTC(),
+		}
+		if err := db.Model(&draft).Updates(updates).Error; err != nil {
+			common.ReplyErr(w, "save failed", http.StatusInternalServerError)
+			return
+		}
+		// Update in-memory so defer doesn't try to restore again.
+		draft.GenerateStatus = prevStatus
+	}
+
+	if err := db.Where("id = ?", draftID).First(&draft).Error; err != nil {
+		common.ReplyErr(w, "reload failed", http.StatusInternalServerError)
+		return
+	}
+
+	common.ReplyOK(w, toDraftResponse(draft))
 }

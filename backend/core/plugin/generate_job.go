@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -23,6 +24,7 @@ const (
 	generateStatusStateDone    = "state_done"
 	generateStatusDone         = "done"
 	generateStatusFailed       = "failed"
+	generateStatusRepairing    = "repairing"
 )
 
 const (
@@ -96,11 +98,15 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 		_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase2 state_machine: %s", err))
 		return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("phase2 state_machine: %w", err)
 	}
-	if err := db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
+	stateUpdates := map[string]any{
 		"state_yaml_content": stateResp.StateYAML,
 		"generate_status":    generateStatusStateDone,
 		"updated_at":         time.Now().UTC(),
-	}).Error; err != nil {
+	}
+	if len(stateResp.Warnings) > 0 {
+		stateUpdates["generate_warning"] = strings.Join(stateResp.Warnings, "; ")
+	}
+	if err := db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(stateUpdates).Error; err != nil {
 		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save state_machine: %w", err)
 	}
 
@@ -113,11 +119,20 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 	})
 	if err != nil {
 		// Phase 3 failure is non-fatal: skeleton + state are already saved.
-		// Mark as done with a warning rather than failed.
+		// Write to generate_warning (not generate_error) since the plugin is still usable.
+		existingWarning := ""
+		var currentDraft orm.PluginDraft
+		if dbErr := db.WithContext(ctx).Select("generate_warning").Where("id = ?", payload.DraftID).First(&currentDraft).Error; dbErr == nil {
+			existingWarning = currentDraft.GenerateWarning
+		}
+		newWarning := fmt.Sprintf("phase3 scenario_scripts: %s", err)
+		if existingWarning != "" {
+			newWarning = existingWarning + "; " + newWarning
+		}
 		_ = db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
-			"generate_status": generateStatusDone,
-			"generate_error":  fmt.Sprintf("phase3 scenario_scripts: %s (non-fatal)", err),
-			"updated_at":      time.Now().UTC(),
+			"generate_status":  generateStatusDone,
+			"generate_warning": newWarning,
+			"updated_at":       time.Now().UTC(),
 		}).Error
 		return asyncjob.Result{}, nil
 	}

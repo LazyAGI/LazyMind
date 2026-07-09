@@ -134,11 +134,19 @@ type PluginDraft struct {
 	GenerateStatus     string `gorm:"column:generate_status;type:varchar(16);not null;default:''"`
 	// GenerateError stores the last error message when GenerateStatus = 'failed' (migration 20260707120000).
 	GenerateError string `gorm:"column:generate_error;type:text;not null;default:''"`
+	// GenerateWarning stores non-fatal warnings produced during generation (migration 20260709120000).
+	// Non-empty when GenerateStatus = 'done' but some fields were incomplete after retries.
+	GenerateWarning string `gorm:"column:generate_warning;type:text;not null;default:''"`
 	// Version is an optimistic-lock counter. SavePluginDraft increments it on every
 	// successful write to plugin_yaml_content or state_yaml_content and rejects saves
 	// that arrive with a stale version (returns 409 Conflict).
 	// AI generate_job writes bypass the version check (it only writes its own fields).
 	Version int `gorm:"column:version;type:int;not null;default:1"`
+	// Source tracking (migration 20260709130000).
+	// SourceType: '' | 'ai' | 'skill' | 'blank'
+	SourceType      string `gorm:"column:source_type;type:varchar(16);not null;default:''"`
+	SourceSkillID   string `gorm:"column:source_skill_id;type:varchar(36);not null;default:''"`
+	SourceSkillName string `gorm:"column:source_skill_name;type:varchar(255);not null;default:''"`
 }
 
 func (PluginDraft) TableName() string { return "plugin_drafts" }

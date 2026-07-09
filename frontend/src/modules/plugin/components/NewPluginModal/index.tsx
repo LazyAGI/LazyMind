@@ -142,7 +142,7 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
 
     setCreating(true);
     try {
-      const draft = await createPluginDraft({ name: effectiveName });
+      const draft = await createPluginDraft({ name: effectiveName, source_type: mode });
       const pm = { ...createEmptyPluginModel(), id: trimmedId, name: effectiveName };
       await updatePluginDraftContent(draft.id, {
         plugin_yaml_content: serializePluginModel(pm),

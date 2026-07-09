@@ -9,6 +9,7 @@ import {
   AppstoreOutlined,
   SettingOutlined,
   FileOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import type { GraphModel } from './core/model';
 import { createEmptyModel } from './core/model';
@@ -49,6 +50,8 @@ function codeFileForTab(tab: ContentTab): CodeFile {
 
 const AUTO_SAVE_DELAY_MS = 1500;
 
+export type RepairTarget = 'statemachine' | 'ui' | 'scenario';
+
 export interface SavePayload {
   stateYaml: string;
   pluginYaml: string;
@@ -73,6 +76,12 @@ interface Props {
   showEmptyHint?: boolean;
   /** When true, all editing is disabled. onSave is ignored and all inputs become read-only. */
   readonly?: boolean;
+  /**
+   * When provided, an "AI 修复" button appears in the toolbar of each content tab.
+   * `target` indicates which part the user wants to repair.
+   * `validationErrors` carries the current graph validation errors (only for 'statemachine' target).
+   */
+  onRepair?: (target: RepairTarget, validationErrors?: ValidationError[]) => void;
 }
 
 function parseScriptFiles(raw: string): Record<string, string> {
@@ -116,6 +125,7 @@ export default function StateGraphEditor({
   onClose,
   showEmptyHint = true,
   readonly = false,
+  onRepair,
 }: Props) {
   const [contentTab, setContentTab] = useState<ContentTab>('statemachine');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
@@ -487,6 +497,11 @@ export default function StateGraphEditor({
         <div className="sge-toolbar2-right">
           {!readonly && contentTab === 'statemachine' && viewMode === 'preview' && (
             <>
+              {onRepair && (
+                <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('statemachine', errors)}>
+                  AI 修复
+                </Button>
+              )}
               <Button
                 size="small"
                 icon={<AppstoreOutlined />}
@@ -508,6 +523,16 @@ export default function StateGraphEditor({
               type={showArtifacts ? 'primary' : 'default'}
             >
               素材{slotCount > 0 && <span className="sge-artifact-count">{slotCount}</span>}
+            </Button>
+          )}
+          {!readonly && contentTab === 'ui' && viewMode === 'preview' && onRepair && (
+            <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('ui')}>
+              AI 修复
+            </Button>
+          )}
+          {!readonly && contentTab === 'scenario' && viewMode === 'preview' && onRepair && (
+            <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('scenario')}>
+              AI 修复
             </Button>
           )}
         </div>

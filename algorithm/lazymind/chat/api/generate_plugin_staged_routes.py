@@ -86,6 +86,15 @@ _STATE_MACHINE_SYSTEM = (
     '  - initial: __start__\n'
     '  - transitions (dict): __start__ key holds the entry transitions list; other keys hold per-step transitions\n'
     '  - steps (dict, each step needs: prompt, and optionally inputs/outputs/tools/route/skipif)\n\n'
+    'CRITICAL RULE — transitions.__start__ MUST always be present and non-empty.\n'
+    'Example of the mandatory __start__ entry:\n'
+    '  transitions:\n'
+    '    __start__:\n'
+    '      - to: <first_step_id>\n'
+    '        condition: "Always enter <first_step_id> first."\n'
+    '  Never omit transitions.__start__. It is required for the state machine to start.\n\n'
+    'CRITICAL RULE — every step listed in plugin.yaml MUST have a transitions entry\n'
+    '(even if it only leads to __end__).\n\n'
     'The plugin.yaml skeleton from Phase 1 is provided below as context.\n'
     'Your step IDs in state.yml MUST match the steps in plugin.yaml exactly.\n\n'
     'Return ONLY a JSON object:\n'
@@ -128,17 +137,14 @@ _SCENARIO_SCRIPTS_SYSTEM = (
     'ALLOWED for HTTP requests: use httpx instead of requests\n'
     'ALLOWED standard library: json, re, math, base64, hashlib, urllib.parse, datetime, typing\n'
     '=== End of Rules ===\n\n'
-    'The complete plugin.yaml and state.yml are provided below as context.\n\n'
-    'Return ONLY a JSON object:\n'
+    '=== Output Format ===\n'
+    'Return ONLY a JSON object with exactly these two keys:\n'
     '  {{"scenario_md": "<scenario.md content as Markdown string>",\n'
     '    "scripts": {{"scripts/tools.py": "<python code>"}}}}\n'
     '- scripts: set to {{}} when no custom tool scripts are needed.\n'
     '- If you do write a script, only implement functions declared in '
-    'plugin.yaml tool_scripts[].functions.\n\n'
-    'Follow the scenario.md format specification below.\n\n'
-    '=== Plugin Format Specification ===\n'
-    '{spec}\n'
-    '=== End of Specification ===\n\n'
+    'plugin.yaml tool_scripts[].functions.\n'
+    '- Do NOT wrap the JSON in markdown code fences. Output raw JSON only.\n\n'
     '=== plugin.yaml ===\n'
     '{plugin_yaml}\n'
     '=== state.yml ===\n'
@@ -211,8 +217,10 @@ _STATE_MACHINE_PATCH_TEMPLATE = (
     '{missing_fields}\n\n'
     'Current state.yml:\n{state_yaml}\n\n'
     'plugin.yaml (for reference):\n{plugin_yaml}\n\n'
-    'Return ONLY a JSON patch: {{"state": {{...}}}}\n'
-    'Fix only the missing fields. No explanation.'
+    'Return the COMPLETE FIXED state.yml (not a partial patch) as:\n'
+    '{{"state_yaml": "<complete corrected state.yml as YAML string>"}}\n'
+    'Fix ALL listed issues. Ensure transitions.__start__ is present with a valid "to" field.\n'
+    'No explanation.'
 )
 
 
@@ -257,6 +265,15 @@ def _patch_state_machine(
     except ValueError as exc:
         logger.warning('[staged] state patch parse failed: %s', exc)
         return state_dict
+    # Prefer full replacement via state_yaml (avoids deep_merge issues with nested lists).
+    if 'state_yaml' in patch:
+        try:
+            fixed = yaml.safe_load(patch['state_yaml']) or {}
+            if isinstance(fixed, dict) and fixed:
+                return fixed
+        except yaml.YAMLError as exc:
+            logger.warning('[staged] state patch YAML parse failed: %s', exc)
+    # Fallback: legacy patch dict merge (kept for backward compat)
     if 'state' in patch and isinstance(patch['state'], dict):
         from lazymind.chat.api.generate_plugin_routes import _deep_merge  # noqa: PLC0415
         state_dict = _deep_merge(state_dict, patch['state'])
@@ -420,6 +437,7 @@ class StateMachineRequest(_LLMConfigMixin):
 
 class StateMachineResponse(BaseModel):
     state_yaml: str
+    warnings: List[str] = []
 
 
 class ScenarioScriptsRequest(_LLMConfigMixin):
@@ -534,7 +552,9 @@ async def generate_state_machine(req: StateMachineRequest) -> StateMachineRespon
     )
     user_prompt = (
         f'Plugin name: {req.name}\n\n'
-        'Generate the complete state.yml for this plugin, including transitions and step prompts.'
+        f'Steps in order: {", ".join(s.get("id", "") for s in plugin_dict.get("steps", []) if isinstance(s, dict)) or "(none)"}\n\n'
+        'Generate the complete state.yml for this plugin, including transitions and step prompts.\n'
+        'transitions.__start__[0].to MUST be set to the first step listed above.'
     )
 
     raw = _call_llm(f'{system_prompt}\n\n{user_prompt}')
@@ -552,7 +572,17 @@ async def generate_state_machine(req: StateMachineRequest) -> StateMachineRespon
     except yaml.YAMLError as exc:
         raise HTTPException(status_code=500, detail=f'Phase 2 YAML parse error: {exc}') from exc
 
+    # Sanitize: remove reserved keywords from steps dict if LLM accidentally included them
+    reserved_keys = {'__start__', '__end__'}
+    state_steps = state_dict.get('steps')
+    if isinstance(state_steps, dict):
+        for key in reserved_keys:
+            if key in state_steps:
+                logger.warning('[staged/state_machine] removing reserved key "%s" from steps', key)
+                del state_steps[key]
+
     # Validate state machine fields + patch retry
+    field_warnings: List[str] = []
     for attempt in range(MAX_PATCH_RETRIES):
         # Reuse _check_missing_fields but only for state fields (pass empty plugin_dict)
         missing = _check_missing_fields({}, state_dict)
@@ -565,10 +595,9 @@ async def generate_state_machine(req: StateMachineRequest) -> StateMachineRespon
     else:
         missing = [m for m in _check_missing_fields({}, state_dict) if m.startswith('state.')]
         if missing:
-            raise HTTPException(
-                status_code=500,
-                detail=f'Phase 2: missing fields after retries: {missing}',
-            )
+            warn_msg = f'Phase 2: missing fields after retries: {missing}'
+            logger.warning('[staged/state_machine] degraded: %s', warn_msg)
+            field_warnings.append(warn_msg)
 
     # PluginSpec validation (both YAML together)
     state_yaml = yaml.dump(state_dict, allow_unicode=True, sort_keys=False)
@@ -586,9 +615,11 @@ async def generate_state_machine(req: StateMachineRequest) -> StateMachineRespon
     else:
         err = _validate_with_pluginspec(req.plugin_yaml, state_yaml)
         if err:
-            raise HTTPException(status_code=500, detail=f'Phase 2 PluginSpec validation failed: {err}')
+            warn_msg = f'Phase 2 PluginSpec validation failed: {err}'
+            logger.warning('[staged/state_machine] degraded: %s', warn_msg)
+            field_warnings.append(warn_msg)
 
-    return StateMachineResponse(state_yaml=state_yaml)
+    return StateMachineResponse(state_yaml=state_yaml, warnings=field_warnings)
 
 
 @router.post(
@@ -607,7 +638,6 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
     inject_model_config(req.llm_config or {})
 
     system_prompt = _SCENARIO_SCRIPTS_SYSTEM.format(
-        spec=_PLUGIN_FORMAT_SPEC,
         plugin_yaml=req.plugin_yaml,
         state_yaml=req.state_yaml,
     )
@@ -621,7 +651,20 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
     try:
         data = _extract_json(raw)
     except ValueError as exc:
-        raise HTTPException(status_code=500, detail=f'Phase 3 JSON parse error: {exc}') from exc
+        # First attempt failed. Retry once with an explicit reminder.
+        logger.warning('[staged/scenario_scripts] first parse failed (%s), retrying...', exc)
+        retry_prompt = (
+            'IMPORTANT: Your previous response could not be parsed as JSON. '
+            'Return ONLY a raw JSON object (no markdown fences, no extra text):\n'
+            '  {"scenario_md": "...", "scripts": {}}\n\n'
+            + user_prompt
+        )
+        raw2 = _call_llm(f'{system_prompt}\n\n{retry_prompt}')
+        try:
+            data = _extract_json(raw2)
+        except ValueError as exc2:
+            logger.warning('[staged/scenario_scripts] retry also failed (%s), using fallback', exc2)
+            data = {}
 
     scenario_md = data.get('scenario_md', '')
     scripts: Dict[str, str] = data.get('scripts') or {}
@@ -802,3 +845,144 @@ async def polish_plugin_info(req: PolishInfoRequest) -> PolishInfoResponse:
             results[field] = original
 
     return PolishInfoResponse(**results)
+
+
+# ---------------------------------------------------------------------------
+# State machine repair endpoint
+# ---------------------------------------------------------------------------
+
+_REPAIR_SYSTEM = (
+    'You are a LazyMind plugin authoring assistant.\n'
+    'Your task is to repair a state.yml that has missing or invalid fields.\n\n'
+    'You are given:\n'
+    '  - The current plugin.yaml (for context: step IDs, slot IDs, etc.)\n'
+    '  - The current state.yml (may be incomplete or have warnings)\n'
+    '  - A list of known warnings/issues\n'
+    '  - An optional user hint describing what to fix\n\n'
+    'CRITICAL RULE — transitions.__start__ MUST always be present and non-empty.\n'
+    'CRITICAL RULE — every step in plugin.yaml MUST have a transitions entry.\n'
+    'CRITICAL RULE — every step in plugin.yaml MUST have a prompt in state.yml.\n\n'
+    'Return the COMPLETE FIXED state.yml as:\n'
+    '  {{"state_yaml": "<complete corrected state.yml as YAML string>"}}\n\n'
+    'Do NOT return a partial patch. Return the full state.yml.\n\n'
+    '=== Plugin Format Specification ===\n'
+    '{spec}\n'
+    '=== End of Specification ===\n\n'
+    '=== Current plugin.yaml ===\n'
+    '{plugin_yaml}\n'
+    '=== End of plugin.yaml ==='
+)
+
+
+class RepairRequest(_LLMConfigMixin):
+    plugin_yaml: str
+    state_yaml: str
+    repair_hint: str = ''
+    warnings: List[str] = []
+    target: str = 'statemachine'  # 'statemachine' | 'ui' | 'scenario'
+
+
+class RepairResponse(BaseModel):
+    state_yaml: str
+    remaining_warnings: List[str] = []
+
+
+@router.post(
+    '/api/chat/generate_plugin/repair',
+    response_model=RepairResponse,
+    summary='Repair an incomplete or invalid state.yml',
+)
+async def repair_state_machine(req: RepairRequest) -> RepairResponse:
+    """Repair a state.yml that has missing fields or validation warnings.
+
+    Accepts the current plugin.yaml and state.yml, plus an optional user hint.
+    Returns a fully corrected state.yml.
+    """
+    inject_model_config(req.llm_config or {})
+
+    try:
+        plugin_dict = yaml.safe_load(req.plugin_yaml) or {}
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=400, detail=f'Invalid plugin_yaml: {exc}') from exc
+
+    try:
+        state_dict = yaml.safe_load(req.state_yaml) or {}
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=400, detail=f'Invalid state_yaml: {exc}') from exc
+
+    # ── Scenario / documentation repair ──────────────────────────────────────
+    if req.target == 'scenario':
+        scenario_system = (
+            'You are a LazyMind plugin authoring assistant.\n'
+            'Your task is to write or repair the scenario.md for a plugin.\n\n'
+            'scenario.md is a guide for the ChatAgent to understand when and how to use this plugin.\n'
+            'It should describe: the plugin purpose, when to trigger it, what each step does,\n'
+            'and what outputs the user should expect.\n\n'
+            'Return the COMPLETE scenario.md as:\n'
+            '  {{"scenario_md": "<complete scenario.md content>"}}\n\n'
+            '=== Plugin Format Specification ===\n'
+            f'{_PLUGIN_FORMAT_SPEC}\n'
+            '=== End of Specification ===\n\n'
+            f'=== Current plugin.yaml ===\n{req.plugin_yaml}\n=== End ===\n\n'
+            f'=== Current state.yml ===\n{req.state_yaml}\n=== End ==='
+        )
+        hint_section = f'User instruction: {req.repair_hint.strip()}\n\n' if req.repair_hint and req.repair_hint.strip() else ''
+        scenario_user = f'{hint_section}Write a complete scenario.md for this plugin.'
+        raw = _call_llm(f'{scenario_system}\n\n{scenario_user}')
+        try:
+            data = _extract_json(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail=f'Scenario repair JSON parse error: {exc}') from exc
+        scenario_md = data.get('scenario_md', '')
+        if not scenario_md:
+            raise HTTPException(status_code=500, detail='Scenario repair: missing scenario_md in response')
+        return RepairResponse(state_yaml=scenario_md, remaining_warnings=[])
+
+    # ── State machine / UI repair ─────────────────────────────────────────────
+    system_prompt = _REPAIR_SYSTEM.format(
+        spec=_PLUGIN_FORMAT_SPEC,
+        plugin_yaml=req.plugin_yaml,
+    )
+
+    warnings_section = ''
+    if req.warnings:
+        warnings_section = 'Known issues to fix:\n' + '\n'.join(f'  - {w}' for w in req.warnings) + '\n\n'
+    hint_section = ''
+    if req.repair_hint and req.repair_hint.strip():
+        hint_section = f'User instruction: {req.repair_hint.strip()}\n\n'
+
+    user_prompt = (
+        f'{warnings_section}'
+        f'{hint_section}'
+        f'Current state.yml to repair:\n{req.state_yaml}\n\n'
+        'Return the complete fixed state.yml.'
+    )
+
+    raw = _call_llm(f'{system_prompt}\n\n{user_prompt}')
+    try:
+        data = _extract_json(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f'Repair JSON parse error: {exc}') from exc
+
+    fixed_yaml = data.get('state_yaml', '')
+    if not fixed_yaml:
+        raise HTTPException(status_code=500, detail='Repair: missing state_yaml in response')
+
+    try:
+        fixed_dict = yaml.safe_load(fixed_yaml) or {}
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=500, detail=f'Repair YAML parse error: {exc}') from exc
+
+    # Sanitize: remove reserved keywords from steps
+    reserved_keys = {'__start__', '__end__'}
+    state_steps = fixed_dict.get('steps')
+    if isinstance(state_steps, dict):
+        for key in reserved_keys:
+            if key in state_steps:
+                del state_steps[key]
+
+    # Check remaining issues and report them (non-fatal)
+    remaining = [m for m in _check_missing_fields({}, fixed_dict) if m.startswith('state.')]
+    fixed_yaml_out = yaml.dump(fixed_dict, allow_unicode=True, sort_keys=False)
+
+    return RepairResponse(state_yaml=fixed_yaml_out, remaining_warnings=remaining)

@@ -205,6 +205,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/plugin-drafts/{draft_id}", []string{"qa.read"}, plugin.GetPluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:save", []string{"qa.write"}, plugin.SavePluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-generate", []string{"qa.write"}, plugin.AIGeneratePluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-repair", []string{"qa.write"}, plugin.AIRepairPluginDraft)
 	handleAPI(r, "DELETE", "/plugin-drafts/{draft_id}", []string{"qa.write"}, plugin.DeletePluginDraft)
 
 	// ----- Task Center -----

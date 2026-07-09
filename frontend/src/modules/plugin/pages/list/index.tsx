@@ -138,6 +138,17 @@ export default function PluginListPage() {
       ),
     },
     {
+      title: '类型',
+      key: 'source_type',
+      width: 80,
+      render: (_: unknown, record: PluginDraftRecord) => {
+        if (record.source_type === 'skill') return <Tag color="blue">AI生成</Tag>;
+        if (record.source_type === 'ai') return <Tag color="blue">AI生成</Tag>;
+        if (record.source_type === 'blank') return <Tag>自定义</Tag>;
+        return <Tag>自定义</Tag>;
+      },
+    },
+    {
       title: '状态',
       dataIndex: 'generate_status',
       key: 'generate_status',
