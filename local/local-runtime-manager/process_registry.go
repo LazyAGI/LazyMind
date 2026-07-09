@@ -142,6 +142,7 @@ func pidFileRecords(paths RuntimePaths, cfg RuntimeConfig) []LocalProcessRecord 
 		{coreProcessName, paths.CorePIDFile, []int{cfg.LocalProxy.CoreHostPort}},
 		{scanControlPlaneProcessName, paths.ScanControlPlanePIDFile, []int{cfg.LocalProxy.ScanHostPort}},
 		{fileWatcherProcessName, paths.FileWatcherPIDFile, []int{cfg.FileWatcher.Port}},
+		{frontendProcessName, paths.FrontendPIDFile, []int{cfg.FrontendPort}},
 		{milvusLiteProcessName, paths.MilvusLitePIDFile, []int{cfg.ModeProfile.VectorStore.Port}},
 	}
 	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
