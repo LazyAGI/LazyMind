@@ -893,6 +893,18 @@ type skillReviewResultListOpenAPIResponse struct {
 	Total    int64                              `json:"total"`
 }
 
+type skillOrganizeOpenAPIRequest struct {
+	RequestID   string   `json:"requestid"`
+	Skills      []string `json:"skills"`
+	ArtifactDir string   `json:"artifact_dir,omitempty"`
+}
+
+type skillOrganizeOpenAPIResponse struct {
+	Status    string `json:"status"`
+	RequestID string `json:"requestid"`
+	TaskID    string `json:"taskid"`
+}
+
 type memoryReviewResultOpenAPIResponse struct {
 	ID             string         `json:"id"`
 	UserID         string         `json:"user_id"`
@@ -2307,6 +2319,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Summary:   "List skill categories",
 			Tags:      []string{"skills"},
 			Responses: map[int]openAPIResponse{200: resp("Skill category list", skillCategoriesOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skill_organize",
+			Summary:     "Submit skill organize task",
+			Description: "Submits a skill organize task for current user's SkillV2 files. The task runs asynchronously in the algorithm service.",
+			Tags:        []string{"skills"},
+			RequestBody: jsonBodyOf(skillOrganizeOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill organize task accepted", skillOrganizeOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",

@@ -15,7 +15,6 @@ from lazymind.review.skill_review.draft import build_skill_drafts
 from lazymind.review.skill_review.db import (
     insert_skill_review_records,
     insert_skill_review_run_stats,
-    read_skill_review_records_by_ids,
     read_session,
 )
 from lazymind.review.skill_review.miner import build_candidate_skills, build_skill_outlines
@@ -38,6 +37,13 @@ from lazymind.review.skill_review.reports import (
 from lazymind.review.skill_review.trajectory import build_trajectories
 
 GLOBAL_USER_ID = 'global'
+
+
+def skill_review_task_id(request: SkillReviewRequest) -> str:
+    return stable_hash({
+        'requestid': request.requestid,
+        'userid': request.user_id or GLOBAL_USER_ID,
+    })
 
 
 @dataclass
@@ -80,7 +86,7 @@ def _run_skill_review(request: SkillReviewRequest, llm: AutoModel, emb: AutoMode
     read_user_ids = [request.user_id] if request.user_id else None
 
     raw_sessions = read_session(request.start_time, request.end_time, read_user_ids)
-    pending_records = read_skill_review_records_by_ids(request.pending_skill_ids)
+    pending_records: list[dict[str, Any]] = []
     if request.user_id:
         user_sessions = _group_sessions_by_user(raw_sessions)
         user_sessions = {
@@ -360,10 +366,7 @@ def _build_run_stat(
 ) -> SkillReviewRunStat:
     ended_at = datetime.now()
     requestid = request.requestid
-    stat_id = stable_hash({
-        'requestid': requestid,
-        'userid': source_user_id,
-    })
+    stat_id = skill_review_task_id(request)
     return SkillReviewRunStat(
         id=stat_id,
         requestid=requestid,

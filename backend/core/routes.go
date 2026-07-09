@@ -296,6 +296,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skillv2handler.List)
 	handleAPI(r, "GET", "/skills:trash", []string{"qa.read"}, skillv2handler.ListTrash)
 	handleAPI(r, "DELETE", "/skills:trash", []string{"qa.write"}, skillv2handler.EmptyTrash)
+	handleAPI(r, "POST", "/skill_organize", []string{"qa.write"}, skillv2handler.SubmitSkillOrganize)
 	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skillv2handler.ListTags)
 	handleAPI(r, "GET", "/skills/categories", []string{"qa.read"}, skillv2handler.ListCategories)
 	handleAPI(r, "POST", "/skills", []string{"qa.write"}, skillv2handler.Create)

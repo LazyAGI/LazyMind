@@ -9,7 +9,7 @@ from lazyllm import ThreadPoolExecutor
 
 from lazymind.review.skill_review.config import DEFAULT_BACKGROUND_WORKERS
 from lazymind.review.skill_review.schemas import SkillReviewRequest
-from lazymind.review.service.skill_review import run_skill_review
+from lazymind.review.service.skill_review import run_skill_review, skill_review_task_id
 
 router = APIRouter()
 background_executor = ThreadPoolExecutor(max_workers=DEFAULT_BACKGROUND_WORKERS)
@@ -20,9 +20,11 @@ def shutdown_background_executor() -> None:
     background_executor.shutdown(wait=False, cancel_futures=True)
 
 
+@router.post('/api/chat/skill-review', summary='Run skill review for chat histories in a time range')
 @router.post('/api/chat/skill_review', summary='Run skill review for chat histories in a time range')
 async def skill_review(payload: SkillReviewRequest):
     loop = asyncio.get_running_loop()
+    taskid = skill_review_task_id(payload)
     try:
         future = loop.run_in_executor(
             background_executor,
@@ -36,18 +38,18 @@ async def skill_review(payload: SkillReviewRequest):
             content={
                 'code': 500,
                 'msg': f'skill review submit failed: {exc}',
-                'data': {'requestid': payload.requestid},
+                'data': {'requestid': payload.requestid, 'taskid': taskid},
             },
         )
 
-    LOG.info(f'[SkillReview] skill review accepted: {payload.requestid} for user {payload.user_id}')
+    LOG.info(f'[SkillReview] skill review accepted: {payload.requestid} task {taskid} for user {payload.user_id}')
     future.add_done_callback(lambda item: _log_skill_review_result(payload, item))
     return JSONResponse(
         status_code=200,
         content={
             'code': 0,
             'msg': 'skill review accepted',
-            'data': {'status': 'running', 'requestid': payload.requestid},
+            'data': {'status': 'running', 'requestid': payload.requestid, 'taskid': taskid},
         },
     )
 
