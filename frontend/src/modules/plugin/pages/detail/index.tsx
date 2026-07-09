@@ -425,9 +425,9 @@ export default function PluginDetailPage() {
         />
       )}
 
-      {/* AI generation progress Modal — shown during Phase 0/1/2, not closable */}
+      {/* AI generation progress Modal — shown during Phase 0/1/2/3, not closable */}
       <Modal
-        open={isStillGenerating && !isRepairing && !editorReady}
+        open={isStillGenerating && !isRepairing}
         closable={false}
         maskClosable={false}
         footer={null}
@@ -447,8 +447,14 @@ export default function PluginDetailPage() {
               {phase === 'skeleton' ? <SyncOutlined spin /> : phase === 'scenario_scripts' || phase === 'done' ? <CheckCircleOutlined /> : null}
               {' 阶段 1：生成插件骨架'}
             </div>
-            <div className="phase-step">{'阶段 2：生成状态机'}</div>
-            <div className="phase-step">{'阶段 3：生成文档 & 脚本'}</div>
+            <div className={`phase-step ${phase === 'scenario_scripts' ? 'active' : phase === 'done' ? 'done' : ''}`}>
+              {phase === 'scenario_scripts' ? <SyncOutlined spin /> : phase === 'done' ? <CheckCircleOutlined /> : null}
+              {' 阶段 2：生成状态机'}
+            </div>
+            <div className={`phase-step ${phase === 'scenario_scripts' ? 'active' : phase === 'done' ? 'done' : ''}`}>
+              {phase === 'scenario_scripts' ? <SyncOutlined spin /> : phase === 'done' ? <CheckCircleOutlined /> : null}
+              {' 阶段 3：生成文档 & 脚本'}
+            </div>
           </div>
           <p className="plugin-generate-progress-hint">生成过程通常需要 30–90 秒，请耐心等待…</p>
         </div>
@@ -536,7 +542,11 @@ export default function PluginDetailPage() {
             <SyncOutlined spin style={{ fontSize: 36, color: '#1677ff' }} />
             <p style={{ marginTop: 16, fontSize: 15, fontWeight: 500 }}>AI 修复中，请稍后…</p>
             <p style={{ marginTop: 4, color: '#8c8c8c', fontSize: 13 }}>
-              正在分析并修复 slot 引用和状态机结构，通常需要 10–30 秒。
+              {repairTarget === 'scenario'
+                ? '正在重新生成说明文档，通常需要 10–60 秒。'
+                : repairTarget === 'ui'
+                  ? '正在分析并修复 UI 配置，通常需要 10–60 秒。'
+                  : '正在分析并修复素材引用和流程图结构，通常需要 10–60 秒。'}
             </p>
           </div>
         ) : (

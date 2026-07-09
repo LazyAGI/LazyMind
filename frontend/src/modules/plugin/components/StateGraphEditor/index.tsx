@@ -488,10 +488,10 @@ export default function StateGraphEditor({
             {(['statemachine', 'ui', 'scenario'] as ContentTab[]).map((tab) => (
               <button
                 key={tab}
-                className={`sge-seg-btn${contentTab === tab ? ' sge-seg-btn--active' : ''}${viewMode === 'code' ? ' sge-seg-btn--disabled' : ''}`}
-                onClick={() => { if (viewMode !== 'code') setContentTab(tab); }}
-                disabled={viewMode === 'code'}
-                aria-disabled={viewMode === 'code'}
+                className={`sge-seg-btn${contentTab === tab ? ' sge-seg-btn--active' : ''}${(viewMode === 'code' || viewMode === 'brief') ? ' sge-seg-btn--disabled' : ''}`}
+                onClick={() => { if (viewMode !== 'code' && viewMode !== 'brief') setContentTab(tab); }}
+                disabled={viewMode === 'code' || viewMode === 'brief'}
+                aria-disabled={viewMode === 'code' || viewMode === 'brief'}
               >
                 {tab === 'statemachine' ? '流程图' : tab === 'ui' ? 'UI' : '说明文档'}
               </button>

@@ -184,6 +184,7 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 		_ = db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
 			"generate_status":  generateStatusDone,
 			"generate_warning": newWarning,
+			"version":          gorm.Expr("version + 1"),
 			"updated_at":       time.Now().UTC(),
 		}).Error
 		return asyncjob.Result{}, nil
@@ -202,6 +203,7 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 		"scripts_content":  scriptsJSON,
 		"generate_status":  generateStatusDone,
 		"generate_error":   "",
+		"version":          gorm.Expr("version + 1"),
 		"updated_at":       time.Now().UTC(),
 	}).Error; err != nil {
 		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save scenario_scripts: %w", err)

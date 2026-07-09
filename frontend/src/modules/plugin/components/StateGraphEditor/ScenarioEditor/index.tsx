@@ -62,6 +62,17 @@ export function parseScenario(markdown: string, steps: StepNode[]): ScenarioData
       data.stepDescriptions[step.id] = '';
     }
   }
+
+  // Fallback: if no structured sections were parsed (AI returned free-form markdown),
+  // put the entire content into overview so users can at least read it.
+  const hasStructuredContent =
+    data.overview !== '' ||
+    Object.values(data.stepDescriptions).some((v) => v !== '') ||
+    data.notes !== '';
+  if (!hasStructuredContent && markdown.trim()) {
+    data.overview = markdown.trim();
+  }
+
   return data;
 }
 

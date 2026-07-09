@@ -183,29 +183,29 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
         if (row._type === 'builtin') return <Tag color="blue">内置</Tag>;
         if (row.source_type === 'skill') {
           const skillLabel = row.source_skill_name || row.source_skill_id || '未知技能';
+          const skillId = row.source_skill_id;
+          const tooltipContent = skillId ? (
+            <span>
+              从技能{' '}
+              <Button
+                type="link"
+                size="small"
+                style={{ color: '#fff', padding: 0, height: 'auto', textDecoration: 'underline' }}
+                onClick={(e) => { e.stopPropagation(); navigate(`/memory-management/skills/${skillId}`); }}
+              >
+                {skillLabel}
+              </Button>
+              {' '}转换
+            </span>
+          ) : `从技能「${skillLabel}」转换`;
           return (
-            <Tooltip title={`从技能「${skillLabel}」转换`}>
+            <Tooltip title={tooltipContent}>
               <Tag color="purple" style={{ cursor: 'default' }}>技能转换</Tag>
             </Tooltip>
           );
         }
         if (row.source_type === 'ai') return <Tag color="blue">AI生成</Tag>;
         return <Tag>自定义</Tag>;
-      },
-    },
-    {
-      title: '关联技能',
-      key: 'source_skill',
-      width: 150,
-      render: (_: unknown, row: PluginRow) => {
-        if (row._type === 'builtin' || row.source_type !== 'skill') return null;
-        const label = row.source_skill_name || row.source_skill_id;
-        if (!label) return <span style={{ color: '#bfbfbf' }}>—</span>;
-        return (
-          <Tooltip title={row.source_skill_id ? `Skill ID: ${row.source_skill_id}` : undefined}>
-            <span style={{ fontSize: 12, color: '#722ed1' }}>{label}</span>
-          </Tooltip>
-        );
       },
     },
     {
