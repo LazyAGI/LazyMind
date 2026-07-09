@@ -34,6 +34,7 @@ import {
 } from "react-router-dom";
 import type { GroupItem, UserItem } from "@/api/generated/auth-client";
 import { createGroupApi, createUserApi } from "@/modules/signin/utils/request";
+import { runtimeFeatures } from "@/runtime/features";
 import GlossaryInboxModal from "./components/GlossaryInboxModal";
 import MemoryDraftModal from "./components/MemoryDraftModal";
 import ShareModal from "./components/ShareModal";
@@ -440,6 +441,7 @@ export default function MemoryManagement() {
   const [draft, setDraft] = useState<AssetDraft>(createDraft());
   const [modalOpen, setModalOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const hideUserGroupSurfaces = runtimeFeatures.hideUserGroupSurfaces;
   const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
   const [skillShareCenterOpen, setSkillShareCenterOpen] = useState(false);
   const [skillShareCenterTab, setSkillShareCenterTab] =
@@ -1426,6 +1428,10 @@ export default function MemoryManagement() {
 
   const refreshSkillShareCenter = useCallback(
     async (options?: { silent?: boolean; showErrorToast?: boolean }) => {
+      if (hideUserGroupSurfaces) {
+        return;
+      }
+
       const requestId = skillShareRequestIdRef.current + 1;
       skillShareRequestIdRef.current = requestId;
 
@@ -1465,7 +1471,7 @@ export default function MemoryManagement() {
         }
       }
     },
-    [t],
+    [hideUserGroupSurfaces, t],
   );
 
   const refreshShareStatus = useCallback(
@@ -1682,12 +1688,12 @@ export default function MemoryManagement() {
   ]);
 
   useEffect(() => {
-    if (activeTab !== "skills") {
+    if (hideUserGroupSurfaces || activeTab !== "skills") {
       return;
     }
 
     void refreshSkillShareCenter({ silent: true });
-  }, [activeTab, refreshSkillShareCenter]);
+  }, [activeTab, hideUserGroupSurfaces, refreshSkillShareCenter]);
 
   useEffect(() => {
     if (routeMemoryTab !== "glossary") {
@@ -3016,6 +3022,9 @@ export default function MemoryManagement() {
   };
 
   const openShareModal = (tab: ShareableTab, item: StructuredAsset | ExperienceAsset) => {
+    if (hideUserGroupSurfaces) {
+      return;
+    }
     setShareTarget({ tab, item });
     setShareDraft({ groupIds: [], userIds: [], message: "" });
     setShareModalOpen(true);
@@ -3032,6 +3041,9 @@ export default function MemoryManagement() {
   };
 
   const openSkillShareCenter = (nextTab: SkillShareCenterTab = "incoming") => {
+    if (hideUserGroupSurfaces) {
+      return;
+    }
     setSkillShareCenterTab(nextTab);
     setSkillShareCenterOpen(true);
     void refreshSkillShareCenter({ showErrorToast: true });
@@ -4995,7 +5007,7 @@ export default function MemoryManagement() {
   };
 
   useEffect(() => {
-    if (!shareModalOpen) {
+    if (hideUserGroupSurfaces || !shareModalOpen) {
       return;
     }
 
@@ -5029,7 +5041,7 @@ export default function MemoryManagement() {
     };
 
     fetchShareOptions();
-  }, [shareModalOpen, t]);
+  }, [hideUserGroupSurfaces, shareModalOpen, t]);
 
   useEffect(() => {
     if (!shareModalOpen || !shareTarget || shareTarget.tab !== "skills") {
@@ -5582,7 +5594,7 @@ export default function MemoryManagement() {
                     onClick={() => openModal("edit", record)}
                   />
                 </Tooltip>
-                {!record.parentId ? (
+                {!hideUserGroupSurfaces && !record.parentId ? (
                   <Tooltip title={t("admin.memoryShareItem")}>
                     <Button
                       type="text"
@@ -6023,7 +6035,8 @@ export default function MemoryManagement() {
     tabMeta,
     memoryTabOrder,
     openSkillShareCenter,
-    incomingPendingCount,
+    incomingPendingCount: hideUserGroupSurfaces ? 0 : incomingPendingCount,
+    hideUserGroupSurfaces,
     glossaryChangeProposals,
     glossaryAssets,
     glossaryLoading,
@@ -6232,44 +6245,48 @@ export default function MemoryManagement() {
         updateChildSkillDraft={updateChildSkillDraft}
       />
 
-      <SkillShareCenterModal
-        t={t}
-        skillShareCenterOpen={skillShareCenterOpen}
-        closeSkillShareCenter={closeSkillShareCenter}
-        skillShareCenterTab={skillShareCenterTab}
-        setSkillShareCenterTab={setSkillShareCenterTab}
-        incomingPendingCount={incomingPendingCount}
-        outgoingSkillShares={outgoingSkillShares}
-        skillShareCenterLoading={skillShareCenterLoading}
-        refreshSkillShareCenter={refreshSkillShareCenter}
-        skillShareCenterError={skillShareCenterError}
-        currentSkillShareList={currentSkillShareList}
-        skillShareActionState={skillShareActionState}
-        getSkillShareStatusMeta={getSkillShareStatusMeta}
-        formatDateTime={formatDateTime}
-        previewSkillShare={previewSkillShare}
-        rejectIncomingSkillShare={rejectIncomingSkillShare}
-        acceptIncomingSkillShare={acceptIncomingSkillShare}
-        isSkillShareActionable={isSkillShareActionable}
-      />
+      {!hideUserGroupSurfaces && (
+        <>
+          <SkillShareCenterModal
+            t={t}
+            skillShareCenterOpen={skillShareCenterOpen}
+            closeSkillShareCenter={closeSkillShareCenter}
+            skillShareCenterTab={skillShareCenterTab}
+            setSkillShareCenterTab={setSkillShareCenterTab}
+            incomingPendingCount={incomingPendingCount}
+            outgoingSkillShares={outgoingSkillShares}
+            skillShareCenterLoading={skillShareCenterLoading}
+            refreshSkillShareCenter={refreshSkillShareCenter}
+            skillShareCenterError={skillShareCenterError}
+            currentSkillShareList={currentSkillShareList}
+            skillShareActionState={skillShareActionState}
+            getSkillShareStatusMeta={getSkillShareStatusMeta}
+            formatDateTime={formatDateTime}
+            previewSkillShare={previewSkillShare}
+            rejectIncomingSkillShare={rejectIncomingSkillShare}
+            acceptIncomingSkillShare={acceptIncomingSkillShare}
+            isSkillShareActionable={isSkillShareActionable}
+          />
 
-      <ShareModal
-        t={t}
-        shareModalOpen={shareModalOpen}
-        closeShareModal={closeShareModal}
-        handleConfirmShare={handleConfirmShare}
-        shareTarget={shareTarget}
-        shareDraft={shareDraft}
-        setShareDraft={setShareDraft}
-        shareLoading={shareLoading}
-        shareGroups={shareGroups}
-        shareUsers={shareUsers}
-        shareStatusLoading={shareStatusLoading}
-        shareStatusError={shareStatusError}
-        shareStatusRecords={shareStatusRecords}
-        getSkillShareStatusMeta={getSkillShareStatusMeta}
-        formatDateTime={formatDateTime}
-      />
+          <ShareModal
+            t={t}
+            shareModalOpen={shareModalOpen}
+            closeShareModal={closeShareModal}
+            handleConfirmShare={handleConfirmShare}
+            shareTarget={shareTarget}
+            shareDraft={shareDraft}
+            setShareDraft={setShareDraft}
+            shareLoading={shareLoading}
+            shareGroups={shareGroups}
+            shareUsers={shareUsers}
+            shareStatusLoading={shareStatusLoading}
+            shareStatusError={shareStatusError}
+            shareStatusRecords={shareStatusRecords}
+            getSkillShareStatusMeta={getSkillShareStatusMeta}
+            formatDateTime={formatDateTime}
+          />
+        </>
+      )}
 
       <Modal
         cancelText={t("common.cancel")}

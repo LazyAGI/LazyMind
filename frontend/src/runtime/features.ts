@@ -8,9 +8,9 @@ export interface RuntimeFeatures {
   hideEvo: boolean;
   hideRegister: boolean;
   hideCloudAdmin: boolean;
-  localAutoLogin: boolean;
-  desktopAutoLogin: boolean;
-  hideDesktopUserControls: boolean;
+  localLikeAutoLogin: boolean;
+  hideLocalUserControls: boolean;
+  hideUserGroupSurfaces: boolean;
   allowFolderPicker: boolean;
   allowOpenLogDir: boolean;
   useLocalGateway: boolean;
@@ -54,9 +54,9 @@ export function resolveRuntimeFeatures(
     hideEvo: explicitHideEvo ?? isLocalLike,
     hideRegister: isLocalLike,
     hideCloudAdmin: isLocalLike,
-    localAutoLogin: isLocalLike,
-    desktopAutoLogin: isDesktop,
-    hideDesktopUserControls: isDesktop,
+    localLikeAutoLogin: isLocalLike,
+    hideLocalUserControls: isLocalLike,
+    hideUserGroupSurfaces: isLocalLike,
     allowFolderPicker: isDesktop,
     allowOpenLogDir: isDesktop,
     useLocalGateway: isLocalLike,

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -25,10 +24,6 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 	if err != nil {
 		return retryableOutcome("load_model_configs_failed", err)
 	}
-	pendingSkillIDs, err := listPendingSkillReviewResultIDs(ctx, w.db, request.UserID)
-	if err != nil {
-		return retryableOutcome("list_pending_skill_results_failed", err)
-	}
 	resourceUpdateInfo(logEventSkillReviewCallStart).
 		Str("task_id", task.ID).
 		Str("user_id", request.UserID).
@@ -39,17 +34,17 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 		Int("quantity_threshold", request.QuantityThreshold).
 		Int("user_turn_count", request.UserTurnCount).
 		Int("tool_call_count", request.ToolCallCount).
-		Int("pending_skill_count", len(pendingSkillIDs)).
 		Msg(logEventSkillReviewCallStart)
 	resp, status, err := w.callers.Skill(ctx, algo.SkillReviewRequest{
-		RequestID:       request.RequestID,
-		UserID:          request.UserID,
-		StartTime:       request.StartTime,
-		EndTime:         request.EndTime,
-		MinUserTurns:    w.cfg.MinUserTurns,
-		MinToolTurns:    w.cfg.MinToolTurns,
-		PendingSkillIDs: pendingSkillIDs,
-		ModelConfigs:    modelConfigs,
+		RequestID:    request.RequestID,
+		UserID:       request.UserID,
+		StartTime:    request.StartTime,
+		EndTime:      request.EndTime,
+		MinUserTurns: w.cfg.MinUserTurns,
+		MinToolTurns: w.cfg.MinToolTurns,
+		SkillBaseDir: defaultSkillBaseDir,
+		FSBaseURL:    common.CoreSelfEndpoint(),
+		ModelConfigs: modelConfigs,
 	})
 	if err != nil {
 		resourceUpdateWarn(logEventSkillReviewCallFailed, err).
@@ -76,15 +71,12 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 			Msg(logEventSkillReviewCallFailed)
 		return retryableOutcome("skill_review_unexpected_response", fmt.Errorf("http_status=%d code=%d status=%q requestid=%q", status, safeSkillCode(resp), safeSkillStatus(resp), safeSkillRequestID(resp)))
 	}
-	if err := expireStillPendingSkillReviewResults(ctx, w.db, pendingSkillIDs); err != nil {
-		return retryableOutcome("expire_pending_skill_results_failed", err)
-	}
 	resourceUpdateInfo(logEventSkillReviewAccepted).
 		Str("task_id", task.ID).
+		Str("algorithm_task_id", safeSkillTaskID(resp)).
 		Str("user_id", request.UserID).
 		Str("requestid", request.RequestID).
 		Int("http_status", status).
-		Int("expired_pending_skill_count", len(pendingSkillIDs)).
 		Msg(logEventSkillReviewAccepted)
 	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone}
 }
@@ -365,30 +357,6 @@ func decodeHistory(raw json.RawMessage) any {
 	return out
 }
 
-func listPendingSkillReviewResultIDs(ctx context.Context, db *gorm.DB, userID string) ([]string, error) {
-	var ids []string
-	err := db.WithContext(ctx).
-		Table("skill_review_results").
-		Where("userid = ? AND review_status = ?", strings.TrimSpace(userID), "pending").
-		Order("time ASC").
-		Pluck("id", &ids).Error
-	return ids, err
-}
-
-func expireStillPendingSkillReviewResults(ctx context.Context, db *gorm.DB, ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	now := time.Now().UTC()
-	return db.WithContext(ctx).
-		Table("skill_review_results").
-		Where("id IN ? AND review_status = ?", ids, "pending").
-		Updates(map[string]any{
-			"review_status": "expired",
-			"time":          now,
-		}).Error
-}
-
 var (
 	errSkillActiveTaskMismatch  = errors.New("skill scheduler active_task_id does not point to current task")
 	errSkillTooFrequent         = errors.New("skill review is too frequent")
@@ -416,6 +384,13 @@ func safeSkillRequestID(resp *algo.SkillReviewResponse) string {
 		return ""
 	}
 	return resp.Data.RequestID
+}
+
+func safeSkillTaskID(resp *algo.SkillReviewResponse) string {
+	if resp == nil {
+		return ""
+	}
+	return resp.Data.TaskID
 }
 
 func skillReviewResponseStatusAccepted(status string) bool {

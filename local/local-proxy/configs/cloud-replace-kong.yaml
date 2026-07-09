@@ -7,6 +7,7 @@ allowNonLocalBind: true
 auth:
   mode: "local-rbac"
   authServiceURL: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT}"
+  autoLoginAllowLAN: ${LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN}
 
 cors:
   allowedOrigins:

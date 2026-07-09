@@ -26,6 +26,9 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if cfg.Auth.AuthServiceURL != "http://127.0.0.1:8000" {
 		t.Fatalf("auth.authServiceURL = %q, want http://127.0.0.1:8000", cfg.Auth.AuthServiceURL)
 	}
+	if cfg.Auth.AutoLoginAllowLAN {
+		t.Fatalf("auth.autoLoginAllowLAN = true, want false")
+	}
 
 	wantOrigins := []string{"http://localhost:5173", "http://127.0.0.1:5173"}
 	if !reflect.DeepEqual(cfg.CORS.AllowedOrigins, wantOrigins) {
@@ -171,6 +174,18 @@ allowNonLocalBind: true
 	}
 	if cfg.Listen.Port != 1234 {
 		t.Fatalf("port = %d, want 1234", cfg.Listen.Port)
+	}
+}
+
+func TestLoadUsesAutoLoginAllowLANEnvOverride(t *testing.T) {
+	t.Setenv("LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN", "true")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	if !cfg.Auth.AutoLoginAllowLAN {
+		t.Fatalf("auth.autoLoginAllowLAN = false, want true")
 	}
 }
 

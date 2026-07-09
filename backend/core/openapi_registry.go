@@ -838,17 +838,18 @@ type resourceUpdateTaskListOpenAPIResponse struct {
 }
 
 type skillReviewResultOpenAPIResponse struct {
-	ID             string `json:"id"`
-	SkillName      string `json:"skill_name"`
-	Type           string `json:"type"`
-	ReviewStatus   string `json:"review_status"`
-	UserID         string `json:"userid"`
-	RequestID      string `json:"requestid"`
-	SkillContent   string `json:"skill_content,omitempty"`
-	CurrentContent string `json:"current_content,omitempty"`
-	Diff           string `json:"diff,omitempty"`
-	Summary        string `json:"summary"`
-	Time           string `json:"time"`
+	ID             string                         `json:"id"`
+	SkillName      string                         `json:"skill_name"`
+	Type           string                         `json:"type"`
+	ReviewStatus   string                         `json:"review_status"`
+	UserID         string                         `json:"userid"`
+	RequestID      string                         `json:"requestid"`
+	SkillContent   string                         `json:"skill_content,omitempty"`
+	CurrentContent string                         `json:"current_content,omitempty"`
+	Diff           string                         `json:"diff,omitempty"`
+	DiffEntryLines []diffEntryLineOpenAPIResponse `json:"diffEntryLines,omitempty"`
+	Summary        string                         `json:"summary"`
+	Time           string                         `json:"time"`
 }
 
 type skillReviewResultListOpenAPIResponse struct {
@@ -890,6 +891,18 @@ type skillReviewTaskListOpenAPIResponse struct {
 	Page     int32                                  `json:"page"`
 	PageSize int32                                  `json:"page_size"`
 	Total    int64                                  `json:"total"`
+}
+
+type skillOrganizeOpenAPIRequest struct {
+	RequestID   string   `json:"requestid"`
+	Skills      []string `json:"skills"`
+	ArtifactDir string   `json:"artifact_dir,omitempty"`
+}
+
+type skillOrganizeOpenAPIResponse struct {
+	Status    string `json:"status"`
+	RequestID string `json:"requestid"`
+	TaskID    string `json:"taskid"`
 }
 
 type memoryReviewResultOpenAPIResponse struct {
@@ -961,8 +974,6 @@ type skillDraftPreviewOpenAPIResponse struct {
 	ReviewStatus       string `json:"review_status"`
 	DraftStatus        string `json:"draft_status"`
 	DraftSourceVersion int64  `json:"draft_source_version"`
-	CurrentContent     string `json:"current_content"`
-	DraftContent       string `json:"draft_content"`
 	Diff               string `json:"diff"`
 	Outdated           bool   `json:"outdated"`
 }
@@ -985,81 +996,50 @@ type shareListQueryParams struct {
 	PageSize int32  `query:"page_size"`
 }
 
-type skillChildCreateOpenAPIRequest struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Content     string   `json:"content"`
-	FileExt     string   `json:"file_ext,omitempty"`
-	AutoEvo     *bool    `json:"auto_evo,omitempty"`
+type skillSourceOpenAPIRequest struct {
+	Type     string `json:"type" desc:"Source type: uploaded_zip or url."`
+	UploadID string `json:"upload_id,omitempty" desc:"Completed upload id when type is uploaded_zip."`
+	URL      string `json:"url,omitempty" desc:"ZIP URL when type is url."`
 }
 
 type skillCreateManagedOpenAPIRequest struct {
-	Name            string                           `json:"name"`
-	Description     string                           `json:"description,omitempty"`
-	Category        string                           `json:"category,omitempty"`
-	ParentSkillID   string                           `json:"parent_skill_id,omitempty"`
-	ParentSkillName string                           `json:"parent_skill_name,omitempty"`
-	Tags            []string                         `json:"tags,omitempty"`
-	Content         string                           `json:"content"`
-	FileExt         string                           `json:"file_ext,omitempty"`
-	AutoEvo         *bool                            `json:"auto_evo,omitempty"`
-	IsEnabled       *bool                            `json:"is_enabled,omitempty"`
-	Children        []skillChildCreateOpenAPIRequest `json:"children,omitempty"`
+	Name        string                    `json:"name"`
+	Category    string                    `json:"category"`
+	Source      skillSourceOpenAPIRequest `json:"source"`
+	Description string                    `json:"description,omitempty"`
+	Tags        []string                  `json:"tags,omitempty"`
+	AutoEvo     *bool                     `json:"auto_evo,omitempty"`
+	IsEnabled   *bool                     `json:"is_enabled,omitempty"`
 }
 
 type skillUpdateManagedOpenAPIRequest struct {
-	Name            *string  `json:"name,omitempty" desc:"Optional. Rename the skill; omit to keep the current name."`
-	Description     *string  `json:"description,omitempty" desc:"Optional. Replace the skill description; omit to keep it unchanged."`
-	Category        *string  `json:"category,omitempty" desc:"Optional for parent skills. Omit for child skills unless moving to another parent."`
-	ParentSkillID   *string  `json:"parent_skill_id,omitempty" desc:"Optional and only valid for child skill updates. Moves the child under this parent skill. Do not send when updating a parent skill."`
-	ParentSkillName *string  `json:"parent_skill_name,omitempty" desc:"Optional and only valid for child skill updates when parent_skill_id is omitted. Do not send when updating a parent skill, even as an empty string."`
-	Tags            []string `json:"tags,omitempty" desc:"Optional. Replace tags; omit to keep tags unchanged."`
-	Content         *string  `json:"content,omitempty" desc:"Optional. If present, replaces stored content; omit to keep content unchanged. Empty string means clear content."`
-	FileExt         *string  `json:"file_ext,omitempty" desc:"Optional for child skills. File extension such as md; omit to keep it unchanged."`
-	AutoEvo         *bool    `json:"auto_evo,omitempty" desc:"Optional. Enable or disable automatic evolution; omit to keep it unchanged."`
-	IsEnabled       *bool    `json:"is_enabled,omitempty" desc:"Optional for parent skills. Enable or disable the skill; omit to keep it unchanged."`
+	Name        *string                    `json:"name,omitempty" desc:"Optional. Rename the directory skill."`
+	Category    *string                    `json:"category,omitempty" desc:"Optional. Move the skill to another category."`
+	Description *string                    `json:"description,omitempty" desc:"Optional. Replace product metadata description; SKILL.md is not rewritten."`
+	Tags        []string                   `json:"tags,omitempty" desc:"Optional. Replace tags; omit to keep tags unchanged."`
+	AutoEvo     *bool                      `json:"auto_evo,omitempty" desc:"Optional. Enable or disable automatic evolution."`
+	IsEnabled   *bool                      `json:"is_enabled,omitempty" desc:"Optional. Enable or disable the skill."`
+	Source      *skillSourceOpenAPIRequest `json:"source,omitempty" desc:"Optional. Replace the whole skill directory from an uploaded ZIP or URL."`
 }
 
-type skillListChildOpenAPIResponse struct {
-	SkillID                string                              `json:"skill_id"`
-	Name                   string                              `json:"name"`
-	Description            string                              `json:"description"`
-	FileExt                string                              `json:"file_ext"`
-	AutoEvo                bool                                `json:"auto_evo"`
-	AutoEvoApplyStatus     string                              `json:"auto_evo_apply_status"`
-	AutoEvoGeneration      int64                               `json:"auto_evo_generation"`
-	AutoEvoError           string                              `json:"auto_evo_error"`
-	IsEnabled              bool                                `json:"is_enabled"`
-	UpdateStatus           string                              `json:"update_status"`
-	HasPendingReviewResult bool                                `json:"has_pending_review_result"`
-	ReviewStatus           string                              `json:"review_status"`
-	NodeType               string                              `json:"node_type"`
-	ParentID               string                              `json:"parent_id"`
-	ParentSkillID          string                              `json:"parent_skill_id"`
-	ParentSkillName        string                              `json:"parent_skill_name"`
-	Version                int64                               `json:"version"`
-	LatestVersionChange    *latestVersionChangeOpenAPIResponse `json:"latest_version_change"`
+type skillDraftSummaryOpenAPIResponse struct {
+	HasUncommittedDraft bool   `json:"has_uncommitted_draft"`
+	TaskID              string `json:"task_id,omitempty"`
+	Version             int64  `json:"version"`
 }
 
 type skillListItemOpenAPIResponse struct {
-	SkillID                string                              `json:"skill_id"`
-	Name                   string                              `json:"name"`
-	Description            string                              `json:"description"`
-	Category               string                              `json:"category"`
-	Tags                   []string                            `json:"tags"`
-	AutoEvo                bool                                `json:"auto_evo"`
-	AutoEvoApplyStatus     string                              `json:"auto_evo_apply_status"`
-	AutoEvoGeneration      int64                               `json:"auto_evo_generation"`
-	AutoEvoError           string                              `json:"auto_evo_error"`
-	IsEnabled              bool                                `json:"is_enabled"`
-	UpdateStatus           string                              `json:"update_status"`
-	HasPendingReviewResult bool                                `json:"has_pending_review_result"`
-	ReviewStatus           string                              `json:"review_status"`
-	NodeType               string                              `json:"node_type"`
-	Version                int64                               `json:"version"`
-	LatestVersionChange    *latestVersionChangeOpenAPIResponse `json:"latest_version_change"`
-	Children               []skillListChildOpenAPIResponse     `json:"children"`
+	ID                  string                              `json:"id"`
+	SkillID             string                              `json:"skill_id"`
+	Name                string                              `json:"name"`
+	SkillName           string                              `json:"skill_name,omitempty"`
+	Description         string                              `json:"description"`
+	Category            string                              `json:"category"`
+	Tags                []string                            `json:"tags"`
+	HeadRevisionID      string                              `json:"head_revision_id"`
+	FileContent         string                              `json:"file_content,omitempty"`
+	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
+	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
 }
 
 type skillListOpenAPIResponse struct {
@@ -1077,51 +1057,358 @@ type skillCategoriesOpenAPIResponse struct {
 	Categories []string `json:"categories"`
 }
 
-type skillDetailChildOpenAPIResponse struct {
-	SkillID                string                              `json:"skill_id"`
-	Name                   string                              `json:"name"`
-	Description            string                              `json:"description"`
-	FileExt                string                              `json:"file_ext"`
-	AutoEvo                bool                                `json:"auto_evo"`
-	AutoEvoApplyStatus     string                              `json:"auto_evo_apply_status"`
-	AutoEvoGeneration      int64                               `json:"auto_evo_generation"`
-	AutoEvoError           string                              `json:"auto_evo_error"`
-	IsEnabled              bool                                `json:"is_enabled"`
-	UpdateStatus           string                              `json:"update_status"`
-	HasPendingReviewResult bool                                `json:"has_pending_review_result"`
-	ReviewStatus           string                              `json:"review_status"`
-	NodeType               string                              `json:"node_type"`
-	ParentID               string                              `json:"parent_id"`
-	ParentSkillID          string                              `json:"parent_skill_id"`
-	ParentSkillName        string                              `json:"parent_skill_name"`
-	Content                string                              `json:"content"`
-	Version                int64                               `json:"version"`
-	LatestVersionChange    *latestVersionChangeOpenAPIResponse `json:"latest_version_change"`
+type skillDetailOpenAPIResponse struct {
+	ID                  string                              `json:"id"`
+	SkillID             string                              `json:"skill_id"`
+	Name                string                              `json:"name"`
+	SkillName           string                              `json:"skill_name,omitempty"`
+	Description         string                              `json:"description"`
+	Category            string                              `json:"category"`
+	Tags                []string                            `json:"tags"`
+	HeadRevisionID      string                              `json:"head_revision_id"`
+	FileContent         string                              `json:"file_content,omitempty"`
+	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
+	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
 }
 
-type skillDetailOpenAPIResponse struct {
-	SkillID                string                              `json:"skill_id"`
-	Name                   string                              `json:"name"`
-	Description            string                              `json:"description"`
-	Category               string                              `json:"category"`
-	Tags                   []string                            `json:"tags"`
-	AutoEvo                bool                                `json:"auto_evo"`
-	AutoEvoApplyStatus     string                              `json:"auto_evo_apply_status"`
-	AutoEvoGeneration      int64                               `json:"auto_evo_generation"`
-	AutoEvoError           string                              `json:"auto_evo_error"`
-	IsEnabled              bool                                `json:"is_enabled"`
-	UpdateStatus           string                              `json:"update_status"`
-	HasPendingReviewResult bool                                `json:"has_pending_review_result"`
-	ReviewStatus           string                              `json:"review_status"`
-	NodeType               string                              `json:"node_type"`
-	ParentID               string                              `json:"parent_id"`
-	ParentSkillID          string                              `json:"parent_skill_id"`
-	ParentSkillName        string                              `json:"parent_skill_name"`
-	Content                string                              `json:"content"`
-	Version                int64                               `json:"version"`
-	LatestVersionChange    *latestVersionChangeOpenAPIResponse `json:"latest_version_change"`
-	FileExt                string                              `json:"file_ext"`
-	Children               []skillDetailChildOpenAPIResponse   `json:"children"`
+type skillWriteOpenAPIResponse struct {
+	SkillID        string `json:"skill_id"`
+	HeadRevisionID string `json:"head_revision_id,omitempty"`
+}
+
+type skillFileQueryParams struct {
+	Path string `query:"path" required:"true"`
+}
+
+type skillFSQueryParams struct {
+	Path string `query:"path"`
+}
+
+type skillRevisionPathParams struct {
+	SkillID    string `path:"skill_id"`
+	RevisionID string `path:"revision_id"`
+}
+
+type builtinSkillPathParams struct {
+	BuiltinSkillUID string `path:"builtin_skill_uid"`
+}
+
+type skillTreeNodeOpenAPIResponse struct {
+	Name     string                         `json:"name"`
+	Path     string                         `json:"path"`
+	Type     string                         `json:"type"`
+	Children []skillTreeNodeOpenAPIResponse `json:"children,omitempty"`
+	BlobHash string                         `json:"blob_hash,omitempty"`
+	Size     int64                          `json:"size,omitempty"`
+	Mime     string                         `json:"mime,omitempty"`
+	FileType string                         `json:"file_type,omitempty"`
+	Binary   bool                           `json:"binary,omitempty"`
+}
+
+type skillFileOpenAPIResponse struct {
+	Path        string `json:"path"`
+	Content     string `json:"content,omitempty"`
+	Binary      bool   `json:"binary"`
+	DownloadURL string `json:"download_url,omitempty"`
+	Mime        string `json:"mime,omitempty"`
+	FileType    string `json:"file_type,omitempty"`
+	BlobHash    string `json:"blob_hash,omitempty"`
+}
+
+type skillFSListOpenAPIResponse struct {
+	Items []skillTreeNodeOpenAPIResponse `json:"items"`
+}
+
+type skillExistsOpenAPIResponse struct {
+	Exists bool `json:"exists"`
+}
+
+type skillDraftStateOpenAPIResponse struct {
+	HasUncommittedDraft bool   `json:"has_uncommitted_draft"`
+	DraftVersion        int64  `json:"draft_version"`
+	BaseRevisionID      string `json:"base_revision_id,omitempty"`
+	TaskID              string `json:"task_id,omitempty"`
+	ConversationID      string `json:"conversation_id,omitempty"`
+}
+
+type skillDraftStatusOpenAPIResponse struct {
+	BaseRevisionID      string `json:"base_revision_id,omitempty"`
+	TaskID              string `json:"task_id,omitempty"`
+	ConversationID      string `json:"conversation_id,omitempty"`
+	DraftVersion        int64  `json:"draft_version"`
+	HasUncommittedDraft bool   `json:"has_uncommitted_draft"`
+	OverlayCount        int64  `json:"overlay_count"`
+}
+
+type skillDraftWriteTextOpenAPIRequest struct {
+	Path                 string `json:"path"`
+	Content              string `json:"content"`
+	ExpectedDraftVersion int64  `json:"expected_draft_version"`
+}
+
+type skillDraftUploadOpenAPIRequest struct {
+	Path                 string `json:"path"`
+	UploadID             string `json:"upload_id"`
+	ExpectedDraftVersion int64  `json:"expected_draft_version"`
+}
+
+type skillDraftMkdirOpenAPIRequest struct {
+	Path                 string `json:"path"`
+	ExpectedDraftVersion int64  `json:"expected_draft_version"`
+}
+
+type skillDraftDeleteOpenAPIRequest struct {
+	Path                 string `json:"path,omitempty"`
+	Recursive            bool   `json:"recursive,omitempty"`
+	ExpectedDraftVersion int64  `json:"expected_draft_version,omitempty"`
+}
+
+type skillDraftMoveOpenAPIRequest struct {
+	From                 string `json:"from"`
+	To                   string `json:"to"`
+	ExpectedDraftVersion int64  `json:"expected_draft_version"`
+}
+
+type skillDraftMutationOpenAPIResponse struct {
+	DraftVersion int64  `json:"draft_version"`
+	BlobHash     string `json:"blob_hash,omitempty"`
+}
+
+type skillCommitOpenAPIRequest struct {
+	DraftVersion int64 `json:"draft_version"`
+}
+
+type skillCommitOpenAPIResponse struct {
+	RevisionID string `json:"revision_id"`
+	RevisionNo int64  `json:"revision_no"`
+}
+
+type skillRevisionOpenAPIResponse struct {
+	ID               string `json:"id"`
+	RevisionID       string `json:"revision_id"`
+	SkillID          string `json:"skill_id"`
+	ParentRevisionID string `json:"parent_revision_id,omitempty"`
+	RevisionNo       int64  `json:"revision_no"`
+	TreeHash         string `json:"tree_hash"`
+	Message          string `json:"message,omitempty"`
+	ChangeSource     string `json:"change_source"`
+	CreatedBy        string `json:"created_by,omitempty"`
+	CreatedAt        string `json:"created_at"`
+	FileContent      string `json:"file_content,omitempty"`
+}
+
+type skillRevisionListOpenAPIResponse struct {
+	Items []skillRevisionOpenAPIResponse `json:"items"`
+}
+
+type skillRollbackOpenAPIRequest struct {
+	TargetRevisionID string `json:"target_revision_id,omitempty"`
+	RevisionID       string `json:"revision_id,omitempty"`
+}
+
+type skillRollbackWarningOpenAPIResponse struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type skillRollbackDiffFileOpenAPIResponse struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+}
+
+type skillRollbackDiffTreeOpenAPIResponse struct {
+	Files []skillRollbackDiffFileOpenAPIResponse `json:"files"`
+}
+
+type skillRollbackPreviewOpenAPIResponse struct {
+	TreeDiff skillRollbackDiffTreeOpenAPIResponse  `json:"tree_diff"`
+	Warnings []skillRollbackWarningOpenAPIResponse `json:"warnings"`
+}
+
+type skillRollbackOpenAPIResponse struct {
+	HeadRevisionID string `json:"head_revision_id"`
+	RevisionNo     int64  `json:"revision_no"`
+}
+
+type diffRefOpenAPIRequest struct {
+	Type       string `json:"type"`
+	SkillID    string `json:"skill_id,omitempty"`
+	RevisionID string `json:"revision_id,omitempty"`
+	UploadID   string `json:"upload_id,omitempty"`
+}
+
+type diffOpenAPIRequest struct {
+	Old          diffRefOpenAPIRequest `json:"old"`
+	New          diffRefOpenAPIRequest `json:"new"`
+	Path         string                `json:"path,omitempty"`
+	ContextLines int                   `json:"context_lines,omitempty"`
+	Mode         string                `json:"mode,omitempty"`
+	OldStart     int                   `json:"old_start,omitempty"`
+	NewStart     int                   `json:"new_start,omitempty"`
+	Lines        int                   `json:"lines,omitempty"`
+}
+
+type diffEntryLineOpenAPIResponse struct {
+	Type                    string `json:"type"`
+	Text                    string `json:"text"`
+	HTML                    string `json:"html,omitempty"`
+	OldLine                 int    `json:"oldLine,omitempty"`
+	NewLine                 int    `json:"newLine,omitempty"`
+	DisplayNoNewLineWarning bool   `json:"displayNoNewLineWarning,omitempty"`
+}
+
+type diffFileOpenAPIResponse struct {
+	Path           string                         `json:"path"`
+	Type           string                         `json:"type"`
+	Status         string                         `json:"status"`
+	Binary         bool                           `json:"binary"`
+	TooLarge       bool                           `json:"too_large"`
+	CacheWritten   bool                           `json:"cache_written"`
+	DiffEntryLines []diffEntryLineOpenAPIResponse `json:"diffEntryLines"`
+}
+
+type diffTreeOpenAPIResponse struct {
+	UserID       string                    `json:"user_id,omitempty"`
+	Files        []diffFileOpenAPIResponse `json:"files"`
+	CacheWritten bool                      `json:"cache_written"`
+}
+
+type remoteFSListQueryParams struct {
+	UserID string `query:"user_id" required:"true" desc:"Required. Target user id used to resolve skills owned by the user."`
+	Path   string `query:"path" required:"true" desc:"RemoteFS path. Use skills for categories, skills/<category> for package list, or skills/<category>/<skill_name>[/rel_path] for package content."`
+	TaskID string `query:"task_id,omitempty" desc:"Optional for skills root/category list; required when path enters a package. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids."`
+}
+
+type remoteFSQueryParams struct {
+	UserID   string `query:"user_id" required:"true" desc:"Required. Target user id used to resolve skills owned by the user."`
+	Path     string `query:"path" required:"true" desc:"RemoteFS package path: skills/<category>/<skill_name>[/rel_path]."`
+	TaskID   string `query:"task_id" required:"true" desc:"Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids."`
+	Encoding string `query:"encoding,omitempty" enum:"raw,base64" desc:"Optional content encoding for GET /remote-fs/content."`
+}
+
+type remoteFSTaskQueryParams struct {
+	UserID string `query:"user_id" required:"true" desc:"Required. Target user id used to resolve skills owned by the user."`
+	TaskID string `query:"task_id" required:"true" desc:"Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids."`
+}
+
+type remoteFSUserQueryParams struct {
+	UserID string `query:"user_id" required:"true" desc:"Required. Target user id used to resolve skills owned by the user."`
+}
+
+type remoteFSDeleteQueryParams struct {
+	UserID    string `query:"user_id" required:"true" desc:"Required. Target user id used to resolve skills owned by the user."`
+	Path      string `query:"path" required:"true" desc:"RemoteFS path to delete."`
+	TaskID    string `query:"task_id,omitempty" desc:"Required for package-internal delete; not required for confirmed permanent package purge."`
+	Permanent bool   `query:"permanent,omitempty" desc:"Required true for package root physical purge."`
+	Confirm   bool   `query:"confirm,omitempty" desc:"Required true for package root physical purge."`
+}
+
+type remoteFSDirOpenAPIRequest struct {
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive"`
+}
+
+type remoteFSCopyOpenAPIRequest struct {
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Overwrite bool   `json:"overwrite"`
+}
+
+type remoteFSMoveOpenAPIRequest struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+type remoteFSTrashOpenAPIRequest struct {
+	Path string `json:"path"`
+}
+
+type remoteFSItemOpenAPIResponse struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Type     string `json:"type"`
+	Size     int64  `json:"size,omitempty"`
+	Mime     string `json:"mime,omitempty"`
+	FileType string `json:"file_type,omitempty"`
+	Binary   bool   `json:"binary,omitempty"`
+}
+
+type remoteFSListOpenAPIResponse struct {
+	Items []remoteFSItemOpenAPIResponse `json:"items"`
+}
+
+type remoteFSInfoOpenAPIResponse struct {
+	Path     string `json:"path"`
+	Type     string `json:"type"`
+	Size     int64  `json:"size,omitempty"`
+	Mime     string `json:"mime,omitempty"`
+	FileType string `json:"file_type,omitempty"`
+	Binary   bool   `json:"binary,omitempty"`
+}
+
+type remoteFSExistsOpenAPIResponse struct {
+	Exists bool `json:"exists"`
+}
+
+type remoteFSBase64ContentOpenAPIResponse struct {
+	Encoding string `json:"encoding"`
+	Content  string `json:"content"`
+}
+
+type okOpenAPIResponse struct {
+	OK bool `json:"ok"`
+}
+
+type marketItemPathParams struct {
+	MarketItemID string `path:"market_item_id"`
+}
+
+type marketInstallOpenAPIRequest struct {
+	MarketItemID string `json:"market_item_id,omitempty"`
+}
+
+type marketInstallOpenAPIResponse struct {
+	SkillID string `json:"skill_id"`
+}
+
+type marketPublishOpenAPIRequest struct {
+	Name     string                    `json:"name"`
+	Category string                    `json:"category"`
+	Source   skillSourceOpenAPIRequest `json:"source"`
+}
+
+type marketPublishOpenAPIResponse struct {
+	MarketItemID  string `json:"market_item_id"`
+	SourceSkillID string `json:"source_skill_id"`
+}
+
+type marketEditOpenAPIRequest struct {
+	Name        *string                    `json:"name,omitempty"`
+	Category    *string                    `json:"category,omitempty"`
+	Description *string                    `json:"description,omitempty"`
+	Source      *skillSourceOpenAPIRequest `json:"source,omitempty"`
+	VersionNote *string                    `json:"version_note,omitempty"`
+}
+
+type marketItemOpenAPIResponse struct {
+	ID            string                      `json:"id,omitempty"`
+	MarketItemID  string                      `json:"market_item_id"`
+	SourceSkillID string                      `json:"source_skill_id,omitempty"`
+	Status        string                      `json:"status,omitempty"`
+	Icon          string                      `json:"icon,omitempty"`
+	SortOrder     int                         `json:"sort_order,omitempty"`
+	VersionNote   string                      `json:"version_note,omitempty"`
+	PublishedAt   string                      `json:"published_at,omitempty"`
+	CreatedAt     string                      `json:"created_at,omitempty"`
+	UpdatedAt     string                      `json:"updated_at,omitempty"`
+	Source        *skillDetailOpenAPIResponse `json:"source,omitempty"`
+}
+
+type marketListOpenAPIResponse struct {
+	Items    []marketItemOpenAPIResponse `json:"items"`
+	Page     int32                       `json:"page"`
+	PageSize int32                       `json:"page_size"`
+	Total    int32                       `json:"total"`
 }
 
 type skillDeleteOpenAPIResponse struct {
@@ -1190,23 +1477,22 @@ type skillShareTargetsOpenAPIResponse struct {
 }
 
 type skillShareListItemOpenAPIResponse struct {
-	ShareItemID           string  `json:"share_item_id"`
-	ShareTaskID           string  `json:"share_task_id"`
-	Status                string  `json:"status"`
-	SourceUserID          string  `json:"source_user_id"`
-	SourceUserName        string  `json:"source_user_name"`
-	TargetUserID          string  `json:"target_user_id"`
-	TargetUserName        string  `json:"target_user_name"`
-	SourceSkillID         string  `json:"source_skill_id"`
-	SourceCategory        string  `json:"source_category"`
-	SourceParentSkillName string  `json:"source_parent_skill_name"`
-	Message               string  `json:"message"`
-	AcceptedAt            *string `json:"accepted_at,omitempty"`
-	RejectedAt            *string `json:"rejected_at,omitempty"`
-	TargetRootSkillID     string  `json:"target_root_skill_id,omitempty"`
-	ErrorMessage          string  `json:"error_message,omitempty"`
-	CreatedAt             string  `json:"created_at"`
-	UpdatedAt             string  `json:"updated_at"`
+	ShareItemID       string  `json:"share_item_id"`
+	ShareTaskID       string  `json:"share_task_id"`
+	Status            string  `json:"status"`
+	SourceUserID      string  `json:"source_user_id"`
+	SourceUserName    string  `json:"source_user_name"`
+	TargetUserID      string  `json:"target_user_id"`
+	TargetUserName    string  `json:"target_user_name"`
+	SourceSkillID     string  `json:"source_skill_id"`
+	SourceCategory    string  `json:"source_category"`
+	Message           string  `json:"message"`
+	AcceptedAt        *string `json:"accepted_at,omitempty"`
+	RejectedAt        *string `json:"rejected_at,omitempty"`
+	TargetRootSkillID string  `json:"target_root_skill_id,omitempty"`
+	ErrorMessage      string  `json:"error_message,omitempty"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
 }
 
 type skillShareListOpenAPIResponse struct {
@@ -1342,6 +1628,9 @@ func registeredCoreOperations() []openAPIOperation {
 	}
 	resp := func(description string, v any) openAPIResponse {
 		return openAPIResponse{Description: description, ContentType: "application/json", Schema: schemaSource{Type: v}}
+	}
+	rawResp := func(description string) openAPIResponse {
+		return openAPIResponse{Description: description, ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}}
 	}
 	refResp := func(description, name string) openAPIResponse {
 		return openAPIResponse{Description: description, ContentType: "application/json", Schema: schemaSource{Ref: name}}
@@ -2041,16 +2330,34 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
+			Path:        "/skill_organize",
+			Summary:     "Submit skill organize task",
+			Description: "Submits a skill organize task for current user's SkillV2 files. The task runs asynchronously in the algorithm service.",
+			Tags:        []string{"skills"},
+			RequestBody: jsonBodyOf(skillOrganizeOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill organize task accepted", skillOrganizeOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
 			Path:        "/skills",
-			Summary:     "Create managed skill",
+			Summary:     "Create directory skill",
+			Description: "Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.",
 			Tags:        []string{"skills"},
 			RequestBody: jsonBodyOf(skillCreateManagedOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Created skill", skillDetailOpenAPIResponse{})},
+			Responses:   map[int]openAPIResponse{200: resp("Created skill", skillWriteOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/builtin-skills/{builtin_skill_uid}:enable",
+			Summary:    "Enable builtin directory skill",
+			Tags:       []string{"skills"},
+			PathParams: builtinSkillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Enabled builtin skill", skillDetailOpenAPIResponse{})},
 		},
 		{
 			Method:     "GET",
 			Path:       "/skills/{skill_id}",
-			Summary:    "Get skill details",
+			Summary:    "Get directory skill details",
 			Tags:       []string{"skills"},
 			PathParams: skillPathParams{},
 			Responses:  map[int]openAPIResponse{200: resp("Skill details", skillDetailOpenAPIResponse{})},
@@ -2058,20 +2365,212 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method:      "PATCH",
 			Path:        "/skills/{skill_id}",
-			Summary:     "Update managed skill",
-			Description: "Partial update. The request body is required, but every field inside it is optional; send only fields that should change. For parent skills, omit parent_skill_id and parent_skill_name entirely. parent_skill_id and parent_skill_name are only for moving child skills to another parent. If content is present, it replaces stored content; omit content to keep it unchanged.",
+			Summary:     "Update directory skill",
+			Description: "Partially updates skill metadata. When source is present, the whole directory is replaced from an uploaded ZIP or URL after draft conflict checks.",
 			Tags:        []string{"skills"},
 			PathParams:  skillPathParams{},
 			RequestBody: jsonBodyOf(skillUpdateManagedOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Updated skill", skillDetailOpenAPIResponse{})},
+			Responses:   map[int]openAPIResponse{200: resp("Updated skill", skillWriteOpenAPIResponse{})},
 		},
 		{
 			Method:     "DELETE",
 			Path:       "/skills/{skill_id}",
-			Summary:    "Delete managed skill",
+			Summary:    "Delete directory skill",
 			Tags:       []string{"skills"},
 			PathParams: skillPathParams{},
 			Responses:  map[int]openAPIResponse{200: resp("Deleted skill", skillDeleteOpenAPIResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/skills/{skill_id}/tree",
+			Summary:    "Get skill tree",
+			Tags:       []string{"skills"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Skill tree", skillTreeNodeOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skills/{skill_id}/file",
+			Summary:     "Read skill file",
+			Tags:        []string{"skills"},
+			PathParams:  skillPathParams{},
+			QueryParams: skillFileQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Skill file", skillFileOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skills/{skill_id}/fs/list",
+			Summary:     "List skill directory entries",
+			Tags:        []string{"skill-fs"},
+			PathParams:  skillPathParams{},
+			QueryParams: skillFSQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Skill directory entries", skillFSListOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skills/{skill_id}/fs/info",
+			Summary:     "Get skill path info",
+			Tags:        []string{"skill-fs"},
+			PathParams:  skillPathParams{},
+			QueryParams: skillFileQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Skill path info", skillTreeNodeOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skills/{skill_id}/fs/exists",
+			Summary:     "Check skill path exists",
+			Tags:        []string{"skill-fs"},
+			PathParams:  skillPathParams{},
+			QueryParams: skillFileQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Skill path exists", skillExistsOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skills/{skill_id}/fs/content",
+			Summary:     "Read skill file content",
+			Tags:        []string{"skill-fs"},
+			PathParams:  skillPathParams{},
+			QueryParams: skillFileQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Skill file content", skillFileOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skills/{skill_id}/fs/download",
+			Summary:     "Download skill file",
+			Tags:        []string{"skill-fs"},
+			PathParams:  skillPathParams{},
+			QueryParams: skillFileQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Skill file download", skillFileOpenAPIResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/skills/{skill_id}/draft/exists",
+			Summary:    "Check skill draft exists",
+			Tags:       []string{"skill-drafts"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Skill draft state", skillDraftStateOpenAPIResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/skills/{skill_id}/draft/status",
+			Summary:    "Get skill draft status",
+			Tags:       []string{"skill-drafts"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Skill draft status", skillDraftStatusOpenAPIResponse{})},
+		},
+		{
+			Method:      "PUT",
+			Path:        "/skills/{skill_id}/draft/fs/text",
+			Summary:     "Write text file to skill draft",
+			Tags:        []string{"skill-drafts"},
+			PathParams:  skillPathParams{},
+			RequestBody: jsonBodyOf(skillDraftWriteTextOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill draft mutation", skillDraftMutationOpenAPIResponse{})},
+		},
+		{
+			Method:      "PUT",
+			Path:        "/skills/{skill_id}/draft/fs/upload",
+			Summary:     "Write uploaded file to skill draft",
+			Tags:        []string{"skill-drafts"},
+			PathParams:  skillPathParams{},
+			RequestBody: jsonBodyOf(skillDraftUploadOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill draft mutation", skillDraftMutationOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skills/{skill_id}/draft/fs/dir",
+			Summary:     "Create directory in skill draft",
+			Tags:        []string{"skill-drafts"},
+			PathParams:  skillPathParams{},
+			RequestBody: jsonBodyOf(skillDraftMkdirOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill draft mutation", skillDraftMutationOpenAPIResponse{})},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/skills/{skill_id}/draft/fs/path",
+			Summary:     "Delete path from skill draft",
+			Tags:        []string{"skill-drafts"},
+			PathParams:  skillPathParams{},
+			QueryParams: skillFSQueryParams{},
+			RequestBody: jsonBodyOf(skillDraftDeleteOpenAPIRequest{}, false),
+			Responses:   map[int]openAPIResponse{200: resp("Skill draft mutation", skillDraftMutationOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skills/{skill_id}/draft/fs/move",
+			Summary:     "Move path in skill draft",
+			Tags:        []string{"skill-drafts"},
+			PathParams:  skillPathParams{},
+			RequestBody: jsonBodyOf(skillDraftMoveOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill draft mutation", skillDraftMutationOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skills/{skill_id}/commit",
+			Summary:     "Commit skill draft",
+			Tags:        []string{"skill-revisions"},
+			PathParams:  skillPathParams{},
+			RequestBody: jsonBodyOf(skillCommitOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Committed skill draft", skillCommitOpenAPIResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/skills/{skill_id}/revisions",
+			Summary:    "List skill revisions",
+			Tags:       []string{"skill-revisions"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Skill revisions", skillRevisionListOpenAPIResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/skills/{skill_id}/revisions/{revision_id}",
+			Summary:    "Get skill revision",
+			Tags:       []string{"skill-revisions"},
+			PathParams: skillRevisionPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Skill revision", skillRevisionOpenAPIResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/skills/{skill_id}/revisions/{revision_id}/tree",
+			Summary:    "Get skill revision tree",
+			Tags:       []string{"skill-revisions"},
+			PathParams: skillRevisionPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Skill revision tree", skillTreeNodeOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skills/{skill_id}/revisions/{revision_id}/file",
+			Summary:     "Read skill revision file",
+			Tags:        []string{"skill-revisions"},
+			PathParams:  skillRevisionPathParams{},
+			QueryParams: skillFileQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Skill revision file", skillFileOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skills/{skill_id}/rollback/preview",
+			Summary:     "Preview skill rollback",
+			Tags:        []string{"skill-revisions"},
+			PathParams:  skillPathParams{},
+			RequestBody: jsonBodyOf(skillRollbackOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill rollback preview", skillRollbackPreviewOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skills/{skill_id}/rollback",
+			Summary:     "Rollback skill",
+			Tags:        []string{"skill-revisions"},
+			PathParams:  skillPathParams{},
+			RequestBody: jsonBodyOf(skillRollbackOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Rolled back skill", skillRollbackOpenAPIResponse{})},
+		},
+		{
+			Method:     "DELETE",
+			Path:       "/skills/{skill_id}/revisions/{revision_id}",
+			Summary:    "Delete skill revision",
+			Tags:       []string{"skill-revisions"},
+			PathParams: skillRevisionPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Deleted skill revision", skillDeleteOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",
@@ -2166,11 +2665,199 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
+			Path:        "/skill-diff/tree",
+			Summary:     "Compare skill trees",
+			Tags:        []string{"skill-diff"},
+			RequestBody: jsonBodyOf(diffOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill tree diff", diffTreeOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skill-diff/file",
+			Summary:     "Compare skill file",
+			Tags:        []string{"skill-diff"},
+			RequestBody: jsonBodyOf(diffOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill file diff", diffFileOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skill-market",
+			Summary:     "List published market skills",
+			Tags:        []string{"skill-market"},
+			QueryParams: skillListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Market skill list", marketListOpenAPIResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/skill-market/{market_item_id}",
+			Summary:    "Get market skill details",
+			Tags:       []string{"skill-market"},
+			PathParams: marketItemPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Market skill item", marketItemOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skill-market:install",
+			Summary:     "Install skill from market",
+			Tags:        []string{"skill-market"},
+			RequestBody: jsonBodyOf(marketInstallOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Installed market skill", marketInstallOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/skill-market/{market_item_id}:install",
+			Summary:    "Install skill from market item",
+			Tags:       []string{"skill-market"},
+			PathParams: marketItemPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Installed market skill", marketInstallOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/admin/skill-market",
+			Summary:     "Publish market skill item",
+			Tags:        []string{"skill-market"},
+			RequestBody: jsonBodyOf(marketPublishOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Published market skill", marketPublishOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/admin/skill-market/{market_item_id}",
+			Summary:     "Edit market skill item",
+			Tags:        []string{"skill-market"},
+			PathParams:  marketItemPathParams{},
+			RequestBody: jsonBodyOf(marketEditOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Edited market skill", marketItemOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/admin/skill-market/{market_item_id}:offline",
+			Summary:    "Unpublish market skill item",
+			Tags:       []string{"skill-market"},
+			PathParams: marketItemPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Unpublished market skill", marketItemOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skill-market/admin/items",
+			Summary:     "Publish market skill item",
+			Tags:        []string{"skill-market"},
+			RequestBody: jsonBodyOf(marketPublishOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Published market skill", marketPublishOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/skill-market/admin/items/{market_item_id}",
+			Summary:     "Edit market skill item",
+			Tags:        []string{"skill-market"},
+			PathParams:  marketItemPathParams{},
+			RequestBody: jsonBodyOf(marketEditOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Edited market skill", marketItemOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/skill-market/admin/items/{market_item_id}:unpublish",
+			Summary:    "Unpublish market skill item",
+			Tags:       []string{"skill-market"},
+			PathParams: marketItemPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Unpublished market skill", marketItemOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
 			Path:        "/skill/create",
 			Summary:     "Create skill directly from internal request",
 			Tags:        []string{"skill-evolution"},
 			RequestBody: jsonBodyOf(internalSkillCreateOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Created skill", skillDetailOpenAPIResponse{})},
+			Responses:   map[int]openAPIResponse{200: resp("Created skill", skillWriteOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/remote-fs/list",
+			Summary:     "List remote skill filesystem path",
+			Description: "List skills root/category without task_id, or list package content with task-aware view selection.",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Remote filesystem list", remoteFSListOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/remote-fs/info",
+			Summary:     "Get remote skill filesystem path info",
+			Description: "Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Remote filesystem info", remoteFSInfoOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/remote-fs/exists",
+			Summary:     "Check remote skill filesystem path exists",
+			Description: "Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Remote filesystem exists", remoteFSExistsOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/remote-fs/content",
+			Summary:     "Read remote skill filesystem content",
+			Description: "Reads package content using task_id semantics: review_ sees existing draft, org_ and editor session ids see publish unless they own the current draft.",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSQueryParams{},
+			Responses:   map[int]openAPIResponse{200: rawResp("Remote filesystem raw content")},
+		},
+		{
+			Method:      "PUT",
+			Path:        "/remote-fs/content",
+			Summary:     "Write remote skill filesystem content",
+			Description: "Writes raw body bytes into the task draft. review_ may write an existing draft without changing draft ownership; org_ and editor session ids conflict with another task draft.",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSQueryParams{},
+			RequestBody: &openAPIBody{Required: true, ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}},
+			Responses:   map[int]openAPIResponse{200: resp("Remote filesystem write result", okOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/remote-fs/dir",
+			Summary:     "Create remote skill filesystem directory or empty package",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSTaskQueryParams{},
+			RequestBody: jsonBodyOf(remoteFSDirOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Remote filesystem mkdir result", okOpenAPIResponse{})},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/remote-fs/path",
+			Summary:     "Delete remote skill filesystem path",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSDeleteQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Remote filesystem delete result", okOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/remote-fs/copy",
+			Summary:     "Copy remote skill filesystem path",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSTaskQueryParams{},
+			RequestBody: jsonBodyOf(remoteFSCopyOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Remote filesystem copy result", okOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/remote-fs/move",
+			Summary:     "Move remote skill filesystem path",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSTaskQueryParams{},
+			RequestBody: jsonBodyOf(remoteFSMoveOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Remote filesystem move result", okOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/remote-fs/trash",
+			Summary:     "Trash remote skill package",
+			Tags:        []string{"remote-fs"},
+			QueryParams: remoteFSUserQueryParams{},
+			RequestBody: jsonBodyOf(remoteFSTrashOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Remote filesystem trash result", okOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",

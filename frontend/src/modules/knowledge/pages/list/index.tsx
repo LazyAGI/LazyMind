@@ -29,6 +29,7 @@ import CreateKnowledgeBaseModal, {
   CreateKnowledgeBaseModalRef,
 } from "@/modules/knowledge/components/CreateKnowledgeBaseModal";
 import UIUtils from "@/modules/knowledge/utils/ui";
+import { runtimeFeatures } from "@/runtime/features";
 import {
   DocumentServiceApi,
   KnowledgeBaseServiceApi,
@@ -331,17 +332,19 @@ const KnowledgePage: FC = () => {
             >
               {t("common.edit")}
             </Button>
-            <Button
-              className="link-btn"
-              type="link"
-              onClick={() =>
-                navigate({
-                  pathname: `/lib/knowledge/auth/${data.dataset_id}`,
-                })
-              }
-            >
-              {t("knowledge.authorize")}
-            </Button>
+            {!runtimeFeatures.hideUserGroupSurfaces && (
+              <Button
+                className="link-btn"
+                type="link"
+                onClick={() =>
+                  navigate({
+                    pathname: `/lib/knowledge/auth/${data.dataset_id}`,
+                  })
+                }
+              >
+                {t("knowledge.authorize")}
+              </Button>
+            )}
             <Button
               className="link-btn"
               type="link"

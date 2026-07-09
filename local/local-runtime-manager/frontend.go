@@ -304,12 +304,18 @@ func writeCaddyfile(paths RuntimePaths, cfg RuntimeConfig) error {
 		}
 	}
 
+	handle /_local/* {
+		reverse_proxy %s {
+			flush_interval -1
+		}
+	}
+
 	handle {
 		try_files {path} /index.html
 		file_server
 	}
 }
-`, siteAddress, bindAddress, strconv.Quote(distRoot), proxy, proxy)
+`, siteAddress, bindAddress, strconv.Quote(distRoot), proxy, proxy, proxy)
 	return os.WriteFile(paths.CaddyConfig, []byte(content), 0o644)
 }
 

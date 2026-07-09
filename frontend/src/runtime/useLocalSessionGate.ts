@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { AgentAppsAuth } from "@/components/auth";
-import { ensureDesktopSession, isDesktopSessionEnabled } from "./desktopSession";
+import { ensureLocalSession, isLocalSessionEnabled } from "./localSession";
 
-export interface DesktopSessionGateState {
+export interface LocalSessionGateState {
   enabled: boolean;
   loading: boolean;
   error: string;
   retry: () => Promise<void>;
 }
 
-export function useDesktopSessionGate(
+export function useLocalSessionGate(
   isLoggedIn: boolean,
   refreshLayoutUser: () => Promise<void>,
-): DesktopSessionGateState {
-  const enabled = isDesktopSessionEnabled();
+): LocalSessionGateState {
+  const enabled = isLocalSessionEnabled();
   const [loading, setLoading] = useState(() => enabled && !AgentAppsAuth.isLoggedIn());
   const [error, setError] = useState("");
 
@@ -22,11 +22,11 @@ export function useDesktopSessionGate(
       setLoading(true);
       setError("");
       try {
-        await ensureDesktopSession({ force });
+        await ensureLocalSession({ force });
         await refreshLayoutUser();
       } catch (restoreError: any) {
-        console.error("Failed to restore desktop admin session:", restoreError);
-        setError(restoreError?.message || "Desktop session could not be restored.");
+        console.error("Failed to restore local admin session:", restoreError);
+        setError(restoreError?.message || "Local session could not be restored.");
       } finally {
         setLoading(false);
       }
@@ -43,7 +43,7 @@ export function useDesktopSessionGate(
     let cancelled = false;
     setLoading(true);
     setError("");
-    void ensureDesktopSession()
+    void ensureLocalSession()
       .then(() => {
         if (!cancelled) {
           return refreshLayoutUser();
@@ -52,8 +52,8 @@ export function useDesktopSessionGate(
       })
       .catch((restoreError: any) => {
         if (!cancelled) {
-          console.error("Failed to restore desktop admin session:", restoreError);
-          setError(restoreError?.message || "Desktop session could not be restored.");
+          console.error("Failed to restore local admin session:", restoreError);
+          setError(restoreError?.message || "Local session could not be restored.");
         }
       })
       .finally(() => {

@@ -51,6 +51,12 @@ export default defineConfig({
         timeout: 3 * 60 * 1000,
         proxyTimeout: 3 * 60 * 1000,
       },
+      "/_local": {
+        target: devProxyTarget,
+        changeOrigin: true,
+        timeout: 3 * 60 * 1000,
+        proxyTimeout: 3 * 60 * 1000,
+      },
     },
   },
   build: {

@@ -530,7 +530,7 @@ func TestSkillPreflightFreezesRequestAndSkipsWhenBelowThreshold(t *testing.T) {
 	assertRequestJSONHasNoSensitiveFields(t, got.RequestJSON)
 }
 
-func TestSkillWorkerCallsReviewAndExpiresOnlyStillPendingResults(t *testing.T) {
+func TestSkillWorkerCallsReviewWithoutPendingSkillResults(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
 	ctx := context.Background()
@@ -588,7 +588,7 @@ func TestSkillWorkerCallsReviewAndExpiresOnlyStillPendingResults(t *testing.T) {
 	}
 	worker.callers.Skill = func(_ context.Context, req algo.SkillReviewRequest) (*algo.SkillReviewResponse, int, error) {
 		captured = req
-		return &algo.SkillReviewResponse{Code: 0, Data: algo.SkillReviewData{Status: "completed", RequestID: req.RequestID}}, 200, nil
+		return &algo.SkillReviewResponse{Code: 0, Data: algo.SkillReviewData{Status: "completed", RequestID: req.RequestID, TaskID: "review_task_1"}}, 200, nil
 	}
 
 	result, err := worker.RunOnce(ctx)
@@ -611,8 +611,11 @@ func TestSkillWorkerCallsReviewAndExpiresOnlyStillPendingResults(t *testing.T) {
 	if captured.MinUserTurns != 2 || captured.MinToolTurns != 2 {
 		t.Fatalf("skill review request should use backend thresholds, got %#v", captured)
 	}
-	if strings.Join(captured.PendingSkillIDs, ",") != "pending-1,pending-2" {
-		t.Fatalf("unexpected pending skill ids: %v", captured.PendingSkillIDs)
+	if captured.SkillBaseDir != defaultSkillBaseDir {
+		t.Fatalf("unexpected skill_base_dir: %#v", captured)
+	}
+	if captured.FSBaseURL == "" {
+		t.Fatalf("expected fs_base_url in skill review request: %#v", captured)
 	}
 
 	var got orm.ResourceUpdateTask
@@ -623,11 +626,11 @@ func TestSkillWorkerCallsReviewAndExpiresOnlyStillPendingResults(t *testing.T) {
 		t.Fatalf("expected done task, got %s", got.Status)
 	}
 	assertRequestJSONHasNoSensitiveFields(t, got.RequestJSON)
-	if status := skillReviewResultStatus(t, db, "pending-1"); status != "expired" {
-		t.Fatalf("expected pending-1 expired, got %s", status)
+	if status := skillReviewResultStatus(t, db, "pending-1"); status != "pending" {
+		t.Fatalf("expected pending-1 unchanged, got %s", status)
 	}
-	if status := skillReviewResultStatus(t, db, "pending-2"); status != "expired" {
-		t.Fatalf("expected pending-2 expired, got %s", status)
+	if status := skillReviewResultStatus(t, db, "pending-2"); status != "pending" {
+		t.Fatalf("expected pending-2 unchanged, got %s", status)
 	}
 	if status := skillReviewResultStatus(t, db, "accepted-1"); status != "accepted" {
 		t.Fatalf("expected accepted-1 unchanged, got %s", status)

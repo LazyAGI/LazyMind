@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local down-local reset-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local up-build-local-lan down-local reset-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -191,6 +191,7 @@ help:
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
 	@echo "  make up-build-local - Build/start local LazyMind without containers"
+	@echo "  make up-build-local-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
 	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
 	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
 	@echo "  make desktop-cache-clean - Remove repo-local Desktop caches, if any"
@@ -474,6 +475,9 @@ desktop-clean:
 
 up-build-local: local-runtime-manager-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
+
+up-build-local-lan: local-runtime-manager-build
+	@LAZYMIND_LOCAL_NETWORK_PROFILE=lan LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN=true "$(LOCAL_RUNTIME_MANAGER_BIN)" up
 
 down-local:
 	@if [ -x "$(LOCAL_RUNTIME_MANAGER_BIN)" ]; then \

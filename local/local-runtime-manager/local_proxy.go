@@ -92,6 +92,7 @@ func localRuntimeEnv(cfg RuntimeConfig) []string {
 		frontendPortEnvVar + "=" + strconv.Itoa(cfg.FrontendPort),
 		frontendLANOriginEnvVar + "=" + frontendLANOrigin(cfg),
 		localNetworkProfileEnvVar + "=" + cfg.NetworkProfile,
+		localAutoLoginAllowLANEnvVar + "=" + envText(localAutoLoginAllowLANEnvVar, "false"),
 		localProxyAddressEnvVar + "=" + cfg.LocalProxy.Address,
 		localProxyPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.Port),
 		localAuthPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),

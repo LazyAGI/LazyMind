@@ -5,9 +5,9 @@ import { AgentAppsAuth } from "@/components/auth";
 import i18n from "@/i18n";
 import { getApiBaseUrl } from "@/runtime/apiBase";
 import {
-  isDesktopSessionEnabled,
-  restoreDesktopSessionAndGetToken,
-} from "@/runtime/desktopSession";
+  isLocalSessionEnabled,
+  restoreLocalSessionAndGetToken,
+} from "@/runtime/localSession";
 
 export const BASE_URL = getApiBaseUrl();
 
@@ -182,17 +182,17 @@ function isRefreshEndpoint(url?: string): boolean {
   return url.includes("/auth/refresh") || url.includes("/auth/login") || url.includes("/auth/logout");
 }
 
-async function restoreDesktopSessionAndRetry(
-  originalRequest?: InternalAxiosRequestConfig & { _desktopRetry?: boolean },
+async function restoreLocalSessionAndRetry(
+  originalRequest?: InternalAxiosRequestConfig & { _localSessionRetry?: boolean },
 ) {
-  if (!isDesktopSessionEnabled()) {
+  if (!isLocalSessionEnabled()) {
     return null;
   }
   if (!originalRequest) {
     return null;
   }
-  const token = await restoreDesktopSessionAndGetToken();
-  originalRequest._desktopRetry = true;
+  const token = await restoreLocalSessionAndGetToken();
+  originalRequest._localSessionRetry = true;
   originalRequest.headers = originalRequest.headers ?? {};
   originalRequest.headers.authorization = `Bearer ${token}`;
   return axiosInstance(originalRequest);
@@ -201,7 +201,7 @@ async function restoreDesktopSessionAndRetry(
 export const handleError = async (error: AxiosError) => {
   if (isCanceledError(error)) return Promise.reject(error);
   
-  const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _desktopRetry?: boolean; silentError?: boolean };
+  const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _localSessionRetry?: boolean; silentError?: boolean };
   const silentError = Boolean(originalRequest?.silentError);
   
   if (error.response) {
@@ -226,11 +226,11 @@ export const handleError = async (error: AxiosError) => {
       }
     } else if (error.response.status === 401) {
       if (isRefreshEndpoint(originalRequest?.url)) {
-        if (isDesktopSessionEnabled()) {
+        if (isLocalSessionEnabled()) {
           try {
-            await restoreDesktopSessionAndGetToken();
-          } catch (desktopSessionError) {
-            console.error("Desktop admin session restore failed:", desktopSessionError);
+            await restoreLocalSessionAndGetToken();
+          } catch (localSessionError) {
+            console.error("Local admin session restore failed:", localSessionError);
           }
           return Promise.reject(error);
         }
@@ -242,14 +242,14 @@ export const handleError = async (error: AxiosError) => {
       }
 
       if (!originalRequest || originalRequest._retry) {
-        if (isDesktopSessionEnabled() && originalRequest && !originalRequest._desktopRetry) {
+        if (isLocalSessionEnabled() && originalRequest && !originalRequest._localSessionRetry) {
           try {
-            const desktopRetryResponse = await restoreDesktopSessionAndRetry(originalRequest);
-            if (desktopRetryResponse) {
-              return desktopRetryResponse;
+            const localSessionRetryResponse = await restoreLocalSessionAndRetry(originalRequest);
+            if (localSessionRetryResponse) {
+              return localSessionRetryResponse;
             }
-          } catch (desktopSessionError) {
-            console.error("Desktop admin session restore failed:", desktopSessionError);
+          } catch (localSessionError) {
+            console.error("Local admin session restore failed:", localSessionError);
           }
         }
         if (AgentAppsAuth.isLoggedIn()) {
@@ -287,16 +287,16 @@ export const handleError = async (error: AxiosError) => {
       } catch (refreshError) {
         console.error("Token refresh failed:", refreshError);
 
-        if (isDesktopSessionEnabled()) {
+        if (isLocalSessionEnabled()) {
           try {
-            const token = await restoreDesktopSessionAndGetToken();
+            const token = await restoreLocalSessionAndGetToken();
             processQueue(token);
             originalRequest.headers = originalRequest.headers ?? {};
             originalRequest.headers.authorization = `Bearer ${token}`;
-            originalRequest._desktopRetry = true;
+            originalRequest._localSessionRetry = true;
             return await axiosInstance(originalRequest);
-          } catch (desktopSessionError) {
-            console.error("Desktop admin session restore failed:", desktopSessionError);
+          } catch (localSessionError) {
+            console.error("Local admin session restore failed:", localSessionError);
           }
         }
         
