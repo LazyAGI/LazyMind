@@ -148,7 +148,7 @@ function hashFileTree(root) {
   const digest = crypto.createHash("sha256");
 
   function walk(dir) {
-    const entries = fs.readdirSync(dir).sort((a, b) => a.localeCompare(b));
+    const entries = fs.readdirSync(dir).sort();
     for (const entry of entries) {
       const full = path.join(dir, entry);
       const rel = path.relative(root, full);
@@ -164,7 +164,16 @@ function hashFileTree(root) {
         digest.update("\0");
       } else if (stat.isFile()) {
         digest.update("file\0");
-        digest.update(fs.readFileSync(full));
+        const fd = fs.openSync(full, "r");
+        const buffer = Buffer.alloc(65536);
+        try {
+          let bytesRead;
+          while ((bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) {
+            digest.update(buffer.subarray(0, bytesRead));
+          }
+        } finally {
+          fs.closeSync(fd);
+        }
         digest.update("\0");
       }
     }
@@ -306,7 +315,6 @@ if [[ ! -d "${APP_PATH}" ]]; then
 fi
 if [[ -d "${APP_PATH}" ]]; then
   sign_app "${APP_PATH}"
-  xattr -cr "${APP_PATH}" 2>/dev/null || true
   remove_generated_path "${ZIP_PATH}"
   ditto -c -k --norsrc --keepParent "${APP_PATH}" "${ZIP_PATH}"
   write_release_metadata "${APP_PATH}" "${ZIP_PATH}"
