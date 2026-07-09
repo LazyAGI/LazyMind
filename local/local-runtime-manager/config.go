@@ -1020,24 +1020,27 @@ func cleanOptionalPath(path string) string {
 	return filepath.Clean(path)
 }
 
+func (p RuntimePaths) buildRootIsBundledResources() bool {
+	buildRoot := filepath.Clean(p.BuildRoot)
+	resourcesRoot := filepath.Clean(p.ResourcesRoot)
+	repoRoot := filepath.Clean(p.RepoRoot)
+	return buildRoot != "" && buildRoot == resourcesRoot && resourcesRoot != repoRoot
+}
+
 func (p RuntimePaths) EnsureAllDirs() error {
 	dirs := []string{
 		p.CacheDir,
 		p.DataDir,
-		p.DepsDir,
 		p.StateDir,
 		p.LogsDir,
 		p.RunDir,
 		p.ConfigDir,
 		filepath.Join(p.ConfigDir, "process-compose"),
 		p.GeneratedDir,
-		p.BinDir,
 		p.XDGCacheDir,
 		p.XDGStateDir,
 		p.ProcessComposeHome,
 		p.ServiceHome,
-		p.PythonRuntimeDir,
-		p.NodeRuntimeDir,
 		p.PythonStateDir,
 		filepath.Dir(p.AuthServicePIDFile),
 		p.AuthServiceStateDir,
@@ -1056,12 +1059,20 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		p.ScanControlPlaneStateDir,
 		p.ScanControlPlaneTempDir,
 		p.FileWatcherBaseRoot,
-		p.AuthServiceVenvDir,
-		filepath.Dir(p.AlgorithmVenv),
 		p.AlgorithmHome,
-		p.FrontendNodeModules,
 		p.AlgorithmPIDDir,
 		filepath.Dir(p.MilvusLiteDBPath),
+	}
+	if !p.buildRootIsBundledResources() {
+		dirs = append(dirs,
+			p.BinDir,
+			p.DepsDir,
+			p.PythonRuntimeDir,
+			p.NodeRuntimeDir,
+			p.AuthServiceVenvDir,
+			filepath.Dir(p.AlgorithmVenv),
+			p.FrontendNodeModules,
+		)
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {

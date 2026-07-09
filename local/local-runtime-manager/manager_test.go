@@ -356,6 +356,46 @@ func TestEnsureAllDirsUsesOnlyApprovedTopLevelDirs(t *testing.T) {
 	}
 }
 
+func TestEnsureAllDirsDoesNotCreateDesktopBuildDirsInResources(t *testing.T) {
+	repo := t.TempDir()
+	resources := filepath.Join(t.TempDir(), "runtime")
+	runtimeRoot := filepath.Join(t.TempDir(), "state")
+	writeComposeFixture(t, repo)
+	if err := os.MkdirAll(resources, 0o755); err != nil {
+		t.Fatalf("mkdir resources: %v", err)
+	}
+	_, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       "desktop",
+		RepoRoot:      repo,
+		RuntimeRoot:   runtimeRoot,
+		ResourcesRoot: resources,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure all dirs: %v", err)
+	}
+	for _, path := range []string{
+		paths.BinDir,
+		paths.DepsDir,
+		paths.PythonRuntimeDir,
+		paths.NodeRuntimeDir,
+		paths.AuthServiceVenvDir,
+		filepath.Dir(paths.AlgorithmVenv),
+		paths.FrontendNodeModules,
+	} {
+		if _, err := os.Stat(path); err == nil {
+			t.Fatalf("desktop bundled build dir should not be created: %s", path)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(paths.DataDir); err != nil {
+		t.Fatalf("runtime data dir should still be created: %v", err)
+	}
+}
+
 func TestCLIAcceptsDesktopProfileFlag(t *testing.T) {
 	cli := NewCLI(io.Discard, io.Discard, &fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
 	if err := cli.Run(context.Background(), []string{"status", "--profile", "desktop"}); err != nil {

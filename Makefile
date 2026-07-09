@@ -20,12 +20,9 @@ export DOCKER_BUILDKIT ?= 1
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 GO ?= go
-export LAZYMIND_LOCAL_BUILD_ROOT ?= $(CURDIR)/local/build
-LOCAL_RUNTIME_MANAGER_BIN ?= $(LAZYMIND_LOCAL_BUILD_ROOT)/bin/local-runtime-manager
-ifeq ($(LOCAL_RUNTIME_MANAGER_BIN),$(CURDIR)/local/.bin/local-runtime-manager)
-override LOCAL_RUNTIME_MANAGER_BIN := $(CURDIR)/local/build/bin/local-runtime-manager
-endif
 LOCAL_BUILD_DIR := $(CURDIR)/local/build
+override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)
+override LOCAL_RUNTIME_MANAGER_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
 comma := ,
 
