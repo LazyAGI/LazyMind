@@ -39,14 +39,19 @@ func (h *adminSessionHandler) ServeHTTP(w http.ResponseWriter, req *http.Request
 }
 
 func requestFromLoopback(req *http.Request) bool {
+	if !isLoopbackHost(trimHostPort(req.RemoteAddr)) {
+		return false
+	}
+
 	if forwardedFor := strings.TrimSpace(req.Header.Get("X-Forwarded-For")); forwardedFor != "" {
-		first := strings.TrimSpace(strings.Split(forwardedFor, ",")[0])
-		return isLoopbackHost(trimHostPort(first))
+		parts := strings.Split(forwardedFor, ",")
+		last := strings.TrimSpace(parts[len(parts)-1])
+		return isLoopbackHost(trimHostPort(last))
 	}
 	if realIP := strings.TrimSpace(req.Header.Get("X-Real-IP")); realIP != "" {
 		return isLoopbackHost(trimHostPort(realIP))
 	}
-	return isLoopbackHost(trimHostPort(req.RemoteAddr))
+	return true
 }
 
 func isLoopbackHost(value string) bool {

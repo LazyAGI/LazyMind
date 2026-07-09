@@ -40,6 +40,38 @@ func TestAdminSessionEndpointRejectsLANByDefault(t *testing.T) {
 	}
 }
 
+func TestAdminSessionEndpointRejectsSpoofedLoopbackForwardedForFromLAN(t *testing.T) {
+	t.Parallel()
+
+	handler := testAdminSessionHandler(false)
+	req := httptest.NewRequest(http.MethodPost, "/_local/admin-session", nil)
+	req.RemoteAddr = "192.168.1.10:54321"
+	req.Header.Set("X-Forwarded-For", "127.0.0.1")
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.Code)
+	}
+}
+
+func TestAdminSessionEndpointUsesRightmostForwardedForFromTrustedProxy(t *testing.T) {
+	t.Parallel()
+
+	handler := testAdminSessionHandler(false)
+	req := httptest.NewRequest(http.MethodPost, "/_local/admin-session", nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	req.Header.Set("X-Forwarded-For", "127.0.0.1, 192.168.1.10")
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.Code)
+	}
+}
+
 func TestAdminSessionEndpointAllowsLANWhenConfigured(t *testing.T) {
 	t.Parallel()
 
