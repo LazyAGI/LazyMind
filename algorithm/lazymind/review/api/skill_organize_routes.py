@@ -56,7 +56,8 @@ async def skill_organize(payload: SkillOrganizeRequest):
 def _log_skill_organize_result(payload: SkillOrganizeRequest, taskid: str, future: asyncio.Future) -> None:
     try:
         result = future.result()
-        LOG.info(f'[SkillOrganize] skill organize completed: {payload.requestid} task={taskid} for user {payload.user_id}')
+        LOG.info(f'[SkillOrganize] skill organize completed: {payload.requestid} \
+            task={taskid} for user {payload.user_id}')
         LOG.info(f'[SkillOrganize] skill organize result: {result.model_dump()}')
     except Exception as exc:
         LOG.exception(f'[SkillOrganize] skill organize failed in background task={taskid}: {exc}')

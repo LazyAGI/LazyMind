@@ -23,10 +23,11 @@ class SkillRemoteFS:
     """Remote skill filesystem client for the Skill Organize pipeline."""
 
     def __init__(self, base_url: str = '', timeout: float | None = None):
-        self.base_url = (base_url or str(_cfg['core_api_url'] or '').strip()).rstrip('/')
+        self.base_url = (base_url or str(_cfg['skill_fs_url'] or '').strip()).rstrip('/')
         self.timeout = timeout or float(_cfg['core_api_timeout'] or 10)
+        self.session = requests.Session()
         if not self.base_url:
-            raise RuntimeError("'core_api_url' is required for skill remote fs access.")
+            raise RuntimeError("'skill_fs_url' is required for skill remote fs access.")
 
     def load_skills(self, user_id: str, skills: list[str], *, task_id: str = '') -> list[SourceSkill]:
         loaded = [_load_local_skill_if_possible(item) for item in skills]
@@ -110,7 +111,7 @@ class SkillRemoteFS:
         )
 
     def _request(self, method: str, endpoint: str, **kwargs) -> requests.Response:
-        response = requests.request(
+        response = self.session.request(
             method,
             f'{self.base_url}/remote-fs/{endpoint}',
             timeout=self.timeout,
@@ -122,6 +123,9 @@ class SkillRemoteFS:
                 f'with HTTP {response.status_code}: {response.text[:500]}'
             )
         return response
+
+    def close(self) -> None:
+        self.session.close()
 
     def _request_json(self, method: str, endpoint: str, **kwargs) -> dict:
         response = self._request(method, endpoint, **kwargs)

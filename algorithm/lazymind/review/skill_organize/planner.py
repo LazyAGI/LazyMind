@@ -27,4 +27,3 @@ def build_organize_plan(
             last_error = exc
             LOG.warning(f'[SkillOrganize] plan attempt {attempt + 1} failed: {exc}')
     raise ValueError(f'failed to build valid organize plan: {last_error}') from last_error
-

@@ -13,7 +13,6 @@ class SkillOrganizeRequest(BaseModel):
     requestid: str = Field(..., min_length=1)
     user_id: str = Field(..., min_length=1)
     skills: List[str] = Field(default_factory=list, max_length=MAX_SKILL_ORGANIZE_LIMIT)
-    fs_base_url: str = ''
     artifact_dir: Optional[str] = None
     model_configs: Dict[str, Any] = Field(default_factory=dict)
 
@@ -21,7 +20,6 @@ class SkillOrganizeRequest(BaseModel):
     def validate_payload(self) -> 'SkillOrganizeRequest':
         self.requestid = self.requestid.strip()
         self.user_id = self.user_id.strip()
-        self.fs_base_url = self.fs_base_url.strip()
         self.skills = [str(item).strip() for item in self.skills if str(item).strip()]
         if not self.skills:
             raise ValueError("'skills' must contain at least one skill name or path.")

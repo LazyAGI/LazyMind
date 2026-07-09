@@ -33,6 +33,7 @@ def parse_skill_summaries(skills: Iterable[SourceSkill]) -> list[SkillSummary]:
 
 def parse_skill_summary(skill: SourceSkill) -> SkillSummary:
     frontmatter, body = parse_skill_frontmatter(skill.content)
+    frontmatter = frontmatter or {}
     name = str(frontmatter.get('name') or skill.name).strip()
     category = str(frontmatter.get('category') or skill.category).strip()
     description = str(frontmatter.get('description') or '').strip()
@@ -48,9 +49,9 @@ def parse_skill_summary(skill: SourceSkill) -> SkillSummary:
     )
 
 
-def _extract_core_steps(body: str) -> list[str]:
+def _extract_core_steps(body: str | None) -> list[str]:
     section = _extract_section_text(body, _STEP_HEADING_HINTS, compact=False)
-    source = section or body
+    source = section or body or ''
     steps: list[str] = []
     for match in _LIST_ITEM_RE.finditer(source):
         item = _first_sentence(match.group(1))

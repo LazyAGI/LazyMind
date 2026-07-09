@@ -37,12 +37,20 @@ def run_skill_organize(
     with lazyllm.new_session(resolved_taskid):
         inject_model_config(request.model_configs)
         llm = AutoModel(model='llm')
-        return _run_skill_organize(
-            request,
-            llm,
-            taskid=resolved_taskid,
-            remote_fs=remote_fs or build_skill_remote_fs(request.fs_base_url),
-        )
+        owns_remote_fs = remote_fs is None
+        client = remote_fs or build_skill_remote_fs()
+        try:
+            return _run_skill_organize(
+                request,
+                llm,
+                taskid=resolved_taskid,
+                remote_fs=client,
+            )
+        finally:
+            if owns_remote_fs:
+                close = getattr(client, 'close', None)
+                if callable(close):
+                    close()
 
 
 def _run_skill_organize(
@@ -69,7 +77,7 @@ def _run_skill_organize(
 
         draft = materialize_fs_draft(plan, source_skills, llm)
         write_stage_file(work_dir, taskid, STAGE_DRAFT, draft)
-        fs_apply = remote_fs.apply_draft(request.user_id, draft, task_id=taskid)
+        fs_apply = remote_fs.apply_draft(request.user_id, draft, task_id=request.requestid)
         write_stage_file(work_dir, taskid, STAGE_VALIDATION, {'status': 'completed', 'fs_apply': fs_apply})
 
         organize_result = _build_organize_result(

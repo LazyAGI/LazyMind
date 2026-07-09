@@ -52,7 +52,7 @@ def insert_skill_organize_result(
                 'userid': user_id,
                 'requestid': requestid,
                 'status': status,
-                'started_at': str(organize_result.get('started_at') or organize_result.get('created_at') or ''),
+                'started_at': organize_result.get('started_at') or organize_result.get('created_at') or None,
                 'duration_ms': int(organize_result.get('duration_ms') or 0),
                 'summary': summary,
             },
