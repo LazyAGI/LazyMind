@@ -420,6 +420,8 @@ func OnSubAgentDone(
 			"step_id":    pctx.StepID,
 			"reason":     "dynamic_pause",
 		})
+		// Notify Python ChatAgent to unblock _wait_for_step_done.
+		go notifyStepDone(pctx.ConvID, pctx.SessionID, pctx.StepID, status, summary)
 	}
 	// Write content_snapshot to all selected revisions for this step.
 	go OnSubAgentDoneSnapshot(context.Background(), db, pctx)

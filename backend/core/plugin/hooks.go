@@ -143,6 +143,26 @@ func StopActivePluginSession(ctx context.Context, db *gorm.DB, stateStore state.
 	}
 }
 
+// notifyStepDone posts a step-done signal to the Python chat service so that
+// _wait_for_step_done in dynamic-mode advance_step unblocks after SubAgent completes.
+// Called in a goroutine; errors are logged and suppressed.
+func notifyStepDone(convID, sessionID, stepID, status, summary string) {
+	body, _ := json.Marshal(map[string]string{
+		"conversation_id": convID,
+		"session_id":      sessionID,
+		"step_id":         stepID,
+		"status":          status,
+		"summary":         summary,
+	})
+	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/plugin/step-done")
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx
+	if err != nil {
+		fmt.Printf("[plugin] notifyStepDone: %v\n", err)
+		return
+	}
+	_ = resp.Body.Close()
+}
+
 // notifyStepCancel posts a cancel signal to the Python chat service so that
 // _wait_for_step_done unblocks immediately for dynamic-mode steps.
 // Called in a goroutine; errors are logged and suppressed.

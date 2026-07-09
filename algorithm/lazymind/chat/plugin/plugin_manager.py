@@ -542,9 +542,9 @@ def build_advance_step_and_hand_off_tool(
 
     advance_step_and_hand_off.__doc__ = (
         'Advance the active plugin to the next step and hand off control to SubAgent/user.\n\n'
-        'The step runs in the background. Use this as the default advancement tool.\n'
-        'Only use `advance_step` (synchronous) when you need intermediate step results\n'
-        'within a single turn (e.g. user said "re-run steps 1 through 3").\n\n'
+        'The step runs in the background. Use this as the DEFAULT tool in single-step mode.\n'
+        'In continuous/uninterrupted mode (Rule 4 in system prompt), use `advance_step`\n'
+        'for intermediate steps and call this tool ONLY for the final `__end__` hand-off.\n\n'
         '## Intent-change rewind (MUST read before advancing)\n\n'
         'If the user expresses dissatisfaction with or changes to the result of a step that\n'
         'has ALREADY SUCCEEDED, you MUST rewind to the earliest affected step instead of\n'
@@ -600,9 +600,6 @@ def build_advance_step_tool(
     forward = sm.get_reachable_steps(current_step) if sm else []
     rewind = list(rewind_steps or [])
     labels = step_labels or {}
-    all_reachable = list(forward) + rewind
-    if current_step and current_step not in all_reachable:
-        all_reachable = [current_step] + all_reachable
 
     choices_doc = _build_step_choices_doc(forward, rewind, labels, plugin_id=plugin_id, current_step=current_step)
 
@@ -621,10 +618,20 @@ def build_advance_step_tool(
         """
         if step_id == '__end__':
             return _trigger_plugin_end(plugin_id)
-        if step_id not in all_reachable:
+        # Dynamically recompute reachable set from latest plugin_step state so
+        # consecutive advance_step calls within one turn work correctly.
+        cfg = _agentic_config()
+        _live_current = cfg.get('plugin_step', '') or current_step
+        sm_live = plugin_loader.get_state_machine(plugin_id)
+        _live_forward = sm_live.get_reachable_steps(_live_current) if sm_live else []
+        _live_rewind = list(rewind_steps or [])
+        _live_reachable = list(_live_forward) + _live_rewind
+        if _live_current and _live_current not in _live_reachable:
+            _live_reachable = [_live_current] + _live_reachable
+        if step_id not in _live_reachable:
             raise ValueError(
                 f'step {step_id!r} is not reachable from '
-                f'{current_step!r}. Reachable: {all_reachable}.'
+                f'{_live_current!r}. Reachable: {_live_reachable}.'
             )
         result = _trigger_plugin_step(
             plugin_id, step_id, user_input,
@@ -633,15 +640,23 @@ def build_advance_step_tool(
             partial_indices=partial_indices or {},
         )
         # Poll for completion via FileSystemQueue.
-        return _wait_for_step_done(step_id, result)
+        summary = _wait_for_step_done(step_id, result)
+        # Update agentic_config so the next advance_step call uses the new current step.
+        try:
+            lazyllm.globals['agentic_config']['plugin_step'] = step_id
+        except Exception:
+            pass
+        return summary
 
     advance_step.__doc__ = (
         'Advance the active plugin step synchronously and return the result.\n\n'
-        'ONLY use this for intermediate steps when the user explicitly asks to\n'
-        'run multiple plugin steps in one chat turn. Do NOT use it for ordinary\n'
-        '"continue"/"next step" requests, single-step advancement, or terminal\n'
-        'final-step advancement. If you are going to call only one advancement\n'
-        'tool, use `advance_step_and_hand_off` instead.\n\n'
+        'Use this tool in continuous/uninterrupted mode (Rule 4 in system prompt).\n'
+        'Continuous mode is active when the user intent contains phrases like\n'
+        '"一次性完成", "不要中断", "一次性写完", "run all steps", "no interruptions".\n'
+        'In continuous mode, call `advance_step` for EVERY pipeline step in order,\n'
+        'then finish with `advance_step_and_hand_off(step_id="__end__", ...)`.\n\n'
+        'In default single-step mode (no uninterrupted constraint), do NOT use this\n'
+        'tool — use `advance_step_and_hand_off` instead so the user can review each result.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
         '    step_id (str): Step to advance to (see list above).\n'
@@ -1167,6 +1182,11 @@ def _build_mode_guidance(
         'you MUST call `update_intent(scope="session", content="<concise summary>")` FIRST,\n'
         'before any step-advance tool call. Summarize 1-2 key constraints in concise Chinese.\n'
         'If the latest query has no explicit new constraints, do NOT call update_intent.\n\n'
+        'ALSO: if the "User Intent & Constraints" section is empty (no session intent recorded yet)\n'
+        'AND the conversation history contains "一次性", "不要中断", "不要打断", "中间不要停",\n'
+        '"一次性写完", "run all steps", "do it all at once", or similar phrases,\n'
+        'call `update_intent(scope="session", content="<concise summary of the constraint>")`\n'
+        'to persist the constraint before advancing any step.\n\n'
         '### Rule 1 — Intent-change detection\n'
         'Before advancing any step, check whether the user is rejecting or changing\n'
         'the outcome of a step that has ALREADY SUCCEEDED. Signals include:\n'
@@ -1185,8 +1205,10 @@ def _build_mode_guidance(
         'still pending.\n\n'
         '### Rule 3 — Workflow advancement requests\n'
         'If the user clearly asks to proceed with the existing plugin workflow and\n'
-        'does not add new requirements, corrections, or dissatisfaction signals,\n'
-        'you MUST advance the workflow by calling `advance_step_and_hand_off`.\n'
+        'does not add new requirements, corrections, or dissatisfaction signals:\n'
+        '  - If continuous mode is NOT active: call `advance_step_and_hand_off` and stop.\n'
+        '  - If continuous mode IS active (Rule 4): call `advance_step` for every remaining\n'
+        '    step, then finish with `advance_step_and_hand_off(step_id="__end__", ...)`.\n'
         'Select the target from "Next forward steps (valid targets for continuing)"\n'
         'in the step-status block. If multiple forward targets are listed, choose\n'
         'the target whose transition condition best matches the current artifacts\n'
@@ -1212,25 +1234,38 @@ def _build_mode_guidance(
             terminal_hint = (
                 f'\n\n## Terminal steps (last steps before pipeline completion)\n\n'
                 f'The following steps lead directly to the end of the pipeline: {names}.\n'
-                'Treat terminal steps like any other single-step advancement: call '
-                '`advance_step_and_hand_off(step_id=<terminal_step>, ...)` and stop. '
-                'Do NOT use synchronous `advance_step` just because a step is terminal, '
-                'and do NOT keep the main chat turn open just to close `__end__`.\n\n'
+                'In continuous/uninterrupted mode (Rule 4), use `advance_step` for terminal '
+                'steps as well, then call `advance_step_and_hand_off(step_id="__end__", ...)` '
+                'after all terminal steps complete.\n'
+                'In default single-step mode, use `advance_step_and_hand_off` and stop.\n\n'
                 'Pipeline completion is handled after the terminal step result is produced. '
                 'If another tool call is needed later to close `__end__`, it must be driven '
                 'by the normal plugin event loop or a later explicit user action, not by '
                 'blocking the current chat stream.'
             )
         common += (
-            '- `advance_step`: Queue a step and WAIT for result (dynamic mode only). '
-            'Use only when the user explicitly asks to run multiple plugin steps in one '
-            'chat turn (for example, "连续执行后面三步" or "run steps 1 through 3 without '
-            'stopping"). In that case, use `advance_step` only for intermediate steps, '
-            'then use `advance_step_and_hand_off` for the final step of that turn.\n'
-            'For ordinary "继续", "下一步", single-step requests, and terminal/final-step '
-            'requests, you MUST call `advance_step_and_hand_off` and stop after the call.\n\n'
-            'After each step in dynamic mode, default to `advance_step_and_hand_off` so '
-            'the user can review the result and decide the next action.\n\n'
+            '- `advance_step`: Queue a step and WAIT for its result (dynamic mode only). '
+            'Use this in continuous/uninterrupted mode (see Rule 4 below). '
+            'Use `advance_step` for every intermediate step, then `advance_step_and_hand_off` '
+            'for the final hand-off.\n'
+            'In default single-step mode (no uninterrupted constraint), use '
+            '`advance_step_and_hand_off` and stop.\n\n'
+            '### Rule 4 — Continuous / uninterrupted execution mode (MUST check before every action)\n'
+            'Activate continuous mode when ANY of the following is true:\n'
+            '  a) The "User Intent & Constraints" section contains phrases such as:\n'
+            '     "一次性完成", "一次性写完", "不要中断", "不要打断", "中间不要停",\n'
+            '     "run all steps", "do it all at once", "no interruptions", "without stopping".\n'
+            '  b) The current user query contains any of the above phrases.\n'
+            'In continuous mode:\n'
+            '  1. Use `advance_step` (NOT `advance_step_and_hand_off`) for every pipeline step\n'
+            '     including terminal steps, executing them in order from current to last.\n'
+            '  2. After ALL steps succeed, call `advance_step_and_hand_off(step_id="__end__", ...)`.\n'
+            '  3. NEVER call `advance_step_and_hand_off` for intermediate steps — '
+            '     it hands off control and breaks the continuous run.\n'
+            '  4. If `advance_step` returns an error, stop the sequence immediately and '
+            '     report the failure; do not skip or continue to a later step.\n\n'
+            'After each step in default (non-continuous) mode, use `advance_step_and_hand_off` '
+            'so the user can review the result and decide the next action.\n\n'
             'When a step is interrupted and user says "继续": call advance_step_and_hand_off with '
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
             'and only produce missing outputs (resume from checkpoint)."\n'
