@@ -58,7 +58,10 @@ type StatusResponse struct {
 	OverallStatus  string                         `json:"overallStatus"`
 	RepoRoot       string                         `json:"repoRoot"`
 	ResourcesRoot  string                         `json:"resourcesRoot,omitempty"`
+	BuildRoot      string                         `json:"buildRoot,omitempty"`
 	RuntimeRoot    string                         `json:"runtimeRoot"`
+	DataDir        string                         `json:"dataDir,omitempty"`
+	LogsDir        string                         `json:"logsDir,omitempty"`
 	ProcessCompose ProcessComposeState            `json:"processCompose"`
 	Config         RuntimeConfigSnapshot          `json:"config,omitempty"`
 	Services       map[string]RuntimeServiceState `json:"services"`

@@ -1025,7 +1025,10 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		OverallStatus:  state.OverallStatus,
 		RepoRoot:       state.RepoRoot,
 		ResourcesRoot:  state.ResourcesRoot,
+		BuildRoot:      cfg.BuildRoot,
 		RuntimeRoot:    state.RuntimeRoot,
+		DataDir:        paths.DataDir,
+		LogsDir:        paths.LogsDir,
 		ProcessCompose: state.ProcessCompose,
 		Config:         snapshotRuntimeConfig(cfg),
 		Services:       state.Services,
@@ -1191,7 +1194,10 @@ func (m *RuntimeManager) humanStatus(resp StatusResponse) string {
 		fmt.Sprintf("overallStatus: %s", resp.OverallStatus),
 		fmt.Sprintf("repoRoot: %s", resp.RepoRoot),
 		fmt.Sprintf("resourcesRoot: %s", resp.ResourcesRoot),
+		fmt.Sprintf("buildRoot: %s", resp.BuildRoot),
 		fmt.Sprintf("runtimeRoot: %s", resp.RuntimeRoot),
+		fmt.Sprintf("dataDir: %s", resp.DataDir),
+		fmt.Sprintf("logsDir: %s", resp.LogsDir),
 	}
 	for name, svc := range resp.Services {
 		lines = append(lines, fmt.Sprintf("%s.kind=%s status=%s", name, svc.Kind, svc.Status))
