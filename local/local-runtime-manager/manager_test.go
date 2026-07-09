@@ -596,6 +596,26 @@ func TestProcessComposeDownStreamsOutputWhenRunnerSupportsIt(t *testing.T) {
 	runner.assertCommandCount(0)
 }
 
+func TestRuntimeManagerUsesDefaultProcessComposeDownTimeout(t *testing.T) {
+	t.Setenv(processComposeDownTimeoutEnvVar, "")
+	t.Setenv(localDownTimeoutEnvVar, "150s")
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+
+	if got, want := manager.effectiveProcessComposeDownTimeout(), 60*time.Second; got != want {
+		t.Fatalf("process-compose down timeout = %s, want %s", got, want)
+	}
+}
+
+func TestRuntimeManagerCapsProcessComposeDownTimeoutAtOverallDownTimeout(t *testing.T) {
+	t.Setenv(processComposeDownTimeoutEnvVar, "30s")
+	t.Setenv(localDownTimeoutEnvVar, "5s")
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+
+	if got, want := manager.effectiveProcessComposeDownTimeout(), 5*time.Second; got != want {
+		t.Fatalf("process-compose down timeout = %s, want %s", got, want)
+	}
+}
+
 func TestProcessComposeEnvPinsAllPlannedPorts(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
