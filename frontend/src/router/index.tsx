@@ -47,21 +47,21 @@ import {
 } from "@/modules/selfEvolution";
 import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
-import { isDesktopSessionEnabled } from "@/runtime/desktopSession";
+import { isLocalSessionEnabled } from "@/runtime/localSession";
 
 const PluginDetailPage = lazy(() => import("@/modules/plugin/pages/detail"));
 const BuiltinPluginDetailPage = lazy(() => import("@/modules/plugin/pages/builtin-detail"));
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
-  const desktopSessionEnabled = isDesktopSessionEnabled();
+  const localSessionEnabled = isLocalSessionEnabled();
 
   return (
     <ConfigProvider
       locale={getAntdLocale(i18n.resolvedLanguage || i18n.language)}
     >
       <Routes>
-        {desktopSessionEnabled ? (
+        {localSessionEnabled ? (
           <Route path="/login" element={<Navigate to="/agent/chat" replace />} />
         ) : (
           <Route path="/login" element={<SigninDashboard />}>
@@ -73,7 +73,7 @@ export default function AppRouter() {
             path="/register"
             element={
               <Navigate
-                to={desktopSessionEnabled ? "/agent/chat" : "/login"}
+                to={localSessionEnabled ? "/agent/chat" : "/login"}
                 replace
               />
             }
@@ -98,7 +98,7 @@ export default function AppRouter() {
         <Route
           path="/loginTransition"
           element={
-            desktopSessionEnabled ? (
+            localSessionEnabled ? (
               <Navigate to="/agent/chat" replace />
             ) : (
               <LoginTransition />

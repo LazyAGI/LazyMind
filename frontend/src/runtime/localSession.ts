@@ -2,24 +2,24 @@ import { AgentAppsAuth, type UserInfo } from "@/components/auth";
 import { apiUrl } from "./apiBase";
 import { runtimeFeatures } from "./features";
 
-let desktopSessionPromise: Promise<UserInfo | null> | null = null;
+let localSessionPromise: Promise<UserInfo | null> | null = null;
 
-export interface DesktopSessionOptions {
+export interface LocalSessionOptions {
   force?: boolean;
 }
 
-export function isDesktopSessionEnabled(): boolean {
-  return runtimeFeatures.localAutoLogin;
+export function isLocalSessionEnabled(): boolean {
+  return runtimeFeatures.localLikeAutoLogin;
 }
 
-export function shouldHideDesktopUserControls(): boolean {
-  return runtimeFeatures.hideDesktopUserControls;
+export function shouldHideLocalUserControls(): boolean {
+  return runtimeFeatures.hideLocalUserControls;
 }
 
-export async function ensureDesktopSession(
-  options?: DesktopSessionOptions,
+export async function ensureLocalSession(
+  options?: LocalSessionOptions,
 ): Promise<UserInfo | null> {
-  if (!isDesktopSessionEnabled()) {
+  if (!isLocalSessionEnabled()) {
     return AgentAppsAuth.getUserInfo();
   }
 
@@ -28,8 +28,8 @@ export async function ensureDesktopSession(
     return current;
   }
 
-  if (!desktopSessionPromise || options?.force) {
-    desktopSessionPromise = (async () => {
+  if (!localSessionPromise || options?.force) {
+    localSessionPromise = (async () => {
       const session = await requestLocalAdminSession(Boolean(options?.force));
       if (!session?.token) {
         throw new Error("Local admin session did not return an access token");
@@ -37,15 +37,15 @@ export async function ensureDesktopSession(
       AgentAppsAuth.setUserInfo(session);
       return AgentAppsAuth.getUserInfo();
     })().finally(() => {
-      desktopSessionPromise = null;
+      localSessionPromise = null;
     });
   }
 
-  return desktopSessionPromise;
+  return localSessionPromise;
 }
 
-export async function restoreDesktopSessionAndGetToken(): Promise<string> {
-  const userInfo = await ensureDesktopSession({ force: true });
+export async function restoreLocalSessionAndGetToken(): Promise<string> {
+  const userInfo = await ensureLocalSession({ force: true });
   const token = userInfo?.token || "";
   if (!token) {
     throw new Error("Local admin session did not return an access token");
@@ -54,7 +54,9 @@ export async function restoreDesktopSessionAndGetToken(): Promise<string> {
 }
 
 async function requestLocalAdminSession(force: boolean): Promise<UserInfo> {
-  const path = force ? "/_local/admin-session?force=true" : "/_local/admin-session";
+  const path = force
+    ? "/_local/admin-session?force=true"
+    : "/_local/admin-session";
   const response = await fetch(apiUrl(path), {
     method: "POST",
     headers: {
