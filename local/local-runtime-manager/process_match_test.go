@@ -10,7 +10,7 @@ func TestProcessTextMatchesDesktopResourceRoot(t *testing.T) {
 	paths := RuntimePaths{
 		RepoRoot:      filepath.Join(root, "LazyMind.app", "Contents", "Resources", "runtime", "app"),
 		ResourcesRoot: filepath.Join(root, "LazyMind.app", "Contents", "Resources", "runtime"),
-		RuntimeRoot:   filepath.Join(root, "Application Support", "lazymind-desktop", "runtime"),
+		RuntimeRoot:   filepath.Join(root, "Library", "Application Support", "LazyMind"),
 	}
 	caddy := filepath.Join(paths.ResourcesRoot, "bin", "caddy")
 	if !processTextMatchesRuntime(paths, caddy) {

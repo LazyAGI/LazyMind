@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, dialog, clipboard } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const isPackaged = app.isPackaged;
@@ -10,10 +11,34 @@ const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
     : path.resolve(__dirname, "..", "..", "dist", "runtime"));
 const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
-const runtimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT ||
-  path.join(app.getPath("userData"), "runtime");
+function defaultUserPathLayout() {
+  const appName = "LazyMind";
+  const home = os.homedir();
+  if (process.platform === "darwin") {
+    return {
+      runtimeRoot: path.join(home, "Library", "Application Support", appName),
+      logsDir: path.join(home, "Library", "Logs", appName),
+    };
+  }
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+    return {
+      runtimeRoot: path.join(localAppData, appName),
+      logsDir: path.join(localAppData, appName, "Logs"),
+    };
+  }
+  const dataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+  const stateHome = process.env.XDG_STATE_HOME || path.join(home, ".local", "state");
+  return {
+    runtimeRoot: path.join(dataHome, appName),
+    logsDir: path.join(stateHome, appName, "logs"),
+  };
+}
+
+const userPathLayout = defaultUserPathLayout();
+const runtimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || userPathLayout.runtimeRoot;
 const dataDir = path.join(runtimeRoot, "data");
-const logsDir = path.join(runtimeRoot, "logs");
+const logsDir = userPathLayout.logsDir;
 const startupLogPath = path.join(logsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", "local-runtime-manager");

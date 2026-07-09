@@ -84,6 +84,7 @@ lazyllm_cpp.egg-info/
 data/
 volumes/
 local/config.env
+local/.bin/
 local/runtime/
 desktop/build/
 desktop/cache/

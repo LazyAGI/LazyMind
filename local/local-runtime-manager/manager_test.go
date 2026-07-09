@@ -21,8 +21,29 @@ func defaultProfileValue() string {
 	return ""
 }
 
-func TestRuntimeConfigUsesLocalRuntimeRootAndManagerBinaryPaths(t *testing.T) {
+func TestMain(m *testing.M) {
+	home, err := os.MkdirTemp("", "lazymind-runtime-manager-home-*")
+	if err != nil {
+		panic(err)
+	}
+	_ = os.Setenv(localHostHomeEnvVar, home)
+	_ = os.Setenv("HOME", home)
+	_ = os.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	code := m.Run()
+	_ = os.RemoveAll(home)
+	os.Exit(code)
+}
+
+func TestRuntimeConfigUsesPlatformUserPathsByDefault(t *testing.T) {
 	repo := t.TempDir()
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv(localHostHomeEnvVar, home)
+	t.Setenv("HOME", home)
+	t.Setenv(runtimeRootEnvVar, "")
+	t.Setenv(localSQLiteDirEnvVar, "")
+	t.Setenv(localMilvusLiteDBPathEnvVar, "")
+	t.Setenv("LAZYMIND_FILE_WATCHER_BASE_ROOT", "")
+	t.Setenv("LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR", "")
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfig("", repo)
 	if err != nil {
@@ -31,11 +52,88 @@ func TestRuntimeConfigUsesLocalRuntimeRootAndManagerBinaryPaths(t *testing.T) {
 	if cfg.Profile != "local" {
 		t.Fatalf("profile = %q, want local", cfg.Profile)
 	}
-	if paths.RuntimeRoot != filepath.Join(repo, "local/runtime") {
-		t.Fatalf("runtime root = %q", paths.RuntimeRoot)
+	layout := runtimePathLayoutForGOOS(runtime.GOOS, home, "", "", "", "")
+	if paths.RuntimeRoot != layout.DataRoot {
+		t.Fatalf("runtime root = %q, want %q", paths.RuntimeRoot, layout.DataRoot)
 	}
-	if localProcessComposeBin != "local/runtime/bin/process-compose" {
-		t.Fatalf("process-compose bin = %q", localProcessComposeBin)
+	if paths.LogsDir != layout.LogsRoot {
+		t.Fatalf("logs dir = %q, want %q", paths.LogsDir, layout.LogsRoot)
+	}
+	if paths.CacheDir != layout.CacheRoot {
+		t.Fatalf("cache dir = %q, want %q", paths.CacheDir, layout.CacheRoot)
+	}
+	if cfg.FileWatcher.WatchHostDir != layout.LocalImportRoot {
+		t.Fatalf("watch host dir = %q, want %q", cfg.FileWatcher.WatchHostDir, layout.LocalImportRoot)
+	}
+	if strings.HasPrefix(paths.RuntimeRoot, repo+string(os.PathSeparator)) {
+		t.Fatalf("default runtime root must not be under repo: %q", paths.RuntimeRoot)
+	}
+}
+
+func TestRuntimePathLayoutForSupportedPlatforms(t *testing.T) {
+	home := filepath.Join("Users", "me")
+	tests := []struct {
+		name     string
+		goos     string
+		localApp string
+		wantData string
+		wantLog  string
+		wantImp  string
+	}{
+		{
+			name:     "darwin",
+			goos:     "darwin",
+			wantData: filepath.Join(home, "Library", "Application Support", "LazyMind"),
+			wantLog:  filepath.Join(home, "Library", "Logs", "LazyMind"),
+			wantImp:  filepath.Join(home, "Documents", "LazyMind"),
+		},
+		{
+			name:     "windows local app data",
+			goos:     "windows",
+			localApp: filepath.Join("Users", "me", "AppData", "Local"),
+			wantData: filepath.Join("Users", "me", "AppData", "Local", "LazyMind"),
+			wantLog:  filepath.Join("Users", "me", "AppData", "Local", "LazyMind", "Logs"),
+			wantImp:  filepath.Join(home, "Documents", "LazyMind"),
+		},
+		{
+			name:     "linux xdg",
+			goos:     "linux",
+			wantData: filepath.Join(home, ".local", "share", "LazyMind"),
+			wantLog:  filepath.Join(home, ".local", "state", "LazyMind", "logs"),
+			wantImp:  filepath.Join(home, "Documents", "LazyMind"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			layout := runtimePathLayoutForGOOS(tt.goos, home, tt.localApp, "", "", "")
+			if layout.DataRoot != tt.wantData {
+				t.Fatalf("data root = %q, want %q", layout.DataRoot, tt.wantData)
+			}
+			if layout.LogsRoot != tt.wantLog {
+				t.Fatalf("logs root = %q, want %q", layout.LogsRoot, tt.wantLog)
+			}
+			if layout.LocalImportRoot != tt.wantImp {
+				t.Fatalf("import root = %q, want %q", layout.LocalImportRoot, tt.wantImp)
+			}
+		})
+	}
+}
+
+func TestRuntimeConfigHonorsLegacyExplicitRuntimeRoot(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(repo, "local", "runtime")
+	t.Setenv(runtimeRootEnvVar, runtimeRoot)
+	t.Setenv("LAZYMIND_FILE_WATCHER_BASE_ROOT", "")
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if paths.RuntimeRoot != runtimeRoot {
+		t.Fatalf("runtime root = %q, want %q", paths.RuntimeRoot, runtimeRoot)
+	}
+	if paths.FileWatcherBaseRoot != filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher") {
+		t.Fatalf("file watcher base root = %q", paths.FileWatcherBaseRoot)
 	}
 }
 
@@ -99,6 +197,9 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	}
 	if paths.FileWatcherBaseRoot != filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher") {
 		t.Fatalf("file watcher base root = %q", paths.FileWatcherBaseRoot)
+	}
+	if !strings.HasSuffix(paths.LogsDir, filepath.Join("LazyMind")) {
+		t.Fatalf("desktop logs dir should use platform log root, got %q", paths.LogsDir)
 	}
 	if strings.HasPrefix(paths.FileWatcherBaseRoot, repo+string(os.PathSeparator)) {
 		t.Fatalf("desktop file watcher base root must not be under bundled repo root: %q", paths.FileWatcherBaseRoot)
@@ -324,7 +425,7 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
-	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local/runtime", "bin", "local-runtime-manager"))
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local", ".bin", "local-runtime-manager"))
 	var out strings.Builder
 	if err := manager.processCompose.WriteGeneratedConfig(&out, repo, paths, cfg, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
 		t.Fatalf("write generated config: %v", err)
@@ -351,11 +452,16 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 
 func TestProcessComposeGOBINIsUnderLocalRuntimeRoot(t *testing.T) {
 	repo := t.TempDir()
-	got, err := processComposeGOBIN(repo)
+	paths := RuntimePaths{
+		RepoRoot:          repo,
+		RuntimeRoot:       filepath.Join(t.TempDir(), "runtime"),
+		ProcessComposeBin: filepath.Join(t.TempDir(), "runtime", "bin", "process-compose"),
+	}
+	got, err := processComposeGOBIN(paths)
 	if err != nil {
 		t.Fatalf("process compose GOBIN: %v", err)
 	}
-	want := filepath.Join(repo, "local/runtime", "bin")
+	want := filepath.Dir(paths.ProcessComposeBin)
 	if got != want {
 		t.Fatalf("GOBIN = %q, want %q", got, want)
 	}
@@ -592,7 +698,7 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
-	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local/runtime", "bin", "local-runtime-manager"))
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local", ".bin", "local-runtime-manager"))
 	manager.probeAPI = func(port int, timeout time.Duration) bool { return false }
 	out, err := manager.Status(context.Background(), cfg, paths, true)
 	if err != nil {
@@ -618,7 +724,7 @@ func TestDerivedToolInstallPathsStayUnderLocalRuntimeRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
-	for _, path := range []string{paths.BinDir, paths.GeneratedDir, paths.StateDir, paths.LogsDir, paths.RunDir, paths.ConfigDir, paths.AuthServiceVenvDir, paths.AlgorithmVenv, paths.FrontendNodeModules, paths.MilvusLiteDBPath, paths.FileWatcherBaseRoot} {
+	for _, path := range []string{paths.BinDir, paths.GeneratedDir, paths.StateDir, paths.RunDir, paths.ConfigDir, paths.AuthServiceVenvDir, paths.AlgorithmVenv, paths.FrontendNodeModules, paths.MilvusLiteDBPath, paths.FileWatcherBaseRoot} {
 		if !strings.HasPrefix(path, paths.RuntimeRoot+string(os.PathSeparator)) {
 			t.Fatalf("%s is outside runtime root %s", path, paths.RuntimeRoot)
 		}

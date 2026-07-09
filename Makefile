@@ -20,9 +20,8 @@ export DOCKER_BUILDKIT ?= 1
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 GO ?= go
-LOCAL_RUNTIME_MANAGER_BIN ?= $(CURDIR)/local/runtime/bin/local-runtime-manager
+LOCAL_RUNTIME_MANAGER_BIN ?= $(CURDIR)/local/.bin/local-runtime-manager
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
-export LAZYMIND_LOCAL_MILVUS_DB_PATH ?= $(CURDIR)/local/runtime/data/stores/milvus/lazymind.db
 comma := ,
 
 # ---------------------------------------------------------------------------
@@ -71,9 +70,8 @@ _COMPOSE := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT
 # file-watcher runs in compose by default. Host mode is kept for local
 # debugging and disables the compose file-watcher service on make up.
 # Keep its writable roots under the compose volume root by default.
-# LAZYMIND_FILE_WATCHER_BASE_ROOT is exported as a compose-friendly path;
-# internal Makefile bookkeeping uses the resolved absolute path below.
-export LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./local/runtime/data/stores/scan/file-watcher
+# Do not export this default for local runtime: runtime-manager owns local paths.
+LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./data/scan
 LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS := $(abspath $(LAZYMIND_FILE_WATCHER_BASE_ROOT))
 export LAZYMIND_FILE_WATCHER_MODE ?= container
 
@@ -81,19 +79,19 @@ export LAZYMIND_FILE_WATCHER_MODE ?= container
 # Override in .env or on the command line if needed.
 ifeq ($(OS),Windows_NT)
   export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= windows
-  export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= D:/
+  export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(USERPROFILE)/Documents/LazyMind
 else
   _UNAME_S := $(shell uname -s 2>/dev/null)
   _UNAME_R := $(shell uname -r 2>/dev/null | tr '[:upper:]' '[:lower:]')
   ifeq ($(_UNAME_S),Darwin)
     export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
-    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)
+    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)/Documents/LazyMind
   else ifneq (,$(findstring microsoft,$(_UNAME_R))$(findstring wsl,$(_UNAME_R)))
     export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
-    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= /mnt
+    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)/Documents/LazyMind
   else
     export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
-    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)
+    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)/Documents/LazyMind
   endif
 endif
 
@@ -197,7 +195,7 @@ help:
 	@echo "  make desktop-cache-clean - Remove repo-local Desktop caches, if any"
 	@echo "  make desktop-clean - Remove all Desktop generated outputs"
 	@echo "  make down-local - Stop local LazyMind runtime"
-	@echo "  make reset-local - Stop local runtime and remove local/runtime"
+	@echo "  make reset-local - Stop local runtime and clear configured local state"
 	@echo "  make down       - Stop Cloud/Kong compose services"
 	@echo "                    Use SERVICES=svc1,svc2 to stop specific services only"
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
@@ -488,13 +486,11 @@ down-local:
 
 reset-local:
 	@if [ -x "$(LOCAL_RUNTIME_MANAGER_BIN)" ]; then \
-		"$(LOCAL_RUNTIME_MANAGER_BIN)" down || \
-			echo "⚠️  Local Runtime manager down timed out or failed; continuing reset"; \
+		"$(LOCAL_RUNTIME_MANAGER_BIN)" reset --scope all || \
+			echo "⚠️  Local Runtime manager reset timed out or failed"; \
 	else \
-		echo "ℹ️  No Local Runtime manager found; skipping stop"; \
+		echo "ℹ️  No Local Runtime manager found; skipping reset"; \
 	fi
-	@echo "🧹 Removing local/runtime runtime directory..."
-	@rm -rf local/runtime
 	@echo "✅ Local runtime reset. Run 'make up-build-local' to rebuild it."
 
 clear:

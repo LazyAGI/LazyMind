@@ -130,6 +130,7 @@ prune_python_runtime "${RUNTIME_ROOT}/python"
 echo "==> Staging runtime app files"
 rsync -a --delete \
   --exclude ".git" \
+  --exclude "local/.bin" \
   --exclude "local/runtime" \
   --exclude "desktop/build" \
   --exclude "desktop/cache" \
