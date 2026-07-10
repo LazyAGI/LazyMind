@@ -5,6 +5,7 @@ import { AgentAppsAuth } from "@/components/auth";
 import i18n from "@/i18n";
 import { getApiBaseUrl } from "@/runtime/apiBase";
 import {
+  ensureLocalSession,
   isLocalSessionEnabled,
   restoreLocalSessionAndGetToken,
 } from "@/runtime/localSession";
@@ -335,7 +336,12 @@ export const handleError = async (error: AxiosError) => {
 };
 
 axiosInstance.interceptors.request.use(
-  (config) => applyOptionalAuthHeader(config),
+  async (config) => {
+    if (isLocalSessionEnabled()) {
+      await ensureLocalSession();
+    }
+    return applyOptionalAuthHeader(config);
+  },
   handleError,
 );
 axiosInstance.interceptors.response.use((response) => response, handleError);
