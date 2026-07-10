@@ -172,3 +172,36 @@ def test_searchbase_tool_rendering_supports_zh_and_content_methods():
     }, language='zh', preview_value=preview_value)
 
     assert '已成功读取 **Sciverse** 搜索结果 **论文标题/https://example.test/paper** 的内容。' in result_text
+
+
+def test_github_skill_install_tool_rendering_uses_url_and_installed_key():
+    github_url = 'https://github.com/owner/repo/tree/main/skills/example'
+    call = {
+        'id': 'call-install',
+        'function': {
+            'name': 'SkillEditorToolGroup_install_skill',
+            'arguments': {'github_url': github_url},
+        },
+    }
+
+    call_text, preview_value = _tool_call_frame_text(call)
+    zh_call_text, _ = _tool_call_frame_text(call, language='zh')
+
+    assert preview_value == github_url
+    assert f'Installing reusable skill from **{github_url}** now.' in call_text
+    assert f'正在从 **{github_url}** 安装技能。' in zh_call_text
+
+    result = {
+        'id': 'call-install',
+        'name': 'SkillEditorToolGroup_install_skill',
+        'result': {
+            'success': True,
+            'tool': 'install_skill',
+            'result': {'status': 'installed', 'skill_key': 'external/example'},
+        },
+    }
+    result_text = _tool_result_frame_text(result, preview_value=preview_value)
+    zh_result_text = _tool_result_frame_text(result, language='zh', preview_value=preview_value)
+
+    assert 'Skill **external/example** was installed successfully.' in result_text
+    assert '已成功安装 **external/example** 技能。' in zh_result_text

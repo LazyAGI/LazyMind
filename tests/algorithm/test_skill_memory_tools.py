@@ -1,4 +1,5 @@
 import importlib
+from types import SimpleNamespace
 
 memory_mod = importlib.import_module('lazymind.chat.engine.tools.memory_editor')
 memory_reader_mod = importlib.import_module('lazymind.chat.engine.tools.memory_reader')
@@ -78,6 +79,41 @@ class FakeSkillStore:
         self.calls.append(('remove', category, name))
         self.packages.pop((category, name), None)
         return {'action': 'remove'}
+
+    def package_exists(self, category, name):
+        self.calls.append(('package_exists', category, name))
+        return (category, name) in self.packages
+
+    def list_packages(self):
+        self.calls.append(('list_packages',))
+        return [
+            {'category': category, 'name': name}
+            for category, name in sorted(self.packages)
+        ]
+
+    def read_skill_md(self, category, name):
+        self.calls.append(('read_skill_md', category, name))
+        return self.packages[(category, name)]['SKILL.md']
+
+    def install_package(self, category, name, files):
+        self.calls.append(('install_package', category, name, files))
+        self.packages[(category, name)] = dict(files)
+        return {'action': 'install'}
+
+
+class FakeGitHubSkillInstaller:
+    def __init__(self, package, existing_sources=None):
+        self.package = package
+        self.existing_sources = dict(existing_sources or {})
+        self.calls = []
+
+    def prepare(self, github_url, category=None):
+        self.calls.append(('prepare', github_url, category))
+        return self.package
+
+    def resolve_source(self, github_url):
+        self.calls.append(('resolve_source', github_url))
+        return self.existing_sources[github_url]
 
 
 def test_memory_editor_operation_writes_remote_fs(monkeypatch):
@@ -367,6 +403,140 @@ def test_skill_editor_create_file_tools_remove_core_paths():
              'scripts/check.py': 'print("ok")\n',
          }),
     ]
+
+
+def test_skill_editor_installs_prepared_github_package_disabled():
+    source = SimpleNamespace(
+        identity=('owner/repo', 'skills/example'),
+        canonical_url='https://github.com/owner/repo/tree/main/skills/example',
+    )
+    package = SimpleNamespace(
+        source=source,
+        name='example',
+        category='external',
+        files={'SKILL.md': b'normalized', 'assets/logo.bin': b'\x00\x01'},
+    )
+    store = FakeSkillStore()
+    installer = FakeGitHubSkillInstaller(package)
+
+    result = skill_editor_mod.SkillEditorToolGroup(
+        store=store,
+        installer=installer,
+    ).install_skill('https://github.com/owner/repo/tree/main/skills/example')
+
+    assert result == {
+        'success': True,
+        'tool': 'install_skill',
+        'result': {
+            'status': 'installed',
+            'skill_key': 'external/example',
+            'github_url': 'https://github.com/owner/repo/tree/main/skills/example',
+            'enabled': False,
+            'message': (
+                'Skill installed. Go to Skill Management > My Skills to review and enable it.'
+            ),
+        },
+    }
+    assert installer.calls == [
+        ('prepare', 'https://github.com/owner/repo/tree/main/skills/example', None),
+    ]
+    assert ('install_package', 'external', 'example', package.files) in store.calls
+
+
+def test_skill_editor_rejects_existing_key_before_scanning_sources():
+    source = SimpleNamespace(identity=('owner/repo', 'skills/example'), canonical_url='canonical')
+    package = SimpleNamespace(
+        source=source,
+        name='example',
+        category='external',
+        files={'SKILL.md': b'normalized'},
+    )
+    store = FakeSkillStore({
+        ('external', 'example'): {'SKILL.md': '---\nname: example\n---\n'},
+    })
+
+    result = skill_editor_mod.SkillEditorToolGroup(
+        store=store,
+        installer=FakeGitHubSkillInstaller(package),
+    ).install_skill('https://github.com/owner/repo/tree/main/skills/example')
+
+    assert result['success'] is False
+    assert result['error']['reason'] == "Skill 'external/example' already exists."
+    assert ('list_packages',) not in store.calls
+    assert not any(call[0] == 'install_package' for call in store.calls)
+
+
+def test_skill_editor_rejects_same_source_at_different_ref_and_key():
+    existing_url = 'https://github.com/Owner/Repo/tree/v1/skills/example'
+    source = SimpleNamespace(
+        identity=('owner/repo', 'skills/example'),
+        canonical_url='https://github.com/owner/repo/tree/main/skills/example',
+    )
+    package = SimpleNamespace(
+        source=source,
+        name='renamed',
+        category='external',
+        files={'SKILL.md': b'normalized'},
+    )
+    store = FakeSkillStore({
+        ('research', 'existing'): {
+            'SKILL.md': (
+                '---\nname: existing\ndescription: Existing.\n'
+                f'github_url: {existing_url}\n---\nBody\n'
+            ),
+        },
+    })
+    installer = FakeGitHubSkillInstaller(
+        package,
+        existing_sources={existing_url: SimpleNamespace(identity=source.identity)},
+    )
+
+    result = skill_editor_mod.SkillEditorToolGroup(
+        store=store,
+        installer=installer,
+    ).install_skill('https://github.com/owner/repo/tree/main/skills/example')
+
+    assert result['success'] is False
+    assert result['error']['reason'] == (
+        "GitHub source is already installed as 'research/existing'."
+    )
+    assert not any(call[0] == 'install_package' for call in store.calls)
+
+
+def test_skill_editor_allows_different_skill_path_from_same_repository():
+    existing_url = 'https://github.com/owner/repo/tree/main/skills/other'
+    source = SimpleNamespace(
+        identity=('owner/repo', 'skills/example'),
+        canonical_url='https://github.com/owner/repo/tree/main/skills/example',
+    )
+    package = SimpleNamespace(
+        source=source,
+        name='example',
+        category='external',
+        files={'SKILL.md': b'normalized'},
+    )
+    store = FakeSkillStore({
+        ('external', 'other'): {
+            'SKILL.md': (
+                '---\nname: other\ndescription: Other.\n'
+                f'github_url: {existing_url}\n---\nBody\n'
+            ),
+        },
+    })
+    installer = FakeGitHubSkillInstaller(
+        package,
+        existing_sources={
+            existing_url: SimpleNamespace(identity=('owner/repo', 'skills/other')),
+        },
+    )
+
+    result = skill_editor_mod.SkillEditorToolGroup(
+        store=store,
+        installer=installer,
+    ).install_skill('https://github.com/owner/repo/tree/main/skills/example')
+
+    assert result['success'] is True
+    assert ('install_package', 'external', 'example', package.files) in store.calls
 
 
 def test_skill_editor_renames_package():

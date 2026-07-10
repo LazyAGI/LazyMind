@@ -3,7 +3,9 @@ from typing import Any, Callable, Dict, Optional
 import lazyllm
 
 from lazymind.chat.engine.tools.infra import (
+    GitHubSkillInstaller,
     normalize_skill_category,
+    parse_skill_frontmatter,
     resolve_skill_editor_identity,
     rewrite_skill_identity,
     SkillRemoteStore,
@@ -39,6 +41,7 @@ class SkillEditorToolGroup:
 
     __public_apis__ = [
         'create_skill',
+        'install_skill',
         'edit_file',
         'patch_file',
         'create_file',
@@ -47,8 +50,76 @@ class SkillEditorToolGroup:
         'remove_skill',
     ]
 
-    def __init__(self, store: Optional[SkillRemoteStore] = None):
+    def __init__(
+        self,
+        store: Optional[SkillRemoteStore] = None,
+        installer: Optional[GitHubSkillInstaller] = None,
+    ):
         self.store = store or SkillRemoteStore()
+        self.installer = installer or GitHubSkillInstaller()
+
+    def install_skill(self, github_url: str, category: Optional[str] = None) -> Dict[str, Any]:
+        """Install one public GitHub skill package as a disabled reusable skill.
+
+        Call this only when the user explicitly asks to install the linked
+        skill. Do not call it when the user only asks to inspect, explain, or
+        analyze a GitHub link. Installation runs immediately without a second
+        confirmation, but the installed skill remains disabled until the user
+        reviews and enables it in Skill Management.
+
+        Args:
+            github_url: Public GitHub repository root or /tree/<ref>/<skill-path> URL.
+            category: Destination skill category. Defaults to "external".
+        """
+        lazyllm.LOG.info(f'[install_skill] called github_url={github_url!r} category={category!r}')
+        try:
+            package = self.installer.prepare(github_url, category)
+        except Exception as exc:
+            return tool_error('install_skill', str(exc))
+
+        skill_key = f'{package.category}/{package.name}'
+        try:
+            if self.store.package_exists(package.category, package.name):
+                return tool_error('install_skill', f'Skill {skill_key!r} already exists.')
+            duplicate_key = self._find_installed_github_source(package.source.identity)
+            if duplicate_key:
+                return tool_error(
+                    'install_skill',
+                    f'GitHub source is already installed as {duplicate_key!r}.',
+                )
+            self.store.install_package(package.category, package.name, package.files)
+        except Exception as exc:
+            return _skill_editor_error('install_skill', 'Failed to install skill package', exc)
+
+        return tool_success('install_skill', {
+            'status': 'installed',
+            'skill_key': skill_key,
+            'github_url': package.source.canonical_url,
+            'enabled': False,
+            'message': (
+                'Skill installed. Go to Skill Management > My Skills to review and enable it.'
+            ),
+        })
+
+    def _find_installed_github_source(self, source_identity: tuple[str, str]) -> Optional[str]:
+        for package in self.store.list_packages():
+            category = package['category']
+            name = package['name']
+            try:
+                frontmatter, _ = parse_skill_frontmatter(self.store.read_skill_md(category, name))
+                github_url = str(frontmatter.get('github_url') or '').strip()
+                if not github_url:
+                    continue
+                existing_source = self.installer.resolve_source(github_url)
+            except ValueError as exc:
+                lazyllm.LOG.warning(
+                    '[install_skill] skip invalid existing github source '
+                    f'skill={category}/{name} error={exc}'
+                )
+                continue
+            if existing_source.identity == source_identity:
+                return f'{category}/{name}'
+        return None
 
     def create_skill(self, name: str, category: Optional[str] = None, *, content: str) -> Dict[str, Any]:
         """Create a new reusable skill from full SKILL.md content.

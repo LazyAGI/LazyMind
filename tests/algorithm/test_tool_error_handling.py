@@ -42,19 +42,25 @@ def test_kb_keyword_search_maps_target_by_type(monkeypatch):
 def test_skill_editor_tool_group_exposes_action_specific_schemas():
     group = skill_editor_mod.SkillEditorToolGroup()
     create_tool = MethodModuleTool(group, 'create_skill')
+    install_tool = MethodModuleTool(group, 'install_skill')
     patch_tool = MethodModuleTool(group, 'patch_file')
 
     assert create_tool.name == 'SkillEditorToolGroup_create_skill'
+    assert install_tool.name == 'SkillEditorToolGroup_install_skill'
     assert patch_tool.name == 'SkillEditorToolGroup_patch_file'
     assert 'modify_skill' not in group.__public_apis__
     create_fields = set(create_tool.params_schema.model_fields)
+    install_fields = set(install_tool.params_schema.model_fields)
     patch_fields = set(patch_tool.params_schema.model_fields)
     create_required = set(create_tool.params_schema.model_json_schema().get('required', []))
+    install_required = set(install_tool.params_schema.model_json_schema().get('required', []))
     patch_required = set(patch_tool.params_schema.model_json_schema().get('required', []))
 
     assert create_fields == {'name', 'category', 'content'}
+    assert install_fields == {'github_url', 'category'}
     assert patch_fields == {'name', 'category', 'path', 'old_text', 'new_text', 'replace_all', 'reason'}
     assert create_required == {'name', 'content'}
+    assert install_required == {'github_url'}
     assert {'name', 'path', 'old_text', 'new_text'}.issubset(patch_required)
     assert 'category' not in patch_required
     assert patch_tool.validate_parameters({

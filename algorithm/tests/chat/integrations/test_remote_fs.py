@@ -8,6 +8,7 @@ import lazyllm
 import pytest
 import requests
 
+from lazymind.chat.engine.tools.infra.skill_remote_store import SkillRemoteStore
 from lazymind.chat.integrations.remote_fs import RemoteFS
 
 
@@ -137,6 +138,50 @@ def test_write_and_write_file_send_raw_body_with_content_type(captured_requests)
     assert calls[1]['params'] == remote_params(path='skills/coding/pkg/assets/logo.png')
     assert calls[1]['data'] == b'\x89PNG'
     assert calls[1]['headers'] == {'Content-Type': 'image/png'}
+
+
+def test_skill_store_install_sends_binary_files_then_skill_md(captured_requests):
+    calls, responses = captured_requests
+    responses.extend([
+        FakeResponse({'ok': True}),
+        FakeResponse({'ok': True}),
+        FakeResponse({'ok': True}),
+    ])
+    store = SkillRemoteStore(fs=RemoteFS(base_url='http://core'))
+
+    store.install_package('external', 'example', {
+        'SKILL.md': b'---\nname: example\n---\nBody\n',
+        'assets/logo.png': b'\x89PNG',
+    })
+
+    assert [call['url'] for call in calls] == [
+        'http://core/remote-fs/dir',
+        'http://core/remote-fs/content',
+        'http://core/remote-fs/content',
+    ]
+    assert calls[1]['data'] == b'\x89PNG'
+    assert calls[1]['headers'] == {'Content-Type': 'image/png'}
+    assert calls[2]['data'] == b'---\nname: example\n---\nBody\n'
+    assert calls[2]['headers'] == {'Content-Type': 'text/markdown; charset=utf-8'}
+
+
+def test_skill_store_install_trashes_package_after_remote_write_failure(captured_requests):
+    calls, responses = captured_requests
+    responses.extend([
+        FakeResponse({'ok': True}),
+        FakeResponse({'message': 'write failed'}, status_code=500),
+        FakeResponse({'ok': True}),
+    ])
+    store = SkillRemoteStore(fs=RemoteFS(base_url='http://core'))
+
+    with pytest.raises(RuntimeError, match='write failed'):
+        store.install_package('external', 'example', {
+            'SKILL.md': b'---\nname: example\n---\nBody\n',
+            'assets/logo.png': b'\x89PNG',
+        })
+
+    assert calls[-1]['url'] == 'http://core/remote-fs/trash'
+    assert calls[-1]['json'] == {'path': 'skills/external/example'}
 
 
 def test_open_write_uses_text_content_type_for_text_mode(captured_requests):
