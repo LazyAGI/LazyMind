@@ -116,9 +116,10 @@ type PluginDraft struct {
 	CreatedAt time.Time `gorm:"column:created_at;not null"`
 	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
 	// Split content columns (migration 20260706120000).
-	// generate_status: '' | 'generating' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
+	// generate_status: '' | 'generating' | 'brief_done' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
 	//   ''             — never triggered AI generation
-	//   'generating'   — Phase 1 in progress
+	//   'generating'   — Phase 0 in progress (design brief)
+	//   'brief_done'   — Phase 0 complete; Phase 1 running
 	//   'skeleton_done' — Phase 1 complete (plugin.yaml available); Phase 2 running
 	//   'state_done'   — Phase 2 complete (state.yml available); Phase 3 running
 	//   'done'         — All phases complete
@@ -134,11 +135,27 @@ type PluginDraft struct {
 	GenerateStatus     string `gorm:"column:generate_status;type:varchar(16);not null;default:''"`
 	// GenerateError stores the last error message when GenerateStatus = 'failed' (migration 20260707120000).
 	GenerateError string `gorm:"column:generate_error;type:text;not null;default:''"`
+	// GenerateWarning stores non-fatal warnings produced during generation (migration 20260709120000).
+	// Non-empty when GenerateStatus = 'done' but some fields were incomplete after retries.
+	GenerateWarning string `gorm:"column:generate_warning;type:text;not null;default:''"`
 	// Version is an optimistic-lock counter. SavePluginDraft increments it on every
 	// successful write to plugin_yaml_content or state_yaml_content and rejects saves
 	// that arrive with a stale version (returns 409 Conflict).
 	// AI generate_job writes bypass the version check (it only writes its own fields).
 	Version int `gorm:"column:version;type:int;not null;default:1"`
+	// Source tracking (migration 20260709130000).
+	// SourceType: '' | 'ai' | 'skill' | 'blank'
+	SourceType      string `gorm:"column:source_type;type:varchar(16);not null;default:''"`
+	SourceSkillID   string `gorm:"column:source_skill_id;type:varchar(36);not null;default:''"`
+	SourceSkillName string `gorm:"column:source_skill_name;type:varchar(255);not null;default:''"`
+	// DesignBriefContent stores the Phase 0 design brief Markdown (migration 20260709140000).
+	// Empty for old drafts that were generated before Phase 0 was introduced.
+	DesignBriefContent string `gorm:"column:design_brief_content;type:text;not null;default:''"`
+	// PluginID mirrors the `id:` field inside PluginYAMLContent (migration 20260709150000).
+	// Kept in sync on every save that touches PluginYAMLContent.
+	// A partial unique index (created_by, plugin_id) WHERE plugin_id != '' enforces
+	// per-user uniqueness while allowing legacy empty-string rows to coexist.
+	PluginID string `gorm:"column:plugin_id;type:varchar(255);not null;default:''"`
 }
 
 func (PluginDraft) TableName() string { return "plugin_drafts" }
