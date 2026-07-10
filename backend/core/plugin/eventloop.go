@@ -30,6 +30,11 @@ type chatStatusCacheEntry struct {
 // PluginStepParams are the task_created.params fields for plugin_step agent type.
 type PluginStepParams struct {
 	PluginID    string `json:"plugin_id"`
+	PluginRef   string `json:"plugin_ref,omitempty"`
+	RevisionID  string `json:"revision_id,omitempty"`
+	RevisionNo  int64  `json:"revision_no,omitempty"`
+	TreeHash    string `json:"tree_hash,omitempty"`
+	RemoteRoot  string `json:"remote_root,omitempty"`
 	StepID      string `json:"step_id"`
 	SessionID   string `json:"session_id"`
 	UserInput   string `json:"user_input"`
@@ -188,9 +193,10 @@ func HandlePluginStepCreated(
 		}
 		psID := "ps_" + common.GenerateID()
 		_, sErr := CreateSession(ctx, db, CreateSessionInput{
-			SessionID:        psID,
-			ConversationID:   convID,
-			PluginID:         pluginID,
+			SessionID:      psID,
+			ConversationID: convID,
+			PluginID:       pluginID,
+			PluginRef:      params.PluginRef, PluginRevisionID: params.RevisionID, PluginRevisionNo: params.RevisionNo, PluginTreeHash: params.TreeHash, PluginRemoteRoot: params.RemoteRoot,
 			TriggerHistoryID: historyID,
 			CurrentStepID:    stepID,
 			CreateUserID:     userID,

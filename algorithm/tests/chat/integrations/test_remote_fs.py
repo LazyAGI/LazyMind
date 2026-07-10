@@ -161,6 +161,19 @@ def test_move_calls_remote_fs_move(captured_requests):
 
     assert calls[0]['method'] == 'POST'
     assert calls[0]['url'] == 'http://core/remote-fs/move'
+
+
+def test_revision_id_is_forwarded_for_plugin_reads(captured_requests):
+    calls, responses = captured_requests
+    responses.extend([
+        FakeResponse({'items': []}),
+        FakeResponse({'exists': True}),
+    ])
+    fs = RemoteFS(base_url='http://core')
+    fs.ls('remote://plugins/u_abc/my-plugin', revision_id='rev-3')
+    assert fs.exists('remote://plugins/u_abc/my-plugin/plugin.yaml', revision_id='rev-3')
+    assert calls[0]['params']['revision_id'] == 'rev-3'
+    assert calls[1]['params']['revision_id'] == 'rev-3'
     assert calls[0]['params'] == remote_params()
     assert calls[0]['json'] == {
         'from': 'skills/coding/pkg/references/old.md',

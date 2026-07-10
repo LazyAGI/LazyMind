@@ -15,8 +15,12 @@ Loaded plugins are cached at import time (startup). Hot-reload is not supported.
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import logging
+import os
+import shutil
 import sys
+import tempfile
 import types
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -32,6 +36,49 @@ _PLUGINS_DIR = Path(_cfg['plugins_dir'])
 
 # Registry: {plugin_id: PluginSpec}
 _registry: Dict[str, 'PluginSpec'] = {}
+_runtime_registry: Dict[tuple[str, str, str], 'PluginSpec'] = {}
+
+
+def resolve_remote_plugin(entry: Dict[str, Any]) -> tuple[str, 'PluginSpec']:
+    """Materialize and cache one immutable RemoteFS plugin revision."""
+    plugin_ref = str(entry.get('plugin_ref') or '').strip()
+    revision_id = str(entry.get('revision_id') or '').strip()
+    tree_hash = str(entry.get('tree_hash') or '').removeprefix('sha256:').strip()
+    remote_root = str(entry.get('remote_root') or '').strip()
+    if not all((plugin_ref, revision_id, tree_hash, remote_root)):
+        raise ValueError('plugin catalog entry is missing runtime identity fields')
+    key = (plugin_ref, revision_id, tree_hash)
+    if key in _runtime_registry:
+        spec = _runtime_registry[key]
+        return spec.plugin_id, spec
+    runtime_id = f'user_{hashlib.sha256(plugin_ref.encode()).hexdigest()[:12]}_{entry.get("plugin_id", "plugin")}'
+    cache_root = Path(os.getenv('LAZYMIND_PLUGIN_RUNTIME_CACHE', tempfile.gettempdir())) / 'lazymind-plugin-runtime'
+    cache_root.mkdir(parents=True, exist_ok=True)
+    final_dir = cache_root / hashlib.sha256(plugin_ref.encode()).hexdigest()[:16] / revision_id
+    if not final_dir.exists():
+        tmp_dir = Path(tempfile.mkdtemp(prefix='plugin-', dir=str(cache_root)))
+        try:
+            from lazymind.chat.integrations.remote_fs import RemoteFS
+            RemoteFS().materialize_dir(remote_root, str(tmp_dir), revision_id=revision_id)
+            rows = []
+            for file_path in sorted(p for p in tmp_dir.rglob('*') if p.is_file()):
+                rel = file_path.relative_to(tmp_dir).as_posix()
+                rows.append(f'{rel}\0file\0{hashlib.sha256(file_path.read_bytes()).hexdigest()}')
+            actual = hashlib.sha256('\n'.join(rows).encode()).hexdigest()
+            if actual != tree_hash:
+                raise ValueError(f'plugin tree hash mismatch: expected {tree_hash}, got {actual}')
+            final_dir.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                tmp_dir.rename(final_dir)
+            except FileExistsError:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+    spec = PluginSpec(plugin_id=runtime_id, plugin_dir=final_dir)
+    _runtime_registry[key] = spec
+    _registry[runtime_id] = spec
+    return runtime_id, spec
 
 
 def _join_conditions(c1: str, c2: str) -> str:

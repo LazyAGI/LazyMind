@@ -19,6 +19,7 @@ remember to list them explicitly.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import uuid
@@ -332,6 +333,9 @@ def _trigger_plugin_step(
         'user_input': user_input,
         'is_cold_start': is_cold_start,
     }
+    for runtime_key in ('plugin_ref', 'revision_id', 'revision_no', 'tree_hash', 'remote_root'):
+        if cfg.get(runtime_key) not in (None, ''):
+            params[runtime_key] = cfg[runtime_key]
     chat_session_id = str(cfg.get('session_id') or '').strip()
     if chat_session_id:
         params['chat_session_id'] = chat_session_id
@@ -493,26 +497,55 @@ def _build_step_choices_doc(
     return '\n'.join(lines)
 
 
-def build_cold_start_tools() -> List[Any]:
+def build_cold_start_tools(
+    plugin_catalog: Optional[List[Dict[str, Any]]] = None,
+    disabled_builtin_plugins: Optional[List[str]] = None,
+) -> List[Any]:
     """Build one trigger_<plugin_id> callable per loaded plugin."""
     tools = []
-    for spec in (plugin_loader._registry or {}).values():
-        pid = spec.plugin_id
-        name = spec.yaml.get('name', pid)
-        desc = spec.yaml.get('description', f'Trigger the {name} plugin.')
-        # when_to_use is the primary trigger hint; fall back to a generic phrase.
-        when_to_use = spec.yaml.get('when_to_use', '').strip()
-        sm = spec.state_machine
-        first_steps = sm.get_reachable_steps('__start__')
+    disabled = set(disabled_builtin_plugins or [])
+    candidates = [
+        (spec, None)
+        for spec in (plugin_loader._registry or {}).values()
+        if not spec.plugin_id.startswith('user_') and spec.plugin_id not in disabled
+    ]
+    candidates.extend((None, entry) for entry in (plugin_catalog or []))
+    for spec, catalog_entry in candidates:
+        if catalog_entry is not None:
+            pid = str(catalog_entry.get('plugin_id') or 'plugin')
+            name = str(catalog_entry.get('name') or pid)
+            desc = str(catalog_entry.get('description') or f'Trigger the {name} plugin.')
+            when_to_use = str(catalog_entry.get('when_to_use') or '').strip()
+            first_steps: List[str] = []
+            plugin_ref = str(catalog_entry.get('plugin_ref', pid)).encode()
+            ref_digest = hashlib.sha256(plugin_ref).hexdigest()[:8]
+            public_tool_name = f'trigger_{pid.replace("-", "_")}_{ref_digest}'
+        else:
+            assert spec is not None
+            pid = spec.plugin_id
+            name = spec.yaml.get('name', pid)
+            desc = spec.yaml.get('description', f'Trigger the {name} plugin.')
+            when_to_use = spec.yaml.get('when_to_use', '').strip()
+            first_steps = spec.state_machine.get_reachable_steps('__start__')
+            public_tool_name = f'trigger_{pid.replace("-", "_")}'
 
-        def _make_trigger(plugin_id: str, first: List[str], desc: str, when_to_use: str):
-            tool_name = f'trigger_{plugin_id.replace("-", "_")}'
+        def _make_trigger(plugin_id: str, first: List[str], desc: str, when_to_use: str, entry=None, tool_name=''):
 
             def _trigger(user_input: str) -> str:
-                step_id = first[0] if first else ''
+                resolved_plugin_id = plugin_id
+                resolved_first = first
+                if entry is not None:
+                    resolved_plugin_id, runtime_spec = plugin_loader.resolve_remote_plugin(entry)
+                    resolved_first = runtime_spec.state_machine.get_reachable_steps('__start__')
+                    cfg = _agentic_config()
+                    cfg.update({
+                        key: entry.get(key)
+                        for key in ('plugin_ref', 'revision_id', 'revision_no', 'tree_hash', 'remote_root')
+                    })
+                step_id = resolved_first[0] if resolved_first else ''
                 if not step_id:
-                    raise ValueError(f'plugin {plugin_id!r} has no reachable first step.')
-                return _trigger_plugin_step(plugin_id, step_id, user_input, is_cold_start=True)
+                    raise ValueError(f'plugin {resolved_plugin_id!r} has no reachable first step.')
+                return _trigger_plugin_step(resolved_plugin_id, step_id, user_input, is_cold_start=True)
 
             # Set __name__ so the framework guard and logging use the public tool name.
             _trigger.__name__ = tool_name
@@ -536,7 +569,7 @@ def build_cold_start_tools() -> List[Any]:
             )
             return _trigger
 
-        tools.append(_make_trigger(pid, first_steps, desc, when_to_use))
+        tools.append(_make_trigger(pid, first_steps, desc, when_to_use, catalog_entry, public_tool_name))
     return tools
 
 
@@ -1193,6 +1226,8 @@ def _build_chat_agent_task_context(conversation_id: str) -> str:
 def resolve_plugin_injection(
     plugin_context: Optional[Dict[str, Any]],
     conversation_id: str = '',
+    plugin_catalog: Optional[List[Dict[str, Any]]] = None,
+    disabled_builtin_plugins: Optional[List[str]] = None,
 ) -> tuple:
     """Resolve plugin tools, system prompt, stop-tools and agentic_config patches.
 
@@ -1240,11 +1275,22 @@ def resolve_plugin_injection(
         p_current_step = plugin_context.get('current_step', '')
 
         if p_session_id and p_plugin_id:
+            if plugin_context.get('plugin_ref') and not plugin_loader.get_plugin(p_plugin_id):
+                _, restored_spec = plugin_loader.resolve_remote_plugin({
+                    **plugin_context,
+                    'plugin_id': p_plugin_id,
+                })
+                plugin_loader._registry[p_plugin_id] = restored_spec
             agentic_config_patch = {
                 'plugin_id': p_plugin_id,
                 'plugin_session_id': p_session_id,
                 'plugin_step': p_current_step,
                 'plugin_mode': plugin_mode,
+                'plugin_ref': plugin_context.get('plugin_ref'),
+                'revision_id': plugin_context.get('revision_id'),
+                'revision_no': plugin_context.get('revision_no'),
+                'tree_hash': plugin_context.get('tree_hash'),
+                'remote_root': plugin_context.get('remote_root'),
                 'focused_tab': plugin_context.get('focused_tab'),
                 'focused_sort_order': plugin_context.get('focused_sort_order'),
             }
@@ -1322,30 +1368,49 @@ def resolve_plugin_injection(
             )
         else:
             # Cold start: no active session yet
-            plugin_tools = build_cold_start_tools()
+            plugin_tools = build_cold_start_tools(plugin_catalog, disabled_builtin_plugins)
             plugin_stop_tools = [t.__name__ for t in plugin_tools]
             if plugin_tools:
                 scenarios = [
                     plugin_loader.get_plugin_intro(spec.plugin_id)
                     for spec in (plugin_loader._registry or {}).values()
+                    if (
+                        spec.plugin_id not in set(disabled_builtin_plugins or [])
+                        and not spec.plugin_id.startswith('user_')
+                    )
                 ]
+                scenarios.extend(_catalog_intro(entry) for entry in (plugin_catalog or []))
                 plugin_system_prompt = (
                     _COLD_START_PLUGIN_PROMPT
                 ) + '\n\n---\n\n'.join(s for s in scenarios if s)
     else:
         # No plugin_context provided: still inject cold-start triggers
-        plugin_tools = build_cold_start_tools()
+        plugin_tools = build_cold_start_tools(plugin_catalog, disabled_builtin_plugins)
         plugin_stop_tools = [t.__name__ for t in plugin_tools]
         if plugin_tools:
             scenarios = [
                 plugin_loader.get_plugin_intro(spec.plugin_id)
                 for spec in (plugin_loader._registry or {}).values()
+                if (
+                    spec.plugin_id not in set(disabled_builtin_plugins or [])
+                    and not spec.plugin_id.startswith('user_')
+                )
             ]
+            scenarios.extend(_catalog_intro(entry) for entry in (plugin_catalog or []))
             plugin_system_prompt = (
                 _COLD_START_PLUGIN_PROMPT
             ) + '\n\n---\n\n'.join(s for s in scenarios if s)
 
     return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
+
+
+def _catalog_intro(entry: Dict[str, Any]) -> str:
+    lines = [f'## Plugin: {entry.get("plugin_id") or entry.get("name") or "plugin"}']
+    if entry.get('description'):
+        lines.append(str(entry['description']))
+    if entry.get('when_to_use'):
+        lines.append(f'When to use: {entry["when_to_use"]}')
+    return '\n'.join(lines)
 
 
 # ---------------------------------------------------------------------------

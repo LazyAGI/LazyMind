@@ -41,6 +41,11 @@ type CreateSessionInput struct {
 	SessionID        string
 	ConversationID   string
 	PluginID         string
+	PluginRef        string
+	PluginRevisionID string
+	PluginRevisionNo int64
+	PluginTreeHash   string
+	PluginRemoteRoot string
 	TriggerHistoryID string
 	CurrentStepID    string
 	CreateUserID     string
@@ -62,9 +67,10 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 
 	now := time.Now().UTC()
 	s := &orm.PluginSession{
-		ID:               in.SessionID,
-		ConversationID:   in.ConversationID,
-		PluginID:         in.PluginID,
+		ID:             in.SessionID,
+		ConversationID: in.ConversationID,
+		PluginID:       in.PluginID,
+		PluginRef:      in.PluginRef, PluginRevisionID: in.PluginRevisionID, PluginRevisionNo: in.PluginRevisionNo, PluginTreeHash: in.PluginTreeHash, PluginRemoteRoot: in.PluginRemoteRoot,
 		TriggerHistoryID: in.TriggerHistoryID,
 		Status:           SessionStatusActive,
 		CurrentStepID:    in.CurrentStepID,

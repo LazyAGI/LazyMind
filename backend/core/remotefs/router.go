@@ -78,6 +78,10 @@ func Trash(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	if isPluginPath(pathValue) {
+		h.pluginList(w, r, pathValue)
+		return
+	}
 	if isSkillPath(pathValue) {
 		h.skill.List(w, requestWithUserAndPath(r, pathValue))
 		return
@@ -111,6 +115,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Info(w http.ResponseWriter, r *http.Request) {
 	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	if isPluginPath(pathValue) {
+		h.pluginInfo(w, r, pathValue)
+		return
+	}
 	if isSkillPath(pathValue) {
 		h.skill.Info(w, requestWithUserAndPath(r, pathValue))
 		return
@@ -138,6 +146,11 @@ func (h *Handler) Info(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Exists(w http.ResponseWriter, r *http.Request) {
 	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	if isPluginPath(pathValue) {
+		_, _, _, err := h.pluginFiles(r, pathValue)
+		writeJSON(w, http.StatusOK, map[string]any{"exists": err == nil})
+		return
+	}
 	if isSkillPath(pathValue) {
 		h.skill.Exists(w, requestWithUserAndPath(r, pathValue))
 		return
@@ -156,6 +169,10 @@ func (h *Handler) Exists(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Content(w http.ResponseWriter, r *http.Request) {
 	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	if isPluginPath(pathValue) {
+		h.pluginContent(w, r, pathValue)
+		return
+	}
 	if isSkillPath(pathValue) {
 		h.skill.Content(w, requestWithUserAndPath(r, pathValue))
 		return

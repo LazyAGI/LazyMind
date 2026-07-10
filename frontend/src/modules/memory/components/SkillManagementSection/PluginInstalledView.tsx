@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Button, Empty, Input, Popconfirm, Radio, Table, Tag, Tooltip, message } from 'antd';
+import { Button, Empty, Input, Popconfirm, Radio, Switch, Table, Tag, Tooltip, message } from 'antd';
 import { DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigate } from 'react-router-dom';
@@ -9,6 +9,8 @@ import {
   deletePluginDraft,
   updatePluginDraftContent,
   listBuiltinPlugins,
+  listUserPluginSettings,
+  setUserPluginEnabled,
 } from '@/modules/plugin/pluginDraftApi';
 import type { PluginDraftRecord, BuiltinPlugin } from '@/modules/plugin/pluginDraftApi';
 import PluginInfoModal from '@/modules/plugin/components/StateGraphEditor/PluginInfoModal';
@@ -38,6 +40,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
   const navigate = useNavigate();
   const [draftRecords, setDraftRecords] = useState<PluginDraftRecord[]>([]);
   const [builtinPlugins, setBuiltinPlugins] = useState<BuiltinPlugin[]>([]);
+  const [enabledByRef, setEnabledByRef] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
@@ -50,12 +53,14 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
   const loadList = useCallback(async () => {
     setLoading(true);
     try {
-      const [draftsResp, builtins] = await Promise.all([
+      const [draftsResp, builtins, pluginSettings] = await Promise.all([
         listPluginDrafts({ page: 1, pageSize: 200 }),
         listBuiltinPlugins(),
+        listUserPluginSettings(),
       ]);
       setDraftRecords(draftsResp.records ?? []);
       setBuiltinPlugins(builtins);
+      setEnabledByRef(Object.fromEntries(pluginSettings.map((item) => [item.plugin_ref, item.enabled])));
     } catch {
       message.error(t('admin.memoryPluginLoadFailed'));
     } finally {
@@ -87,6 +92,13 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
     setQuery('');
     setTypeFilter('all');
     setPage(1);
+  };
+
+  const handleEnabledChange = async (pluginRef: string, enabled: boolean) => {
+    const previous = enabledByRef[pluginRef] ?? false;
+    setEnabledByRef((current) => ({ ...current, [pluginRef]: enabled }));
+    try { await setUserPluginEnabled(pluginRef, enabled); message.success(enabled ? 'Plugin 已默认启用' : 'Plugin 已默认关闭'); }
+    catch { setEnabledByRef((current) => ({ ...current, [pluginRef]: previous })); message.error('Plugin 默认启用状态保存失败'); }
   };
 
   const openInfoModal = (record: PluginDraftRecord) => {
@@ -143,6 +155,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
     {
       title: t('admin.memoryPluginColId'),
       key: 'plugin_id',
+      width: 240,
       render: (_: unknown, row: PluginRow) => {
         const pluginId = row._type === 'builtin' ? row.id : getDraftPluginId(row);
         const href =
@@ -150,28 +163,33 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
             ? `/memory-management/plugins/builtin/${row.id}`
             : `/memory-management/plugins/${row.id}`;
         return (
+          <Tooltip title={pluginId} mouseEnterDelay={0.4}>
           <Button
             type="link"
-            style={{ fontFamily: 'monospace', padding: 0 }}
+            style={{ fontFamily: 'monospace', padding: 0, display: 'block', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}
             onClick={() => navigate(href)}
           >
             {pluginId}
           </Button>
+          </Tooltip>
         );
       },
     },
     {
       title: t('admin.memoryPluginColName'),
       key: 'name',
+      width: 220,
       render: (_: unknown, row: PluginRow) => {
         const href =
           row._type === 'builtin'
             ? `/memory-management/plugins/builtin/${row.id}`
             : `/memory-management/plugins/${row.id}`;
         return (
-          <Button type="link" style={{ padding: 0 }} onClick={() => navigate(href)}>
+          <Tooltip title={row.name} mouseEnterDelay={0.4}>
+          <Button type="link" style={{ padding: 0, display: 'block', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }} onClick={() => navigate(href)}>
             {row.name}
           </Button>
+          </Tooltip>
         );
       },
     },
@@ -211,13 +229,14 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
     {
       title: t('admin.memoryPluginColStatus'),
       key: 'generate_status',
-      width: 100,
+      width: 130,
       render: (_: unknown, row: PluginRow) => {
         if (row._type === 'builtin') return null;
         const status = row.generate_status;
         if (status === 'generating') return <Tag color="processing">{t('admin.memoryPluginStatusGenerating')}</Tag>;
         if (status === 'failed') return <Tag color="error">{t('admin.memoryPluginStatusFailed')}</Tag>;
-        return null;
+        if (row.published) return <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><Tag color="success" style={{ marginInlineEnd: 0 }}>已发布</Tag><Tag style={{ marginInlineEnd: 0 }}>v{row.current_revision_no}</Tag></div>;
+        return <Tag>未发布</Tag>;
       },
     },
     {
@@ -226,7 +245,18 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
       width: 180,
       render: (_: unknown, row: PluginRow) => {
         if (row._type === 'builtin') return '—';
-        return new Date(row.updated_at).toLocaleString('zh-CN');
+        return <span style={{ whiteSpace: 'nowrap' }}>{new Date(row.updated_at).toLocaleString('zh-CN')}</span>;
+      },
+    },
+    {
+      title: '默认启用',
+      key: 'default_enabled',
+      width: 110,
+      align: 'center',
+      render: (_: unknown, row: PluginRow) => {
+        const pluginRef = row._type === 'builtin' ? `builtin:${row.id}` : row.published_plugin_ref;
+        if (!pluginRef) return <Tooltip title="发布后才可启用"><Switch size="small" disabled /></Tooltip>;
+        return <Switch size="small" checked={enabledByRef[pluginRef] ?? (row._type === 'builtin')} onChange={(enabled) => void handleEnabledChange(pluginRef, enabled)} />;
       },
     },
     {
@@ -325,6 +355,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
             dataSource={pageRows}
             columns={columns}
             pagination={pagination}
+            tableLayout="fixed"
             locale={{
               emptyText: (
                 <Empty

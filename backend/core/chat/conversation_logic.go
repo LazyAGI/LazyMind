@@ -1718,6 +1718,26 @@ func pluginStepParamsFromEventParams(raw map[string]any) plugin.PluginStepParams
 	if pid, ok := raw["plugin_id"].(string); ok {
 		params.PluginID = pid
 	}
+	if v, ok := raw["plugin_ref"].(string); ok {
+		params.PluginRef = v
+	}
+	if v, ok := raw["revision_id"].(string); ok {
+		params.RevisionID = v
+	}
+	if v, ok := raw["tree_hash"].(string); ok {
+		params.TreeHash = v
+	}
+	if v, ok := raw["remote_root"].(string); ok {
+		params.RemoteRoot = v
+	}
+	switch v := raw["revision_no"].(type) {
+	case float64:
+		params.RevisionNo = int64(v)
+	case int64:
+		params.RevisionNo = v
+	case int:
+		params.RevisionNo = int64(v)
+	}
 	if sid, ok := raw["step_id"].(string); ok {
 		params.StepID = sid
 	}

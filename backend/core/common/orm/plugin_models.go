@@ -11,6 +11,11 @@ type PluginSession struct {
 	ID               string `gorm:"column:id;type:varchar(36);primaryKey"`
 	ConversationID   string `gorm:"column:conversation_id;type:varchar(36);not null"`
 	PluginID         string `gorm:"column:plugin_id;type:varchar(64);not null"`
+	PluginRef        string `gorm:"column:plugin_ref;type:varchar(512);not null;default:''"`
+	PluginRevisionID string `gorm:"column:plugin_revision_id;type:varchar(36);not null;default:''"`
+	PluginRevisionNo int64  `gorm:"column:plugin_revision_no;not null;default:0"`
+	PluginTreeHash   string `gorm:"column:plugin_tree_hash;type:varchar(64);not null;default:''"`
+	PluginRemoteRoot string `gorm:"column:plugin_remote_root;type:varchar(1024);not null;default:''"`
 	TriggerHistoryID string `gorm:"column:trigger_history_id;type:varchar(36)"`
 	// Status: active | completed | failed | waiting
 	Status        string `gorm:"column:status;type:varchar(16);not null;default:active"`
@@ -155,7 +160,57 @@ type PluginDraft struct {
 	// Kept in sync on every save that touches PluginYAMLContent.
 	// A partial unique index (created_by, plugin_id) WHERE plugin_id != '' enforces
 	// per-user uniqueness while allowing legacy empty-string rows to coexist.
-	PluginID string `gorm:"column:plugin_id;type:varchar(255);not null;default:''"`
+	PluginID       string `gorm:"column:plugin_id;type:varchar(255);not null;default:''"`
+	BaseRevisionID string `gorm:"column:base_revision_id;type:varchar(36);not null;default:''"`
 }
 
 func (PluginDraft) TableName() string { return "plugin_drafts" }
+
+type PluginResource struct {
+	ID, PluginRef, PluginID, OwnerUserID, OwnerScope, SourceType, RelativeRoot string
+	Name, Description, WhenToUse, HeadRevisionID, Status                       string
+	Version                                                                    int64
+	ContainsScripts                                                            bool
+	CreatedAt, UpdatedAt                                                       time.Time
+}
+
+func (PluginResource) TableName() string { return "plugins" }
+
+type PluginBlob struct {
+	Hash           string
+	Size           int64
+	Mime, FileType string
+	Binary         bool `gorm:"column:is_binary"`
+	Content        []byte
+	CreatedAt      time.Time
+}
+
+func (PluginBlob) TableName() string { return "plugin_blobs" }
+
+type PluginRevision struct {
+	ID, PluginResourceID, ParentRevisionID string
+	RevisionNo                             int64
+	TreeHash, Message, CreatedBy           string
+	CreatedAt                              time.Time
+}
+
+func (PluginRevision) TableName() string { return "plugin_revisions" }
+
+type PluginRevisionEntry struct {
+	RevisionID, Path, EntryType string
+	BlobHash                    *string
+	Size                        int64
+	Mime, FileType              string
+	Binary                      bool `gorm:"column:is_binary"`
+	Mode                        int
+}
+
+func (PluginRevisionEntry) TableName() string { return "plugin_revision_entries" }
+
+type UserPluginSetting struct {
+	UserID, PluginRef string
+	Enabled           bool
+	UpdatedAt         time.Time
+}
+
+func (UserPluginSetting) TableName() string { return "user_plugin_settings" }
