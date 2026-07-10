@@ -79,6 +79,7 @@ func exportOpenAPIArtifacts(openAPIJSON []byte) {
 // text core text（text Kong + auth-service Authorization）。text gorilla/mux，text path text，text ":action" text。
 func handleAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) {
 	r.HandleFunc(path, withMutationRequestAudit(method, path, h)).Methods(method)
+}
 
 func registerCoreRoutes(r *mux.Router) {
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

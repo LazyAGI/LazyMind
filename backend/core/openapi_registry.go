@@ -827,11 +827,20 @@ type resourceUpdateTaskListQueryParams struct {
 	TaskType     string `query:"task_type"`
 }
 
+type skillReviewTaskListQueryParams struct {
+	Page      int32  `query:"page"`
+	PageSize  int32  `query:"page_size"`
+	Status    string `query:"status"`
+	RequestID string `query:"requestid"`
+}
+
 type skillReviewResultListQueryParams struct {
 	Page         int32  `query:"page"`
 	PageSize     int32  `query:"page_size"`
 	ReviewStatus string `query:"review_status"`
 	Type         string `query:"type"`
+	SkillName    string `query:"skill_name"`
+	RequestID    string `query:"requestid"`
 }
 
 type memoryReviewResultListQueryParams struct {
@@ -896,6 +905,52 @@ type skillReviewResultListOpenAPIResponse struct {
 	Page     int32                              `json:"page"`
 	PageSize int32                              `json:"page_size"`
 	Total    int64                              `json:"total"`
+}
+
+type skillReviewSummaryOpenAPIResponse struct {
+	QualifiedSessionCount int32                              `json:"qualified_session_count"`
+	UserTurnCount         int32                              `json:"user_turn_count"`
+	ToolCallCount         int32                              `json:"tool_call_count"`
+	MinUserTurns          int32                              `json:"min_user_turns"`
+	MinToolTurns          int32                              `json:"min_tool_turns"`
+	QuantityThreshold     int32                              `json:"quantity_threshold"`
+	WindowStart           string                             `json:"window_start"`
+	WindowEnd             string                             `json:"window_end"`
+	RunningTask           *resourceUpdateTaskOpenAPIResponse `json:"running_task,omitempty"`
+	RunningRequestID      string                             `json:"running_requestid,omitempty"`
+}
+
+type skillReviewRunOpenAPIResponse struct {
+	Task      resourceUpdateTaskOpenAPIResponse `json:"task"`
+	Summary   skillReviewSummaryOpenAPIResponse `json:"summary"`
+	RequestID string                            `json:"requestid"`
+}
+
+type skillReviewTaskStatusOpenAPIResponse struct {
+	Task        resourceUpdateTaskOpenAPIResponse `json:"task"`
+	RequestID   string                            `json:"requestid"`
+	Status      string                            `json:"status"`
+	RunStatus   string                            `json:"run_status,omitempty"`
+	ResultCount int64                             `json:"result_count"`
+}
+
+type skillReviewTaskListOpenAPIResponse struct {
+	Items    []skillReviewTaskStatusOpenAPIResponse `json:"items"`
+	Page     int32                                  `json:"page"`
+	PageSize int32                                  `json:"page_size"`
+	Total    int64                                  `json:"total"`
+}
+
+type skillOrganizeOpenAPIRequest struct {
+	RequestID   string   `json:"requestid"`
+	Skills      []string `json:"skills"`
+	ArtifactDir string   `json:"artifact_dir,omitempty"`
+}
+
+type skillOrganizeOpenAPIResponse struct {
+	Status    string `json:"status"`
+	RequestID string `json:"requestid"`
+	TaskID    string `json:"taskid"`
 }
 
 type memoryReviewResultOpenAPIResponse struct {
@@ -2203,6 +2258,31 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "GET",
+			Path:        "/skill-review:summary",
+			Summary:     "Get skill review summary",
+			Description: "Returns the current review window and depositable conversation count for manual skill review.",
+			Tags:        []string{"skill-review"},
+			Responses:   map[int]openAPIResponse{200: resp("Skill review summary", skillReviewSummaryOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skill-review:run",
+			Summary:     "Run manual skill review",
+			Description: "Creates a manual skill review task for the current review window when at least one conversation is depositable.",
+			Tags:        []string{"skill-review"},
+			Responses:   map[int]openAPIResponse{200: resp("Manual skill review task", skillReviewRunOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skill-review/tasks",
+			Summary:     "List skill review tasks",
+			Description: "Lists manual skill review tasks for the current user using the algorithm run status when available.",
+			Tags:        []string{"skill-review"},
+			QueryParams: skillReviewTaskListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Manual skill review task list", skillReviewTaskListOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
 			Path:        "/skill-review-results",
 			Summary:     "List skill review results",
 			Description: "Lists skill draft review results for the current user.",
@@ -2312,6 +2392,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Summary:   "List skill categories",
 			Tags:      []string{"skills"},
 			Responses: map[int]openAPIResponse{200: resp("Skill category list", skillCategoriesOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skill_organize",
+			Summary:     "Submit skill organize task",
+			Description: "Submits a skill organize task for current user's SkillV2 files. The task runs asynchronously in the algorithm service.",
+			Tags:        []string{"skills"},
+			RequestBody: jsonBodyOf(skillOrganizeOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Skill organize task accepted", skillOrganizeOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",
@@ -2873,7 +2962,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/models",
 			Summary:     "List current user's models by model_type",
-			Description: "Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model's maximum input length in tokens; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
+			Description: "Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
 			Tags:        []string{"model_providers"},
 			QueryParams: listUserModelsByModelTypeQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Models list", listModelProviderGroupModelsOpenAPIResponse{})},
@@ -2937,7 +3026,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models",
 			Summary:     "List models under a connection group",
-			Description: "Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input length in tokens. Custom or unknown models return null.",
+			Description: "Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models).",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Group models list", listModelProviderGroupModelsOpenAPIResponse{})},
