@@ -142,7 +142,12 @@ func main() {
 		log.Logger.Fatal().Msg("ACL_DB_DRIVER set but ACL_DB_DSN is empty")
 	}
 	db := orm.MustConnect(driver, dsn)
-	if err := migrate.RunUp(); err != nil {
+	if driver == orm.DriverSQLite {
+		if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
+			log.Logger.Fatal().Err(err).Msg("run SQLite AutoMigrate failed")
+		}
+		log.Logger.Info().Msg("SQLite schema initialized")
+	} else if err := migrate.RunUp(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("run SQL migrations failed")
 	}
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
@@ -191,6 +196,7 @@ func main() {
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
 	evalset.RegisterAsyncJobs()
+	plugin.RegisterPluginDraftGenerateJob()
 	asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
 	asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{
 		Concurrency:  asyncConfig.Concurrency,

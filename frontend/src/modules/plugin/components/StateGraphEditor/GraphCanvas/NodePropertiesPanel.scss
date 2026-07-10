@@ -1,0 +1,361 @@
+/* ── 面板容器 ── */
+.node-props-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100%;
+  background: #fff;
+  border-left: 1px solid #f0f0f0;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
+.node-props-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+.node-props-panel-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #1f1f1f;
+}
+
+.node-props-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0 8px 0;
+}
+
+.node-props-panel-footer {
+  padding: 12px 16px;
+  border-top: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+/* ── 可折叠分组 ── */
+.npp-section {
+  border-bottom: 1px solid #f5f5f5;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.npp-section-header {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 16px;
+  box-sizing: border-box;
+  background: #fafafa;
+
+  &:hover {
+    background: #f0f0f0;
+  }
+}
+
+.npp-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #262626;
+  letter-spacing: 0.02em;
+}
+
+.npp-section-icon {
+  font-size: 11px;
+  color: #8c8c8c;
+}
+
+.npp-section-body {
+  padding: 10px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── 单行字段（label + control 横排） ── */
+.npp-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.npp-field-label {
+  flex-shrink: 0;
+  width: 70px;
+  font-size: 12px;
+  color: #595959;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.npp-field-control {
+  flex: 1;
+  min-width: 0;
+}
+
+.npp-field-error {
+  font-size: 11px;
+  color: #ff4d4f;
+  margin-top: 2px;
+  display: block;
+}
+
+/* ── 块级字段（label 单独一行） ── */
+.npp-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── Tooltip 问号图标 ── */
+.npp-tip-icon {
+  font-size: 11px;
+  color: #bfbfbf;
+  cursor: pointer;
+
+  &:hover {
+    color: #1677ff;
+  }
+}
+
+/* ── 提示文字 ── */
+.npp-hint {
+  font-size: 11px;
+  color: #bfbfbf;
+}
+
+/* ── 允许跳过区域 ── */
+.npp-skip-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.npp-skip-label {
+  font-size: 12px;
+  color: #595959;
+}
+
+.npp-skip-input {
+  margin-left: 24px;
+}
+
+/* ── 完成后前往：表头与内容行对齐 ── */
+.npp-transitions-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .npp-field-label {
+    flex-shrink: 0;
+  }
+
+  .col-condition-title {
+    flex: 2;
+    font-size: 11px;
+    color: #8c8c8c;
+    margin-left: 4px;
+    white-space: nowrap;
+  }
+}
+
+/* ── 跳转分支表格 ── */
+.npp-transitions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.node-props-transition-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 28px 0 0;
+}
+
+.node-props-transition-col-label {
+  font-size: 11px;
+  color: #8c8c8c;
+  flex-shrink: 0;
+
+  &.col-to {
+    flex: 1;
+  }
+
+  &.col-condition {
+    flex: 2;
+    margin-left: 4px;
+  }
+}
+
+.node-props-transition-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Slot 引用行（素材 + 必填切换） ── */
+.npp-slot-ref-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* Slot Select: fixed width, truncate overflow text */
+.npp-slot-select {
+  flex: 1;
+  min-width: 0;
+
+  .ant-select-selector {
+    overflow: hidden;
+  }
+
+  .ant-select-selection-item {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+}
+
+/* Option label text inside optionRender — fills the item and truncates */
+.npp-select-option-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+/* ── PromptEditor ── */
+.pe-wrapper {
+  position: relative;
+  margin-top: 4px;
+}
+
+.pe-editor {
+  min-height: 72px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1f1f1f;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  transition: border-color 0.2s;
+
+  &:focus {
+    border-color: #1677ff;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.15);
+  }
+
+  &.pe-editor--empty::before {
+    content: attr(data-placeholder);
+    color: #bfbfbf;
+    pointer-events: none;
+  }
+}
+
+/* Slot chip inside the editor */
+.pe-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #ede9ff;
+  color: #5b35d4;
+  border-radius: 4px;
+  padding: 1px 4px 1px 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  user-select: none;
+  white-space: nowrap;
+  vertical-align: middle;
+  margin: 0 1px;
+}
+
+.pe-chip-text {
+  pointer-events: none;
+}
+
+.pe-chip-del {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #7c5cbf;
+  line-height: 1;
+
+  &:hover {
+    background: rgba(91, 53, 212, 0.15);
+  }
+}
+
+/* Dropdown */
+.pe-dropdown {
+  position: absolute;
+  z-index: 100;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  min-width: 160px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.pe-dropdown-item {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+
+  &:hover {
+    background: #f5f0ff;
+  }
+}
+
+.pe-dropdown-id {
+  color: #5b35d4;
+  font-weight: 500;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.pe-dropdown-label {
+  color: #8c8c8c;
+  font-size: 12px;
+}

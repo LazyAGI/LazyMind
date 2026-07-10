@@ -8,7 +8,9 @@ export interface RuntimeFeatures {
   hideEvo: boolean;
   hideRegister: boolean;
   hideCloudAdmin: boolean;
-  localAutoLogin: boolean;
+  localLikeAutoLogin: boolean;
+  hideLocalUserControls: boolean;
+  hideUserGroupSurfaces: boolean;
   allowFolderPicker: boolean;
   allowOpenLogDir: boolean;
   useLocalGateway: boolean;
@@ -45,15 +47,18 @@ export function resolveRuntimeFeatures(
 ): RuntimeFeatures {
   const mode = resolveRuntimeMode(env);
   const isLocalLike = isLocalLikeMode(mode);
+  const isDesktop = mode === "desktop";
   const explicitHideEvo = parseBooleanFlag(env.VITE_HIDE_EVO);
 
   return {
     hideEvo: explicitHideEvo ?? isLocalLike,
     hideRegister: isLocalLike,
     hideCloudAdmin: isLocalLike,
-    localAutoLogin: isLocalLike,
-    allowFolderPicker: mode === "desktop",
-    allowOpenLogDir: mode === "desktop",
+    localLikeAutoLogin: isLocalLike,
+    hideLocalUserControls: isLocalLike,
+    hideUserGroupSurfaces: isLocalLike,
+    allowFolderPicker: isDesktop,
+    allowOpenLogDir: isDesktop,
     useLocalGateway: isLocalLike,
   };
 }

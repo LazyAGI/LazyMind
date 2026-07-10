@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -25,27 +24,27 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 	if err != nil {
 		return retryableOutcome("load_model_configs_failed", err)
 	}
-	pendingSkillIDs, err := listPendingSkillReviewResultIDs(ctx, w.db, request.UserID)
-	if err != nil {
-		return retryableOutcome("list_pending_skill_results_failed", err)
-	}
 	resourceUpdateInfo(logEventSkillReviewCallStart).
 		Str("task_id", task.ID).
 		Str("user_id", request.UserID).
 		Str("requestid", request.RequestID).
 		Str("start_time", request.StartTime).
 		Str("end_time", request.EndTime).
+		Int("qualified_session_count", request.QualifiedSessionCount).
+		Int("quantity_threshold", request.QuantityThreshold).
 		Int("user_turn_count", request.UserTurnCount).
 		Int("tool_call_count", request.ToolCallCount).
-		Int("pending_skill_count", len(pendingSkillIDs)).
 		Msg(logEventSkillReviewCallStart)
 	resp, status, err := w.callers.Skill(ctx, algo.SkillReviewRequest{
-		RequestID:       request.RequestID,
-		UserID:          request.UserID,
-		StartTime:       request.StartTime,
-		EndTime:         request.EndTime,
-		PendingSkillIDs: pendingSkillIDs,
-		ModelConfigs:    modelConfigs,
+		RequestID:    request.RequestID,
+		UserID:       request.UserID,
+		StartTime:    request.StartTime,
+		EndTime:      request.EndTime,
+		MinUserTurns: w.cfg.MinUserTurns,
+		MinToolTurns: w.cfg.MinToolTurns,
+		SkillBaseDir: defaultSkillBaseDir,
+		FSBaseURL:    common.CoreSelfEndpoint(),
+		ModelConfigs: modelConfigs,
 	})
 	if err != nil {
 		resourceUpdateWarn(logEventSkillReviewCallFailed, err).
@@ -59,7 +58,7 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 			Msg(logEventSkillReviewCallFailed)
 		return retryableOutcome("skill_review_call_failed", fmt.Errorf("http_status=%d: %w", status, err))
 	}
-	if status != 200 || resp == nil || resp.Code != 0 || resp.Data.Status != "running" || resp.Data.RequestID != request.RequestID {
+	if status != 200 || resp == nil || resp.Code != 0 || !skillReviewResponseStatusAccepted(resp.Data.Status) || resp.Data.RequestID != request.RequestID {
 		resourceUpdateWarn(logEventSkillReviewCallFailed, nil).
 			Str("task_id", task.ID).
 			Str("user_id", request.UserID).
@@ -72,15 +71,12 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 			Msg(logEventSkillReviewCallFailed)
 		return retryableOutcome("skill_review_unexpected_response", fmt.Errorf("http_status=%d code=%d status=%q requestid=%q", status, safeSkillCode(resp), safeSkillStatus(resp), safeSkillRequestID(resp)))
 	}
-	if err := expireStillPendingSkillReviewResults(ctx, w.db, pendingSkillIDs); err != nil {
-		return retryableOutcome("expire_pending_skill_results_failed", err)
-	}
 	resourceUpdateInfo(logEventSkillReviewAccepted).
 		Str("task_id", task.ID).
+		Str("algorithm_task_id", safeSkillTaskID(resp)).
 		Str("user_id", request.UserID).
 		Str("requestid", request.RequestID).
 		Int("http_status", status).
-		Int("expired_pending_skill_count", len(pendingSkillIDs)).
 		Msg(logEventSkillReviewAccepted)
 	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone}
 }
@@ -118,12 +114,18 @@ func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdate
 				Msg(logEventSkillReviewPreflight)
 			return request, permanentOutcome("invalid_frozen_window", "frozen request requires requestid/user_id/start_time/end_time")
 		}
-		if request.UserTurnCount < w.cfg.MinUserTurns || request.ToolCallCount < w.cfg.MinToolTurns {
+		quantityThreshold := request.QuantityThreshold
+		if quantityThreshold <= 0 {
+			quantityThreshold = w.stageFor(0).QuantityThreshold
+		}
+		if request.QualifiedSessionCount < quantityThreshold {
 			resourceUpdateInfo(logEventSkillReviewPreflight).
 				Str("task_id", task.ID).
 				Str("user_id", request.UserID).
 				Str("requestid", request.RequestID).
 				Str("reason", "frozen_threshold_not_reached").
+				Int("qualified_session_count", request.QualifiedSessionCount).
+				Int("quantity_threshold", quantityThreshold).
 				Int("user_turn_count", request.UserTurnCount).
 				Int("tool_call_count", request.ToolCallCount).
 				Int("min_user_turns", w.cfg.MinUserTurns).
@@ -168,15 +170,19 @@ func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdate
 		if end.Sub(start) > w.cfg.MaxWindow {
 			return errSkillWindowTooOld
 		}
-		stats, err := CountSkillReviewHistoryStats(ctx, tx, userID, start, end)
+		stage := w.stageFor(state.StageIndex)
+		stats, err := CountSkillReviewHistoryStats(ctx, tx, userID, start, end, w.cfg.MinUserTurns, w.cfg.MinToolTurns)
 		if err != nil {
 			return err
 		}
+		stats.QuantityThreshold = stage.QuantityThreshold
 		request.UserID = userID
 		request.StartTime = formatTaskTime(start)
 		request.EndTime = formatTaskTime(end)
 		request.UserTurnCount = stats.UserTurnCount
 		request.ToolCallCount = stats.ToolCallCount
+		request.QualifiedSessionCount = stats.QualifiedSessionCount
+		request.QuantityThreshold = stage.QuantityThreshold
 		request.StartPreflightAt = formatTaskTime(now)
 		if !now.Before(state.NextRunAt) {
 			request.StartTriggerReason = "stale"
@@ -202,7 +208,7 @@ func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdate
 			return err
 		}
 		frozen = request
-		thresholdReached = stats.UserTurnCount >= w.cfg.MinUserTurns && stats.ToolCallCount >= w.cfg.MinToolTurns
+		thresholdReached = stats.QualifiedSessionCount >= stage.QuantityThreshold
 		return nil
 	})
 	if err != nil {
@@ -232,6 +238,8 @@ func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdate
 			Str("user_id", frozen.UserID).
 			Str("requestid", frozen.RequestID).
 			Str("reason", "start_threshold_not_reached").
+			Int("qualified_session_count", frozen.QualifiedSessionCount).
+			Int("quantity_threshold", frozen.QuantityThreshold).
 			Int("user_turn_count", frozen.UserTurnCount).
 			Int("tool_call_count", frozen.ToolCallCount).
 			Int("min_user_turns", w.cfg.MinUserTurns).
@@ -245,6 +253,8 @@ func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdate
 		Str("requestid", frozen.RequestID).
 		Str("start_time", frozen.StartTime).
 		Str("end_time", frozen.EndTime).
+		Int("qualified_session_count", frozen.QualifiedSessionCount).
+		Int("quantity_threshold", frozen.QuantityThreshold).
 		Int("user_turn_count", frozen.UserTurnCount).
 		Int("tool_call_count", frozen.ToolCallCount).
 		Str("trigger_reason", frozen.StartTriggerReason).
@@ -347,30 +357,6 @@ func decodeHistory(raw json.RawMessage) any {
 	return out
 }
 
-func listPendingSkillReviewResultIDs(ctx context.Context, db *gorm.DB, userID string) ([]string, error) {
-	var ids []string
-	err := db.WithContext(ctx).
-		Table("skill_review_results").
-		Where("userid = ? AND review_status = ?", strings.TrimSpace(userID), "pending").
-		Order("time ASC").
-		Pluck("id", &ids).Error
-	return ids, err
-}
-
-func expireStillPendingSkillReviewResults(ctx context.Context, db *gorm.DB, ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	now := time.Now().UTC()
-	return db.WithContext(ctx).
-		Table("skill_review_results").
-		Where("id IN ? AND review_status = ?", ids, "pending").
-		Updates(map[string]any{
-			"review_status": "expired",
-			"time":          now,
-		}).Error
-}
-
 var (
 	errSkillActiveTaskMismatch  = errors.New("skill scheduler active_task_id does not point to current task")
 	errSkillTooFrequent         = errors.New("skill review is too frequent")
@@ -400,11 +386,55 @@ func safeSkillRequestID(resp *algo.SkillReviewResponse) string {
 	return resp.Data.RequestID
 }
 
+func safeSkillTaskID(resp *algo.SkillReviewResponse) string {
+	if resp == nil {
+		return ""
+	}
+	return resp.Data.TaskID
+}
+
+func skillReviewResponseStatusAccepted(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "running", "completed":
+		return true
+	default:
+		return false
+	}
+}
+
 func safeMemoryStatus(resp *algo.MemoryReviewResponse) string {
 	if resp == nil {
 		return ""
 	}
 	return resp.Status
+}
+
+func (w *Worker) stageFor(index int) Stage {
+	if len(w.cfg.Stages) == 0 {
+		return DefaultConfig().Stages[0]
+	}
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(w.cfg.Stages) {
+		index = len(w.cfg.Stages) - 1
+	}
+	stage := w.cfg.Stages[index]
+	if stage.Window <= 0 {
+		stage.Window = w.cfg.MaxWindow
+	}
+	if stage.Interval <= 0 {
+		stage.Interval = w.cfg.MinInterval
+	}
+	if stage.QuantityThreshold <= 0 {
+		defaultStages := DefaultConfig().Stages
+		if index >= 0 && index < len(defaultStages) {
+			stage.QuantityThreshold = defaultStages[index].QuantityThreshold
+		} else {
+			stage.QuantityThreshold = defaultStages[len(defaultStages)-1].QuantityThreshold
+		}
+	}
+	return stage
 }
 
 func skillPreflightReason(err error) string {

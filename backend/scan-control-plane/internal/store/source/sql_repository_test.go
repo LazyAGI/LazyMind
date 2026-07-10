@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	_ "github.com/glebarez/go-sqlite"
 	"gorm.io/gorm/clause"
 )
 
@@ -151,6 +153,136 @@ func TestJSONValueReturnsValidJSONTextForStructuredProviderOptions(t *testing.T)
 		t.Fatalf("json value: %v", err)
 	}
 	assertValidJSONTextParam(t, value, "provider_options")
+}
+
+func TestSQLiteAutoMigrateCreatesUpsertConstraints(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "scan.db"))+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewSQLRepositoryWithDriver("sqlite", db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatalf("auto migrate sqlite: %v", err)
+	}
+
+	for table, index := range map[string][]string{
+		"source_bindings":               {"uk_source_binding_current_target", "source_id", "connector_type", "target_type", "target_fingerprint"},
+		"documents":                     {"uk_documents_object", "source_id", "binding_id", "object_key"},
+		"parse_tasks":                   {"uk_parse_task_idempotency", "idempotency_key"},
+		"source_sync_runs":              {"uk_source_sync_runs_scheduled_fire", "binding_id", "binding_generation", "scheduled_fire_at"},
+		"data_source_create_operations": {"uk_create_operation", "caller_id", "request_id"},
+	} {
+		assertSQLiteUniqueIndex(t, db, table, index[0], index[1:])
+	}
+	assertSQLiteUniqueIndex(t, db, "parse_tasks", "uk_parse_task_active", []string{
+		"source_id", "binding_id", "object_key", "target_version_id", "task_action",
+	})
+}
+
+func TestSQLiteCreateOperationUpsertUsesCallerRequestConstraint(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "scan.db"))+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewSQLRepositoryWithDriver("sqlite", db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatalf("auto migrate sqlite: %v", err)
+	}
+
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	base := CreateOperation{
+		OperationID:        "op-1",
+		CallerID:           "user-1",
+		RequestID:          "request-1",
+		RequestHash:        "hash-1",
+		Status:             "PENDING",
+		CompensationStatus: "NONE",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	if err := ormUpsertOperation(repo.orm, base); err != nil {
+		t.Fatalf("insert create operation: %v", err)
+	}
+	base.OperationID = "op-2"
+	base.SourceID = "source-1"
+	base.DatasetID = "dataset-1"
+	base.Status = "SUCCEEDED"
+	base.UpdatedAt = now.Add(time.Minute)
+	if err := ormUpsertOperation(repo.orm, base); err != nil {
+		t.Fatalf("upsert create operation: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM data_source_create_operations WHERE caller_id = ? AND request_id = ?", "user-1", "request-1").Scan(&count); err != nil {
+		t.Fatalf("count create operations: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one create operation after upsert, got %d", count)
+	}
+	var sourceID string
+	if err := db.QueryRow("SELECT source_id FROM data_source_create_operations WHERE caller_id = ? AND request_id = ?", "user-1", "request-1").Scan(&sourceID); err != nil {
+		t.Fatalf("read create operation: %v", err)
+	}
+	if sourceID != "source-1" {
+		t.Fatalf("upsert did not update source_id: %q", sourceID)
+	}
+}
+
+func TestSQLiteRepairDedupesLegacyRowsBeforeCreatingIndexes(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "scan.db"))+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewSQLRepositoryWithDriver("sqlite", db)
+	if err := repo.orm.AutoMigrate(
+		&ormSource{},
+		&ormBinding{},
+		&ormDocument{},
+		&ormParseTask{},
+		&ormSyncRun{},
+		&ormCreateOperation{},
+	); err != nil {
+		t.Fatalf("legacy auto migrate sqlite: %v", err)
+	}
+	insertSQLiteRepairDuplicates(t, db)
+
+	if err := repo.repairSQLiteSchema(); err != nil {
+		t.Fatalf("repair sqlite schema: %v", err)
+	}
+
+	assertSQLiteUniqueIndex(t, db, "source_bindings", "uk_source_binding_current_target", []string{"source_id", "connector_type", "target_type", "target_fingerprint"})
+	assertSQLiteUniqueIndex(t, db, "documents", "uk_documents_object", []string{"source_id", "binding_id", "object_key"})
+	assertSQLiteUniqueIndex(t, db, "parse_tasks", "uk_parse_task_idempotency", []string{"idempotency_key"})
+	assertSQLiteUniqueIndex(t, db, "parse_tasks", "uk_parse_task_active", []string{"source_id", "binding_id", "object_key", "target_version_id", "task_action"})
+	assertSQLiteUniqueIndex(t, db, "source_sync_runs", "uk_source_sync_runs_scheduled_fire", []string{"binding_id", "binding_generation", "scheduled_fire_at"})
+	assertSQLiteUniqueIndex(t, db, "data_source_create_operations", "uk_create_operation", []string{"caller_id", "request_id"})
+
+	assertSQLiteCount(t, db, "active duplicate bindings", "SELECT COUNT(*) FROM source_bindings WHERE source_id = 'source-1' AND connector_type = 'local_fs' AND target_type = 'local_path' AND target_fingerprint = 'target-1' AND status <> 'DELETING'", 1)
+	assertSQLiteCount(t, db, "duplicate documents", "SELECT COUNT(*) FROM documents WHERE source_id = 'source-1' AND binding_id = 'binding-keep' AND object_key = 'doc-key'", 1)
+	assertSQLiteCount(t, db, "duplicate idempotency tasks", "SELECT COUNT(*) FROM parse_tasks WHERE idempotency_key = 'idempotency-dup'", 1)
+	assertSQLiteCount(t, db, "duplicate active tasks", "SELECT COUNT(*) FROM parse_tasks WHERE source_id = 'source-1' AND binding_id = 'binding-keep' AND object_key = 'doc-key' AND target_version_id = 'version-active' AND task_action = 'parse' AND status IN ('PENDING', 'RUNNING', 'SUBMITTED')", 1)
+	assertSQLiteCount(t, db, "duplicate scheduled runs", "SELECT COUNT(*) FROM source_sync_runs WHERE binding_id = 'binding-keep' AND binding_generation = 1 AND scheduled_fire_at = '2026-07-07 12:00:00+00:00' AND trigger_type = 'scheduled' AND status IN ('PENDING', 'RUNNING')", 1)
+	assertSQLiteCount(t, db, "duplicate create operations", "SELECT COUNT(*) FROM data_source_create_operations WHERE caller_id = 'user-1' AND request_id = 'request-1'", 1)
+
+	var taskDocumentID string
+	if err := db.QueryRow("SELECT document_id FROM parse_tasks WHERE task_id = 'task-doc-ref'").Scan(&taskDocumentID); err != nil {
+		t.Fatalf("read repaired task document id: %v", err)
+	}
+	if taskDocumentID != "document-2" {
+		t.Fatalf("parse task document reference was not moved to kept document: %q", taskDocumentID)
+	}
 }
 
 func TestListSourcesScansProjectedSourceFields(t *testing.T) {
@@ -448,6 +580,114 @@ func assertValidJSONTextParam(t *testing.T, value any, name string) {
 	decoder.UseNumber()
 	if err := decoder.Decode(&decoded); err != nil {
 		t.Fatalf("%s JSON param is invalid: %v text=%q", name, err, text)
+	}
+}
+
+func assertSQLiteUniqueIndex(t *testing.T, db *sql.DB, table, indexName string, wantColumns []string) {
+	t.Helper()
+
+	rows, err := db.Query("PRAGMA index_list(" + table + ")")
+	if err != nil {
+		t.Fatalf("list sqlite indexes for %s: %v", table, err)
+	}
+	defer rows.Close()
+
+	found := false
+	for rows.Next() {
+		var seq int
+		var name string
+		var unique int
+		var origin string
+		var partial int
+		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
+			t.Fatalf("scan sqlite index for %s: %v", table, err)
+		}
+		if name == indexName {
+			if unique != 1 {
+				t.Fatalf("sqlite index %s on %s is not unique", indexName, table)
+			}
+			found = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("scan sqlite indexes for %s: %v", table, err)
+	}
+	if !found {
+		t.Fatalf("sqlite index %s on %s not found", indexName, table)
+	}
+
+	columnRows, err := db.Query("PRAGMA index_info(" + indexName + ")")
+	if err != nil {
+		t.Fatalf("read sqlite index info for %s: %v", indexName, err)
+	}
+	defer columnRows.Close()
+
+	var gotColumns []string
+	for columnRows.Next() {
+		var seqno int
+		var cid int
+		var name string
+		if err := columnRows.Scan(&seqno, &cid, &name); err != nil {
+			t.Fatalf("scan sqlite index info for %s: %v", indexName, err)
+		}
+		gotColumns = append(gotColumns, name)
+	}
+	if err := columnRows.Err(); err != nil {
+		t.Fatalf("scan sqlite index columns for %s: %v", indexName, err)
+	}
+	if fmt.Sprint(gotColumns) != fmt.Sprint(wantColumns) {
+		t.Fatalf("sqlite index %s columns = %v, want %v", indexName, gotColumns, wantColumns)
+	}
+}
+
+func assertSQLiteCount(t *testing.T, db *sql.DB, name, query string, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(query).Scan(&got); err != nil {
+		t.Fatalf("count %s: %v", name, err)
+	}
+	if got != want {
+		t.Fatalf("count %s = %d, want %d", name, got, want)
+	}
+}
+
+func insertSQLiteRepairDuplicates(t *testing.T, db *sql.DB) {
+	t.Helper()
+	statements := []string{
+		`INSERT INTO sources (source_id, tenant_id, created_by, name, dataset_id, status, source_options_json, include_extensions_json, exclude_extensions_json, config_version, deleted_at, created_at, updated_at)
+		 VALUES ('source-1', 'tenant-1', 'user-1', 'Docs', 'dataset-1', 'ACTIVE', '{}', '{}', '{}', 1, NULL, '2026-07-07 11:00:00+00:00', '2026-07-07 11:00:00+00:00')`,
+		`INSERT INTO source_bindings (binding_id, source_id, binding_type, connector_type, target_type, target_ref, target_fingerprint, agent_id, auth_connection_id, provider_options_json, tree_key, binding_generation, core_parent_document_id, core_parent_document_name, sync_mode, schedule_policy_json, next_sync_at, include_extensions_json, exclude_extensions_json, status, last_error, deleted_at, created_at, updated_at)
+		 VALUES ('binding-old', 'source-1', 'connector_target', 'local_fs', 'local_path', '/docs', 'target-1', NULL, NULL, '{}', 'tree-root', 1, 'folder-old', 'Docs Old', 'manual', '{}', NULL, '{}', '{}', 'ACTIVE', '{}', NULL, '2026-07-07 11:00:00+00:00', '2026-07-07 11:00:00+00:00')`,
+		`INSERT INTO source_bindings (binding_id, source_id, binding_type, connector_type, target_type, target_ref, target_fingerprint, agent_id, auth_connection_id, provider_options_json, tree_key, binding_generation, core_parent_document_id, core_parent_document_name, sync_mode, schedule_policy_json, next_sync_at, include_extensions_json, exclude_extensions_json, status, last_error, deleted_at, created_at, updated_at)
+		 VALUES ('binding-keep', 'source-1', 'connector_target', 'local_fs', 'local_path', '/docs', 'target-1', NULL, NULL, '{}', 'tree-root', 1, 'folder-keep', 'Docs Keep', 'manual', '{}', NULL, '{}', '{}', 'ACTIVE', '{}', NULL, '2026-07-07 11:01:00+00:00', '2026-07-07 11:01:00+00:00')`,
+		`INSERT INTO documents (document_id, tenant_id, source_id, binding_id, object_key, core_document_id, current_version_id, desired_version_id, source_version, display_name, mime_type, file_extension, parse_status, created_at, updated_at)
+		 VALUES ('document-1', 'tenant-1', 'source-1', 'binding-keep', 'doc-key', 'core-1', 'current-1', 'desired-1', 'source-v1', 'Doc', 'text/plain', '.txt', 'PENDING', '2026-07-07 11:00:00+00:00', '2026-07-07 11:00:00+00:00')`,
+		`INSERT INTO documents (document_id, tenant_id, source_id, binding_id, object_key, core_document_id, current_version_id, desired_version_id, source_version, display_name, mime_type, file_extension, parse_status, created_at, updated_at)
+		 VALUES ('document-2', 'tenant-1', 'source-1', 'binding-keep', 'doc-key', 'core-2', 'current-2', 'desired-2', 'source-v2', 'Doc', 'text/plain', '.txt', 'PENDING', '2026-07-07 11:01:00+00:00', '2026-07-07 11:01:00+00:00')`,
+		`INSERT INTO parse_tasks (task_id, tenant_id, source_id, binding_id, binding_generation, object_key, document_id, task_action, target_version_id, source_version, core_parent_document_id, idempotency_key, status, core_task_id, core_document_id, lease_owner, lease_until, retry_count, next_run_at, last_error, created_at, updated_at)
+		 VALUES ('task-doc-ref', 'tenant-1', 'source-1', 'binding-keep', 1, 'doc-key', 'document-1', 'parse', 'version-doc-ref', 'source-v1', 'folder-keep', 'idempotency-doc-ref', 'FAILED', NULL, NULL, NULL, NULL, 0, '2026-07-07 12:00:00+00:00', '{}', '2026-07-07 11:02:00+00:00', '2026-07-07 11:02:00+00:00')`,
+		`INSERT INTO parse_tasks (task_id, tenant_id, source_id, binding_id, binding_generation, object_key, document_id, task_action, target_version_id, source_version, core_parent_document_id, idempotency_key, status, core_task_id, core_document_id, lease_owner, lease_until, retry_count, next_run_at, last_error, created_at, updated_at)
+		 VALUES ('task-idem-old', 'tenant-1', 'source-1', 'binding-keep', 1, 'doc-key', 'document-2', 'parse', 'version-idem-old', 'source-v1', 'folder-keep', 'idempotency-dup', 'FAILED', NULL, NULL, NULL, NULL, 0, '2026-07-07 12:00:00+00:00', '{}', '2026-07-07 11:03:00+00:00', '2026-07-07 11:03:00+00:00')`,
+		`INSERT INTO parse_tasks (task_id, tenant_id, source_id, binding_id, binding_generation, object_key, document_id, task_action, target_version_id, source_version, core_parent_document_id, idempotency_key, status, core_task_id, core_document_id, lease_owner, lease_until, retry_count, next_run_at, last_error, created_at, updated_at)
+		 VALUES ('task-idem-keep', 'tenant-1', 'source-1', 'binding-keep', 1, 'doc-key', 'document-2', 'parse', 'version-idem-keep', 'source-v1', 'folder-keep', 'idempotency-dup', 'FAILED', NULL, NULL, NULL, NULL, 0, '2026-07-07 12:00:00+00:00', '{}', '2026-07-07 11:04:00+00:00', '2026-07-07 11:04:00+00:00')`,
+		`INSERT INTO parse_tasks (task_id, tenant_id, source_id, binding_id, binding_generation, object_key, document_id, task_action, target_version_id, source_version, core_parent_document_id, idempotency_key, status, core_task_id, core_document_id, lease_owner, lease_until, retry_count, next_run_at, last_error, created_at, updated_at)
+		 VALUES ('task-active-old', 'tenant-1', 'source-1', 'binding-keep', 1, 'doc-key', 'document-2', 'parse', 'version-active', 'source-v1', 'folder-keep', 'idempotency-active-old', 'PENDING', NULL, NULL, NULL, NULL, 0, '2026-07-07 12:00:00+00:00', '{}', '2026-07-07 11:05:00+00:00', '2026-07-07 11:05:00+00:00')`,
+		`INSERT INTO parse_tasks (task_id, tenant_id, source_id, binding_id, binding_generation, object_key, document_id, task_action, target_version_id, source_version, core_parent_document_id, idempotency_key, status, core_task_id, core_document_id, lease_owner, lease_until, retry_count, next_run_at, last_error, created_at, updated_at)
+		 VALUES ('task-active-keep', 'tenant-1', 'source-1', 'binding-keep', 1, 'doc-key', 'document-2', 'parse', 'version-active', 'source-v1', 'folder-keep', 'idempotency-active-keep', 'RUNNING', NULL, NULL, NULL, NULL, 0, '2026-07-07 12:00:00+00:00', '{}', '2026-07-07 11:06:00+00:00', '2026-07-07 11:06:00+00:00')`,
+		`INSERT INTO source_sync_runs (run_id, source_id, binding_id, binding_generation, trigger_type, scheduled_fire_at, scope_type, scope_ref_json, coverage_json, status, seen_count, new_count, modified_count, deleted_count, unchanged_count, error_code, error_message, started_at, finished_at)
+		 VALUES ('run-old', 'source-1', 'binding-keep', 1, 'scheduled', '2026-07-07 12:00:00+00:00', 'full', '{}', '{}', 'PENDING', 0, 0, 0, 0, 0, NULL, NULL, '2026-07-07 11:00:00+00:00', NULL)`,
+		`INSERT INTO source_sync_runs (run_id, source_id, binding_id, binding_generation, trigger_type, scheduled_fire_at, scope_type, scope_ref_json, coverage_json, status, seen_count, new_count, modified_count, deleted_count, unchanged_count, error_code, error_message, started_at, finished_at)
+		 VALUES ('run-keep', 'source-1', 'binding-keep', 1, 'scheduled', '2026-07-07 12:00:00+00:00', 'full', '{}', '{}', 'RUNNING', 0, 0, 0, 0, 0, NULL, NULL, '2026-07-07 11:01:00+00:00', NULL)`,
+		`INSERT INTO data_source_create_operations (operation_id, caller_id, request_id, request_hash, source_id, dataset_id, created_core_parent_document_ids_json, created_binding_ids_json, warning_json, status, compensation_status, compensation_error, created_at, updated_at)
+		 VALUES ('op-old', 'user-1', 'request-1', 'hash-1', NULL, NULL, '{}', '{}', '{}', 'PENDING', 'NONE', '{}', '2026-07-07 11:00:00+00:00', '2026-07-07 11:00:00+00:00')`,
+		`INSERT INTO data_source_create_operations (operation_id, caller_id, request_id, request_hash, source_id, dataset_id, created_core_parent_document_ids_json, created_binding_ids_json, warning_json, status, compensation_status, compensation_error, created_at, updated_at)
+		 VALUES ('op-keep', 'user-1', 'request-1', 'hash-1', 'source-1', 'dataset-1', '{}', '{}', '{}', 'SUCCEEDED', 'NONE', '{}', '2026-07-07 11:01:00+00:00', '2026-07-07 11:01:00+00:00')`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatalf("insert sqlite repair fixture: %v\n%s", err, statement)
+		}
 	}
 }
 

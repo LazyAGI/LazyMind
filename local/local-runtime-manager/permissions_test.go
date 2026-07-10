@@ -7,52 +7,18 @@ import (
 	"testing"
 )
 
-func TestEnsureComposeBindPermissionsMakesCriticalPathsReadable(t *testing.T) {
+func TestEnsureLocalDataRootWritableCreatesWritableDataDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod permission bits are Unix-specific")
 	}
 	repo := t.TempDir()
-	paths := []string{
-		"db-init",
-		"scripts/db-bootstrap.sh",
-		"kong.yml",
-		"redis-users.acl",
-	}
-	for _, rel := range paths {
-		path := filepath.Join(repo, filepath.FromSlash(rel))
-		if filepath.Ext(path) == "" {
-			if err := os.MkdirAll(path, 0o700); err != nil {
-				t.Fatalf("mkdir %s: %v", rel, err)
-			}
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatalf("mkdir parent for %s: %v", rel, err)
-		}
-		if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
-			t.Fatalf("write %s: %v", rel, err)
-		}
+
+	if err := ensureLocalDataRootWritable(repo); err != nil {
+		t.Fatalf("ensure local data root writable: %v", err)
 	}
 
-	if err := ensureComposeBindPermissions(repo); err != nil {
-		t.Fatalf("ensure permissions: %v", err)
-	}
-
-	for _, rel := range paths {
-		path := filepath.Join(repo, filepath.FromSlash(rel))
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("stat %s: %v", rel, err)
-		}
-		mode := info.Mode().Perm()
-		if info.IsDir() {
-			if mode&0o555 != 0o555 {
-				t.Fatalf("expected directory %s to be readable/executable by containers, mode=%#o", rel, mode)
-			}
-			continue
-		}
-		if mode&0o444 != 0o444 {
-			t.Fatalf("expected file %s to be readable by containers, mode=%#o", rel, mode)
-		}
+	probe := filepath.Join(repo, "data", "probe")
+	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil {
+		t.Fatalf("expected data root to be writable: %v", err)
 	}
 }

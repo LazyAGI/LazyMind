@@ -1,0 +1,192 @@
+initial: __start__
+
+transitions:
+  __start__:
+    - to: build_context
+      condition: "Cold start — always enter context building first."
+
+  build_context:
+    - to: generate_outline
+      condition: "Context ready — proceed to outline planning."
+
+  generate_outline:
+    - to: plan_sections
+      condition: "Outline accepted — proceed to per-section instruction planning."
+
+  plan_sections:
+    - to: generate_draft
+      condition: "Section instructions ready — proceed to draft writing."
+
+  generate_draft:
+    - to: review_document
+      condition: "Full draft produced — proceed to review."
+
+  review_document:
+    - to: finalize_report
+      condition: "Review passed — proceed to finalization."
+
+  finalize_report:
+    - to: __end__
+      condition: "Final report produced — pipeline complete."
+
+steps:
+  build_context:
+    label: Build Context
+    prompt: |
+      {{runtime_instruction}}
+
+      This step produces three artifacts: writing_task, resource_profiles, and writing_context.
+
+      Step 1: Call writer_build_writing_task(query="{{user_input}}") to get the writing_task path, then persist it with save_artifact(content_type='file', key='writing_task').
+
+      Step 2: Call writer_profile_resources(writing_task_path=<writing_task path>, user_input="{{user_input}}") to get the resource_profiles path, then persist it with save_artifact(content_type='file', key='resource_profiles').
+
+      Step 3: Call writer_create_writing_context(writing_task_path=<writing_task path>, resource_profiles_path=<resource_profiles path>) to get the writing_context path, then persist it with save_artifact(content_type='file', key='writing_context').
+
+      If any of the above tool calls fails, do not perform any extra fallback — stop the step immediately. In particular, do not write content yourself to persist.
+    tools:
+      - writer_build_writing_task
+      - writer_profile_resources
+      - writer_create_writing_context
+    outputs:
+      - slot: writing_task
+      - slot: resource_profiles
+      - slot: writing_context
+    acceptance_criteria: |
+      writing_task, resource_profiles, and writing_context are all saved; writing_context.context_id is non-empty; document_summary.summary is non-empty with at least 1 key_point; style_profile contains the three fields audience, formality, and tone.
+
+  generate_outline:
+    label: Generate Outline
+    prompt: |
+      {{runtime_instruction}}
+
+      This step generates a structured outline from writing_task + writing_context, then syncs the outline content back into the writing context. Call get_artifact to retrieve writing_task and writing_context, pass them to writer_generate_outline(writing_task_path=<writing_task path>, writing_context_path=<writing_context path>), and obtain the outline path.
+
+      After the outline is generated, call writer_update_writing_context(content_artifact_path=<outline path>, writing_context_path=<original writing_context path>) and obtain the updated writing_context path.
+
+      Once all generation operations in this step are complete, call save_artifact(content_type='file', key='outline') to save the outline path, then call save_artifact(content_type='file', key='writing_context') to save the updated writing_context path.
+
+      If any of the above tool calls fails, do not perform any extra fallback — stop the step immediately. In particular, do not write content yourself to persist.
+    tools:
+      - writer_generate_outline
+      - writer_update_writing_context
+    inputs:
+      - slot: writing_task
+        required: true
+      - slot: writing_context
+        required: true
+    outputs:
+      - slot: outline
+      - slot: writing_context
+    acceptance_criteria: |
+      outline is saved; nodes count is at least 3; each node contains at least the non-empty fields node_id, title, instruction, and constraints; writing_context has been saved once; document_summary reflects the outline content.
+
+  plan_sections:
+    label: Plan Sections
+    prompt: |
+      {{runtime_instruction}}
+
+      This step generates writing instructions for every top-level section in the outline in a single batch. Call get_artifact to retrieve writing_context and outline. If review_report already exists in the artifacts, this step is a replan triggered by a rewind from the review stage, and you must call get_artifact(key='review_report') once more to bring it into the generation process.
+
+      Then call writer_generate_section_instructions(outline_path=<outline path>, writing_context_path=<writing_context path>, review_report_path=<review_report path, or empty string if absent>) and persist the returned path with save_artifact(content_type='file', key='section_instructions').
+
+      If any of the above tool calls fails, do not perform any extra fallback — stop the step immediately. In particular, do not write content yourself to persist.
+    tools:
+      - writer_generate_section_instructions
+    inputs:
+      - slot: outline
+        required: true
+      - slot: writing_context
+        required: true
+      - slot: review_report
+        required: false
+    outputs:
+      - slot: section_instructions
+    acceptance_criteria: |
+      section_instructions is saved; it is a SectionInstructionList artifact (data.instructions is an array) whose entry count matches the outline.nodes count one-to-one; each entry contains at least the fields outline_node_id, section_title, section_goal, and required_points.
+
+  generate_draft:
+    label: Generate Draft
+    prompt: |
+      {{runtime_instruction}}
+
+      This step writes the draft body section by section, then merges them into the complete document.
+
+      Call get_artifact to retrieve the file paths of writing_task, writing_context, outline, and section_instructions. Prepare a draft_section_paths list to record every non-empty section path returned by the tool.
+
+      Call writer_generate_draft_section(writing_task_path=<writing_task path>, section_instructions_path=<section_instructions path>, writing_context_path=<writing_context path>) to produce the next section. Internally, the tool decides which section to write based on the section files already produced. When the tool returns a non-empty path, append it to draft_section_paths and continue calling the same tool to produce the next section.
+
+      When the tool returns an empty string, all section drafts have been generated. Take the last path in draft_section_paths and call writer_assemble_draft_document(draft_sections_anchor_path=<last draft_section path>, writing_context_path=<writing_context path>, outline_path=<outline path>) to obtain the draft_document path.
+
+      After the draft document is generated, call writer_update_writing_context(content_artifact_path=<draft_document path>, writing_context_path=<original writing_context path>) and obtain the updated writing_context path.
+
+      Once all generation operations in this step are complete, in the order of draft_section_paths, call save_artifact(content_type='file', key='draft_sections') for each section draft path, then call save_artifact(content_type='file', key='draft_document') to save the draft_document path, and finally call save_artifact(content_type='file', key='writing_context') to save the updated writing_context path.
+
+      If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
+    tools:
+      - writer_generate_draft_section
+      - writer_assemble_draft_document
+      - writer_update_writing_context
+    inputs:
+      - slot: writing_task
+        required: true
+      - slot: writing_context
+        required: true
+      - slot: outline
+        required: true
+      - slot: section_instructions
+        required: true
+    outputs:
+      - slot: draft_sections
+      - slot: draft_document
+      - slot: writing_context
+    acceptance_criteria: |
+      draft_sections are saved in section order; the count matches section_instructions.data.instructions, with at least 2 DraftSection; each DraftSection has a non-empty title and non-empty blocks, and every block's content is a non-empty string. draft_document has been saved once, with draft_document.sections corresponding one-to-one with draft_sections in order; writing_context has been saved once, and document_summary reflects the draft_document content.
+
+  review_document:
+    label: Review Document
+    prompt: |
+      {{runtime_instruction}}
+
+      This step reviews the draft for consistency and quality. Call get_artifact to retrieve the file paths of writing_context and draft_document, then call writer_check_consistency(draft_path=<draft_document path>, writing_context_path=<writing_context path>). The tool returns review_report (the absolute path of the review_report artifact file) and review_summary (the content summary string produced by validate_draft_document — not a path). Call save_artifact(content_type='file', key='review_report', value=<review_report path>) and save_artifact(content_type='text', key='review_summary', value=<review_summary content>) separately to persist them.
+
+      The content of review_summary decides next_step: if the review passes, advance to finalize_report to produce the final report; if it fails, rewind to plan_sections to replan the sections. The final message of this step must follow this format: "Since {{review_summary}}, recommend advancing the next step to {{next_step}}."
+
+      If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
+    tools:
+      - writer_check_consistency
+    inputs:
+      - slot: draft_document
+        required: true
+      - slot: writing_context
+        required: true
+    outputs:
+      - slot: review_report
+      - slot: review_summary
+    acceptance_criteria: |
+      review_report is saved; result.is_passed is a boolean; result.score is a 0-100 number; result.summary is a non-empty string; result.issues is an array whose items each contain severity (high/medium/low), category, and description. review_summary is saved as the content summary produced by validate_draft_document (not a path). The final message must follow the format "Since {{review_summary}}, recommend advancing the next step to {{next_step}}".
+
+  finalize_report:
+    label: Finalize Report
+    prompt: |
+      {{runtime_instruction}}
+
+      This step produces the final Markdown report after review. Call get_artifact to retrieve the file paths of writing_context, draft_document, and review_report, then pass them to writer_generate_writing_output(draft_path=<draft_document path>, review_report_path=<review_report path>, writing_context_path=<writing_context path>). The tool returns two file paths at once: writing_output (the structured artifact) and writing_output_md (the final Markdown report).
+
+      Once the generation operations in this step are complete, call save_artifact(content_type='file', key='writing_output') and save_artifact(content_type='file', key='writing_output_md') for the two paths to persist them as the artifacts of the current step.
+
+      If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
+    tools:
+      - writer_generate_writing_output
+    inputs:
+      - slot: draft_document
+        required: true
+      - slot: review_report
+        required: true
+      - slot: writing_context
+        required: true
+    outputs:
+      - slot: writing_output
+      - slot: writing_output_md
+    acceptance_criteria: |
+      writing_output is saved; writing_output_md is saved; output_format is markdown; content is a non-empty string that includes a title and at least 2 level-2 sections (starting with `## `), with a body long enough to stand on its own.

@@ -18,9 +18,14 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
 	"lazymind/core/state"
+	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
 )
+
+type chatStatusCacheEntry struct {
+	Status string `json:"status"`
+}
 
 // PluginStepParams are the task_created.params fields for plugin_step agent type.
 type PluginStepParams struct {
@@ -50,6 +55,12 @@ type PluginStepParams struct {
 	// SubAgent can access uploaded files via read_user_attachment / find_user_attachment.
 	// Key = conversation turn sequence (string), value = list of absolute file paths.
 	HistoryFilesPerTurn map[string][]string `json:"history_files_per_turn,omitempty"`
+
+	// Filters carries retrieval filters (e.g. kb_id) from the chat session into plugin steps.
+	Filters map[string]any `json:"filters,omitempty"`
+
+	// UserID is the chat user id for KB ACL and signed static-file URLs.
+	UserID string `json:"user_id,omitempty"`
 }
 
 // asMap serialises the params into the generic map expected by subagent.RunRequest.Params.
@@ -72,6 +83,12 @@ func (p PluginStepParams) asMap() map[string]any {
 	}
 	if len(p.HistoryFilesPerTurn) > 0 {
 		m["history_files_per_turn"] = p.HistoryFilesPerTurn
+	}
+	if len(p.Filters) > 0 {
+		m["filters"] = p.Filters
+	}
+	if p.UserID != "" {
+		m["user_id"] = p.UserID
 	}
 	return m
 }
@@ -136,8 +153,9 @@ func HandlePluginStepCreated(
 		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusCompleted); uErr != nil {
 			fmt.Printf("[Plugin] __end__: failed to complete session %s: %v\n", sessionID, uErr)
 		}
-		// Sync TaskCenter status to completed.
-		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, sessionID, "completed")
+		// Sync TaskCenter status to succeeded.
+		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, sessionID, "succeeded")
+		clearGeneratingChatStatus(ctx, stateStore, convID)
 		return sessionID, taskID, true, nil
 	}
 
@@ -199,9 +217,7 @@ func HandlePluginStepCreated(
 		if uErr := UpdateSessionCurrentStep(ctx, db, sessionID, stepID); uErr != nil {
 			fmt.Printf("[Plugin] failed to update current_step: %v\n", uErr)
 		}
-		// Ensure session is marked active when a new step starts. This covers the
-		// auto-advance path where advanceAutoMode triggers ChatAgent directly without
-		// going through /plugin-sessions/{id}:advance (which would set active explicitly).
+		// Ensure session is marked active when a new step starts (e.g. auto-advance via ChatAgent).
 		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive); uErr != nil {
 			fmt.Printf("[Plugin] failed to reset session status to active: %v\n", uErr)
 		}
@@ -232,6 +248,19 @@ func HandlePluginStepCreated(
 	}
 	if len(params.HistoryFilesPerTurn) > 0 {
 		rawParamsMap["history_files_per_turn"] = params.HistoryFilesPerTurn
+	}
+	filters := params.Filters
+	if len(filters) == 0 {
+		filters = filtersFromConversation(db, convID)
+		if len(filters) > 0 {
+			params.Filters = filters
+		}
+	}
+	if len(filters) > 0 {
+		rawParamsMap["filters"] = filters
+	}
+	if params.UserID != "" {
+		rawParamsMap["user_id"] = params.UserID
 	}
 	rawParams, _ := json.Marshal(rawParamsMap)
 	inputJSON, _ := json.Marshal(inputKeys)
@@ -343,6 +372,25 @@ func OnSubAgentDone(
 		}
 	}
 
+	// Once a terminal plugin step succeeds, close the plugin session according
+	// to the state machine instead of requiring a follow-up ChatAgent turn to
+	// emit __end__.
+	if status == subagent.StatusSucceeded && isTerminalPluginStep(ctx, pctx.PluginID, pctx.StepID) {
+		if _, sErr := CreateSessionStep(ctx, db, pctx.SessionID, "__end__", "__end__", 1); sErr == nil {
+			_ = UpdateStepStatus(ctx, db, "__end__", StepStatusSucceeded)
+		}
+		_ = UpdateSessionCurrentStep(ctx, db, pctx.SessionID, "__end__")
+		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusCompleted)
+		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "succeeded")
+		clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
+		onSSE("plugin_completed", map[string]any{
+			"session_id": pctx.SessionID,
+			"step_id":    pctx.StepID,
+		})
+		go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+		return
+	}
+
 	// Determine mode: use context-level PluginMode (set from request body during HandlePluginStepCreated).
 	// Falls back to "dynamic" if not set. Env-var defaultMode() is no longer used.
 	mode := pctx.PluginMode
@@ -377,6 +425,30 @@ func OnSubAgentDone(
 	go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
 }
 
+func clearGeneratingChatStatus(ctx context.Context, stateStore state.Store, convID string) {
+	if stateStore == nil || strings.TrimSpace(convID) == "" {
+		return
+	}
+	key := fmt.Sprintf("rag/chat/status:%s", convID)
+	entries, err := stateStore.HGetAll(ctx, key)
+	if err != nil {
+		return
+	}
+	var fields []string
+	for historyID, raw := range entries {
+		var st chatStatusCacheEntry
+		if json.Unmarshal([]byte(raw), &st) != nil {
+			continue
+		}
+		if st.Status == "generating" {
+			fields = append(fields, historyID)
+		}
+	}
+	if len(fields) > 0 {
+		_ = stateStore.HDel(ctx, key, fields...)
+	}
+}
+
 // advanceAutoMode calls DriverAgent and forwards its natural-language assessment to ChatAgent.
 // ChatAgent then decides autonomously whether to advance, retry, rewind, or complete the plugin
 // by calling advance_step with the appropriate step_id (including "__end__" to finish).
@@ -404,13 +476,13 @@ func advanceAutoMode(
 		pctxCopy := *pctx
 		go func() {
 			triggerNextChatTurn(pctxCopy.ConvID, pctxCopy.SessionID, pctxCopy.PluginID, pctxCopy.StepID,
-				pctxCopy.UserID, summary, func() {
+				pctxCopy.PluginMode, pctxCopy.UserID, summary, func() {
 					onSSE("auto_chat_started", map[string]any{
 						"session_id":      pctxCopy.SessionID,
 						"conversation_id": pctxCopy.ConvID,
 						"driver_message":  summary,
 					})
-				})
+				}, "driver")
 			checkAndFallbackIfStuck(ctx, db, stateStore, onSSE, &pctxCopy)
 		}()
 		return
@@ -461,7 +533,7 @@ func advanceAutoMode(
 	pctxCopy := *pctx
 	go func() {
 		triggerNextChatTurn(pctxCopy.ConvID, pctxCopy.SessionID, pctxCopy.PluginID, pctxCopy.StepID,
-			pctxCopy.UserID, driverMsg, func() {
+			pctxCopy.PluginMode, pctxCopy.UserID, driverMsg, func() {
 				// Emit after core has accepted the request and set Redis generating status,
 				// so the frontend resume SSE does not race with stream setup.
 				onSSE("auto_chat_started", map[string]any{
@@ -469,7 +541,7 @@ func advanceAutoMode(
 					"conversation_id": pctxCopy.ConvID,
 					"driver_message":  driverMsg,
 				})
-			})
+			}, "driver")
 		checkAndFallbackIfStuck(ctx, db, stateStore, onSSE, &pctxCopy)
 	}()
 }
@@ -478,24 +550,33 @@ func advanceAutoMode(
 // the next ChatAgent round. This ensures history persistence, applyChatRuntimeConfigs,
 // and all other Go-side pipeline steps run exactly as in a real user turn.
 func triggerNextChatTurn(
-	convID, sessionID, pluginID, currentStep, userID, syntheticMsg string,
+	convID, sessionID, pluginID, currentStep, pluginMode, userID, syntheticMsg string,
 	onReady func(),
+	syntheticSource string,
 ) {
 	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
+	pluginCtx := map[string]any{
+		"session_id":   sessionID,
+		"plugin_id":    pluginID,
+		"current_step": currentStep,
+		"plugin_mode":  pluginMode,
+	}
+	if syntheticSource != "" {
+		pluginCtx["synthetic_source"] = syntheticSource
+	}
 	reqBody := map[string]any{
 		"query":           syntheticMsg,
 		"conversation_id": convID,
 		// stream=true is required so that task_created events emitted by the ChatAgent
 		// are written to the Redis SSE buffer and delivered to the frontend.
 		// Non-streaming mode skips the event pipeline entirely.
-		"stream": true,
-		"mode":   "auto",
-		"input":  []map[string]any{{"input_type": "text", "text": syntheticMsg}},
-		"plugin_context": map[string]any{
-			"session_id":   sessionID,
-			"plugin_id":    pluginID,
-			"current_step": currentStep,
-		},
+		"stream":         true,
+		"mode":           "auto",
+		"input":          []map[string]any{{"input_type": "text", "text": syntheticMsg}},
+		"plugin_context": pluginCtx,
+	}
+	if searchConfig := loadConversationSearchConfig(store.DB(), convID); len(searchConfig) > 0 {
+		reqBody["conversation"] = map[string]any{"search_config": searchConfig}
 	}
 	body, _ := json.Marshal(reqBody)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -790,6 +871,34 @@ func resolveSlotBinding(pluginID, slot string) (slotID, cardinality string) {
 		return "", ""
 	}
 	return result.SlotID, result.Cardinality
+}
+
+func isTerminalPluginStep(parentCtx context.Context, pluginID, stepID string) bool {
+	if pluginID == "" || stepID == "" {
+		return false
+	}
+	endpoint := common.ChatServiceEndpoint()
+	url := fmt.Sprintf("%s/api/plugins/%s", endpoint, pluginID)
+	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var spec pluginStateSpec
+	if json.NewDecoder(resp.Body).Decode(&spec) != nil {
+		return false
+	}
+	edges := spec.State.Transitions[stepID]
+	return len(edges) == 1 && edges[0].To == "__end__"
 }
 
 // defaultDriverMaxRetries is the global max retry count for DriverAgent RETRY verdicts.

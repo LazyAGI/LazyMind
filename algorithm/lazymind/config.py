@@ -33,6 +33,8 @@ def _model_config_path_post_action(resolved_path):
 # All LAZYMIND_* environment variables are registered here.
 config = Config(prefix='LAZYMIND', home='~/.lazyllm_rag')
 _LAZYMIND_ROOT = os.path.dirname(__file__)
+config.add('runtime_mode', str, 'cloud', 'RUNTIME_MODE',
+           description='LazyMind runtime mode profile: cloud or local.')
 
 # ---------------------------------------------------------------------------
 # Chat
@@ -100,6 +102,8 @@ config.add('agentic_kb_url', str, 'http://lazyllm-algo:8000', 'AGENTIC_KB_URL',
            description='Knowledge base service URL for agentic tools.')
 config.add('core_api_url', str, 'http://core:8000', 'CORE_API_URL', description='Core API service URL.')
 config.add('core_api_timeout', int, 30, 'CORE_API_TIMEOUT', description='Core API request timeout in seconds.')
+config.add('core_internal_token', str, '', 'AUTH_SERVICE_INTERNAL_TOKEN',
+           description='Internal service token for privileged Core API calls.')
 config.add('agentic_kb_name', str, 'general_algo', 'AGENTIC_KB_NAME',
            description='Default knowledge base name for agentic.')
 config.add('skill_fs_url', str, 'remote://skills', 'SKILL_FS_URL', description='Skill filesystem URL.')

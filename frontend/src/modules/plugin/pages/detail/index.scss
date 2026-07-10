@@ -1,0 +1,146 @@
+.plugin-detail-loading,
+.plugin-detail-error {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 300px;
+  color: #8c8c8c;
+}
+
+// Portal overlay that hosts the plugin editor.
+// Fills the content area (.main-layout-body), leaving the sidebar untouched.
+.plugin-editor-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  // Prevent overflow from leaking outside the container.
+  overflow: hidden;
+}
+
+.plugin-editor-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.plugin-editor-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  overflow: hidden;
+}
+
+// Full-screen "waiting" state shown during AI repair or before editor is ready.
+.plugin-detail-page--waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background: #fff;
+}
+
+.plugin-detail-waiting-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 0 24px;
+}
+
+.plugin-detail-waiting-icon {
+  font-size: 32px;
+  color: #1677ff;
+}
+
+.plugin-detail-waiting-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f1f1f;
+}
+
+.plugin-detail-waiting-sub {
+  margin: 0;
+  font-size: 13px;
+  color: #8c8c8c;
+  max-width: 360px;
+  line-height: 1.6;
+}
+
+.plugin-detail-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+}
+
+.plugin-detail-name {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #1f1f1f;
+  font-size: 13px;
+
+  &:hover {
+    text-decoration: underline;
+    color: #1677ff;
+  }
+}
+
+.plugin-detail-editor {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.plugin-detail-banner {
+  flex-shrink: 0;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+}
+
+.plugin-detail-skeleton {
+  flex: 1;
+  overflow: hidden;
+  padding: 24px 32px;
+}
+
+// Progress modal shown during AI generation (Phase 0/1/2).
+.plugin-generate-progress-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 32px 24px 24px;
+  text-align: center;
+}
+
+.plugin-generate-progress-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: #1f1f1f;
+}
+
+.plugin-generate-progress-hint {
+  margin: 0;
+  font-size: 13px;
+  color: #8c8c8c;
+}
+
+.plugin-generate-phase-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+  text-align: left;
+  padding: 12px 16px;
+  background: #f5f5f5;
+  border-radius: 8px;
+}

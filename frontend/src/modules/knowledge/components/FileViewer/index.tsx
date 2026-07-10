@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useState,
+} from "react";
 import { Spin, message, Empty } from "antd";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
@@ -12,15 +19,20 @@ import {
   RenderWord,
 } from "./renderers";
 
-import { RenderPdf } from "@/components/ui";
+import { RenderPdf, exportPdfAsImagePdf } from "@/components/ui";
 import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
 
 import "./index.scss";
+
+export interface FileViewerRef {
+  exportImagePdf: () => Promise<void>;
+}
 
 interface FileViewerProps {
   file?: string;
   fileName: string;
   segment?: Segment;
+  onExportReadyChange?: (ready: boolean) => void;
 }
 
 const IMAGE_FILE_TYPES = [
@@ -59,9 +71,9 @@ const MEDIA_MIME_TYPES: Record<string, string> = {
   webp: "image/webp",
 };
 
-const FileViewer = (props: FileViewerProps) => {
+const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   const { t } = useTranslation();
-  const { file, segment } = props;
+  const { file, segment, onExportReadyChange } = props;
   const resolvedFileUrl = useMemo(() => normalizeProxyableUrl(file), [file]);
   const [loading, setLoading] = useState(false);
   const [fileData, setFileData] = useState<ArrayBuffer | null>(null);
@@ -226,6 +238,20 @@ const FileViewer = (props: FileViewerProps) => {
     return <Empty description={previewError || t("common.noData")} />;
   }, [previewError]);
 
+  // pdf.js transfers/detaches the buffer it receives; keep a dedicated copy for preview.
+  const pdfPreviewData = useMemo(() => {
+    if (!fileData || fileType !== "pdf") {
+      return null;
+    }
+    try {
+      const copy = new ArrayBuffer(fileData.byteLength);
+      new Uint8Array(copy).set(new Uint8Array(fileData));
+      return copy;
+    } catch {
+      return null;
+    }
+  }, [fileData, fileType]);
+
   const renderFile = useMemo(() => {
     if (!fileData) {
       return null;
@@ -236,17 +262,17 @@ const FileViewer = (props: FileViewerProps) => {
       case "html":
         return <RenderHtml fileData={fileData} content={content} />;
       case "pdf":
-        return (
+        return pdfPreviewData ? (
           <RenderPdf
             className="scroll-container"
             style={{
-              height: "calc(100vh - 150px)",
+              height: "100%",
             }}
-            fileData={fileData}
+            fileData={pdfPreviewData}
             metadata={meta}
             content={content}
           />
-        );
+        ) : null;
       case "docx":
         return (
           <RenderWord
@@ -316,7 +342,43 @@ const FileViewer = (props: FileViewerProps) => {
           </div>
         );
       }
-  }, [fileData, content, fileType, mediaObjectUrl, meta, props.fileName]);
+  }, [fileData, pdfPreviewData, content, fileType, mediaObjectUrl, meta, props.fileName]);
+
+  const canExportImagePdf =
+    fileType === "pdf" && !!fileData && !loading && !previewError;
+
+  useEffect(() => {
+    onExportReadyChange?.(canExportImagePdf);
+    return () => {
+      onExportReadyChange?.(false);
+    };
+  }, [canExportImagePdf, onExportReadyChange]);
+
+  const exportImagePdf = useCallback(async () => {
+    if (!fileData || fileType !== "pdf") {
+      throw new Error("PDF is not ready for export");
+    }
+    const authHeaders = AgentAppsAuth.getAuthHeaders();
+    const headers = new Headers();
+    Object.entries(authHeaders).forEach(([key, value]) => {
+      if (value) {
+        headers.set(key, value);
+      }
+    });
+    await exportPdfAsImagePdf(fileData, {
+      fileName: props.fileName,
+      fetchUrl: resolvedFileUrl || undefined,
+      fetchHeaders: headers.keys().next().done ? undefined : headers,
+    });
+  }, [fileData, fileType, props.fileName, resolvedFileUrl]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      exportImagePdf,
+    }),
+    [exportImagePdf],
+  );
 
   return (
     <div className="file-viewer-container">
@@ -327,6 +389,8 @@ const FileViewer = (props: FileViewerProps) => {
       </div>
     </div>
   );
-};
+});
+
+FileViewer.displayName = "FileViewer";
 
 export default FileViewer;

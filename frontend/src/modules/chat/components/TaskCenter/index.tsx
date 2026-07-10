@@ -35,9 +35,20 @@ const EMPTY_TASKS: SubAgentTask[] = [];
 const RUNNING_STATUSES: TaskStatus[] = ["pending", "running"];
 
 function imageUrlOf(value: any): string {
-  if (!value) return "";
-  if (value.url) return value.url;
-  if (value.path) return resolveCoreAssetUrl(value.path);
+  const raw = value?.url || value?.path;
+  if (!raw) return "";
+  const resolved = resolveCoreAssetUrl(raw);
+  if (!resolved) return "";
+  // Avoid mounting obviously non-browser-accessible local paths (e.g. /data/subagent/*)
+  // to prevent transient broken thumbnails before signed/static URLs become available.
+  if (
+    resolved.startsWith("/static-files/") ||
+    resolved.startsWith("/api/core/static-files/") ||
+    resolved.startsWith("http://") ||
+    resolved.startsWith("https://")
+  ) {
+    return resolved;
+  }
   return "";
 }
 
@@ -216,29 +227,48 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
   const fileListPaths = fileLists.flatMap((a) =>
     Array.isArray(a.value?.paths) ? a.value.paths : [],
   );
+  const imageUrls = images
+    .map((a) => ({
+      key: `img-${a.slot}-${a.seq}`,
+      src: imageUrlOf(a.value),
+    }))
+    .filter((img) => Boolean(img.src));
+  const fileListUrls = fileListPaths
+    .map((p: string, i: number) => ({
+      key: `fl-${i}`,
+      src: resolveCoreAssetUrl(p),
+    }))
+    .filter(
+      (img) =>
+        Boolean(img.src) &&
+        (img.src.startsWith("/static-files/") ||
+          img.src.startsWith("/api/core/static-files/") ||
+          img.src.startsWith("http://") ||
+          img.src.startsWith("https://")),
+    );
 
   const total =
-    images.length + fileListPaths.length + files.length + texts.length;
+    imageUrls.length + fileListUrls.length + files.length + texts.length;
 
   return (
     <CollapsibleSection title={`${t("taskCenter.artifacts")} (${total})`}>
       <div className="task-artifacts-inner">
-        {(images.length > 0 || fileListPaths.length > 0) && (
+        {(imageUrls.length > 0 || fileListUrls.length > 0) && (
           <div className="task-artifacts-grid">
             <Image.PreviewGroup>
-              {images.map((a) => (
+              {imageUrls.map((img) => (
                 <Image
-                  key={`img-${a.slot}-${a.seq}`}
-                  src={imageUrlOf(a.value)}
+                  key={img.key}
+                  src={img.src}
                   width={64}
                   height={64}
                   className="task-artifact-thumb"
                 />
               ))}
-              {fileListPaths.map((p: string, i: number) => (
+              {fileListUrls.map((img) => (
                 <Image
-                  key={`fl-${i}`}
-                  src={resolveCoreAssetUrl(p)}
+                  key={img.key}
+                  src={img.src}
                   width={64}
                   height={64}
                   className="task-artifact-thumb"

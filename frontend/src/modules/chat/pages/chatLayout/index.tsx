@@ -22,7 +22,7 @@ import {
   parseConversationPluginSettings,
   type ConversationPluginSettings,
 } from "@/modules/chat/utils/request";
-import { draftStore } from "@/modules/chat/store/pluginPanel";
+import { draftStore, buildPluginSearchConfig, usePluginStore } from "@/modules/chat/store/pluginPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { isDeveloperModeActive } from "@/utils/developerMode";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
@@ -35,7 +35,6 @@ import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
 import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
-import { usePluginStore } from "@/modules/chat/store/pluginPanel";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 
 // Stable empty reference to avoid returning a fresh array from the zustand
@@ -158,6 +157,40 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const hasPluginSession = usePluginStore((s) =>
     sessionId ? (s.sessionByConversation[sessionId] ?? null) !== null : false,
   );
+
+  // When the user changes KB selection during an active plugin session, persist it on the
+  // conversation so analyze_subject KB prefetch inherits filters.kb_id.
+  const kbSyncInitializedRef = useRef(false);
+  useEffect(() => {
+    kbSyncInitializedRef.current = false;
+  }, [sessionId]);
+  useEffect(() => {
+    if (!sessionId || sessionId.startsWith('temp_')) {
+      return;
+    }
+    if (!kbSyncInitializedRef.current) {
+      kbSyncInitializedRef.current = true;
+      return;
+    }
+    const session = usePluginStore.getState().sessionByConversation[sessionId];
+    if (!session?.session_id) {
+      return;
+    }
+    if (session.status !== 'active' && session.status !== 'waiting') {
+      return;
+    }
+    const searchConfig = buildPluginSearchConfig(chatConfig);
+    void usePluginStore.getState().syncSessionSearchConfig(
+      sessionId,
+      session.session_id,
+      searchConfig,
+    );
+  }, [
+    sessionId,
+    chatConfig?.knowledgeBaseId,
+    chatConfig?.creators,
+    chatConfig?.tags,
+  ]);
 
   const tasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
@@ -348,21 +381,21 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         : undefined;
 
     // Attach focused_tab and focused_sort_order so the AI knows what the user is looking at.
+    const { focusedTabByConversation, focusedSortOrderByConversation } =
+      usePluginStore.getState();
+    const focusedTab = focusedTabByConversation[sessionId];
+    const focusedSortOrder = focusedSortOrderByConversation[sessionId];
     const pluginUIState =
-      activeSession && (activeSession.focusedTab || activeSession.focusedSortOrder !== undefined)
+      focusedTab || focusedSortOrder !== undefined
         ? {
-            focused_tab: activeSession.focusedTab,
-            focused_sort_order: activeSession.focusedSortOrder,
+            focused_tab: focusedTab,
+            focused_sort_order: focusedSortOrder,
           }
         : undefined;
 
     // Collect pending artifact references from the chat input store.
     const { getArtifactRefs, clearArtifactRefs } = useChatInputStore.getState();
     const artifactRefs = getArtifactRefs(sessionId);
-    // Clear after reading so they are not repeated in the next message.
-    if (artifactRefs.length > 0) {
-      clearArtifactRefs(sessionId);
-    }
     // Clear after reading so they are not repeated in the next message.
     if (artifactRefs.length > 0) {
       clearArtifactRefs(sessionId);

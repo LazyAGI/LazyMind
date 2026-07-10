@@ -15,6 +15,7 @@ const stateBackendEnv = "LAZYMIND_STATE_BACKEND"
 type Config struct {
 	Address                           string
 	Port                              int
+	DBDriver                          string
 	DBDSN                             string
 	DBMigrationFile                   string
 	CoreBaseURL                       string
@@ -57,6 +58,7 @@ func defaultConfig() Config {
 	return Config{
 		Address:                           "127.0.0.1",
 		Port:                              18080,
+		DBDriver:                          "postgres",
 		DefaultDatasetAlgoID:              "general_algo",
 		DefaultDatasetAlgoName:            "General",
 		LocalFSDefaultAgentID:             "file-watcher-local-001",
@@ -91,6 +93,9 @@ func (c *Config) applyEnv() {
 	}
 	if dsn := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN")); dsn != "" {
 		c.DBDSN = dsn
+	}
+	if driver := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_DRIVER")); driver != "" {
+		c.DBDriver = driver
 	}
 	if migrationFile := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_MIGRATION_FILE")); migrationFile != "" {
 		c.DBMigrationFile = migrationFile
@@ -157,6 +162,11 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.DBDSN) == "" {
 		return fmt.Errorf("db dsn is required")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.DBDriver)) {
+	case "postgres", "sqlite":
+	default:
+		return fmt.Errorf("db driver must be postgres or sqlite")
 	}
 	if strings.TrimSpace(c.CoreBaseURL) == "" {
 		return fmt.Errorf("core base url is required")

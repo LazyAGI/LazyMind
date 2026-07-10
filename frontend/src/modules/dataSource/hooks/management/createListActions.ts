@@ -5,6 +5,10 @@ import {
   getLocalFSChatSetting,
   updateLocalFSChatSetting,
 } from "../../api/localFsChat";
+import {
+  listDatabaseConnections,
+  type DatabaseConnectionItem,
+} from "../../api/databaseConnections";
 import { normalizeDataSourceStatus } from "../../utils/status";
 import {
   getFirstScanBinding,
@@ -13,6 +17,7 @@ import {
   type ScanV2Source,
 } from "../../utils/scanAccessors";
 import { mapScanSourceToDataSource } from "../../mappers/scanSourceToDataSource";
+import { mapDatabaseConnectionToDataSource } from "../../mappers/databaseConnection";
 import type { ManagementContext, RefreshSourcesOptions } from "./context";
 
 export function createListActions(ctx: ManagementContext) {
@@ -34,7 +39,7 @@ export function createListActions(ctx: ManagementContext) {
 
     ctx.setScanLoading(true);
     try {
-      const [sourcesResponse, nextLocalFSChatSetting] = await Promise.all([
+      const [sourcesResponse, nextLocalFSChatSetting, databaseConnections] = await Promise.all([
         client.listSources({
           keyword: keyword || undefined,
           page: nextPage,
@@ -43,6 +48,10 @@ export function createListActions(ctx: ManagementContext) {
         getLocalFSChatSetting().catch((error) => {
           console.error("Failed to refresh local fs chat setting", error);
           return { enabled: ctx.localScanChatEnabled };
+        }),
+        listDatabaseConnections().catch((error) => {
+          console.error("Failed to refresh external database connections", error);
+          return { connections: [] as DatabaseConnectionItem[] };
         }),
       ]);
       const sourceList = (sourcesResponse.data.items || []) as ScanV2Source[];
@@ -80,14 +89,30 @@ export function createListActions(ctx: ManagementContext) {
           }
         }),
       );
+      const databaseSources = (databaseConnections.connections || [])
+        .filter((item) => {
+          if (!keyword) {
+            return true;
+          }
+          const text = [
+            item.display_name || "",
+            item.description || "",
+            item.db_type || "",
+            item.host || "",
+            item.database_name || "",
+            item.username || "",
+          ].join(" ").toLowerCase();
+          return text.includes(keyword.toLowerCase());
+        })
+        .map((item) => mapDatabaseConnectionToDataSource(item, t));
       if (ctx.sourceListRequestSeqRef.current !== requestSeq) {
         return;
       }
       ctx.setLocalScanChatEnabled(Boolean(nextLocalFSChatSetting.enabled));
-      ctx.setSources(nextSources);
+      ctx.setSources(nextPage === 1 ? [...databaseSources, ...nextSources] : nextSources);
       ctx.setSourceListPage(nextPage);
       ctx.setSourceListPageSize(nextPageSize);
-      ctx.setSourceListTotal(Number(sourcesResponse.data.total || 0));
+      ctx.setSourceListTotal(Number(sourcesResponse.data.total || 0) + databaseSources.length);
 
       if (showSuccessMessage) {
         message.success(t("admin.dataSourceListRefreshed"));

@@ -87,4 +87,5 @@ export interface ChatMessage {
   display_delta?: string;
   cite_message?: string;
   cite_messages?: string[];
+  tool_call_turns?: number;
 }

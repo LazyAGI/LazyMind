@@ -25,6 +25,7 @@ import {
   withModelProviderJsonOptions,
 } from "../api";
 import ToolManagementSection from "../components/ToolManagementSection";
+import { isDeveloperModeActive } from "@/utils/developerMode";
 
 type ServiceCategoryKey = "parsing" | "search" | "academic";
 type ServiceProviderCategory = "ocr" | "search" | "datasource";
@@ -1081,7 +1082,7 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
             <div className="model-provider-tools-substack">
               {renderServiceCategory("search")}
               {renderServiceCategory("academic")}
-              <ToolManagementSection view="builtin" />
+              {isDeveloperModeActive() ? <ToolManagementSection view="builtin" /> : null}
               <ToolManagementSection view="mcp" />
             </div>
           ) : (

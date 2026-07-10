@@ -30,6 +30,38 @@ function parseIntentText(raw?: string): string {
   }
 }
 
+/** Fallback: read latest selected text from a slot artifact. */
+function parseSelectedSlotText(session: PluginSession, slotKey: string, includeUnselected = false): string {
+  const candidates = (session.slots ?? [])
+    .filter((s) => s.slot === slotKey && (includeUnselected || s.selected))
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const latest = candidates[0];
+  if (!latest) return '';
+  const raw = latest.artifact_value;
+  if (raw === null || raw === undefined) return '';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    if (obj.text !== undefined) return String(obj.text);
+    if (obj.value !== undefined) return String(obj.value);
+  }
+  return String(raw);
+}
+
+/** Latest _source_tool among selected image slots (newest first). */
+function getLatestSelectedImageSourceTool(session: PluginSession): string {
+  const selectedImageSlots = (session.slots ?? []).filter(
+    (s) => s.selected && s.content_type === 'image',
+  );
+  if (!selectedImageSlots.length) {
+    return '';
+  }
+  const latest = [...selectedImageSlots].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  )[0];
+  return String(latest?.artifact_value?._source_tool ?? '').trim();
+}
+
 /** IntentPopover shows global intent + per-step intent inside a floating popover. */
 function IntentPopover({
   session,
@@ -42,14 +74,16 @@ function IntentPopover({
 }) {
   const { t } = useTranslation();
   const wrapRef = useRef<HTMLDivElement>(null);
-  const globalText = parseIntentText(session.intent_context);
+  const globalText =
+    parseIntentText(session.intent_context)
+    || parseSelectedSlotText(session, 'user_intent_summary', true);
   const stepIntents = (session.steps ?? [])
     .filter((s) => !!parseIntentText(s.intent_context))
     .map((s, idx) => ({
       idx: idx + 1,
       stepId: s.step_id,
       text: parseIntentText(s.intent_context),
-      tabLabel: tabs.find((t) => t.id === s.step_id)?.label ?? s.step_id,
+      tabLabel: tabs.find((t) => getTabStepId(t) === s.step_id)?.label ?? s.step_id,
     }));
 
   useEffect(() => {
@@ -191,25 +225,91 @@ function resolveColumnSlotId(
   return null;
 }
 
+/**
+ * Flatten a format-C CompositePanelNode tree into a flat column list.
+ * For 'row' nodes, children become columns proportioned by weight.
+ * For 'column' nodes at root, we treat the whole tree as one column (single slot fallback).
+ * tabs[] leaf nodes become an InnerTabsNode for backward compat rendering.
+ */
+function flattenFormatCNode(
+  node: import('@/modules/chat/store/pluginPanel').CompositePanelNode,
+  weight: number,
+): Array<{ slotId: string | InnerTabsNode; weight: number }> {
+  if (node.slot) {
+    return [{ slotId: node.slot, weight }];
+  }
+  if (node.tabs && node.tabs.length > 0) {
+    // Convert format-C tabs (string[]) to legacy InnerTabsNode for rendering
+    const innerTabsNode: InnerTabsNode = {
+      tabs: node.tabs.map((slotId) => slotId as CompositeLayoutNode),
+    };
+    return [{ slotId: innerTabsNode, weight }];
+  }
+  if (node.direction === 'row' && node.children) {
+    const childWeight = node.children.reduce((s, c) => s + (c.weight ?? 1), 0);
+    return node.children.flatMap((child) =>
+      flattenFormatCNode(child, ((child.weight ?? 1) / childWeight) * weight),
+    );
+  }
+  // column direction or unknown: render as a single nested block — just flatten children
+  if (node.direction === 'column' && node.children) {
+    // For now, render only the first child in column containers (rows handle horizontal splitting)
+    // A full nested column render would require CSS grid nesting, handled in the tree renderer.
+    return node.children.flatMap((child) => flattenFormatCNode(child, child.weight ?? 1));
+  }
+  return [];
+}
+
 /** Build the effective column list from composite_layout (or fall back to slot ids). */
 function buildColumns(
   tab: TabDef,
 ): Array<{ slotId: string | InnerTabsNode; weight: number }> {
   const layout = tab.composite_layout;
-  if (!layout || layout.length === 0) {
-    // Fallback: all slots side-by-side with equal weight.
+  if (!layout) {
     return tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
   }
-  // The top-level array may be a single [...] parallel node or an explicit list of columns.
-  // Detect whether the first element is itself an array (parallel node).
+
+  // Format C: { direction, children } tree
+  if (!Array.isArray(layout) && typeof layout === 'object' && 'direction' in layout) {
+    const result = flattenFormatCNode(
+      layout as import('@/modules/chat/store/pluginPanel').CompositePanelNode,
+      1,
+    );
+    return result.length > 0 ? result : tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
+  }
+
+  // Legacy array format
+  if (!Array.isArray(layout) || layout.length === 0) {
+    return tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
+  }
   const first = layout[0];
   const cols =
     Array.isArray(first)
       ? (first as CompositeLayoutNode[])
-      : layout;
+      : layout as CompositeLayoutNode[];
   return cols
     .map((n) => resolveColumnSlotId(n))
     .filter((c): c is NonNullable<typeof c> => c !== null);
+}
+
+function getTabStepId(tab: TabDef): string | undefined {
+  return tab.step_id ?? tab.id;
+}
+
+function getTabSlotRevisions(
+  session: PluginSession,
+  tab: TabDef,
+  artifactKey: string,
+): SlotRevision[] {
+  const slots = session.slots ?? [];
+  if (tab.step_id) {
+    return slots.filter((s) => s.slot === artifactKey && s.step_id === tab.step_id);
+  }
+  const isStepTab = session.steps?.some((s) => s.step_id === tab.id);
+  if (isStepTab) {
+    return slots.filter((s) => s.slot === artifactKey && s.step_id === tab.id);
+  }
+  return slots.filter((s) => s.slot === artifactKey && s.selected);
 }
 
 /** Get all distinct sort_orders present across the participating slots. */
@@ -219,8 +319,11 @@ function getCompositeRows(
 ): number[] {
   const participating = new Set(tab.slots.map((s) => s.id));
   const orders = new Set<number>();
+  const scopeStepId = tab.step_id
+    ?? (session.steps?.some((s) => s.step_id === tab.id) ? tab.id : undefined);
   for (const slot of session.slots ?? []) {
-    if (slot.selected && participating.has(slot.slot)) {
+    const matchesTabStep = scopeStepId ? slot.step_id === scopeStepId : slot.selected;
+    if (matchesTabStep && participating.has(slot.slot)) {
       if (slot.sort_order !== undefined) {
         orders.add(slot.sort_order);
       }
@@ -232,11 +335,12 @@ function getCompositeRows(
 /** Find a slot revision for (slot, sort_order). */
 function findSlotRevision(
   session: PluginSession,
+  tab: TabDef,
   artifactKey: string,
   sortOrder: number,
 ): SlotRevision | undefined {
-  return (session.slots ?? []).find(
-    (s) => s.selected && s.slot === artifactKey && s.sort_order === sortOrder,
+  return getTabSlotRevisions(session, tab, artifactKey).find(
+    (s) => s.slot === artifactKey && s.sort_order === sortOrder,
   );
 }
 
@@ -246,6 +350,7 @@ function findSlotRevision(
 
 function InnerTabsCell({
   tabsNode,
+  tab,
   session,
   slotDefs,
   sortOrder,
@@ -253,6 +358,7 @@ function InnerTabsCell({
   onReference,
 }: {
   tabsNode: InnerTabsNode;
+  tab: TabDef;
   session: PluginSession;
   slotDefs: SlotDef[];
   sortOrder: number;
@@ -287,7 +393,7 @@ function InnerTabsCell({
       {innerSlotIds.map((slotId, i) => {
         const def = slotDefs.find((s) => s.id === slotId);
         const artifactKey = def?.id ?? slotId;
-        const rev = findSlotRevision(session, artifactKey, sortOrder);
+        const rev = findSlotRevision(session, tab, artifactKey, sortOrder);
         return (
           <div key={slotId} role='tabpanel' hidden={i !== activeIdx}>
             {rev ? (
@@ -362,6 +468,7 @@ function CompositeSlotGrid({
                 >
                   <InnerTabsCell
                     tabsNode={col.slotId}
+                    tab={tab}
                     session={session}
                     slotDefs={tab.slots}
                     sortOrder={sortOrder}
@@ -374,7 +481,7 @@ function CompositeSlotGrid({
             const slotId = col.slotId as string;
             const def = tab.slots.find((s) => s.id === slotId);
             const artifactKey = def?.id ?? slotId;
-            const rev = findSlotRevision(session, artifactKey, sortOrder);
+            const rev = findSlotRevision(session, tab, artifactKey, sortOrder);
             return (
               <div
                 key={slotId}
@@ -434,6 +541,7 @@ function SortableImageList({
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
   onAddItem?: () => void;
 }) {
+  const { t } = useTranslation();
   const reorderSlotItems = usePluginStore((s) => s.reorderSlotItems);
   // localOrder stores list_index values in display order.
   const [localOrder, setLocalOrder] = useState<number[]>(() =>
@@ -612,7 +720,7 @@ function SortableImageList({
           type='button'
         >
           <span className='plugin-panel__image-add-card-icon'>+</span>
-          <span className='plugin-panel__image-add-card-label'>新增附件</span>
+          <span className='plugin-panel__image-add-card-label'>{t('chat.pluginAddAttachment')}</span>
         </button>
       )}
     </div>
@@ -635,6 +743,7 @@ function TabSlotGrid({
   const addFileInputRef = useRef<HTMLInputElement>(null);
   const addingSlotIdRef = useRef<string>('');
   const addingSlotTypeRef = useRef<string>('');
+  const { t } = useTranslation();
   const { createSlotItem } = usePluginStore();
 
   const handleAddItem = useCallback((slotId: string, slotType: string) => {
@@ -670,8 +779,50 @@ function TabSlotGrid({
       />
     );
   }
+  const resolveVisibleSlots = (slotDefs: SlotDef[]): SlotDef[] => {
+    if (session.plugin_id !== 'image-plugin' || tab.id !== 'result') {
+      return slotDefs;
+    }
+    const selectedImageSlots = (session.slots ?? []).filter(
+      (s) => s.selected && s.content_type === 'image',
+    );
+    if (!selectedImageSlots.length) {
+      return slotDefs;
+    }
+    const latest = [...selectedImageSlots].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )[0];
+    const sourceTool = String(latest?.artifact_value?._source_tool ?? '').trim();
+    if (sourceTool === 'image_generator') {
+      return slotDefs
+        .filter((s) => s.id === 'image_output')
+        .map((s) => ({
+          ...s,
+          // In pure generation flow, this slot is the final generated output, not an editor input.
+          label: 'Generated Image',
+        }));
+    }
+    if (sourceTool === 'image_editor') {
+      const allowed = new Set(['image_output', 'enhanced_image_output']);
+      return slotDefs.filter((s) => allowed.has(s.id));
+    }
+    return slotDefs;
+  };
+  const visibleSlots = resolveVisibleSlots(tab.slots);
+  const resolveSlotLabel = (slotDef: SlotDef): string => {
+    const key = slotDef.id;
+    if (
+      session.plugin_id === 'image-plugin'
+      && tab.id === 'result'
+      && key === 'image_output'
+      && getLatestSelectedImageSourceTool(session) === 'image_generator'
+    ) {
+      return t('chat.pluginGeneratedImage');
+    }
+    return slotDef.label ?? slotDef.id;
+  };
   return (
-    <div className={`plugin-panel__tab-content plugin-panel__tab-content--${tab.layout ?? 'list'}`}>
+    <div className={`plugin-panel__tab-content plugin-panel__tab-content--${tab.layout ?? 'vertical'}`}>
       {/* Hidden file input for adding new items */}
       <input
         ref={addFileInputRef}
@@ -681,22 +832,23 @@ function TabSlotGrid({
         onChange={handleAddFileChange}
         aria-hidden='true'
       />
-      {tab.slots.map((slotDef) => {
+      {visibleSlots.map((slotDef) => {
         const artifactKey = slotDef.id;
-        const revisions = (session.slots ?? []).filter(
-          (s) => s.slot === artifactKey && s.selected,
-        );
+        const revisions = getTabSlotRevisions(session, tab, artifactKey);
+        if (session.plugin_id === 'image-plugin' && tab.id === 'result' && revisions.length === 0) {
+          return null;
+        }
         const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
         const isDraggable = Boolean(slotDef.ordered);
         return (
           <div key={slotDef.id} className='plugin-panel__named-slot'>
-            {slotDef.label && (
-              <span className='plugin-panel__slot-label'>{slotDef.label}</span>
+            {(slotDef.label || slotDef.id) && (
+              <span className='plugin-panel__slot-label'>{resolveSlotLabel(slotDef)}</span>
             )}
             {revisions.length === 0 ? (
               <div
                 className='plugin-panel__slot-placeholder'
-                aria-label={`${slotDef.label} pending`}
+                aria-label={`${resolveSlotLabel(slotDef)} pending`}
               >
                 <span>—</span>
               </div>
@@ -753,7 +905,7 @@ export function PluginPanel({
   onStop,
   onDismissed,
 }: PluginPanelProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { session, loading, refresh } = usePluginSession(conversationId);
   const bumpDismissedRefresh = usePluginStore((s) => s.bumpDismissedRefresh);
   const autoRunning = usePluginStore((s) =>
@@ -762,9 +914,12 @@ export function PluginPanel({
   const [activeTabIdx, setActiveTabIdx] = React.useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const fetchPluginUI = usePluginStore((s) => s.fetchPluginUI);
-  const pluginUIByPlugin = usePluginStore((s) => s.pluginUIByPlugin);
   const setFocusedTab = usePluginStore((s) => s.setFocusedTab);
   const setFocusedSortOrder = usePluginStore((s) => s.setFocusedSortOrder);
+  // Focused tab id mirrored out of the session so polling refreshes don't
+  // reset the user's current tab.
+  const focusedTabByConversation = usePluginStore((s) => s.focusedTabByConversation);
+  const persistedFocusedTab = conversationId ? focusedTabByConversation[conversationId] : undefined;
   const [ui, setUI] = useState<PluginUI>({});
   const [dismissing, setDismissing] = useState(false);
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
@@ -798,18 +953,22 @@ export function PluginPanel({
 
   useEffect(() => {
     if (!session?.plugin_id) return;
-    const cached = pluginUIByPlugin[session.plugin_id];
-    if (cached) { setUI(cached); return; }
+    const lang = i18n.language || '';
+    const cached = usePluginStore.getState().pluginUIByPlugin[`${session.plugin_id}:${lang}`];
+    if (cached) {
+      setUI(cached);
+    }
+    // Always re-fetch once to avoid stale cached tab/slot layouts after plugin.yaml updates.
     fetchPluginUI(session.plugin_id).then(setUI);
-  }, [session?.plugin_id, fetchPluginUI, pluginUIByPlugin]);
+  }, [session?.plugin_id, fetchPluginUI, i18n.language]);
 
-  // Restore the previously focused tab when UI loads or session changes.
+  // Restore the previously focused tab when UI loads.
   useEffect(() => {
     const tabs: TabDef[] = ui.tabs ?? [];
-    if (!tabs.length || !session?.focusedTab) return;
-    const idx = tabs.findIndex((t) => t.id === session.focusedTab);
+    if (!tabs.length || !persistedFocusedTab) return;
+    const idx = tabs.findIndex((t) => t.id === persistedFocusedTab);
     if (idx !== -1) setActiveTabIdx(idx);
-  }, [ui.tabs, session?.focusedTab]);
+  }, [ui.tabs, persistedFocusedTab]);
 
   useEffect(() => {
     if (!session || session.status !== 'active') return;
@@ -842,9 +1001,6 @@ export function PluginPanel({
 
   const tabs: TabDef[] = ui.tabs ?? [];
   const hasTabs = tabs.length > 0;
-
-  // Always show the intent button when a session exists.
-  // When no intent has been recorded yet the popover shows empty sections.
   const hasIntent = true;
 
   const showActions =
@@ -977,7 +1133,8 @@ export function PluginPanel({
       {!collapsed && hasTabs && (
         <div className='plugin-panel__tabs' role='tablist'>
           {tabs.map((tab, idx) => {
-            const step = session.steps?.find((s) => s.step_id === tab.id);
+            const stepID = getTabStepId(tab);
+            const step = session.steps?.find((s) => s.step_id === stepID);
             const stepStatus = step?.status;
             return (
               <React.Fragment key={tab.id}>
@@ -1051,16 +1208,18 @@ export function PluginPanel({
               {t('chat.pluginStop')}
             </button>
           )}
-          <button
-            type='button'
-            className='plugin-panel__action-btn plugin-panel__action-btn--secondary'
-            disabled={buttonsDisabled}
-            aria-disabled={buttonsDisabled}
-            onClick={handleRetry}
-            title={buttonsDisabled ? t('chat.pluginBtnDisabledHint') : t('chat.pluginRetry')}
-          >
-            {t('chat.pluginRetry')}
-          </button>
+          {session.status !== 'completed' && (
+            <button
+              type='button'
+              className='plugin-panel__action-btn plugin-panel__action-btn--secondary'
+              disabled={buttonsDisabled}
+              aria-disabled={buttonsDisabled}
+              onClick={handleRetry}
+              title={buttonsDisabled ? t('chat.pluginBtnDisabledHint') : t('chat.pluginRetry')}
+            >
+              {t('chat.pluginRetry')}
+            </button>
+          )}
           {showContinue && (
             <button
               type='button'
@@ -1080,14 +1239,15 @@ export function PluginPanel({
             </button>
           )}
           {session.status === 'completed' && session.steps && session.steps.length > 0 && (
-            <div className='plugin-panel__rollback'>
-              <span className='plugin-panel__rollback-label'>{t('chat.pluginRollbackLabel')}</span>
-              <div className='plugin-panel__rollback-steps'>
+            <div style={{ flex: '1 1 100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 500 }}>{t('chat.pluginRollbackLabel')}</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {session.steps.map((step) => (
                   <button
                     key={`${step.step_id}-${step.attempt}`}
                     type='button'
-                    className='plugin-panel__rollback-step-btn'
+                    className='plugin-panel__action-btn plugin-panel__action-btn--secondary'
+                    style={{ padding: '3px 10px', fontSize: 12 }}
                     onClick={() => handleRollback(step.step_id)}
                     title={`${t('chat.pluginRollbackPrefix')}${step.step_id}`}
                   >

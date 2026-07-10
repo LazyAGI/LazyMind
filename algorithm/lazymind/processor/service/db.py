@@ -8,12 +8,31 @@ SHARED_DB_ENV_KEY = 'LAZYMIND_DATABASE_URL'
 
 
 def parse_db_url(url: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Convert postgresql+psycopg://user:password@host:port/dbname into SqlManager kwargs."""
+    """Convert configured database URLs into LazyLLM SqlManager kwargs."""
     if not url or not url.strip():
         return None
     try:
         u = urlparse(url)
         db_type = (u.scheme or 'postgresql').split('+')[0]
+        if db_type == 'sqlite':
+            db_name = unquote(u.path or '')
+            raw_url = url.strip()
+            if raw_url.startswith('sqlite:////'):
+                db_name = '/' + db_name.lstrip('/')
+            elif raw_url.startswith('sqlite:///') and db_name.startswith('/'):
+                db_name = db_name[1:]
+            if db_name.startswith('/') and u.netloc:
+                db_name = f'/{u.netloc}{db_name}'
+            if not db_name:
+                raise ValueError('sqlite database path is required')
+            return {
+                'db_type': 'sqlite',
+                'user': '',
+                'password': '',
+                'host': '',
+                'port': 0,
+                'db_name': db_name,
+            }
         if db_type != 'postgresql':
             raise ValueError(f'unsupported database scheme: {u.scheme or db_type}')
         if not u.hostname:
@@ -48,18 +67,18 @@ def require_shared_db_config(service_name: str) -> Dict[str, Any]:
     if database_url is None:
         raise RuntimeError(
             f'{service_name} requires a shared database configuration. '
-            f'Set {SHARED_DB_ENV_KEY} to a valid PostgreSQL URL.'
+            f'Set {SHARED_DB_ENV_KEY} to a valid PostgreSQL or SQLite URL.'
         )
     try:
         db_config = parse_db_url(database_url)
     except ValueError as exc:
         raise RuntimeError(
-            f'{service_name} requires a valid PostgreSQL URL in {SHARED_DB_ENV_KEY}: {exc}'
+            f'{service_name} requires a valid PostgreSQL or SQLite URL in {SHARED_DB_ENV_KEY}: {exc}'
         ) from exc
     if db_config is None:
         raise RuntimeError(
             f'{service_name} requires a shared database configuration. '
-            f'Set {SHARED_DB_ENV_KEY} to a valid PostgreSQL URL.'
+            f'Set {SHARED_DB_ENV_KEY} to a valid PostgreSQL or SQLite URL.'
         )
     return db_config
 

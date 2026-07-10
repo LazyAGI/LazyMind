@@ -34,6 +34,7 @@ export type ConversationHistoryRecord = Omit<
     second_result?: string;
     thinking_time_s?: number | string;
     second_thinking_time_s?: number | string;
+    tool_call_turns?: number | string;
   };
 
 interface BuildChatMessageListOptions {
@@ -168,6 +169,7 @@ export function buildChatMessageListFromHistory(
       sources: record.sources,
       feed_back: record.feed_back,
       thinking_time_s: record.thinking_time_s,
+      tool_call_turns: record.tool_call_turns,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.

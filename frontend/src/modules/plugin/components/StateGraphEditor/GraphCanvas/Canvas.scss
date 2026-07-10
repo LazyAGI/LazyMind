@@ -1,0 +1,309 @@
+.graph-canvas-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  overscroll-behavior-x: none;
+
+  .react-flow {
+    width: 100%;
+    height: 100%;
+    overscroll-behavior-x: none;
+  }
+
+  // Tell the browser that horizontal scroll inside the pane is handled
+  // by ReactFlow (pan), so do NOT chain it to browser back/forward navigation.
+  .react-flow__pane,
+  .react-flow__renderer,
+  .react-flow__viewport {
+    overscroll-behavior-x: none;
+    touch-action: pan-y pinch-zoom;
+  }
+}
+
+// Step node card
+.step-node {
+  position: relative;
+  width: 100%;
+  min-width: 90px;
+  height: auto;
+  min-height: 64px;
+  background: #fff;
+  border: 1.5px solid #d9d9d9;
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
+  // Do not clip — allows source Handle and resize grip to extend beyond the node border
+
+  &.is-selected {
+    border-color: #1677ff;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.18);
+  }
+
+  &.has-error {
+    border-color: #ff4d4f;
+    box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.15);
+  }
+
+  &.is-skippable {
+    border-style: dashed;
+    border-color: #faad14;
+  }
+}
+
+// Right-edge resize grip — always present, visible on node hover
+.step-node-resize-handle {
+  position: absolute;
+  top: 0;
+  // Center the grip on the node's right border: shift it 3px outward so the
+  // 6px-wide hit area straddles the border (3px inside + 3px outside).
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  // Below the source Handle (z-index: 20) so the connection dot stays clickable
+  z-index: 9;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 1px;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 20px;
+    border-radius: 2px;
+    background: #d9d9d9;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+}
+
+.step-node:hover .step-node-resize-handle::after,
+.step-node.is-selected .step-node-resize-handle::after {
+  opacity: 1;
+}
+
+.step-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.step-node-id {
+  font-size: 10px;
+  color: #8c8c8c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.step-node-mode-tag {
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.step-node-badges {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.step-node-badge {
+  font-size: 12px;
+  line-height: 1;
+  cursor: default;
+  user-select: none;
+
+  &--choice {
+    color: #722ed1;
+  }
+
+  &--parallel {
+    color: #1677ff;
+  }
+
+  &--skip {
+    color: #faad14;
+  }
+}
+
+.step-node-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1f1f1f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-node-handle {
+  width: 10px;
+  height: 10px;
+  background: #1677ff;
+  border: 2px solid #fff;
+  // Source handle must sit above the resize grip so it is always clickable
+  z-index: 20 !important;
+}
+
+// Terminal nodes — card style (like step nodes)
+.terminal-node {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  background: #fff;
+  border: 1.5px solid #d9d9d9;
+  border-radius: 10px;
+  pointer-events: all;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  min-width: 64px;
+}
+
+.terminal-node--start {
+  border-color: #1677ff;
+}
+
+.terminal-node--end {
+  border-color: #389e0d;
+}
+
+.terminal-node-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f1f1f;
+  letter-spacing: 0.02em;
+}
+
+// Transition edge — hover popover
+.transition-edge-popover {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+  padding: 0;
+  min-width: 80px;
+  max-width: 200px;
+  position: relative;
+}
+
+.transition-edge-popover-inner {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  border-radius: 6px;
+
+  &:hover {
+    background: #f5f5f5;
+  }
+
+  &.has-error {
+    .transition-edge-popover-text {
+      color: #cf1322;
+    }
+  }
+}
+
+.transition-edge-popover-icon {
+  font-size: 11px;
+  color: #8c8c8c;
+  flex-shrink: 0;
+}
+
+.transition-edge-popover-text {
+  font-size: 12px;
+  color: #262626;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.transition-edge-popover-empty {
+  color: #bfbfbf;
+  font-style: italic;
+}
+
+// Down-pointing arrow connecting popover to the edge
+.transition-edge-popover-arrow {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 6px;
+  overflow: hidden;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 10px;
+    height: 10px;
+    background: #fff;
+    border-right: 1px solid #e0e0e0;
+    border-bottom: 1px solid #e0e0e0;
+  }
+}
+
+// Output slot chips inside step node
+.step-node-outputs {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 3px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.step-node-outputs-prefix {
+  font-size: 10px;
+  color: #8c8c8c;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-right: 1px;
+}
+
+.step-node-output-chip {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #f0f5ff;
+  color: #2f54eb;
+  border: 1px solid #adc6ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+  cursor: default;
+
+  &--more {
+    background: #fafafa;
+    color: #595959;
+    border-color: #d9d9d9;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+}

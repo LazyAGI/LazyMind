@@ -1,0 +1,172 @@
+id: writer-plugin
+name: AI Writer
+description: >
+  Compose structured long-form writing, including articles, reports, technical
+  documents, creative stories, fiction, short stories, and novel-style drafts.
+  The workflow runs in six steps: parse the writing intent and scope, generate
+  an outline, plan per-chapter writing instructions, draft the full text,
+  review the draft and surface revision feedback, then produce the final
+  document. Each step supports a full rerun via the state machine self-loop.
+
+when_to_use: >
+  Invoke this plugin when the user wants to write, draft, or generate a long
+  article, report, technical document, survey, expository piece, story, short
+  story, fiction piece, novel chapter, or any other structured long-form text.
+  Typical requests include "write a report on X", "help me draft a technical
+  article on Y", "write a survey", "generate an introduction to Z", "write a
+  short story", "write a novel chapter", or "写一篇小说". If the writing request
+  lacks details such as length, style, audience, or plot constraints, still
+  trigger this plugin with the user's exact original request so the workflow
+  can infer sensible defaults or collect context during the writing steps. Not
+  suitable for single-paragraph rewrites or translations.
+
+tool_scripts:
+  - path: scripts/tools.py
+    functions:
+      - writer_build_writing_task
+      - writer_profile_resources
+      - writer_create_writing_context
+      - writer_generate_outline
+      - writer_generate_section_instructions
+      - writer_generate_draft_section
+      - writer_assemble_draft_document
+      - writer_update_writing_context
+      - writer_check_consistency
+      - writer_generate_writing_output
+
+steps:
+  - id: build_context
+  - id: generate_outline
+  - id: plan_sections
+  - id: generate_draft
+  - id: review_document
+  - id: finalize_report
+
+slots:
+  - id: writing_task
+    label: Writing Task
+    type: text
+    cardinality: single
+  - id: resource_profiles
+    label: Resource Profiles
+    type: text
+    cardinality: single
+  - id: writing_context
+    label: Writing Context
+    type: text
+    cardinality: single
+    summary_max_chars: 600
+  - id: outline
+    label: Outline
+    type: text
+    cardinality: single
+  - id: section_instructions
+    label: Section Instructions
+    type: text
+    cardinality: single
+  - id: draft_sections
+    label: Draft Sections
+    type: text
+    cardinality: list
+    ordered: true
+  - id: draft_document
+    label: Full Draft
+    type: text
+    cardinality: single
+  - id: review_report
+    label: Review Report
+    type: text
+    cardinality: single
+  - id: review_summary
+    label: Review Summary
+    type: text
+    cardinality: single
+  - id: writing_output
+    label: Final Report
+    type: text
+    cardinality: single
+  - id: writing_output_md
+    label: Final Report (Markdown)
+    type: file
+    cardinality: single
+
+ui:
+  tabs:
+    - id: context
+      step_id: build_context
+      label: Context
+      layout: list
+      slots:
+        - id: writing_task
+        - id: resource_profiles
+        - id: writing_context
+
+    - id: outline
+      step_id: generate_outline
+      label: Outline
+      layout: list
+      slots:
+        - id: outline
+        - id: writing_context
+
+    - id: plan_sections
+      step_id: plan_sections
+      label: Plan Sections
+      layout: list
+      slots:
+        - id: section_instructions
+
+    - id: draft
+      step_id: generate_draft
+      label: Draft
+      layout: list
+      slots:
+        - id: draft_sections
+        - id: draft_document
+        - id: writing_context
+
+    - id: review
+      step_id: review_document
+      label: Review
+      layout: list
+      slots:
+        - id: review_report
+        - id: review_summary
+
+    - id: result
+      step_id: finalize_report
+      label: Final Report
+      layout: list
+      slots:
+        - id: writing_output
+        - id: writing_output_md
+
+i18n:
+  zh-CN:
+    name: AI 写作
+    steps:
+      build_context: {label: 意图解析}
+      generate_outline: {label: 生成大纲}
+      plan_sections: {label: 规划章节}
+      generate_draft: {label: 撰写初稿}
+      review_document: {label: 审阅初稿}
+      finalize_report: {label: 最终成稿}
+    tabs:
+      context: {label: 构造上下文}
+      outline: {label: 生成大纲}
+      plan_sections: {label: 规划章节}
+      draft: {label: 生成初稿}
+      review: {label: 审阅初稿}
+      result: {label: 最终成稿}
+    slots:
+      writing_task: {label: 写作任务}
+      resource_profiles: {label: 资源画像}
+      writing_context: {label: 写作上下文}
+      outline: {label: 大纲}
+      section_instructions: {label: 章节规划}
+      draft_sections: {label: 章节草稿}
+      draft_document: {label: 完整初稿}
+      review_report: {label: 审阅报告}
+      review_summary: {label: 审阅摘要}
+      writing_output: {label: 最终成稿}
+      writing_output_md: {label: 最终成稿（Markdown）}

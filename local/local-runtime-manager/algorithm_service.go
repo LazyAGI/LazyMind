@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -92,7 +94,7 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 	if err := ensureAlgorithmDataDirs(paths); err != nil {
 		return err
 	}
-	if err := m.preparePython(ctx, paths, cfg.Algorithm.EnableEvo); err != nil {
+	if err := m.preparePython(ctx, cfg, paths, cfg.Algorithm.EnableEvo); err != nil {
 		return err
 	}
 	if err := m.waitForDependencies(ctx, cfg, spec.Name); err != nil {
@@ -113,6 +115,7 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 		_ = killAlgorithmProcess(cmd.Process)
 		return err
 	}
+	registerLocalProcess(paths, service, cmd.Process.Pid, []int{spec.Port}, append([]string{paths.AlgorithmPython}, spec.Module...))
 
 	waitErr := make(chan error, 1)
 	go func() {
@@ -121,18 +124,21 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 	if err := waitForHTTPHealth(ctx, spec.Port, spec.HealthPath, service, algorithmHealthTimeout, waitErr); err != nil {
 		_ = killAlgorithmProcess(cmd.Process)
 		_ = os.Remove(pidFile)
+		unregisterLocalProcess(paths, service, cmd.Process.Pid)
 		return err
 	}
 	if service == algoProcessName {
 		if err := waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, algorithmHealthTimeout); err != nil {
 			_ = killAlgorithmProcess(cmd.Process)
 			_ = os.Remove(pidFile)
+			unregisterLocalProcess(paths, service, cmd.Process.Pid)
 			return err
 		}
 	}
 
 	err := <-waitErr
 	_ = os.Remove(pidFile)
+	unregisterLocalProcess(paths, service, cmd.Process.Pid)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -207,8 +213,14 @@ func killAlgorithmProcess(proc *os.Process) error {
 	return proc.Kill()
 }
 
-func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
-	if err := ensureLazyLLMSubmodule(paths.RepoRoot); err != nil {
+func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, includeEvo bool) error {
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(paths.AlgorithmPython); err == nil && !info.IsDir() {
+			return nil
+		}
+		return fmt.Errorf("desktop algorithm Python not found: %s", paths.AlgorithmPython)
+	}
+	if err := ensureLazyLLMSubmodule(ctx, m.runner, paths.RepoRoot); err != nil {
 		return err
 	}
 	release, err := acquireAlgorithmPythonLock(ctx, paths)
@@ -216,31 +228,45 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths Runti
 		return err
 	}
 	defer release()
-	stamp := filepath.Join(filepath.Dir(paths.AlgorithmVenv), "algorithm.ready")
-	if includeEvo {
-		stamp = filepath.Join(filepath.Dir(paths.AlgorithmVenv), "algorithm-evo.ready")
+	stamp, err := algorithmReadyStamp(paths, includeEvo)
+	if err != nil {
+		return err
 	}
 	if _, err := os.Stat(stamp); err == nil {
-		return nil
+		if m.pythonModuleAvailable(ctx, paths, "pkg_resources") {
+			return nil
+		}
 	}
 	if _, err := os.Stat(paths.AlgorithmPython); os.IsNotExist(err) {
 		if err := m.createVenv(ctx, paths, false); err != nil {
 			return err
 		}
 	}
-	if err := m.ensurePip(ctx, paths); err != nil {
-		return err
+	if err := m.installAlgorithmPythonDeps(ctx, paths, includeEvo); err != nil {
+		if rebuildErr := m.createVenv(ctx, paths, true); rebuildErr != nil {
+			return fmt.Errorf("prepare algorithm python failed and venv rebuild failed: %w (original install error: %v)", rebuildErr, err)
+		}
+		if retryErr := m.installAlgorithmPythonDeps(ctx, paths, includeEvo); retryErr != nil {
+			return fmt.Errorf("prepare algorithm python failed after venv rebuild: %w (original install error: %v)", retryErr, err)
+		}
 	}
-	pip := filepath.Join(paths.AlgorithmVenv, "bin", "pip")
+	return os.WriteFile(stamp, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644)
+}
+
+func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
 	lazyllm := filepath.Join(paths.AlgorithmVenv, "bin", "lazyllm")
+	uv, ok := uvCommand()
+	if !ok {
+		return fmt.Errorf("uv is required to install algorithm requirements; install uv or set %s", authServiceUVEnvVar)
+	}
 	installSteps := []Command{
-		{Name: paths.AlgorithmPython, Args: []string{"-m", "pip", "install", "--upgrade", "pip"}, Dir: paths.RepoRoot},
-		{Name: pip, Args: []string{"install", "lazyllm"}, Dir: paths.RepoRoot},
-		{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot},
-		{Name: pip, Args: []string{"install", "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")}, Dir: paths.RepoRoot},
+		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "setuptools<81"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
+		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
+		{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot, Env: pythonDependencyCacheEnv(paths)},
+		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 	}
 	if includeEvo {
-		installSteps = append(installSteps, Command{Name: pip, Args: []string{"install", "-r", filepath.Join(paths.RepoRoot, "evo", "requirements.txt")}, Dir: paths.RepoRoot})
+		installSteps = append(installSteps, Command{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "evo", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)})
 	}
 	for _, step := range installSteps {
 		res, err := m.runner.Run(ctx, step)
@@ -248,70 +274,56 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths Runti
 			return fmt.Errorf("prepare algorithm python failed at %s %s: %w (%s)", step.Name, strings.Join(step.Args, " "), err, strings.TrimSpace(res.Stderr))
 		}
 	}
-	return os.WriteFile(stamp, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644)
-}
-
-func (m *AlgorithmServiceManager) createVenv(ctx context.Context, paths RuntimePaths, clear bool) error {
-	python := envText("PYTHON", "python3")
-	if uv, ok := uvCommand(); ok {
-		args := []string{"venv", "--seed", "--python", python}
-		if clear {
-			args = append(args, "--clear")
-		}
-		args = append(args, paths.AlgorithmVenv)
-		if res, err := m.runner.Run(ctx, Command{Name: uv, Args: args, Dir: paths.RepoRoot}); err != nil {
-			detail := strings.TrimSpace(res.Stderr)
-			if detail == "" {
-				detail = strings.TrimSpace(res.Stdout)
-			}
-			return fmt.Errorf("create algorithm venv with uv failed: %w (%s)", err, detail)
-		}
-		return nil
-	}
-	if res, err := m.runner.Run(ctx, Command{Name: python, Args: []string{"-m", "venv", paths.AlgorithmVenv}, Dir: paths.RepoRoot}); err != nil {
-		return fmt.Errorf("create algorithm venv failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
-	}
 	return nil
 }
 
-func (m *AlgorithmServiceManager) ensurePip(ctx context.Context, paths RuntimePaths) error {
-	check := Command{Name: paths.AlgorithmPython, Args: []string{"-m", "pip", "--version"}, Dir: paths.RepoRoot}
-	if res, err := m.runner.Run(ctx, check); err == nil && strings.TrimSpace(res.Stdout+res.Stderr) != "" {
-		return nil
+func algorithmReadyStamp(paths RuntimePaths, includeEvo bool) (string, error) {
+	hash := sha256.New()
+	files := []string{filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")}
+	prefix := "algorithm"
+	if includeEvo {
+		files = append(files, filepath.Join(paths.RepoRoot, "evo", "requirements.txt"))
+		prefix = "algorithm-evo"
 	}
-	step := Command{Name: paths.AlgorithmPython, Args: []string{"-m", "ensurepip", "--upgrade"}, Dir: paths.RepoRoot}
-	if res, err := m.runner.Run(ctx, step); err != nil {
-		if uv, ok := uvCommand(); ok {
-			_ = uv
-			if createErr := m.createVenv(ctx, paths, true); createErr == nil {
-				return nil
-			}
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
 		}
+		_, _ = hash.Write([]byte(filepath.ToSlash(path)))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write(data)
+		_, _ = hash.Write([]byte{0})
+	}
+	digest := hex.EncodeToString(hash.Sum(nil))[:16]
+	return filepath.Join(paths.PythonStateDir, prefix+"-"+digest+".ready"), nil
+}
+
+func (m *AlgorithmServiceManager) pythonModuleAvailable(ctx context.Context, paths RuntimePaths, module string) bool {
+	if _, err := os.Stat(paths.AlgorithmPython); err != nil {
+		return false
+	}
+	_, err := m.runner.Run(ctx, Command{Name: paths.AlgorithmPython, Args: []string{"-c", "import " + module}, Dir: paths.RepoRoot})
+	return err == nil
+}
+
+func (m *AlgorithmServiceManager) createVenv(ctx context.Context, paths RuntimePaths, clear bool) error {
+	python, err := ensureLocalPythonRuntime(ctx, m.runner, paths, envText(localPythonVersionEnvVar, defaultLocalPythonVersion))
+	if err != nil {
+		return err
+	}
+	uv, ok := uvCommand()
+	if !ok {
+		return fmt.Errorf("uv is required to create algorithm venv; install uv or set %s", authServiceUVEnvVar)
+	}
+	if res, err := m.runner.Run(ctx, Command{Name: uv, Args: localPythonVenvArgs(python, clear, paths.AlgorithmVenv), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)}); err != nil {
 		detail := strings.TrimSpace(res.Stderr)
 		if detail == "" {
 			detail = strings.TrimSpace(res.Stdout)
 		}
-		return fmt.Errorf("bootstrap algorithm pip failed at %s %s: %w (%s)", step.Name, strings.Join(step.Args, " "), err, detail)
+		return fmt.Errorf("create algorithm venv with uv failed: %w (%s)", err, detail)
 	}
 	return nil
-}
-
-func uvCommand() (string, bool) {
-	if uv := strings.TrimSpace(os.Getenv("UV")); uv != "" {
-		return uv, true
-	}
-	if uv, err := exec.LookPath("uv"); err == nil {
-		return uv, true
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", false
-	}
-	userUV := filepath.Join(home, ".local", "bin", "uv")
-	if info, err := os.Stat(userUV); err == nil && !info.IsDir() {
-		return userUV, true
-	}
-	return "", false
 }
 
 func acquireAlgorithmPythonLock(ctx context.Context, paths RuntimePaths) (func(), error) {
@@ -342,19 +354,19 @@ func acquireAlgorithmPythonLock(ctx context.Context, paths RuntimePaths) (func()
 func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg RuntimeConfig, service string) error {
 	switch service {
 	case processorServerProcessName:
-		return waitForTCP(ctx, "127.0.0.1", cfg.Algorithm.PostgresPort, "PostgreSQL", 3*time.Minute)
+		return nil
 	case processorWorkerProcessName:
 		return waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute)
 	case algoProcessName:
 		if err := waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute); err != nil {
 			return err
 		}
-		if isBuiltInServiceURI("LAZYMIND_MILVUS_URI", "http://milvus:19530") {
-			if err := waitForTCP(ctx, "127.0.0.1", cfg.Algorithm.MilvusPort, "Milvus", 5*time.Minute); err != nil {
+		if cfg.ModeProfile.VectorStore.ManagedProcess {
+			if err := waitForTCP(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, "Milvus", 5*time.Minute); err != nil {
 				return err
 			}
 		}
-		if isBuiltInServiceURI("LAZYMIND_OPENSEARCH_URI", "https://opensearch:9200") {
+		if localSegmentStoreUsesBuiltInOpenSearch() {
 			if err := waitForTCP(ctx, "127.0.0.1", cfg.Algorithm.OpenSearchPort, "OpenSearch", 5*time.Minute); err != nil {
 				return err
 			}
@@ -375,12 +387,26 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 	return nil
 }
 
+func localSegmentStorePath(paths RuntimePaths) string {
+	return filepath.Join(paths.AlgorithmHome, "sqlite", "segment-store.db")
+}
+
+func localSegmentStoreURIOrPath(cfg RuntimeConfig, paths RuntimePaths) string {
+	if strings.EqualFold(localSegmentStoreType(), "opensearch") {
+		return envText("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", fmt.Sprintf("https://127.0.0.1:%d", cfg.Algorithm.OpenSearchPort))
+	}
+	return envText("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", localSegmentStorePath(paths))
+}
+
 func ensureAlgorithmDataDirs(paths RuntimePaths) error {
 	dirs := []string{
-		filepath.Join(paths.RepoRoot, "data", "core", "uploads"),
-		filepath.Join(paths.RepoRoot, "data", "traces"),
-		filepath.Join(paths.RepoRoot, "data", "evo"),
-		filepath.Join(paths.RepoRoot, "data", "subagent"),
+		paths.UploadRoot,
+		paths.LazyLLMTempDir,
+		paths.OCRCacheDir,
+		paths.TracesDir,
+		paths.SubagentDataDir,
+		paths.LazyLLMHome,
+		paths.EvoDataDir,
 		filepath.Join(paths.AlgorithmHome, "agent_workspace"),
 		filepath.Join(paths.AlgorithmHome, "sqlite"),
 	}
@@ -392,35 +418,59 @@ func ensureAlgorithmDataDirs(paths RuntimePaths) error {
 	return nil
 }
 
-func ensureLazyLLMSubmodule(repoRoot string) error {
+func ensureLazyLLMSubmodule(ctx context.Context, runner CommandRunner, repoRoot string) error {
 	required := filepath.Join(repoRoot, "algorithm", "lazyllm", "lazyllm")
 	if info, err := os.Stat(required); err == nil && info.IsDir() {
 		return nil
 	}
-	return fmt.Errorf("algorithm/lazyllm submodule is not checked out; run: git submodule update --init algorithm/lazyllm")
+	res, err := runner.Run(ctx, Command{
+		Name: "git",
+		Args: []string{"submodule", "update", "--init", "algorithm/lazyllm"},
+		Dir:  repoRoot,
+	})
+	if err != nil {
+		return fmt.Errorf("initialize algorithm/lazyllm submodule failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+	}
+	if info, err := os.Stat(required); err == nil && info.IsDir() {
+		return nil
+	}
+	return fmt.Errorf("algorithm/lazyllm submodule is still not checked out after git submodule update --init algorithm/lazyllm")
+}
+
+func ensureLazyLLMSource(ctx context.Context, runner CommandRunner, repoRoot string, profile string) error {
+	required := filepath.Join(repoRoot, "algorithm", "lazyllm", "lazyllm")
+	if info, err := os.Stat(required); err == nil && info.IsDir() {
+		return nil
+	}
+	if profile == "desktop" {
+		return fmt.Errorf("desktop runtime is missing bundled algorithm/lazyllm source; rebuild the app with algorithm/lazyllm submodule initialized")
+	}
+	return ensureLazyLLMSubmodule(ctx, runner, repoRoot)
 }
 
 func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) []string {
-	uploads := filepath.Join(paths.RepoRoot, "data", "core", "uploads")
-	traces := filepath.Join(paths.RepoRoot, "data", "traces")
 	pythonPath := strings.Join([]string{
 		filepath.Join(paths.RepoRoot, "algorithm", "lazyllm"),
 		filepath.Join(paths.RepoRoot, "algorithm"),
 		paths.RepoRoot,
 	}, string(os.PathListSeparator))
-	dbURL := fmt.Sprintf("postgresql+psycopg://app:app@127.0.0.1:%d/app", cfg.Algorithm.PostgresPort)
+	lazyLLMDBURL := sqliteURL(paths.LazyLLMDBPath)
+	coreDBURL := sqliteURL(paths.CoreDBPath)
 	noProxy := envText("no_proxy", "127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
 	noProxyUpper := envText("NO_PROXY", noProxy)
+	routerPoolStart, routerPoolEnd := localRouterPortPool(cfg)
 	env := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"PYTHONPATH=" + pythonPath,
 		"LAZYMIND_HOME=" + paths.AlgorithmHome,
-		"LAZYMIND_DATABASE_URL=" + dbURL,
-		"LAZYMIND_CORE_DATABASE_URL=" + fmt.Sprintf("postgresql+psycopg://root:123456@127.0.0.1:%d/core", cfg.Algorithm.PostgresPort),
-		"LAZYMIND_SHARED_UPLOAD_DIR=" + uploads,
-		"LAZYMIND_UPLOAD_DIR=" + uploads,
-		"LAZYMIND_UPLOAD_ROOT=" + uploads,
-		"LAZYMIND_DOCUMENT_SERVICE_STORAGE_DIR=" + uploads,
+		"LAZYLLM_HOME=" + paths.LazyLLMHome,
+		"LAZYMIND_DATABASE_URL=" + lazyLLMDBURL,
+		"LAZYMIND_CORE_DATABASE_URL=" + coreDBURL,
+		"LAZYMIND_ACL_DB_DSN=" + coreDBURL,
+		"LAZYMIND_SHARED_UPLOAD_DIR=" + paths.UploadRoot,
+		"LAZYMIND_UPLOAD_DIR=" + paths.UploadRoot,
+		"LAZYMIND_UPLOAD_ROOT=" + paths.UploadRoot,
+		"LAZYMIND_DOCUMENT_SERVICE_STORAGE_DIR=" + paths.UploadRoot,
 		"http_proxy=" + envText("http_proxy", ""),
 		"https_proxy=" + envText("https_proxy", ""),
 		"HTTP_PROXY=" + envText("HTTP_PROXY", ""),
@@ -439,16 +489,16 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYLLM_MINIMAX_API_KEY=" + envText("LAZYLLM_MINIMAX_API_KEY", ""),
 		"LAZYLLM_AIPING_API_KEY=" + envText("LAZYLLM_AIPING_API_KEY", ""),
 		"LAZYMIND_MAAS_API_KEY=" + envText("LAZYMIND_MAAS_API_KEY", ""),
-		"LAZYLLM_TEMP_DIR=" + filepath.Join(uploads, ".lazyllm_temp"),
-		"LAZYMIND_OCR_CACHE_DIR=" + filepath.Join(uploads, ".image_cache"),
-		"LAZYMIND_MOUNT_BASE_DIR=" + uploads,
+		"LAZYLLM_TEMP_DIR=" + paths.LazyLLMTempDir,
+		"LAZYMIND_OCR_CACHE_DIR=" + paths.OCRCacheDir,
+		"LAZYMIND_MOUNT_BASE_DIR=" + paths.UploadRoot,
 		"TZ=" + envText("TZ", "Asia/Shanghai"),
 		"LANGFUSE_HOST=" + envText("LANGFUSE_HOST", ""),
 		"LANGFUSE_BASE_URL=" + envText("LANGFUSE_BASE_URL", ""),
 		"LANGFUSE_PUBLIC_KEY=" + envText("LANGFUSE_PUBLIC_KEY", ""),
 		"LANGFUSE_SECRET_KEY=" + envText("LANGFUSE_SECRET_KEY", ""),
 		"LAZYLLM_TRACE_ENABLED=" + envText("LAZYLLM_TRACE_ENABLED", "1"),
-		"LAZYLLM_TRACE_LOCAL_STORAGE_DIR=" + traces,
+		"LAZYLLM_TRACE_LOCAL_STORAGE_DIR=" + paths.TracesDir,
 		"LAZYLLM_TRACE_CONSUME_BACKEND=local",
 		"LAZYLLM_TRACE_BACKEND=local",
 		"OTEL_EXPORTER_OTLP_TIMEOUT=" + envText("OTEL_EXPORTER_OTLP_TIMEOUT", "60"),
@@ -478,18 +528,20 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_USE_INNER_MODEL=true",
 		"LAZYMIND_RESET_ALGO_ON_STARTUP=" + envText("LAZYMIND_RESET_ALGO_ON_STARTUP", "false"),
 		"LAZYMIND_RESET_ALL_ON_STARTUP=" + envText("LAZYMIND_RESET_ALL_ON_STARTUP", "false"),
-		"LAZYMIND_MILVUS_URI=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.MilvusPort),
+		"LAZYMIND_MILVUS_URI=" + cfg.ModeProfile.VectorStore.Endpoint,
 		"LAZYMIND_OPENSEARCH_URI=" + envText("LAZYMIND_OPENSEARCH_URI", fmt.Sprintf("https://127.0.0.1:%d", cfg.Algorithm.OpenSearchPort)),
 		"LAZYMIND_OPENSEARCH_USER=" + envText("LAZYMIND_OPENSEARCH_USER", "admin"),
 		"LAZYMIND_OPENSEARCH_PASSWORD=" + envText("LAZYMIND_OPENSEARCH_PASSWORD", "LazyRAG_OpenSearch123!"),
-		"LAZYMIND_SEGMENT_STORE_TYPE=" + envText("LAZYMIND_SEGMENT_STORE_TYPE", "opensearch"),
-		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH=" + envText("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", fmt.Sprintf("https://127.0.0.1:%d", cfg.Algorithm.OpenSearchPort)),
+		"LAZYMIND_SEGMENT_STORE_TYPE=" + localSegmentStoreType(),
+		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH=" + localSegmentStoreURIOrPath(cfg, paths),
 		"LAZYMIND_SEGMENT_STORE_USER=" + envText("LAZYMIND_SEGMENT_STORE_USER", "admin"),
 		"LAZYMIND_SEGMENT_STORE_PASSWORD=" + envText("LAZYMIND_SEGMENT_STORE_PASSWORD", "LazyRAG_OpenSearch123!"),
 		"LAZYMIND_DOCUMENT_SERVER_URL=" + fmt.Sprintf("http://127.0.0.1:%d,general_algo", cfg.Algorithm.AlgoPort),
+		"LAZYMIND_AGENTIC_KB_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.AlgoPort),
 		"LAZYMIND_DEFAULT_CHAT_DATASET=algo",
 		"LAZYMIND_CORE_API_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_CORE_SERVICE_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.LocalProxy.CoreHostPort),
+		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + envText("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "dev-internal-service-token"),
 		"LAZYMIND_FILE_URL_SIGN_SECRET=" + envText("LAZYMIND_FILE_URL_SIGN_SECRET", "changeme-in-production"),
 		"LAZYMIND_FILE_URL_EXPIRE_SECONDS=" + envText("LAZYMIND_FILE_URL_EXPIRE_SECONDS", "3600"),
 		"LAZYMIND_MAX_RETRIES=" + envText("LAZYMIND_MAX_RETRIES", "20"),
@@ -498,16 +550,17 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_MAX_CONCURRENCY=" + envText("LAZYMIND_MAX_CONCURRENCY", "10"),
 		"LAZYMIND_LLM_PRIORITY=" + envText("LAZYMIND_LLM_PRIORITY", "0"),
 		"LAZYMIND_ENABLE_ROUTER=" + envText("LAZYMIND_ENABLE_ROUTER", "true"),
-		"LAZYMIND_ROUTER_PORT_POOL_START=18100",
-		"LAZYMIND_ROUTER_PORT_POOL_END=18999",
-		"LAZYMIND_ROUTER_PORTS_PER_INSTANCE=100",
+		"LAZYMIND_ROUTER_HOST=" + envText("LAZYMIND_ROUTER_HOST", "127.0.0.1"),
+		routerPortPoolStartEnvVar + "=" + strconv.Itoa(routerPoolStart),
+		routerPortPoolEndEnvVar + "=" + strconv.Itoa(routerPoolEnd),
+		routerPortsPerInstanceEnvVar + "=" + strconv.Itoa(defaultRouterPortsPerInstance),
 		"LAZYMIND_ROUTER_DEFAULT_ALGO_PATH=" + filepath.Join(paths.RepoRoot, "algorithm", "lazymind", "chat"),
 		"LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT=1",
 		"LAZYMIND_PLUGINS_DIR=" + filepath.Join(paths.RepoRoot, "plugins"),
 		"LAZYMIND_AGENTIC_WORKSPACE=" + filepath.Join(paths.AlgorithmHome, "agent_workspace"),
-		"LAZYMIND_SUBAGENT_WORKSPACE=" + filepath.Join(paths.RepoRoot, "data", "subagent"),
+		"LAZYMIND_SUBAGENT_WORKSPACE=" + paths.SubagentDataDir,
 		"LAZYMIND_EVO_API_PORT=" + strconv.Itoa(cfg.Algorithm.EvoPort),
-		"LAZYMIND_EVO_BASE_DIR=" + filepath.Join(paths.RepoRoot, "data", "evo"),
+		"LAZYMIND_EVO_BASE_DIR=" + paths.EvoDataDir,
 		"LAZYMIND_EVO_CHAT_SOURCE=" + filepath.Join(paths.RepoRoot, "algorithm", "lazymind", "chat"),
 		"LAZYMIND_EVO_CODE_TIMEOUT_S=" + envText("LAZYMIND_EVO_CODE_TIMEOUT_S", "900"),
 		"LAZYMIND_EVO_LLM_ROLE=" + envText("LAZYMIND_EVO_LLM_ROLE", "evo_llm"),
@@ -520,6 +573,31 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		env = append(env, "LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.DocPort)+"/v1/internal/callbacks/tasks")
 	}
 	return env
+}
+
+func localRouterPortPool(cfg RuntimeConfig) (int, int) {
+	if cfg.Algorithm.RouterPortPoolStart > 0 {
+		end := cfg.Algorithm.RouterPortPoolEnd
+		if end < cfg.Algorithm.RouterPortPoolStart {
+			end = cfg.Algorithm.RouterPortPoolStart + defaultRouterPortsPerInstance - 1
+		}
+		return cfg.Algorithm.RouterPortPoolStart, end
+	}
+	if strings.TrimSpace(os.Getenv(routerPortPoolStartEnvVar)) != "" {
+		start := envPort(routerPortPoolStartEnvVar, defaultRouterPortPoolStart)
+		end := envPort(routerPortPoolEndEnvVar, start+defaultRouterPortsPerInstance-1)
+		return start, end
+	}
+	offset := cfg.ProcessComposePort - defaultProcessComposePort
+	start := defaultRouterPortPoolStart + offset*defaultRouterPortsPerInstance
+	if start < 1024 || start+defaultRouterPortsPerInstance-1 >= 65536 {
+		start = defaultRouterPortPoolStart
+	}
+	end := start + defaultRouterPortsPerInstance - 1
+	if strings.TrimSpace(os.Getenv(routerPortPoolEndEnvVar)) != "" {
+		end = envPort(routerPortPoolEndEnvVar, end)
+	}
+	return start, end
 }
 
 func algorithmPIDFile(paths RuntimePaths, service string) string {
@@ -652,6 +730,17 @@ func waitForTCP(ctx context.Context, host string, port int, label string, timeou
 		case <-ticker.C:
 		}
 	}
+}
+
+func tcpOK(ctx context.Context, host string, port int, timeout time.Duration) bool {
+	address := net.JoinHostPort(host, strconv.Itoa(port))
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func processAlive(pid int) bool {

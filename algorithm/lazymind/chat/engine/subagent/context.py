@@ -39,6 +39,12 @@ class SubAgentContext:
     _artifact_counts: Dict[str, int] = field(default_factory=dict)
     _local_artifacts: List[Dict[str, Any]] = field(default_factory=list)
 
+    def __getstate__(self) -> Dict[str, Any]:
+        state = dict(self.__dict__)
+        state['db'] = None
+        state['emit'] = None
+        return state
+
     def next_artifact_seq(self, key: str) -> int:
         self._artifact_counts[key] = self._artifact_counts.get(key, 0) + 1
         return self._artifact_counts[key]

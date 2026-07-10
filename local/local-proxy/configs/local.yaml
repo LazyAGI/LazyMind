@@ -7,11 +7,13 @@ allowNonLocalBind: false
 auth:
   mode: "local-rbac"
   authServiceURL: "http://127.0.0.1:8000"
+  autoLoginAllowLAN: false
 
 cors:
   allowedOrigins:
     - "http://localhost:5173"
     - "http://127.0.0.1:5173"
+    - "${LAZYMIND_FRONTEND_LAN_ORIGIN}"
 
 timeouts:
   connect: 10s

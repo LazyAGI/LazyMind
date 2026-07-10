@@ -24,6 +24,11 @@ from lazymind.chat.service.component import (
     filter_tools,
     normalize_history_for_agent,
 )
+from lazymind.chat.service.component.status_retry import (
+    _new_react_agent,
+    build_status_retry_query,
+    is_status_only_answer,
+)
 from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.utils import (
     SensitiveFilter,
@@ -181,6 +186,33 @@ def _build_schedule_tools() -> list:
     return [build_schedule_tool_group()]
 
 
+def _collect_active_tool_names(configs: list) -> set[str]:
+    # Build a per-request callable allowlist from filtered tool configs.
+    # This is consumed by tool_runtime guard to prevent accidental execution
+    # when the model tries to call a tool that is not active in this session.
+    names: set[str] = set()
+    for cfg in configs:
+        inst = getattr(cfg, 'instance', None)
+        if inst is None:
+            continue
+        if callable(inst):
+            tool_name = str(getattr(inst, '__name__', '')).strip()
+            if tool_name:
+                names.add(tool_name)
+        public_apis = getattr(inst, '__public_apis__', None)
+        if isinstance(public_apis, (list, tuple)):
+            group_name = inst.__class__.__name__
+            if group_name:
+                names.add(f'get_{group_name}_methods')
+            for method_name in public_apis:
+                method = str(method_name).strip()
+                if method:
+                    names.add(method)
+                    if group_name:
+                        names.add(f'{group_name}_{method}')
+    return names
+
+
 def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]],
                                    current_turn_seq: Optional[int] = None) -> str:
     """Build the '## User Uploaded Files' context section from history_files_per_turn.
@@ -333,9 +365,14 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         f'[files_map_keys={sorted(message.files.keys()) if isinstance(message.files, dict) else None}]'
     )
     start_time = time.time()
+    plugin_context = plugin.plugin_context or {}
     priority = runtime.priority or LAZYMIND_LLM_PRIORITY
     query, agent_query = _normalize_cite_message_query_for_agent(message.query)
-    sensitive_word = check_sensitive_content(query)
+    is_driver_turn = (
+        isinstance(plugin_context, dict)
+        and plugin_context.get('synthetic_source') == 'driver'
+    )
+    sensitive_word = None if is_driver_turn else check_sensitive_content(query)
     if sensitive_word:
         cost = round(time.time() - start_time, 3)
         LOG.warning(
@@ -352,7 +389,6 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             },
             cost,
         ), final_data={'tool_call_turns': 0})
-
     filters = dict(retrieval.filters or {})
     files_map: Dict[str, List[str]] = message.files if isinstance(message.files, dict) else {}
     flat_files: List[str] = []
@@ -541,24 +577,41 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             async with rag_sem:
                 async for kind, payload in drive_agent(react_agent, agent_query, history=agent_history):
                     if kind == 'event':
-                        event_tag = payload.get('tag', '') if isinstance(payload, dict) else ''
-                        if event_tag in ('tool_calls', 'tool_results'):
-                            LOG.info(
-                                f'[ChatServer] [DBG_AGENT_EVENT] [sid={conversation.session_id}] '
-                                f'[tag={event_tag}] [payload={payload}]'
-                            )
                         for frame in translator.feed(payload):
                             cost = round(time.time() - start_time, 3)
                             yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FEED')
                     else:
                         # 'final' -- payload is already the resolved result value;
                         # if future.result() raised, drive_agent propagated it before yielding.
-                        LOG.info(
-                            f'[ChatServer] [DBG_AGENT_FINAL] [sid={conversation.session_id}] '
-                            f'[tool_call_turns={translator.tool_call_turns}] '
-                            f'[result_type={type(payload).__name__}] [result={str(payload)[:200]}]'
-                        )
                         final_result = payload
+
+                if translator.tool_call_turns == 0 and is_status_only_answer(final_result):
+                    LOG.info(
+                        f'[ChatServer] [STATUS_ONLY_RETRY] [sid={conversation.session_id}] '
+                        f'[result={str(final_result)[:120]}]'
+                    )
+                    retry_query = build_status_retry_query(agent_query)
+                    retry_agent = _new_react_agent(
+                        all_tools=all_tools,
+                        query=query,
+                        runtime_prompt=runtime_prompt,
+                        agent=agent,
+                        config=_cfg,
+                        fs=FS,
+                        stop_tools=stop_tools,
+                    )
+                    async for kind, payload in drive_agent(retry_agent, retry_query, history=agent_history):
+                        if kind == 'event':
+                            for frame in translator.feed(payload):
+                                cost = round(time.time() - start_time, 3)
+                                yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='RETRY_FEED')
+                        else:
+                            LOG.info(
+                                f'[ChatServer] [DBG_AGENT_FINAL_RETRY] [sid={conversation.session_id}] '
+                                f'[tool_call_turns={translator.tool_call_turns}] '
+                                f'[result_type={type(payload).__name__}] [result={str(payload)[:200]}]'
+                            )
+                            final_result = payload
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)

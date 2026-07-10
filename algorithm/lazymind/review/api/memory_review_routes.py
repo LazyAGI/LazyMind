@@ -20,14 +20,6 @@ class MemoryReviewPayload(BaseModel):
         default_factory=list,
         description='Chat history passed by backend for review',
     )
-    memory: str = Field(
-        default='',
-        description='Current full agent memory text to edit',
-    )
-    user: str = Field(
-        default='',
-        description='Current full user profile text to edit',
-    )
     llm_config: Optional[Dict[str, Any]] = Field(
         None,
         description=(
@@ -60,8 +52,6 @@ async def memory_review(payload: MemoryReviewPayload):
         result = review_memory(
             user_id=payload.user_id,
             history=payload.history,
-            memory=payload.memory,
-            user=payload.user,
             llm_config=payload.llm_config,
         )
     except Exception as exc:

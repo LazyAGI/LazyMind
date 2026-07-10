@@ -7,4 +7,5 @@ export {
 export { default as ListPageTable } from "./ListPageTable";
 export { default as DetailPageHeader } from "./DetailPageHeader";
 export { default as RenderPdf } from "./RenderPdf";
+export { exportPdfAsImagePdf } from "./exportPdfAsImage";
 export { default as RiskTip } from "./RiskTip";

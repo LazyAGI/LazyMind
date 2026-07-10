@@ -443,6 +443,7 @@ func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.R
 		"delta":           stripThinkTags(stripToolTags(last.Result)),
 		"finish_reason":   "FINISH_REASON_STOP",
 		"history_id":      last.ID,
+		"tool_call_turns": last.ToolCallTurns,
 	})
 }
 
@@ -456,6 +457,7 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"delta":           stripThinkTags(stripToolTags(last.Result)),
 			"finish_reason":   "FINISH_REASON_STOP",
 			"history_id":      last.ID,
+			"tool_call_turns": last.ToolCallTurns,
 		})
 		return
 	}
@@ -477,6 +479,7 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"delta":           stripThinkTags(stripToolTags(h.Result)),
 			"finish_reason":   finish,
 			"history_id":      h.ID,
+			"tool_call_turns": h.ToolCallTurns,
 		})
 	}
 }
@@ -681,18 +684,23 @@ func resumeMultiAnswerChat(ctx context.Context, stateStore state.Store, convID s
 	}
 }
 
-// StopChatGeneration text POST /api/v1/conversations:stopChatGeneration
+// StopChatGeneration handles:
+//   - POST /conversations:stopChatGeneration (conversation_id in JSON body)
+//   - POST /conversations/{conversation_id}:stop (conversation_id in path; body optional)
 func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ConversationID string `json:"conversation_id"`
 		HistoryID      string `json:"history_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
 		return
 	}
 	convID := strings.TrimSpace(body.ConversationID)
 	historyID := strings.TrimSpace(body.HistoryID)
+	if convID == "" {
+		convID = conversationIDFromPath(r)
+	}
 	if convID == "" {
 		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
 		return
@@ -907,6 +915,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"reason":          h.Reason,
 		"expected_answer": h.ExpectedAnswer,
 		"create_time":     h.CreateTime.UTC().Format(time.RFC3339),
+		"tool_call_turns": h.ToolCallTurns,
 	}
 	if askPending != nil {
 		item["ask_pending"] = askPending

@@ -11,6 +11,7 @@ import {
 } from "antd";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
+import { runtimeFeatures } from "@/runtime/features";
 import {
   fetchModelFeatures,
   isImageEmbedRequired,
@@ -413,17 +414,19 @@ const Detail = () => {
                   }}
                 />
               </Tooltip>
-              <Tooltip title={t("knowledge.authorize")}>
-                <Button
-                  icon={<SettingOutlined />}
-                  style={{ marginLeft: "12px", width: "24px", height: "24px" }}
-                  onClick={() =>
-                    navigate({
-                      pathname: `/lib/knowledge/auth/${id}`,
-                    })
-                  }
-                />
-              </Tooltip>
+              {!runtimeFeatures.hideUserGroupSurfaces && (
+                <Tooltip title={t("knowledge.authorize")}>
+                  <Button
+                    icon={<SettingOutlined />}
+                    style={{ marginLeft: "12px", width: "24px", height: "24px" }}
+                    onClick={() =>
+                      navigate({
+                        pathname: `/lib/knowledge/auth/${id}`,
+                      })
+                    }
+                  />
+                </Tooltip>
+              )}
               <Tooltip title={t("common.delete")}>
                 <Button
                   icon={<DeleteOutlined />}

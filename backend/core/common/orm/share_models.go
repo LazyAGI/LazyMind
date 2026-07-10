@@ -20,6 +20,7 @@ func (SkillShareTask) TableName() string { return "skill_share_tasks" }
 type SkillShareItem struct {
 	ID                 string     `gorm:"column:id;type:varchar(36);primaryKey"`
 	ShareTaskID        string     `gorm:"column:share_task_id;type:varchar(36);not null;index:idx_skill_share_items_target_user,priority:1"`
+	SourceSkillID      string     `gorm:"column:source_skill_id;type:varchar(36);not null;default:'';index:idx_skill_share_items_source_skill"`
 	TargetUserID       string     `gorm:"column:target_user_id;type:varchar(255);not null;index:idx_skill_share_items_target_user,priority:2"`
 	TargetUserName     string     `gorm:"column:target_user_name;type:varchar(255);not null;default:''"`
 	Status             string     `gorm:"column:status;type:varchar(32);not null;index:idx_skill_share_items_target_user,priority:3"`

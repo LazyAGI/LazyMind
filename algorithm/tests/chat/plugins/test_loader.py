@@ -406,3 +406,29 @@ def test_find_producer_step(tmp_path):
         assert plugin_loader.find_producer_step('test-plugin', 'nonexistent') is None
     finally:
         plugin_loader.load_all()
+
+
+def test_find_producer_steps_allows_duplicate_artifact_outputs(tmp_path):
+    from lazymind.chat.plugin import plugin_loader
+    plugins_dir = make_plugin_dir(tmp_path)
+    state_path = plugins_dir / 'test-plugin' / 'scenario' / 'state.yml'
+    state_text = state_path.read_text()
+    state_text = state_text.replace(
+        '          - artifact_id: analysis\n'
+        '            content_type: text\n'
+        '            slot_id: text_result\n',
+        '          - artifact_id: analysis\n'
+        '            content_type: text\n'
+        '            slot_id: text_result\n'
+        '          - artifact_id: optimized\n'
+        '            content_type: text\n'
+        '            slot_id: text_result\n',
+    )
+    state_path.write_text(state_text)
+    with patch.object(plugin_loader, '_PLUGINS_DIR', plugins_dir):
+        plugin_loader.load_all()
+    try:
+        assert plugin_loader.find_producer_steps('test-plugin', 'optimized') == ['step_a', 'step_b']
+        assert plugin_loader.find_producer_step('test-plugin', 'optimized') == 'step_a'
+    finally:
+        plugin_loader.load_all()

@@ -21,6 +21,7 @@ import (
 
 type SkillState struct {
 	Resource     *orm.SkillResource
+	V2Resource   *orm.SkillV2Skill
 	RelativePath string
 	Content      string
 	ContentHash  string
@@ -238,6 +239,13 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 		return nil, err
 	}
 
+	var v2Skills []orm.SkillV2Skill
+	if err := db.WithContext(ctx).
+		Where("owner_user_id = ? AND is_enabled = ? AND deleted_at IS NULL", userID, true).
+		Order("category ASC, skill_name ASC").
+		Find(&v2Skills).Error; err != nil {
+		return nil, err
+	}
 	var skills []orm.SkillResource
 	if err := db.WithContext(ctx).
 		Where("owner_user_id = ? AND node_type = ? AND is_enabled = ?", userID, SkillNodeTypeParent, true).
@@ -247,8 +255,9 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	}
 
 	now := time.Now()
-	availableSkills := make([]string, 0, len(skills))
-	snapshots := make([]orm.ResourceSessionSnapshot, 0, len(skills)+2)
+	availableSkills := make([]string, 0, len(v2Skills)+len(skills))
+	snapshots := make([]orm.ResourceSessionSnapshot, 0, len(v2Skills)+len(skills)+2)
+	seenSkillNames := map[string]struct{}{}
 
 	snapshots = append(snapshots,
 		orm.ResourceSessionSnapshot{
@@ -271,13 +280,53 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 		},
 	)
 
+	for _, skill := range v2Skills {
+		state, err := skillStateFromV2Resource(ctx, db, &skill)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				appLog.Logger.Warn().
+					Str("user_id", userID).
+					Str("skill_id", strings.TrimSpace(skill.ID)).
+					Str("category", strings.TrimSpace(skill.Category)).
+					Str("skill_name", strings.TrimSpace(skill.SkillName)).
+					Str("head_revision_id", valueOrEmpty(skill.HeadRevisionID)).
+					Err(err).
+					Msg("skipping enabled skill with invalid published SKILL.md")
+				continue
+			}
+			return nil, err
+		}
+		parentName := strings.TrimSpace(skill.SkillName)
+		category := strings.TrimSpace(skill.Category)
+		availableName := fmt.Sprintf("%s/%s", category, parentName)
+		seenSkillNames[availableName] = struct{}{}
+		availableSkills = append(availableSkills, availableName)
+		snapshots = append(snapshots, orm.ResourceSessionSnapshot{
+			ID:              newUUID(),
+			SessionID:       sessionID,
+			UserID:          userID,
+			ResourceType:    ResourceTypeSkill,
+			ResourceKey:     strings.TrimSpace(skill.ID),
+			Category:        category,
+			ParentSkillName: parentName,
+			SkillName:       parentName,
+			FileExt:         "md",
+			RelativePath:    state.RelativePath,
+			SnapshotHash:    state.ContentHash,
+			CreatedAt:       now,
+		})
+	}
 	for _, skill := range skills {
 		state, err := skillStateFromResource(&skill)
 		if err != nil {
 			return nil, err
 		}
 		parentName := firstNonEmpty(strings.TrimSpace(skill.ParentSkillName), strings.TrimSpace(skill.SkillName))
-		availableSkills = append(availableSkills, fmt.Sprintf("%s/%s", strings.TrimSpace(skill.Category), parentName))
+		availableName := fmt.Sprintf("%s/%s", strings.TrimSpace(skill.Category), parentName)
+		if _, exists := seenSkillNames[availableName]; exists {
+			continue
+		}
+		availableSkills = append(availableSkills, availableName)
 		snapshots = append(snapshots, orm.ResourceSessionSnapshot{
 			ID:              newUUID(),
 			SessionID:       sessionID,
@@ -414,8 +463,21 @@ func loadLegacySystemUserPreferenceTemplate(ctx context.Context, tx *gorm.DB, us
 }
 
 func LoadSkillStateByResourceKey(ctx context.Context, db *gorm.DB, userID, resourceKey string) (*SkillState, error) {
-	var skill orm.SkillResource
+	var v2Skill orm.SkillV2Skill
 	err := db.WithContext(ctx).
+		Where("owner_user_id = ? AND id = ?",
+			strings.TrimSpace(userID),
+			strings.TrimSpace(resourceKey),
+		).
+		Take(&v2Skill).Error
+	if err == nil {
+		return skillStateFromV2Resource(ctx, db, &v2Skill)
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	var skill orm.SkillResource
+	err = db.WithContext(ctx).
 		Where("owner_user_id = ? AND id = ?",
 			strings.TrimSpace(userID),
 			strings.TrimSpace(resourceKey),
@@ -428,8 +490,22 @@ func LoadSkillStateByResourceKey(ctx context.Context, db *gorm.DB, userID, resou
 }
 
 func LoadParentSkillState(ctx context.Context, db *gorm.DB, userID, category, skillName string) (*SkillState, error) {
-	var skill orm.SkillResource
+	var v2Skill orm.SkillV2Skill
 	err := db.WithContext(ctx).
+		Where("owner_user_id = ? AND category = ? AND skill_name = ?",
+			strings.TrimSpace(userID),
+			strings.TrimSpace(category),
+			strings.TrimSpace(skillName),
+		).
+		Take(&v2Skill).Error
+	if err == nil {
+		return skillStateFromV2Resource(ctx, db, &v2Skill)
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	var skill orm.SkillResource
+	err = db.WithContext(ctx).
 		Where("owner_user_id = ? AND category = ? AND node_type = ? AND (skill_name = ? OR parent_skill_name = ?)",
 			strings.TrimSpace(userID),
 			strings.TrimSpace(category),
@@ -442,6 +518,48 @@ func LoadParentSkillState(ctx context.Context, db *gorm.DB, userID, category, sk
 		return nil, err
 	}
 	return skillStateFromResource(&skill)
+}
+
+func skillStateFromV2Resource(ctx context.Context, db *gorm.DB, skill *orm.SkillV2Skill) (*SkillState, error) {
+	if skill == nil || skill.HeadRevisionID == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	skillMDPath := strings.TrimSpace(skill.SkillMDPath)
+	if skillMDPath == "" {
+		skillMDPath = "SKILL.md"
+	}
+	var entry orm.SkillV2RevisionEntry
+	if err := db.WithContext(ctx).
+		Where("revision_id = ? AND path = ? AND entry_type = ?", *skill.HeadRevisionID, skillMDPath, "file").
+		Take(&entry).Error; err != nil {
+		return nil, err
+	}
+	if entry.BlobHash == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var blob orm.SkillV2Blob
+	if err := db.WithContext(ctx).Where("hash = ?", *entry.BlobHash).Take(&blob).Error; err != nil {
+		return nil, err
+	}
+	content := ""
+	if !blob.Binary {
+		content = string(blob.Content)
+	}
+	relativeRoot := strings.TrimSpace(skill.RelativeRoot)
+	if relativeRoot == "" {
+		relativeRoot = filepath.ToSlash(filepath.Join(skill.Category, skill.SkillName))
+	}
+	relativePath := filepath.ToSlash(filepath.Join(relativeRoot, skillMDPath))
+	contentHash := strings.TrimSpace(blob.Hash)
+	if contentHash == "" {
+		contentHash = HashContent(content)
+	}
+	return &SkillState{
+		V2Resource:   skill,
+		RelativePath: relativePath,
+		Content:      content,
+		ContentHash:  contentHash,
+	}, nil
 }
 
 func skillStateFromResource(skill *orm.SkillResource) (*SkillState, error) {
@@ -493,6 +611,13 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }
 
 func maxInt64(a, b int64) int64 {

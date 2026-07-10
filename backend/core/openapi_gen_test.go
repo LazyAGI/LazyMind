@@ -662,6 +662,7 @@ func TestOpenAPISpecCoversEvalSetOperations(t *testing.T) {
 		{"patch", "/api/core/eval-sets/{eval_set_id}", "eval-sets"},
 		{"delete", "/api/core/eval-sets/{eval_set_id}", "eval-sets"},
 		{"get", "/api/core/eval-sets/{eval_set_id}/question-types", "eval-set-items"},
+		{"get", "/api/core/eval-sets/{eval_set_id}/items:invalidReferences", "eval-set-items"},
 		{"get", "/api/core/eval-sets/{eval_set_id}/items", "eval-set-items"},
 		{"post", "/api/core/eval-sets/{eval_set_id}/items", "eval-set-items"},
 		{"patch", "/api/core/eval-sets/{eval_set_id}/items/{item_id}", "eval-set-items"},

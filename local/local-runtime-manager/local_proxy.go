@@ -25,17 +25,24 @@ func (m *LocalProxyManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 		return err
 	}
 
-	goBin := strings.TrimSpace(os.Getenv("GO"))
-	if goBin == "" {
-		goBin = "go"
-	}
-	build := Command{
-		Name: goBin,
-		Args: []string{"build", "-buildvcs=false", "-o", paths.LocalProxyBin, "./cmd/local-proxy"},
-		Dir:  filepath.Join(paths.RepoRoot, localProxySourceDirName),
-	}
-	if res, err := m.runner.Run(ctx, build); err != nil {
-		return fmt.Errorf("build local-proxy failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(paths.LocalProxyBin); err != nil || info.IsDir() {
+			return fmt.Errorf("desktop local-proxy binary not found: %s", paths.LocalProxyBin)
+		}
+	} else {
+		goBin := strings.TrimSpace(os.Getenv("GO"))
+		if goBin == "" {
+			goBin = "go"
+		}
+		build := Command{
+			Name: goBin,
+			Args: []string{"build", "-buildvcs=false", "-o", paths.LocalProxyBin, "./cmd/local-proxy"},
+			Dir:  filepath.Join(paths.RepoRoot, localProxySourceDirName),
+			Env:  goToolEnv(paths),
+		}
+		if res, err := m.runner.Run(ctx, build); err != nil {
+			return fmt.Errorf("build local-proxy failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+		}
 	}
 
 	run := Command{
@@ -78,14 +85,36 @@ func localProxyEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 
 func localRuntimeEnv(cfg RuntimeConfig) []string {
 	return []string{
+		runtimeProfileEnvVar + "=" + cfg.Profile,
+		runtimeRootEnvVar + "=" + cfg.RuntimeRoot,
+		localBuildRootEnvVar + "=" + cfg.BuildRoot,
+		runtimeResourcesRootEnvVar + "=" + cfg.ResourcesRoot,
 		processComposePortEnvVar + "=" + strconv.Itoa(cfg.ProcessComposePort),
 		frontendPortEnvVar + "=" + strconv.Itoa(cfg.FrontendPort),
+		frontendLANOriginEnvVar + "=" + frontendLANOrigin(cfg),
+		localNetworkProfileEnvVar + "=" + cfg.NetworkProfile,
+		localAutoLoginAllowLANEnvVar + "=" + envText(localAutoLoginAllowLANEnvVar, "false"),
 		localProxyAddressEnvVar + "=" + cfg.LocalProxy.Address,
 		localProxyPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.Port),
+		localAuthPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
 		localProxyAuthHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
 		localProxyCoreHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		localProxyChatHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.ChatHostPort),
 		localProxyScanHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
 		localProxyEvoHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.EvoHostPort),
 	}
+}
+
+func frontendLANOrigin(cfg RuntimeConfig) string {
+	if explicit := strings.TrimSpace(os.Getenv(frontendLANOriginEnvVar)); explicit != "" {
+		return explicit
+	}
+	if cfg.NetworkProfile != "lan" {
+		return ""
+	}
+	ip := firstLANIPv4()
+	if ip == "" {
+		return ""
+	}
+	return "http://" + ip + ":" + strconv.Itoa(cfg.FrontendPort)
 }

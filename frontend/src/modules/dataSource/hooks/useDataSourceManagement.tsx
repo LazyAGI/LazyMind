@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
 import type { TypedConfirmModalRef } from '@/components/ui/TypedConfirmModal';
+import type { DatabaseConnectionItem } from "../api/databaseConnections";
 import {
   createFeishuAccountId,
   getOAuthStateFromConnection,
@@ -98,6 +99,8 @@ export function useDataSourceManagement() {
   const [manualOauthModalOpen, setManualOauthModalOpen] = useState(false);
   const [manualOauthCallbackValue, setManualOauthCallbackValue] = useState("");
   const [manualOauthSubmitting, setManualOauthSubmitting] = useState(false);
+  const [databaseEditingConnection, setDatabaseEditingConnection] = useState<DatabaseConnectionItem | null>(null);
+  const [databaseEditSaving, setDatabaseEditSaving] = useState(false);
   const oauthAttemptRef = useRef<PendingOAuthAttempt | null>(null);
   const canCreateLocalSource = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
   const creatableSourceTypeOptions = sourceTypeOptions.filter(
@@ -229,6 +232,10 @@ export function useDataSourceManagement() {
     setManualOauthCallbackValue,
     manualOauthSubmitting,
     setManualOauthSubmitting,
+    databaseEditingConnection,
+    setDatabaseEditingConnection,
+    databaseEditSaving,
+    setDatabaseEditSaving,
     oauthState,
     setOauthState,
     connectionVerified,
@@ -380,12 +387,26 @@ export function useDataSourceManagement() {
   };
 
   const requestDeleteSourceConfirm = (record: DataSourceItem) => {
-    pendingConfirmActionRef.current = () => ctx.executeDeleteSource(record);
+    const isDatabase = record.type === "database";
+    pendingConfirmActionRef.current = () => (
+      isDatabase
+        ? ctx.executeDeleteDatabaseConnection(record)
+        : ctx.executeDeleteSource(record)
+    );
     confirmRef.current?.onOpen({
       id: record.id,
-      title: t("admin.dataSourceDeleteTitle", { name: record.name }),
-      content: t("admin.dataSourceDeleteContent"),
-      confirmText: t("admin.dataSourceDeleteConfirmText", { name: record.name }),
+      title: t(
+        isDatabase ? "admin.dataSourceDatabaseDeleteTitle" : "admin.dataSourceDeleteTitle",
+        { name: record.name },
+      ),
+      content: t(
+        isDatabase ? "admin.dataSourceDatabaseDeleteContent" : "admin.dataSourceDeleteContent",
+        { name: record.name },
+      ),
+      confirmText: t(
+        isDatabase ? "common.delete" : "admin.dataSourceDeleteConfirmText",
+        { name: record.name },
+      ),
     });
   };
 
@@ -395,6 +416,7 @@ export function useDataSourceManagement() {
 
   return {
     t,
+    navigate,
     form,
     feishuSetupForm,
     sources,
@@ -422,6 +444,8 @@ export function useDataSourceManagement() {
     manualOauthCallbackValue,
     setManualOauthCallbackValue,
     manualOauthSubmitting,
+    databaseEditingConnection,
+    databaseEditSaving,
     cloudSetupProvider,
     feishuSetupModalOpen,
     setFeishuSetupModalOpen,
@@ -461,8 +485,12 @@ export function useDataSourceManagement() {
     handleResetFeishuSetup: ctx.handleResetFeishuSetup,
     handleResetNotionSetup: ctx.handleResetNotionSetup,
     openDetailPage: ctx.openDetailPage,
+    openDatabaseConnectionConfig: ctx.openDatabaseConnectionConfig,
+    closeDatabaseConnectionConfig: ctx.closeDatabaseConnectionConfig,
+    handleSaveDatabaseConnectionConfig: ctx.handleSaveDatabaseConnectionConfig,
     openEditWizard: ctx.openEditWizard,
     requestDeleteSourceConfirm,
+    executeDeleteDatabaseConnection: ctx.executeDeleteDatabaseConnection,
     requestSaveWithSyncConfirm,
     confirmRef,
     handleTypedConfirm,

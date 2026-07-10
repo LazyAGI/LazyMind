@@ -264,6 +264,175 @@
   }
 }
 
+.memory-manual-skill-review-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(10px, 1.5vh, 16px);
+}
+
+.memory-manual-skill-review {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid #dbe7f5;
+  border-radius: 8px;
+  background: #ffffff;
+
+  &.is-ready {
+    border-color: #b7ebd1;
+    background: #f8fffb;
+  }
+
+  &.is-empty {
+    background: #fbfdff;
+  }
+}
+
+.memory-manual-skill-review-copy {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+
+  strong {
+    flex: 0 0 auto;
+    color: #101828;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  span {
+    min-width: 0;
+    color: #667085;
+    font-size: 13px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+}
+
+.memory-manual-skill-review-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.memory-manual-skill-review-icon-button.ant-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-color: #dfe6ef;
+  color: #5f6b7e;
+}
+
+.memory-manual-skill-review-run-button.ant-btn {
+  height: 30px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  gap: 4px;
+}
+
+.memory-manual-skill-review-result {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #d1fadf;
+  border-radius: 8px;
+  background: #f8fffb;
+  color: #475467;
+
+  &.is-empty {
+    border-color: #dbe7f5;
+    background: #fbfdff;
+  }
+
+  &.is-warning {
+    border-color: #fedf89;
+    background: #fffcf5;
+  }
+
+  &.is-running {
+    border-color: #b9ddff;
+    background: #f5fbff;
+  }
+}
+
+.memory-manual-skill-review-result-icon {
+  flex: 0 0 auto;
+  display: flex;
+  margin-top: 2px;
+  color: #039855;
+  font-size: 14px;
+  line-height: 1;
+
+  .memory-manual-skill-review-result.is-empty & {
+    color: #667085;
+  }
+
+  .memory-manual-skill-review-result.is-warning & {
+    color: #b54708;
+  }
+
+  .memory-manual-skill-review-result.is-running & {
+    color: #1570ef;
+  }
+}
+
+.memory-manual-skill-review-result-body {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.memory-manual-skill-review-result-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #475467;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.memory-manual-skill-review-result-label {
+  flex: 0 0 auto;
+  color: #344054;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.memory-manual-skill-review-result-tags {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.memory-manual-skill-review-result-tag.ant-tag {
+  max-width: 220px;
+  margin-inline-end: 0;
+  border-radius: 4px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-manual-skill-review-result-hint {
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .memory-experience-feature-status-dot {
   width: 8px;
   height: 8px;
@@ -3790,8 +3959,22 @@
   .memory-mcp-form-grid,
   .memory-profile-field-grid,
   .memory-child-skill-grid,
+  .memory-manual-skill-review-row,
   .memory-tab-grid {
     grid-template-columns: 1fr;
+  }
+
+  .memory-manual-skill-review {
+    grid-column: 1;
+    flex-wrap: wrap;
+  }
+
+  .memory-manual-skill-review-result {
+    grid-column: 1;
+  }
+
+  .memory-manual-skill-review-actions {
+    width: 100%;
   }
 
   .memory-profile-editor {

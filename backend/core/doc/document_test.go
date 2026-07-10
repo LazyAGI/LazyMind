@@ -55,6 +55,105 @@ func TestStreamLocalFileInlineUsesActualFilenameForCSV(t *testing.T) {
 	}
 }
 
+func TestStreamLocalFileSubagentWorkspace(t *testing.T) {
+	subRoot := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", subRoot)
+
+	fullPath := filepath.Join(subRoot, "user-1", "task-1", "output.png")
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("create dir: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("png"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	streamLocalFile(recorder, fullPath, "output.png", "image/png", true)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestGetSignedStaticFileSubagentPath(t *testing.T) {
+	subRoot := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", subRoot)
+
+	inner := filepath.Join("user-1", "task-1", "output.png")
+	fullPath := filepath.Join(subRoot, inner)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("create dir: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte("png"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	rel := "subagent/" + filepath.ToSlash(inner)
+	expires := time.Now().UTC().Unix() + 3600
+	sig := signStaticFile(rel, expires)
+	req := httptest.NewRequest(http.MethodGet,
+		fmt.Sprintf("/static-files/%s?expires=%d&sig=%s", encodeStaticFilePath(rel), expires, sig),
+		nil)
+	req = mux.SetURLVars(req, map[string]string{"path": encodeStaticFilePath(rel)})
+
+	recorder := httptest.NewRecorder()
+	GetSignedStaticFile(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if body := recorder.Body.String(); body != "png" {
+		t.Fatalf("expected body png, got %q", body)
+	}
+}
+
+func TestStaticFileURLFromSubagentPathUsesSubagentPrefix(t *testing.T) {
+	subRoot := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", subRoot)
+
+	fullPath := filepath.Join(subRoot, "user-1", "task-1", "output.json")
+	url := StaticFileURLFromAnyStoragePath(fullPath)
+	if !strings.HasPrefix(url, "/static-files/subagent/user-1/task-1/output.json?") {
+		t.Fatalf("expected subagent static file url, got %q", url)
+	}
+}
+
+func TestAggregateDocumentsFiltersUnreadableDatasets(t *testing.T) {
+	db := newDocumentTestDB(t)
+	now := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
+	if err := db.Create(&orm.Dataset{ID: "dataset-owned", DisplayName: "Owned", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "Alice", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
+		t.Fatalf("create owned dataset: %v", err)
+	}
+	if err := db.Create(&orm.Dataset{ID: "dataset-other", DisplayName: "Other", BaseModel: orm.BaseModel{CreateUserID: "user-2", CreateUserName: "Bob", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
+		t.Fatalf("create other dataset: %v", err)
+	}
+	if err := db.Create(&orm.Document{ID: "doc-owned", DatasetID: "dataset-owned", DisplayName: "report.pdf", Tags: []byte(`["finance"]`), Ext: []byte(`{"file_size":12}`), BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "Alice", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
+		t.Fatalf("create owned document: %v", err)
+	}
+	if err := db.Create(&orm.Document{ID: "doc-other", DatasetID: "dataset-other", DisplayName: "secret.pdf", Tags: []byte(`["finance"]`), Ext: []byte(`{"file_size":20}`), BaseModel: orm.BaseModel{CreateUserID: "user-2", CreateUserName: "Bob", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
+		t.Fatalf("create other document: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/core/system-query/documents:aggregate", strings.NewReader(`{"dataset_ids":["dataset-owned","dataset-other"],"file_types":["pdf"],"group_by":["dataset_id","file_type"]}`))
+	req.Header.Set("X-User-Id", "user-1")
+	AggregateDocuments(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp AggregateDocumentsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.TotalCount != 1 || resp.TotalSize != 12 {
+		t.Fatalf("expected only readable owned doc, got count=%d size=%d", resp.TotalCount, resp.TotalSize)
+	}
+	if len(resp.Groups) != 1 || resp.Groups[0].Key["dataset_id"] != "dataset-owned" || resp.Groups[0].Key["file_type"] != "PDF" {
+		t.Fatalf("unexpected groups: %#v", resp.Groups)
+	}
+}
+
 func newDocumentTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 

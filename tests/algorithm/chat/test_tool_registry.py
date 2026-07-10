@@ -71,6 +71,22 @@ def test_registry_key_source_activates_function_tool():
     ]
 
 
+def test_active_tool_names_include_lazy_group_gateways():
+    from lazymind.chat.service.chat_service import _collect_active_tool_names
+
+    configs = filter_tools(DEFAULT_TOOLS)
+    active_names = _collect_active_tool_names(configs)
+
+    assert 'get_SystemQueryToolGroup_methods' in active_names
+    assert 'get_ExternalDBToolGroup_methods' in active_names
+    assert 'list_external_dbs' in active_names
+    assert 'describe_external_db' in active_names
+    assert 'external_db_query' in active_names
+    assert 'ExternalDBToolGroup_list_external_dbs' in active_names
+    assert 'ExternalDBToolGroup_describe_external_db' in active_names
+    assert 'ExternalDBToolGroup_external_db_query' in active_names
+
+
 def test_pick_first_valid_agent_tool_uses_group_config_description():
     lazyllm.globals.config['dynamic_tool_auth'] = {'bocha': 'bocha-token'}
 

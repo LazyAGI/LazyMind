@@ -26,6 +26,9 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if cfg.Auth.AuthServiceURL != "http://127.0.0.1:8000" {
 		t.Fatalf("auth.authServiceURL = %q, want http://127.0.0.1:8000", cfg.Auth.AuthServiceURL)
 	}
+	if cfg.Auth.AutoLoginAllowLAN {
+		t.Fatalf("auth.autoLoginAllowLAN = true, want false")
+	}
 
 	wantOrigins := []string{"http://localhost:5173", "http://127.0.0.1:5173"}
 	if !reflect.DeepEqual(cfg.CORS.AllowedOrigins, wantOrigins) {
@@ -174,6 +177,18 @@ allowNonLocalBind: true
 	}
 }
 
+func TestLoadUsesAutoLoginAllowLANEnvOverride(t *testing.T) {
+	t.Setenv("LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN", "true")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	if !cfg.Auth.AutoLoginAllowLAN {
+		t.Fatalf("auth.autoLoginAllowLAN = false, want true")
+	}
+}
+
 func TestLoadCloudReplaceKongConfigFile(t *testing.T) {
 	t.Setenv("LAZYMIND_LOCAL_PROXY_PORT", "5024")
 	t.Setenv("LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT", "18000")
@@ -243,6 +258,33 @@ func TestLoadCloudReplaceKongConfigFile(t *testing.T) {
 	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/healthz", false, true)
 	wantRoute("core-route", "/api/core", "http://127.0.0.1:18001", "/health", true, false)
 	wantRoute("evo-route", "/api/evo", "http://127.0.0.1:18047", "/healthz", true, true)
+}
+
+func TestLoadCloudReplaceKongConfigFileIncludesLANOriginWhenSet(t *testing.T) {
+	t.Setenv("LAZYMIND_LOCAL_PROXY_PORT", "5024")
+	t.Setenv("LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT", "18000")
+	t.Setenv("LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT", "18001")
+	t.Setenv("LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT", "18046")
+	t.Setenv("LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT", "18080")
+	t.Setenv("LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT", "18047")
+	t.Setenv("LAZYMIND_FRONTEND_PORT", "8090")
+	t.Setenv("LAZYMIND_FRONTEND_LAN_ORIGIN", "http://10.0.0.2:8090")
+
+	cfg, err := Load(filepath.Join("..", "..", "configs", "cloud-replace-kong.yaml"))
+	if err != nil {
+		t.Fatalf("Load cloud-replace-kong.yaml: %v", err)
+	}
+
+	wantOrigins := []string{
+		"http://localhost:5173",
+		"http://127.0.0.1:5173",
+		"http://localhost:8090",
+		"http://127.0.0.1:8090",
+		"http://10.0.0.2:8090",
+	}
+	if !reflect.DeepEqual(cfg.CORS.AllowedOrigins, wantOrigins) {
+		t.Fatalf("allowedOrigins = %#v, want %#v", cfg.CORS.AllowedOrigins, wantOrigins)
+	}
 }
 
 func TestLoadUsesCLIConfigPathOverEnv(t *testing.T) {

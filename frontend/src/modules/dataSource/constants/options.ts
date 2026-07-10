@@ -35,11 +35,6 @@ export const DATA_SOURCE_FILE_TYPE_OPTIONS: Array<{
     i18nKey: "admin.dataSourceFileTypeDocx",
   },
   {
-    value: "hwp",
-    extensions: ["hwp"],
-    i18nKey: "admin.dataSourceFileTypeHwp",
-  },
-  {
     value: "ppt",
     extensions: ["ppt"],
     i18nKey: "admin.dataSourceFileTypePpt",

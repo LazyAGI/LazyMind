@@ -1,5 +1,5 @@
-import { useCallback, useEffect } from "react";
-import { usePluginStore, type SlotRevision } from "@/modules/chat/store/pluginPanel";
+import { useCallback, useEffect } from 'react';
+import { usePluginStore, type SlotRevision } from '@/modules/chat/store/pluginPanel';
 
 /**
  * usePluginSession returns the active plugin session and helpers for the given conversationId.

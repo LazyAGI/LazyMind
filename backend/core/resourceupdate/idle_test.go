@@ -308,6 +308,66 @@ func TestIdleFallbackCreatesCombinedMemoryReviewTaskWithoutSensitiveRequestField
 	}
 }
 
+func TestIdleFallbackUsesPendingMemoryReviewDraftContent(t *testing.T) {
+	db := newIdleTestDB(t)
+	store := newFakeIdleStore()
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	insertIdleResources(t, db, "user-1", now)
+	insertMemoryReviewResult(t, db, MemoryReviewResult{
+		ID:           "pending-memory",
+		UserID:       "user-1",
+		Target:       orm.ResourceUpdateResourceTypeMemory,
+		Content:      "draft memory",
+		Operations:   json.RawMessage(`[]`),
+		State:        memoryReviewStateSuccess,
+		ReviewStatus: reviewStatusPending,
+		Time:         now.Add(-2 * time.Minute),
+	})
+	insertMemoryReviewResult(t, db, MemoryReviewResult{
+		ID:           "pending-preference",
+		UserID:       "user-1",
+		Target:       orm.ResourceUpdateResourceTypeUserPreference,
+		Content:      "draft preference",
+		Operations:   json.RawMessage(`[]`),
+		State:        memoryReviewStateSuccess,
+		ReviewStatus: reviewStatusPending,
+		Time:         now.Add(-time.Minute),
+	})
+	insertIdleEvent(t, db, "session-draft:h1", "session-draft", "user-1", "h1", now.Add(-time.Hour), now.Add(-time.Minute))
+	store.history[conversationIdleHistoryKey("session-draft")] = []idleHistoryMessage{
+		{Role: "user", Content: "please remember another thing"},
+	}
+
+	processor := newIdleProcessorWithStore(db, store, Config{
+		WorkerLockTTL:                     time.Minute,
+		ConversationIdleFallbackBatchSize: 10,
+	}, "idle-test")
+	processor.clock = func() time.Time { return now }
+	result, err := processor.RunFallbackOnce(ctx)
+	if err != nil {
+		t.Fatalf("fallback run: %v", err)
+	}
+	if result.Found != 1 || result.Triggered != 1 {
+		t.Fatalf("unexpected fallback result: %#v", result)
+	}
+
+	var task orm.ResourceUpdateTask
+	if err := db.Take(&task).Error; err != nil {
+		t.Fatalf("read task: %v", err)
+	}
+	var request memoryGenerateRequestJSON
+	if err := json.Unmarshal(task.RequestJSON, &request); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if request.Memory != "draft memory" {
+		t.Fatalf("expected pending memory draft in request, got %q", request.Memory)
+	}
+	if request.User != "draft preference" {
+		t.Fatalf("expected pending user_preference draft in request, got %q", request.User)
+	}
+}
+
 func TestIdleCleanupKeepsHistoryForNewerEvent(t *testing.T) {
 	store := newFakeIdleStore()
 	ctx := context.Background()
@@ -339,6 +399,7 @@ func newIdleTestDB(t *testing.T) *gorm.DB {
 		&orm.ConversationIdleEvent{},
 		&orm.SystemMemory{},
 		&orm.SystemUserPreference{},
+		&orm.MemoryReviewResult{},
 	); err != nil {
 		t.Fatalf("auto migrate idle models: %v", err)
 	}

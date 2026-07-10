@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	apidocs "lazymind/core/docs"
 )
 
 const (
@@ -24,7 +23,7 @@ func buildOpenAPISpecFromRouter(r *mux.Router) ([]byte, error) {
 		return nil, err
 	}
 
-	spec := loadBaseOpenAPISpec()
+	spec := map[string]any{}
 	mergeOpenAPISpec(spec, prefixOpenAPIPaths(manualOpenAPISpec()))
 	operationSpec := prefixOpenAPIPaths(operationRegistryOpenAPISpec())
 	removeOpenAPIOperations(spec, operationSpec)
@@ -219,32 +218,6 @@ func isOpenAPIHTTPMethod(method string) bool {
 	default:
 		return false
 	}
-}
-
-func loadBaseOpenAPISpec() map[string]any {
-	raw := strings.TrimSpace(apidocs.SwaggerDoc())
-	if raw == "" {
-		return map[string]any{}
-	}
-
-	var spec map[string]any
-	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
-		return map[string]any{}
-	}
-
-	if basePaths, ok := spec["paths"].(map[string]any); ok {
-		prefixedPaths := make(map[string]any, len(basePaths))
-		for path, item := range basePaths {
-			if strings.HasPrefix(path, apiPrefix) {
-				prefixedPaths[path] = item
-				continue
-			}
-			prefixedPaths[apiPrefix+path] = item
-		}
-		spec["paths"] = prefixedPaths
-	}
-
-	return spec
 }
 
 func getOrCreateObject(parent map[string]any, key string) map[string]any {

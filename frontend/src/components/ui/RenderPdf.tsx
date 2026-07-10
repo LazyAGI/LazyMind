@@ -447,18 +447,18 @@ const pageWidthPx = useMemo(() => {
     GAP * Math.max(0, numPages - 1);
 
   return (
-      <div
-        className={className}
-        ref={containerRef}
-        onScroll={onScroll}
-        style={{
-          overflow: "auto",
-          height: "calc(100vh - 220px)",
-          position: "relative",
-          backgroundColor: gapBackground,
-          ...style,
-        }}
-      >
+    <div
+      className={className}
+      ref={containerRef}
+      onScroll={onScroll}
+      style={{
+        overflow: "auto",
+        height: "calc(100vh - 220px)",
+        position: "relative",
+        backgroundColor: gapBackground,
+        ...style,
+      }}
+    >
       <Document
         file={fileData}
         renderMode={renderMode}

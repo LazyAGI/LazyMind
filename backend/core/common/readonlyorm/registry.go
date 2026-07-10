@@ -39,7 +39,7 @@ func Specs() []TableSpec {
 // LAZYMIND_READONLY_TABLES supports items like:
 // - "ragservice.documents"
 // - "ragservice.documents,ragservice.jobs"
-// - "documents" (schema defaults to public)
+// - "documents" (schema defaults to LazyLLMSchema)
 func specsFromEnv() []TableSpec {
 	raw := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_TABLES"))
 	if raw == "" {
@@ -52,7 +52,7 @@ func specsFromEnv() []TableSpec {
 		if item == "" {
 			continue
 		}
-		schema := "public"
+		schema := LazyLLMSchema()
 		table := item
 		if strings.Contains(item, ".") {
 			ss := strings.SplitN(item, ".", 2)

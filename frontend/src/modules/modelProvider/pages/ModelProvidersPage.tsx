@@ -592,7 +592,7 @@ export default function ModelProviderPage() {
     [addedProviderList]
   );
 
-  const visibleProviders = providerOptions;
+  const visibleProviders = [...providerOptions].sort((a, b) => b.name.localeCompare(a.name));
 
   const openProviderConfig = (provider: AddedProvider | ProviderOption, group?: ProviderConnectionGroup) => {
     const configuredProvider = addedProviderList.find((item) => item.id === provider.id);

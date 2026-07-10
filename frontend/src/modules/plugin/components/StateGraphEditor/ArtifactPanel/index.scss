@@ -1,0 +1,297 @@
+.artifact-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 300px;
+  height: 100%;
+  background: #fff;
+  border-right: 1px solid #f0f0f0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+
+  &--inline {
+    position: static;
+    width: 100%;
+    height: 100%;
+    box-shadow: none;
+    border-right: none;
+    z-index: auto;
+  }
+}
+
+.artifact-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+.artifact-panel-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #1f1f1f;
+}
+
+.artifact-panel-desc {
+  padding: 8px 16px;
+  font-size: 11px;
+  color: #8c8c8c;
+  border-bottom: 1px solid #f5f5f5;
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+
+.artifact-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+// ── Preview item ─────────────────────────────────────────────────────────────
+.artifact-item {
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  transition: border-color 0.15s;
+
+  &:hover {
+    border-color: #d9d9d9;
+  }
+
+  &[draggable='true'] {
+    cursor: grab;
+
+    &:active {
+      cursor: grabbing;
+    }
+  }
+
+  &--editing,
+  &--new {
+    background: #f5f7ff;
+    border: 1px dashed #adc6ff;
+  }
+}
+
+// Line 1: icon? name (id), type [edit] 🗑️
+.artifact-item-line1 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-height: 24px;
+}
+
+.artifact-item-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.artifact-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1f1f1f;
+}
+
+.artifact-item-id {
+  font-size: 11px;
+  color: #8c8c8c;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}
+
+.artifact-item-sep {
+  font-size: 12px;
+  color: #bfbfbf;
+}
+
+.artifact-item-type {
+  font-size: 12px;
+  color: #595959;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.artifact-item-cardinality {
+  color: #8c8c8c;
+  font-size: 11px;
+}
+
+.artifact-item-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.artifact-item-edit-btn {
+  font-size: 12px;
+  padding: 0 6px;
+  height: 22px;
+  color: #1677ff;
+}
+
+.artifact-item-delete-btn {
+  font-size: 14px;
+  padding: 0 4px;
+  height: 22px;
+}
+
+// Line 2: join/leave tab (only in uiMode)
+.artifact-item-line2 {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  padding-left: 2px;
+}
+
+// ── Edit form ────────────────────────────────────────────────────────────────
+.artifact-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.artifact-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+
+  &--flags {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 2px 0;
+
+    .ant-checkbox-wrapper {
+      font-size: 12px;
+      color: #595959;
+    }
+  }
+}
+
+.artifact-edit-field-label {
+  font-size: 12px;
+  color: #595959;
+  white-space: nowrap;
+  width: 72px;
+  flex-shrink: 0;
+}
+
+.artifact-edit-field-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact-edit-id-readonly {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  color: #1677ff;
+  background: #e6f4ff;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.artifact-edit-type-select {
+  width: 90px !important;
+}
+
+.artifact-edit-summary-input {
+  width: 90px !important;
+}
+
+.artifact-edit-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.artifact-id-error {
+  font-size: 11px;
+  color: #cf1322;
+  margin-top: 2px;
+}
+
+// ── Footer ───────────────────────────────────────────────────────────────────
+.artifact-panel-footer {
+  padding: 10px 12px;
+  border-top: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+// ── UI mode join/leave button ─────────────────────────────────────────────────
+.artifact-row-join {
+  font-size: 12px;
+  padding: 0 8px;
+  height: 22px;
+
+  &--active {
+    color: #52c41a;
+  }
+}
+
+.artifact-row-joined {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.artifact-row-joined-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0 4px;
+  height: 22px;
+  font-size: 12px;
+  color: #1677ff;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+  transition: background 0.12s;
+
+  &:hover {
+    background: #f0f5ff;
+    text-decoration: underline;
+  }
+}
+
+.artifact-row-joined-check {
+  color: #52c41a;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.artifact-row-joined-remove {
+  color: #bfbfbf;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+
+  &:hover {
+    color: #ff4d4f;
+    background: #fff1f0;
+  }
+}

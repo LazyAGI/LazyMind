@@ -26,7 +26,6 @@ export const ALLOWED_FILE_TYPES = [
   "pdf",
   "docx",
   "doc",
-  "hwp",
   "ppt",
   "pptx",
   "jpg",

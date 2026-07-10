@@ -18,6 +18,11 @@ declare global {
     lazymindDesktop?: {
       openLogsDir?: () => Promise<void> | void;
       openDataDir?: () => Promise<void> | void;
+      runtimeStatus?: () => Promise<unknown> | unknown;
+      restartRuntime?: () => Promise<unknown> | unknown;
+      resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
+      selectFolder?: () => Promise<string | null> | string | null;
+      exportDiagnostics?: () => Promise<string> | string;
     };
   }
 }

@@ -1,256 +1,378 @@
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, Optional
 
 import lazyllm
 
 from lazymind.chat.engine.tools.infra import (
-    build_skill_identity,
-    create_remote_skill,
-    is_writable_skill_source,
-    list_all_skill_entries,
     normalize_skill_category,
-    parse_skill_frontmatter,
-    remove_remote_skill,
+    resolve_skill_editor_identity,
+    rewrite_skill_identity,
+    SkillRemoteStore,
+    skill_identity_from_content,
     tool_error,
     tool_success,
     validate_skill_content,
     validate_skill_name,
 )
 from lazymind.chat.engine.tools.infra.skill_operations import (
-    SkillEditOperation,
-    apply_skill_edit_operations,
+    create_skill_file,
+    delete_skill_file,
+    edit_skill_file,
+    patch_skill_file,
 )
-from lazymind.chat.engine.tools.infra.skill_review_store import (
-    SKILL_REVIEW_TYPE_PATCH,
-    find_pending_skill_review,
-    insert_skill_review_result,
+
+
+_DRAFT_BELONGS_TO_ANOTHER_TASK_ERROR = 'draft belongs to another task'
+_PENDING_SKILL_CHANGE_MESSAGE = (
+    'There are pending changes. Please ask the user to handle them before modifying.'
 )
-from lazymind.config import config as _cfg
 
 
-_PENDING_CHANGE_MESSAGE = 'There is an unresolved pending change; handle it before submitting another edit.'
-_CREATE_SUCCESS_RESULT = {
-    'status': 'created',
-    'message': 'Skill was created and is now active.',
-}
-_MODIFY_SUCCESS_RESULT = {
-    'status': 'pending_review',
-    'message': 'Skill changes were submitted and are pending review.',
-}
-_REMOVE_SUCCESS_RESULT = {
-    'status': 'removed',
-    'message': 'Skill was removed and is no longer active.',
-}
+def _skill_editor_error(tool_name: str, prefix: str, exc: Exception) -> Dict[str, Any]:
+    message = str(exc)
+    if _DRAFT_BELONGS_TO_ANOTHER_TASK_ERROR in message:
+        return tool_error(tool_name, _PENDING_SKILL_CHANGE_MESSAGE)
+    return tool_error(tool_name, f'{prefix}: {message}')
 
 
-def skill_editor(
-    name: str,
-    action: Literal['create', 'modify', 'remove'],
-    category: Optional[str],
-    content: Optional[str] = None,
-    operations: Optional[List[SkillEditOperation]] = None,
-    reason: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Manage skills by creating, modifying, or removing a skill entry.
+class SkillEditorToolGroup:
+    """Create, edit, rename, and remove reusable skill packages."""
 
-    Use this tool to curate reusable skills. It has three actions:
+    __public_apis__ = [
+        'create_skill',
+        'edit_file',
+        'patch_file',
+        'create_file',
+        'delete_file',
+        'rename_skill',
+        'remove_skill',
+    ]
 
-    - action='create': after completing a complex task (5+ tool calls),
-      fixing a tricky error, or discovering a non-trivial workflow, save the
-      approach as a new skill by passing the full SKILL.md body in
-      content. The SKILL.md YAML frontmatter must include name, category, and
-      description. A successful create takes effect immediately.
-    - action='modify': when finding a skill outdated, incomplete, or
-      wrong, submit operations that edit the current SKILL.md content for
-      review. The edit takes effect only after review is accepted.
-    - action='remove': when a skill is superseded or no longer correct,
-      request its deletion. A successful remove takes effect immediately.
+    def __init__(self, store: Optional[SkillRemoteStore] = None):
+        self.store = store or SkillRemoteStore()
 
-    Only skills with source=remote are writable. Skills with
-    source=file or any other source are read-only; do not use this tool
-    to modify or remove them.
+    def create_skill(self, name: str, category: Optional[str] = None, *, content: str) -> Dict[str, Any]:
+        """Create a new reusable skill from full SKILL.md content.
 
-    Both name and category are used as on-disk directory names, so they must
-    not contain whitespace or slashes. The category argument must be a single
-    path segment such as "engineering" or "coding"; do not nest categories like
-    "engineering/railway". The layout is always category/name/SKILL.md.
+        The SKILL.md YAML frontmatter must include name, category, and
+        description. Both name and category are path segments; category must be
+        a single segment such as "engineering" or "coding". The name argument
+        may be either a plain skill name or the full "category/name" key shown
+        in the skill list; when category is also provided, it must match that
+        key.
 
-    For modify and remove, derive category from the directory immediately above
-    the skill_name directory in the skill path. For example, in
-    ".../skills/testing/test-full-flow", name is "test-full-flow" and category
-    is "testing". Preserve or update the SKILL.md frontmatter category;
-    pending review checks use both category and name.
-
-    If this tool returns a pending-change error such as "There is an unresolved
-    pending change; handle it before submitting another edit.", do not call
-    skill_editor again for the same skill. The pending review must be handled
-    first.
-
-    Args:
-        name: Skill name.
-        action: Skill workflow to run. Use 'create' to create a new skill
-            that takes effect immediately, 'modify' to edit an existing remote
-            skill using the 'operations' argument and submit the edited content
-            for review, or 'remove' to delete an existing remote skill
-            immediately.
-            For 'modify' and 'remove', a pending review row for the same
-            category/name blocks the request.
-        category: Skill category directory used to locate category/name/SKILL.md.
-        content: Full SKILL.md content, including YAML frontmatter with
-            name/category/description. ONLY for action='create'. Do NOT pass
-            for action='modify' or 'remove'.
-        operations: Ordered JSON edit operations. ONLY for action='modify'.
-            Do NOT pass for action='create' or 'remove'. Supported operations:
-
-            - ``{"op": "replace_text", "old": "...", "new": "..."}``:
-              replace the first exact ``old`` substring with ``new``.
-              Prefer multiple small replace_text operations for local edits.
-            - ``{"op": "replace_all", "content": "..."}``: replace the
-              full original SKILL.md content with ``content``. Use this only
-              when exact local replacement is not safe enough.
-        reason: Why the skill should be removed. ONLY for action='remove'.
-    """
-    lazyllm.LOG.info(
-        '[skill_editor] called '
-        f'name={name!r} action={action!r} '
-        f'category={category!r} content_len={len(content) if content else 0} '
-        f'operations_count={len(operations) if operations else 0}'
-    )
-
-    name_error = validate_skill_name(name)
-    if name_error:
-        return tool_error('skill_editor', name_error, log_message=f'[skill_editor] fail reason={name_error!r}')
-
-    agentic_config = lazyllm.globals['agentic_config']
-    user_id = str(agentic_config.get('user_id') or '').strip()
-    session_id = str(agentic_config.get('session_id') or '').strip()
-
-    normalized_category = normalize_skill_category(category)
-    if not normalized_category:
-        return tool_error(
-            'skill_editor',
-            f'Category {category!r} is invalid; it must be a single '
-            "ASCII-safe path segment (only letters, digits, '-', '_' "
-            "and '.'; no spaces, no Chinese, no '/')."
+        Args:
+            name: Skill name, or full "category/name" skill key.
+            category: Skill category directory used for category/name/SKILL.md. Optional when name is a full key.
+            content: Full SKILL.md content, including YAML frontmatter.
+        """
+        lazyllm.LOG.info(
+            '[create_skill] called '
+            f'name={name!r} category={category!r} content_len={len(content) if content else 0}'
         )
+        resolved = resolve_skill_editor_identity(name, category, 'create_skill')
+        if resolved.get('error'):
+            return tool_error('create_skill', resolved['error'])
+        normalized_category = resolved['category']
+        name = resolved['name']
+        lazyllm.LOG.info(f'[create_skill] lookup category={normalized_category!r} name={name!r}')
 
-    existing_skills = list_all_skill_entries(_cfg['skill_fs_url'])
-    skill_id = build_skill_identity(normalized_category or '', name)
-    existing_skill = existing_skills.get(skill_id)
-    lazyllm.LOG.info(
-        '[skill_editor] lookup '
-        f'skill_id={skill_id!r} '
-        f'found={existing_skill is not None} '
-        f'existing_keys={list(existing_skills.keys())!r}'
-    )
-
-    if action == 'create':
         content_error = validate_skill_content(content or '')
         if content_error:
             return tool_error(
-                'skill_editor',
+                'create_skill',
                 content_error,
-                log_message=f'[skill_editor] fail reason={content_error!r}',
+                log_message=f'[create_skill] fail reason={content_error!r}',
             )
-        if operations:
-            return tool_error('skill_editor', "action='create' must not include 'operations'.")
-        content_category, content_name = _skill_identity_from_content(content or '')
+        content_category, content_name = skill_identity_from_content(content or '')
         if content_category != normalized_category or content_name != name:
             return tool_error(
-                'skill_editor',
+                'create_skill',
                 'SKILL.md frontmatter name/category must match the tool name/category for create.'
             )
-        pending = find_pending_skill_review(content_category, content_name, user_id)
-        if pending or existing_skill:
-            return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
+        try:
+            self.store.create(content_category, content_name, content or '')
+        except Exception as exc:
+            return _skill_editor_error('create_skill', 'Failed to create skill package', exc)
+        return tool_success('create_skill', {
+            'status': 'created',
+            'message': 'Skill package change was written.',
+        })
 
-        create_remote_skill(content_category, content_name, content or '')
-        return tool_success('skill_editor', _CREATE_SUCCESS_RESULT)
+    def _run_file_operation(
+        self,
+        tool_name: str,
+        name: str,
+        category: Optional[str],
+        operation: Callable[..., Dict[str, Any]],
+        reason: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        resolved = self.store.resolve_existing_identity(name, category)
+        if resolved.get('error'):
+            return tool_error(tool_name, resolved['error'])
+        normalized_category = resolved['category']
+        name = resolved['name']
+        try:
+            current_files = self.store.list_files(normalized_category, name)
+            result = operation(current_files, normalized_category, name, **kwargs)
+            edited_files = result.pop('files')
+            change_set = self.store.replace_files(normalized_category, name, current_files, edited_files)
+        except ValueError as exc:
+            if _DRAFT_BELONGS_TO_ANOTHER_TASK_ERROR in str(exc):
+                return tool_error(tool_name, _PENDING_SKILL_CHANGE_MESSAGE)
+            return tool_error(tool_name, str(exc))
+        except Exception as exc:
+            return _skill_editor_error(tool_name, 'Failed to load or edit skill package', exc)
+        result['written_files'] = change_set['written']
+        result['deleted_files'] = change_set['deleted']
+        if 'summary' not in result:
+            touched = ', '.join(result.get('touched_files') or [])
+            result['summary'] = reason or f'skill_editor {tool_name}: {touched}'
+        return tool_success(tool_name, result)
 
-    if action == 'modify':
-        if content is not None:
-            return tool_error('skill_editor', "action='modify' must not include 'content'; use 'operations'.")
-        if not operations:
-            return tool_error('skill_editor', "action='modify' requires a non-empty 'operations' list.")
-        if not existing_skill:
-            return tool_error(
-                'skill_editor',
-                f'Skill {name!r} does not exist in category {normalized_category!r}; '
-                "use action='create' to add a new skill."
-            )
-        source = existing_skill.get('source', 'file')
-        lazyllm.LOG.info(
-            '[skill_editor] modify_check '
-            f'source={source!r} '
-            f'writable={is_writable_skill_source(source)}'
+    def edit_file(
+        self,
+        name: str,
+        category: Optional[str] = None,
+        *,
+        path: str,
+        content: str,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Replace an existing file inside a reusable skill package.
+
+        Args:
+            name: Skill name, or full "category/name" skill key.
+            category: Skill category directory used for category/name/SKILL.md.
+                Optional when name is a full key or unique.
+            path: Existing package file to replace. May be SKILL.md.
+            content: Full replacement file content.
+            reason: Short summary of why this file is being edited.
+        """
+        lazyllm.LOG.info(f'[edit_file] called name={name!r} category={category!r} path={path!r}')
+
+        return self._run_file_operation(
+            'edit_file',
+            name,
+            category,
+            edit_skill_file,
+            reason,
+            path=path,
+            content=content,
         )
-        if not is_writable_skill_source(source):
+
+    def patch_file(
+        self,
+        name: str,
+        category: Optional[str] = None,
+        *,
+        path: str,
+        old_text: str,
+        new_text: str,
+        replace_all: bool = False,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Patch an existing file inside a reusable skill package.
+
+        Args:
+            name: Skill name, or full "category/name" skill key.
+            category: Skill category directory used for category/name/SKILL.md.
+                Optional when name is a full key or unique.
+            path: Existing package file to patch. Must be explicit; no default target is assumed.
+            old_text: Text to find. It must identify a unique match unless replace_all is true.
+            new_text: Replacement text. Use an empty string to delete matched text.
+            replace_all: Replace every match instead of requiring uniqueness.
+            reason: Short summary of why this file is being patched.
+        """
+        lazyllm.LOG.info(f'[patch_file] called name={name!r} category={category!r} path={path!r}')
+
+        return self._run_file_operation(
+            'patch_file',
+            name,
+            category,
+            patch_skill_file,
+            reason,
+            path=path,
+            old_text=old_text,
+            new_text=new_text,
+            replace_all=replace_all,
+        )
+
+    def create_file(
+        self,
+        name: str,
+        category: Optional[str] = None,
+        *,
+        path: str,
+        content: str,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a new supporting file inside a reusable skill package.
+
+        SKILL.md cannot be created or overwritten with this tool; use
+        create_skill for new packages and edit_file or patch_file for SKILL.md.
+        After creating a supporting file, update SKILL.md with a relative link
+        or instruction that explains when and how the new file should be used.
+
+        Put reference material, examples, or detailed guidance under
+        references/. Put executable helper scripts under scripts/. Put static
+        media or data assets under assets/. Put reusable output or prompt
+        templates under templates/.
+
+        Args:
+            name: Skill name, or full "category/name" skill key.
+            category: Skill category directory used for category/name/SKILL.md.
+                Optional when name is a full key or unique.
+            path: New supporting file path to create.
+            content: File content.
+            reason: Short summary of why this file is being created.
+        """
+        lazyllm.LOG.info(f'[create_file] called name={name!r} category={category!r} path={path!r}')
+
+        return self._run_file_operation(
+            'create_file',
+            name,
+            category,
+            create_skill_file,
+            reason,
+            path=path,
+            content=content,
+        )
+
+    def delete_file(
+        self,
+        name: str,
+        category: Optional[str] = None,
+        *,
+        path: str,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Delete a supporting file from a reusable skill package.
+
+        SKILL.md cannot be deleted with this tool; use remove_skill to remove
+        the whole skill package.
+
+        Args:
+            name: Skill name, or full "category/name" skill key.
+            category: Skill category directory used for category/name/SKILL.md.
+                Optional when name is a full key or unique.
+            path: Existing supporting file path to delete.
+            reason: Short summary of why this file is being deleted.
+        """
+        lazyllm.LOG.info(f'[delete_file] called name={name!r} category={category!r} path={path!r}')
+
+        return self._run_file_operation(
+            'delete_file',
+            name,
+            category,
+            delete_skill_file,
+            reason,
+            path=path,
+        )
+
+    def rename_skill(
+        self,
+        name: str,
+        category: Optional[str] = None,
+        *,
+        new_name: str,
+        new_category: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Rename or move an existing reusable skill package.
+
+        This moves the package and rewrites SKILL.md frontmatter name/category.
+        Use this instead of edit_file or patch_file whenever the skill identity changes.
+
+        Args:
+            name: Current skill name, or full "category/name" skill key.
+            category: Current skill category. Optional when name is a full key or unique.
+            new_name: New skill name.
+            new_category: New skill category. If omitted, current category is kept.
+        """
+        lazyllm.LOG.info(
+            '[rename_skill] called '
+            f'name={name!r} category={category!r} new_name={new_name!r} new_category={new_category!r}'
+        )
+        resolved = self.store.resolve_existing_identity(name, category)
+        if resolved.get('error'):
+            return tool_error('rename_skill', resolved['error'])
+        normalized_category = resolved['category']
+        name = resolved['name']
+        lazyllm.LOG.info(f'[rename_skill] lookup category={normalized_category!r} name={name!r}')
+
+        target_name = str(new_name or '').strip()
+        name_error = validate_skill_name(target_name)
+        if name_error:
+            return tool_error('rename_skill', f'new_name is invalid: {name_error}')
+        target_category = normalize_skill_category(new_category if new_category is not None else normalized_category)
+        if not target_category:
             return tool_error(
-                'skill_editor',
-                f'Skill {name!r} in category {normalized_category!r} has read-only source '
-                f'{source!r}; skill_editor can only modify remote skills.'
+                'rename_skill',
+                f'new_category {new_category!r} is invalid; it must be a single ASCII-safe path segment.'
             )
+        if target_category == normalized_category and target_name == name:
+            return tool_error('rename_skill', 'rename_skill requires a different new_name or new_category.')
 
         try:
-            from lazymind.rewrite.base import UnprocessableContentError
-
-            edited_content, operation_payload = apply_skill_edit_operations(
-                existing_skill.get('content') or '',
-                operations,
-            )
-        except UnprocessableContentError as exc:
-            return tool_error('skill_editor', str(exc))
-
-        content_error = validate_skill_content(edited_content)
+            current_files = self.store.list_files(normalized_category, name)
+            skill_content = current_files.get('SKILL.md') or ''
+            renamed_content = rewrite_skill_identity(skill_content, target_category, target_name)
+        except Exception as exc:
+            return _skill_editor_error('rename_skill', 'Failed to prepare skill rename', exc)
+        content_error = validate_skill_content(renamed_content)
         if content_error:
-            return tool_error('skill_editor', content_error)
-        edited_category, edited_name = _skill_identity_from_content(edited_content)
-        pending = find_pending_skill_review(edited_category, edited_name, user_id)
-        if pending:
-            return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
+            return tool_error('rename_skill', content_error)
 
-        insert_skill_review_result(
-            category=normalized_category,
-            skill_name=name,
-            review_type=SKILL_REVIEW_TYPE_PATCH,
-            skill_content=edited_content,
-            user_id=user_id,
-            requestid=session_id,
-            summary=reason or f'skill_editor operations: {len(operation_payload)}',
-        )
-        return tool_success('skill_editor', _MODIFY_SUCCESS_RESULT)
-
-    if action == 'remove':
-        if content is not None or operations:
-            return tool_error('skill_editor', "action='remove' must not include 'content' or 'operations'.")
-        if not existing_skill:
-            return tool_error(
-                'skill_editor',
-                f'Skill {name!r} does not exist in category {normalized_category!r}; '
-                'nothing to remove.'
+        try:
+            self.store.rename(
+                normalized_category,
+                name,
+                target_category,
+                target_name,
+                skill_content=renamed_content,
             )
-        source = existing_skill.get('source', 'file')
-        if not is_writable_skill_source(source):
-            return tool_error(
-                'skill_editor',
-                f'Skill {name!r} in category {normalized_category!r} has read-only source '
-                f'{source!r}; skill_editor can only remove remote skills.'
-            )
+        except Exception as exc:
+            return _skill_editor_error('rename_skill', 'Failed to rename skill package', exc)
 
-        pending = find_pending_skill_review(normalized_category, name, user_id)
-        if pending:
-            return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
+        payload = {
+            'old': {'category': normalized_category, 'name': name},
+            'new': {'category': target_category, 'name': target_name},
+        }
+        result = {
+            'status': 'renamed',
+            'message': 'Skill package change was written.',
+        }
+        result.update(payload)
+        return tool_success('rename_skill', result)
 
-        remove_remote_skill(normalized_category, name)
-        return tool_success('skill_editor', _REMOVE_SUCCESS_RESULT)
+    def remove_skill(
+        self,
+        name: str,
+        category: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Remove an existing reusable skill package.
 
-    return tool_error(
-        'skill_editor',
-        f"Unknown action {action!r}; expected one of 'create', 'modify', 'remove'."
-    )
+        Use this when a skill is superseded or no longer correct.
 
+        Args:
+            name: Skill name, or full "category/name" skill key.
+            category: Skill category directory. Optional when name is a full key or unique.
+            reason: Why the skill should be removed.
+        """
+        lazyllm.LOG.info(f'[remove_skill] called name={name!r} category={category!r} reason={reason!r}')
+        resolved = self.store.resolve_existing_identity(name, category)
+        if resolved.get('error'):
+            return tool_error('remove_skill', resolved['error'])
+        normalized_category = resolved['category']
+        name = resolved['name']
+        lazyllm.LOG.info(f'[remove_skill] lookup category={normalized_category!r} name={name!r}')
 
-def _skill_identity_from_content(content: str) -> tuple[str, str]:
-    frontmatter, _ = parse_skill_frontmatter(content)
-    category = str(frontmatter.get('category') or '').strip()
-    name = str(frontmatter.get('name') or '').strip()
-    return category, name
+        try:
+            self.store.remove(normalized_category, name)
+        except Exception as exc:
+            return _skill_editor_error('remove_skill', 'Failed to remove skill package', exc)
+        return tool_success('remove_skill', {
+            'status': 'removed',
+            'message': 'Skill package change was written.',
+        })

@@ -2,74 +2,37 @@ package main
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 )
 
-var composeBindCriticalReadPaths = []string{
-	"backend/scan-control-plane/migrations",
-	"backend/scan-control-plane/scripts",
-	"backend/file-watcher/configs",
-	"db-init",
-	"kong/plugins",
-	"plugins",
-	"scripts/db-bootstrap.sh",
-	"kong.yml",
-	"redis-users.acl",
-}
-
-var composeBindBestEffortReadPaths = []string{
-	"api/backend",
-	"evo",
-}
-
-func ensureComposeBindPermissions(repoRoot string) error {
+func ensureLocalDataRootWritable(repoRoot string) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	if err := addContainerReadBits(repoRoot); err != nil {
-		return fmt.Errorf("ensure repo root is readable by containers: %w", err)
+	dataRoot := filepath.Join(repoRoot, "data")
+	if err := ensureWritableDir(dataRoot); err == nil {
+		return nil
+	} else if os.IsPermission(err) {
+		return fmt.Errorf("local data root %s is not writable; fix ownership or permissions and retry", dataRoot)
+	} else {
+		return err
 	}
-	for _, rel := range composeBindCriticalReadPaths {
-		path := filepath.Join(repoRoot, filepath.FromSlash(rel))
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			continue
-		} else if err != nil {
-			return fmt.Errorf("inspect compose bind path %s: %w", rel, err)
-		}
-		if err := makeTreeContainerReadable(path); err != nil {
-			return fmt.Errorf("ensure compose bind path %s is readable by containers: %w", rel, err)
-		}
-	}
-	for _, rel := range composeBindBestEffortReadPaths {
-		path := filepath.Join(repoRoot, filepath.FromSlash(rel))
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		_ = makeTreeContainerReadable(path)
-	}
-	return nil
 }
 
-func makeTreeContainerReadable(root string) error {
-	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		return addContainerReadBits(path)
-	})
-}
-
-func addContainerReadBits(path string) error {
-	info, err := os.Stat(path)
+func ensureWritableDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".lazymind-write-test-*")
 	if err != nil {
 		return err
 	}
-	mode := info.Mode().Perm() | 0o444
-	if info.IsDir() || mode&0o111 != 0 {
-		mode |= 0o111
+	probe := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(probe)
+		return err
 	}
-	return os.Chmod(path, mode)
+	return os.Remove(probe)
 }

@@ -66,6 +66,20 @@ func autoApplySkillReviewResult(ctx context.Context, tx *gorm.DB, task orm.Resou
 	if strings.TrimSpace(result.Type) != skillReviewTypePatch {
 		return fmt.Errorf("%w: auto apply only supports skill patch results", errReviewInvalid)
 	}
+	v2Resource, err := mapSkillPatchResultToV2Resource(ctx, withUpdateLock(tx), result)
+	if err == nil && strings.TrimSpace(task.ResourceID) == strings.TrimSpace(v2Resource.ID) {
+		if strings.TrimSpace(task.ResourceType) != orm.ResourceUpdateResourceTypeSkill ||
+			strings.TrimSpace(task.UserID) != strings.TrimSpace(result.UserID) {
+			return fmt.Errorf("%w: skill auto apply task mapping mismatch", errReviewConflict)
+		}
+		if !v2Resource.AutoEvo {
+			return fmt.Errorf("%w: skill auto_evo disabled", errReviewConflict)
+		}
+		return applySkillV2PatchResult(ctx, tx, result, v2Resource)
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
 	resource, err := mapSkillPatchResultToResource(withUpdateLock(tx).WithContext(ctx), result)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

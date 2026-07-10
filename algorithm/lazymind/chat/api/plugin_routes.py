@@ -199,7 +199,20 @@ async def get_plugin(
         'ui': resolved.get('ui', spec.yaml.get('ui', {})),
         'state': spec.state,
         'i18n': spec.yaml.get('i18n', {}),
+        # Raw YAML texts for frontend read-only editor display.
+        'plugin_yaml_raw': spec.plugin_yaml_raw,
+        'state_yaml_raw': spec.state_yaml_raw,
+        'scenario_raw': spec.scenario_md,
     }
+
+
+@router.post('/api/plugins/{plugin_id}', include_in_schema=False)
+@router.put('/api/plugins/{plugin_id}', include_in_schema=False)
+@router.patch('/api/plugins/{plugin_id}', include_in_schema=False)
+@router.delete('/api/plugins/{plugin_id}', include_in_schema=False)
+async def builtin_plugin_write_forbidden(plugin_id: str) -> None:  # noqa: ARG001
+    """Explicitly reject all write operations on built-in plugins."""
+    raise HTTPException(status_code=403, detail='built-in plugins are read-only')
 
 
 def _parse_best_lang(accept_language: Optional[str]) -> str:

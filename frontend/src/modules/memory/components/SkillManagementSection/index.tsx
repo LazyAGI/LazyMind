@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Modal, Tooltip, message } from "antd";
-import { QuestionCircleOutlined } from "@ant-design/icons";
+import { Button, Tooltip, message } from "antd";
+import { PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { useNavigate } from "react-router-dom";
+import PluginInstalledView from "./PluginInstalledView";
 import { AgentAppsAuth } from "@/components/auth";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
 import { useMemoryManagementOutletContext } from "../../context";
@@ -20,10 +22,13 @@ import {
   isMockMarketSkill,
   resolveMarketSkillAssets,
 } from "./skillMarketMockData";
+import NewPluginModal from "@/modules/plugin/components/NewPluginModal";
 import "./index.scss";
 
 export default function SkillManagementSection() {
   const listContentRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const [newPluginOpen, setNewPluginOpen] = useState(false);
   const [memoryTableBodyHeight, setMemoryTableBodyHeight] = useState<number>();
   const [marketKeyword, setMarketKeyword] = useState("");
   const [adminPublishOpen, setAdminPublishOpen] = useState(false);
@@ -243,6 +248,7 @@ export default function SkillManagementSection() {
     resetFilters();
   };
 
+
   const handleMarketReset = () => {
     setMarketKeyword("");
     setMarketSkillSource("all");
@@ -414,6 +420,15 @@ export default function SkillManagementSection() {
           >
             {t("admin.memorySkillViewUpload")}
           </button>
+          <button
+            type="button"
+            role="tab"
+            className={`memory-skill-view-tab ${skillView === "plugins" ? "is-active" : ""}`}
+            aria-selected={skillView === "plugins"}
+            onClick={() => setSkillView("plugins")}
+          >
+            {t("admin.memorySkillViewPlugins")}
+          </button>
         </div>
 
         <div className="memory-skill-bar-actions">
@@ -427,6 +442,15 @@ export default function SkillManagementSection() {
           {skillView === "market" && isAdmin ? (
             <Button type="primary" onClick={() => setAdminPublishOpen(true)}>
               {t("admin.memorySkillAdminPublishButton")}
+            </Button>
+          ) : null}
+          {skillView === "plugins" ? (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setNewPluginOpen(true)}
+            >
+              {t("admin.memoryPluginNewButton")}
             </Button>
           ) : null}
         </div>
@@ -506,6 +530,19 @@ export default function SkillManagementSection() {
         onPublished={async () => {
           await refreshSkillAssets({ page: skillListPage });
           setMarketCatalogAssets([]);
+        }}
+      />
+
+      {skillView === "plugins" ? (
+        <PluginInstalledView t={t} onNewPlugin={() => setNewPluginOpen(true)} />
+      ) : null}
+
+      <NewPluginModal
+        open={newPluginOpen}
+        onCancel={() => setNewPluginOpen(false)}
+        onCreated={(draftId) => {
+          setNewPluginOpen(false);
+          navigate(`/memory-management/plugins/${draftId}`);
         }}
       />
     </div>

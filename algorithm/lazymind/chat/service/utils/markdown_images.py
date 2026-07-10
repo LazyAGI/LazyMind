@@ -25,7 +25,7 @@ def build_image_url_map_from_config(config: Dict[str, Any] | None) -> Dict[str, 
     url_map: Dict[str, str] = {}
     registry = config.get('_image_url_registry')
     if isinstance(registry, dict):
-        for key, value in registry.items():
+        for key, value in list(registry.items()):
             signed = static_file_url_from_any(str(value))
             if signed:
                 url_map[str(key)] = signed
@@ -33,7 +33,7 @@ def build_image_url_map_from_config(config: Dict[str, Any] | None) -> Dict[str, 
 
     refs = config.get('_citation_sources')
     if isinstance(refs, dict):
-        for source in refs.values():
+        for source in list(refs.values()):
             if not isinstance(source, dict):
                 continue
             for field in ('text', 'content'):

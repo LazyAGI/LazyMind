@@ -1,0 +1,16 @@
+.plugin-config-editor {
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px;
+
+  .pce-section {
+    margin-bottom: 8px;
+  }
+
+  .pce-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #262626;
+    margin: 0 0 12px 0;
+  }
+}

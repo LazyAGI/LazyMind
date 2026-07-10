@@ -23,7 +23,7 @@ watch:
 
 security:
   allowed_roots:
-    - "/watch/docs"
+    - "${LAZYMIND_FILE_WATCHER_ALLOWED_ROOT:-/watch/docs}"
 
 http:
   read_timeout: "10s"

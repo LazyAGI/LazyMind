@@ -97,7 +97,7 @@ Kong API Gateway + JWT/RBAC 四层鉴权：前端 → Kong RBAC → Core ACL →
 
 ## 快速开始
 
-**前置条件：** Docker & Docker Compose
+**本地运行前置条件：** Go、Python 3、uv、pnpm 和 Node.js。
 
 ### 第一步 — 申请 MinerU API Key（高质量 PDF 解析）
 
@@ -114,7 +114,7 @@ export LAZYLLM_MINERU_API_KEY=你的mineru_key
 ### 第二步 — 启动服务
 
 ```bash
-make up-build
+make local-up
 ```
 
 启动后访问：
@@ -127,6 +127,12 @@ make up-build
 登录后进入模型设置页面，使用第一步申请的 API Key 配置**大模型（LLM）**、**视觉模型（VLM）** 和 **Reranker 模型**。
 
 环境变量配置与完整示例见 [`docs/quick_start.CN.md`](docs/quick_start.CN.md)。
+
+停止本地运行：
+
+```bash
+make local-down
+```
 
 ---
 
@@ -152,15 +158,26 @@ make test-hermetic
 
 | 场景 | 命令 |
 |------|------|
-| 标准启动 | `make up` |
-| 本地运行模式（SQLite 状态后端，无 Redis） | `make up-build LAZYMIND_RUNTIME_MODE=local` |
-| 构建镜像并启动 | `make up-build` |
+| 宿主机本地运行（SQLite 状态后端，无容器） | `make local-up` |
+| 停止本地运行 | `make local-down` |
+| 删除本地应用产物 | `make local-clean` |
+| 停止本地运行、清除运行数据并删除本地应用产物 | `make local-reset` |
+| 容器栈启动 | `make up` |
+| 构建镜像并启动容器栈 | `make up-build` |
 | 私有化部署 MinerU OCR | `make up LAZYMIND_DEPLOY_MINERU=1` |
 | 私有化部署 PaddleOCR  | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | 外接 Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | 开启存储 Dashboard | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 
-`LAZYMIND_RUNTIME_MODE=local` 会应用本地 compose override，把 chat/auth/subagent 等短生命周期状态写入 SQLite，并把 Redis 服务缩放为 0。不设置该变量，或设置为 `LAZYMIND_RUNTIME_MODE=cloud`，则使用默认 Redis 状态后端。
+`make local-up` 会通过 `local/build/bin/local-runtime-manager` 在宿主机上直接运行 LazyMind。如果 `local/config.env` 不存在，Make 会从 `local/config.env.example` 复制一份，并用它作为 local build/run 配置。应用程序产物放在仓库内的 `local/build`：Go 二进制在 `local/build/bin`，managed runtime 在 `local/build/runtimes`，Python 依赖在 `local/build/deps/python`，Node 依赖在 `local/build/deps/node`，desktop staging 的 app 文件在 `local/build/app`。运行数据、SQLite 数据库、状态、启动生成文件、日志、缓存和本地文档导入路径使用平台规范目录。只有确实需要非标准路径时，才在 `local/config.env` 中覆盖对应的 `LAZYMIND_*` 路径变量。
+
+### 平台路径示例
+
+| 平台 | 应用程序产物 | 运行数据和 DB | 日志 | 缓存 | 本地文档 |
+|------|--------------|---------------|------|------|----------|
+| macOS | `<repo>/local/build` | `/Users/<User>/Library/Application Support/LazyMind` | `/Users/<User>/Library/Logs/LazyMind` | `/Users/<User>/Library/Caches/LazyMind` | `/Users/<User>/Documents/LazyMind` |
+| Windows | `<repo>\local\build` | `%LOCALAPPDATA%\LazyMind` | `%LOCALAPPDATA%\LazyMind\Logs` | `%LOCALAPPDATA%\LazyMind\Cache` | `%USERPROFILE%\Documents\LazyMind` |
+| Linux | `<repo>/local/build` | `${XDG_DATA_HOME:-/home/<user>/.local/share}/LazyMind` | `${XDG_STATE_HOME:-/home/<user>/.local/state}/LazyMind/logs` | `${XDG_CACHE_HOME:-/home/<user>/.cache}/LazyMind` | `/home/<user>/Documents/LazyMind` |
 
 ---
 

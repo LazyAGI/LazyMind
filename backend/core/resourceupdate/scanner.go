@@ -134,6 +134,29 @@ func scanSkillReviewResults(ctx context.Context, tx *gorm.DB, now time.Time) (in
 }
 
 func scanSkillReviewResultsForResource(ctx context.Context, tx *gorm.DB, userID, resourceID string, now time.Time) error {
+	if v2Resource, err := skillV2ResourceByID(ctx, tx, userID, resourceID); err == nil {
+		if !v2Resource.AutoEvo {
+			resourceUpdateInfo(logEventResultScanSkipped).
+				Str("resource_type", orm.ResourceUpdateResourceTypeSkill).
+				Str("resource_id", resourceID).
+				Str("user_id", userID).
+				Str("reason", "auto_evo_disabled").
+				Msg(logEventResultScanSkipped)
+			return nil
+		}
+		var rows []SkillReviewResult
+		if err := skillResultSelect(withUpdateLock(tx).WithContext(ctx)).
+			Where("review_status = ? AND type = ? AND userid = ? AND skill_name = ?",
+				reviewStatusPending, skillReviewTypePatch, userID, v2Resource.SkillName).
+			Order("time DESC, id DESC").
+			Find(&rows).Error; err != nil {
+			return err
+		}
+		_, _, err := scanSkillReviewResultRows(ctx, tx, rows, now, autoEvoTrigger(v2Resource.AutoEvoGeneration))
+		return err
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
 	var resource orm.SkillResource
 	if err := tx.WithContext(ctx).
 		Where("id = ? AND owner_user_id = ? AND node_type = ?", resourceID, userID, evolution.SkillNodeTypeParent).
@@ -230,25 +253,40 @@ func scanSkillReviewResultRows(ctx context.Context, tx *gorm.DB, rows []SkillRev
 			continue
 		}
 		seenPatch[key] = row.ID
-		resource, err := mapSkillPatchResultToResource(tx.WithContext(ctx), row)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				expireIDs = append(expireIDs, row.ID)
-				resourceUpdateInfo(logEventResultExpired).
-					Str("resource_type", orm.ResourceUpdateResourceTypeSkill).
-					Str("review_result_id", row.ID).
-					Str("user_id", row.UserID).
-					Str("skill_name", row.SkillName).
-					Str("reason", "skill_patch_resource_not_found").
-					Msg(logEventResultExpired)
-				continue
-			}
+		resourceID := ""
+		autoEvo := false
+		generation := int64(0)
+		v2Resource, err := mapSkillPatchResultToV2Resource(ctx, tx, row)
+		if err == nil {
+			resourceID = v2Resource.ID
+			autoEvo = v2Resource.AutoEvo
+			generation = v2Resource.AutoEvoGeneration
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return 0, 0, err
+		} else {
+			resource, err := mapSkillPatchResultToResource(tx.WithContext(ctx), row)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					expireIDs = append(expireIDs, row.ID)
+					resourceUpdateInfo(logEventResultExpired).
+						Str("resource_type", orm.ResourceUpdateResourceTypeSkill).
+						Str("review_result_id", row.ID).
+						Str("user_id", row.UserID).
+						Str("skill_name", row.SkillName).
+						Str("reason", "skill_patch_resource_not_found").
+						Msg(logEventResultExpired)
+					continue
+				}
+				return 0, 0, err
+			}
+			resourceID = resource.ID
+			autoEvo = resource.AutoEvo
+			generation = resource.AutoEvoGeneration
 		}
-		if !resource.AutoEvo {
+		if !autoEvo {
 			resourceUpdateInfo(logEventResultScanSkipped).
 				Str("resource_type", orm.ResourceUpdateResourceTypeSkill).
-				Str("resource_id", resource.ID).
+				Str("resource_id", resourceID).
 				Str("review_result_id", row.ID).
 				Str("user_id", row.UserID).
 				Str("skill_name", row.SkillName).
@@ -257,9 +295,9 @@ func scanSkillReviewResultRows(ctx context.Context, tx *gorm.DB, rows []SkillRev
 			continue
 		}
 		if trigger.TriggerType == orm.ResourceUpdateTriggerTypeAutoEvoEnabled {
-			trigger.Generation = resource.AutoEvoGeneration
+			trigger.Generation = generation
 		}
-		made, err := ensureAutoApplyTask(ctx, tx, orm.ResourceUpdateResourceTypeSkill, row.UserID, resource.ID, row.ID, now, trigger)
+		made, err := ensureAutoApplyTask(ctx, tx, orm.ResourceUpdateResourceTypeSkill, row.UserID, resourceID, row.ID, now, trigger)
 		if err != nil {
 			return 0, 0, err
 		}
@@ -281,6 +319,13 @@ func scanSkillReviewResultRows(ctx context.Context, tx *gorm.DB, rows []SkillRev
 }
 
 func applyNewSkillReviewResult(ctx context.Context, tx *gorm.DB, row SkillReviewResult, now time.Time) error {
+	if _, err := createSkillV2FromNewResult(ctx, tx, row, ""); err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	} else {
+		return updateSkillReviewStatus(ctx, tx, row.ID, reviewStatusAccepted)
+	}
 	if _, err := createSkillFromNewResult(ctx, tx, row, "", now, resourcechange.Source{
 		ChangeSource:  resourcechange.ChangeSourceAutoApply,
 		SourceRefType: resourcechange.SourceRefTypeSkillReviewResult,
@@ -581,7 +626,10 @@ func currentAutoEvoGeneration(tx *gorm.DB, resourceType, resourceID string) (int
 	case orm.ResourceUpdateResourceTypeUserPreference:
 		err = tx.Model(&orm.SystemUserPreference{}).Select("auto_evo_generation").Where("id = ?", resourceID).Take(&row).Error
 	case orm.ResourceUpdateResourceTypeSkill:
-		err = tx.Model(&orm.SkillResource{}).Select("auto_evo_generation").Where("id = ?", resourceID).Take(&row).Error
+		err = tx.Model(&orm.SkillV2Skill{}).Select("auto_evo_generation").Where("id = ?", resourceID).Take(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			err = tx.Model(&orm.SkillResource{}).Select("auto_evo_generation").Where("id = ?", resourceID).Take(&row).Error
+		}
 	default:
 		return 0, fmt.Errorf("unsupported resource type %q", resourceType)
 	}

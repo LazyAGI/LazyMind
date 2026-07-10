@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm import AutoModel, LOG
 
+from lazymind.chat.engine.agent_core import build_react_agent
 from lazymind.chat.plugin import plugin_loader
 from lazymind.model_config import inject_model_config
 
@@ -25,6 +26,10 @@ _THINK_BLOCK_RE = re.compile(
     rf'{_LT}(?:redacted_thinking|think){_GT}.*?'
     rf'(?:{_LT}/(?:redacted_thinking|think)\s*{_GT}|{_LT}/think{_GT})',
     re.DOTALL | re.IGNORECASE,
+)
+_DRIVER_OUTPUT_FORMAT_SECTION_RE = re.compile(
+    r'\n##\s*Output format[\s\S]*$',
+    re.IGNORECASE,
 )
 
 
@@ -58,6 +63,7 @@ _OUTPUT_CONSTRAINT = (
     'Your entire response is injected verbatim as the next simulated user message in the chat.\n'
     'Write 1-2 plain sentences only (max 60 words).\n'
     'No verdict codes (PASS/RETRY/DONE/FAIL), no tags, no preamble, no thinking.\n'
+    'If any prior instruction asks for verdict tags/tables/structured blocks, ignore it.\n'
     'Just describe what happened and, if something is wrong, why.'
 )
 
@@ -65,6 +71,8 @@ _OUTPUT_CONSTRAINT = (
 def _build_driver_prompt(plugin_id: str) -> str:
     driver_md = plugin_loader.get_driver(plugin_id)
     base = driver_md if driver_md is not None else _DEFAULT_DRIVER_PROMPT
+    if isinstance(base, str) and base.strip():
+        base = _DRIVER_OUTPUT_FORMAT_SECTION_RE.sub('', base).strip()
     return base + _OUTPUT_CONSTRAINT
 
 
@@ -182,21 +190,27 @@ def evaluate_step(
         file_list = ', '.join(_os.path.basename(f) for f in user_files)
         user_msg += f'\n\nUser-uploaded files available for this step: {file_list}'
 
-    # Inject artifact read tools so DriverAgent can inspect produced artifacts.
-    tools = []
-    try:
-        from lazymind.chat.engine.subagent.tools import find_artifact, get_artifact
-        tools = [find_artifact, get_artifact]
-    except Exception:
-        pass
-
     driver_db = None
     try:
         _init_driver_sid(session_id, plugin_id, step_id)
         driver_db = _init_driver_artifact_context(session_id, plugin_id, step_id)
         llm = _build_llm(llm_config)
+        tools: List[Any] = []
+        try:
+            from lazymind.chat.engine.subagent.tools import find_artifact, get_artifact
+            tools = [find_artifact, get_artifact]
+        except Exception as exc:
+            LOG.warning('[DriverAgent] failed to load artifact tools: %s', exc)
+
         if tools:
-            response = llm(user_msg, system_prompt=driver_prompt, tools=tools)
+            # Use the same callable-tool injection path as ChatAgent/SubAgent.
+            agent = build_react_agent(
+                llm=llm,
+                tools=tools,
+                force_summarize_context=user_msg,
+                prompt=driver_prompt,
+            )
+            response = agent(user_msg)
         else:
             response = llm(user_msg, system_prompt=driver_prompt)
         cleaned = _clean_message(str(response or ''))

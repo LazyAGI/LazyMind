@@ -6,9 +6,20 @@ export type DesktopBridgeResult =
   | { ok: true }
   | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
 
+type DesktopBridgeCommand =
+  | "openLogsDir"
+  | "openDataDir"
+  | "runtimeStatus"
+  | "restartRuntime";
+
 interface LazyMindDesktopBridge {
   openLogsDir?: () => Promise<void> | void;
   openDataDir?: () => Promise<void> | void;
+  runtimeStatus?: () => Promise<unknown> | unknown;
+  restartRuntime?: () => Promise<unknown> | unknown;
+  resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
+  selectFolder?: () => Promise<string | null> | string | null;
+  exportDiagnostics?: () => Promise<string> | string;
 }
 
 function getDesktopBridge(): LazyMindDesktopBridge | undefined {
@@ -21,7 +32,7 @@ function getDesktopBridge(): LazyMindDesktopBridge | undefined {
 }
 
 async function callDesktopBridge(
-  method: keyof LazyMindDesktopBridge,
+  method: DesktopBridgeCommand,
 ): Promise<DesktopBridgeResult> {
   const bridge = getDesktopBridge();
   const handler = bridge?.[method];
@@ -44,4 +55,39 @@ export function openLogsDir(): Promise<DesktopBridgeResult> {
 
 export function openDataDir(): Promise<DesktopBridgeResult> {
   return callDesktopBridge("openDataDir");
+}
+
+export function runtimeStatus(): Promise<DesktopBridgeResult> {
+  return callDesktopBridge("runtimeStatus");
+}
+
+export function restartRuntime(): Promise<DesktopBridgeResult> {
+  return callDesktopBridge("restartRuntime");
+}
+
+export function resetRuntime(scope?: "kb" | "all"): Promise<DesktopBridgeResult> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.resetRuntime) {
+    return Promise.resolve({ ok: false, reason: "unavailable" });
+  }
+  return Promise.resolve()
+    .then(() => bridge.resetRuntime?.(scope))
+    .then(() => ({ ok: true as const }))
+    .catch((error) => ({ ok: false as const, reason: "failed" as const, error }));
+}
+
+export function selectFolder(): Promise<string | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.selectFolder) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.selectFolder());
+}
+
+export function exportDiagnostics(): Promise<string | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.exportDiagnostics) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.exportDiagnostics());
 }

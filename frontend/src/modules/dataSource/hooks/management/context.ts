@@ -7,6 +7,10 @@ import type {
   FeishuAuthAccount,
 } from "../../common/feishuAccounts";
 import type {
+  DatabaseConnectionItem,
+  DatabaseConnectionPayload,
+} from "../../api/databaseConnections";
+import type {
   CloudDataSourceProvider,
   FeishuDataSourceConnection,
   FeishuDataSourceOAuthMessage,
@@ -114,6 +118,10 @@ export interface ManagementContext {
   setManualOauthCallbackValue: Dispatch<SetStateAction<string>>;
   manualOauthSubmitting: boolean;
   setManualOauthSubmitting: Dispatch<SetStateAction<boolean>>;
+  databaseEditingConnection: DatabaseConnectionItem | null;
+  setDatabaseEditingConnection: Dispatch<SetStateAction<DatabaseConnectionItem | null>>;
+  databaseEditSaving: boolean;
+  setDatabaseEditSaving: Dispatch<SetStateAction<boolean>>;
 
   // OAuth / connection state
   oauthState: OAuthState;
@@ -214,7 +222,11 @@ export interface ManagementContext {
   handleNextStep: () => void;
   handleSubmitManualOauthCallback: () => Promise<void>;
   openDetailPage: (record: DataSourceItem) => void;
+  openDatabaseConnectionConfig: (record: DataSourceItem) => void;
+  closeDatabaseConnectionConfig: () => void;
+  handleSaveDatabaseConnectionConfig: (payload: DatabaseConnectionPayload) => Promise<void>;
   executeDeleteSource: (record: DataSourceItem) => Promise<void>;
+  executeDeleteDatabaseConnection: (record: DataSourceItem) => Promise<void>;
 
   // Save handlers (createSaveActions)
   handleSave: (saveMode?: DataSourceSaveMode) => Promise<void>;
