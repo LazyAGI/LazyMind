@@ -39,21 +39,27 @@ def test_kb_keyword_search_maps_target_by_type(monkeypatch):
     assert calls[1]['doc_id'] == 'doc-1'
 
 
-def test_skill_editor_returns_error_result_for_skill_index_exception(monkeypatch):
-    def raise_unexpected(_base_dir):
-        raise RuntimeError('skill index unavailable')
+def test_skill_editor_tool_group_exposes_action_specific_schemas():
+    group = skill_editor_mod.SkillEditorToolGroup()
+    create_tool = MethodModuleTool(group, 'create_skill')
+    patch_tool = MethodModuleTool(group, 'patch_file')
 
-    monkeypatch.setattr(skill_editor_mod.lazyllm, 'globals', {'agentic_config': {}})
-    monkeypatch.setattr(skill_editor_mod, 'list_all_skill_entries', raise_unexpected)
+    assert create_tool.name == 'SkillEditorToolGroup_create_skill'
+    assert patch_tool.name == 'SkillEditorToolGroup_patch_file'
+    assert 'modify_skill' not in group.__public_apis__
+    create_fields = set(create_tool.params_schema.model_fields)
+    patch_fields = set(patch_tool.params_schema.model_fields)
+    create_required = set(create_tool.params_schema.model_json_schema().get('required', []))
+    patch_required = set(patch_tool.params_schema.model_json_schema().get('required', []))
 
-    result = skill_editor_mod.skill_editor(
-        'existing',
-        'modify',
-        'coding',
-        operations=[{'op': 'replace_text', 'old': 'old', 'new': 'new'}],
-    )
-
-    assert result['success'] is False
-    assert result['tool'] == 'skill_editor'
-    assert result['error']['type'] == 'RuntimeError'
-    assert 'skill index unavailable' in result['error']['detail']
+    assert create_fields == {'name', 'category', 'content'}
+    assert patch_fields == {'name', 'category', 'path', 'old_text', 'new_text', 'replace_all', 'reason'}
+    assert create_required == {'name', 'content'}
+    assert {'name', 'path', 'old_text', 'new_text'}.issubset(patch_required)
+    assert 'category' not in patch_required
+    assert patch_tool.validate_parameters({
+        'name': 'research/web-research',
+        'path': 'SKILL.md',
+        'old_text': 'old',
+        'new_text': 'new',
+    })

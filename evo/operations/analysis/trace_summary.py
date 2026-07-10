@@ -40,7 +40,7 @@ def build_trace_summary(case: Mapping[str, Any], answer: Mapping[str, Any]) -> d
     case_id = _text(case.get('id') or answer.get('case_id'))
     trace_id = _text(answer.get('trace_id'))
     if not trace_id:
-        raise ValueError(f'analysis trace_id is required for case {case_id}')
+        return _trace_unavailable(case_id, trace_id, 'eval.rag_answer trace_id missing')
     from lazyllm.tracing.consume import get_single_trace
 
     last_error: Exception | None = None
@@ -53,18 +53,20 @@ def build_trace_summary(case: Mapping[str, Any], answer: Mapping[str, Any]) -> d
             if attempt + 1 < TRACE_READ_ATTEMPTS:
                 time.sleep(TRACE_RETRY_SECONDS)
     else:
-        raise ValueError(
-            f'trace {trace_id} not available after 3 attempts: {last_error}'
-        ) from last_error
+        return _trace_unavailable(
+            case_id,
+            trace_id,
+            f'lazyllm.get_single_trace failed after {TRACE_READ_ATTEMPTS} attempts: {last_error}',
+        )
     root = getattr(trace, 'execution_tree', None)
     if root is None:
-        raise ValueError(f'trace {trace_id} has no execution_tree')
+        return _trace_unavailable(case_id, trace_id, 'lazyllm trace has no execution_tree')
     graph = nx.DiGraph()
     nodes: list[dict[str, Any]] = []
     edges: list[tuple[str, str]] = []
     _walk(root, '', graph, nodes, edges)
     if not nodes:
-        raise ValueError(f'trace {trace_id} produced no nodes')
+        return _trace_unavailable(case_id, trace_id, 'lazyllm trace produced no nodes')
     _set_exclusive_latency(graph, nodes)
     diagnostic = [node for node in nodes if node['stage'] in DIAGNOSTIC_STAGES]
     stage_sequence = [node['stage'] for node in nodes]
@@ -108,6 +110,53 @@ def build_trace_summary(case: Mapping[str, Any], answer: Mapping[str, Any]) -> d
     }
 
 
+def _trace_unavailable(case_id: str, trace_id: str, reason: str) -> dict[str, Any]:
+    error = {
+        'id': 'trace',
+        'stage': 'trace',
+        'name': 'lazyllm.get_single_trace',
+        'status': 'unavailable',
+        'error': _preview(reason),
+    }
+    return {
+        'case_id': case_id,
+        'trace_id': trace_id,
+        'trace_source': 'lazyllm.get_single_trace',
+        'trace_status': 'unavailable',
+        'route_signature': 'trace_unavailable',
+        'tree_text': '',
+        'execution_tree': {},
+        'stage_sequence': [],
+        'diagnostic_stage_sequence': [],
+        'unknown_stage_count': 0,
+        'edges': [],
+        'critical_path': [],
+        'bottleneck_stage': '',
+        'stages': [],
+        'stage_counts': {},
+        'latency_by_stage': {},
+        'error_stages': [error],
+        'retrieval_steps': [],
+        'retrieved_doc_ids': [],
+        'retrieved_chunk_ids': [],
+        'final_context_doc_ids': [],
+        'final_context_chunk_ids': [],
+        'semantic_metric_keys': [],
+        'features': {
+            'node_count': 0.0,
+            'edge_count': 0.0,
+            'max_depth': 0.0,
+            'branching_factor_avg': 0.0,
+            'error_span_count': 1.0,
+            'trace_latency_ms': 0.0,
+            'exclusive_latency_ms': 0.0,
+            'retrieved_doc_count': 0.0,
+            'retrieved_chunk_count': 0.0,
+            'trace_unavailable': 1.0,
+        },
+    }
+
+
 def _walk(step: Any, parent_id: str, graph: nx.DiGraph, nodes: list[dict[str, Any]],
           edges: list[tuple[str, str]], depth: int = 0) -> None:
     node_id = _required_text(getattr(step, 'step_id', ''), 'trace step_id')
@@ -144,6 +193,9 @@ def _walk(step: Any, parent_id: str, graph: nx.DiGraph, nodes: list[dict[str, An
 
 
 def _stage(step: Any) -> str:
+    name = _text(getattr(step, 'name', '')).lower()
+    if name.startswith('get_') and 'toolgroup_methods' in name:
+        return 'tool_call'
     fields = ' '.join(_text(value).lower() for value in (
         getattr(step, 'semantic_type', ''), getattr(step, 'node_type', ''), getattr(step, 'name', ''),
     ))
@@ -222,7 +274,8 @@ def _retrieval_artifacts(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         metrics = node.get('semantic_metrics') if isinstance(node.get('semantic_metrics'), Mapping) else {}
         if node['stage'] not in {'retrieve', 'rerank', 'context_assembly'}:
             continue
-        step_docs, step_chunks = _unique(metrics.get('doc_ids')), _unique(metrics.get('chunk_ids'))
+        step_docs = _unique(metrics.get('doc_ids'))
+        step_chunks = _unique(metrics.get('chunk_ids'))
         doc_ids.extend(step_docs)
         chunk_ids.extend(step_chunks)
         keys.update(metrics.get('keys') or [])
@@ -363,4 +416,4 @@ def _latency(step: Any, node_id: str) -> float:
 
 
 def _preview(value: Any) -> str:
-    return _text(value)[:500]
+    return _text(value)[:2000]

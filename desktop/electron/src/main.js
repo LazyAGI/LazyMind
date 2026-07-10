@@ -10,11 +10,9 @@ const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
     : path.resolve(__dirname, "..", "..", "dist", "runtime"));
 const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
-const runtimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT ||
-  path.join(app.getPath("userData"), "runtime");
-const dataDir = path.join(runtimeRoot, "data");
-const logsDir = path.join(runtimeRoot, "logs");
-const startupLogPath = path.join(logsDir, "desktop-startup.log");
+const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
+const desktopLogsDir = app.getPath("logs");
+const startupLogPath = path.join(desktopLogsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", "local-runtime-manager");
 const maxStartupLogEntries = 1200;
@@ -31,7 +29,6 @@ let allowWindowClose = false;
 let startupLogEntries = [];
 let startupLogWriteFailed = false;
 let lastStartupError = null;
-let desktopAdminSessionPromise = null;
 let startupState = {
   status: "starting",
   phase: "Initializing",
@@ -41,25 +38,32 @@ let startupState = {
 };
 
 function sidecarArgs(command, extra = []) {
-  return [
+  const args = [
     command,
     "--profile", "desktop",
     "--repo-root", repoRoot,
-    "--runtime-root", runtimeRoot,
     "--resources-root", runtimeResourcesRoot,
-    ...extra,
   ];
+  if (explicitRuntimeRoot) {
+    args.push("--runtime-root", explicitRuntimeRoot);
+  }
+  return [...args, ...extra];
 }
 
 function sidecarEnv() {
-  return {
+  const env = {
     ...process.env,
     LAZYMIND_RUNTIME_PROFILE: "desktop",
-    LAZYMIND_RUNTIME_ROOT: runtimeRoot,
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
     VITE_LAZYMIND_MODE: "desktop",
     PYTHONDONTWRITEBYTECODE: "1",
   };
+  if (explicitRuntimeRoot) {
+    env.LAZYMIND_RUNTIME_ROOT = explicitRuntimeRoot;
+  } else {
+    delete env.LAZYMIND_RUNTIME_ROOT;
+  }
+  return env;
 }
 
 function sidecarShutdownEnv() {
@@ -69,10 +73,20 @@ function sidecarShutdownEnv() {
   };
 }
 
-function ensureRuntimeDirs() {
-  fs.mkdirSync(logsDir, { recursive: true });
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.mkdirSync(path.join(runtimeRoot, "run"), { recursive: true });
+function currentRuntimeRoot() {
+  return currentStatus?.runtimeRoot || explicitRuntimeRoot || "";
+}
+
+function currentDataDir() {
+  return currentStatus?.dataDir || (currentRuntimeRoot() ? path.join(currentRuntimeRoot(), "data") : "");
+}
+
+function currentRuntimeLogsDir() {
+  return currentStatus?.logsDir || "";
+}
+
+function ensureDesktopLogDirs() {
+  fs.mkdirSync(desktopLogsDir, { recursive: true });
 }
 
 function resetStartupLogsForRun() {
@@ -80,7 +94,7 @@ function resetStartupLogsForRun() {
   startupLogWriteFailed = false;
   lastStartupError = null;
   try {
-    ensureRuntimeDirs();
+    ensureDesktopLogDirs();
     fs.writeFileSync(startupLogPath, "");
   } catch (error) {
     startupLogWriteFailed = true;
@@ -121,7 +135,7 @@ function appendStartupLog(source, line) {
   }
   if (!startupLogWriteFailed) {
     try {
-      ensureRuntimeDirs();
+      ensureDesktopLogDirs();
       fs.appendFileSync(startupLogPath, `[${entry.ts}] [${source}] ${text}\n`);
     } catch (error) {
       startupLogWriteFailed = true;
@@ -164,9 +178,10 @@ function startupDiagnosticsSnapshot() {
       sidecarPath,
       resourcesRoot: runtimeResourcesRoot,
       repoRoot,
-      runtimeRoot,
-      dataDir,
-      logsDir,
+      runtimeRoot: currentRuntimeRoot(),
+      dataDir: currentDataDir(),
+      logsDir: currentRuntimeLogsDir(),
+      desktopLogsDir,
       startupLogPath,
     },
     status: currentStatus,
@@ -204,8 +219,8 @@ function startGuard() {
   if (guardProcess || !fs.existsSync(sidecarPath)) {
     return;
   }
-  ensureRuntimeDirs();
-  const shutdownLog = path.join(logsDir, "desktop-shutdown.log");
+  ensureDesktopLogDirs();
+  const shutdownLog = path.join(desktopLogsDir, "desktop-shutdown.log");
   let errFd = "ignore";
   try {
     errFd = fs.openSync(shutdownLog, "a");
@@ -264,8 +279,8 @@ function spawnDetachedShutdownHelper(reason) {
   if (!fs.existsSync(sidecarPath)) {
     return false;
   }
-  ensureRuntimeDirs();
-  const shutdownLog = path.join(logsDir, "desktop-shutdown.log");
+  ensureDesktopLogDirs();
+  const shutdownLog = path.join(desktopLogsDir, "desktop-shutdown.log");
   const outFd = fs.openSync(shutdownLog, "a");
   const errFd = fs.openSync(shutdownLog, "a");
   try {
@@ -295,97 +310,14 @@ async function readStatus() {
   return currentStatus;
 }
 
-function unwrapApiResponse(payload) {
-  if (payload && typeof payload === "object" && "data" in payload) {
-    return payload.data;
-  }
-  return payload;
-}
-
-function desktopAuthBaseUrl(status) {
-  const authPort = status?.config?.authService?.Port || status?.config?.authService?.port;
-  if (!authPort) {
-    throw new Error("Desktop auth-service port is not available");
-  }
-  return `http://127.0.0.1:${authPort}/api/authservice`;
-}
-
-async function fetchJson(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    signal: options.signal || AbortSignal.timeout(15000),
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  const text = await response.text();
-  let payload = null;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = text;
-    }
-  }
-  if (!response.ok) {
-    const detail = payload?.detail || payload?.message || text || response.statusText;
-    throw new Error(`Desktop auth request failed (${response.status}): ${detail}`);
-  }
-  return unwrapApiResponse(payload);
-}
-
-async function createDesktopAdminSession() {
-  const status = currentStatus || await readStatus();
-  const baseUrl = desktopAuthBaseUrl(status);
-  const username = String(process.env.LAZYMIND_BOOTSTRAP_ADMIN_USERNAME || "admin");
-  const password = String(process.env.LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD || "admin");
-
-  const login = await fetchJson(`${baseUrl}/auth/login`, {
-    method: "POST",
-    body: JSON.stringify({ username, password }),
-  });
-  if (!login?.access_token) {
-    throw new Error("Desktop admin login did not return an access token");
-  }
-
-  const currentUser = await fetchJson(`${baseUrl}/auth/me`, {
-    headers: {
-      Authorization: `Bearer ${login.access_token}`,
-    },
-  });
-
-  return {
-    token: login.access_token,
-    refreshToken: login.refresh_token,
-    username: currentUser?.username || username,
-    userId: currentUser?.user_id,
-    role: currentUser?.role || login.role,
-    email: currentUser?.email || undefined,
-    displayName: currentUser?.display_name || undefined,
-    tenantId: currentUser?.tenant_id || login.tenant_id || undefined,
-    dynamic: currentUser?.dynamic === true,
-    chatUnlikeSwitch: currentUser?.chat_unlike_switch === true,
-    timestamp: Date.now(),
-  };
-}
-
-function ensureDesktopAdminSession() {
-  if (!desktopAdminSessionPromise) {
-    desktopAdminSessionPromise = createDesktopAdminSession().finally(() => {
-      desktopAdminSessionPromise = null;
-    });
-  }
-  return desktopAdminSessionPromise;
-}
-
 function logStartupContext() {
   appendStartupLog("desktop", `sidecar: ${sidecarPath}`);
   appendStartupLog("desktop", `resources: ${runtimeResourcesRoot}`);
   appendStartupLog("desktop", `repo: ${repoRoot}`);
-  appendStartupLog("desktop", `runtime directory: ${runtimeRoot}`);
-  appendStartupLog("desktop", `data directory: ${dataDir}`);
-  appendStartupLog("desktop", `logs directory: ${logsDir}`);
+  appendStartupLog("desktop", explicitRuntimeRoot
+    ? `runtime directory override: ${explicitRuntimeRoot}`
+    : "runtime directory: delegated to local-runtime-manager");
+  appendStartupLog("desktop", `desktop logs directory: ${desktopLogsDir}`);
 }
 
 function startRuntime() {
@@ -394,7 +326,7 @@ function startRuntime() {
     return;
   }
   resetStartupLogsForRun();
-  ensureRuntimeDirs();
+  ensureDesktopLogDirs();
   runtimeProcessExit = null;
   updateStartupState({
     status: "starting",
@@ -785,19 +717,29 @@ ipcMain.handle("lazymind:resetRuntime", async (_event, scope = "kb") => {
   return readStatus();
 });
 ipcMain.handle("lazymind:openLogsDir", async () => {
-  fs.mkdirSync(logsDir, { recursive: true });
-  await shell.openPath(logsDir);
+  try {
+    await readStatus();
+  } catch {
+    // Keep diagnostics usable even when the sidecar cannot start.
+  }
+  const target = currentRuntimeLogsDir() || desktopLogsDir;
+  fs.mkdirSync(target, { recursive: true });
+  await shell.openPath(target);
 });
 ipcMain.handle("lazymind:openDataDir", async () => {
-  fs.mkdirSync(dataDir, { recursive: true });
-  await shell.openPath(dataDir);
+  await readStatus();
+  const target = currentDataDir();
+  if (!target) {
+    throw new Error("LazyMind runtime data directory is not available");
+  }
+  fs.mkdirSync(target, { recursive: true });
+  await shell.openPath(target);
 });
 ipcMain.handle("lazymind:selectFolder", async () => {
   const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
 });
 ipcMain.handle("lazymind:startupDiagnostics", () => startupDiagnosticsSnapshot());
-ipcMain.handle("lazymind:desktopAdminSession", () => ensureDesktopAdminSession());
 ipcMain.handle("lazymind:copyStartupLogs", () => {
   const text = startupLogEntries
     .map((entry) => `[${entry.ts}] [${entry.source}] ${entry.text}`)
@@ -807,15 +749,16 @@ ipcMain.handle("lazymind:copyStartupLogs", () => {
 });
 ipcMain.handle("lazymind:exportDiagnostics", async () => {
   const status = currentStatus || await readStatus();
-  const out = path.join(logsDir, "desktop-diagnostics.json");
+  const out = path.join(desktopLogsDir, "desktop-diagnostics.json");
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify({
     status,
     runtimeResourcesRoot,
     repoRoot,
-    runtimeRoot,
-    dataDir,
-    logsDir,
+    runtimeRoot: currentRuntimeRoot(),
+    dataDir: currentDataDir(),
+    logsDir: currentRuntimeLogsDir(),
+    desktopLogsDir,
     desktopStartupLog: startupLogPath,
     lastStartupError,
   }, null, 2));

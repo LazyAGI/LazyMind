@@ -19,14 +19,54 @@ remember to list them explicitly.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm.tools.agent.base import _write_agent_data
 
 from lazymind.chat.plugin import plugin_loader
+
+LOG = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _ReachabilitySnapshot:
+    current_step: str
+    session_id: str
+    forward_steps: List[str]
+    rewind_steps: List[str]
+    reachable_steps: List[str]
+
+
+_COLD_START_PLUGIN_PROMPT = (
+    '## Available Plugins\n'
+    'IMPORTANT: Only trigger a plugin when the capability matches the '
+    "user's PRIMARY and DIRECT intent — the main goal they are asking for "
+    'right now. Never trigger a plugin for a sub-step that the model has '
+    "internally decided is part of a larger multi-step plan. If the user's "
+    'request involves multiple steps and only one of those steps would use a '
+    'plugin, do NOT trigger the plugin. Never infer plugin intent from '
+    'indirect or implicit cues.\n'
+    'When a plugin does match the user\'s primary and direct intent, call '
+    'the matching `trigger_<plugin>_plugin` tool before using `ask_user`. '
+    'Do not ask clarification questions first just because optional details '
+    "are missing; pass the user's exact original request to the plugin so its "
+    'workflow can collect context or proceed with sensible defaults.\n\n'
+    'CRITICAL — explicit plugin start requests:\n'
+    'If the user explicitly asks to start, launch, or enable a plugin (e.g. '
+    '"启动绘图插件", "打开图片生成插件", "启动图片插件", "start the image plugin"), '
+    'you MUST call the matching `trigger_<plugin_id>_plugin` tool in this same '
+    'response before any other action. Do NOT reply with text only, do NOT call '
+    '`image_generator` / `image_editor` directly, and do NOT ask clarification '
+    'questions first. Pass the user\'s request as `user_input` (or repeat their '
+    'start phrase if they gave no further detail).\n'
+    'For the AI image plugin (`image-plugin`), call `trigger_image_plugin`.\n\n'
+)
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +188,11 @@ def _trigger_plugin_step(
     """
     cfg = _agentic_config()
     session_id: str = cfg.get('plugin_session_id', '') or str(uuid.uuid4())
+    current_step: str = cfg.get('plugin_step', '')
+    LOG.info(
+        '[plugin.advance] trigger requested plugin=%s step=%s session=%s current=%s cold=%s input_len=%d',
+        plugin_id, step_id, session_id, current_step or '__start__', is_cold_start, len(user_input or ''),
+    )
 
     # --- Layer 1: format validation (no DB needed) ---
     if not user_input or not user_input.strip():
@@ -161,7 +206,6 @@ def _trigger_plugin_step(
     if sm is None:
         raise ValueError(f'plugin {plugin_id!r} not found.')
 
-    current_step: str = cfg.get('plugin_step', '')
     if not sm.is_reachable(current_step, step_id):
         # Condition B: allow rewind to an ancestor that has previously succeeded.
         ancestors = sm.get_ancestors(current_step)
@@ -182,9 +226,15 @@ def _trigger_plugin_step(
                 f'{current_label}. '
                 f'Reachable steps: {reachable}.'
             )
+    LOG.info(
+        '[plugin.advance] state_machine accepted plugin=%s step=%s session=%s current=%s cold=%s',
+        plugin_id, step_id, session_id, current_step or '__start__', is_cold_start,
+    )
 
     # --- Layer 2: dependency validation (via Go core REST API) ---
     step_config = plugin_loader.get_step_config(plugin_id, step_id)
+    if not step_config:
+        raise ValueError(f'step {step_id!r} is not defined in plugin {plugin_id!r}.')
     inputs: List[Dict[str, Any]] = step_config.get('inputs', [])
     if inputs and not is_cold_start and session_id:
         import httpx
@@ -202,7 +252,9 @@ def _trigger_plugin_step(
                     if isinstance(s, dict)
                 }
                 for inp in inputs:
-                    slot = inp['slot']
+                    slot = inp.get('slot')
+                    if not slot:
+                        continue
                     required = inp.get('required', True)
                     producer_steps = plugin_loader.find_producer_steps(plugin_id, slot)
                     if not producer_steps:
@@ -220,12 +272,21 @@ def _trigger_plugin_step(
                     step_status = producer_statuses.get(preferred_producer)
                     if step_status is None:
                         if required:
+                            LOG.warning(
+                                '[plugin.advance] dependency missing plugin=%s step=%s session=%s slot=%s producer=%s',
+                                plugin_id, step_id, session_id, slot, preferred_producer,
+                            )
                             return (
                                 f'Error: required artifact {slot!r} not available. '
                                 f'Please trigger {preferred_producer!r} first.'
                             )
                         continue
                     if step_status in ('running', 'interrupted'):
+                        LOG.warning(
+                            '[plugin.advance] dependency not ready '
+                            'plugin=%s step=%s session=%s slot=%s producer=%s status=%s',
+                            plugin_id, step_id, session_id, slot, preferred_producer, step_status,
+                        )
                         return (
                             f'Error: artifact {slot!r} not ready '
                             f'(producer step {preferred_producer!r} status: {step_status!r}).'
@@ -233,11 +294,19 @@ def _trigger_plugin_step(
                     if step_status == 'failed':
                         if not required:
                             continue
+                        LOG.warning(
+                            '[plugin.advance] dependency failed plugin=%s step=%s session=%s slot=%s producer=%s',
+                            plugin_id, step_id, session_id, slot, preferred_producer,
+                        )
                         return (
                             f'Error: artifact {slot!r} not ready '
                             f'(producer step {preferred_producer!r} status: {step_status!r}).'
                         )
-        except Exception:
+        except Exception as exc:
+            LOG.warning(
+                '[plugin.advance] dependency check skipped plugin=%s step=%s session=%s error=%s',
+                plugin_id, step_id, session_id, exc,
+            )
             pass  # Defensive: skip DB check on error; Go will re-validate
 
     # --- Emit task_created signal ---
@@ -249,7 +318,7 @@ def _trigger_plugin_step(
         for o in output_defs
         if o.get('slot') and o.get('required', True)
     ]
-    input_keys = [i['slot'] for i in inputs]
+    input_keys = [i['slot'] for i in inputs if i.get('slot')]
 
     # Framework tools are always present regardless of plugin declaration.
     # Domain tools (e.g. kb) come only from state.yml — Go does not forward this
@@ -264,6 +333,12 @@ def _trigger_plugin_step(
         'user_input': user_input,
         'is_cold_start': is_cold_start,
     }
+    for runtime_key in ('plugin_ref', 'revision_id', 'revision_no', 'tree_hash', 'remote_root'):
+        if cfg.get(runtime_key) not in (None, ''):
+            params[runtime_key] = cfg[runtime_key]
+    chat_session_id = str(cfg.get('session_id') or '').strip()
+    if chat_session_id:
+        params['chat_session_id'] = chat_session_id
     parent_agentic_config = _export_parent_agentic_config(cfg)
     if parent_agentic_config:
         params['parent_agentic_config'] = parent_agentic_config
@@ -285,6 +360,12 @@ def _trigger_plugin_step(
     user_id: str = str(cfg.get('user_id') or '').strip()
     if user_id:
         params['user_id'] = user_id
+    LOG.info(
+        '[plugin.advance] emitting task_created plugin=%s step=%s session=%s '
+        'chat_sid=%s task=%s cold=%s inputs=%s outputs=%s required_outputs=%s',
+        plugin_id, step_id, session_id, chat_session_id, task_id, is_cold_start,
+        input_keys, output_keys, required_output_keys,
+    )
 
     # Inject focused_tab (UI context hint) into the objective.
     # focused_sort_order is NOT injected — it is the UI scroll position,
@@ -309,6 +390,10 @@ def _trigger_plugin_step(
         output_slots=output_keys,
         tools=merged_tools,
         resume=False,
+    )
+    LOG.info(
+        '[plugin.advance] task_created emitted plugin=%s step=%s session=%s task=%s',
+        plugin_id, step_id, session_id, task_id,
     )
     step_label = step_config.get('label', '')
     display_name = f'{step_id} ({step_label})' if step_label else step_id
@@ -394,6 +479,13 @@ def _build_step_choices_doc(
                 '  If they belong to a choice node (route:choice), pick exactly ONE based on conditions.\n'
                 '  For steps annotated with [when: ...], only advance to that step if the condition holds.'
             )
+    # Self-retry: current_step is injected into all_reachable without a graph self-loop.
+    # Document it here so ChatAgent knows it can pass step_id=current_step to re-run.
+    if current_step and current_step not in {'__start__', '__end__'}:
+        label = step_labels.get(current_step, '')
+        suffix = f'  ({label})' if label else ''
+        lines.append('Retry (re-run current step):')
+        lines.append(f'  - {current_step}{suffix}  <- full or partial retry of this step')
     if rewind_steps:
         lines.append('Rewind (re-run a past step):')
         for s in rewind_steps:
@@ -405,26 +497,55 @@ def _build_step_choices_doc(
     return '\n'.join(lines)
 
 
-def build_cold_start_tools() -> List[Any]:
+def build_cold_start_tools(
+    plugin_catalog: Optional[List[Dict[str, Any]]] = None,
+    disabled_builtin_plugins: Optional[List[str]] = None,
+) -> List[Any]:
     """Build one trigger_<plugin_id> callable per loaded plugin."""
     tools = []
-    for spec in (plugin_loader._registry or {}).values():
-        pid = spec.plugin_id
-        name = spec.yaml.get('name', pid)
-        desc = spec.yaml.get('description', f'Trigger the {name} plugin.')
-        # when_to_use is the primary trigger hint; fall back to a generic phrase.
-        when_to_use = spec.yaml.get('when_to_use', '').strip()
-        sm = spec.state_machine
-        first_steps = sm.get_reachable_steps('__start__')
+    disabled = set(disabled_builtin_plugins or [])
+    candidates = [
+        (spec, None)
+        for spec in (plugin_loader._registry or {}).values()
+        if not spec.plugin_id.startswith('user_') and spec.plugin_id not in disabled
+    ]
+    candidates.extend((None, entry) for entry in (plugin_catalog or []))
+    for spec, catalog_entry in candidates:
+        if catalog_entry is not None:
+            pid = str(catalog_entry.get('plugin_id') or 'plugin')
+            name = str(catalog_entry.get('name') or pid)
+            desc = str(catalog_entry.get('description') or f'Trigger the {name} plugin.')
+            when_to_use = str(catalog_entry.get('when_to_use') or '').strip()
+            first_steps: List[str] = []
+            plugin_ref = str(catalog_entry.get('plugin_ref', pid)).encode()
+            ref_digest = hashlib.sha256(plugin_ref).hexdigest()[:8]
+            public_tool_name = f'trigger_{pid.replace("-", "_")}_{ref_digest}'
+        else:
+            assert spec is not None
+            pid = spec.plugin_id
+            name = spec.yaml.get('name', pid)
+            desc = spec.yaml.get('description', f'Trigger the {name} plugin.')
+            when_to_use = spec.yaml.get('when_to_use', '').strip()
+            first_steps = spec.state_machine.get_reachable_steps('__start__')
+            public_tool_name = f'trigger_{pid.replace("-", "_")}'
 
-        def _make_trigger(plugin_id: str, first: List[str], desc: str, when_to_use: str):
-            tool_name = f'trigger_{plugin_id.replace("-", "_")}'
+        def _make_trigger(plugin_id: str, first: List[str], desc: str, when_to_use: str, entry=None, tool_name=''):
 
             def _trigger(user_input: str) -> str:
-                step_id = first[0] if first else ''
+                resolved_plugin_id = plugin_id
+                resolved_first = first
+                if entry is not None:
+                    resolved_plugin_id, runtime_spec = plugin_loader.resolve_remote_plugin(entry)
+                    resolved_first = runtime_spec.state_machine.get_reachable_steps('__start__')
+                    cfg = _agentic_config()
+                    cfg.update({
+                        key: entry.get(key)
+                        for key in ('plugin_ref', 'revision_id', 'revision_no', 'tree_hash', 'remote_root')
+                    })
+                step_id = resolved_first[0] if resolved_first else ''
                 if not step_id:
-                    raise ValueError(f'plugin {plugin_id!r} has no reachable first step.')
-                return _trigger_plugin_step(plugin_id, step_id, user_input, is_cold_start=True)
+                    raise ValueError(f'plugin {resolved_plugin_id!r} has no reachable first step.')
+                return _trigger_plugin_step(resolved_plugin_id, step_id, user_input, is_cold_start=True)
 
             # Set __name__ so the framework guard and logging use the public tool name.
             _trigger.__name__ = tool_name
@@ -436,19 +557,92 @@ def build_cold_start_tools() -> List[Any]:
                 f'{tool_desc}\n\n'
                 'Args:\n'
                 '    user_input (str): A concise goal statement for the SubAgent that\n'
-                '        will execute this step.  Synthesise the key intent from the\n'
-                '        conversation — do NOT pass vague phrases like "继续", "请继续",\n'
-                '        or "continue".  Include: what the user wants to achieve, any\n'
-                '        style / quality constraints they mentioned, and relevant context\n'
-                '        from the chat history.  Example: "生成一张科幻风格的宇宙飞船插画，\n'
+                '        will execute this step. Use ONLY the latest user query in this turn;\n'
+                '        do NOT pass vague phrases like "继续", "请继续", or "continue".\n'
+                '        Include: what the user wants to achieve, and style / quality\n'
+                '        constraints explicitly mentioned in that query only.\n'
+                '        Do NOT inject prior-turn context unless the user explicitly repeats it.\n'
+                '        Example: "生成一张科幻风格的宇宙飞船插画，\n'
                 '        线条简洁，色调冷蓝，适合作为游戏启动画面背景".\n\n'
                 'Returns:\n'
                 '    Confirmation that the plugin was started.'
             )
             return _trigger
 
-        tools.append(_make_trigger(pid, first_steps, desc, when_to_use))
+        tools.append(_make_trigger(pid, first_steps, desc, when_to_use, catalog_entry, public_tool_name))
     return tools
+
+
+def _live_reachability_snapshot(
+    plugin_id: str,
+    fallback_current_step: str,
+    rewind_steps: Optional[List[str]] = None,
+) -> _ReachabilitySnapshot:
+    """Compute live step reachability from current ChatAgent state."""
+    cfg = _agentic_config()
+    current_step = cfg.get('plugin_step', '') or fallback_current_step
+    session_id = cfg.get('plugin_session_id', '')
+    sm = plugin_loader.get_state_machine(plugin_id)
+    forward_steps = sm.get_reachable_steps(current_step) if sm else []
+    rewind = list(rewind_steps or [])
+    reachable = list(forward_steps) + rewind
+    if current_step and current_step not in reachable:
+        reachable = [current_step] + reachable
+    return _ReachabilitySnapshot(
+        current_step=current_step,
+        session_id=session_id,
+        forward_steps=forward_steps,
+        rewind_steps=rewind,
+        reachable_steps=reachable,
+    )
+
+
+def _validate_live_step_reachable(
+    *,
+    tool_name: str,
+    plugin_id: str,
+    step_id: str,
+    fallback_current_step: str,
+    rewind_steps: Optional[List[str]],
+    runtime_instruction: Optional[str],
+    partial_indices: Optional[Dict[str, List[int]]],
+    input_len: Optional[int] = None,
+) -> _ReachabilitySnapshot:
+    """Validate a step tool call against live reachability and log consistently."""
+    snapshot = _live_reachability_snapshot(plugin_id, fallback_current_step, rewind_steps)
+    if input_len is None:
+        LOG.info(
+            '[plugin.advance] %s called plugin=%s target=%s session=%s current=%s '
+            'reachable=%s runtime_instruction=%s partial=%s',
+            tool_name, plugin_id, step_id, snapshot.session_id,
+            snapshot.current_step or '__start__', snapshot.reachable_steps,
+            bool(runtime_instruction), bool(partial_indices),
+        )
+    else:
+        LOG.info(
+            '[plugin.advance] %s called plugin=%s target=%s session=%s current=%s '
+            'input_len=%d reachable=%s runtime_instruction=%s partial=%s',
+            tool_name, plugin_id, step_id, snapshot.session_id,
+            snapshot.current_step or '__start__', input_len, snapshot.reachable_steps,
+            bool(runtime_instruction), bool(partial_indices),
+        )
+    if step_id not in snapshot.reachable_steps:
+        LOG.warning(
+            '[plugin.advance] %s rejected unreachable plugin=%s target=%s '
+            'session=%s current=%s reachable=%s',
+            tool_name, plugin_id, step_id, snapshot.session_id,
+            snapshot.current_step or '__start__', snapshot.reachable_steps,
+        )
+        raise ValueError(
+            f'step {step_id!r} is not reachable from '
+            f'{snapshot.current_step!r}. Reachable: {snapshot.reachable_steps}.'
+        )
+    LOG.info(
+        '[plugin.advance] %s reachable plugin=%s target=%s session=%s current=%s reachable=%s',
+        tool_name, plugin_id, step_id, snapshot.session_id,
+        snapshot.current_step or '__start__', snapshot.reachable_steps,
+    )
+    return snapshot
 
 
 def build_advance_step_and_hand_off_tool(
@@ -467,7 +661,6 @@ def build_advance_step_and_hand_off_tool(
     forward = sm.get_reachable_steps(current_step) if sm else []
     rewind = list(rewind_steps or [])
     labels = step_labels or {}
-    all_reachable = list(forward) + rewind
 
     choices_doc = _build_step_choices_doc(forward, rewind, labels, plugin_id=plugin_id, current_step=current_step)
 
@@ -488,15 +681,22 @@ def build_advance_step_and_hand_off_tool(
         steps 1 through 3").  In that case use `advance_step` (synchronous, dynamic
         mode only) for intermediate steps and this tool for the final step.
 
-        Use `step_id="__end__"` when the pipeline is fully complete.
+        Terminal plugin steps are normally completed by the plugin event loop after
+        the terminal task succeeds. Use `step_id="__end__"` only as an explicit
+        close signal when the final step has already succeeded and the session is
+        still open.
         """
         if step_id == '__end__':
             return _trigger_plugin_end(plugin_id)
-        if step_id not in all_reachable:
-            raise ValueError(
-                f'step {step_id!r} is not reachable from '
-                f'{current_step!r}. Reachable: {all_reachable}.'
-            )
+        _validate_live_step_reachable(
+            tool_name='advance_step_and_hand_off',
+            plugin_id=plugin_id,
+            step_id=step_id,
+            fallback_current_step=current_step,
+            rewind_steps=rewind_steps,
+            runtime_instruction=runtime_instruction,
+            partial_indices=partial_indices,
+        )
         return _trigger_plugin_step(
             plugin_id, step_id, user_input,
             is_cold_start=False,
@@ -506,9 +706,11 @@ def build_advance_step_and_hand_off_tool(
 
     advance_step_and_hand_off.__doc__ = (
         'Advance the active plugin to the next step and hand off control to SubAgent/user.\n\n'
-        'The step runs in the background. Use this as the default advancement tool.\n'
-        'Only use `advance_step` (synchronous) when you need intermediate step results\n'
-        'within a single turn (e.g. user said "re-run steps 1 through 3").\n\n'
+        'The step runs in the background. Use this as the DEFAULT tool in single-step mode.\n'
+        'In continuous/uninterrupted mode (Rule 4 in system prompt), use `advance_step`\n'
+        'for prerequisite steps before the requested target boundary, then call this tool\n'
+        'for the boundary step and stop. Terminal steps are also boundary steps; after a\n'
+        'terminal task succeeds, the plugin event loop completes the session.\n\n'
         '## Intent-change rewind (MUST read before advancing)\n\n'
         'If the user expresses dissatisfaction with or changes to the result of a step that\n'
         'has ALREADY SUCCEEDED, you MUST rewind to the earliest affected step instead of\n'
@@ -529,15 +731,19 @@ def build_advance_step_and_hand_off_tool(
         'When the user says "重试": advance_step_and_hand_off(step_id=..., rewind=True)\n'
         '  (rewind=True discards previous partial artifacts and restarts the step from scratch)\n\n'
         '## Completing the plugin\n\n'
-        'Call with step_id="__end__" when the final step has succeeded.\n\n'
+        'Prefer handing off the terminal pipeline step itself. The plugin event loop will\n'
+        'mark the session completed after that terminal task succeeds. Call with\n'
+        'step_id="__end__" only if the final step has already succeeded but the session\n'
+        'still needs an explicit close signal.\n\n'
         '## Rewind guidance\n\n'
         'If the DriverAgent or user indicates a prior step produced bad output, rewind by\n'
         'passing its step_id. Rewind-eligible steps are listed in the "Rewind" section below.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
         '    step_id (str): Step to advance to (see list above) or "__end__".\n'
-        '    user_input (str): Concise goal statement for the SubAgent — synthesise intent\n'
-        '        from the conversation.  Do NOT pass vague phrases like "继续" or "continue".\n'
+        '    user_input (str): Concise goal statement for the SubAgent based on the latest\n'
+        '        user query only. Do NOT pass vague phrases like "继续" or "continue", and\n'
+        '        do NOT include prior-turn context unless the user explicitly repeats it.\n'
         '    runtime_instruction (str, optional): Ephemeral directive for this run only.\n'
         '    partial_indices (dict, optional): Maps slot → list_index values to\n'
         '        overwrite (list-cardinality slots only).\n\n'
@@ -563,7 +769,6 @@ def build_advance_step_tool(
     forward = sm.get_reachable_steps(current_step) if sm else []
     rewind = list(rewind_steps or [])
     labels = step_labels or {}
-    all_reachable = list(forward) + rewind
 
     choices_doc = _build_step_choices_doc(forward, rewind, labels, plugin_id=plugin_id, current_step=current_step)
 
@@ -582,37 +787,175 @@ def build_advance_step_tool(
         """
         if step_id == '__end__':
             return _trigger_plugin_end(plugin_id)
-        if step_id not in all_reachable:
-            raise ValueError(
-                f'step {step_id!r} is not reachable from '
-                f'{current_step!r}. Reachable: {all_reachable}.'
-            )
+        reachability = _validate_live_step_reachable(
+            tool_name='advance_step',
+            plugin_id=plugin_id,
+            step_id=step_id,
+            fallback_current_step=current_step,
+            rewind_steps=rewind_steps,
+            runtime_instruction=runtime_instruction,
+            partial_indices=partial_indices,
+            input_len=len(user_input or ''),
+        )
+        _clear_step_signal_queues(step_id)
         result = _trigger_plugin_step(
             plugin_id, step_id, user_input,
             is_cold_start=False,
             runtime_instruction=runtime_instruction or '',
             partial_indices=partial_indices or {},
         )
+        # First wait for Go/Core to acknowledge that it consumed the streaming
+        # task_created event and launched the plugin_step. Without this ack, a
+        # lost task_created event would look like a long-running step.
+        task_id = _wait_for_step_started(step_id)
+        # Core updates plugin_sessions.current_step_id when it accepts
+        # task_created. Keep ChatAgent's local state on the same boundary.
+        _set_local_plugin_step(step_id)
+        LOG.info(
+            '[plugin.advance] local current_step updated plugin=%s step=%s session=%s task=%s',
+            plugin_id, step_id, reachability.session_id, task_id,
+        )
         # Poll for completion via FileSystemQueue.
-        return _wait_for_step_done(step_id, result)
+        LOG.info(
+            '[plugin.advance] waiting for step_done plugin=%s step=%s session=%s task=%s',
+            plugin_id, step_id, reachability.session_id, task_id,
+        )
+        summary = _wait_for_step_done(step_id, result)
+        LOG.info(
+            '[plugin.advance] advance_step completed plugin=%s step=%s session=%s task=%s summary_len=%d',
+            plugin_id, step_id, reachability.session_id, task_id, len(summary or ''),
+        )
+        return _append_step_transition_hint(
+            summary,
+            plugin_id=plugin_id,
+            current_step=step_id,
+            rewind_steps=rewind_steps or [],
+            step_labels=labels,
+        )
 
     advance_step.__doc__ = (
         'Advance the active plugin step synchronously and return the result.\n\n'
-        'ONLY use this for intermediate steps when the user explicitly asks to\n'
-        'run multiple plugin steps in one chat turn. Do NOT use it for ordinary\n'
-        '"continue"/"next step" requests, single-step advancement, or terminal\n'
-        'final-step advancement. If you are going to call only one advancement\n'
-        'tool, use `advance_step_and_hand_off` instead.\n\n'
+        'Use this tool in continuous/uninterrupted mode (Rule 4 in system prompt).\n'
+        'Continuous mode is active when the user intent contains phrases like\n'
+        '"一次性完成", "不要中断", "一次性写完", "run all steps", "no interruptions".\n'
+        'In continuous mode with an explicit target boundary, use `advance_step` only\n'
+        'for prerequisite steps before that boundary, then execute the boundary step\n'
+        'with `advance_step_and_hand_off` and stop. If the user did not set a boundary,\n'
+        'run prerequisite remaining steps with this tool, then execute the terminal step\n'
+        'with `advance_step_and_hand_off` and stop.\n\n'
+        'In default single-step mode (no uninterrupted constraint), do NOT use this\n'
+        'tool — use `advance_step_and_hand_off` instead so the user can review each result.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
         '    step_id (str): Step to advance to (see list above).\n'
-        '    user_input (str): Concise goal statement for the SubAgent.\n'
+        '    user_input (str): Concise goal statement from the latest user query only.\n'
         '    runtime_instruction (str, optional): Ephemeral directive for this run.\n'
         '    partial_indices (dict, optional): List-slot overwrite indices.\n\n'
         'Returns:\n'
         '    Step result summary after SubAgent completes.'
     )
     return advance_step
+
+
+def _append_step_transition_hint(
+    summary: str,
+    plugin_id: str,
+    current_step: str,
+    rewind_steps: List[str],
+    step_labels: Dict[str, str],
+) -> str:
+    """Append live transition guidance to advance_step's tool result."""
+    sm = plugin_loader.get_state_machine(plugin_id)
+    forward = sm.get_reachable_steps(current_step) if sm else []
+    choices_doc = _build_step_choices_doc(
+        forward,
+        rewind_steps,
+        step_labels,
+        plugin_id=plugin_id,
+        current_step=current_step,
+    )
+    return (
+        f'{summary}\n\n'
+        '---\n'
+        'Plugin state after this step:\n'
+        f'- Current step: {current_step}\n'
+        '- The next advance_step call in this same turn must follow this live state:\n\n'
+        f'{choices_doc}\n\n'
+        'Continuous-mode boundary reminder:\n'
+        '- If the latest user request says to run only up to a specific milestone/step '
+        '(for example "执行到 X", "到 X 为止", "until X", "up to X"), match X against '
+        'the available step ids, labels, and transition descriptions. Execute that '
+        'target boundary step with `advance_step_and_hand_off`, then stop. Do not '
+        'advance to downstream steps or manually close `__end__` after the boundary hand-off.'
+    )
+
+
+def _set_local_plugin_step(step_id: str) -> None:
+    """Update ChatAgent's in-process current step after Core accepts the task."""
+    try:
+        lazyllm.globals['agentic_config']['plugin_step'] = step_id
+    except Exception as exc:
+        LOG.warning('[plugin.advance] failed to update local plugin_step step=%s error=%s', step_id, exc)
+
+
+def _clear_step_signal_queues(step_id: str) -> None:
+    """Drop stale started/done signals before launching a fresh dynamic step."""
+    try:
+        from lazyllm.common.queue import FileSystemQueue
+        cfg = _agentic_config()
+        session_id = cfg.get('plugin_session_id', '')
+        for prefix in ('step_started', 'step_done'):
+            FileSystemQueue(klass=f'{prefix}_{session_id}_{step_id}').clear()
+        LOG.info('[plugin.advance] cleared step signal queues step=%s session=%s', step_id, session_id)
+    except Exception as exc:
+        LOG.warning('[plugin.advance] failed to clear step signal queues step=%s error=%s', step_id, exc)
+
+
+def _wait_for_step_started(step_id: str, timeout: float = 15.0) -> str:
+    """Poll FileSystemQueue for a step_started ack from Go/Core.
+
+    Raises TimeoutError when the streaming task_created event was not consumed
+    by Core in time. This is a launch failure, not a step execution timeout.
+    """
+    import time
+    from lazyllm.common.queue import FileSystemQueue
+
+    cfg = _agentic_config()
+    session_id = cfg.get('plugin_session_id', '')
+    queue_key = f'step_started_{session_id}_{step_id}'
+    fsq = FileSystemQueue(klass=queue_key)
+    deadline = time.monotonic() + timeout
+    LOG.info('[plugin.advance] waiting for step_started step=%s session=%s timeout=%.0fs', step_id, session_id, timeout)
+    while time.monotonic() < deadline:
+        for raw in fsq.dequeue():
+            try:
+                msg = json.loads(raw)
+            except Exception as exc:
+                LOG.warning(
+                    '[plugin.advance] ignored malformed step_started signal '
+                    'step=%s session=%s error=%s',
+                    step_id, session_id, exc,
+                )
+                continue
+            if msg.get('tag') == 'step_started':
+                task_id = str(msg.get('task_id') or '')
+                LOG.info(
+                    '[plugin.advance] received step_started step=%s session=%s task=%s',
+                    step_id, session_id, task_id,
+                )
+                return task_id
+            if msg.get('tag') == 'cancel':
+                LOG.warning(
+                    '[plugin.advance] received cancel before step_started step=%s session=%s',
+                    step_id, session_id,
+                )
+                raise RuntimeError(f'Step {step_id!r} was stopped before launch completed.')
+        time.sleep(0.2)
+    LOG.error('[plugin.advance] step_started timeout step=%s session=%s timeout=%.0fs', step_id, session_id, timeout)
+    raise TimeoutError(
+        f'Step {step_id!r} was not acknowledged by Core within {timeout:.0f}s. '
+        'The task_created stream event may not have been consumed.'
+    )
 
 
 def _wait_for_step_done(step_id: str, trigger_result: str, timeout: float = 600.0) -> str:
@@ -630,20 +973,36 @@ def _wait_for_step_done(step_id: str, trigger_result: str, timeout: float = 600.
         queue_key = f'step_done_{session_id}_{step_id}'
         fsq = FileSystemQueue(klass=queue_key)
         deadline = time.monotonic() + timeout
+        LOG.info('[plugin.advance] polling step_done step=%s session=%s timeout=%.0fs', step_id, session_id, timeout)
         while time.monotonic() < deadline:
             for raw in fsq.dequeue():
                 try:
                     msg = json.loads(raw)
                     # Support both old tag='step_done' format and new {status, summary} format.
                     if msg.get('tag') == 'step_done' or 'status' in msg:
+                        LOG.info(
+                            '[plugin.advance] received step_done step=%s session=%s status=%s summary_len=%d',
+                            step_id, session_id, msg.get('status', ''), len(msg.get('summary', '') or ''),
+                        )
                         return msg.get('summary', f"Step '{step_id}' completed.")
                     if msg.get('tag') == 'cancel':
+                        LOG.warning(
+                            '[plugin.advance] received cancel while waiting step_done '
+                            'step=%s session=%s',
+                            step_id, session_id,
+                        )
                         return f"Step '{step_id}' was stopped by the user."
-                except Exception:
-                    pass
+                except Exception as exc:
+                    LOG.warning(
+                        '[plugin.advance] ignored malformed step_done signal '
+                        'step=%s session=%s error=%s',
+                        step_id, session_id, exc,
+                    )
             time.sleep(2.0)
+        LOG.error('[plugin.advance] step_done timeout step=%s session=%s timeout=%.0fs', step_id, session_id, timeout)
         return f"Step '{step_id}' timed out waiting for completion (partial result may be available)."
-    except Exception:
+    except Exception as exc:
+        LOG.warning('[plugin.advance] step_done wait failed step=%s error=%s; returning trigger result', step_id, exc)
         return trigger_result
 
 
@@ -683,7 +1042,9 @@ def build_update_intent_tool() -> Any:
 
         Args:
             scope (str): 'session' for global or 'step' for step-specific constraint.
-            content (str): The intent/constraint description, in the user's own words.
+            content (str): A concise model-generated summary of the user's emphasized
+                constraints in the latest query (not a full raw quote). If no explicit
+                constraints are present, do not call this tool.
             step_id (str, optional): Required when scope='step'.
 
         Returns:
@@ -865,6 +1226,8 @@ def _build_chat_agent_task_context(conversation_id: str) -> str:
 def resolve_plugin_injection(
     plugin_context: Optional[Dict[str, Any]],
     conversation_id: str = '',
+    plugin_catalog: Optional[List[Dict[str, Any]]] = None,
+    disabled_builtin_plugins: Optional[List[str]] = None,
 ) -> tuple:
     """Resolve plugin tools, system prompt, stop-tools and agentic_config patches.
 
@@ -912,11 +1275,22 @@ def resolve_plugin_injection(
         p_current_step = plugin_context.get('current_step', '')
 
         if p_session_id and p_plugin_id:
+            if plugin_context.get('plugin_ref') and not plugin_loader.get_plugin(p_plugin_id):
+                _, restored_spec = plugin_loader.resolve_remote_plugin({
+                    **plugin_context,
+                    'plugin_id': p_plugin_id,
+                })
+                plugin_loader._registry[p_plugin_id] = restored_spec
             agentic_config_patch = {
                 'plugin_id': p_plugin_id,
                 'plugin_session_id': p_session_id,
                 'plugin_step': p_current_step,
                 'plugin_mode': plugin_mode,
+                'plugin_ref': plugin_context.get('plugin_ref'),
+                'revision_id': plugin_context.get('revision_id'),
+                'revision_no': plugin_context.get('revision_no'),
+                'tree_hash': plugin_context.get('tree_hash'),
+                'remote_root': plugin_context.get('remote_root'),
                 'focused_tab': plugin_context.get('focused_tab'),
                 'focused_sort_order': plugin_context.get('focused_sort_order'),
             }
@@ -994,54 +1368,49 @@ def resolve_plugin_injection(
             )
         else:
             # Cold start: no active session yet
-            plugin_tools = build_cold_start_tools()
+            plugin_tools = build_cold_start_tools(plugin_catalog, disabled_builtin_plugins)
             plugin_stop_tools = [t.__name__ for t in plugin_tools]
             if plugin_tools:
                 scenarios = [
                     plugin_loader.get_plugin_intro(spec.plugin_id)
                     for spec in (plugin_loader._registry or {}).values()
+                    if (
+                        spec.plugin_id not in set(disabled_builtin_plugins or [])
+                        and not spec.plugin_id.startswith('user_')
+                    )
                 ]
+                scenarios.extend(_catalog_intro(entry) for entry in (plugin_catalog or []))
                 plugin_system_prompt = (
-                    '## Available Plugins\n'
-                    'IMPORTANT: Only trigger a plugin when the capability matches the '
-                    'user\'s PRIMARY and DIRECT intent — the main goal they are asking for '
-                    'right now. Never trigger a plugin for a sub-step that the model has '
-                    'internally decided is part of a larger multi-step plan. If the user\'s '
-                    'request involves multiple steps and only one of those steps would use a '
-                    'plugin, do NOT trigger the plugin. Never infer plugin intent from '
-                    'indirect or implicit cues.\n'
-                    'When a plugin does match the user\'s primary and direct intent, call '
-                    'the matching `trigger_<plugin>_plugin` tool before using `ask_user`. '
-                    'Do not ask clarification questions first just because optional details '
-                    'are missing; pass the user\'s exact original request to the plugin so its '
-                    'workflow can collect context or proceed with sensible defaults.\n\n'
+                    _COLD_START_PLUGIN_PROMPT
                 ) + '\n\n---\n\n'.join(s for s in scenarios if s)
     else:
         # No plugin_context provided: still inject cold-start triggers
-        plugin_tools = build_cold_start_tools()
+        plugin_tools = build_cold_start_tools(plugin_catalog, disabled_builtin_plugins)
         plugin_stop_tools = [t.__name__ for t in plugin_tools]
         if plugin_tools:
             scenarios = [
                 plugin_loader.get_plugin_intro(spec.plugin_id)
                 for spec in (plugin_loader._registry or {}).values()
+                if (
+                    spec.plugin_id not in set(disabled_builtin_plugins or [])
+                    and not spec.plugin_id.startswith('user_')
+                )
             ]
+            scenarios.extend(_catalog_intro(entry) for entry in (plugin_catalog or []))
             plugin_system_prompt = (
-                '## Available Plugins\n'
-                'IMPORTANT: Only trigger a plugin when the capability matches the '
-                'user\'s PRIMARY and DIRECT intent — the main goal they are asking for '
-                'right now. Never trigger a plugin for a sub-step that the model has '
-                'internally decided is part of a larger multi-step plan. If the user\'s '
-                'request involves multiple steps and only one of those steps would use a '
-                'plugin, do NOT trigger the plugin. Never infer plugin intent from '
-                'indirect or implicit cues.\n'
-                'When a plugin does match the user\'s primary and direct intent, call '
-                'the matching `trigger_<plugin>_plugin` tool before using `ask_user`. '
-                'Do not ask clarification questions first just because optional details '
-                'are missing; pass the user\'s exact original request to the plugin so its '
-                'workflow can collect context or proceed with sensible defaults.\n\n'
+                _COLD_START_PLUGIN_PROMPT
             ) + '\n\n---\n\n'.join(s for s in scenarios if s)
 
     return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
+
+
+def _catalog_intro(entry: Dict[str, Any]) -> str:
+    lines = [f'## Plugin: {entry.get("plugin_id") or entry.get("name") or "plugin"}']
+    if entry.get('description'):
+        lines.append(str(entry['description']))
+    if entry.get('when_to_use'):
+        lines.append(f'When to use: {entry["when_to_use"]}')
+    return '\n'.join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1144,7 +1513,18 @@ def _build_mode_guidance(
     # --- Global decision rules (apply to both auto and dynamic modes) ---
     global_rules = (
         '\n\n## Step decision rules (READ BEFORE EVERY ACTION)\n\n'
-        '### Rule 1 — Intent-change detection (highest priority)\n'
+        '### Rule 0 — Intent capture from latest user query (highest priority)\n'
+        'At the beginning of each plugin turn, inspect ONLY the latest user query.\n'
+        'If it contains explicit constraints/emphasis (e.g. "必须/务必/一定/不要/不许/禁止/只能/根据..."),\n'
+        'you MUST call `update_intent(scope="session", content="<concise summary>")` FIRST,\n'
+        'before any step-advance tool call. Summarize 1-2 key constraints in concise Chinese.\n'
+        'If the latest query has no explicit new constraints, do NOT call update_intent.\n\n'
+        'ALSO: if the "User Intent & Constraints" section is empty (no session intent recorded yet)\n'
+        'AND the conversation history contains "一次性", "不要中断", "不要打断", "中间不要停",\n'
+        '"一次性写完", "run all steps", "do it all at once", or similar phrases,\n'
+        'call `update_intent(scope="session", content="<concise summary of the constraint>")`\n'
+        'to persist the constraint before advancing any step.\n\n'
+        '### Rule 1 — Intent-change detection\n'
         'Before advancing any step, check whether the user is rejecting or changing\n'
         'the outcome of a step that has ALREADY SUCCEEDED. Signals include:\n'
         '  - Direct negation: "我不喜欢…", "换成…", "不要…", "重新…", "I don\'t like…"\n'
@@ -1162,8 +1542,14 @@ def _build_mode_guidance(
         'still pending.\n\n'
         '### Rule 3 — Workflow advancement requests\n'
         'If the user clearly asks to proceed with the existing plugin workflow and\n'
-        'does not add new requirements, corrections, or dissatisfaction signals,\n'
-        'you MUST advance the workflow by calling `advance_step_and_hand_off`.\n'
+        'does not add new requirements, corrections, or dissatisfaction signals:\n'
+        '  - If continuous mode is NOT active: call `advance_step_and_hand_off` and stop.\n'
+        '  - If continuous mode IS active (Rule 4) and the user set a target boundary:\n'
+        '    use `advance_step` for prerequisite steps before that boundary, then use\n'
+        '    `advance_step_and_hand_off` for the boundary step and stop.\n'
+        '  - If continuous mode IS active with no target boundary: use `advance_step`\n'
+        '    for prerequisite remaining steps, then use `advance_step_and_hand_off`\n'
+        '    for the terminal/final-deliverable step and stop.\n'
         'Select the target from "Next forward steps (valid targets for continuing)"\n'
         'in the step-status block. If multiple forward targets are listed, choose\n'
         'the target whose transition condition best matches the current artifacts\n'
@@ -1189,25 +1575,52 @@ def _build_mode_guidance(
             terminal_hint = (
                 f'\n\n## Terminal steps (last steps before pipeline completion)\n\n'
                 f'The following steps lead directly to the end of the pipeline: {names}.\n'
-                'Treat terminal steps like any other single-step advancement: call '
-                '`advance_step_and_hand_off(step_id=<terminal_step>, ...)` and stop. '
-                'Do NOT use synchronous `advance_step` just because a step is terminal, '
-                'and do NOT keep the main chat turn open just to close `__end__`.\n\n'
-                'Pipeline completion is handled after the terminal step result is produced. '
-                'If another tool call is needed later to close `__end__`, it must be driven '
-                'by the normal plugin event loop or a later explicit user action, not by '
-                'blocking the current chat stream.'
+                'If the user explicitly targets one of these terminal steps as the boundary,\n'
+                'execute it with `advance_step_and_hand_off` and stop. If the user asks to\n'
+                'complete the whole pipeline and no narrower boundary is specified, run\n'
+                'prerequisite steps with `advance_step`, execute the terminal step with\n'
+                '`advance_step_and_hand_off`, and let the plugin event loop complete the\n'
+                'session after that terminal task finishes.\n'
+                'In default single-step mode, use `advance_step_and_hand_off` and stop.'
             )
         common += (
-            '- `advance_step`: Queue a step and WAIT for result (dynamic mode only). '
-            'Use only when the user explicitly asks to run multiple plugin steps in one '
-            'chat turn (for example, "连续执行后面三步" or "run steps 1 through 3 without '
-            'stopping"). In that case, use `advance_step` only for intermediate steps, '
-            'then use `advance_step_and_hand_off` for the final step of that turn.\n'
-            'For ordinary "继续", "下一步", single-step requests, and terminal/final-step '
-            'requests, you MUST call `advance_step_and_hand_off` and stop after the call.\n\n'
-            'After each step in dynamic mode, default to `advance_step_and_hand_off` so '
-            'the user can review the result and decide the next action.\n\n'
+            '- `advance_step`: Queue a step and WAIT for its result (dynamic mode only). '
+            'Use this in continuous/uninterrupted mode (see Rule 4 below). '
+            'Use `advance_step` for prerequisite steps before a requested boundary, then '
+            '`advance_step_and_hand_off` for the boundary step.\n'
+            'In default single-step mode (no uninterrupted constraint), use '
+            '`advance_step_and_hand_off` and stop.\n\n'
+            '### Rule 4 — Continuous / uninterrupted execution mode (MUST check before every action)\n'
+            'Activate continuous mode when ANY of the following is true:\n'
+            '  a) The "User Intent & Constraints" section contains phrases such as:\n'
+            '     "一次性完成", "一次性写完", "不要中断", "不要打断", "中间不要停",\n'
+            '     "run all steps", "do it all at once", "no interruptions", "without stopping".\n'
+            '  b) The current user query contains any of the above phrases.\n'
+            'Before executing continuous mode, determine whether the latest user query sets\n'
+            'an explicit target boundary with phrases like "执行到 X", "做到 X", "到 X 为止",\n'
+            '"生成到 X", "until X", or "up to X". Match X against the current plugin\'s\n'
+            'available step ids, step labels, and transition descriptions shown in the\n'
+            'Plugin Step Status / tool candidate lists. Do not assume plugin-specific step\n'
+            'names or meanings that are not present in the current plugin context.\n'
+            'A target boundary has higher priority than generic uninterrupted phrases. For\n'
+            'example, "一次性执行到 X，中间不要问我" means run only through the\n'
+            'matched boundary step X, then stop after queuing X.\n'
+            'In continuous mode:\n'
+            '  1. If an explicit target boundary exists, use `advance_step` only for steps\n'
+            '     before the boundary, in pipeline order.\n'
+            '  2. Execute the target boundary step with `advance_step_and_hand_off`, then stop.\n'
+            '     Do NOT wait for the boundary step with `advance_step`.\n'
+            '  3. Do NOT call downstream steps and do NOT call `__end__` after a non-`__end__`\n'
+            '     boundary hand-off.\n'
+            '  4. If there is no explicit target boundary and the user requested the whole\n'
+            '     pipeline/final deliverable, run prerequisite steps with `advance_step`,\n'
+            '     execute the terminal step with `advance_step_and_hand_off`, then stop.\n'
+            '  5. NEVER call `advance_step_and_hand_off` for intermediate steps — '
+            '     it hands off control and breaks the continuous run.\n'
+            '  6. If `advance_step` returns an error, stop the sequence immediately and '
+            '     report the failure; do not skip or continue to a later step.\n\n'
+            'After each step in default (non-continuous) mode, use `advance_step_and_hand_off` '
+            'so the user can review the result and decide the next action.\n\n'
             'When a step is interrupted and user says "继续": call advance_step_and_hand_off with '
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
             'and only produce missing outputs (resume from checkpoint)."\n'

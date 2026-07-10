@@ -14,6 +14,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/resourcechange"
+	skilldiff "lazymind/core/skillv2/diff"
 	"lazymind/core/store"
 )
 
@@ -39,17 +40,27 @@ type taskResponse struct {
 }
 
 type skillReviewResultResponse struct {
-	ID             string    `json:"id"`
-	SkillName      string    `json:"skill_name"`
-	Type           string    `json:"type"`
-	ReviewStatus   string    `json:"review_status"`
-	UserID         string    `json:"userid"`
-	RequestID      string    `json:"requestid"`
-	SkillContent   string    `json:"skill_content,omitempty"`
-	CurrentContent string    `json:"current_content,omitempty"`
-	Diff           string    `json:"diff,omitempty"`
-	Summary        string    `json:"summary"`
-	Time           time.Time `json:"time"`
+	ID             string                        `json:"id"`
+	SkillName      string                        `json:"skill_name"`
+	Type           string                        `json:"type"`
+	ReviewStatus   string                        `json:"review_status"`
+	UserID         string                        `json:"userid"`
+	RequestID      string                        `json:"requestid"`
+	SkillContent   string                        `json:"skill_content,omitempty"`
+	CurrentContent string                        `json:"current_content,omitempty"`
+	Diff           string                        `json:"diff,omitempty"`
+	DiffEntryLines []reviewDiffEntryLineResponse `json:"diffEntryLines,omitempty"`
+	Summary        string                        `json:"summary"`
+	Time           time.Time                     `json:"time"`
+}
+
+type reviewDiffEntryLineResponse struct {
+	Type                    string `json:"type"`
+	Text                    string `json:"text"`
+	HTML                    string `json:"html,omitempty"`
+	OldLine                 int    `json:"oldLine,omitempty"`
+	NewLine                 int    `json:"newLine,omitempty"`
+	DisplayNoNewLineWarning bool   `json:"displayNoNewLineWarning,omitempty"`
 }
 
 type skillReviewSummaryResponse struct {
@@ -559,6 +570,16 @@ func acceptSkillReviewResult(ctx context.Context, db *gorm.DB, userID, userName,
 		}
 		switch strings.TrimSpace(row.Type) {
 		case skillReviewTypePatch:
+			v2Resource, err := mapSkillPatchResultToV2Resource(ctx, withUpdateLock(tx), row)
+			if err == nil {
+				if err := applySkillV2PatchResult(ctx, tx, row, v2Resource); err != nil {
+					return err
+				}
+				break
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 			resource, err := mapSkillPatchResultToResource(withUpdateLock(tx).WithContext(ctx), row)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -575,13 +596,18 @@ func acceptSkillReviewResult(ctx context.Context, db *gorm.DB, userID, userName,
 				return err
 			}
 		case skillReviewTypeNew:
-			if _, err := createSkillFromNewResult(ctx, tx, row, userName, now, resourcechange.Source{
-				ChangeSource:  resourcechange.ChangeSourceReviewAccept,
-				SourceRefType: resourcechange.SourceRefTypeSkillReviewResult,
-				SourceRefID:   row.ID,
-				ChangedAt:     now,
-			}); err != nil {
-				return err
+			if _, err := createSkillV2FromNewResult(ctx, tx, row, userName); err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				if _, err := createSkillFromNewResult(ctx, tx, row, userName, now, resourcechange.Source{
+					ChangeSource:  resourcechange.ChangeSourceReviewAccept,
+					SourceRefType: resourcechange.SourceRefTypeSkillReviewResult,
+					SourceRefID:   row.ID,
+					ChangedAt:     now,
+				}); err != nil {
+					return err
+				}
 			}
 			if err := updateSkillReviewStatus(ctx, tx, row.ID, reviewStatusAccepted); err != nil {
 				return err
@@ -727,6 +753,11 @@ func LatestPendingSkillPatchReviewResult(ctx context.Context, db *gorm.DB, userI
 		return SkillReviewResult{}, err
 	}
 	for _, row := range rows {
+		if _, err := mapSkillPatchResultToV2Resource(ctx, db, row); err == nil {
+			return row, nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return SkillReviewResult{}, err
+		}
 		if _, err := mapSkillPatchResultToResource(db.WithContext(ctx), row); err == nil {
 			return row, nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -843,7 +874,20 @@ func skillResultDetailResponse(ctx context.Context, db *gorm.DB, row SkillReview
 				return skillReviewResultResponse{}, err
 			}
 			resp.Diff = diff
+			resp.DiffEntryLines = buildReviewDiffEntryLines(ctx, "", row.SkillContent)
 		}
+		return resp, nil
+	}
+	if current, ok, err := skillV2CurrentContent(ctx, db, row.UserID, row.SkillName); err != nil {
+		return skillReviewResultResponse{}, err
+	} else if ok {
+		resp.CurrentContent = current
+		diff, err := evolution.BuildContentDiff(current, row.SkillContent)
+		if err != nil {
+			return skillReviewResultResponse{}, err
+		}
+		resp.Diff = diff
+		resp.DiffEntryLines = buildReviewDiffEntryLines(ctx, current, row.SkillContent)
 		return resp, nil
 	}
 	resource, err := mapSkillPatchResultToResource(db.WithContext(ctx), row)
@@ -859,7 +903,52 @@ func skillResultDetailResponse(ctx context.Context, db *gorm.DB, row SkillReview
 		return skillReviewResultResponse{}, err
 	}
 	resp.Diff = diff
+	resp.DiffEntryLines = buildReviewDiffEntryLines(ctx, resource.Content, row.SkillContent)
 	return resp, nil
+}
+
+func buildReviewDiffEntryLines(ctx context.Context, currentContent, draftContent string) []reviewDiffEntryLineResponse {
+	oldFS := reviewSingleFileFS{content: currentContent, exists: strings.TrimSpace(currentContent) != ""}
+	newFS := reviewSingleFileFS{content: draftContent, exists: strings.TrimSpace(draftContent) != ""}
+	diff, err := skilldiff.NewService(skilldiff.ServiceDeps{}).CompareFile(ctx, oldFS, newFS, skilldiff.DiffOptions{Path: "SKILL.md"})
+	if err != nil {
+		return nil
+	}
+	out := make([]reviewDiffEntryLineResponse, 0, len(diff.DiffEntryLines))
+	for _, line := range diff.DiffEntryLines {
+		out = append(out, reviewDiffEntryLineResponse{
+			Type:                    line.Type,
+			Text:                    line.Text,
+			HTML:                    line.HTML,
+			OldLine:                 line.OldLine,
+			NewLine:                 line.NewLine,
+			DisplayNoNewLineWarning: line.DisplayNoNewLineWarning,
+		})
+	}
+	return out
+}
+
+type reviewSingleFileFS struct {
+	content string
+	exists  bool
+}
+
+func (fs reviewSingleFileFS) ListAll(context.Context) ([]skilldiff.EntryInfo, error) {
+	if !fs.exists {
+		return nil, nil
+	}
+	return []skilldiff.EntryInfo{{
+		Path:     "SKILL.md",
+		Type:     "file",
+		BlobHash: evolution.HashContent(fs.content),
+		Binary:   false,
+		FileType: "markdown",
+		Size:     int64(len([]byte(fs.content))),
+	}}, nil
+}
+
+func (fs reviewSingleFileFS) ReadFile(context.Context, string) ([]byte, error) {
+	return []byte(fs.content), nil
 }
 
 func memoryResultToResponse(row MemoryReviewResult) memoryReviewResultResponse {

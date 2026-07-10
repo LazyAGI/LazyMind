@@ -14,9 +14,11 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/filediff"
 	appLog "lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/resourcechange"
+	"lazymind/core/resourcefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/store"
 )
@@ -34,13 +36,22 @@ type upsertRequest struct {
 }
 
 type draftPreviewResponse struct {
-	ReviewResultID     string `json:"review_result_id"`
-	ReviewStatus       string `json:"review_status"`
-	DraftStatus        string `json:"draft_status"`
-	DraftSourceVersion int64  `json:"draft_source_version"`
-	CurrentContent     string `json:"current_content"`
-	DraftContent       string `json:"draft_content"`
-	Diff               string `json:"diff"`
+	ReviewResultID     string             `json:"review_result_id"`
+	ReviewStatus       string             `json:"review_status"`
+	DraftStatus        string             `json:"draft_status"`
+	DraftSourceVersion int64              `json:"draft_source_version"`
+	CurrentContent     string             `json:"current_content"`
+	DraftContent       string             `json:"draft_content"`
+	Diff               string             `json:"diff"`
+	FileDiff           *filediff.FileDiff `json:"file_diff,omitempty"`
+	RevisionID         string             `json:"revision_id,omitempty"`
+	DraftVersion       int64              `json:"draft_version,omitempty"`
+	ReviewID           string             `json:"review_id,omitempty"`
+	ReviewVersion      int64              `json:"review_version,omitempty"`
+	CanUndo            bool               `json:"can_undo"`
+	PendingCount       int                `json:"pending_count"`
+	AcceptedCount      int                `json:"accepted_count"`
+	RejectedCount      int                `json:"rejected_count"`
 }
 
 const maxManagedContentChars = 1500
@@ -317,12 +328,42 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	existing, err := evolution.LoadSystemUserPreference(r.Context(), db, userID)
-	if err != nil && err != gorm.ErrRecordNotFound {
+	if _, err := evolution.LoadSystemUserPreference(r.Context(), db, userID); err == gorm.ErrRecordNotFound {
+		row, err := upsertManagedPreferenceContent(r, db, userID, userName, req, true)
+		if err != nil {
+			common.ReplyErr(w, "update user_preference failed", http.StatusInternalServerError)
+			return
+		}
+		if _, _, _, err := ensurePreferenceResource(r.Context(), db, userID, userName); err != nil {
+			common.ReplyErr(w, "initialize user_preference resource failed", http.StatusInternalServerError)
+			return
+		}
+		reviewStatus, err := evolution.ManagedReviewStatusForResource(r.Context(), db, userID, evolution.ResourceTypeUserPreference)
+		if err != nil {
+			common.ReplyErr(w, "query user_preference failed", http.StatusInternalServerError)
+			return
+		}
+		item := evolution.NewManagedStateItem(evolution.ResourceTypeUserPreference, row, reviewStatus)
+		if summary, err := resourcechange.LatestSummaryForResource(r.Context(), db, userID, orm.ResourceUpdateResourceTypeUserPreference, row.ID); err == nil {
+			item.LatestVersionChange = summary
+		}
+		common.ReplyOK(w, item)
+		return
+	} else if err != nil {
 		common.ReplyErr(w, "query user_preference failed", http.StatusInternalServerError)
 		return
 	}
-	pendingDraft := existing != nil && strings.TrimSpace(existing.DraftStatus) == "pending_confirm"
+
+	existing, fsService, _, err := ensurePreferenceResource(r.Context(), db, userID, userName)
+	if err != nil {
+		common.ReplyErr(w, "query user_preference failed", http.StatusInternalServerError)
+		return
+	}
+	draft, pendingDraft, err := preferenceDraftIsPending(r.Context(), fsService, userID)
+	if err != nil {
+		common.ReplyErr(w, "query user_preference draft failed", http.StatusInternalServerError)
+		return
+	}
 	if pendingDraft && (req.AutoEvo == nil || !*req.AutoEvo) {
 		common.ReplyErr(w, "user_preference draft already pending_confirm", http.StatusConflict)
 		return
@@ -330,7 +371,70 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 
 	var row *orm.SystemUserPreference
 	if pendingDraft {
+		if _, err := fsService.DiscardDraft(r.Context(), preferenceResourceRef(userID)); err != nil {
+			common.ReplyErr(w, "discard user_preference draft failed", http.StatusInternalServerError)
+			return
+		}
 		row, err = enableManagedPreferenceAutoEvoWithDiscardedDraft(r, db, existing, userID, userName)
+		if err != nil {
+			common.ReplyErr(w, "update user_preference failed", http.StatusInternalServerError)
+			return
+		}
+	} else if req.Content != nil || req.AgentPersona != nil || req.PreferredName != nil || req.ResponseStyle != nil {
+		head, err := fsService.ReadFile(r.Context(), resourcefs.ReadFileRequest{Ref: preferenceResourceRef(userID), RefType: resourcefs.FileRefHead})
+		if err != nil {
+			common.ReplyErr(w, "query user_preference file failed", http.StatusInternalServerError)
+			return
+		}
+		nextContent, parsed, err := PatchFileContent(head.Content, PreferencePatch{
+			Content:       req.Content,
+			AgentPersona:  req.AgentPersona,
+			PreferredName: req.PreferredName,
+			ResponseStyle: req.ResponseStyle,
+		})
+		if err != nil {
+			common.ReplyErr(w, "invalid user_preference file", http.StatusBadRequest)
+			return
+		}
+		draftResp, err := fsService.WriteDraft(r.Context(), resourcefs.WriteDraftRequest{
+			Ref:                  preferenceResourceRef(userID),
+			Content:              nextContent,
+			ExpectedDraftVersion: draft.DraftVersion,
+			UpdatedBy:            userID,
+		})
+		if err != nil {
+			common.ReplyErr(w, "update user_preference draft failed", http.StatusInternalServerError)
+			return
+		}
+		commit, err := fsService.CommitDraft(r.Context(), resourcefs.CommitDraftRequest{
+			Ref:                  preferenceResourceRef(userID),
+			Message:              "direct user_preference update",
+			SourceRefType:        "user_preference",
+			SourceRefID:          existing.ID,
+			ExpectedDraftVersion: draftResp.DraftVersion,
+			CreatedBy:            userID,
+		})
+		if err != nil {
+			common.ReplyErr(w, "commit user_preference draft failed", http.StatusInternalServerError)
+			return
+		}
+		parsed, err = ParseFileContent(commit.Content)
+		if err != nil {
+			common.ReplyErr(w, "invalid committed user_preference file", http.StatusInternalServerError)
+			return
+		}
+		content := parsed.Content
+		agentPersona := parsed.AgentPersona
+		preferredName := parsed.PreferredName
+		responseStyle := parsed.ResponseStyle
+		syncReq := upsertRequest{
+			Content:       &content,
+			AgentPersona:  &agentPersona,
+			PreferredName: &preferredName,
+			ResponseStyle: &responseStyle,
+			AutoEvo:       req.AutoEvo,
+		}
+		row, err = upsertManagedPreferenceContent(r, db, userID, userName, syncReq, true)
 		if err != nil {
 			common.ReplyErr(w, "update user_preference failed", http.StatusInternalServerError)
 			return
@@ -385,36 +489,42 @@ func DraftPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := evolution.LoadSystemUserPreference(r.Context(), db, userID)
-	if err == gorm.ErrRecordNotFound {
-		common.ReplyErr(w, "user_preference not found", http.StatusNotFound)
-		return
-	}
+	_, fsService, _, err := ensurePreferenceResource(r.Context(), db, userID, store.UserName(r))
 	if err != nil {
 		common.ReplyErr(w, "query user_preference failed", http.StatusInternalServerError)
 		return
 	}
-	result, err := resourceupdate.LatestPendingMemoryReviewResult(r.Context(), db, userID, orm.ResourceUpdateResourceTypeUserPreference)
+	preview, err := fsService.DraftPreview(r.Context(), resourcefs.DraftPreviewRequest{Ref: preferenceResourceRef(userID)})
 	if err != nil {
-		resourceupdate.ReplyReviewError(w, err, "user_preference draft")
+		common.ReplyErr(w, "user_preference draft not found", http.StatusNotFound)
 		return
 	}
-
-	currentContent := evolution.FormatSystemUserPreferenceForChat(*row)
-	diff, err := evolution.BuildContentDiff(currentContent, result.Content)
+	if strings.TrimSpace(preview.DraftStatus) != "pending_confirm" {
+		common.ReplyErr(w, "user_preference draft not found", http.StatusNotFound)
+		return
+	}
+	diff, err := evolution.BuildContentDiff(preview.HeadContent, preview.DraftContent)
 	if err != nil {
 		common.ReplyErr(w, "build user_preference diff failed", http.StatusInternalServerError)
 		return
 	}
 
 	common.ReplyOK(w, draftPreviewResponse{
-		ReviewResultID:     result.ID,
-		ReviewStatus:       result.ReviewStatus,
-		DraftStatus:        result.ReviewStatus,
-		DraftSourceVersion: row.Version,
-		CurrentContent:     currentContent,
-		DraftContent:       result.Content,
+		ReviewStatus:       preview.DraftStatus,
+		DraftStatus:        preview.DraftStatus,
+		DraftSourceVersion: preview.DraftVersion,
+		CurrentContent:     preview.HeadContent,
+		DraftContent:       preview.DraftContent,
 		Diff:               diff,
+		FileDiff:           &preview.Diff,
+		RevisionID:         preview.BaseRevisionID,
+		DraftVersion:       preview.DraftVersion,
+		ReviewID:           preview.ReviewID,
+		ReviewVersion:      preview.ReviewVersion,
+		CanUndo:            preview.CanUndo,
+		PendingCount:       preview.PendingCount,
+		AcceptedCount:      preview.AcceptedCount,
+		RejectedCount:      preview.RejectedCount,
 	})
 }
 
@@ -442,19 +552,19 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := evolution.EnsureSystemUserPreference(r.Context(), db, userID, userName)
+	row, fsService, _, err := ensurePreferenceResource(r.Context(), db, userID, userName)
 	if err != nil {
 		common.ReplyErr(w, "query user_preference failed", http.StatusInternalServerError)
 		return
 	}
-	content, err := preferenceGenerateBaseContent(*row)
+	base, err := preferenceCurrentWritableContent(r.Context(), fsService, userID)
 	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusNotFound)
+		common.ReplyErr(w, "query user_preference content failed", http.StatusInternalServerError)
 		return
 	}
 
 	algoReq := algo.ManagedGenerateRequest{
-		Content:      content,
+		Content:      base.Content,
 		UserInstruct: req.UserInstruct,
 	}
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), db, userID)
@@ -475,18 +585,18 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now()
-	update := map[string]any{
-		"draft_content":        generated,
-		"draft_source_version": row.Version,
-		"draft_status":         "pending_confirm",
-		"draft_updated_at":     now,
-		"updated_by":           userID,
-		"updated_by_name":      userName,
-		"updated_at":           now,
-		"ext":                  evolution.WithDraftSuggestionIDs(row.Ext, nil),
+	draft, _, err := preferenceDraftIsPending(r.Context(), fsService, userID)
+	if err != nil {
+		common.ReplyErr(w, "query user_preference draft failed", http.StatusInternalServerError)
+		return
 	}
-	if err := db.WithContext(r.Context()).Model(&orm.SystemUserPreference{}).Where("id = ?", row.ID).Updates(update).Error; err != nil {
+	draftResp, err := fsService.WriteDraft(r.Context(), resourcefs.WriteDraftRequest{
+		Ref:                  preferenceResourceRef(userID),
+		Content:              generated,
+		ExpectedDraftVersion: draft.DraftVersion,
+		UpdatedBy:            userID,
+	})
+	if err != nil {
 		common.ReplyErr(w, "update user_preference draft failed", http.StatusInternalServerError)
 		return
 	}
@@ -494,6 +604,7 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		"draft_status":         "pending_confirm",
 		"draft_source_version": row.Version,
 		"draft_content":        generated,
+		"draft_version":        draftResp.DraftVersion,
 	})
 }
 
@@ -516,18 +627,44 @@ func Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := resourceupdate.LatestPendingMemoryReviewResult(r.Context(), db, userID, orm.ResourceUpdateResourceTypeUserPreference)
-	if err != nil {
-		resourceupdate.ReplyReviewError(w, err, "user_preference draft")
-		return
-	}
-	if _, err := resourceupdate.AcceptMemoryReviewResultByID(r.Context(), db, userID, result.ID); err != nil {
-		resourceupdate.ReplyReviewError(w, err, "confirm user_preference draft")
-		return
-	}
-	row, err := evolution.LoadSystemUserPreference(r.Context(), db, userID)
+	userName := strings.TrimSpace(store.UserName(r))
+	_, fsService, _, err := ensurePreferenceResource(r.Context(), db, userID, userName)
 	if err != nil {
 		common.ReplyErr(w, "query user_preference failed", http.StatusInternalServerError)
+		return
+	}
+	preview, err := fsService.DraftPreview(r.Context(), resourcefs.DraftPreviewRequest{Ref: preferenceResourceRef(userID)})
+	if err != nil || strings.TrimSpace(preview.DraftStatus) != "pending_confirm" {
+		common.ReplyErr(w, "user_preference draft not found", http.StatusNotFound)
+		return
+	}
+	parsed, err := ParseFileContent(preview.DraftContent)
+	if err != nil {
+		common.ReplyErr(w, "invalid user_preference draft", http.StatusBadRequest)
+		return
+	}
+	if _, err := fsService.CommitDraft(r.Context(), resourcefs.CommitDraftRequest{
+		Ref:                  preferenceResourceRef(userID),
+		Message:              "confirm user_preference draft",
+		SourceRefType:        "user_preference",
+		ExpectedDraftVersion: preview.DraftVersion,
+		CreatedBy:            userID,
+	}); err != nil {
+		common.ReplyErr(w, "confirm user_preference draft failed", http.StatusInternalServerError)
+		return
+	}
+	content := parsed.Content
+	agentPersona := parsed.AgentPersona
+	preferredName := parsed.PreferredName
+	responseStyle := parsed.ResponseStyle
+	row, err := upsertManagedPreferenceContent(r, db, userID, userName, upsertRequest{
+		Content:       &content,
+		AgentPersona:  &agentPersona,
+		PreferredName: &preferredName,
+		ResponseStyle: &responseStyle,
+	}, true)
+	if err != nil {
+		common.ReplyErr(w, "sync user_preference failed", http.StatusInternalServerError)
 		return
 	}
 	common.ReplyOK(w, map[string]any{
@@ -551,13 +688,13 @@ func Discard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := resourceupdate.LatestPendingMemoryReviewResult(r.Context(), db, userID, orm.ResourceUpdateResourceTypeUserPreference)
+	_, fsService, _, err := ensurePreferenceResource(r.Context(), db, userID, store.UserName(r))
 	if err != nil {
-		resourceupdate.ReplyReviewError(w, err, "user_preference draft")
+		common.ReplyErr(w, "query user_preference failed", http.StatusInternalServerError)
 		return
 	}
-	if _, err := resourceupdate.RejectMemoryReviewResultByID(r.Context(), db, userID, result.ID); err != nil {
-		resourceupdate.ReplyReviewError(w, err, "discard user_preference draft")
+	if _, err := fsService.DiscardDraft(r.Context(), preferenceResourceRef(userID)); err != nil {
+		common.ReplyErr(w, "discard user_preference draft failed", http.StatusInternalServerError)
 		return
 	}
 	common.ReplyOK(w, map[string]any{"discarded": true})

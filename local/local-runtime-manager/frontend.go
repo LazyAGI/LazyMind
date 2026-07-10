@@ -76,6 +76,17 @@ func (m *FrontendManager) Run(ctx context.Context, cfg RuntimeConfig, paths Runt
 		Args: []string{"run", "--config", paths.CaddyConfig, "--adapter", "caddyfile"},
 		Dir:  paths.RepoRoot,
 	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		return err
+	}
+	if err := os.WriteFile(paths.FrontendPIDFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		return err
+	}
+	registerLocalProcess(paths, frontendProcessName, os.Getpid(), []int{cfg.FrontendPort}, append([]string{caddyBin}, run.Args...))
+	defer func() {
+		_ = os.Remove(paths.FrontendPIDFile)
+		unregisterLocalProcess(paths, frontendProcessName, os.Getpid())
+	}()
 	if res, err := m.runner.Run(ctx, run); err != nil {
 		return fmt.Errorf("frontend caddy exited: %w (%s)", err, commandResultDetail(res))
 	}
@@ -107,10 +118,26 @@ func (m *FrontendManager) runFrontendCommand(ctx context.Context, cmd Command, t
 }
 
 func (m *FrontendManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	_ = ctx
-	_ = cfg
-	_ = paths
-	return nil
+	if err := paths.EnsureAllDirs(); err != nil {
+		return err
+	}
+	if readPIDFileQuiet(paths.FrontendPIDFile) > 0 {
+		return stopPIDFileProcess(ctx, paths.FrontendPIDFile)
+	}
+
+	records := discoverLocalRuntimeProcesses(paths, cfg, scanLocalRuntimeProcesses)
+	frontendRecords := make([]LocalProcessRecord, 0, len(records))
+	for _, record := range records {
+		if record.Service == frontendProcessName && record.PID != os.Getpid() {
+			frontendRecords = append(frontendRecords, record)
+		}
+	}
+	if len(frontendRecords) == 0 {
+		return nil
+	}
+	err := stopLocalProcessRecords(ctx, frontendRecords)
+	cleanupLocalProcessRecords(paths, frontendRecords)
+	return err
 }
 
 func frontendBuildEnv() []string {
@@ -171,7 +198,7 @@ func prepareFrontendNodeModules(paths RuntimePaths, frontendDir string) error {
 			return err
 		}
 		if err := os.RemoveAll(nodeModules); err != nil {
-			return fmt.Errorf("move frontend node_modules into local runtime root: %w", err)
+			return fmt.Errorf("move frontend node_modules into local build root: %w", err)
 		}
 		if ready {
 			_ = os.RemoveAll(runtimeNodeModules)
@@ -183,7 +210,7 @@ func prepareFrontendNodeModules(paths RuntimePaths, frontendDir string) error {
 		return fmt.Errorf("inspect frontend node_modules: %w", err)
 	}
 	if err := os.Symlink(runtimeNodeModules, nodeModules); err != nil {
-		return fmt.Errorf("link frontend node_modules to local runtime root: %w", err)
+		return fmt.Errorf("link frontend node_modules to local build root: %w", err)
 	}
 	return nil
 }
@@ -304,12 +331,18 @@ func writeCaddyfile(paths RuntimePaths, cfg RuntimeConfig) error {
 		}
 	}
 
+	handle /_local/* {
+		reverse_proxy %s {
+			flush_interval -1
+		}
+	}
+
 	handle {
 		try_files {path} /index.html
 		file_server
 	}
 }
-`, siteAddress, bindAddress, strconv.Quote(distRoot), proxy, proxy)
+`, siteAddress, bindAddress, strconv.Quote(distRoot), proxy, proxy, proxy)
 	return os.WriteFile(paths.CaddyConfig, []byte(content), 0o644)
 }
 

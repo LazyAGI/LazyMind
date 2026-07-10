@@ -1160,7 +1160,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     />
                   </div>
                   <div className="input-bottom-actions-right-item">
-                    <Tooltip title="以异步任务方式执行，可在任务中心查看进度和结果">
+                    <Tooltip title={t("chat.runInBackgroundTooltip")}>
                       <Button
                         size="small"
                         type="text"
@@ -1195,9 +1195,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           setText("");
                           onClearCiteMessage?.();
                         }}
-                        aria-label="后台运行"
+                        aria-label={t("chat.runInBackground")}
                       >
-                        后台运行
+                        {t("chat.runInBackground")}
                       </Button>
                     </Tooltip>
                   </div>

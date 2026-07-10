@@ -15,6 +15,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/resourcechange"
+	"lazymind/core/resourcefs"
 	"lazymind/core/store"
 )
 
@@ -96,6 +97,31 @@ func memoryReviewResultStatus(t *testing.T, db *orm.DB, id string) string {
 		t.Fatalf("query memory review result %s: %v", id, err)
 	}
 	return row.ReviewStatus
+}
+
+func createMemoryResourceDraft(t *testing.T, db *orm.DB, userID, draftContent string) {
+	t.Helper()
+	row, err := evolution.LoadSystemMemory(context.Background(), db.DB, userID)
+	if err != nil {
+		t.Fatalf("load memory: %v", err)
+	}
+	service := resourcefs.NewService(resourcefs.ServiceDeps{DB: db.DB})
+	ref := resourcefs.ResourceRef{UserID: userID, ResourceType: resourcefs.ResourceTypeMemory}
+	if _, err := service.EnsureResource(context.Background(), ref, row.Content); err != nil {
+		t.Fatalf("ensure memory resource: %v", err)
+	}
+	draft, err := service.ReadFile(context.Background(), resourcefs.ReadFileRequest{Ref: ref, RefType: resourcefs.FileRefDraft})
+	if err != nil {
+		t.Fatalf("read memory draft: %v", err)
+	}
+	if _, err := service.WriteDraft(context.Background(), resourcefs.WriteDraftRequest{
+		Ref:                  ref,
+		Content:              draftContent,
+		ExpectedDraftVersion: draft.DraftVersion,
+		UpdatedBy:            userID,
+	}); err != nil {
+		t.Fatalf("write memory draft: %v", err)
+	}
 }
 
 func TestUpsertCreatesThenUpdatesMemory(t *testing.T) {
@@ -396,23 +422,20 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 
 	now := time.Now()
 	row := orm.SystemMemory{
-		ID:                 "memory-1",
-		UserID:             "u1",
-		Content:            "current memory",
-		ContentHash:        "hash-current",
-		Version:            2,
-		DraftContent:       "legacy draft memory",
-		DraftSourceVersion: 2,
-		DraftStatus:        "pending_confirm",
-		UpdatedBy:          "u1",
-		UpdatedByName:      "User 1",
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:            "memory-1",
+		UserID:        "u1",
+		Content:       "current memory",
+		ContentHash:   "hash-current",
+		Version:       2,
+		UpdatedBy:     "u1",
+		UpdatedByName: "User 1",
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create memory: %v", err)
 	}
-	createMemoryReviewResult(t, db, "memory-preview", "u1", orm.ResourceUpdateResourceTypeMemory, "updated memory", now)
+	createMemoryResourceDraft(t, db, "u1", "updated memory")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/memory:draft-preview", nil)
 	req.Header.Set("X-User-Id", "u1")
@@ -431,11 +454,11 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 	if resp.Code != 0 {
 		t.Fatalf("expected code 0, got %d message=%s", resp.Code, resp.Message)
 	}
-	if resp.Data.ReviewResultID != "memory-preview" {
-		t.Fatalf("expected review_result_id memory-preview, got %q", resp.Data.ReviewResultID)
+	if resp.Data.ReviewResultID != "" {
+		t.Fatalf("expected empty legacy review_result_id, got %q", resp.Data.ReviewResultID)
 	}
-	if resp.Data.ReviewStatus != "pending" || resp.Data.DraftStatus != "pending" {
-		t.Fatalf("expected pending review status, got review_status=%q draft_status=%q", resp.Data.ReviewStatus, resp.Data.DraftStatus)
+	if resp.Data.ReviewStatus != "pending_confirm" || resp.Data.DraftStatus != "pending_confirm" {
+		t.Fatalf("expected resourcefs pending status, got review_status=%q draft_status=%q", resp.Data.ReviewStatus, resp.Data.DraftStatus)
 	}
 	if resp.Data.CurrentContent != "current memory" {
 		t.Fatalf("unexpected current content: %q", resp.Data.CurrentContent)
@@ -451,7 +474,7 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 	}
 }
 
-func TestDraftPreviewIgnoresLegacyMemoryResourceDraft(t *testing.T) {
+func TestDraftPreviewMigratesLegacyMemoryResourceDraft(t *testing.T) {
 	db := newMemoryTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -481,8 +504,15 @@ func TestDraftPreviewIgnoresLegacyMemoryResourceDraft(t *testing.T) {
 
 	DraftPreview(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected legacy resource draft to be ignored as 404, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected legacy draft_content to migrate into resourcefs draft, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp draftPreviewMemoryAPITestResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.DraftContent != "legacy draft memory" {
+		t.Fatalf("expected migrated resourcefs draft, got %q", resp.Data.DraftContent)
 	}
 }
 
@@ -512,23 +542,21 @@ func TestGenerateOverwritesExistingPendingDraft(t *testing.T) {
 
 	now := time.Now()
 	row := orm.SystemMemory{
-		ID:                 "memory-1",
-		UserID:             "u1",
-		Content:            "current memory",
-		ContentHash:        evolution.HashContent("current memory"),
-		Version:            3,
-		DraftContent:       "old draft content",
-		DraftSourceVersion: 2,
-		DraftStatus:        "pending_confirm",
-		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"old-suggestion"}),
-		UpdatedBy:          "u1",
-		UpdatedByName:      "User 1",
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:            "memory-1",
+		UserID:        "u1",
+		Content:       "current memory",
+		ContentHash:   evolution.HashContent("current memory"),
+		Version:       3,
+		Ext:           evolution.WithDraftSuggestionIDs(nil, []string{"old-suggestion"}),
+		UpdatedBy:     "u1",
+		UpdatedByName: "User 1",
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create memory: %v", err)
 	}
+	createMemoryResourceDraft(t, db, "u1", "old draft content")
 	suggestion := orm.ResourceSuggestion{
 		ID:           "suggestion-1",
 		UserID:       "u1",
@@ -571,19 +599,13 @@ func TestGenerateOverwritesExistingPendingDraft(t *testing.T) {
 		t.Fatalf("unexpected draft content: %q", resp.Data.DraftContent)
 	}
 
-	var updated orm.SystemMemory
-	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
-		t.Fatalf("query updated memory: %v", err)
+	service := resourcefs.NewService(resourcefs.ServiceDeps{DB: db.DB})
+	draft, err := service.ReadFile(context.Background(), resourcefs.ReadFileRequest{Ref: resourcefs.ResourceRef{UserID: "u1", ResourceType: resourcefs.ResourceTypeMemory}, RefType: resourcefs.FileRefDraft})
+	if err != nil {
+		t.Fatalf("read resourcefs draft: %v", err)
 	}
-	if updated.DraftContent != "new draft content" {
-		t.Fatalf("expected draft to be overwritten, got %q", updated.DraftContent)
-	}
-	if updated.DraftSourceVersion != row.Version {
-		t.Fatalf("expected draft source version %d, got %d", row.Version, updated.DraftSourceVersion)
-	}
-	gotIDs := evolution.DraftSuggestionIDs(updated.Ext)
-	if len(gotIDs) != 0 {
-		t.Fatalf("expected draft suggestion ids to be cleared, got %#v", gotIDs)
+	if draft.Content != "new draft content" {
+		t.Fatalf("expected resourcefs draft to be overwritten, got %q", draft.Content)
 	}
 }
 
@@ -617,23 +639,21 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 
 	now := time.Now()
 	row := orm.SystemMemory{
-		ID:                 "memory-1",
-		UserID:             "u1",
-		Content:            "current memory",
-		ContentHash:        evolution.HashContent("current memory"),
-		Version:            3,
-		DraftContent:       "draft memory",
-		DraftSourceVersion: 3,
-		DraftStatus:        "pending_confirm",
-		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
-		UpdatedBy:          "u1",
-		UpdatedByName:      "User 1",
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:            "memory-1",
+		UserID:        "u1",
+		Content:       "current memory",
+		ContentHash:   evolution.HashContent("current memory"),
+		Version:       3,
+		Ext:           evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
+		UpdatedBy:     "u1",
+		UpdatedByName: "User 1",
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create memory: %v", err)
 	}
+	createMemoryResourceDraft(t, db, "u1", "draft memory")
 	suggestion := orm.ResourceSuggestion{
 		ID:           "suggestion-1",
 		UserID:       "u1",
@@ -674,16 +694,6 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if _, ok := algoBody["suggestions"]; ok {
 		t.Fatalf("suggestions should not be sent to algorithm: %#v", algoBody["suggestions"])
 	}
-	var updated orm.SystemMemory
-	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
-		t.Fatalf("query updated memory: %v", err)
-	}
-	gotIDs := evolution.DraftSuggestionIDs(updated.Ext)
-	if len(gotIDs) != 0 {
-		t.Fatalf("expected draft suggestion ids to be cleared, got %#v", gotIDs)
-	}
-	createMemoryReviewResult(t, db, "memory-confirm", "u1", orm.ResourceUpdateResourceTypeMemory, "draft from user instruction", now.Add(time.Second))
-
 	confirmReq := httptest.NewRequest(http.MethodPost, "/api/core/memory:confirm", nil)
 	confirmReq.Header.Set("X-User-Id", "u1")
 	confirmReq.Header.Set("X-User-Name", "User 1")
@@ -694,42 +704,37 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if confirmRec.Code != http.StatusOK {
 		t.Fatalf("expected confirm status 200, got %d body=%s", confirmRec.Code, confirmRec.Body.String())
 	}
-	if status := memoryReviewResultStatus(t, db, "memory-confirm"); status != "accepted" {
-		t.Fatalf("expected review result accepted, got %q", status)
-	}
 	var confirmed orm.SystemMemory
 	if err := db.Where("id = ?", row.ID).Take(&confirmed).Error; err != nil {
 		t.Fatalf("query confirmed memory: %v", err)
 	}
 	if confirmed.Content != "draft from user instruction" || confirmed.Version != row.Version+1 {
-		t.Fatalf("expected review result content to be applied, got content=%q version=%d", confirmed.Content, confirmed.Version)
+		t.Fatalf("expected resourcefs draft content to be applied, got content=%q version=%d", confirmed.Content, confirmed.Version)
 	}
 }
 
-func TestDiscardRejectsPendingMemoryReviewResult(t *testing.T) {
+func TestDiscardDoesNotTouchPendingMemoryReviewResult(t *testing.T) {
 	db := newMemoryTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
 	now := time.Now()
 	row := orm.SystemMemory{
-		ID:                 "memory-1",
-		UserID:             "u1",
-		Content:            "current memory",
-		ContentHash:        evolution.HashContent("current memory"),
-		Version:            3,
-		DraftContent:       "legacy draft memory",
-		DraftSourceVersion: 3,
-		DraftStatus:        "pending_confirm",
-		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
-		UpdatedBy:          "u1",
-		UpdatedByName:      "User 1",
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:            "memory-1",
+		UserID:        "u1",
+		Content:       "current memory",
+		ContentHash:   evolution.HashContent("current memory"),
+		Version:       3,
+		Ext:           evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
+		UpdatedBy:     "u1",
+		UpdatedByName: "User 1",
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create memory: %v", err)
 	}
+	createMemoryResourceDraft(t, db, "u1", "resourcefs draft memory")
 	createMemoryReviewResult(t, db, "memory-discard", "u1", orm.ResourceUpdateResourceTypeMemory, "review draft memory", now)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/memory:discard", nil)
@@ -742,8 +747,8 @@ func TestDiscardRejectsPendingMemoryReviewResult(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if status := memoryReviewResultStatus(t, db, "memory-discard"); status != "rejected" {
-		t.Fatalf("expected review result rejected, got %q", status)
+	if status := memoryReviewResultStatus(t, db, "memory-discard"); status != "pending" {
+		t.Fatalf("expected legacy review result to remain pending, got %q", status)
 	}
 	var updated orm.SystemMemory
 	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {

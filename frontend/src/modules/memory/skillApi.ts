@@ -1,6 +1,43 @@
+import {
+  Configuration as CoreConfiguration,
+  SkillDiffApiFactory,
+  SkillDraftsApiFactory,
+  SkillFsApiFactory,
+  SkillMarketApiFactory,
+  SkillRevisionsApiFactory,
+  SkillSharesApiFactory,
+  SkillsApiFactory,
+  type DiffEntryLineOpenAPIResponse,
+  type DiffFileOpenAPIResponse,
+  type DiffTreeOpenAPIResponse,
+  type SkillCreateManagedOpenAPIRequest,
+  type SkillDetailOpenAPIResponse,
+  type SkillDraftStatusOpenAPIResponse,
+  type SkillFileOpenAPIResponse,
+  type SkillListItemOpenAPIResponse,
+  type SkillRevisionOpenAPIResponse,
+  type SkillShareDetailOpenAPIResponse,
+  type SkillShareListItemOpenAPIResponse,
+  type SkillShareTargetItemOpenAPIResponse,
+  type SkillTreeNodeOpenAPIResponse,
+  type SkillUpdateManagedOpenAPIRequest,
+} from "@/api/generated/core-client";
 import { axiosInstance, BASE_URL } from "@/components/request";
+import { mapDiffEntryLines } from "./components/skillPackage/skillDiffUtils";
+import type { DiffLine } from "./shared";
+
+const coreConfig = new CoreConfiguration({ basePath: BASE_URL });
+const skillsApi = SkillsApiFactory(coreConfig, BASE_URL, axiosInstance);
+const skillDraftsApi = SkillDraftsApiFactory(coreConfig, BASE_URL, axiosInstance);
+const skillFsApi = SkillFsApiFactory(coreConfig, BASE_URL, axiosInstance);
+const skillRevisionsApi = SkillRevisionsApiFactory(coreConfig, BASE_URL, axiosInstance);
+const skillSharesApi = SkillSharesApiFactory(coreConfig, BASE_URL, axiosInstance);
+const skillMarketApi = SkillMarketApiFactory(coreConfig, BASE_URL, axiosInstance);
+const skillDiffApi = SkillDiffApiFactory(coreConfig, BASE_URL, axiosInstance);
 
 const coreBasePath = `${BASE_URL}/api/core`;
+
+const SKILL_MD_PATH = "SKILL.md";
 
 interface ApiEnvelope<T> {
   code?: number;
@@ -8,82 +45,51 @@ interface ApiEnvelope<T> {
   data?: T;
 }
 
-interface SkillNode {
-  id?: string;
-  skill_id?: string;
-  skillId?: string;
-  name?: string;
-  skill_name?: string;
-  description?: string;
-  desc?: string;
-  category?: string;
-  tags?: unknown;
-  content?: string;
-  parent_id?: string;
-  parent_skill_id?: string;
-  parent_skill_name?: string;
-  parentSkillId?: string;
-  parentSkillName?: string;
-  auto_evo?: boolean;
-  is_locked?: boolean;
-  is_enabled?: boolean;
-  file_ext?: string;
-  node_type?: string;
-  update_status?: string;
-  review_status?: string;
-  has_pending_review_result?: boolean;
-  has_pending_review_suggestions?: boolean;
-  has_pending_remove_suggestion?: boolean;
-  suggestion_status?: string;
-  auto_evo_apply_status?: string;
-  auto_evo_generation?: number;
-  auto_evo_error?: string;
-  builtin_skill_uid?: string;
-  builtinSkillUid?: string;
-  origin_builtin_skill_uid?: string;
-  originBuiltinSkillUid?: string;
-  is_builtin_template?: boolean;
-  isBuiltinTemplate?: boolean;
-  activation_status?: string;
-  activationStatus?: string;
-  readonly?: boolean;
-  children?: SkillNode[];
-  [key: string]: unknown;
+type WrappedPayload<T> = T | ApiEnvelope<T>;
+
+const unwrapEnvelope = <T>(payload: WrappedPayload<T>): T => {
+  if (payload && typeof payload === "object" && "data" in payload) {
+    const envelope = payload as ApiEnvelope<T>;
+    if (envelope.data !== undefined) {
+      return envelope.data;
+    }
+  }
+  return payload as T;
+};
+
+const toStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+};
+
+export interface SkillDraftSummary {
+  hasUncommittedDraft: boolean;
+  taskId: string;
+  version: number;
 }
 
 export interface SkillAssetRecord {
   id: string;
+  skillId: string;
   name: string;
+  skillName: string;
   description: string;
   category: string;
   tags: string[];
   content: string;
-  parentId?: string;
-  parentSkillName?: string;
-  protect: boolean;
+  headRevisionId: string;
+  draft: SkillDraftSummary;
   autoEvo: boolean;
   isEnabled: boolean;
-  fileExt?: string;
-  nodeType?: string;
-  hasPendingReviewSuggestions?: boolean;
-  hasPendingReviewResult?: boolean;
-  hasPendingRemoveSuggestion?: boolean;
-  reviewStatus?: string;
-  suggestionStatus?: string;
-  updateStatus?: string;
-  autoEvoApplyStatus?: string;
-  autoEvoGeneration?: number;
-  autoEvoError?: string;
-  builtinSkillUid?: string;
-  originBuiltinSkillUid?: string;
-  isBuiltinTemplate?: boolean;
-  activationStatus?: string;
-  readonly?: boolean;
 }
 
 export interface SkillDraftGeneratePayload {
-  suggestionIds?: string[];
   userInstruct: string;
+  suggestionIds?: string[];
 }
 
 export interface SkillDraftPreviewRecord {
@@ -94,6 +100,8 @@ export interface SkillDraftPreviewRecord {
   draftStatus: string;
   outdated: boolean;
   skillId: string;
+  reviewStatus: string;
+  diffLines: DiffLine[];
 }
 
 export interface ListSkillOptions {
@@ -102,7 +110,6 @@ export interface ListSkillOptions {
   tags?: string[];
   page?: number;
   pageSize?: number;
-  excludeBuiltinTemplates?: boolean;
 }
 
 export interface SkillAssetListResult {
@@ -114,7 +121,7 @@ export interface SkillAssetListResult {
 
 export interface ShareSkillPayload {
   targetUserIds: string[];
-  targetGroupIds: string[];
+  targetGroupIds?: string[];
   message?: string;
 }
 
@@ -123,13 +130,8 @@ export interface SkillUpdatePayloadSource {
   description?: string;
   category?: string;
   tags?: string[];
-  content?: string;
-  parentId?: string;
-  parentSkillName?: string;
   autoEvo?: boolean;
   isEnabled?: boolean;
-  fileExt?: string;
-  protect?: boolean;
 }
 
 export type SkillShareStatus =
@@ -151,7 +153,7 @@ export interface SkillShareRecord {
   sourceSkillId: string;
   skillName: string;
   skillDescription: string;
-  skillContent: string;
+  skillContent?: string;
   category: string;
   tags: string[];
   message: string;
@@ -231,6 +233,322 @@ export interface SkillReviewResultRecord {
   time: string;
 }
 
+export interface SkillRevisionRecord {
+  id: string;
+  revisionId: string;
+  revisionNo: number;
+  skillId: string;
+  changeSource: string;
+  message: string;
+  createdAt: string;
+  createdBy: string;
+  parentRevisionId: string;
+  treeHash: string;
+}
+
+export interface SkillDraftStatusRecord {
+  baseRevisionId: string;
+  conversationId: string;
+  draftVersion: number;
+  hasUncommittedDraft: boolean;
+  overlayCount: number;
+  taskId: string;
+}
+
+export const hasSkillDraftChanges = (status: SkillDraftStatusRecord): boolean =>
+  status.hasUncommittedDraft || status.overlayCount > 0;
+
+export const isSkillAgentDraftContext = (status: SkillDraftStatusRecord): boolean =>
+  hasSkillDraftChanges(status) && Boolean(status.taskId || status.conversationId);
+
+const emptySkillFileDiff = (path: string): SkillDiffFileRecord => ({
+  path,
+  status: "unchanged",
+  binary: false,
+  type: "file",
+  tooLarge: false,
+  diffEntryLines: [],
+});
+
+export async function probeSkillAgentReviewMode(
+  skillId: string,
+  status: SkillDraftStatusRecord,
+  changedPaths: string[],
+): Promise<boolean> {
+  if (!isSkillAgentDraftContext(status)) {
+    return false;
+  }
+  const firstChanged = changedPaths[0];
+  if (!firstChanged) {
+    return false;
+  }
+  const fileDiff = await compareSkillFileDiff(skillId, firstChanged).catch(() => null);
+  return Boolean(fileDiff?.review?.reviewId);
+}
+
+export interface SkillDraftReviewMeta {
+  reviewId: string;
+  reviewVersion: number;
+  canUndo: boolean;
+  pendingCount?: number;
+  acceptedCount?: number;
+  rejectedCount?: number;
+}
+
+export type SkillDraftReviewDecision = "accept" | "reject";
+
+const mapSkillDraftReviewDecisionToApi = (
+  decision: SkillDraftReviewDecision,
+): "accepted" | "rejected" => (decision === "accept" ? "accepted" : "rejected");
+
+export interface SkillDraftReviewActionItem {
+  hunkId: string;
+  decision: SkillDraftReviewDecision;
+  path?: string;
+}
+
+export interface SkillDraftReviewMutationResult {
+  reviewVersion: number;
+  canUndo: boolean;
+  pendingCount?: number;
+  acceptedCount?: number;
+  rejectedCount?: number;
+}
+
+export interface SkillDiffFileRecord {
+  path: string;
+  status: string;
+  binary: boolean;
+  type: string;
+  tooLarge: boolean;
+  diffEntryLines: DiffEntryLineOpenAPIResponse[];
+  review?: SkillDraftReviewMeta;
+}
+
+export interface SkillDiffTreeRecord {
+  cacheWritten: boolean;
+  files: SkillDiffFileRecord[];
+}
+
+export interface SkillTreeNodeRecord {
+  name: string;
+  path: string;
+  type: "file" | "dir";
+  fileType: string;
+  mime: string;
+  size: number;
+  binary: boolean;
+  blobHash: string;
+  children: SkillTreeNodeRecord[];
+}
+
+export interface CreateSkillPayload {
+  name: string;
+  description?: string;
+  category: string;
+  tags?: string[];
+  autoEvo?: boolean;
+  isEnabled?: boolean;
+  source:
+    | { type: "uploaded_zip"; uploadId: string }
+    | { type: "url"; url: string };
+}
+
+const normalizeDraftSummary = (
+  draft: SkillDetailOpenAPIResponse["draft"] | undefined,
+): SkillDraftSummary => ({
+  hasUncommittedDraft: Boolean(draft?.has_uncommitted_draft),
+  taskId: draft?.task_id || "",
+  version: draft?.version ?? 0,
+});
+
+const normalizeSkillItem = (
+  item: SkillListItemOpenAPIResponse | SkillDetailOpenAPIResponse,
+  content = "",
+): SkillAssetRecord => {
+  const skillId = item.skill_id || item.id;
+  const name = item.name || item.skill_name || skillId;
+
+  return {
+    id: item.id || skillId,
+    skillId,
+    name,
+    skillName: item.skill_name || name,
+    description: item.description || "",
+    category: item.category || "",
+    tags: toStringArray(item.tags),
+    content: content || item.file_content || "",
+    headRevisionId: item.head_revision_id || "",
+    draft: normalizeDraftSummary(item.draft),
+    autoEvo: false,
+    isEnabled: true,
+  };
+};
+
+const normalizeSkillShareStatus = (value: string): SkillShareStatus => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return "pending";
+  }
+  if (normalized.includes("pending") || normalized.includes("wait")) {
+    return "pending";
+  }
+  if (normalized.includes("fail") || normalized.includes("error")) {
+    return "failed";
+  }
+  if (normalized.includes("accept") || normalized.includes("complete")) {
+    return "accepted";
+  }
+  if (normalized.includes("reject") || normalized.includes("declin")) {
+    return "rejected";
+  }
+  return "unknown";
+};
+
+const normalizeOutgoingShare = (
+  item: SkillShareListItemOpenAPIResponse,
+): SkillShareRecord => ({
+  id: item.share_item_id,
+  skillId: item.source_skill_id,
+  sourceSkillId: item.source_skill_id,
+  skillName: item.source_category || item.source_skill_id,
+  skillDescription: "",
+  skillContent: "",
+  category: item.source_category || "",
+  tags: [],
+  message: item.message || "",
+  status: normalizeSkillShareStatus(item.status),
+  rawStatus: item.status,
+  errorMessage: item.error_message,
+  sender: {
+    id: item.source_user_id,
+    name: item.source_user_name || item.source_user_id,
+    type: "user",
+  },
+  recipients: [
+    {
+      id: item.target_user_id,
+      name: item.target_user_name || item.target_user_id,
+      type: "user",
+    },
+  ],
+  createdAt: item.created_at,
+  updatedAt: item.updated_at,
+  decidedAt: item.accepted_at || item.rejected_at,
+});
+
+const normalizeIncomingShare = (
+  item: SkillShareListItemOpenAPIResponse,
+): SkillShareRecord => normalizeOutgoingShare(item);
+
+const normalizeShareTarget = (
+  item: SkillShareTargetItemOpenAPIResponse,
+  skillId: string,
+): SkillShareRecord => ({
+  id: item.share_item_id,
+  skillId,
+  sourceSkillId: skillId,
+  skillName: skillId,
+  skillDescription: "",
+  skillContent: "",
+  category: "",
+  tags: [],
+  message: item.message || "",
+  status: normalizeSkillShareStatus(item.status),
+  rawStatus: item.status,
+  errorMessage: item.error_message,
+  sender: null,
+  recipients: [
+    {
+      id: item.target_user_id,
+      name: item.target_user_name || item.target_user_id,
+      type: "user",
+    },
+  ],
+  createdAt: item.shared_at,
+  updatedAt: item.updated_at,
+  decidedAt: item.accepted_at || item.rejected_at,
+});
+
+const normalizeShareDetail = (
+  payload: SkillShareDetailOpenAPIResponse,
+): SkillShareRecord => {
+  const source = payload.source;
+  const skill = source ? normalizeSkillItem(source) : null;
+
+  return {
+    id: payload.share_item_id,
+    skillId: skill?.id || "",
+    sourceSkillId: skill?.id || "",
+    skillName: skill?.name || "",
+    skillDescription: skill?.description || "",
+    skillContent: skill?.content || "",
+    category: skill?.category || "",
+    tags: skill?.tags || [],
+    message: payload.message || "",
+    status: normalizeSkillShareStatus(payload.status),
+    rawStatus: payload.status,
+    sender: null,
+    recipients: [],
+  };
+};
+
+const normalizeRevision = (item: SkillRevisionOpenAPIResponse): SkillRevisionRecord => ({
+  id: item.id || item.revision_id,
+  revisionId: item.revision_id || item.id,
+  revisionNo: item.revision_no,
+  skillId: item.skill_id,
+  changeSource: item.change_source || "",
+  message: item.message || "",
+  createdAt: item.created_at || "",
+  createdBy: item.created_by || "",
+  parentRevisionId: item.parent_revision_id || "",
+  treeHash: item.tree_hash || "",
+});
+
+const normalizeTreeNode = (node: SkillTreeNodeOpenAPIResponse): SkillTreeNodeRecord => ({
+  name: node.name || "",
+  path: node.path || "",
+  type: node.type === "dir" ? "dir" : "file",
+  fileType: node.file_type || "",
+  mime: node.mime || "",
+  size: node.size ?? 0,
+  binary: Boolean(node.binary),
+  blobHash: node.blob_hash || "",
+  children: (node.children || []).map(normalizeTreeNode),
+});
+
+const normalizeDraftStatus = (
+  payload: SkillDraftStatusOpenAPIResponse,
+): SkillDraftStatusRecord => ({
+  baseRevisionId: payload.base_revision_id || "",
+  conversationId: payload.conversation_id || "",
+  draftVersion: payload.draft_version ?? 0,
+  hasUncommittedDraft: Boolean(payload.has_uncommitted_draft),
+  overlayCount: payload.overlay_count ?? 0,
+  taskId: payload.task_id || "",
+});
+
+const readSkillFileContent = async (
+  skillId: string,
+  path = SKILL_MD_PATH,
+): Promise<string> => {
+  const response = await skillsApi.apiCoreSkillsSkillIdFileGet({ skillId, path });
+  const payload = unwrapEnvelope<SkillFileOpenAPIResponse>(response.data);
+  return payload.content || "";
+};
+
+export const buildSkillUpdatePayload = (
+  skill: SkillUpdatePayloadSource,
+): SkillUpdateManagedOpenAPIRequest => ({
+  auto_evo: skill.autoEvo,
+  category: skill.category,
+  description: skill.description,
+  is_enabled: skill.isEnabled,
+  name: skill.name,
+  tags: skill.tags,
+});
+
 type RawObject = Record<string, unknown>;
 
 const toRawObject = (value: unknown): RawObject | null => {
@@ -238,25 +556,6 @@ const toRawObject = (value: unknown): RawObject | null => {
     return null;
   }
   return value as RawObject;
-};
-
-const toBoolean = (value: unknown, fallback = false): boolean => {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value === "number") {
-    return value !== 0;
-  }
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true" || normalized === "1") {
-      return true;
-    }
-    if (normalized === "false" || normalized === "0") {
-      return false;
-    }
-  }
-  return fallback;
 };
 
 const toStringValue = (value: unknown, fallback = ""): string => {
@@ -280,101 +579,6 @@ const toNumberValue = (value: unknown, fallback = 0): number => {
     }
   }
   return fallback;
-};
-
-const toStringArray = (value: unknown): string[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) =>
-        typeof item === "string"
-          ? item.trim()
-          : typeof item === "number"
-            ? String(item)
-            : "",
-      )
-      .filter(Boolean);
-  }
-
-  if (typeof value === "string") {
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
-  return [];
-};
-
-const toNodeArray = (value: unknown): SkillNode[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((item): item is SkillNode => Boolean(item && typeof item === "object"));
-};
-
-const getFirstValue = (sources: Array<RawObject | null>, keys: string[]): unknown => {
-  for (const source of sources) {
-    if (!source) {
-      continue;
-    }
-
-    for (const key of keys) {
-      if (!(key in source)) {
-        continue;
-      }
-
-      const candidate = source[key];
-      if (candidate !== undefined && candidate !== null) {
-        return candidate;
-      }
-    }
-  }
-
-  return undefined;
-};
-
-const getFirstString = (
-  sources: Array<RawObject | null>,
-  keys: string[],
-  fallback = "",
-): string => {
-  const value = getFirstValue(sources, keys);
-  return toStringValue(value, fallback).trim();
-};
-
-const getObjectCandidate = (sources: Array<RawObject | null>, keys: string[]): RawObject | null => {
-  const value = getFirstValue(sources, keys);
-  return toRawObject(value);
-};
-
-export const buildSkillUpdatePayload = (
-  skill: SkillUpdatePayloadSource,
-  overrides: RawObject = {},
-): RawObject => ({
-  auto_evo: Boolean(skill.autoEvo),
-  category: skill.category || "",
-  content: skill.content || "",
-  description: skill.description || "",
-  file_ext: skill.fileExt || "md",
-  is_enabled: skill.isEnabled ?? true,
-  name: skill.name || "",
-  parent_skill_id: skill.parentId || "",
-  parent_skill_name: skill.parentSkillName || "",
-  tags: skill.tags || [],
-  ...overrides,
-});
-
-const unwrapEnvelope = <T>(payload: unknown): T => {
-  if (!payload || typeof payload !== "object") {
-    return payload as T;
-  }
-
-  const envelope = payload as ApiEnvelope<T>;
-  if ("data" in envelope && envelope.data !== undefined) {
-    return envelope.data as T;
-  }
-
-  return payload as T;
 };
 
 const normalizeResourceUpdateTask = (value: unknown): ResourceUpdateTaskRecord | null => {
@@ -460,622 +664,6 @@ const normalizeSkillReviewResult = (value: unknown): SkillReviewResultRecord | n
   };
 };
 
-const extractSkillId = (raw: SkillNode): string => {
-  return toStringValue(raw.skill_id || raw.skillId || raw.id || raw.name || "");
-};
-
-const normalizeSkillNode = (raw: SkillNode, parentId?: string): SkillAssetRecord | null => {
-  const id = extractSkillId(raw);
-  const name = toStringValue(raw.name || raw.skill_name || "");
-
-  if (!id && !name) {
-    return null;
-  }
-
-  const resolvedId = id || name;
-  const resolvedParentId = toStringValue(
-    parentId || raw.parent_skill_id || raw.parentSkillId || raw.parent_id || "",
-  );
-
-  return {
-    id: resolvedId,
-    name: name || resolvedId,
-    description: toStringValue(raw.description || raw.desc || ""),
-    category: toStringValue(raw.category || ""),
-    tags: toStringArray(raw.tags),
-    content: toStringValue(raw.content || ""),
-    parentId: resolvedParentId || undefined,
-    parentSkillName: toStringValue(raw.parent_skill_name || raw.parentSkillName || ""),
-    protect: toBoolean(raw.is_locked, false),
-    autoEvo: toBoolean(raw.auto_evo, false),
-    isEnabled: toBoolean(raw.is_enabled, true),
-    fileExt: toStringValue(raw.file_ext || ""),
-    nodeType: toStringValue(raw.node_type || ""),
-    hasPendingReviewSuggestions: toBoolean(raw.has_pending_review_suggestions, false),
-    hasPendingReviewResult: toBoolean(raw.has_pending_review_result, false),
-    hasPendingRemoveSuggestion: toBoolean(raw.has_pending_remove_suggestion, false),
-    reviewStatus: toStringValue(raw.review_status || ""),
-    suggestionStatus: toStringValue(raw.suggestion_status || ""),
-    updateStatus: toStringValue(raw.update_status || ""),
-    autoEvoApplyStatus: toStringValue(raw.auto_evo_apply_status || ""),
-    autoEvoGeneration: typeof raw.auto_evo_generation === "number" ? raw.auto_evo_generation : 0,
-    autoEvoError: toStringValue(raw.auto_evo_error || ""),
-    builtinSkillUid: toStringValue(raw.builtin_skill_uid || raw.builtinSkillUid || ""),
-    originBuiltinSkillUid: toStringValue(
-      raw.origin_builtin_skill_uid || raw.originBuiltinSkillUid || "",
-    ),
-    isBuiltinTemplate: toBoolean(raw.is_builtin_template || raw.isBuiltinTemplate, false),
-    activationStatus: toStringValue(raw.activation_status || raw.activationStatus || ""),
-    readonly: toBoolean(raw.readonly, false),
-  };
-};
-
-const flattenSkillNodes = (nodes: SkillNode[], parentId?: string): SkillAssetRecord[] => {
-  const flattened: SkillAssetRecord[] = [];
-
-  nodes.forEach((node) => {
-    const normalized = normalizeSkillNode(node, parentId);
-    if (!normalized) {
-      return;
-    }
-
-    flattened.push(normalized);
-    const children = toNodeArray(node.children);
-    if (children.length) {
-      flattened.push(...flattenSkillNodes(children, normalized.id));
-    }
-  });
-
-  return flattened;
-};
-
-const extractSkillList = (payload: unknown): SkillNode[] => {
-  if (Array.isArray(payload)) {
-    return payload as SkillNode[];
-  }
-
-  if (!payload || typeof payload !== "object") {
-    return [];
-  }
-
-  const data = payload as RawObject;
-  const candidates = [
-    data.skills,
-    data.list,
-    data.items,
-    data.rows,
-    data.records,
-    data.results,
-  ];
-
-  for (const candidate of candidates) {
-    const nodes = toNodeArray(candidate);
-    if (nodes.length) {
-      return nodes;
-    }
-  }
-
-  return [];
-};
-
-const normalizeSkillShareStatus = (value: unknown): SkillShareStatus => {
-  const normalized = toStringValue(value, "").trim().toLowerCase();
-
-  if (!normalized) {
-    return "pending";
-  }
-
-  // Pending-like states (for example `pending_accept`) should stay actionable.
-  if (
-    normalized.includes("pending") ||
-    normalized.includes("wait") ||
-    normalized.includes("review") ||
-    normalized.includes("queue") ||
-    normalized.includes("open") ||
-    normalized.includes("new")
-  ) {
-    return "pending";
-  }
-
-  if (
-    normalized.includes("fail") ||
-    normalized.includes("error") ||
-    normalized.includes("timeout")
-  ) {
-    return "failed";
-  }
-
-  if (
-    normalized === "accepted" ||
-    normalized === "accept" ||
-    normalized === "confirm" ||
-    normalized === "confirmed" ||
-    normalized.includes("accepted") ||
-    normalized.includes("confirm_success") ||
-    normalized.includes("complete") ||
-    normalized.includes("success")
-  ) {
-    return "accepted";
-  }
-
-  if (
-    normalized.includes("reject") ||
-    normalized.includes("declin") ||
-    normalized.includes("discard") ||
-    normalized.includes("deny")
-  ) {
-    return "rejected";
-  }
-
-  if (
-    normalized.includes("accept") ||
-    normalized.includes("approved") ||
-    normalized.includes("share")
-  ) {
-    return "pending";
-  }
-
-  return "unknown";
-};
-
-const normalizePrincipal = (
-  value: unknown,
-  typeHint: "user" | "group",
-): SkillSharePrincipal | null => {
-  if (typeof value === "string" || typeof value === "number") {
-    const normalized = String(value).trim();
-    if (!normalized) {
-      return null;
-    }
-    return {
-      id: normalized,
-      name: normalized,
-      type: typeHint,
-    };
-  }
-
-  const raw = toRawObject(value);
-  if (!raw) {
-    return null;
-  }
-
-  const id =
-    typeHint === "group"
-      ? getFirstString([raw], ["group_id", "groupId", "id"])
-      : getFirstString([raw], ["user_id", "userId", "id"]);
-  const name =
-    typeHint === "group"
-      ? getFirstString([raw], ["group_name", "groupName", "name"])
-      : getFirstString([raw], [
-          "display_name_zh",
-          "displayNameZh",
-          "display_name_cn",
-          "displayNameCn",
-          "name_zh",
-          "nameZh",
-          "nickname",
-          "nick_name",
-          "nickName",
-          "display_name",
-          "displayName",
-          "username",
-          "user_name",
-          "userName",
-          "name",
-        ]);
-
-  if (!id && !name) {
-    return null;
-  }
-
-  const resolved = id || name;
-  return {
-    id: resolved,
-    name: name || resolved,
-    type: typeHint,
-  };
-};
-
-const zipPrincipalArrays = (
-  ids: string[],
-  names: string[],
-  type: "user" | "group",
-): SkillSharePrincipal[] => {
-  const maxLength = Math.max(ids.length, names.length);
-  const principals: SkillSharePrincipal[] = [];
-
-  for (let index = 0; index < maxLength; index += 1) {
-    const id = (ids[index] || names[index] || "").trim();
-    const name = (names[index] || ids[index] || "").trim();
-
-    if (!id && !name) {
-      continue;
-    }
-
-    principals.push({
-      id: id || name,
-      name: name || id,
-      type,
-    });
-  }
-
-  return principals;
-};
-
-const dedupePrincipals = (principals: SkillSharePrincipal[]): SkillSharePrincipal[] => {
-  const deduped = new Map<string, SkillSharePrincipal>();
-
-  principals.forEach((principal) => {
-    if (!principal.id && !principal.name) {
-      return;
-    }
-
-    const key = `${principal.type}:${principal.id || principal.name}`;
-    const existing = deduped.get(key);
-    if (!existing) {
-      deduped.set(key, principal);
-      return;
-    }
-
-    const existingHasDisplayName = existing.name && existing.name !== existing.id;
-    const nextHasDisplayName = principal.name && principal.name !== principal.id;
-    deduped.set(key, {
-      ...existing,
-      id: existing.id || principal.id,
-      name: existingHasDisplayName
-        ? existing.name
-        : nextHasDisplayName
-          ? principal.name
-          : existing.name || principal.name,
-    });
-  });
-
-  return Array.from(deduped.values());
-};
-
-const extractPrincipals = (
-  raw: RawObject,
-  type: "user" | "group",
-  arrayKeys: string[],
-  idKeys: string[],
-  nameKeys: string[],
-  singleKeys: string[] = [],
-): SkillSharePrincipal[] => {
-  const principals: SkillSharePrincipal[] = [];
-
-  arrayKeys.forEach((key) => {
-    const value = raw[key];
-    if (Array.isArray(value)) {
-      value.forEach((item) => {
-        const normalized = normalizePrincipal(item, type);
-        if (normalized) {
-          principals.push(normalized);
-        }
-      });
-    } else {
-      const normalized = normalizePrincipal(value, type);
-      if (normalized) {
-        principals.push(normalized);
-      }
-    }
-  });
-
-  principals.push(
-    ...zipPrincipalArrays(
-      idKeys.flatMap((key) => toStringArray(raw[key])),
-      nameKeys.flatMap((key) => toStringArray(raw[key])),
-      type,
-    ),
-  );
-
-  singleKeys.forEach((key) => {
-    const normalized = normalizePrincipal(raw[key], type);
-    if (normalized) {
-      principals.push(normalized);
-    }
-  });
-
-  return dedupePrincipals(principals);
-};
-
-const extractShareList = (payload: unknown): RawObject[] => {
-  if (Array.isArray(payload)) {
-    return payload
-      .map((item) => toRawObject(item))
-      .filter((item): item is RawObject => Boolean(item));
-  }
-
-  const raw = toRawObject(payload);
-  if (!raw) {
-    return [];
-  }
-
-  const candidates = [
-    raw.share_items,
-    raw.shareItems,
-    raw.skill_shares,
-    raw.skillShares,
-    raw.shares,
-    raw.items,
-    raw.list,
-    raw.rows,
-    raw.records,
-    raw.results,
-    raw.incoming,
-    raw.outgoing,
-  ];
-
-  for (const candidate of candidates) {
-    if (!Array.isArray(candidate)) {
-      continue;
-    }
-
-    const items = candidate
-      .map((item) => toRawObject(item))
-      .filter((item): item is RawObject => Boolean(item));
-    if (items.length) {
-      return items;
-    }
-  }
-
-  if (
-    getFirstString([raw], ["share_item_id", "shareItemId", "id"]) ||
-    getFirstString([raw], ["skill_id", "skillId", "skill_name", "skillName"])
-  ) {
-    return [raw];
-  }
-
-  return [];
-};
-
-const normalizeSkillShareRecord = (raw: RawObject): SkillShareRecord | null => {
-  const shareNode = raw;
-  const skillNode =
-    getObjectCandidate([raw], [
-      "skill",
-      "shared_skill",
-      "sharedSkill",
-      "skill_item",
-      "skillItem",
-      "item",
-      "asset",
-      "detail",
-      "payload",
-      "data",
-    ]) || raw;
-  const senderNode =
-    getObjectCandidate([raw], [
-      "sender",
-      "from_user",
-      "fromUser",
-      "share_user",
-      "shareUser",
-      "creator",
-      "owner",
-    ]) ||
-    toRawObject({
-      user_id:
-        getFirstString([raw], [
-          "sender_user_id",
-          "senderUserId",
-          "from_user_id",
-          "fromUserId",
-          "share_user_id",
-          "shareUserId",
-          "creator_user_id",
-          "creatorUserId",
-          "source_user_id",
-          "sourceUserId",
-        ]) || undefined,
-      display_name:
-        getFirstString([raw], [
-          "sender_display_name",
-          "senderDisplayName",
-          "sender_name",
-          "senderName",
-          "from_user_name",
-          "fromUserName",
-          "share_user_name",
-          "shareUserName",
-          "creator_name",
-          "creatorName",
-          "source_user_name",
-          "sourceUserName",
-        ]) || undefined,
-      username:
-        getFirstString([raw], [
-          "sender_username",
-          "senderUsername",
-          "from_username",
-          "fromUsername",
-          "creator_username",
-          "creatorUsername",
-          "source_username",
-          "sourceUsername",
-        ]) || undefined,
-    });
-
-  const recipients = dedupePrincipals([
-    ...extractPrincipals(
-      raw,
-      "user",
-      [
-        "target_users",
-        "targetUsers",
-        "users",
-        "user_list",
-        "userList",
-        "receivers",
-        "receiver_users",
-        "receiverUsers",
-      ],
-      [
-        "target_user_ids",
-        "targetUserIds",
-        "user_ids",
-        "userIds",
-        "target_user_id",
-        "targetUserId",
-      ],
-      [
-        "target_user_names",
-        "targetUserNames",
-        "user_names",
-        "userNames",
-        "target_user_name",
-        "targetUserName",
-      ],
-      [
-        "target_user",
-        "targetUser",
-        "receiver",
-        "receiver_user",
-        "receiverUser",
-      ],
-    ),
-    ...extractPrincipals(
-      raw,
-      "group",
-      [
-        "target_groups",
-        "targetGroups",
-        "groups",
-        "group_list",
-        "groupList",
-        "receiver_groups",
-        "receiverGroups",
-      ],
-      [
-        "target_group_ids",
-        "targetGroupIds",
-        "group_ids",
-        "groupIds",
-        "target_group_id",
-        "targetGroupId",
-      ],
-      [
-        "target_group_names",
-        "targetGroupNames",
-        "group_names",
-        "groupNames",
-        "target_group_name",
-        "targetGroupName",
-      ],
-      [
-        "target_group",
-        "targetGroup",
-        "receiver_group",
-        "receiverGroup",
-      ],
-    ),
-  ]);
-
-  const id = getFirstString([shareNode], ["share_item_id", "shareItemId", "item_id", "itemId", "id"]);
-  const sourceSkillId = getFirstString([shareNode, skillNode], [
-    "source_skill_id",
-    "sourceSkillId",
-  ]);
-  const skillId = getFirstString([shareNode, skillNode], [
-    "skill_id",
-    "skillId",
-    "id",
-  ]) || sourceSkillId;
-  const skillName = getFirstString([shareNode, skillNode], [
-    "skill_name",
-    "skillName",
-    "source_parent_skill_name",
-    "sourceParentSkillName",
-    "source_skill_name",
-    "sourceSkillName",
-    "name",
-    "title",
-  ]);
-
-  if (!id && !skillId && !skillName) {
-    return null;
-  }
-
-  const rawStatus = getFirstString([shareNode], [
-    "status",
-    "share_status",
-    "shareStatus",
-    "state",
-    "decision",
-    "result",
-  ]);
-
-  return {
-    id: id || skillId || skillName,
-    skillId: skillId || skillName,
-    sourceSkillId,
-    skillName: skillName || skillId || id,
-    skillDescription: getFirstString([shareNode, skillNode], [
-      "skill_description",
-      "skillDescription",
-      "description",
-      "desc",
-      "summary",
-    ]),
-    skillContent: getFirstString([shareNode, skillNode], [
-      "skill_content",
-      "skillContent",
-      "content",
-      "markdown",
-      "body",
-    ]),
-    category: getFirstString([shareNode, skillNode], [
-      "category",
-      "source_category",
-      "sourceCategory",
-    ]),
-    tags: toStringArray(getFirstValue([shareNode, skillNode], ["tags", "labels"])),
-    message: getFirstString([shareNode], ["share_message", "shareMessage", "message", "remark", "note"]),
-    status: normalizeSkillShareStatus(rawStatus),
-    rawStatus,
-    errorMessage: getFirstString([shareNode], [
-      "error_message",
-      "errorMessage",
-      "fail_reason",
-      "failReason",
-    ]),
-    sender: normalizePrincipal(senderNode, "user"),
-    recipients,
-    createdAt: getFirstString([shareNode], [
-      "shared_at",
-      "sharedAt",
-      "create_time",
-      "createTime",
-      "created_at",
-      "createdAt",
-    ]),
-    updatedAt: getFirstString([shareNode], [
-      "updated_at",
-      "updatedAt",
-      "update_time",
-      "updateTime",
-      "handled_at",
-      "handledAt",
-    ]),
-    decidedAt: getFirstString([shareNode], [
-      "accepted_at",
-      "acceptedAt",
-      "rejected_at",
-      "rejectedAt",
-      "decided_at",
-      "decidedAt",
-      "handled_at",
-      "handledAt",
-    ]),
-  };
-};
-
-export async function listSkillAssets(
-  options: ListSkillOptions = {},
-): Promise<SkillAssetRecord[]> {
-  const result = await listSkillAssetsPage(options);
-  return result.records;
-}
-
 export async function getSkillReviewSummary(): Promise<SkillReviewSummaryRecord> {
   const response = await axiosInstance.get(`${coreBasePath}/skill-review:summary`);
   const payload = unwrapEnvelope<unknown>(response.data);
@@ -1149,167 +737,120 @@ export async function listSkillReviewResultsByRequest(
     .filter((item): item is SkillReviewResultRecord => Boolean(item));
 }
 
-export async function listSkillTags(): Promise<string[]> {
-  const response = await axiosInstance.get(`${coreBasePath}/skills/tags`);
-  const payload = unwrapEnvelope<unknown>(response.data);
-  const rawPayload = toRawObject(payload);
-  const rawEnvelope = toRawObject(response.data);
-  const tags = toStringArray(
-    Array.isArray(payload)
-      ? payload
-      : getFirstValue([rawPayload, rawEnvelope], [
-          "tags",
-          "list",
-          "items",
-          "records",
-        ]),
-  );
+export async function listSkillAssets(
+  options: ListSkillOptions = {},
+): Promise<SkillAssetRecord[]> {
+  const result = await listSkillAssetsPage(options);
+  return result.records;
+}
 
-  return [...new Set(tags)].sort((left, right) => left.localeCompare(right));
+export async function listSkillTags(): Promise<string[]> {
+  const response = await skillsApi.apiCoreSkillsTagsGet();
+  const payload = unwrapEnvelope<{ tags?: string[] }>(response.data);
+  return [...new Set(toStringArray(payload.tags))].sort((left, right) =>
+    left.localeCompare(right),
+  );
 }
 
 export async function listSkillCategories(): Promise<string[]> {
-  const response = await axiosInstance.get(`${coreBasePath}/skills/categories`);
-  const payload = unwrapEnvelope<unknown>(response.data);
-  const rawPayload = toRawObject(payload);
-  const rawEnvelope = toRawObject(response.data);
-  const categories = toStringArray(
-    Array.isArray(payload)
-      ? payload
-      : getFirstValue([rawPayload, rawEnvelope], [
-          "categories",
-          "list",
-          "items",
-          "records",
-        ]),
+  const response = await skillsApi.apiCoreSkillsCategoriesGet();
+  const payload = unwrapEnvelope<{ categories?: string[] }>(response.data);
+  return [...new Set(toStringArray(payload.categories))].sort((left, right) =>
+    left.localeCompare(right),
   );
-
-  return [...new Set(categories)].sort((left, right) => left.localeCompare(right));
 }
 
 export async function listSkillAssetsPage(
   options: ListSkillOptions = {},
 ): Promise<SkillAssetListResult> {
-  const params = new URLSearchParams();
-  const keyword = options.keyword?.trim();
-  const category = options.category?.trim();
-  const tags = (options.tags ?? []).map((item) => item.trim()).filter(Boolean);
-
-  params.set("page", String(options.page ?? 1));
-  params.set("page_size", String(options.pageSize ?? 200));
-  if (keyword) {
-    params.set("keyword", keyword);
-  }
-  if (category) {
-    params.set("category", category);
-  }
-  tags.forEach((item) => {
-    params.append("tags", item);
+  const response = await skillsApi.apiCoreSkillsGet({
+    keyword: options.keyword?.trim() || undefined,
+    category: options.category?.trim() || undefined,
+    tags: (options.tags ?? []).map((item) => item.trim()).filter(Boolean),
+    page: options.page ?? 1,
+    pageSize: options.pageSize ?? 200,
   });
-  if (options.excludeBuiltinTemplates) {
-    params.set("exclude_builtin_templates", "true");
-  }
+  const payload = unwrapEnvelope<{
+    items?: SkillListItemOpenAPIResponse[];
+    page?: number;
+    page_size?: number;
+    total?: number;
+  }>(response.data);
 
-  const response = await axiosInstance.get(`${coreBasePath}/skills`, {
-    params,
-  });
-
-  const payload = unwrapEnvelope<unknown>(response.data);
-  const rawPayload = toRawObject(payload);
-  const rawEnvelope = toRawObject(response.data);
-  const skillNodes = extractSkillList(payload);
-  const flattened = flattenSkillNodes(skillNodes);
-  const deduped = new Map<string, SkillAssetRecord>();
-
-  flattened.forEach((item) => {
-    deduped.set(item.id, item);
-  });
-
-  let records = Array.from(deduped.values());
-  if (options.excludeBuiltinTemplates) {
-    records = records.filter((item) => !item.isBuiltinTemplate);
-  }
-  const page = Math.max(1, toNumberValue(rawPayload?.page ?? rawEnvelope?.page, options.page ?? 1));
-  const pageSize = Math.max(
-    1,
-    toNumberValue(
-      rawPayload?.page_size ??
-        rawPayload?.pageSize ??
-        rawEnvelope?.page_size ??
-        rawEnvelope?.pageSize,
-      options.pageSize ?? 200,
-    ),
-  );
-  const paginationNode = getObjectCandidate([rawPayload, rawEnvelope], [
-    "pagination",
-    "pager",
-    "page_info",
-    "pageInfo",
-  ]);
-  const totalCandidate = getFirstValue(
-    [rawPayload, rawEnvelope, paginationNode],
-    [
-      "total",
-      "totle",
-      "total_count",
-      "totalCount",
-      "total_size",
-      "totalSize",
-      "count",
-    ],
-  );
-  const total =
-    totalCandidate === undefined || totalCandidate === null
-      ? records.length
-      : Math.max(0, toNumberValue(totalCandidate, records.length));
+  const records = (payload.items || []).map((item) => normalizeSkillItem(item));
 
   return {
     records,
-    total,
-    page,
-    pageSize,
+    total: payload.total ?? records.length,
+    page: payload.page ?? options.page ?? 1,
+    pageSize: payload.page_size ?? options.pageSize ?? 200,
   };
 }
 
-export async function getSkillAssetDetail(skillId: string): Promise<SkillAssetRecord | null> {
-  const response = await axiosInstance.get(
-    `${coreBasePath}/skills/${encodeURIComponent(skillId)}`,
-  );
-  const payload = unwrapEnvelope<unknown>(response.data);
-  const rootNode = normalizeSkillNode((payload || {}) as SkillNode);
-
-  if (rootNode) {
-    return rootNode;
-  }
-
-  const list = extractSkillList(payload);
-  if (!list.length) {
+export async function getSkillAssetDetail(
+  skillId: string,
+  options?: { loadContent?: boolean },
+): Promise<SkillAssetRecord | null> {
+  const response = await skillsApi.apiCoreSkillsSkillIdGet({ skillId });
+  const payload = unwrapEnvelope<SkillDetailOpenAPIResponse>(response.data);
+  if (!payload?.id && !payload?.skill_id) {
     return null;
   }
 
-  const normalized = normalizeSkillNode(list[0]);
-  return normalized;
+  let content = payload.file_content || "";
+  if (options?.loadContent !== false) {
+    try {
+      content = await readSkillFileContent(skillId);
+    } catch {
+      content = payload.file_content || "";
+    }
+  }
+
+  return normalizeSkillItem(payload, content);
 }
 
-export async function createSkillAsset(payload: RawObject) {
-  return axiosInstance.post(`${coreBasePath}/skills`, payload);
+export async function createSkillAsset(payload: CreateSkillPayload): Promise<string> {
+  const request: SkillCreateManagedOpenAPIRequest = {
+    name: payload.name,
+    description: payload.description,
+    category: payload.category,
+    tags: payload.tags,
+    auto_evo: payload.autoEvo,
+    is_enabled: payload.isEnabled,
+    source:
+      payload.source.type === "uploaded_zip"
+        ? { type: "uploaded_zip", upload_id: payload.source.uploadId }
+        : { type: "url", url: payload.source.url },
+  };
+
+  const response = await skillsApi.apiCoreSkillsPost({
+    skillCreateManagedOpenAPIRequest: request,
+  });
+  const body = unwrapEnvelope<{ skill_id?: string }>(response.data);
+  return body.skill_id || "";
 }
 
 export async function enableBuiltinSkill(
   builtinSkillUid: string,
 ): Promise<SkillAssetRecord | null> {
-  const response = await axiosInstance.post(
-    `${coreBasePath}/builtin-skills/${encodeURIComponent(builtinSkillUid)}:enable`,
-  );
-  const payload = unwrapEnvelope<unknown>(response.data);
-  return normalizeSkillNode((payload || {}) as SkillNode);
+  const response = await skillsApi.apiCoreBuiltinSkillsBuiltinSkillUidEnablePost({
+    builtinSkillUid,
+  });
+  const payload = unwrapEnvelope<SkillDetailOpenAPIResponse>(response.data);
+  if (!payload?.id && !payload?.skill_id) {
+    return null;
+  }
+  return normalizeSkillItem(payload);
 }
 
-export async function patchSkillAsset(skillId: string, payload: RawObject) {
-  return axiosInstance.patch(
-    `${coreBasePath}/skills/${encodeURIComponent(skillId)}`,
-    payload,
-  );
+export async function patchSkillAsset(
+  skillId: string,
+  payload: SkillUpdateManagedOpenAPIRequest,
+) {
+  return skillsApi.apiCoreSkillsSkillIdPatch({
+    skillId,
+    skillUpdateManagedOpenAPIRequest: payload,
+  });
 }
 
 export async function generateSkillDraft(
@@ -1317,57 +858,90 @@ export async function generateSkillDraft(
   payload: SkillDraftGeneratePayload,
 ) {
   const requestPayload: {
-    suggestion_ids?: string[];
     user_instruct: string;
+    suggestion_ids?: string[];
   } = {
     user_instruct: payload.userInstruct.trim(),
   };
 
-  if (payload.suggestionIds) {
+  if (payload.suggestionIds?.length) {
     requestPayload.suggestion_ids = payload.suggestionIds;
   }
 
-  return axiosInstance.post(
-    `${coreBasePath}/skills/${encodeURIComponent(skillId)}:generate`,
-    requestPayload,
-  );
+  return skillsApi.apiCoreSkillsSkillIdGeneratePost({
+    skillId,
+    skillGenerateOpenAPIRequest: requestPayload,
+  });
 }
 
-export async function previewSkillDraft(skillId: string): Promise<SkillDraftPreviewRecord> {
-  const response = await axiosInstance.get(
-    `${coreBasePath}/skills/${encodeURIComponent(skillId)}:draft-preview`,
-  );
-  const payload = unwrapEnvelope<RawObject>(response.data);
+export async function previewSkillDraft(
+  skillId: string,
+): Promise<SkillDraftPreviewRecord> {
+  const [detailResponse, draftStatus] = await Promise.all([
+    skillsApi.apiCoreSkillsSkillIdGet({ skillId }),
+    getSkillDraftStatus(skillId),
+  ]);
+  const detailPayload = unwrapEnvelope<SkillDetailOpenAPIResponse>(detailResponse.data);
+
+  if (!hasSkillDraftChanges(draftStatus)) {
+    const currentContent = await readSkillFileContent(skillId, SKILL_MD_PATH).catch(
+      () => detailPayload.file_content || "",
+    );
+    return {
+      currentContent,
+      diff: "",
+      draftContent: "",
+      draftSourceVersion: draftStatus.draftVersion,
+      draftStatus: "",
+      outdated: false,
+      skillId: detailPayload.skill_id || skillId,
+      reviewStatus: "",
+      diffLines: [],
+    };
+  }
+
+  const [fileDiff, currentContent, draftContent] = await Promise.all([
+    compareSkillFileDiff(skillId, SKILL_MD_PATH).catch(() => emptySkillFileDiff(SKILL_MD_PATH)),
+    readSkillFileContent(skillId, SKILL_MD_PATH).catch(
+      () => detailPayload.file_content || "",
+    ),
+    readSkillFsContent(skillId, SKILL_MD_PATH).catch(() => ""),
+  ]);
+
+  const diffLines = mapDiffEntryLines(fileDiff.diffEntryLines);
+  const isAgentDraft = isSkillAgentDraftContext(draftStatus);
+  const hasReviewSession = Boolean(fileDiff.review?.reviewId);
 
   return {
-    currentContent: toStringValue(payload?.current_content, ""),
-    diff: toStringValue(payload?.diff, ""),
-    draftContent: toStringValue(payload?.draft_content, ""),
-    draftSourceVersion: Number(payload?.draft_source_version || 0),
-    draftStatus: toStringValue(payload?.draft_status, ""),
-    outdated: toBoolean(payload?.outdated, false),
-    skillId: toStringValue(payload?.skill_id, skillId),
+    currentContent,
+    diff: "",
+    draftContent,
+    draftSourceVersion: draftStatus.draftVersion,
+    draftStatus: isAgentDraft ? "pending_confirm" : "",
+    outdated: false,
+    skillId: detailPayload.skill_id || skillId,
+    reviewStatus: isAgentDraft && hasReviewSession ? "pending_confirm" : "",
+    diffLines,
   };
 }
 
 export async function confirmSkillDraft(skillId: string): Promise<SkillAssetRecord | null> {
-  const response = await axiosInstance.post(
-    `${coreBasePath}/skills/${encodeURIComponent(skillId)}:confirm`,
-  );
-  const payload = unwrapEnvelope<unknown>(response.data);
-  return normalizeSkillNode((payload || {}) as SkillNode);
+  const response = await skillsApi.apiCoreSkillsSkillIdConfirmPost({ skillId });
+  const payload = unwrapEnvelope<SkillDetailOpenAPIResponse>(response.data);
+  if (!payload?.id && !payload?.skill_id) {
+    return null;
+  }
+  return normalizeSkillItem(payload);
 }
 
 export async function discardSkillDraft(skillId: string): Promise<boolean> {
-  const response = await axiosInstance.post(
-    `${coreBasePath}/skills/${encodeURIComponent(skillId)}:discard`,
-  );
-  const payload = unwrapEnvelope<RawObject>(response.data);
-  return toBoolean(payload?.discarded, false);
+  const response = await skillsApi.apiCoreSkillsSkillIdDiscardPost({ skillId });
+  const payload = unwrapEnvelope<{ discarded?: boolean }>(response.data);
+  return Boolean(payload.discarded);
 }
 
 export async function removeSkillAsset(skillId: string) {
-  return axiosInstance.delete(`${coreBasePath}/skills/${encodeURIComponent(skillId)}`);
+  return skillsApi.apiCoreSkillsSkillIdDelete({ skillId });
 }
 
 export async function disableSkillAsset(skillId: string) {
@@ -1375,92 +949,475 @@ export async function disableSkillAsset(skillId: string) {
 }
 
 export async function shareSkillAsset(skillId: string, payload: ShareSkillPayload) {
-  return axiosInstance.post(
-    `${coreBasePath}/skills/${encodeURIComponent(skillId)}:share`,
-    {
+  return skillSharesApi.apiCoreSkillsSkillIdSharePost({
+    skillId,
+    shareSkillOpenAPIRequest: {
       target_user_ids: payload.targetUserIds,
-      target_group_ids: payload.targetGroupIds,
+      target_group_ids: payload.targetGroupIds || [],
       message: payload.message || "",
     },
-  );
-}
-
-async function listSkillShares(path: string): Promise<SkillShareRecord[]> {
-  const response = await axiosInstance.get(`${coreBasePath}${path}`);
-  const payload = unwrapEnvelope<unknown>(response.data);
-  const shares = extractShareList(payload)
-    .map((item) => normalizeSkillShareRecord(item))
-    .filter((item): item is SkillShareRecord => Boolean(item));
-  const deduped = new Map<string, SkillShareRecord>();
-
-  shares.forEach((item) => {
-    deduped.set(item.id, item);
   });
-
-  return Array.from(deduped.values());
 }
 
 export async function listIncomingSkillShares(): Promise<SkillShareRecord[]> {
-  return listSkillShares("/skill-shares/incoming");
+  const response = await skillSharesApi.apiCoreSkillSharesIncomingGet({
+    page: 1,
+    pageSize: 200,
+  });
+  const payload = unwrapEnvelope<{ items?: SkillShareListItemOpenAPIResponse[] }>(
+    response.data,
+  );
+  return (payload.items || []).map(normalizeIncomingShare);
 }
 
 export async function listOutgoingSkillShares(): Promise<SkillShareRecord[]> {
-  return listSkillShares("/skill-shares/outgoing");
+  const response = await skillSharesApi.apiCoreSkillSharesOutgoingGet({
+    page: 1,
+    pageSize: 200,
+  });
+  const payload = unwrapEnvelope<{ items?: SkillShareListItemOpenAPIResponse[] }>(
+    response.data,
+  );
+  return (payload.items || []).map(normalizeOutgoingShare);
 }
 
 export async function listSkillShareTargets(skillId: string): Promise<SkillShareRecord[]> {
-  const response = await axiosInstance.get(
-    `${coreBasePath}/skills/${encodeURIComponent(skillId)}:shares`,
-    {
-      params: {
-        page: 1,
-        page_size: 200,
-      },
-    },
-  );
-  const payload = unwrapEnvelope<unknown>(response.data);
-  const shares = extractShareList(payload)
-    .map((item) => normalizeSkillShareRecord(item))
-    .filter((item): item is SkillShareRecord => Boolean(item));
-  const deduped = new Map<string, SkillShareRecord>();
-
-  shares.forEach((item) => {
-    const primaryRecipient = item.recipients[0];
-    const dedupeKey = primaryRecipient
-      ? `${primaryRecipient.type}:${primaryRecipient.id || primaryRecipient.name}`
-      : item.id;
-    deduped.set(dedupeKey, item);
+  const response = await skillSharesApi.apiCoreSkillsSkillIdSharesGet({
+    skillId,
+    page: 1,
+    pageSize: 200,
   });
+  const payload = unwrapEnvelope<{
+    items?: SkillShareTargetItemOpenAPIResponse[];
+    skill_id?: string;
+  }>(response.data);
 
-  return Array.from(deduped.values());
+  return (payload.items || []).map((item) =>
+    normalizeShareTarget(item, payload.skill_id || skillId),
+  );
 }
 
 export async function getSkillShareDetail(shareItemId: string): Promise<SkillShareRecord | null> {
-  const response = await axiosInstance.get(
-    `${coreBasePath}/skill-shares/${encodeURIComponent(shareItemId)}`,
-  );
-  const payload = unwrapEnvelope<unknown>(response.data);
-  const normalized = normalizeSkillShareRecord(toRawObject(payload) || {});
-
-  if (normalized) {
-    return normalized;
-  }
-
-  const shares = extractShareList(payload)
-    .map((item) => normalizeSkillShareRecord(item))
-    .filter((item): item is SkillShareRecord => Boolean(item));
-
-  return shares[0] || null;
+  const response = await skillSharesApi.apiCoreSkillSharesShareItemIdGet({ shareItemId });
+  const payload = unwrapEnvelope<SkillShareDetailOpenAPIResponse>(response.data);
+  return normalizeShareDetail(payload);
 }
 
 export async function acceptSkillShare(shareItemId: string) {
-  return axiosInstance.post(
-    `${coreBasePath}/skill-shares/${encodeURIComponent(shareItemId)}:accept`,
-  );
+  return skillSharesApi.apiCoreSkillSharesShareItemIdAcceptPost({ shareItemId });
 }
 
 export async function rejectSkillShare(shareItemId: string) {
-  return axiosInstance.post(
-    `${coreBasePath}/skill-shares/${encodeURIComponent(shareItemId)}:reject`,
-  );
+  return skillSharesApi.apiCoreSkillSharesShareItemIdRejectPost({ shareItemId });
 }
+
+export async function getSkillDraftStatus(skillId: string): Promise<SkillDraftStatusRecord> {
+  const response = await skillDraftsApi.apiCoreSkillsSkillIdDraftStatusGet({ skillId });
+  const payload = unwrapEnvelope<SkillDraftStatusOpenAPIResponse>(response.data);
+  return normalizeDraftStatus(payload);
+}
+
+export async function writeSkillDraftText(
+  skillId: string,
+  options: { path: string; content: string; expectedDraftVersion: number },
+) {
+  const response = await skillDraftsApi.apiCoreSkillsSkillIdDraftFsTextPut({
+    skillId,
+    skillDraftWriteTextOpenAPIRequest: {
+      path: options.path,
+      content: options.content,
+      expected_draft_version: options.expectedDraftVersion,
+    },
+  });
+  const payload = unwrapEnvelope<{ draft_version?: number }>(response.data);
+  return payload.draft_version ?? options.expectedDraftVersion;
+}
+
+export async function commitSkillDraft(
+  skillId: string,
+  draftVersion: number,
+): Promise<{ revisionId: string; revisionNo: number }> {
+  const response = await skillRevisionsApi.apiCoreSkillsSkillIdCommitPost({
+    skillId,
+    skillCommitOpenAPIRequest: { draft_version: draftVersion },
+  });
+  const payload = unwrapEnvelope<{ revision_id?: string; revision_no?: number }>(response.data);
+  return {
+    revisionId: payload.revision_id || "",
+    revisionNo: payload.revision_no ?? 0,
+  };
+}
+
+export async function listSkillRevisions(skillId: string): Promise<SkillRevisionRecord[]> {
+  const response = await skillRevisionsApi.apiCoreSkillsSkillIdRevisionsGet({ skillId });
+  const payload = unwrapEnvelope<{ items?: SkillRevisionOpenAPIResponse[] }>(response.data);
+  return (payload.items || []).map(normalizeRevision);
+}
+
+export async function getSkillRevisionFile(
+  skillId: string,
+  revisionId: string,
+  path = SKILL_MD_PATH,
+): Promise<string> {
+  const response = await skillRevisionsApi.apiCoreSkillsSkillIdRevisionsRevisionIdFileGet({
+    skillId,
+    revisionId,
+    path,
+  });
+  const payload = unwrapEnvelope<SkillFileOpenAPIResponse>(response.data);
+  return payload.content || "";
+}
+
+const readRawString = (value: Record<string, unknown>, keys: string[]): string => {
+  for (const key of keys) {
+    const field = value[key];
+    if (typeof field === "string" && field.trim()) {
+      return field.trim();
+    }
+    if (typeof field === "number" && Number.isFinite(field)) {
+      return String(field);
+    }
+  }
+  return "";
+};
+
+const readRawBoolean = (value: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const field = value[key];
+    if (typeof field === "boolean") {
+      return field;
+    }
+  }
+  return false;
+};
+
+const readRawNumber = (value: Record<string, unknown>, keys: string[], fallback = 0) => {
+  for (const key of keys) {
+    const field = value[key];
+    if (typeof field === "number" && Number.isFinite(field)) {
+      return field;
+    }
+    if (typeof field === "string" && field.trim()) {
+      const parsed = Number(field);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return fallback;
+};
+
+const normalizeDraftReviewMeta = (
+  payload: Record<string, unknown>,
+): SkillDraftReviewMeta | undefined => {
+  const reviewId = readRawString(payload, ["review_id", "reviewId"]);
+  if (!reviewId) {
+    return undefined;
+  }
+  return {
+    reviewId,
+    reviewVersion: readRawNumber(payload, [
+      "review_version",
+      "reviewVersion",
+      "expected_review_version",
+      "expectedReviewVersion",
+    ]),
+    canUndo: readRawBoolean(payload, ["can_undo", "canUndo"]),
+    pendingCount: readRawNumber(payload, ["pending_count", "pendingCount"], 0),
+    acceptedCount: readRawNumber(payload, ["accepted_count", "acceptedCount"], 0),
+    rejectedCount: readRawNumber(payload, ["rejected_count", "rejectedCount"], 0),
+  };
+};
+
+const normalizeDraftReviewMutation = (
+  payload: Record<string, unknown>,
+  fallbackReviewVersion: number,
+): SkillDraftReviewMutationResult => ({
+  reviewVersion: readRawNumber(
+    payload,
+    ["review_version", "reviewVersion", "expected_review_version", "expectedReviewVersion"],
+    fallbackReviewVersion,
+  ),
+  canUndo: readRawBoolean(payload, ["can_undo", "canUndo"]),
+  pendingCount: readRawNumber(payload, ["pending_count", "pendingCount"], 0),
+  acceptedCount: readRawNumber(payload, ["accepted_count", "acceptedCount"], 0),
+  rejectedCount: readRawNumber(payload, ["rejected_count", "rejectedCount"], 0),
+});
+
+const unwrapSkillFileDiffPayload = (
+  payload: DiffFileOpenAPIResponse | Record<string, unknown>,
+): { file: Record<string, unknown>; reviewSource: Record<string, unknown> } => {
+  const raw = payload as Record<string, unknown>;
+  const nestedFileDiff = raw.file_diff ?? raw.fileDiff;
+  if (nestedFileDiff && typeof nestedFileDiff === "object") {
+    return {
+      file: nestedFileDiff as Record<string, unknown>,
+      reviewSource: raw,
+    };
+  }
+  return {
+    file: raw,
+    reviewSource: raw,
+  };
+};
+
+const normalizeDiffFile = (
+  payload: DiffFileOpenAPIResponse | Record<string, unknown>,
+): SkillDiffFileRecord => {
+  const { file, reviewSource } = unwrapSkillFileDiffPayload(payload);
+  const diffEntryLines =
+    (file.diffEntryLines as DiffEntryLineOpenAPIResponse[] | undefined) ||
+    (file.diff_entry_lines as DiffEntryLineOpenAPIResponse[] | undefined) ||
+    [];
+
+  return {
+    path: String(file.path || ""),
+    status: String(file.status || ""),
+    binary: Boolean(file.binary),
+    type: String(file.type || "file"),
+    tooLarge: Boolean(file.too_large ?? file.tooLarge),
+    diffEntryLines,
+    review: normalizeDraftReviewMeta(reviewSource),
+  };
+};
+
+const normalizeDiffTree = (payload: DiffTreeOpenAPIResponse): SkillDiffTreeRecord => ({
+  cacheWritten: Boolean(payload.cache_written),
+  files: (payload.files || []).map(normalizeDiffFile),
+});
+
+const buildHeadDraftDiffRequest = (skillId: string, path?: string) => ({
+  old: { type: "head", skill_id: skillId },
+  new: { type: "draft", skill_id: skillId },
+  context_lines: 3,
+  ...(path ? { path } : {}),
+});
+
+export async function compareSkillTreeDiff(skillId: string): Promise<SkillDiffTreeRecord> {
+  const response = await skillDiffApi.apiCoreSkillDiffTreePost({
+    diffOpenAPIRequest: buildHeadDraftDiffRequest(skillId),
+  });
+  const payload = unwrapEnvelope<DiffTreeOpenAPIResponse>(response.data);
+  return normalizeDiffTree(payload);
+}
+
+export async function compareSkillFileDiff(
+  skillId: string,
+  path: string,
+): Promise<SkillDiffFileRecord> {
+  const response = await skillDiffApi.apiCoreSkillDiffFilePost({
+    diffOpenAPIRequest: buildHeadDraftDiffRequest(skillId, path),
+  });
+  const payload = unwrapEnvelope<DiffFileOpenAPIResponse | Record<string, unknown>>(response.data);
+  return normalizeDiffFile(payload);
+}
+
+export async function submitSkillDraftReviewActions(
+  skillId: string,
+  reviewId: string,
+  options: {
+    expectedReviewVersion: number;
+    items: SkillDraftReviewActionItem[];
+  },
+): Promise<SkillDraftReviewMutationResult> {
+  const response = await axiosInstance.post(
+    `${BASE_URL}/api/core/skills/${encodeURIComponent(skillId)}/draft-review/${encodeURIComponent(reviewId)}/actions`,
+    {
+      expected_review_version: options.expectedReviewVersion,
+      items: options.items.map((item) => ({
+        hunk_id: item.hunkId,
+        decision: mapSkillDraftReviewDecisionToApi(item.decision),
+        ...(item.path ? { path: item.path } : {}),
+      })),
+    },
+  );
+  const payload = unwrapEnvelope<Record<string, unknown>>(response.data);
+  return normalizeDraftReviewMutation(payload, options.expectedReviewVersion);
+}
+
+export async function undoSkillDraftReview(
+  skillId: string,
+  reviewId: string,
+  expectedReviewVersion: number,
+): Promise<SkillDraftReviewMutationResult> {
+  const response = await axiosInstance.post(
+    `${BASE_URL}/api/core/skills/${encodeURIComponent(skillId)}/draft-review/${encodeURIComponent(reviewId)}:undo`,
+    {
+      expected_review_version: expectedReviewVersion,
+    },
+  );
+  const payload = unwrapEnvelope<Record<string, unknown>>(response.data);
+  return normalizeDraftReviewMutation(payload, expectedReviewVersion);
+}
+
+export async function commitSkillDraftReview(
+  skillId: string,
+  reviewId: string,
+  expectedReviewVersion: number,
+): Promise<SkillDraftReviewMutationResult> {
+  const response = await axiosInstance.post(
+    `${BASE_URL}/api/core/skills/${encodeURIComponent(skillId)}/draft-review/${encodeURIComponent(reviewId)}:commit`,
+    {
+      expected_review_version: expectedReviewVersion,
+    },
+  );
+  const payload = unwrapEnvelope<Record<string, unknown>>(response.data);
+  return normalizeDraftReviewMutation(payload, expectedReviewVersion);
+}
+
+export async function loadSkillFileDiffLines(
+  skillId: string,
+  path = SKILL_MD_PATH,
+): Promise<{ fileDiff: SkillDiffFileRecord; lines: DiffLine[] }> {
+  const fileDiff = await compareSkillFileDiff(skillId, path);
+  return {
+    fileDiff,
+    lines: mapDiffEntryLines(fileDiff.diffEntryLines),
+  };
+}
+
+export async function mkdirSkillDraftPath(
+  skillId: string,
+  options: { path: string; expectedDraftVersion: number },
+): Promise<number> {
+  const response = await skillDraftsApi.apiCoreSkillsSkillIdDraftFsDirPost({
+    skillId,
+    skillDraftMkdirOpenAPIRequest: {
+      path: options.path,
+      expected_draft_version: options.expectedDraftVersion,
+    },
+  });
+  const payload = unwrapEnvelope<{ draft_version?: number }>(response.data);
+  return payload.draft_version ?? options.expectedDraftVersion;
+}
+
+export async function deleteSkillDraftPath(
+  skillId: string,
+  options: { path: string; expectedDraftVersion: number; recursive?: boolean },
+): Promise<number> {
+  const response = await skillDraftsApi.apiCoreSkillsSkillIdDraftFsPathDelete({
+    skillId,
+    path: options.path,
+    skillDraftDeleteOpenAPIRequest: {
+      path: options.path,
+      expected_draft_version: options.expectedDraftVersion,
+      recursive: options.recursive,
+    },
+  });
+  const payload = unwrapEnvelope<{ draft_version?: number }>(response.data);
+  return payload.draft_version ?? options.expectedDraftVersion;
+}
+
+export async function moveSkillDraftPath(
+  skillId: string,
+  options: { from: string; to: string; expectedDraftVersion: number },
+): Promise<number> {
+  const response = await skillDraftsApi.apiCoreSkillsSkillIdDraftFsMovePost({
+    skillId,
+    skillDraftMoveOpenAPIRequest: {
+      from: options.from,
+      to: options.to,
+      expected_draft_version: options.expectedDraftVersion,
+    },
+  });
+  const payload = unwrapEnvelope<{ draft_version?: number }>(response.data);
+  return payload.draft_version ?? options.expectedDraftVersion;
+}
+
+export async function uploadSkillDraftFile(
+  skillId: string,
+  options: { path: string; uploadId: string; expectedDraftVersion: number },
+): Promise<number> {
+  const response = await skillDraftsApi.apiCoreSkillsSkillIdDraftFsUploadPut({
+    skillId,
+    skillDraftUploadOpenAPIRequest: {
+      path: options.path,
+      upload_id: options.uploadId,
+      expected_draft_version: options.expectedDraftVersion,
+    },
+  });
+  const payload = unwrapEnvelope<{ draft_version?: number }>(response.data);
+  return payload.draft_version ?? options.expectedDraftVersion;
+}
+
+export async function getSkillTree(skillId: string): Promise<SkillTreeNodeRecord> {
+  const response = await skillsApi.apiCoreSkillsSkillIdTreeGet({ skillId });
+  const payload = unwrapEnvelope<SkillTreeNodeOpenAPIResponse>(response.data);
+  return normalizeTreeNode(payload);
+}
+
+export interface SkillFsFileRecord {
+  path: string;
+  binary: boolean;
+  content: string;
+  mime: string;
+  fileType: string;
+  downloadUrl: string;
+  blobHash: string;
+}
+
+export async function readSkillFsFile(
+  skillId: string,
+  path: string,
+): Promise<SkillFsFileRecord> {
+  const response = await skillFsApi.apiCoreSkillsSkillIdFsContentGet({ skillId, path });
+  const payload = unwrapEnvelope<SkillFileOpenAPIResponse>(response.data);
+  return {
+    path: payload.path || path,
+    binary: Boolean(payload.binary),
+    content: payload.content || "",
+    mime: payload.mime || "",
+    fileType: payload.file_type || "",
+    downloadUrl: payload.download_url || "",
+    blobHash: payload.blob_hash || "",
+  };
+}
+
+export async function readSkillFsContent(skillId: string, path: string): Promise<string> {
+  const file = await readSkillFsFile(skillId, path);
+  return file.content;
+}
+
+export async function listSkillMarketPage(options?: {
+  page?: number;
+  pageSize?: number;
+  keyword?: string;
+  category?: string;
+}) {
+  const response = await skillMarketApi.apiCoreSkillMarketGet({
+    page: options?.page ?? 1,
+    pageSize: options?.pageSize ?? 20,
+    keyword: options?.keyword,
+    category: options?.category,
+  });
+  const payload = unwrapEnvelope<{
+    items?: SkillListItemOpenAPIResponse[];
+    page?: number;
+    page_size?: number;
+    total?: number;
+  }>(
+    response.data as WrappedPayload<{
+      items?: SkillListItemOpenAPIResponse[];
+      page?: number;
+      page_size?: number;
+      total?: number;
+    }>,
+  );
+
+  return {
+    records: (payload.items || []).map((item) => normalizeSkillItem(item)),
+    total: payload.total ?? 0,
+    page: payload.page ?? 1,
+    pageSize: payload.page_size ?? 20,
+  };
+}
+
+export async function installSkillFromMarket(marketItemId: string): Promise<string> {
+  const response = await skillMarketApi.apiCoreSkillMarketMarketItemIdInstallPost({
+    marketItemId,
+  });
+  const payload = unwrapEnvelope<{ skill_id?: string }>(response.data);
+  return payload.skill_id || "";
+}
+
+export { SKILL_MD_PATH };

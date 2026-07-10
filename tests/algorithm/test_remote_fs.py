@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 import subprocess
@@ -9,7 +10,6 @@ import requests
 from lazyllm.tools.agent.skill_manager import SkillManager as LazySkillManager
 from lazyllm.tools.fs.client import FS
 
-from lazymind.chat.engine.tools.skill_editor import list_all_skill_entries
 from lazymind.chat.integrations.remote_fs import RemoteFS
 from lazymind.config import config as algo_config
 
@@ -17,7 +17,7 @@ from lazymind.config import config as algo_config
 class _Response:
     def __init__(self, payload=None, content=b''):
         self._payload = payload or {}
-        self.content = content
+        self.content = content if content else json.dumps(self._payload).encode()
 
     def raise_for_status(self):
         return None
@@ -32,47 +32,39 @@ def test_remote_fs_uses_core_readonly_api(monkeypatch):
     def fake_request(method, url, params, timeout, **kwargs):
         calls.append((method, url, params, timeout, kwargs.get('data')))
         if url.endswith('/list'):
-            return _Response({'code': 0, 'data': {'entries': [{'name': 'skills/a', 'type': 'directory', 'size': 0}]}})
+            return _Response({'items': [{'name': 'a', 'path': 'skills/a', 'type': 'dir', 'size': 0}]})
         if url.endswith('/info'):
-            return _Response({'code': 0, 'data': {'name': 'skills/a/SKILL.md', 'type': 'file', 'size': 4}})
+            return _Response({'path': 'skills/a/SKILL.md', 'type': 'file', 'size': 4})
         if url.endswith('/exists'):
-            return _Response({'code': 0, 'data': {'exists': True}})
-        raise AssertionError(url)
-
-    def fake_get(url, params, timeout):
-        calls.append(('GET', url, params, timeout, None))
+            return _Response({'exists': True})
         if url.endswith('/content'):
             return _Response(content=b'test')
         raise AssertionError(url)
 
     monkeypatch.setattr('lazymind.chat.integrations.remote_fs.requests.request', fake_request)
-    monkeypatch.setattr('lazymind.chat.integrations.remote_fs.requests.get', fake_get)
     monkeypatch.setattr(
         'lazymind.chat.integrations.remote_fs.lazyllm.globals',
-        {'agentic_config': {'session_id': 'sid-1'}},
+        {'agentic_config': {'user_id': 'user-1', 'session_id': 'sid-1'}},
     )
 
     fs = RemoteFS(base_url='http://core:8000', timeout=3)
 
-    assert fs.ls('remote://skills') == [{'name': 'remote://skills/a', 'type': 'directory', 'size': 0}]
+    assert fs.ls('remote://skills') == [{'name': 'remote://skills/a', 'path': 'skills/a', 'type': 'dir', 'size': 0}]
     assert fs.info('skills/a/SKILL.md')['size'] == 4
     assert fs.exists('skills/a/SKILL.md') is True
     assert fs.open('skills/a/SKILL.md', 'rb').read() == b'test'
     assert calls == [
-        ('GET', 'http://core:8000/remote-fs/list', {'path': 'skills', 'detail': 'true', 'session_id': 'sid-1'}, 3, None),
-        ('GET', 'http://core:8000/remote-fs/info', {'path': 'skills/a/SKILL.md', 'session_id': 'sid-1'}, 3, None),
-        ('GET', 'http://core:8000/remote-fs/exists', {'path': 'skills/a/SKILL.md', 'session_id': 'sid-1'}, 3, None),
-        ('GET', 'http://core:8000/remote-fs/content', {'path': 'skills/a/SKILL.md', 'session_id': 'sid-1'}, 3, None),
+        ('GET', 'http://core:8000/remote-fs/list', {'path': 'skills', 'user_id': 'user-1', 'task_id': 'sid-1'}, 3, None),
+        ('GET', 'http://core:8000/remote-fs/info', {'path': 'skills/a/SKILL.md', 'user_id': 'user-1', 'task_id': 'sid-1'}, 3, None),
+        ('GET', 'http://core:8000/remote-fs/exists', {'path': 'skills/a/SKILL.md', 'user_id': 'user-1', 'task_id': 'sid-1'}, 3, None),
+        (
+            'GET',
+            'http://core:8000/remote-fs/content',
+            {'path': 'skills/a/SKILL.md', 'encoding': 'raw', 'user_id': 'user-1', 'task_id': 'sid-1'},
+            3,
+            None,
+        ),
     ]
-
-
-def test_remote_fs_reads_core_api_url_from_model_config(monkeypatch):
-    del monkeypatch
-
-    with algo_config.temp('core_api_url', 'http://inner-core:9000'):
-        fs = RemoteFS()
-
-        assert fs.base_url == 'http://inner-core:9000'
 
 
 def test_remote_fs_omits_session_id_when_not_available(monkeypatch):
@@ -80,7 +72,7 @@ def test_remote_fs_omits_session_id_when_not_available(monkeypatch):
 
     def fake_request(method, url, params, timeout, **kwargs):
         calls.append((method, url, params, timeout))
-        return _Response({'code': 0, 'data': {'exists': False}})
+        return _Response({'exists': False})
 
     monkeypatch.setattr('lazymind.chat.integrations.remote_fs.requests.request', fake_request)
     monkeypatch.setattr('lazymind.chat.integrations.remote_fs.lazyllm.globals', {'agentic_config': {}})
@@ -93,37 +85,57 @@ def test_remote_fs_omits_session_id_when_not_available(monkeypatch):
     ]
 
 
-def test_remote_fs_write_and_rm_use_core_api(monkeypatch):
+def test_remote_fs_write_mkdir_rm_and_trash_use_core_api(monkeypatch):
     calls = []
 
     def fake_request(method, url, params, timeout, **kwargs):
-        calls.append((method, url, params, timeout, kwargs.get('data')))
-        return _Response({'code': 0, 'data': {}})
+        calls.append((method, url, params, timeout, kwargs.get('data'), kwargs.get('json')))
+        return _Response({'ok': True})
 
     monkeypatch.setattr('lazymind.chat.integrations.remote_fs.requests.request', fake_request)
     monkeypatch.setattr(
         'lazymind.chat.integrations.remote_fs.lazyllm.globals',
-        {'agentic_config': {'session_id': 'sid-1'}},
+        {'agentic_config': {'user_id': 'user-1', 'session_id': 'sid-1'}},
     )
 
     fs = RemoteFS(base_url='http://core:8000', timeout=3)
+    fs.mkdir('remote://skills/a/b', create_parents=True)
     fs.write('remote://skills/a/b/SKILL.md', 'hello')
     fs.rm('remote://skills/a/b', recursive=True)
+    fs.trash('remote://skills/a/b')
 
     assert calls == [
         (
+            'POST',
+            'http://core:8000/remote-fs/dir',
+            {'user_id': 'user-1', 'task_id': 'sid-1'},
+            3,
+            None,
+            {'path': 'skills/a/b', 'recursive': True},
+        ),
+        (
             'PUT',
             'http://core:8000/remote-fs/content',
-            {'path': 'skills/a/b/SKILL.md', 'session_id': 'sid-1'},
+            {'path': 'skills/a/b/SKILL.md', 'user_id': 'user-1', 'task_id': 'sid-1'},
             3,
             b'hello',
+            None,
         ),
         (
             'DELETE',
             'http://core:8000/remote-fs/path',
-            {'path': 'skills/a/b', 'recursive': 'true', 'session_id': 'sid-1'},
+            {'path': 'skills/a/b', 'recursive': 'true', 'user_id': 'user-1', 'task_id': 'sid-1'},
             3,
             None,
+            None,
+        ),
+        (
+            'POST',
+            'http://core:8000/remote-fs/trash',
+            {'user_id': 'user-1', 'task_id': 'sid-1'},
+            3,
+            None,
+            {'path': 'skills/a/b'},
         ),
     ]
 
@@ -170,7 +182,7 @@ def mock_remote_fs_server(tmp_path):
         try:
             response = requests.get(
                 f'{base_url}/remote-fs/exists',
-                params={'path': 'skills', 'session_id': 'sid-demo'},
+                params={'path': 'skills', 'user_id': 'user-demo', 'task_id': 'sid-demo'},
                 timeout=0.5,
             )
             if response.ok:
@@ -196,25 +208,34 @@ def test_skill_manager_lists_remote_skills_from_mock_server(monkeypatch, mock_re
     FS._instances.clear()
     monkeypatch.setattr(
         'lazymind.chat.integrations.remote_fs.lazyllm.globals',
-        {'agentic_config': {'session_id': 'sid-demo'}},
+        {'agentic_config': {'user_id': 'user-demo', 'session_id': 'sid-demo'}},
     )
     with algo_config.temp('core_api_url', mock_remote_fs_server):
-        entries = list_all_skill_entries('remote://skills')
+        manager = LazySkillManager(dir='remote://skills', fs=FS)
 
-        assert entries['writing/example']['name'] == 'example'
-        assert entries['writing/example']['category'] == 'writing'
-        assert entries['writing/example']['path'] == 'remote://skills/writing/example'
-        assert entries['writing/example']['source'] == 'remote'
-        assert 'Example Skill' in entries['writing/example']['content']
-        assert entries['ops/deploy-checklist']['name'] == 'deploy-checklist'
-        assert entries['ops/deploy-checklist']['category'] == 'ops'
+        skill_files = dict(manager._iter_skill_files())
+        assert skill_files['remote://skills/writing/example'] == 'remote://skills/writing/example/SKILL.md'
+        assert skill_files['remote://skills/ops/deploy-checklist'] == (
+            'remote://skills/ops/deploy-checklist/SKILL.md'
+        )
+
+        example_content = manager._fs_read(skill_files['remote://skills/writing/example'])
+        example_meta = manager._extract_yaml_meta(example_content)
+        deploy_content = manager._fs_read(skill_files['remote://skills/ops/deploy-checklist'])
+        deploy_meta = manager._extract_yaml_meta(deploy_content)
+
+        assert example_meta['name'] == 'example'
+        assert example_meta['category'] == 'writing'
+        assert 'Example Skill' in example_content
+        assert deploy_meta['name'] == 'deploy-checklist'
+        assert deploy_meta['category'] == 'ops'
 
 
 def test_skill_manager_reads_reference_from_remote_mock_server(monkeypatch, mock_remote_fs_server):
     FS._instances.clear()
     monkeypatch.setattr(
         'lazymind.chat.integrations.remote_fs.lazyllm.globals',
-        {'agentic_config': {'session_id': 'sid-demo'}},
+        {'agentic_config': {'user_id': 'user-demo', 'session_id': 'sid-demo'}},
     )
     with algo_config.temp('core_api_url', mock_remote_fs_server):
         manager = LazySkillManager(dir='remote://skills', fs=FS)

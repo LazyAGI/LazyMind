@@ -30,7 +30,9 @@ export interface FeishuDataSourceConnection {
 export interface FeishuDataSourceWizardDraft {
   activeView?: "assets" | "connectors";
   authSelectModalOpen?: boolean;
+  authSelectProvider?: CloudDataSourceProvider;
   wizardOpen: boolean;
+  openWizardAfterOAuth?: boolean;
   wizardStep: number;
   wizardMode: "create" | "edit";
   selectedType: string | null;

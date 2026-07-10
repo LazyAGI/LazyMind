@@ -1,6 +1,9 @@
 package main
 
 import (
+	"net/http"
+	"strings"
+
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/chat"
@@ -14,10 +17,12 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/plugin"
 	"lazymind/core/preference"
+	"lazymind/core/remotefs"
 	"lazymind/core/resourcechange"
+	"lazymind/core/resourcefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
-	"lazymind/core/skill"
+	skillv2handler "lazymind/core/skillv2/handler"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
 	"lazymind/core/userprefs"
@@ -25,6 +30,19 @@ import (
 
 	"github.com/gorilla/mux"
 )
+
+func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) {
+	handleAPI(r, method, path, perms, h).MatcherFunc(func(r *http.Request, _ *mux.RouteMatch) bool {
+		path := strings.TrimPrefix(r.URL.EscapedPath(), "/api/core")
+		const prefix = "/agent/threads/"
+		rest := strings.TrimPrefix(path, prefix)
+		if rest == path {
+			return true
+		}
+		threadID, _, _ := strings.Cut(rest, "/")
+		return !strings.Contains(threadID, ":")
+	})
+}
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
@@ -153,29 +171,33 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Agent thread stream -----
 	handleAPI(r, "GET", "/agent/threads", []string{"qa.read"}, agent.ListThreads)
 	handleAPI(r, "POST", "/agent/threads", []string{"qa.write"}, agent.CreateThread)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}:events", []string{"qa.read"}, agent.StreamThreadEvents)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/events/{step_id}", []string{"qa.read"}, agent.StreamThreadStepEvents)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/steps", []string{"qa.read"}, agent.ListThreadSteps)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/steps/{step_id}/records", []string{"qa.read"}, agent.ListThreadStepRecords)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}", []string{"qa.read"}, agent.GetThread)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/history", []string{"qa.read"}, agent.GetThreadHistory)
-	handleAPI(r, "DELETE", "/agent/threads/{thread_id}:history", []string{"qa.write"}, agent.DeleteThreadHistory)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/rounds", []string{"qa.read"}, agent.ListThreadRounds)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/records", []string{"qa.read"}, agent.ListThreadRecords)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/{kind}:download", []string{"qa.read"}, agent.DownloadThreadResult)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/datasets", []string{"qa.read"}, agent.GetThreadResultDatasets)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/eval-reports", []string{"qa.read"}, agent.GetThreadResultEvalReports)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/analysis-reports", []string{"qa.read"}, agent.GetThreadResultAnalysisReports)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/diffs", []string{"qa.read"}, agent.GetThreadResultDiffs)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/abtests", []string{"qa.read"}, agent.GetThreadResultAbtests)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/flow-status", []string{"qa.read"}, agent.GetThreadFlowStatus)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/artifacts/{artifact_id}", []string{"qa.read"}, agent.GetThreadArtifact)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:messages", []string{"qa.write"}, agent.StreamThreadMessages)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:start", []string{"qa.write"}, agent.StartThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:pause", []string{"qa.write"}, agent.PauseThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:cancel", []string{"qa.write"}, agent.CancelThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:retry", []string{"qa.write"}, agent.RetryThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:continue", []string{"qa.write"}, agent.ContinueThread)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/events:stream", []string{"qa.read"}, agent.StreamThreadEvents)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/event-trace:stream", []string{"qa.read"}, agent.StreamThreadEventTrace)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/steps", []string{"qa.read"}, agent.ListThreadSteps)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates", []string{"qa.read"}, agent.ListThreadGates)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/{step}/versions/{version}:download", []string{"qa.read"}, agent.DownloadThreadGate)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/{step}/versions/{version}", []string{"qa.read"}, agent.GetThreadGateContent)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases", []string{"qa.read"}, agent.GetThreadEvalGateBadCases)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details", []string{"qa.read"}, agent.GetThreadABTestGateCaseDetails)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/results/traces:compare", []string{"qa.read"}, agent.CompareThreadTraces)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/results/traces/{trace_id}", []string{"qa.read"}, agent.GetThreadTraceDetail)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}", []string{"qa.read"}, agent.GetThread)
+	handleAgentThreadAPI(r, "DELETE", "/agent/threads/{thread_id}", []string{"qa.write"}, agent.DeleteThread)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/messages", []string{"qa.read"}, agent.GetThreadMessages)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/messages", []string{"qa.write"}, agent.StreamThreadMessages)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/start", []string{"qa.write"}, agent.StartThread)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/pause", []string{"qa.write"}, agent.PauseThread)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/cancel", []string{"qa.write"}, agent.CancelThread)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/retry", []string{"qa.write"}, agent.RetryThread)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/continue", []string{"qa.write"}, agent.ContinueThread)
+	handleAPI(r, "GET", "/agent/candidates", []string{"qa.read"}, agent.ListCandidates)
+	handleAPI(r, "GET", "/agent/candidates/{candidate_id:.*}", []string{"qa.read"}, agent.GetCandidate)
+	handleAPI(r, "GET", "/agent/router/status", []string{"qa.read"}, agent.GetRouterStatus)
+	handleAPI(r, "GET", "/agent/router/algorithms", []string{"qa.read"}, agent.ListRouterAlgorithms)
+	handleAPI(r, "POST", "/agent/router/algorithms", []string{"qa.write"}, agent.RegisterRouterAlgorithm)
+	handleAPI(r, "POST", "/agent/router/algorithms/{algorithm_id}:action", []string{"qa.write"}, agent.PostRouterAlgorithmAction)
+	handleAPI(r, "GET", "/agent/router/ab-strategy", []string{"qa.read"}, agent.GetRouterABStrategy)
+	handleAPI(r, "PUT", "/agent/router/ab-strategy", []string{"qa.write"}, agent.PutRouterABStrategy)
 
 	// ----- Conversation -----
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)
@@ -201,10 +223,20 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Plugin Drafts (user-created plugin authoring) -----
 	handleAPI(r, "GET", "/plugin-drafts", []string{"qa.read"}, plugin.ListPluginDrafts)
 	handleAPI(r, "POST", "/plugin-drafts", []string{"qa.write"}, plugin.CreatePluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts:polish-info", []string{"qa.write"}, plugin.PolishPluginDraftInfo)
 	handleAPI(r, "GET", "/plugin-drafts/{draft_id}", []string{"qa.read"}, plugin.GetPluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:save", []string{"qa.write"}, plugin.SavePluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-generate", []string{"qa.write"}, plugin.AIGeneratePluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-repair", []string{"qa.write"}, plugin.AIRepairPluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:publish", []string{"qa.write"}, plugin.PublishPluginDraft)
 	handleAPI(r, "DELETE", "/plugin-drafts/{draft_id}", []string{"qa.write"}, plugin.DeletePluginDraft)
+	handleAPI(r, "GET", "/chat/settings/plugins", []string{"qa.read"}, plugin.ListUserPluginSettings)
+	handleAPI(r, "PATCH", "/chat/settings/plugins/{plugin_ref:.+}", []string{"qa.write"}, plugin.PatchUserPluginSetting)
+	handleAPI(r, "POST", "/published-plugins/{plugin_ref:.+}:rollback", []string{"qa.write"}, plugin.RollbackPlugin)
+	handleAPI(r, "POST", "/published-plugins/{plugin_ref:.+}:archive", []string{"qa.write"}, plugin.ArchivePlugin)
+	handleAPI(r, "GET", "/published-plugins/{plugin_ref:.+}/versions", []string{"qa.read"}, plugin.ListPluginVersions)
+	handleAPI(r, "GET", "/published-plugins/{plugin_ref:.+}/versions/{revision_id}", []string{"qa.read"}, plugin.GetPluginVersion)
+	handleAPI(r, "POST", "/published-plugins/{plugin_ref:.+}/versions/{revision_id}:edit", []string{"qa.write"}, plugin.ReplaceDraftFromPluginVersion)
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
@@ -275,25 +307,68 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/personalization-items", []string{"qa.read"}, evolution.ListManagedStates)
 	handleAPI(r, "GET", "/personalization-setting", []string{"qa.read"}, evolution.GetPersonalizationSetting)
 	handleAPI(r, "PUT", "/personalization-setting", []string{"qa.write"}, evolution.SetPersonalizationSetting)
-	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skill.List)
-	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skill.ListTags)
-	handleAPI(r, "GET", "/skills/categories", []string{"qa.read"}, skill.ListCategories)
-	handleAPI(r, "POST", "/skills", []string{"qa.write"}, skill.CreateManaged)
-	handleAPI(r, "POST", "/builtin-skills/{builtin_skill_uid}:enable", []string{"qa.write"}, skill.EnableBuiltinSkill)
-	handleAPI(r, "GET", "/skills/{skill_id}:shares", []string{"qa.read"}, skill.ListSkillShareTargets)
-	handleAPI(r, "GET", "/skill-shares/incoming", []string{"qa.read"}, skill.IncomingShares)
-	handleAPI(r, "GET", "/skill-shares/outgoing", []string{"qa.read"}, skill.OutgoingShares)
-	handleAPI(r, "GET", "/skill-shares/{share_item_id}", []string{"qa.read"}, skill.GetShareItem)
-	handleAPI(r, "POST", "/skill-shares/{share_item_id}:accept", []string{"qa.write"}, skill.AcceptShare)
-	handleAPI(r, "POST", "/skill-shares/{share_item_id}:reject", []string{"qa.write"}, skill.RejectShare)
-	handleAPI(r, "GET", "/skills/{skill_id}:draft-preview", []string{"qa.read"}, skill.DraftPreview)
-	handleAPI(r, "GET", "/skills/{skill_id}", []string{"qa.read"}, skill.Get)
-	handleAPI(r, "PATCH", "/skills/{skill_id}", []string{"qa.write"}, skill.UpdateManaged)
-	handleAPI(r, "DELETE", "/skills/{skill_id}", []string{"qa.write"}, skill.DeleteManaged)
-	handleAPI(r, "POST", "/skills/{skill_id}:generate", []string{"qa.write"}, skill.Generate)
-	handleAPI(r, "POST", "/skills/{skill_id}:confirm", []string{"qa.write"}, skill.Confirm)
-	handleAPI(r, "POST", "/skills/{skill_id}:discard", []string{"qa.write"}, skill.Discard)
-	handleAPI(r, "POST", "/skills/{skill_id}:share", []string{"qa.write"}, skill.Share)
+	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skillv2handler.List)
+	handleAPI(r, "GET", "/skills:trash", []string{"qa.read"}, skillv2handler.ListTrash)
+	handleAPI(r, "DELETE", "/skills:trash", []string{"qa.write"}, skillv2handler.EmptyTrash)
+	handleAPI(r, "POST", "/skill_organize", []string{"qa.write"}, skillv2handler.SubmitSkillOrganize)
+	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skillv2handler.ListTags)
+	handleAPI(r, "GET", "/skills/categories", []string{"qa.read"}, skillv2handler.ListCategories)
+	handleAPI(r, "POST", "/skills", []string{"qa.write"}, skillv2handler.Create)
+	handleAPI(r, "POST", "/builtin-skills/{builtin_skill_uid}:enable", []string{"qa.write"}, skillv2handler.EnableBuiltinSkill)
+	handleAPI(r, "GET", "/skills/{skill_id}:shares", []string{"qa.read"}, skillv2handler.ListShareTargets)
+	handleAPI(r, "GET", "/skill-shares/incoming", []string{"qa.read"}, skillv2handler.IncomingShares)
+	handleAPI(r, "GET", "/skill-shares/outgoing", []string{"qa.read"}, skillv2handler.OutgoingShares)
+	handleAPI(r, "GET", "/skill-shares/{share_item_id}", []string{"qa.read"}, skillv2handler.GetShareItem)
+	handleAPI(r, "POST", "/skill-shares/{share_item_id}:accept", []string{"qa.write"}, skillv2handler.AcceptShare)
+	handleAPI(r, "POST", "/skill-shares/{share_item_id}:reject", []string{"qa.write"}, skillv2handler.RejectShare)
+	handleAPI(r, "GET", "/skills/{skill_id}:draft-preview", []string{"qa.read"}, skillv2handler.DraftPreview)
+	handleAPI(r, "GET", "/skills/{skill_id}/tree", []string{"qa.read"}, skillv2handler.Tree)
+	handleAPI(r, "GET", "/skills/{skill_id}/file", []string{"qa.read"}, skillv2handler.File)
+	handleAPI(r, "GET", "/skills/{skill_id}/fs/list", []string{"qa.read"}, skillv2handler.FSList)
+	handleAPI(r, "GET", "/skills/{skill_id}/fs/info", []string{"qa.read"}, skillv2handler.FSInfo)
+	handleAPI(r, "GET", "/skills/{skill_id}/fs/exists", []string{"qa.read"}, skillv2handler.FSExists)
+	handleAPI(r, "GET", "/skills/{skill_id}/fs/content", []string{"qa.read"}, skillv2handler.FSContent)
+	handleAPI(r, "GET", "/skills/{skill_id}/fs/download", []string{"qa.read"}, skillv2handler.FSDownload)
+	handleAPI(r, "GET", "/skills/{skill_id}/draft/exists", []string{"qa.read"}, skillv2handler.DraftExists)
+	handleAPI(r, "GET", "/skills/{skill_id}/draft/status", []string{"qa.read"}, skillv2handler.DraftStatus)
+	handleAPI(r, "PUT", "/skills/{skill_id}/draft/fs/text", []string{"qa.write"}, skillv2handler.DraftWriteText)
+	handleAPI(r, "PUT", "/skills/{skill_id}/draft/fs/upload", []string{"qa.write"}, skillv2handler.DraftUpload)
+	handleAPI(r, "POST", "/skills/{skill_id}/draft/fs/dir", []string{"qa.write"}, skillv2handler.DraftMkdir)
+	handleAPI(r, "DELETE", "/skills/{skill_id}/draft/fs/path", []string{"qa.write"}, skillv2handler.DraftDeletePath)
+	handleAPI(r, "POST", "/skills/{skill_id}/draft/fs/move", []string{"qa.write"}, skillv2handler.DraftMove)
+	handleAPI(r, "POST", "/skills/{skill_id}/draft-review/{review_id}/actions", []string{"qa.write"}, skillv2handler.DraftReviewAction)
+	handleAPI(r, "POST", "/skills/{skill_id}/draft-review/{review_id}:undo", []string{"qa.write"}, skillv2handler.DraftReviewUndo)
+	handleAPI(r, "POST", "/skills/{skill_id}/draft-review/{review_id}:commit", []string{"qa.write"}, skillv2handler.DraftReviewCommit)
+	handleAPI(r, "POST", "/skills/{skill_id}/commit", []string{"qa.write"}, skillv2handler.Commit)
+	handleAPI(r, "GET", "/skills/{skill_id}/revisions", []string{"qa.read"}, skillv2handler.ListRevisions)
+	handleAPI(r, "GET", "/skills/{skill_id}/revisions/{revision_id}/tree", []string{"qa.read"}, skillv2handler.GetRevisionTree)
+	handleAPI(r, "GET", "/skills/{skill_id}/revisions/{revision_id}/file", []string{"qa.read"}, skillv2handler.ReadRevisionFile)
+	handleAPI(r, "GET", "/skills/{skill_id}/revisions/{revision_id}", []string{"qa.read"}, skillv2handler.GetRevision)
+	handleAPI(r, "POST", "/skills/{skill_id}/rollback/preview", []string{"qa.read"}, skillv2handler.RollbackPreview)
+	handleAPI(r, "POST", "/skills/{skill_id}/rollback", []string{"qa.write"}, skillv2handler.Rollback)
+	handleAPI(r, "DELETE", "/skills/{skill_id}/revisions/{revision_id}", []string{"qa.write"}, skillv2handler.DeleteRevision)
+	handleAPI(r, "GET", "/skills/{skill_id}", []string{"qa.read"}, skillv2handler.Get)
+	handleAPI(r, "PATCH", "/skills/{skill_id}", []string{"qa.write"}, skillv2handler.Patch)
+	handleAPI(r, "POST", "/skills/{skill_id}:trash", []string{"qa.write"}, skillv2handler.Trash)
+	handleAPI(r, "POST", "/skills/{skill_id}:restore", []string{"qa.write"}, skillv2handler.Restore)
+	handleAPI(r, "DELETE", "/skills/{skill_id}:purge", []string{"qa.write"}, skillv2handler.Purge)
+	handleAPI(r, "DELETE", "/skills/{skill_id}", []string{"qa.write"}, skillv2handler.Delete)
+	handleAPI(r, "POST", "/skills/{skill_id}:generate", []string{"qa.write"}, skillv2handler.Generate)
+	handleAPI(r, "POST", "/skills/{skill_id}:confirm", []string{"qa.write"}, skillv2handler.Confirm)
+	handleAPI(r, "POST", "/skills/{skill_id}:discard", []string{"qa.write"}, skillv2handler.Discard)
+	handleAPI(r, "POST", "/skills/{skill_id}:share", []string{"qa.write"}, skillv2handler.Share)
+	handleAPI(r, "POST", "/skill-diff/tree", []string{"qa.read"}, skillv2handler.DiffTree)
+	handleAPI(r, "POST", "/skill-diff/file", []string{"qa.read"}, skillv2handler.DiffFile)
+	handleAPI(r, "GET", "/skill-market", []string{"qa.read"}, skillv2handler.MarketList)
+	handleAPI(r, "GET", "/skill-market/{market_item_id}", []string{"qa.read"}, skillv2handler.MarketGet)
+	handleAPI(r, "POST", "/skill-market:install", []string{"qa.write"}, skillv2handler.MarketInstall)
+	handleAPI(r, "POST", "/skill-market/{market_item_id}:install", []string{"qa.write"}, skillv2handler.MarketInstall)
+	handleAPI(r, "POST", "/admin/skill-market", []string{"qa.write"}, skillv2handler.MarketPublish)
+	handleAPI(r, "PATCH", "/admin/skill-market/{market_item_id}", []string{"qa.write"}, skillv2handler.MarketEdit)
+	handleAPI(r, "POST", "/admin/skill-market/{market_item_id}:offline", []string{"qa.write"}, skillv2handler.MarketUnpublish)
+	handleAPI(r, "POST", "/skill-market/admin/items", []string{"qa.write"}, skillv2handler.MarketPublish)
+	handleAPI(r, "PATCH", "/skill-market/admin/items/{market_item_id}", []string{"qa.write"}, skillv2handler.MarketEdit)
+	handleAPI(r, "POST", "/skill-market/admin/items/{market_item_id}:unpublish", []string{"qa.write"}, skillv2handler.MarketUnpublish)
 	handleAPI(r, "PUT", "/memory", []string{"qa.write"}, memory.Upsert)
 	handleAPI(r, "GET", "/memory:draft-preview", []string{"qa.read"}, memory.DraftPreview)
 	handleAPI(r, "POST", "/memory:generate", []string{"qa.write"}, memory.Generate)
@@ -304,6 +379,17 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/user-preference:generate", []string{"qa.write"}, preference.Generate)
 	handleAPI(r, "POST", "/user-preference:confirm", []string{"qa.write"}, preference.Confirm)
 	handleAPI(r, "POST", "/user-preference:discard", []string{"qa.write"}, preference.Discard)
+	handleAPI(r, "GET", "/personal-resource/{resource_type}:file", []string{"qa.read"}, resourcefs.GetFile)
+	handleAPI(r, "PUT", "/personal-resource/{resource_type}:file", []string{"qa.write"}, resourcefs.WriteDraft)
+	handleAPI(r, "PUT", "/personal-resource/{resource_type}:draft", []string{"qa.write"}, resourcefs.WriteDraft)
+	handleAPI(r, "GET", "/personal-resource/{resource_type}:draft-preview", []string{"qa.read"}, resourcefs.DraftPreview)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}/draft-review/{review_id}/actions", []string{"qa.write"}, resourcefs.ReviewAction)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}/draft-review/{review_id}:undo", []string{"qa.write"}, resourcefs.ReviewUndo)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}:commit", []string{"qa.write"}, resourcefs.CommitDraft)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}:discard", []string{"qa.write"}, resourcefs.DiscardDraft)
+	handleAPI(r, "GET", "/personal-resource/{resource_type}/revisions", []string{"qa.read"}, resourcefs.ListRevisions)
+	handleAPI(r, "GET", "/personal-resource/{resource_type}/revisions/{revision_id}", []string{"qa.read"}, resourcefs.GetRevision)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}:rollback", []string{"qa.write"}, resourcefs.Rollback)
 
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
 	handleAPI(r, "GET", "/conversations/{name}:history", []string{"qa.read"}, chat.GetConversationHistory)
@@ -376,13 +462,17 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/prompts", []string{"document.read"}, chat.ListPrompts)
 
 	// Algorithm service callbacks: no request-level RBAC, protected by internal service token at infra level.
-	handleAPI(r, "POST", "/skill/create", nil, skill.Create)
-	handleAPI(r, "GET", "/remote-fs/list", []string{"qa.read"}, skill.RemoteFSList)
-	handleAPI(r, "GET", "/remote-fs/info", []string{"qa.read"}, skill.RemoteFSInfo)
-	handleAPI(r, "GET", "/remote-fs/exists", []string{"qa.read"}, skill.RemoteFSExists)
-	handleAPI(r, "GET", "/remote-fs/content", []string{"qa.read"}, skill.RemoteFSContent)
-	handleAPI(r, "PUT", "/remote-fs/content", []string{"qa.write"}, skill.RemoteFSWrite)
-	handleAPI(r, "DELETE", "/remote-fs/path", []string{"qa.write"}, skill.RemoteFSDelete)
+	handleAPI(r, "POST", "/skill/create", nil, skillv2handler.InternalCreate)
+	handleAPI(r, "GET", "/remote-fs/list", nil, remotefs.List)
+	handleAPI(r, "GET", "/remote-fs/info", nil, remotefs.Info)
+	handleAPI(r, "GET", "/remote-fs/exists", nil, remotefs.Exists)
+	handleAPI(r, "GET", "/remote-fs/content", nil, remotefs.Content)
+	handleAPI(r, "PUT", "/remote-fs/content", nil, remotefs.Content)
+	handleAPI(r, "POST", "/remote-fs/dir", nil, remotefs.Dir)
+	handleAPI(r, "DELETE", "/remote-fs/path", nil, remotefs.Delete)
+	handleAPI(r, "POST", "/remote-fs/copy", nil, remotefs.Copy)
+	handleAPI(r, "POST", "/remote-fs/move", nil, remotefs.Move)
+	handleAPI(r, "POST", "/remote-fs/trash", nil, remotefs.Trash)
 
 	// ----- ACL（Knowledge basetextPermission） -----
 	handleAPI(r, "GET", "/kb/list", []string{"document.read"}, acl.ListKB)

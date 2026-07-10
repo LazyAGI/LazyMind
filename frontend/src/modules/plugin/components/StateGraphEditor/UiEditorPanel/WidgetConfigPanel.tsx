@@ -1,4 +1,5 @@
 import { Checkbox, InputNumber, Select } from 'antd';
+import { useTranslation } from 'react-i18next';
 import type { WidgetConfig } from '../core/pluginModel';
 
 interface Props {
@@ -16,20 +17,21 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function BaseFields({ config, onChange }: { config: WidgetConfig; onChange: (next: WidgetConfig) => void }) {
+  const { t } = useTranslation();
   return (
     <>
-      <Field label="只读">
+      <Field label={t('selfEvolutionRun.wcpReadOnly')}>
         <Checkbox
           checked={!!config.readOnly}
           onChange={(e) => onChange({ ...config, readOnly: e.target.checked || undefined } as WidgetConfig)}
         />
       </Field>
-      <Field label="最大高度">
+      <Field label={t('selfEvolutionRun.wcpMaxHeight')}>
         <InputNumber
           size="small"
           min={0}
           value={config.maxHeight}
-          placeholder="不限"
+          placeholder={t('selfEvolutionRun.wcpPlaceholderUnlimited')}
           onChange={(v) => onChange({ ...config, maxHeight: v ?? undefined } as WidgetConfig)}
           style={{ width: 80 }}
           addonAfter="px"
@@ -40,16 +42,17 @@ function BaseFields({ config, onChange }: { config: WidgetConfig; onChange: (nex
 }
 
 function TextListFields({ config, onChange }: { config: Extract<WidgetConfig, { widgetType: 'text-list' }>; onChange: (next: WidgetConfig) => void }) {
+  const { t } = useTranslation();
   return (
     <>
       <BaseFields config={config} onChange={onChange} />
-      <Field label="项内布局">
+      <Field label={t('selfEvolutionRun.wcpItemLayout')}>
         <Select
           size="small"
           value={config.itemLayout ?? 'vertical'}
           options={[
-            { value: 'vertical', label: '纵向' },
-            { value: 'horizontal', label: '横向' },
+            { value: 'vertical', label: t('selfEvolutionRun.wcpLayoutVertical') },
+            { value: 'horizontal', label: t('selfEvolutionRun.wcpLayoutHorizontal') },
             { value: 'grid', label: 'Grid' },
           ]}
           onChange={(v) => onChange({ ...config, itemLayout: v })}
@@ -57,12 +60,12 @@ function TextListFields({ config, onChange }: { config: Extract<WidgetConfig, { 
         />
       </Field>
       {config.itemLayout === 'horizontal' && (
-        <Field label="项最大宽">
+        <Field label={t('selfEvolutionRun.wcpItemMaxWidth')}>
           <InputNumber
             size="small"
             min={0}
             value={config.itemMaxWidth}
-            placeholder="不限"
+            placeholder={t('selfEvolutionRun.wcpPlaceholderUnlimited')}
             onChange={(v) => onChange({ ...config, itemMaxWidth: v ?? undefined })}
             style={{ width: 80 }}
             addonAfter="px"
@@ -70,19 +73,19 @@ function TextListFields({ config, onChange }: { config: Extract<WidgetConfig, { 
         </Field>
       )}
       {config.itemLayout === 'grid' && (
-        <Field label="最大列数">
+        <Field label={t('selfEvolutionRun.wcpGridMaxCols')}>
           <InputNumber
             size="small"
             min={1}
             max={12}
             value={config.gridMaxCols}
-            placeholder="自动"
+            placeholder={t('selfEvolutionRun.wcpPlaceholderAuto')}
             onChange={(v) => onChange({ ...config, gridMaxCols: v ?? undefined })}
             style={{ width: 70 }}
           />
         </Field>
       )}
-      <Field label="显示新增">
+      <Field label={t('selfEvolutionRun.wcpShowAddButton')}>
         <Checkbox
           checked={config.showAddButton !== false}
           onChange={(e) => onChange({ ...config, showAddButton: e.target.checked ? undefined : false })}
@@ -93,15 +96,16 @@ function TextListFields({ config, onChange }: { config: Extract<WidgetConfig, { 
 }
 
 function ImageSingleFields({ config, onChange }: { config: Extract<WidgetConfig, { widgetType: 'image-single' }>; onChange: (next: WidgetConfig) => void }) {
+  const { t } = useTranslation();
   return (
     <>
       <BaseFields config={config} onChange={onChange} />
-      <Field label="图片高度">
+      <Field label={t('selfEvolutionRun.wcpImageHeight')}>
         <InputNumber
           size="small"
           min={0}
           value={config.imageHeight}
-          placeholder="自适应"
+          placeholder={t('selfEvolutionRun.wcpPlaceholderAuto')}
           onChange={(v) => onChange({ ...config, imageHeight: v ?? undefined })}
           style={{ width: 80 }}
           addonAfter="px"
@@ -112,22 +116,23 @@ function ImageSingleFields({ config, onChange }: { config: Extract<WidgetConfig,
 }
 
 function ImageGalleryFields({ config, onChange }: { config: Extract<WidgetConfig, { widgetType: 'image-gallery' }>; onChange: (next: WidgetConfig) => void }) {
+  const { t } = useTranslation();
   return (
     <>
       <BaseFields config={config} onChange={onChange} />
-      <Field label="排列">
+      <Field label={t('selfEvolutionRun.wcpGalleryLayout')}>
         <Select
           size="small"
           value={config.itemLayout ?? 'horizontal'}
           options={[
-            { value: 'horizontal', label: '横向' },
+            { value: 'horizontal', label: t('selfEvolutionRun.wcpLayoutHorizontal') },
             { value: 'grid', label: 'Grid' },
           ]}
           onChange={(v) => onChange({ ...config, itemLayout: v })}
           style={{ width: 90 }}
         />
       </Field>
-      <Field label="卡片宽">
+      <Field label={t('selfEvolutionRun.wcpCardWidth')}>
         <InputNumber
           size="small"
           min={60}
@@ -137,7 +142,7 @@ function ImageGalleryFields({ config, onChange }: { config: Extract<WidgetConfig
           addonAfter="px"
         />
       </Field>
-      <Field label="卡片高">
+      <Field label={t('selfEvolutionRun.wcpCardHeight')}>
         <InputNumber
           size="small"
           min={40}
@@ -148,19 +153,19 @@ function ImageGalleryFields({ config, onChange }: { config: Extract<WidgetConfig
         />
       </Field>
       {config.itemLayout === 'grid' && (
-        <Field label="最大列数">
+        <Field label={t('selfEvolutionRun.wcpGridMaxCols')}>
           <InputNumber
             size="small"
             min={1}
             max={12}
             value={config.gridMaxCols}
-            placeholder="自动"
+            placeholder={t('selfEvolutionRun.wcpPlaceholderAuto')}
             onChange={(v) => onChange({ ...config, gridMaxCols: v ?? undefined })}
             style={{ width: 70 }}
           />
         </Field>
       )}
-      <Field label="显示新增">
+      <Field label={t('selfEvolutionRun.wcpShowAddButton')}>
         <Checkbox
           checked={config.showAddButton !== false}
           onChange={(e) => onChange({ ...config, showAddButton: e.target.checked ? undefined : false })}
@@ -171,10 +176,11 @@ function ImageGalleryFields({ config, onChange }: { config: Extract<WidgetConfig
 }
 
 function JsonBlockFields({ config, onChange }: { config: Extract<WidgetConfig, { widgetType: 'json-block' }>; onChange: (next: WidgetConfig) => void }) {
+  const { t } = useTranslation();
   return (
     <>
       <BaseFields config={config} onChange={onChange} />
-      <Field label="默认折叠">
+      <Field label={t('selfEvolutionRun.wcpCollapsed')}>
         <Checkbox
           checked={!!config.collapsed}
           onChange={(e) => onChange({ ...config, collapsed: e.target.checked || undefined })}

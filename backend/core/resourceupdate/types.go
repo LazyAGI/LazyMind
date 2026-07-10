@@ -8,6 +8,8 @@ import (
 	"lazymind/core/algo"
 )
 
+const defaultSkillBaseDir = "skills"
+
 type HistoryStats struct {
 	UserTurnCount         int `gorm:"column:user_turn_count"`
 	ToolCallCount         int `gorm:"column:tool_call_count"`

@@ -2,6 +2,7 @@ import { useCallback, useRef, useState, Fragment } from 'react';
 import type { CSSProperties } from 'react';
 import { PlusOutlined, CloseOutlined, SettingOutlined, SplitCellsOutlined, EditOutlined } from '@ant-design/icons';
 import { Button, Input, Modal, Popconfirm, Popover, Tooltip } from 'antd';
+import { useTranslation } from 'react-i18next';
 import type { CompositePanelNode, CompositeTab, WidgetConfig } from '../core/pluginModel';
 import type { SlotDef } from '../core/model';
 import WidgetPlaceholder from './WidgetPlaceholder';
@@ -63,7 +64,7 @@ function DividerHandle({ direction, onDrag }: DividerHandleProps) {
       className={`cc-divider cc-divider--${direction}`}
       onMouseDown={handleMouseDown}
       role='separator'
-      aria-label='拖拽调整比例'
+      aria-label='drag-resize'
     />
   );
 }
@@ -78,6 +79,7 @@ interface PageBarProps {
 }
 
 function PageBar({ position, onPositionChange }: PageBarProps) {
+  const { t } = useTranslation();
   const isCol = position === 'left' || position === 'right';
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -88,10 +90,10 @@ function PageBar({ position, onPositionChange }: PageBarProps) {
   const MAX_EXPANDED = 10;
 
   const directions: Array<{ value: PageBarPosition; label: string }> = [
-    { value: 'top', label: '顶部' },
-    { value: 'bottom', label: '底部' },
-    { value: 'left', label: '左侧' },
-    { value: 'right', label: '右侧' },
+    { value: 'top', label: t('selfEvolutionRun.compositePageBarTop') },
+    { value: 'bottom', label: t('selfEvolutionRun.compositePageBarBottom') },
+    { value: 'left', label: t('selfEvolutionRun.compositePageBarLeft') },
+    { value: 'right', label: t('selfEvolutionRun.compositePageBarRight') },
   ];
 
   const allPages = Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -137,7 +139,7 @@ function PageBar({ position, onPositionChange }: PageBarProps) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <button type='button' className='cc-pagebar-arrow' aria-label='上一页'>
+      <button type='button' className='cc-pagebar-arrow' aria-label='prev-page'>
         {isCol ? '∧' : '‹'}
       </button>
       <div className={`cc-pagebar-pages cc-pagebar-pages--${isCol ? 'col' : 'row'}`}>
@@ -153,7 +155,7 @@ function PageBar({ position, onPositionChange }: PageBarProps) {
         ))}
         {showBottomEllipsis && <span className='cc-pagebar-ellipsis'>{isCol ? '⋮' : '…'}</span>}
       </div>
-      <button type='button' className='cc-pagebar-arrow' aria-label='下一页'>
+      <button type='button' className='cc-pagebar-arrow' aria-label='next-page'>
         {isCol ? '∨' : '›'}
       </button>
       <Popover
@@ -163,7 +165,7 @@ function PageBar({ position, onPositionChange }: PageBarProps) {
         onOpenChange={setPopoverOpen}
         placement={isCol ? 'right' : 'top'}
       >
-        <button type='button' className='cc-pagebar-setting' aria-label='设置页条位置'>
+        <button type='button' className='cc-pagebar-setting' aria-label='pagebar-position-setting'>
           <SettingOutlined />
         </button>
       </Popover>
@@ -190,6 +192,7 @@ interface LeafPaneProps {
 }
 
 function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSplitCol, style, listConstraint }: LeafPaneProps) {
+  const { t } = useTranslation();
   const [isDragOver, setIsDragOver] = useState(false);
   const [activeTabIdx, setActiveTabIdx] = useState(0);
   const [renamingTabIdx, setRenamingTabIdx] = useState<number | null>(null);
@@ -324,9 +327,9 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
       {/* Overwrite confirmation modal */}
       <Modal
         open={!!pendingDropSlotId}
-        title='确认覆盖'
-        okText='确认覆盖'
-        cancelText='取消'
+        title={t('selfEvolutionRun.ccConfirmOverwrite')}
+        okText={t('selfEvolutionRun.ccConfirmOverwrite')}
+        cancelText={t('selfEvolutionRun.ccCancel')}
         okButtonProps={{ danger: true }}
         onOk={() => {
           if (pendingDropSlotId) doAssignSlot(pendingDropSlotId);
@@ -336,14 +339,14 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
         centered
         width={360}
       >
-        此分块已绑定素材，确定要替换为新素材吗？
+        {t('selfEvolutionRun.ccConfirmOverwriteBody')}
       </Modal>
 
       {/* List constraint conflict modal */}
       <Modal
         open={!!listConflictSlotId}
-        title='素材类型不兼容'
-        okText='我知道了'
+        title={t('selfEvolutionRun.ccListConflictTitle')}
+        okText={t('selfEvolutionRun.ccIUnderstand')}
         cancelButtonProps={{ style: { display: 'none' } }}
         onOk={() => setListConflictSlotId(null)}
         onCancel={() => setListConflictSlotId(null)}
@@ -351,8 +354,8 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
         width={400}
       >
         {listConstraint === 'list'
-          ? '这个 Composite 区域里已有「列表」素材。要保持同步翻页，所有素材必须同为「列表」类型。请改为拖入「列表」素材，或先清空区域内已有素材再重新选择。'
-          : 'Composite 区域里已有「非列表」素材。所有素材必须类型一致，请改为拖入「非列表」素材，或先清空区域内已有素材再重新选择。'}
+          ? t('selfEvolutionRun.ccListConflictBodyList')
+          : t('selfEvolutionRun.ccListConflictBodySingle')}
       </Modal>
 
       {/* Toolbar */}
@@ -368,15 +371,15 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
               onBlur={commitBlockRename}
               onPressEnter={commitBlockRename}
               className='cc-leaf-block-label-input'
-              placeholder='分块名称'
+              placeholder={t('selfEvolutionRun.ccBlockNamePlaceholder')}
             />
           ) : (
             <span
               className='cc-leaf-block-label-text'
-              title='双击重命名'
+              title={t('selfEvolutionRun.ccBlockRenameTooltip')}
               onDoubleClick={startBlockRename}
             >
-              {blockLabel || <span className='cc-leaf-block-label-placeholder'>分块</span>}
+              {blockLabel || <span className='cc-leaf-block-label-placeholder'>{t('selfEvolutionRun.ccBlockDefaultLabel')}</span>}
               <EditOutlined className='cc-leaf-block-label-edit-icon' onClick={startBlockRename} />
             </span>
           )}
@@ -389,7 +392,7 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
         >
           {/* Expanded action buttons — slide in on hover */}
           <div className='cc-leaf-toolbar-expanded'>
-            <Tooltip title={isTabsNode ? '新增 Tab 页' : '开启 Tab（新增 2 个）'} placement='top'>
+            <Tooltip title={isTabsNode ? t('selfEvolutionRun.ccAddTabPage') : t('selfEvolutionRun.ccEnableTab')} placement='top'>
               <Button
                 size='small'
                 type='text'
@@ -398,7 +401,7 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
               >Tab</Button>
             </Tooltip>
             {onSplitRow && (
-              <Tooltip title='向右拆分' placement='top'>
+            <Tooltip title={t('selfEvolutionRun.ccSplitRight')} placement='top'>
                 <Button
                   size='small'
                   type='text'
@@ -409,7 +412,7 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
               </Tooltip>
             )}
             {onSplitCol && (
-              <Tooltip title='向下拆分' placement='top'>
+            <Tooltip title={t('selfEvolutionRun.ccSplitDown')} placement='top'>
                 <Button
                   size='small'
                   type='text'
@@ -429,14 +432,14 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
           />
           {onRemove && (
             <Popconfirm
-              title='确定移除此分块？'
-              description='移除后该分块绑定的内容将丢失。'
+              title={t('selfEvolutionRun.ccRemoveBlockTitle')}
+              description={t('selfEvolutionRun.ccRemoveBlockDesc')}
               onConfirm={onRemove}
-              okText='确定移除'
-              cancelText='取消'
+              okText={t('selfEvolutionRun.ccRemoveBlockOk')}
+              cancelText={t('selfEvolutionRun.ccCancel')}
               okButtonProps={{ danger: true }}
             >
-              <Tooltip title='移除此分块'>
+              <Tooltip title={t('selfEvolutionRun.ccRemoveBlockTooltip')}>
                 <Button size='small' type='text' danger icon={<CloseOutlined />} className='cc-leaf-remove-btn' />
               </Tooltip>
             </Popconfirm>
@@ -474,13 +477,13 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
                   </span>
                 )}
                 <Popconfirm
-                  title='删除此 Tab 页？'
-                  description={tabs.length <= 2 ? '删除后 Tab 模式将关闭，内容保留在分块中。' : undefined}
+                  title={t('selfEvolutionRun.ccDeleteTabTitle')}
+                  description={tabs.length <= 2 ? t('selfEvolutionRun.ccDeleteTabLastDesc') : undefined}
                   open={confirmRemoveTabIdx === idx}
                   onConfirm={(e) => { e?.stopPropagation(); handleRemoveTab(idx); setConfirmRemoveTabIdx(null); }}
                   onCancel={(e) => { e?.stopPropagation(); setConfirmRemoveTabIdx(null); }}
-                  okText='确定删除'
-                  cancelText='取消'
+                  okText={t('selfEvolutionRun.ccDeleteTabOk')}
+                  cancelText={t('selfEvolutionRun.ccCancel')}
                   okButtonProps={{ danger: true }}
                 >
                   <Button
@@ -499,7 +502,7 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
             if (!activeTab?.slot) {
               return (
                 <div className='cc-leaf-placeholder'>
-                  <PlusOutlined /><span>拖入素材</span>
+                  <PlusOutlined /><span>{t('selfEvolutionRun.ccDropSlotHere')}</span>
                 </div>
               );
             }
@@ -517,7 +520,7 @@ function LeafPane({ node, slotMap, uiSlots, onChange, onRemove, onSplitRow, onSp
       {/* Single slot mode — no slot yet */}
       {!isTabsNode && !node.slot && (
         <div className='cc-leaf-placeholder'>
-          <PlusOutlined /><span>拖入素材</span>
+          <PlusOutlined /><span>{t('selfEvolutionRun.ccDropSlotHere')}</span>
         </div>
       )}
 

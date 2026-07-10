@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from 'antd';
 import { ExpandOutlined, CompressOutlined, CloseOutlined, FileTextOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { PluginModel, PluginUiTab, WidgetConfig, CompositePanelNode, WidgetType } from '../core/pluginModel';
 import { SLOT_DEFAULT_WIDGET } from '../core/pluginModel';
 import type { GraphModel } from '../core/model';
@@ -34,6 +35,7 @@ export default function UiEditorPanel({
   onActiveTabChange,
   readonly = false,
 }: Props) {
+  const { t } = useTranslation();
   const [fullscreen, setFullscreen] = useState(false);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [autoEditTabId, setAutoEditTabId] = useState<string | undefined>(undefined);
@@ -55,7 +57,7 @@ export default function UiEditorPanel({
 
   const handleAddTab = () => {
     const id = nextTabId();
-    const newTab: PluginUiTab = { id, label: '新 Tab', layout: 'vertical', slots: [] };
+    const newTab: PluginUiTab = { id, label: t('selfEvolutionRun.uiEditorNewTabLabel'), layout: 'vertical', slots: [] };
     updateTabs([...tabs, newTab]);
     onActiveTabChange(id);
     setAutoEditTabId(id);
@@ -183,7 +185,7 @@ export default function UiEditorPanel({
                 icon={fullscreen ? <CompressOutlined /> : <ExpandOutlined />}
                 className="uep-expand-btn"
                 onClick={() => setFullscreen((v) => !v)}
-                title={fullscreen ? '退出全屏' : '全屏预览'}
+                title={fullscreen ? t('selfEvolutionRun.uiEditorExitFullscreen') : t('selfEvolutionRun.uiEditorEnterFullscreen')}
               />
             }
           />
@@ -195,7 +197,7 @@ export default function UiEditorPanel({
               <span className="uep-props-panel-icon">{selectedIcon}</span>
               <div className="uep-props-panel-header-text">
                 <span className="uep-props-panel-title">{selectedLabel}</span>
-                <span className="uep-props-panel-subtitle">材料属性编辑</span>
+            <span className="uep-props-panel-subtitle">{t('selfEvolutionRun.uiEditorPropsSubtitle')}</span>
               </div>
               <Button
                 type="text"

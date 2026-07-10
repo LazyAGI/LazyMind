@@ -1228,6 +1228,118 @@
   flex-wrap: wrap;
 }
 
+.memory-skill-import-section {
+  border: 1px solid #edf1f5;
+  border-radius: 12px;
+  padding: 14px;
+  background: #fbfcff;
+}
+
+.memory-skill-create-modal {
+  .ant-modal-body {
+    max-height: min(72vh, 720px);
+    overflow-y: auto;
+    padding-top: 16px;
+    padding-bottom: 8px;
+  }
+}
+
+.memory-skill-create-source {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  .ant-radio-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+.memory-skill-create-grid {
+  gap: 14px;
+}
+
+.memory-skill-content-field {
+  gap: 10px;
+}
+
+.memory-skill-content-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  label {
+    margin-bottom: 0;
+  }
+}
+
+.memory-skill-import-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+
+  .ant-btn-text {
+    color: #667085;
+    font-size: 12px;
+    padding-inline: 8px;
+  }
+
+  .ant-btn-text:not(:disabled):hover {
+    color: #344054;
+    background: #f2f4f7;
+  }
+}
+
+.memory-skill-import-input-icon {
+  color: #98a2b3;
+}
+
+.memory-skill-import-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .ant-input-affix-wrapper {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.memory-skill-import-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.memory-skill-import-method {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.memory-skill-import-panel {
+  label {
+    display: block;
+    margin-bottom: 6px;
+    color: #344054;
+    font-size: 13px;
+    font-weight: 600;
+  }
+}
+
+.memory-skill-import-drop {
+  .ant-upload-drag {
+    min-height: 132px;
+    border-color: #b8c4d4;
+    border-radius: 12px;
+    background: #fff;
+  }
+}
+
 .memory-child-skill-section {
   border-top: 1px solid #edf1f5;
   padding-top: 16px;
@@ -2292,20 +2404,107 @@
 .memory-skill-detail-layout {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
+}
+
+.memory-skill-detail-page-header.common-detail-page-header {
+  gap: 6px;
 }
 
 .memory-skill-detail-page-header {
-  padding: 14px 16px;
-  border: 1px solid #e5ebf3;
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at top right, rgba(22, 119, 255, 0.14), transparent 40%),
-    linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 8px 12px;
+  border: 1px solid #e8edf3;
+  border-radius: 10px;
+  background: #fff;
 
   .detail-page-description {
     color: inherit;
+    margin: 0;
   }
+
+  .detail-page-title {
+    gap: 8px;
+  }
+
+  .detail-title {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  .memory-skill-detail-title-trigger {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    cursor: text;
+    color: inherit;
+    font: inherit;
+  }
+
+  .memory-skill-detail-title-edit {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
+    width: 100%;
+
+    .ant-input {
+      flex: 1;
+      min-width: 160px;
+      max-width: 360px;
+    }
+  }
+}
+
+.memory-skill-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.memory-skill-detail-description-row {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.memory-skill-detail-description-text,
+.memory-skill-detail-description-trigger span {
+  display: block;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-skill-detail-description-trigger {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  cursor: text;
+  color: inherit;
+}
+
+.memory-skill-detail-description-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
 }
 
 .memory-skill-detail-header-content {
@@ -2575,31 +2774,17 @@
 .memory-skill-detail-meta {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 6px;
+  flex: 0 1 auto;
   flex-wrap: wrap;
 
   .ant-tag {
     margin-inline-end: 0;
     border-radius: 999px;
-    padding: 2px 10px;
+    padding: 0 8px;
     font-size: 12px;
-  }
-}
-
-.memory-skill-detail-tags {
-  padding-top: 2px;
-
-  .memory-tag-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .ant-tag {
-    border-radius: 999px;
-    padding: 4px 10px;
-    margin-inline-end: 0;
+    line-height: 20px;
     background: #f2f4f7;
     color: #475467;
     border: 1px solid #eaecf0;
@@ -2699,8 +2884,9 @@
     padding: 12px;
   }
 
-  .memory-skill-detail-page-header {
-    padding: 12px;
+  .memory-skill-detail-page-header.common-detail-page-header {
+    padding: 8px 10px;
+    gap: 6px;
   }
 
   .memory-experience-detail-page-header {
@@ -2764,6 +2950,335 @@
   line-height: 1.8;
   padding: 0;
   resize: vertical;
+}
+
+.memory-skill-package-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.memory-skill-package-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memory-skill-package-loading,
+.memory-skill-package-panel-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+}
+
+.memory-skill-package-review-alert {
+  margin: 0;
+}
+
+.memory-skill-package-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px 0;
+}
+
+.memory-skill-package-file-actions {
+  margin-left: auto;
+}
+
+.memory-skill-package-create-form {
+  width: 100%;
+
+  .ant-select {
+    width: 160px;
+    flex: 0 0 160px;
+  }
+
+  .ant-select-selector {
+    overflow: hidden;
+    align-items: center;
+  }
+
+  .ant-select-selection-item {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    line-height: 22px;
+  }
+
+  .memory-skill-package-path-option {
+    width: 100%;
+    margin: 0;
+    line-height: 22px;
+    vertical-align: middle;
+  }
+
+  .ant-input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
+.memory-skill-package-path-dropdown {
+  .ant-select-item-option-content {
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    min-width: 0;
+    min-height: 32px;
+  }
+
+  .memory-skill-package-path-option {
+    margin: 0;
+    line-height: 22px;
+    vertical-align: middle;
+  }
+}
+
+.memory-skill-package-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  height: min(68vh, 720px);
+  min-height: 360px;
+  border-top: 1px solid #e7edf4;
+}
+
+.memory-skill-ellipsis-text {
+  display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.memory-skill-tree-node-name.memory-skill-ellipsis-text {
+  vertical-align: bottom;
+}
+
+.memory-skill-package-tree {
+  min-height: 0;
+  border-right: 1px solid #e7edf4;
+  background: #fbfcff;
+  padding: 12px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+
+  .ant-tree-treenode {
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .ant-tree-node-content-wrapper {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .ant-tree-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+  }
+}
+
+.memory-skill-package-tree-head {
+  margin-bottom: 8px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.memory-skill-tree-node-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+
+  .memory-skill-tree-node-name {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .memory-skill-tree-status {
+    flex: 0 0 auto;
+  }
+}
+
+.memory-skill-tree-status {
+  margin-inline-end: 0;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.memory-skill-package-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: #fff;
+}
+
+.memory-skill-package-main-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid #edf1f5;
+  color: #101828;
+  font-size: 13px;
+
+  .memory-skill-package-main-path {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .memory-skill-package-main-path-strong {
+    font-weight: 600;
+  }
+}
+
+.memory-skill-package-main-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  scrollbar-gutter: stable;
+}
+
+.memory-skill-package-diff {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.memory-skill-package-diff-hunks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memory-skill-diff-hunk {
+  border: 1px solid #e7edf4;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+
+  &.is-pending {
+    border-color: #91caff;
+    box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.08);
+  }
+
+  &.is-accepted {
+    border-color: #b7eb8f;
+  }
+
+  &.is-rejected {
+    border-color: #ffccc7;
+  }
+}
+
+.memory-skill-diff-hunk-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.memory-skill-diff-hunk-toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.memory-skill-diff-hunk-label {
+  color: #344054;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.memory-skill-diff-hunk-pending {
+  color: #1677ff;
+  font-size: 12px;
+}
+
+.memory-skill-diff-hunk-fallback-hint {
+  padding: 12px;
+  border: 1px dashed #d0d5dd;
+  border-radius: 8px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.6;
+  background: #fcfcfd;
+}
+
+.memory-skill-review-stats {
+  color: #475467;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.memory-skill-diff-line-html {
+  .diff-addition {
+    background: rgba(82, 196, 26, 0.18);
+  }
+
+  .diff-deletion {
+    background: rgba(255, 77, 79, 0.18);
+    text-decoration: line-through;
+  }
+}
+
+.memory-skill-diff-hunk-head {
+  padding: 0 10px;
+  background: #fbfcfe;
+
+  .memory-diff-line.is-hunk {
+    background: transparent;
+  }
+}
+
+.memory-skill-diff-hunk-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.memory-skill-diff-hunk-body {
+  padding: 4px 0;
+}
+
+.memory-skill-package-plain {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #475467;
+  line-height: 1.8;
+}
+
+@media (max-width: 960px) {
+  .memory-skill-package-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .memory-skill-package-tree {
+    border-right: 0;
+    border-bottom: 1px solid #e7edf4;
+    max-height: 220px;
+  }
 }
 
 .memory-experience-detail-content {

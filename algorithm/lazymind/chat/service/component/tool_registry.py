@@ -30,7 +30,7 @@ from lazymind.chat.engine.tools import (
     kb_tmp_search,
     memory_editor,
     read_memory,
-    skill_editor,
+    SkillEditorToolGroup,
     url_fetch,
     vision_extractor,
     vocab_learn,
@@ -188,7 +188,7 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         name='skill_editor',
         label='技能编辑',
         description='创建、修改和删除技能',
-        instance=skill_editor,
+        instance=SkillEditorToolGroup(),
     ),
     ToolGroupConfig(
         name='local_fs',

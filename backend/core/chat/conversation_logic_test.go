@@ -34,6 +34,38 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 }
 
+func TestPluginStepParamsFromEventParamsPreservesChatSessionID(t *testing.T) {
+	params := pluginStepParamsFromEventParams(map[string]any{
+		"plugin_id":              "writer-plugin",
+		"step_id":                "generate_outline",
+		"session_id":             "ps-1",
+		"chat_session_id":        "conv-1_123",
+		"user_input":             "go",
+		"is_cold_start":          false,
+		"retry_hint":             "retry",
+		"partial_indices":        map[string]any{"outline": []any{float64(1), float64(3)}},
+		"history_files_per_turn": map[string]any{"2": []any{"a.png", "b.pdf"}},
+		"filters":                map[string]any{"kb_id": "kb-1"},
+		"user_id":                "user-1",
+	})
+
+	if params.PluginID != "writer-plugin" || params.StepID != "generate_outline" || params.SessionID != "ps-1" {
+		t.Fatalf("unexpected basic params: %+v", params)
+	}
+	if params.ChatSessionID != "conv-1_123" {
+		t.Fatalf("expected chat_session_id to be preserved, got %q", params.ChatSessionID)
+	}
+	if got := params.PartialIndices["outline"]; len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("unexpected partial_indices: %#v", params.PartialIndices)
+	}
+	if got := params.HistoryFilesPerTurn["2"]; len(got) != 2 || got[0] != "a.png" || got[1] != "b.pdf" {
+		t.Fatalf("unexpected history_files_per_turn: %#v", params.HistoryFilesPerTurn)
+	}
+	if params.Filters["kb_id"] != "kb-1" || params.UserID != "user-1" || params.RetryHint != "retry" {
+		t.Fatalf("unexpected remaining params: %+v", params)
+	}
+}
+
 func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
 	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
 		"conversation": map[string]any{

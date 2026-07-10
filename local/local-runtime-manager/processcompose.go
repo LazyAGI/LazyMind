@@ -187,6 +187,7 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 	env = append(env,
 		runtimeProfileEnvVar+"="+cfg.Profile,
 		runtimeRootEnvVar+"="+cfg.RuntimeRoot,
+		localBuildRootEnvVar+"="+cfg.BuildRoot,
 		runtimeResourcesRootEnvVar+"="+cfg.ResourcesRoot,
 		localPortsPinnedEnvVar+"=1",
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
@@ -316,29 +317,24 @@ func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, paths RuntimeP
 	if _, ok := m.runner.(*ExecRunner); !ok {
 		return nil
 	}
-	if paths.ResourcesRoot != "" && !pathIsUnderRoot(paths.ProcessComposeBin, paths.ResourcesRoot) {
+	if paths.ResourcesRoot != "" && filepath.Clean(paths.ResourcesRoot) != filepath.Clean(paths.RepoRoot) && !pathIsUnderRoot(paths.ProcessComposeBin, paths.ResourcesRoot) {
 		return fmt.Errorf("process-compose binary not found in runtime resources: %s", paths.ProcessComposeBin)
 	}
 	if info, err := os.Stat(paths.ProcessComposeBin); err == nil && !info.IsDir() {
 		return nil
 	}
-	repoRoot := paths.RepoRoot
-	candidate := filepath.Join(repoRoot, localProcessComposeBin)
-	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(candidate), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(paths.ProcessComposeBin), 0o755); err != nil {
 		return err
 	}
-	gobin, err := processComposeGOBIN(repoRoot)
+	gobin, err := processComposeGOBIN(paths)
 	if err != nil {
 		return fmt.Errorf("resolve process-compose GOBIN: %w", err)
 	}
 	res, err := m.runner.Run(ctx, Command{
 		Name: "go",
 		Args: []string{"install", processComposePackage},
-		Dir:  repoRoot,
-		Env:  append(goToolEnv(RuntimePaths{RepoRoot: repoRoot, RuntimeRoot: filepath.Join(repoRoot, "local", "runtime")}), "GOBIN="+gobin),
+		Dir:  paths.RepoRoot,
+		Env:  append(goToolEnv(paths), "GOBIN="+gobin),
 	})
 	if err != nil {
 		return fmt.Errorf("install process-compose failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
@@ -346,8 +342,8 @@ func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, paths RuntimeP
 	return nil
 }
 
-func processComposeGOBIN(repoRoot string) (string, error) {
-	return filepath.Abs(filepath.Join(repoRoot, "local", "runtime", "bin"))
+func processComposeGOBIN(paths RuntimePaths) (string, error) {
+	return filepath.Abs(filepath.Dir(paths.ProcessComposeBin))
 }
 
 func quoteShellArg(value string) string {

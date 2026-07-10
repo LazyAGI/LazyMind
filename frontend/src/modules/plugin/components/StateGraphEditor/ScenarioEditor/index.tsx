@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { StepNode } from '../core/model';
 import './index.scss';
 
@@ -27,8 +28,7 @@ export function serializeScenario(steps: StepNode[], data: ScenarioData): string
       const desc = data.stepDescriptions[step.id] ?? '';
       lines.push(`### ${step.id}（${step.label}）`, '', desc.trim() || '（暂无描述）', '');
     }
-  }
-  if (data.notes.trim()) {
+  }  if (data.notes.trim()) {
     lines.push('## 注意事项', '', data.notes.trim(), '');
   }
   return lines.join('\n');
@@ -62,6 +62,17 @@ export function parseScenario(markdown: string, steps: StepNode[]): ScenarioData
       data.stepDescriptions[step.id] = '';
     }
   }
+
+  // Fallback: if no structured sections were parsed (AI returned free-form markdown),
+  // put the entire content into overview so users can at least read it.
+  const hasStructuredContent =
+    data.overview !== '' ||
+    Object.values(data.stepDescriptions).some((v) => v !== '') ||
+    data.notes !== '';
+  if (!hasStructuredContent && markdown.trim()) {
+    data.overview = markdown.trim();
+  }
+
   return data;
 }
 
@@ -70,6 +81,7 @@ export function parseScenario(markdown: string, steps: StepNode[]): ScenarioData
  * Overview and notes are edited via PluginInfoModal (场景说明 tab).
  */
 export default function ScenarioEditor({ steps, value, onChange }: Props) {
+  const { t } = useTranslation();
   const [localStepDescs, setLocalStepDescs] = useState<Record<string, string>>(value.stepDescriptions);
 
   // Sync step descriptions when steps change
@@ -90,7 +102,7 @@ export default function ScenarioEditor({ steps, value, onChange }: Props) {
   return (
     <div className="scenario-editor">
       {steps.length === 0 ? (
-        <p className="se-empty-hint">请先在画布中添加步骤，在步骤属性面板填写步骤说明</p>
+        <p className="se-empty-hint">{t('selfEvolutionRun.scenarioEditorEmptyHint')}</p>
       ) : (
         <div className="se-steps-table">
           {steps.map((step) => (
@@ -103,7 +115,7 @@ export default function ScenarioEditor({ steps, value, onChange }: Props) {
                 className="se-step-desc-input"
                 value={localStepDescs[step.id] ?? ''}
                 onChange={(e) => updateStepDesc(step.id, e.target.value)}
-                placeholder="描述该步骤的作用…"
+                placeholder={t('selfEvolutionRun.scenarioStepDescPlaceholder')}
               />
             </div>
           ))}

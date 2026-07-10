@@ -1,8 +1,8 @@
-import { type CheckpointWaitPrompt, type EvolutionMode, type NormalizedThreadEvent, type StepStatus, type WorkflowProgressPhaseSnapshot, type WorkflowProgressSnapshot, type WorkflowResultsState, type WorkflowRuntimeState, type WorkflowStep, type WorkflowStepId } from "./types";
-import { stageStepMap, workflowStepOrder } from "./constants";
+import { type CheckpointWaitPrompt, type EvolutionMode, type NormalizedThreadEvent, type StepStatus, type ThreadEventStage, type WorkflowProgressPhaseSnapshot, type WorkflowProgressSnapshot, type WorkflowResultsState, type WorkflowRuntimeState, type WorkflowStep, type WorkflowStepId } from "./types";
+import { stageStepMap, stepStageMap, workflowStepOrder } from "./constants";
 import { getWorkflowStepDefinitions, t } from "./i18n";
-import { getLastItem, getOperationRunId } from "./fields";
-import { dedupeNormalizedEvents } from "./threadEvents";
+import { getLastItem, getOperationRunId, getStringField } from "./fields";
+import { dedupeNormalizedEvents, getFlowStatusFromPayload, isTerminalThreadEvent, resolveTerminalStepStatusFromFlowStatus, toThreadEventStage } from "./threadEvents";
 import { getCompletedEvalProgressPhases, getCompletedProgressSnapshot, getEvalOverallProgressSnapshot, getRuntimeProgressStatusLabel, isIntentSidecarOperation, isStepFinishEvent, mergeProgressSnapshot, updateEvalProgressPhases, updateProgressStatusText } from "./progress";
 
 export function createInitialWorkflowRuntimeState(): WorkflowRuntimeState {
@@ -40,7 +40,7 @@ export function createCheckpointRestoreWorkflowRuntimeState(checkpoint: Checkpoi
   });
 
   state[currentStepId] = {
-    status: "paused",
+    status: "done",
     runtimeText: checkpoint.message,
     progress: getCompletedProgressSnapshot(),
   };
@@ -99,10 +99,65 @@ export function getTerminalFlowStepStatus(status?: string): StepStatus | undefin
   if (["error", "failed"].includes(normalizedStatus)) {
     return "failed";
   }
-  if (["completed", "done", "ended", "success", "succeeded"].includes(normalizedStatus)) {
+  if (["ended"].includes(normalizedStatus)) {
     return "done";
   }
   return undefined;
+}
+
+export function applyThreadStreamTerminalToState(
+  prev: WorkflowRuntimeState,
+  event: NormalizedThreadEvent,
+): WorkflowRuntimeState {
+  const flowStatus = getStringField(event.payload, ["status", "state"])?.trim().toLowerCase();
+  const completedStage =
+    event.stage ||
+    toThreadEventStage(getStringField(event.payload, ["current_step", "currentStep", "step"]));
+  if (!completedStage) {
+    return prev;
+  }
+
+  const completedStepId = stageStepMap[completedStage];
+  const completedStepIndex = getWorkflowStepIndex(completedStepId);
+  if (completedStepIndex < 0) {
+    return prev;
+  }
+
+  const nextStatus: StepStatus =
+    flowStatus === "paused" || flowStatus === "completed"
+      ? "done"
+      : resolveTerminalStepStatusFromFlowStatus(flowStatus);
+
+  const next: WorkflowRuntimeState = { ...prev };
+  getWorkflowStepDefinitions().forEach((step, index) => {
+    next[step.id] = { ...prev[step.id] };
+    if (index < completedStepIndex) {
+      next[step.id] = {
+        ...next[step.id],
+        status: "done",
+        progress: next[step.id].progress || getCompletedProgressSnapshot(),
+      };
+      return;
+    }
+    if (index !== completedStepIndex) {
+      return;
+    }
+    if (completedStage === "eval") {
+      next[step.id] = {
+        ...next[step.id],
+        status: nextStatus,
+        progressPhases: getCompletedEvalProgressPhases(),
+        progress: getEvalOverallProgressSnapshot(getCompletedEvalProgressPhases()),
+      };
+      return;
+    }
+    next[step.id] = {
+      ...next[step.id],
+      status: nextStatus,
+      progress: next[step.id].progress || getCompletedProgressSnapshot(),
+    };
+  });
+  return next;
 }
 
 export function getWorkflowStepIndex(stepId: WorkflowStepId | undefined) {
@@ -188,6 +243,10 @@ export function buildWorkflowStepRuntimeFromEvents(events: NormalizedThreadEvent
   };
 
   events.forEach((event) => {
+    if (isTerminalThreadEvent(event.type)) {
+      return;
+    }
+
     if (snapshot.status === "done" && isIntentSidecarOperation(event)) {
       return;
     }
@@ -236,6 +295,13 @@ export function buildWorkflowStepRuntimeFromEvents(events: NormalizedThreadEvent
     }
     snapshot.runtimeText = event.progress ? undefined : event.displayText;
   });
+
+  const terminalEvent = events.find((event) => isTerminalThreadEvent(event.type));
+  if (terminalEvent) {
+    snapshot.status = resolveTerminalStepStatusFromFlowStatus(
+      getFlowStatusFromPayload(terminalEvent.payload),
+    );
+  }
 
   if (isSuperseded && snapshot.status === "running") {
     snapshot.status = "done";
@@ -297,6 +363,41 @@ export function buildVisibleWorkflowSteps(
     };
   });
   return applyTerminalFlowStepStatus(steps, terminalStepStatus);
+}
+
+export function applyThreadStepStatusToWorkflowSteps(
+  steps: WorkflowStep[],
+  threadStepStatusByStage: Partial<Record<ThreadEventStage, StepStatus>>,
+  checkpoint?: CheckpointWaitPrompt,
+): WorkflowStep[] {
+  if (!Object.keys(threadStepStatusByStage).length && !checkpoint?.completedStage) {
+    return steps;
+  }
+  return steps.map((step) => {
+    const stage = stepStageMap[step.id];
+    let overrideStatus = stage ? threadStepStatusByStage[stage] : undefined;
+    if (checkpoint?.completedStage === stage) {
+      overrideStatus = "done";
+    } else if (
+      overrideStatus === "running" &&
+      (step.status === "failed" || step.status === "canceled")
+    ) {
+      overrideStatus = step.status;
+    } else if (!overrideStatus && step.status === "paused" && checkpoint?.completedStage === stage) {
+      overrideStatus = "done";
+    }
+    if (!overrideStatus) {
+      return step;
+    }
+    return {
+      ...step,
+      status: overrideStatus,
+      progress:
+        overrideStatus === "done"
+          ? step.progress || getCompletedProgressSnapshot()
+          : step.progress,
+    };
+  });
 }
 
 export function reduceWorkflowRuntimeState(

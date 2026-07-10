@@ -6,3 +6,5 @@ export * from "../oauth/urls";
 export * from "../oauth/storage";
 export * from "../oauth/mappers";
 export * from "../oauth/api";
+export * from "../oauth/bootstrapOAuthSession";
+export * from "../oauth/restoreWizardDraft";

@@ -114,7 +114,7 @@ export LAZYLLM_MINERU_API_KEY=你的mineru_key
 ### 第二步 — 启动服务
 
 ```bash
-make up-build-local
+make local-up
 ```
 
 启动后访问：
@@ -131,7 +131,7 @@ make up-build-local
 停止本地运行：
 
 ```bash
-make down-local
+make local-down
 ```
 
 ---
@@ -158,8 +158,10 @@ make test-hermetic
 
 | 场景 | 命令 |
 |------|------|
-| 宿主机本地运行（SQLite 状态后端，无容器） | `make up-build-local` |
-| 停止本地运行 | `make down-local` |
+| 宿主机本地运行（SQLite 状态后端，无容器） | `make local-up` |
+| 停止本地运行 | `make local-down` |
+| 删除本地应用产物 | `make local-clean` |
+| 停止本地运行、清除运行数据并删除本地应用产物 | `make local-reset` |
 | 容器栈启动 | `make up` |
 | 构建镜像并启动容器栈 | `make up-build` |
 | 私有化部署 MinerU OCR | `make up LAZYMIND_DEPLOY_MINERU=1` |
@@ -167,7 +169,15 @@ make test-hermetic
 | 外接 Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | 开启存储 Dashboard | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 
-`make up-build-local` 会通过 `local/runtime/bin/local-runtime-manager` 在宿主机上直接运行 LazyMind。如果 `local/config.env` 不存在，Make 会从 `local/config.env.example` 复制一份，并用它作为 local build/run 配置。生成的程序、运行状态、依赖、日志和启动配置都会放在 `local/runtime/` 下。local Python runtime 会安装到 `local/runtime/runtimes/python`，服务依赖放在 `local/runtime/deps/`，运行数据放在 `local/runtime/data/`；pnpm、uv、pip、corepack 和 Go 等构建期工具缓存使用用户级默认缓存，不写入 `local/runtime/`。整个 `local/runtime/` 目录可以删除后重建。
+`make local-up` 会通过 `local/build/bin/local-runtime-manager` 在宿主机上直接运行 LazyMind。如果 `local/config.env` 不存在，Make 会从 `local/config.env.example` 复制一份，并用它作为 local build/run 配置。应用程序产物放在仓库内的 `local/build`：Go 二进制在 `local/build/bin`，managed runtime 在 `local/build/runtimes`，Python 依赖在 `local/build/deps/python`，Node 依赖在 `local/build/deps/node`，desktop staging 的 app 文件在 `local/build/app`。运行数据、SQLite 数据库、状态、启动生成文件、日志、缓存和本地文档导入路径使用平台规范目录。只有确实需要非标准路径时，才在 `local/config.env` 中覆盖对应的 `LAZYMIND_*` 路径变量。
+
+### 平台路径示例
+
+| 平台 | 应用程序产物 | 运行数据和 DB | 日志 | 缓存 | 本地文档 |
+|------|--------------|---------------|------|------|----------|
+| macOS | `<repo>/local/build` | `/Users/<User>/Library/Application Support/LazyMind` | `/Users/<User>/Library/Logs/LazyMind` | `/Users/<User>/Library/Caches/LazyMind` | `/Users/<User>/Documents/LazyMind` |
+| Windows | `<repo>\local\build` | `%LOCALAPPDATA%\LazyMind` | `%LOCALAPPDATA%\LazyMind\Logs` | `%LOCALAPPDATA%\LazyMind\Cache` | `%USERPROFILE%\Documents\LazyMind` |
+| Linux | `<repo>/local/build` | `${XDG_DATA_HOME:-/home/<user>/.local/share}/LazyMind` | `${XDG_STATE_HOME:-/home/<user>/.local/state}/LazyMind/logs` | `${XDG_CACHE_HOME:-/home/<user>/.cache}/LazyMind` | `/home/<user>/Documents/LazyMind` |
 
 ---
 

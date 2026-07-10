@@ -233,6 +233,45 @@ func builtinTemplateID(uid string) string {
 	return builtinSkillIDPrefix + strings.TrimSpace(uid)
 }
 
+// IsBuiltinSkillID reports whether id was produced by builtinTemplateID.
+func IsBuiltinSkillID(id string) bool {
+	return strings.HasPrefix(id, builtinSkillIDPrefix)
+}
+
+// GetBuiltinSkillContent returns the content and name of a builtin skill by its
+// template ID (as returned in the "skill_id" field of the skill list response).
+// The second return value is false when the id is not a known builtin skill.
+func GetBuiltinSkillContent(templateID string) (content, name string, ok bool, err error) {
+	uid := strings.TrimPrefix(templateID, builtinSkillIDPrefix)
+	// Handle child template IDs of the form "uid:relative/path".
+	parentUID := uid
+	if idx := strings.IndexByte(uid, ':'); idx >= 0 {
+		parentUID = uid[:idx]
+		relativePath := uid[idx+1:]
+		item, found, loadErr := builtinSkillByUID(parentUID)
+		if loadErr != nil {
+			return "", "", false, loadErr
+		}
+		if !found {
+			return "", "", false, nil
+		}
+		for _, child := range item.Children {
+			if child.RelativePath == relativePath {
+				return child.Content, child.Name, true, nil
+			}
+		}
+		return "", "", false, nil
+	}
+	item, found, loadErr := builtinSkillByUID(parentUID)
+	if loadErr != nil {
+		return "", "", false, loadErr
+	}
+	if !found {
+		return "", "", false, nil
+	}
+	return item.Content, item.Name, true, nil
+}
+
 func builtinListResponse(item builtinSkill) map[string]any {
 	children := make([]map[string]any, 0, len(item.Children))
 	for _, child := range item.Children {

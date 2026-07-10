@@ -55,9 +55,10 @@ export interface PluginDraftRecord {
   state_layout_content: string;
   scenario_content: string;
   scripts_content: string;
-  // '' | 'generating' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
+  // '' | 'generating' | 'brief_done' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
   //   ''              — AI generation never triggered
-  //   'generating'    — Phase 1 (skeleton) in progress
+  //   'generating'    — Phase 0 (design brief) in progress
+  //   'brief_done'    — Phase 0 complete; Phase 1 (skeleton) running
   //   'skeleton_done' — Phase 1 complete; plugin_yaml_content available; Phase 2 running
   //   'state_done'    — Phase 2 complete; state_yaml_content available; Phase 3 running; editor usable
   //   'done'          — All phases complete
@@ -65,11 +66,27 @@ export interface PluginDraftRecord {
   generate_status: string;
   // Non-empty when generate_status === 'failed'; may also contain non-fatal Phase 3 warnings when 'done'.
   generate_error: string;
+  // Non-empty when generate_status === 'done' but Phase 2 had non-fatal field warnings.
+  generate_warning: string;
+  // Phase 0 design brief Markdown (migration 20260709140000). Empty for old drafts.
+  design_brief_content: string;
+  // Source tracking.
+  // 'ai' | 'skill' | 'blank' | '' (blank/unknown)
+  source_type: string;
+  source_skill_id: string;
+  source_skill_name: string;
   // Optimistic-lock version. Increment on every save that touches plugin_yaml_content or state_yaml_content.
   version: number;
   created_at: string;
   updated_at: string;
   created_by: string;
+  published: boolean;
+  published_plugin_ref: string;
+  current_revision_id: string;
+  current_revision_no: number;
+  published_status: string;
+  base_revision_id: string;
+  draft_dirty: boolean;
 }
 
 export interface ListPluginDraftsResponse {
@@ -91,7 +108,7 @@ export async function listPluginDrafts(params: { page?: number; pageSize?: numbe
   return resp.data.data;
 }
 
-export async function createPluginDraft(payload: { name: string; content?: string }): Promise<PluginDraftRecord> {
+export async function createPluginDraft(payload: { name: string; content?: string; source_type?: string }): Promise<PluginDraftRecord> {
   const resp = await axiosInstance.post<CoreResponse<PluginDraftRecord>>(`${coreBasePath}/plugin-drafts`, payload);
   return resp.data.data;
 }
@@ -124,6 +141,40 @@ export async function deletePluginDraft(id: string): Promise<void> {
   await axiosInstance.delete(`${coreBasePath}/plugin-drafts/${id}`);
 }
 
+export interface PublishedPluginVersion {
+  plugin_ref: string;
+  revision_id: string;
+  revision_no: number;
+  remote_root: string;
+  enabled: boolean;
+}
+
+export async function publishPluginDraft(id: string): Promise<PublishedPluginVersion> {
+  const resp = await axiosInstance.post<CoreResponse<PublishedPluginVersion>>(`${coreBasePath}/plugin-drafts/${id}:publish`);
+  return resp.data.data;
+}
+
+export interface PluginVersionSummary { revision_id: string; revision_no: number; tree_hash: string; message: string; created_by: string; created_at: string; current: boolean }
+export interface PluginVersionContent { plugin_ref: string; revision_id: string; revision_no: number; tree_hash: string; plugin_yaml_content: string; state_yaml_content: string; scenario_content: string; scripts_content: string; readonly: true }
+export async function listPluginVersions(pluginRef: string): Promise<PluginVersionSummary[]> { const r=await axiosInstance.get<CoreResponse<{versions:PluginVersionSummary[]}>>(`${coreBasePath}/published-plugins/${encodeURIComponent(pluginRef)}/versions`);return r.data.data.versions }
+export async function getPluginVersion(pluginRef: string, revisionId: string): Promise<PluginVersionContent> { const r=await axiosInstance.get<CoreResponse<PluginVersionContent>>(`${coreBasePath}/published-plugins/${encodeURIComponent(pluginRef)}/versions/${encodeURIComponent(revisionId)}`);return r.data.data }
+export async function editPluginVersion(pluginRef: string, revisionId: string): Promise<PluginDraftRecord> { const r=await axiosInstance.post<CoreResponse<PluginDraftRecord>>(`${coreBasePath}/published-plugins/${encodeURIComponent(pluginRef)}/versions/${encodeURIComponent(revisionId)}:edit`);return r.data.data }
+
+export interface UserPluginSetting {
+  plugin_ref: string; plugin_id: string; name: string; description: string;
+  when_to_use: string; source_type: string; revision_id: string;
+  revision_no: number; remote_root: string; enabled: boolean; status: string;
+}
+
+export async function listUserPluginSettings(): Promise<UserPluginSetting[]> {
+  const resp = await axiosInstance.get<CoreResponse<{ plugins: UserPluginSetting[] }>>(`${coreBasePath}/chat/settings/plugins`);
+  return resp.data.data.plugins;
+}
+
+export async function setUserPluginEnabled(pluginRef: string, enabled: boolean): Promise<void> {
+  await axiosInstance.patch(`${coreBasePath}/chat/settings/plugins/${encodeURIComponent(pluginRef)}`, { enabled });
+}
+
 // Trigger AI generation for a plugin draft.
 // Returns immediately with generate_status == 'generating'; the job runs asynchronously.
 export async function aiGeneratePluginDraft(
@@ -132,6 +183,43 @@ export async function aiGeneratePluginDraft(
 ): Promise<PluginDraftRecord> {
   const resp = await axiosInstance.post<CoreResponse<PluginDraftRecord>>(
     `${coreBasePath}/plugin-drafts/${id}:ai-generate`,
+    payload,
+  );
+  return resp.data.data;
+}
+
+export type PolishableField = 'description' | 'when_to_use' | 'overview' | 'notes';
+
+export interface PolishPluginInfoPayload {
+  fields: Partial<Record<PolishableField, string>>;
+  target_fields: PolishableField[];
+}
+
+export type PolishPluginInfoResponse = Partial<Record<PolishableField, string>>;
+
+export async function polishPluginInfo(payload: PolishPluginInfoPayload): Promise<PolishPluginInfoResponse> {
+  const resp = await axiosInstance.post<CoreResponse<PolishPluginInfoResponse>>(
+    `${coreBasePath}/plugin-drafts:polish-info`,
+    payload,
+  );
+  return resp.data.data;
+}
+
+export interface RepairPluginDraftPayload {
+  repair_hint?: string;
+  // Which part to repair: 'statemachine' | 'ui' | 'scenario'
+  // 'statemachine' and 'ui' maps to state.yml repair; 'scenario' maps to scenario.md repair.
+  target?: string;
+}
+
+// Trigger AI repair for a plugin draft with warnings or incomplete state.yml.
+// Sends current YAML content to Python /repair endpoint and returns the patched draft.
+export async function repairPluginDraft(
+  id: string,
+  payload: RepairPluginDraftPayload,
+): Promise<PluginDraftRecord> {
+  const resp = await axiosInstance.post<CoreResponse<PluginDraftRecord>>(
+    `${coreBasePath}/plugin-drafts/${id}:ai-repair`,
     payload,
   );
   return resp.data.data;

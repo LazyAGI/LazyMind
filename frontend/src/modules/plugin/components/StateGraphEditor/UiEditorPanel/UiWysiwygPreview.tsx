@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, Dropdown, Input, InputNumber } from 'antd';
 import type { InputRef, MenuProps } from 'antd';
 import { PlusOutlined, EllipsisOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { PluginModel, PluginUiTab, PluginSlotDef, WidgetConfig, WidgetType, CompositePanelNode } from '../core/pluginModel';
 import { SLOT_DEFAULT_WIDGET } from '../core/pluginModel';
 import type { SlotDef } from '../core/model';
@@ -11,7 +12,7 @@ import './UiWysiwygPreview.scss';
 
 const LAYOUT_LABELS: Record<string, string> = {
   vertical: 'Vertical',
-  list: 'Vertical (旧)',
+  list: 'Vertical (legacy)',
   grid: 'Grid',
   horizontal: 'Horizontal',
   composite: 'Composite',
@@ -130,8 +131,9 @@ function TabContent({
   onCompositeLayoutChange,
   onCompositeTabPositionChange,
 }: TabContentProps) {
+  const { t } = useTranslation();
   if (tab.layout !== 'composite' && tab.slots.length === 0) {
-    return <div className="wywp-no-slots">将左侧素材拖入此处，或点击素材行「加入 Tab」</div>;
+    return <div className="wywp-no-slots">{t('selfEvolutionRun.uiWysiwygNoSlots')}</div>;
   }
 
   // Editable canvas
@@ -237,6 +239,7 @@ export default function UiWysiwygPreview({
   onCompositeTabPositionChange,
   extraRightAction,
 }: Props) {
+  const { t } = useTranslation();
   const tabs = pluginModel.ui?.tabs ?? [];
   const uiSlots: Record<string, WidgetConfig> = (pluginModel.ui?.slots ?? {}) as Record<string, WidgetConfig>;
   const pluginSlotMap = Object.fromEntries(pluginModel.slots.map((s) => [s.id, s]));
@@ -279,11 +282,11 @@ export default function UiWysiwygPreview({
     return (
       <div className="wywp-root wywp-empty">
         <div className="wywp-empty-hint">
-          暂无 UI 配置。点击「新建 Tab」并将左侧素材拖入后，效果将实时呈现。
+          {t('selfEvolutionRun.uiWysiwygEmptyHint')}
         </div>
         {onAddTab && (
           <Button size="small" icon={<PlusOutlined />} onClick={onAddTab} style={{ marginTop: 12 }}>
-            新建 Tab
+            {t('selfEvolutionRun.uiWysiwygAddTab')}
           </Button>
         )}
       </div>
@@ -326,8 +329,8 @@ export default function UiWysiwygPreview({
                   <Dropdown
                     menu={{
                       items: [
-                        ...(onRenameTab ? [{ key: 'rename', label: '重命名' as React.ReactNode, onClick: ({ domEvent }: { domEvent: React.MouseEvent }) => { domEvent.stopPropagation(); startEdit(tab); } }] : []),
-                        ...(onDeleteTab && tabs.length > 1 ? [{ key: 'delete', label: <span style={{ color: '#ff4d4f' }}>删除 Tab</span> as React.ReactNode, onClick: ({ domEvent }: { domEvent: React.MouseEvent }) => { domEvent.stopPropagation(); onDeleteTab(tabId); } }] : []),
+                        ...(onRenameTab ? [{ key: 'rename', label: t('selfEvolutionRun.uiWysiwygRenameTab') as React.ReactNode, onClick: ({ domEvent }: { domEvent: React.MouseEvent }) => { domEvent.stopPropagation(); startEdit(tab); } }] : []),
+                        ...(onDeleteTab && tabs.length > 1 ? [{ key: 'delete', label: <span style={{ color: '#ff4d4f' }}>{t('selfEvolutionRun.uiWysiwygDeleteTab')}</span> as React.ReactNode, onClick: ({ domEvent }: { domEvent: React.MouseEvent }) => { domEvent.stopPropagation(); onDeleteTab(tabId); } }] : []),
                       ] as MenuProps['items'],
                     }}
                     trigger={['click']}
@@ -346,7 +349,7 @@ export default function UiWysiwygPreview({
           })}
           {onAddTab && (
             <Button type="text" size="small" icon={<PlusOutlined />} className="wywp-stepbar-add" onClick={onAddTab}>
-              新建 Tab
+              {t('selfEvolutionRun.uiWysiwygAddTab')}
             </Button>
           )}
         </div>
@@ -355,13 +358,13 @@ export default function UiWysiwygPreview({
           {onLayoutChange && (
             <Dropdown menu={{ items: layoutMenuItems }} trigger={['click']}>
               <Button size="small" className="wywp-layout-btn">
-                布局: {LAYOUT_LABELS[activeLayout ?? 'vertical']} ▾
+                {t('selfEvolutionRun.uiWysiwygLayoutLabel', { layout: LAYOUT_LABELS[activeLayout ?? 'vertical'] })}
               </Button>
             </Dropdown>
           )}
           {activeLayout === 'grid' && onGridColsChange && (
             <div className="wywp-grid-cols-control">
-              <span className="wywp-grid-cols-label">列数:</span>
+              <span className="wywp-grid-cols-label">{t('selfEvolutionRun.uiWysiwygGridColsLabel')}</span>
               <InputNumber
                 size="small"
                 min={1}
@@ -397,8 +400,8 @@ export default function UiWysiwygPreview({
 
       {!editorMode && (
         <div className="wywp-footer">
-          <button type="button" className="wywp-btn wywp-btn--ghost">重试</button>
-          <button type="button" className="wywp-btn wywp-btn--primary">继续</button>
+          <button type="button" className="wywp-btn wywp-btn--ghost">{t('selfEvolutionRun.uiWysiwygFooterRetry') }</button>
+          <button type="button" className="wywp-btn wywp-btn--primary">{t('selfEvolutionRun.uiWysiwygFooterContinue')}</button>
         </div>
       )}
     </div>

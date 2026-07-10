@@ -87,11 +87,13 @@ func localRuntimeEnv(cfg RuntimeConfig) []string {
 	return []string{
 		runtimeProfileEnvVar + "=" + cfg.Profile,
 		runtimeRootEnvVar + "=" + cfg.RuntimeRoot,
+		localBuildRootEnvVar + "=" + cfg.BuildRoot,
 		runtimeResourcesRootEnvVar + "=" + cfg.ResourcesRoot,
 		processComposePortEnvVar + "=" + strconv.Itoa(cfg.ProcessComposePort),
 		frontendPortEnvVar + "=" + strconv.Itoa(cfg.FrontendPort),
 		frontendLANOriginEnvVar + "=" + frontendLANOrigin(cfg),
 		localNetworkProfileEnvVar + "=" + cfg.NetworkProfile,
+		localAutoLoginAllowLANEnvVar + "=" + envText(localAutoLoginAllowLANEnvVar, "false"),
 		localProxyAddressEnvVar + "=" + cfg.LocalProxy.Address,
 		localProxyPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.Port),
 		localAuthPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),

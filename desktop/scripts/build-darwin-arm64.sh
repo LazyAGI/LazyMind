@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_ROOT="${ROOT}/desktop/build/darwin-arm64"
-RUNTIME_ROOT="${BUILD_ROOT}/runtime"
+BUILD_ROOT="${ROOT}/local/build"
+RUNTIME_ROOT="${BUILD_ROOT}"
 DIST_ROOT="${ROOT}/desktop/dist"
 APP_RUNTIME_ROOT="${DIST_ROOT}/runtime"
 APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
@@ -85,7 +85,10 @@ prune_runtime_app() {
 mkdir -p \
   "${RUNTIME_ROOT}/bin" \
   "${RUNTIME_ROOT}/app" \
-  "${RUNTIME_ROOT}/python" \
+  "${RUNTIME_ROOT}/runtimes/python" \
+  "${RUNTIME_ROOT}/runtimes/node" \
+  "${RUNTIME_ROOT}/deps/python" \
+  "${RUNTIME_ROOT}/deps/node" \
   "${ELECTRON_CACHE}" \
   "${ELECTRON_BUILDER_CACHE}"
 
@@ -112,24 +115,26 @@ if [[ ! -d "${ROOT}/algorithm/lazyllm/lazyllm" ]]; then
 fi
 
 echo "==> Preparing Python runtime and venvs"
-export UV_PYTHON_INSTALL_DIR="${RUNTIME_ROOT}/python/runtime"
+export UV_PYTHON_INSTALL_DIR="${RUNTIME_ROOT}/runtimes/python"
 "${UV_BIN}" python install 3.11.15
 PYTHON="$("${UV_BIN}" python find --managed-python --no-python-downloads --resolve-links 3.11.15)"
-rm -rf "${RUNTIME_ROOT}/python/auth-service"
-"${UV_BIN}" venv --managed-python --no-python-downloads --relocatable --seed --link-mode copy --python "${PYTHON}" "${RUNTIME_ROOT}/python/auth-service"
-"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/python/auth-service/bin/python" --link-mode copy --strict -r "${ROOT}/backend/auth-service/requirements.txt"
-rm -rf "${RUNTIME_ROOT}/python/algorithm"
-"${UV_BIN}" venv --managed-python --no-python-downloads --relocatable --seed --link-mode copy --python "${PYTHON}" "${RUNTIME_ROOT}/python/algorithm"
-"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/python/algorithm/bin/python" --link-mode copy --strict 'setuptools<81' lazyllm
-"${RUNTIME_ROOT}/python/algorithm/bin/lazyllm" install rag
-"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
+rm -rf "${RUNTIME_ROOT}/deps/python/auth-service"
+"${UV_BIN}" venv --managed-python --no-python-downloads --relocatable --seed --link-mode copy --python "${PYTHON}" "${RUNTIME_ROOT}/deps/python/auth-service"
+"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/auth-service/bin/python" --link-mode copy --strict -r "${ROOT}/backend/auth-service/requirements.txt"
+rm -rf "${RUNTIME_ROOT}/deps/python/algorithm"
+"${UV_BIN}" venv --managed-python --no-python-downloads --relocatable --seed --link-mode copy --python "${PYTHON}" "${RUNTIME_ROOT}/deps/python/algorithm"
+"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict 'setuptools<81' lazyllm
+"${RUNTIME_ROOT}/deps/python/algorithm/bin/lazyllm" install rag
+"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
 make_internal_symlinks_relative "${RUNTIME_ROOT}"
 echo "==> Pruning Python runtime bytecode and test packages"
-prune_python_runtime "${RUNTIME_ROOT}/python"
+prune_python_runtime "${RUNTIME_ROOT}/runtimes/python"
+prune_python_runtime "${RUNTIME_ROOT}/deps/python"
 
 echo "==> Staging runtime app files"
 rsync -a --delete \
   --exclude ".git" \
+  --exclude "local/build" \
   --exclude "local/runtime" \
   --exclude "desktop/build" \
   --exclude "desktop/cache" \

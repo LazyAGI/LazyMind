@@ -45,17 +45,64 @@ from lazyllm.common.utils import SecurityVisitor
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+
+def _tmpl(template: str, **kwargs: str) -> str:
+    """Replace named placeholders ({__key__}) in a template string.
+
+    Uses explicit sentinel-wrapped keys so that bare `{}` or `{json_example}`
+    fragments inside the template are never mistaken for format placeholders.
+    """
+    result = template
+    for key, value in kwargs.items():
+        result = result.replace('{__' + key + '__}', value)
+    return result
+
+
 # ---------------------------------------------------------------------------
-# Phase-specific prompts
+# Phase 0: Design Brief system prompt
 # ---------------------------------------------------------------------------
+
+_DESIGN_BRIEF_SYSTEM = (
+    'You are a LazyMind plugin authoring assistant.\n'
+    'Your task is Phase 0: produce a concise design brief for a plugin.\n\n'
+    'Output a Markdown document with EXACTLY these three sections:\n\n'
+    '## Plugin Overview\n'
+    '(One paragraph: what this plugin does and what problem it solves.)\n\n'
+    '## Slots\n'
+    '- `slot_id` (type, cardinality) — description; produced by which step, consumed by which steps\n'
+    '  (type: text | image | file | json; cardinality: single | list)\n\n'
+    '## Steps & Flow\n'
+    '1. `step_id` — one-sentence responsibility\n'
+    '   - Inputs: slot_id1, slot_id2 (or "user input")\n'
+    '   - Outputs: slot_id3\n'
+    '   - Next: → next_step_id (condition)\n\n'
+    'Rules:\n'
+    '  - Every slot_id used in Steps must appear in the Slots section.\n'
+    '  - Use snake_case for all IDs.\n'
+    '  - Keep it concise; this brief is injected as context into later phases.\n\n'
+    'Return ONLY a JSON object: {{"design_brief": "<markdown string>"}}\n'
+    'No explanation outside the JSON.'
+)
+
 
 _SKELETON_SYSTEM = (
     'You are a LazyMind plugin authoring assistant.\n'
     'Your task is Phase 1 of a 3-phase plugin generation: produce a plugin.yaml SKELETON.\n\n'
-    'The skeleton must include:\n'
-    '  - id, name, description, when_to_use\n'
+    'The skeleton MUST include ALL of the following:\n'
+    '  - id, name, description\n'
+    '  - when_to_use — REQUIRED. Write in English. Use clear trigger conditions:\n'
+    '    "ONLY call this tool when ... Do NOT trigger if ..."\n'
     '  - slots list (each slot: id, label, type, cardinality)\n'
     '  - steps list (each step: id, label) — list of step IDs only, NO execution details\n'
+    '  - ui block — REQUIRED. Must contain:\n'
+    '      tabs: list of tab objects. Each tab must have id, label, layout, and slots.\n'
+    '      slots: map of slot_id → widget config, each with widgetType. Use these mappings:\n'
+    '        text + single   → text-single\n'
+    '        text + list     → text-list\n'
+    '        image + single  → image-single\n'
+    '        image + list    → image-gallery\n'
+    '        file  + *       → file-card\n'
+    '        json  + *       → json-block\n'
     '  - tool_scripts — ONLY include this section when the plugin genuinely needs custom Python\n'
     '    tools (external API calls, local data processing, complex computation).\n'
     '    DO NOT add tool_scripts for pure LLM reasoning/writing workflows.\n\n'
@@ -64,8 +111,9 @@ _SKELETON_SYSTEM = (
     '  {{"plugin_yaml": "<full plugin.yaml content as YAML string>"}}\n\n'
     'Follow the format specification below.\n\n'
     '=== Plugin Format Specification ===\n'
-    '{spec}\n'
-    '=== End of Specification ==='
+    '{__spec__}\n'
+    '=== End of Specification ===\n\n'
+    '{__design_brief_section__}'
 )
 
 _STATE_MACHINE_SYSTEM = (
@@ -75,25 +123,50 @@ _STATE_MACHINE_SYSTEM = (
     '  - initial: __start__\n'
     '  - transitions (dict): __start__ key holds the entry transitions list; other keys hold per-step transitions\n'
     '  - steps (dict, each step needs: prompt, and optionally inputs/outputs/tools/route/skipif)\n\n'
+    'CRITICAL RULE — transitions.__start__ MUST always be present and non-empty.\n'
+    'Example of the mandatory __start__ entry:\n'
+    '  transitions:\n'
+    '    __start__:\n'
+    '      - to: <first_step_id>\n'
+    '        condition: "Always enter <first_step_id> first."\n'
+    '  Never omit transitions.__start__. It is required for the state machine to start.\n\n'
+    'CRITICAL RULE — every step listed in plugin.yaml MUST have a transitions entry\n'
+    '(even if it only leads to __end__).\n\n'
     'The plugin.yaml skeleton from Phase 1 is provided below as context.\n'
     'Your step IDs in state.yml MUST match the steps in plugin.yaml exactly.\n\n'
     'Return ONLY a JSON object:\n'
     '  {{"state_yaml": "<full state.yml content as YAML string>"}}\n\n'
     'Follow the format specification below.\n\n'
     '=== Plugin Format Specification ===\n'
-    '{spec}\n'
+    '{__spec__}\n'
     '=== End of Specification ===\n\n'
     '=== Plugin Skeleton (plugin.yaml from Phase 1) ===\n'
-    '{plugin_yaml}\n'
-    '=== End of Skeleton ==='
+    '{__plugin_yaml__}\n'
+    '=== End of Skeleton ===\n\n'
+    '{__design_brief_section__}'
 )
 
 _SCENARIO_SCRIPTS_SYSTEM = (
     'You are a LazyMind plugin authoring assistant.\n'
     'Your task is Phase 3 of a 3-phase plugin generation:\n'
-    '  1. Write scenario.md — a user-facing guide describing what this plugin does,\n'
-    '     its workflow steps, and usage notes.\n'
+    '  1. Write scenario.md — a structured guide for the plugin editor.\n'
     '  2. Optionally write Python scripts ONLY when strictly necessary (see rules below).\n\n'
+    '=== scenario.md FORMAT (STRICTLY REQUIRED) ===\n'
+    'The scenario.md MUST follow this exact Markdown structure (write in Chinese):\n\n'
+    '## 场景描述\n\n'
+    '<One or two paragraphs describing what this plugin does and when to use it.>\n\n'
+    '## 工作流程\n\n'
+    '### {step_id}（{step_label}）\n\n'
+    '<One or two sentences describing what this step does.>\n\n'
+    '(repeat for every step in the same order as steps[] in plugin.yaml)\n\n'
+    '## 注意事项\n\n'
+    '<Optional usage tips, constraints, or warnings. Omit this section if nothing to add.>\n\n'
+    'RULES:\n'
+    '  - Use the EXACT step ids and labels from plugin.yaml steps[].\n'
+    '  - Every step MUST have a non-empty description. Do NOT write "（暂无描述）".\n'
+    '  - Write all content in Chinese.\n'
+    '  - Do NOT add extra top-level sections or change the section names.\n'
+    '=== End of scenario.md FORMAT ===\n\n'
     '=== When to Write Scripts ===\n'
     'WRITE scripts only when the plugin needs capabilities the LLM alone cannot perform:\n'
     '  - Calling a specific external HTTP API (use httpx, not requests)\n'
@@ -105,7 +178,7 @@ _SCENARIO_SCRIPTS_SYSTEM = (
     '  - A web search could work without calling a specific private API\n'
     '  - The plugin is a text/content generation pipeline\n\n'
     'Default: DO NOT write scripts unless there is a clear, concrete need.\n'
-    'When in doubt, set scripts to {}.\n\n'
+    'When in doubt, set scripts to {{}}.\n\n'
     '=== Script Safety Rules (STRICTLY ENFORCED) ===\n'
     'Generated scripts are validated with an AST security checker. '
     'Violations will cause the generation to fail.\n\n'
@@ -117,21 +190,19 @@ _SCENARIO_SCRIPTS_SYSTEM = (
     'ALLOWED for HTTP requests: use httpx instead of requests\n'
     'ALLOWED standard library: json, re, math, base64, hashlib, urllib.parse, datetime, typing\n'
     '=== End of Rules ===\n\n'
-    'The complete plugin.yaml and state.yml are provided below as context.\n\n'
-    'Return ONLY a JSON object:\n'
-    '  {{"scenario_md": "<scenario.md content as Markdown string>",\n'
-    '    "scripts": {{"scripts/tools.py": "<python code>"}}}}\n'
-    '- scripts: set to {{}} when no custom tool scripts are needed.\n'
+    '=== Output Format ===\n'
+    'Return ONLY a JSON object with exactly these two keys:\n'
+    '  {"scenario_md": "<scenario.md content as Markdown string>",\n'
+    '    "scripts": {"scripts/tools.py": "<python code>"}}\n'
+    '- scripts: set to {} when no custom tool scripts are needed.\n'
     '- If you do write a script, only implement functions declared in '
-    'plugin.yaml tool_scripts[].functions.\n\n'
-    'Follow the scenario.md format specification below.\n\n'
-    '=== Plugin Format Specification ===\n'
-    '{spec}\n'
-    '=== End of Specification ===\n\n'
+    'plugin.yaml tool_scripts[].functions.\n'
+    '- Do NOT wrap the JSON in markdown code fences. Output raw JSON only.\n\n'
+    '{__design_brief_section__}'
     '=== plugin.yaml ===\n'
-    '{plugin_yaml}\n'
+    '{__plugin_yaml__}\n'
     '=== state.yml ===\n'
-    '{state_yaml}\n'
+    '{__state_yaml__}\n'
     '=== End of Context ==='
 )
 
@@ -139,9 +210,21 @@ _SCENARIO_SCRIPTS_SYSTEM = (
 # Required field sets per phase
 # ---------------------------------------------------------------------------
 
-_REQUIRED_SKELETON_PLUGIN_TOP = ['id', 'name', 'description', 'steps', 'slots']
+_REQUIRED_SKELETON_PLUGIN_TOP = ['id', 'name', 'description', 'when_to_use', 'steps', 'slots']
 _REQUIRED_SKELETON_SLOT_FIELDS = ['id', 'label', 'type', 'cardinality']
 _REQUIRED_SKELETON_STEP_FIELDS = ['id', 'label']
+
+# widgetType mappings expected by the frontend
+_WIDGET_TYPE_DEFAULTS: Dict[str, str] = {
+    ('text', 'single'): 'text-single',
+    ('text', 'list'): 'text-list',
+    ('image', 'single'): 'image-single',
+    ('image', 'list'): 'image-gallery',
+    ('file', 'single'): 'file-card',
+    ('file', 'list'): 'file-card',
+    ('json', 'single'): 'json-block',
+    ('json', 'list'): 'json-block',
+}
 
 
 def _check_skeleton_missing(plugin_dict: Dict[str, Any]) -> List[str]:
@@ -168,24 +251,30 @@ def _check_skeleton_missing(plugin_dict: Dict[str, Any]) -> List[str]:
             for f in _REQUIRED_SKELETON_STEP_FIELDS:
                 if not step.get(f):
                     missing.append(f'plugin.steps[{i}].{f}')
+    # Blocking: ui.tabs must be present for the frontend to render the layout
+    ui = plugin_dict.get('ui')
+    if not isinstance(ui, dict) or not ui.get('tabs'):
+        missing.append('plugin.ui.tabs (ui tabs block missing, frontend cannot render layout)')
     return missing
 
 
 _SKELETON_PATCH_TEMPLATE = (
     'The generated plugin.yaml skeleton has missing fields:\n'
-    '{missing_fields}\n\n'
-    'Current skeleton:\n{plugin_yaml}\n\n'
-    'Return ONLY a JSON patch: {{"plugin": {{...}}}}\n'
+    '{__missing_fields__}\n\n'
+    'Current skeleton:\n{__plugin_yaml__}\n\n'
+    'Return ONLY a JSON patch: {"plugin": {...}}\n'
     'Fix only the missing fields. No explanation.'
 )
 
 _STATE_MACHINE_PATCH_TEMPLATE = (
     'The generated state.yml has missing or invalid fields:\n'
-    '{missing_fields}\n\n'
-    'Current state.yml:\n{state_yaml}\n\n'
-    'plugin.yaml (for reference):\n{plugin_yaml}\n\n'
-    'Return ONLY a JSON patch: {{"state": {{...}}}}\n'
-    'Fix only the missing fields. No explanation.'
+    '{__missing_fields__}\n\n'
+    'Current state.yml:\n{__state_yaml__}\n\n'
+    'plugin.yaml (for reference):\n{__plugin_yaml__}\n\n'
+    'Return the COMPLETE FIXED state.yml (not a partial patch) as:\n'
+    '{"state_yaml": "<complete corrected state.yml as YAML string>"}\n'
+    'Fix ALL listed issues. Ensure transitions.__start__ is present with a valid "to" field.\n'
+    'No explanation.'
 )
 
 
@@ -195,7 +284,8 @@ def _patch_skeleton(
     system_prompt: str,
 ) -> Dict[str, Any]:
     plugin_yaml_str = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
-    patch_prompt = _SKELETON_PATCH_TEMPLATE.format(
+    patch_prompt = _tmpl(
+        _SKELETON_PATCH_TEMPLATE,
         missing_fields='\n'.join(f'  - {f}' for f in missing),
         plugin_yaml=plugin_yaml_str,
     )
@@ -219,7 +309,8 @@ def _patch_state_machine(
 ) -> Dict[str, Any]:
     plugin_yaml_str = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
     state_yaml_str = yaml.dump(state_dict, allow_unicode=True, sort_keys=False)
-    patch_prompt = _STATE_MACHINE_PATCH_TEMPLATE.format(
+    patch_prompt = _tmpl(
+        _STATE_MACHINE_PATCH_TEMPLATE,
         missing_fields='\n'.join(f'  - {f}' for f in missing),
         state_yaml=state_yaml_str,
         plugin_yaml=plugin_yaml_str,
@@ -230,6 +321,15 @@ def _patch_state_machine(
     except ValueError as exc:
         logger.warning('[staged] state patch parse failed: %s', exc)
         return state_dict
+    # Prefer full replacement via state_yaml (avoids deep_merge issues with nested lists).
+    if 'state_yaml' in patch:
+        try:
+            fixed = yaml.safe_load(patch['state_yaml']) or {}
+            if isinstance(fixed, dict) and fixed:
+                return fixed
+        except yaml.YAMLError as exc:
+            logger.warning('[staged] state patch YAML parse failed: %s', exc)
+    # Fallback: legacy patch dict merge (kept for backward compat)
     if 'state' in patch and isinstance(patch['state'], dict):
         from lazymind.chat.api.generate_plugin_routes import _deep_merge  # noqa: PLC0415
         state_dict = _deep_merge(state_dict, patch['state'])
@@ -327,10 +427,10 @@ def _dry_run_import(filename: str, source: str) -> Optional[str]:
 
 _NODE_FIX_TEMPLATE = (
     'A Python script has a security or runtime problem in one of its top-level nodes.\n\n'
-    'File: {filename}\n'
-    'Problem node ({node_label} "{node_name}"):\n'
-    '```python\n{node_source}\n```\n'
-    'Error: {error}\n\n'
+    'File: {__filename__}\n'
+    'Problem node ({__node_label__} "{__node_name__}"):\n'
+    '```python\n{__node_source__}\n```\n'
+    'Error: {__error__}\n\n'
     'Rules:\n'
     '  Allowed HTTP library: httpx (not requests).\n'
     '  Allowed stdlib: json, re, math, base64, hashlib, urllib.parse, datetime, typing, httpx.\n'
@@ -339,21 +439,21 @@ _NODE_FIX_TEMPLATE = (
     '             os.system, os.popen, os.remove, os.rmdir, os.unlink, os.rename, os.environ,\n'
     '             sys.exit, sys.modules.\n\n'
     'Full current script for context:\n'
-    '```python\n{full_source}\n```\n\n'
+    '```python\n{__full_source__}\n```\n\n'
     'Return ONLY a JSON object with the corrected FULL script (do not omit other functions):\n'
-    '{{"fixed_source": "<complete corrected Python source>"}}\n'
+    '{"fixed_source": "<complete corrected Python source>"}\n'
     'No explanation.'
 )
 
 _DRY_RUN_FIX_TEMPLATE = (
     'A Python script fails to import (dry-run import error).\n\n'
-    'File: {filename}\n'
-    'Error: {error}\n\n'
+    'File: {__filename__}\n'
+    'Error: {__error__}\n\n'
     'Full current script:\n'
-    '```python\n{full_source}\n```\n\n'
+    '```python\n{__full_source__}\n```\n\n'
     'Fix the script so it can be imported without errors.\n'
     'Return ONLY a JSON object with the corrected FULL script:\n'
-    '{{"fixed_source": "<complete corrected Python source>"}}\n'
+    '{"fixed_source": "<complete corrected Python source>"}\n'
     'No explanation.'
 )
 
@@ -369,6 +469,146 @@ def _ask_fix(system_prompt: str, fix_prompt: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Design brief section helper
+# ---------------------------------------------------------------------------
+
+def _design_brief_section(design_brief: Optional[str]) -> str:
+    """Return a formatted design brief block for injection into system prompts.
+
+    Returns an empty string when no brief is available (graceful fallback for
+    old drafts or Phase 0 failures).
+    """
+    if not design_brief or not design_brief.strip():
+        return ''
+    return (
+        '=== Design Brief (authoritative reference) ===\n'
+        f'{design_brief.strip()}\n'
+        '=== End of Design Brief ===\n'
+        'The slots[], steps[], and step inputs/outputs MUST exactly match this brief.\n\n'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Slot reference validation & repair
+# ---------------------------------------------------------------------------
+
+def _validate_slot_references(
+    plugin_dict: Dict[str, Any],
+    state_dict: Dict[str, Any],
+) -> List[str]:
+    """Check that every slot id referenced in state.yml is defined in plugin.yaml.
+
+    Returns a list of error strings, empty when all references are valid.
+    """
+    defined_slots: set = {
+        s.get('id')
+        for s in (plugin_dict.get('slots') or [])
+        if isinstance(s, dict) and s.get('id')
+    }
+    errors: List[str] = []
+    steps = state_dict.get('steps') or {}
+    if not isinstance(steps, dict):
+        return errors
+    for step_id, step in steps.items():
+        if not isinstance(step, dict):
+            continue
+        for direction in ('inputs', 'outputs'):
+            refs = step.get(direction) or []
+            if isinstance(refs, list):
+                for ref in refs:
+                    ref_id = (
+                        ref if isinstance(ref, str)
+                        else ref.get('id') or ref.get('slot') if isinstance(ref, dict)
+                        else None
+                    )
+                    if ref_id and ref_id not in defined_slots:
+                        errors.append(
+                            f"step '{step_id}' references undefined slot '{ref_id}' in {direction}"
+                        )
+    return errors
+
+
+_SLOT_REPAIR_SYSTEM = (
+    'You are a plugin schema doctor. You receive a plugin.yaml (slots definition) and a '
+    'state.yml (step inputs/outputs) that have mismatched slot IDs.\n\n'
+    'Your task: fix the mismatch. You may EITHER:\n'
+    '  A) Add missing slot definitions to plugin.yaml slots[] when the state.yml references '
+    'are semantically correct but the slot was simply never declared, OR\n'
+    '  B) Fix slot references in state.yml steps inputs/outputs to use the IDs already '
+    'declared in plugin.yaml slots[], when the state.yml used wrong / inconsistent IDs.\n'
+    '  C) Do both, when appropriate.\n\n'
+    'Rules:\n'
+    '- Prefer renaming state.yml references to match existing plugin.yaml slot IDs whenever '
+    'a clear semantic match exists (same concept, different name).\n'
+    '- Only add new slot entries to plugin.yaml when there is genuinely new data being '
+    'produced with no equivalent in the existing slots.\n'
+    '- Do NOT remove any existing slot from plugin.yaml.\n'
+    '- Do NOT change step names, transitions, or prompts.\n'
+    '- Return ONLY valid JSON: {"plugin_yaml": "...", "state_yaml": "..."}\n'
+    '- No markdown fences, no explanation outside the JSON.'
+)
+
+
+def _repair_slots_only(
+    plugin_dict: Dict[str, Any],
+    state_dict: Dict[str, Any],
+    errors: List[str],
+    llm_config: Dict[str, Any],
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Use LLM to fix slot-reference mismatches between plugin.yaml and state.yml.
+
+    The LLM decides whether to add missing slots to plugin.yaml, rename wrong
+    references in state.yml, or both.  Returns (fixed_plugin_dict, fixed_state_dict).
+    Falls back to the originals if the LLM response cannot be parsed.
+    """
+    inject_model_config(llm_config or {})
+
+    plugin_yaml_str = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
+    state_yaml_str = yaml.dump(state_dict, allow_unicode=True, sort_keys=False)
+
+    user_prompt = (
+        'Slot reference errors found:\n'
+        + '\n'.join(f'  - {e}' for e in errors)
+        + f'\n\nCurrent plugin.yaml:\n{plugin_yaml_str}\n\n'
+        f'Current state.yml:\n{state_yaml_str}\n\n'
+        'Fix the slot mismatches and return the corrected plugin.yaml and state.yml as JSON.'
+    )
+
+    raw = _call_llm(f'{_SLOT_REPAIR_SYSTEM}\n\n{user_prompt}')
+    try:
+        data = _extract_json(raw)
+    except ValueError as exc:
+        logger.warning('[staged/slot_repair] LLM parse failed (%s), falling back to originals', exc)
+        return plugin_dict, state_dict
+
+    fixed_plugin_dict = plugin_dict
+    fixed_state_dict = state_dict
+
+    if new_plugin_yaml := data.get('plugin_yaml', ''):
+        try:
+            parsed = yaml.safe_load(new_plugin_yaml)
+            if isinstance(parsed, dict):
+                fixed_plugin_dict = parsed
+        except yaml.YAMLError as exc:
+            logger.warning('[staged/slot_repair] plugin_yaml parse failed: %s', exc)
+
+    if new_state_yaml := data.get('state_yaml', ''):
+        try:
+            parsed = yaml.safe_load(new_state_yaml)
+            if isinstance(parsed, dict):
+                fixed_state_dict = parsed
+        except yaml.YAMLError as exc:
+            logger.warning('[staged/slot_repair] state_yaml parse failed: %s', exc)
+
+    remaining = _validate_slot_references(fixed_plugin_dict, fixed_state_dict)
+    logger.info(
+        '[staged/slot_repair] after LLM repair: %d remaining errors (was %d)',
+        len(remaining), len(errors),
+    )
+    return fixed_plugin_dict, fixed_state_dict
+
+
+# ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
 
@@ -376,10 +616,21 @@ class _LLMConfigMixin(BaseModel):
     llm_config: Dict[str, Any] = Field(default_factory=dict)
 
 
+class DesignBriefRequest(_LLMConfigMixin):
+    name: str
+    description: Optional[str] = None
+    skill_content: Optional[str] = None
+
+
+class DesignBriefResponse(BaseModel):
+    design_brief: str
+
+
 class SkeletonRequest(_LLMConfigMixin):
     name: str
     description: Optional[str] = None
     skill_content: Optional[str] = None
+    design_brief: Optional[str] = None
 
 
 class SkeletonResponse(BaseModel):
@@ -389,16 +640,20 @@ class SkeletonResponse(BaseModel):
 class StateMachineRequest(_LLMConfigMixin):
     name: str
     plugin_yaml: str  # output from Phase 1
+    design_brief: Optional[str] = None
 
 
 class StateMachineResponse(BaseModel):
     state_yaml: str
+    plugin_yaml: str = ''  # updated when slot repair was applied
+    warnings: List[str] = []
 
 
 class ScenarioScriptsRequest(_LLMConfigMixin):
     name: str
     plugin_yaml: str   # output from Phase 1
     state_yaml: str    # output from Phase 2
+    design_brief: Optional[str] = None
 
 
 class ScenarioScriptsResponse(BaseModel):
@@ -411,6 +666,44 @@ class ScenarioScriptsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post(
+    '/api/chat/generate_plugin/design_brief',
+    response_model=DesignBriefResponse,
+    summary='Phase 0: Generate design brief (slots + steps + flow)',
+)
+async def generate_design_brief(req: DesignBriefRequest) -> DesignBriefResponse:
+    """Phase 0: generate a Markdown design brief that defines slot IDs and step flow.
+
+    This brief is injected into Phase 1/2/3 prompts as an authoritative reference
+    so that slot IDs remain consistent across all generation phases.
+    """
+    inject_model_config(req.llm_config or {})
+
+    if req.skill_content and req.skill_content.strip():
+        user_prompt = (
+            f'Plugin name: {req.name}\n\n'
+            f'Convert the following skill content into a design brief:\n\n{req.skill_content}'
+        )
+    else:
+        user_prompt = (
+            f'Plugin name: {req.name}\n\n'
+            f'Generate a design brief based on the following description:\n\n'
+            f'{req.description or req.name}'
+        )
+
+    raw = _call_llm(f'{_DESIGN_BRIEF_SYSTEM}\n\n{user_prompt}')
+    try:
+        data = _extract_json(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f'Phase 0 JSON parse error: {exc}') from exc
+
+    brief = data.get('design_brief', '')
+    if not brief:
+        raise HTTPException(status_code=500, detail='Phase 0: missing design_brief in response')
+
+    return DesignBriefResponse(design_brief=brief)
+
+
+@router.post(
     '/api/chat/generate_plugin/skeleton',
     response_model=SkeletonResponse,
     summary='Phase 1: Generate plugin.yaml skeleton',
@@ -419,7 +712,11 @@ async def generate_skeleton(req: SkeletonRequest) -> SkeletonResponse:
     """Phase 1: generate plugin.yaml skeleton (slots + steps list, no state logic)."""
     inject_model_config(req.llm_config or {})
 
-    system_prompt = _SKELETON_SYSTEM.format(spec=_PLUGIN_FORMAT_SPEC)
+    system_prompt = _tmpl(
+        _SKELETON_SYSTEM,
+        spec=_PLUGIN_FORMAT_SPEC,
+        design_brief_section=_design_brief_section(req.design_brief),
+    )
     if req.skill_content and req.skill_content.strip():
         user_prompt = (
             f'Plugin name: {req.name}\n\n'
@@ -450,17 +747,58 @@ async def generate_skeleton(req: SkeletonRequest) -> SkeletonResponse:
     # Validate skeleton fields + patch retry
     for attempt in range(MAX_PATCH_RETRIES):
         missing = _check_skeleton_missing(plugin_dict)
-        if not missing:
+        # Separate blocking errors from warn-level ui.tabs issues
+        blocking = [m for m in missing if 'warn:' not in m]
+        if not blocking:
             break
-        logger.info('[staged/skeleton] attempt=%d missing: %s', attempt + 1, missing)
-        plugin_dict = _patch_skeleton(plugin_dict, missing, system_prompt)
+        logger.info('[staged/skeleton] attempt=%d missing: %s', attempt + 1, blocking)
+        plugin_dict = _patch_skeleton(plugin_dict, blocking, system_prompt)
     else:
         missing = _check_skeleton_missing(plugin_dict)
-        if missing:
+        blocking = [m for m in missing if 'warn:' not in m]
+        if blocking:
             raise HTTPException(
                 status_code=500,
-                detail=f'Phase 1: missing fields after retries: {missing}',
+                detail=f'Phase 1: missing fields after retries: {blocking}',
             )
+
+    # Auto-fill missing ui.slots[*].widgetType based on slot type+cardinality
+    slots_list = plugin_dict.get('slots', [])
+    if isinstance(slots_list, list):
+        ui = plugin_dict.setdefault('ui', {})
+        ui_slots = ui.setdefault('slots', {})
+        for slot in slots_list:
+            if not isinstance(slot, dict):
+                continue
+            slot_id = slot.get('id')
+            slot_type = (slot.get('type') or '').lower()
+            cardinality = (slot.get('cardinality') or 'single').lower()
+            if slot_id and slot_id not in ui_slots:
+                widget = _WIDGET_TYPE_DEFAULTS.get(
+                    (slot_type, cardinality),
+                    _WIDGET_TYPE_DEFAULTS.get((slot_type, 'single'), 'text-single'),
+                )
+                ui_slots[slot_id] = {'widgetType': widget}
+
+        # Fallback: if ui.tabs is missing or empty, generate one tab per slot
+        # in declaration order so the frontend always has something to render.
+        if not ui.get('tabs'):
+            auto_tabs = []
+            for slot in slots_list:
+                if not isinstance(slot, dict):
+                    continue
+                slot_id = slot.get('id')
+                if not slot_id:
+                    continue
+                auto_tabs.append({
+                    'id': f'tab_{slot_id}',
+                    'label': slot.get('label') or slot_id,
+                    'layout': 'vertical',
+                    'slots': [{'id': slot_id}],
+                })
+            if auto_tabs:
+                ui['tabs'] = auto_tabs
+                logger.info('[staged/skeleton] auto-generated %d ui.tabs from slots', len(auto_tabs))
 
     plugin_yaml = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
     return SkeletonResponse(plugin_yaml=plugin_yaml)
@@ -480,13 +818,17 @@ async def generate_state_machine(req: StateMachineRequest) -> StateMachineRespon
     except yaml.YAMLError as exc:
         raise HTTPException(status_code=400, detail=f'Invalid plugin_yaml: {exc}') from exc
 
-    system_prompt = _STATE_MACHINE_SYSTEM.format(
+    system_prompt = _tmpl(
+        _STATE_MACHINE_SYSTEM,
         spec=_PLUGIN_FORMAT_SPEC,
         plugin_yaml=req.plugin_yaml,
+        design_brief_section=_design_brief_section(req.design_brief),
     )
     user_prompt = (
-        f'Plugin name: {req.name}\n\n'
-        'Generate the complete state.yml for this plugin, including transitions and step prompts.'
+        f'Plugin name: {req.name}\n\nSteps in order: '
+        f'{", ".join(s.get("id", "") for s in plugin_dict.get("steps", []) if isinstance(s, dict)) or "(none)"}\n\n'
+        'Generate the complete state.yml for this plugin, including transitions and step prompts.\n'
+        'transitions.__start__[0].to MUST be set to the first step listed above.'
     )
 
     raw = _call_llm(f'{system_prompt}\n\n{user_prompt}')
@@ -504,7 +846,17 @@ async def generate_state_machine(req: StateMachineRequest) -> StateMachineRespon
     except yaml.YAMLError as exc:
         raise HTTPException(status_code=500, detail=f'Phase 2 YAML parse error: {exc}') from exc
 
+    # Sanitize: remove reserved keywords from steps dict if LLM accidentally included them
+    reserved_keys = {'__start__', '__end__'}
+    state_steps = state_dict.get('steps')
+    if isinstance(state_steps, dict):
+        for key in reserved_keys:
+            if key in state_steps:
+                logger.warning('[staged/state_machine] removing reserved key "%s" from steps', key)
+                del state_steps[key]
+
     # Validate state machine fields + patch retry
+    field_warnings: List[str] = []
     for attempt in range(MAX_PATCH_RETRIES):
         # Reuse _check_missing_fields but only for state fields (pass empty plugin_dict)
         missing = _check_missing_fields({}, state_dict)
@@ -517,10 +869,9 @@ async def generate_state_machine(req: StateMachineRequest) -> StateMachineRespon
     else:
         missing = [m for m in _check_missing_fields({}, state_dict) if m.startswith('state.')]
         if missing:
-            raise HTTPException(
-                status_code=500,
-                detail=f'Phase 2: missing fields after retries: {missing}',
-            )
+            warn_msg = f'Phase 2: missing fields after retries: {missing}'
+            logger.warning('[staged/state_machine] degraded: %s', warn_msg)
+            field_warnings.append(warn_msg)
 
     # PluginSpec validation (both YAML together)
     state_yaml = yaml.dump(state_dict, allow_unicode=True, sort_keys=False)
@@ -538,9 +889,25 @@ async def generate_state_machine(req: StateMachineRequest) -> StateMachineRespon
     else:
         err = _validate_with_pluginspec(req.plugin_yaml, state_yaml)
         if err:
-            raise HTTPException(status_code=500, detail=f'Phase 2 PluginSpec validation failed: {err}')
+            warn_msg = f'Phase 2 PluginSpec validation failed: {err}'
+            logger.warning('[staged/state_machine] degraded: %s', warn_msg)
+            field_warnings.append(warn_msg)
 
-    return StateMachineResponse(state_yaml=state_yaml)
+    # Slot reference validation + repair (max 1 attempt).
+    # Run after PluginSpec so slot errors are as accurate as possible.
+    slot_errors = _validate_slot_references(plugin_dict, state_dict)
+    if slot_errors:
+        logger.info('[staged/state_machine] slot errors: %s', slot_errors)
+        plugin_dict, state_dict = _repair_slots_only(plugin_dict, state_dict, slot_errors, req.llm_config or {})
+        # Re-validate; if still broken, log a warning (non-fatal).
+        remaining_slot_errors = _validate_slot_references(plugin_dict, state_dict)
+        if remaining_slot_errors:
+            warn_msg = f'Phase 2 slot repair incomplete: {remaining_slot_errors}'
+            logger.warning('[staged/state_machine] %s', warn_msg)
+            field_warnings.append(warn_msg)
+
+    final_plugin_yaml = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
+    return StateMachineResponse(state_yaml=state_yaml, plugin_yaml=final_plugin_yaml, warnings=field_warnings)
 
 
 @router.post(
@@ -558,10 +925,11 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
     """
     inject_model_config(req.llm_config or {})
 
-    system_prompt = _SCENARIO_SCRIPTS_SYSTEM.format(
-        spec=_PLUGIN_FORMAT_SPEC,
+    system_prompt = _tmpl(
+        _SCENARIO_SCRIPTS_SYSTEM,
         plugin_yaml=req.plugin_yaml,
         state_yaml=req.state_yaml,
+        design_brief_section=_design_brief_section(req.design_brief),
     )
     user_prompt = (
         f'Plugin name: {req.name}\n\n'
@@ -573,7 +941,20 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
     try:
         data = _extract_json(raw)
     except ValueError as exc:
-        raise HTTPException(status_code=500, detail=f'Phase 3 JSON parse error: {exc}') from exc
+        # First attempt failed. Retry once with an explicit reminder.
+        logger.warning('[staged/scenario_scripts] first parse failed (%s), retrying...', exc)
+        retry_prompt = (
+            'IMPORTANT: Your previous response could not be parsed as JSON. '
+            'Return ONLY a raw JSON object (no markdown fences, no extra text):\n'
+            '  {"scenario_md": "...", "scripts": {}}\n\n'
+            + user_prompt
+        )
+        raw2 = _call_llm(f'{system_prompt}\n\n{retry_prompt}')
+        try:
+            data = _extract_json(raw2)
+        except ValueError as exc2:
+            logger.warning('[staged/scenario_scripts] retry also failed (%s), using fallback', exc2)
+            data = {}
 
     scenario_md = data.get('scenario_md', '')
     scripts: Dict[str, str] = data.get('scripts') or {}
@@ -597,7 +978,8 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
                     logger.error('[staged] dropping %s: syntax error after retries: %s', filename, exc)
                     dropped = True
                     break
-                fix_prompt = _DRY_RUN_FIX_TEMPLATE.format(
+                fix_prompt = _tmpl(
+                    _DRY_RUN_FIX_TEMPLATE,
                     filename=filename,
                     error=f'SyntaxError: {exc}',
                     full_source=current_code,
@@ -622,7 +1004,8 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
                 # Use the first violation's node source for the node_source field;
                 # the full script is always included so the model has full context.
                 first_node, first_err = violations[0]
-                fix_prompt = _NODE_FIX_TEMPLATE.format(
+                fix_prompt = _tmpl(
+                    _NODE_FIX_TEMPLATE,
                     filename=filename,
                     node_label=_NODE_LABEL.get(type(first_node), type(first_node).__name__),
                     node_name=_node_name(first_node),
@@ -644,7 +1027,8 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
                     logger.error('[staged] dropping %s: dry-run failed after retries: %s', filename, dry_run_err)
                     dropped = True
                     break
-                fix_prompt = _DRY_RUN_FIX_TEMPLATE.format(
+                fix_prompt = _tmpl(
+                    _DRY_RUN_FIX_TEMPLATE,
                     filename=filename,
                     error=dry_run_err,
                     full_source=current_code,
@@ -663,3 +1047,403 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
             safe_scripts[filename] = current_code
 
     return ScenarioScriptsResponse(scenario_md=scenario_md, scripts=safe_scripts)
+
+
+# ---------------------------------------------------------------------------
+# Plugin info polish endpoint
+# ---------------------------------------------------------------------------
+
+_POLISH_FIELD_INSTRUCTIONS: Dict[str, str] = {
+    'description': (
+        'Polish this plugin description to be concise and professional. '
+        'Clearly describe what the plugin does in 1-2 sentences. '
+        'Output the polished text only, no extra explanation.'
+    ),
+    'when_to_use': (
+        'Polish this trigger condition. '
+        'IMPORTANT: Output in English only. '
+        'Use precise trigger language: start with "ONLY call this tool when ..." '
+        'and optionally add "Do NOT trigger if ...". '
+        'Output the polished text only, no extra explanation.'
+    ),
+    'overview': (
+        'Polish this scene overview. Keep the original meaning, improve clarity and '
+        'professional tone to fit a business scenario description. '
+        'Output the polished text only, no extra explanation.'
+    ),
+    'notes': (
+        'Polish these usage notes. Keep all original points, improve clarity and '
+        'organize them in a logical order. '
+        'Output the polished text only, no extra explanation.'
+    ),
+}
+
+_POLISH_SYSTEM = (
+    'You are a professional editor for AI plugin documentation. '
+    'Follow the field-specific instructions precisely and output only the polished text.'
+)
+
+
+class PolishInfoRequest(_LLMConfigMixin):
+    fields: Dict[str, str] = Field(default_factory=dict)
+    target_fields: List[str]
+
+
+class PolishInfoResponse(BaseModel):
+    description: Optional[str] = None
+    when_to_use: Optional[str] = None
+    overview: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.post(
+    '/api/chat/generate_plugin/polish_info',
+    response_model=PolishInfoResponse,
+    summary='Polish plugin info fields with AI',
+)
+async def polish_plugin_info(req: PolishInfoRequest) -> PolishInfoResponse:
+    """Polish one or more plugin info fields (description, when_to_use, overview, notes).
+
+    Each field is polished independently using a field-specific prompt.
+    Only fields listed in target_fields are processed and returned.
+    """
+    inject_model_config(req.llm_config or {})
+
+    allowed_fields = set(_POLISH_FIELD_INSTRUCTIONS.keys())
+    results: Dict[str, str] = {}
+
+    for field in req.target_fields:
+        if field not in allowed_fields:
+            logger.warning('[polish_info] skipping unknown field: %s', field)
+            continue
+        original = (req.fields.get(field) or '').strip()
+        if not original:
+            logger.warning('[polish_info] skipping empty field: %s', field)
+            continue
+
+        instruction = _POLISH_FIELD_INSTRUCTIONS[field]
+        prompt = (
+            f'{_POLISH_SYSTEM}\n\n'
+            f'{instruction}\n\n'
+            f'Original text:\n{original}'
+        )
+        polished = _call_llm(prompt).strip()
+        # Strip surrounding quotes that some models add
+        if len(polished) >= 2 and polished[0] == polished[-1] and polished[0] in ('"', "'"):
+            polished = polished[1:-1].strip()
+        if polished:
+            results[field] = polished
+        else:
+            logger.warning('[polish_info] LLM returned empty result for field: %s', field)
+            results[field] = original
+
+    return PolishInfoResponse(**results)
+
+
+# ---------------------------------------------------------------------------
+# State machine repair endpoint
+# ---------------------------------------------------------------------------
+
+_REPAIR_SYSTEM = (
+    'You are a LazyMind plugin authoring assistant.\n'
+    'Your task is to repair a state.yml that has missing or invalid fields.\n\n'
+    'You are given:\n'
+    '  - The current plugin.yaml (for context: step IDs, slot IDs, etc.)\n'
+    '  - The current state.yml (may be incomplete or have warnings)\n'
+    '  - A list of known warnings/issues\n'
+    '  - An optional user hint describing what to fix\n\n'
+    'CRITICAL RULE — transitions.__start__ MUST always be present and non-empty.\n'
+    'CRITICAL RULE — every step in plugin.yaml MUST have a transitions entry.\n'
+    'CRITICAL RULE — every step in plugin.yaml MUST have a prompt in state.yml.\n\n'
+    'Return the COMPLETE FIXED state.yml as:\n'
+    '  {"state_yaml": "<complete corrected state.yml as YAML string>"}\n\n'
+    'Do NOT return a partial patch. Return the full state.yml.\n\n'
+    '=== Plugin Format Specification ===\n'
+    '{__spec__}\n'
+    '=== End of Specification ===\n\n'
+    '=== Current plugin.yaml ===\n'
+    '{__plugin_yaml__}\n'
+    '=== End of plugin.yaml ==='
+)
+
+
+class RepairRequest(_LLMConfigMixin):
+    plugin_yaml: str
+    state_yaml: str
+    repair_hint: str = ''
+    warnings: List[str] = []
+    target: str = 'statemachine'  # 'statemachine' | 'ui' | 'scenario'
+
+
+class RepairResponse(BaseModel):
+    state_yaml: str
+    plugin_yaml: str = ''  # populated when slot repair was applied
+    remaining_warnings: List[str] = []
+
+
+@router.post(
+    '/api/chat/generate_plugin/repair',
+    response_model=RepairResponse,
+    summary='Repair an incomplete or invalid state.yml',
+)
+async def repair_state_machine(req: RepairRequest) -> RepairResponse:
+    """Repair a state.yml that has missing fields or validation warnings.
+
+    Accepts the current plugin.yaml and state.yml, plus an optional user hint.
+    Returns a fully corrected state.yml.
+    """
+    logger.info(
+        '[repair] START target=%r repair_hint=%r warnings=%s '
+        'plugin_yaml_len=%d state_yaml_len=%d',
+        req.target,
+        (req.repair_hint or '')[:120],
+        req.warnings,
+        len(req.plugin_yaml),
+        len(req.state_yaml),
+    )
+    inject_model_config(req.llm_config or {})
+
+    try:
+        plugin_dict = yaml.safe_load(req.plugin_yaml) or {}
+    except yaml.YAMLError as exc:
+        logger.error('[repair] invalid plugin_yaml: %s', exc)
+        raise HTTPException(status_code=400, detail=f'Invalid plugin_yaml: {exc}') from exc
+
+    try:
+        state_dict = yaml.safe_load(req.state_yaml) or {}
+    except yaml.YAMLError as exc:
+        logger.error('[repair] invalid state_yaml: %s', exc)
+        raise HTTPException(status_code=400, detail=f'Invalid state_yaml: {exc}') from exc
+
+    # ── Scenario / documentation repair ──────────────────────────────────────
+    if req.target == 'scenario':
+        scenario_system = (
+            'You are a LazyMind plugin authoring assistant.\n'
+            'Your task is to write or repair the scenario.md for a plugin.\n\n'
+            'scenario.md is a structured guide for the plugin editor.\n\n'
+            '=== scenario.md FORMAT (STRICTLY REQUIRED) ===\n'
+            'The scenario.md MUST follow this exact Markdown structure (write in Chinese):\n\n'
+            '## 场景描述\n\n'
+            '<One or two paragraphs describing what this plugin does and when to use it.>\n\n'
+            '## 工作流程\n\n'
+            '### {step_id}（{step_label}）\n\n'
+            '<One or two sentences describing what this step does.>\n\n'
+            '(repeat for every step in the same order as steps[] in plugin.yaml)\n\n'
+            '## 注意事项\n\n'
+            '<Optional usage tips, constraints, or warnings. Omit this section if nothing to add.>\n\n'
+            'RULES:\n'
+            '  - Use the EXACT step ids and labels from plugin.yaml steps[].\n'
+            '  - Every step MUST have a non-empty description. Do NOT write "（暂无描述）".\n'
+            '  - Write all content in Chinese.\n'
+            '  - Do NOT add extra top-level sections or change the section names.\n'
+            '=== End of scenario.md FORMAT ===\n\n'
+            'Return the COMPLETE scenario.md as:\n'
+            '  {{"scenario_md": "<complete scenario.md content>"}}\n\n'
+            f'=== Current plugin.yaml ===\n{req.plugin_yaml}\n=== End ===\n\n'
+            f'=== Current state.yml ===\n{req.state_yaml}\n=== End ==='
+        )
+        hint_section = (f'User instruction: {req.repair_hint.strip()}\n\n'
+                        if req.repair_hint and req.repair_hint.strip() else '')
+        scenario_user = f'{hint_section}Write a complete scenario.md for this plugin.'
+        raw = _call_llm(f'{scenario_system}\n\n{scenario_user}')
+        try:
+            data = _extract_json(raw)
+        except ValueError as exc:
+            logger.error('[repair/scenario] JSON parse error: %s | raw=%r', exc, raw[:300])
+            raise HTTPException(status_code=500, detail=f'Scenario repair JSON parse error: {exc}') from exc
+        scenario_md = data.get('scenario_md', '')
+        if not scenario_md:
+            logger.error('[repair/scenario] missing scenario_md in LLM response, keys=%s', list(data.keys()))
+            raise HTTPException(status_code=500, detail='Scenario repair: missing scenario_md in response')
+        logger.info('[repair/scenario] SUCCESS scenario_md_len=%d', len(scenario_md))
+        return RepairResponse(state_yaml=scenario_md, remaining_warnings=[])
+
+    # ── State machine / UI repair ─────────────────────────────────────────────
+    system_prompt = _tmpl(
+        _REPAIR_SYSTEM,
+        spec=_PLUGIN_FORMAT_SPEC,
+        plugin_yaml=req.plugin_yaml,
+    )
+
+    # Pre-validate slot references so we can inject them into the repair prompt.
+    pre_slot_errors = _validate_slot_references(plugin_dict, state_dict)
+
+    warnings_section = ''
+    if req.warnings:
+        warnings_section = 'Known issues to fix:\n' + '\n'.join(f'  - {w}' for w in req.warnings) + '\n\n'
+    hint_section = ''
+    if req.repair_hint and req.repair_hint.strip():
+        hint_section = f'User instruction: {req.repair_hint.strip()}\n\n'
+    slot_error_section = ''
+    if pre_slot_errors:
+        slot_error_section = (
+            'SLOT REFERENCE ERRORS (must fix — use ONLY the slot ids defined in plugin.yaml slots[]):\n'
+            + '\n'.join(f'  - {e}' for e in pre_slot_errors)
+            + '\n\n'
+        )
+
+    user_prompt = (
+        f'{warnings_section}'
+        f'{slot_error_section}'
+        f'{hint_section}'
+        f'Current state.yml to repair:\n{req.state_yaml}\n\n'
+        'Return the complete fixed state.yml.'
+    )
+
+    raw = _call_llm(f'{system_prompt}\n\n{user_prompt}')
+    try:
+        data = _extract_json(raw)
+    except ValueError as exc:
+        logger.error('[repair/statemachine] JSON parse error: %s | raw=%r', exc, raw[:300])
+        raise HTTPException(status_code=500, detail=f'Repair JSON parse error: {exc}') from exc
+
+    fixed_yaml = data.get('state_yaml', '')
+    if not fixed_yaml:
+        logger.error('[repair/statemachine] missing state_yaml in LLM response, keys=%s', list(data.keys()))
+        raise HTTPException(status_code=500, detail='Repair: missing state_yaml in response')
+
+    try:
+        fixed_dict = yaml.safe_load(fixed_yaml) or {}
+    except yaml.YAMLError as exc:
+        logger.error('[repair/statemachine] YAML parse error on fixed output: %s | yaml=%r', exc, fixed_yaml[:300])
+        raise HTTPException(status_code=500, detail=f'Repair YAML parse error: {exc}') from exc
+
+    # Sanitize: remove reserved keywords from steps
+    reserved_keys = {'__start__', '__end__'}
+    state_steps = fixed_dict.get('steps')
+    if isinstance(state_steps, dict):
+        for key in reserved_keys:
+            if key in state_steps:
+                del state_steps[key]
+
+    # Check remaining issues and report them (non-fatal)
+    remaining = [m for m in _check_missing_fields({}, fixed_dict) if m.startswith('state.')]
+    logger.info('[repair/statemachine] field check remaining=%s', remaining)
+
+    # Slot check before structural/PluginSpec retries: only used to update remaining.
+    # The definitive slot repair runs after all retries (see below) so that structural
+    # or PluginSpec retries cannot re-introduce slot errors undetected.
+    repaired_plugin_yaml = ''
+
+    # Structural pre-check before PluginSpec: catch common LLM mistakes that produce
+    # cryptic AttributeErrors inside PluginSpec (e.g. transitions generated as a list).
+    fixed_yaml_out = yaml.dump(fixed_dict, allow_unicode=True, sort_keys=False)
+
+    def _structural_check(state: dict) -> str:
+        transitions = state.get('transitions')
+        if transitions is not None and not isinstance(transitions, dict):
+            return (
+                f'transitions must be a YAML mapping (dict), '
+                f'got {type(transitions).__name__}. '
+                f'Each key is a step id and each value is a list of {{to, condition}} entries.'
+            )
+        steps = state.get('steps')
+        if steps is not None and not isinstance(steps, dict):
+            return (
+                f'steps must be a YAML mapping (dict), '
+                f'got {type(steps).__name__}.'
+            )
+        return ''
+
+    struct_err = _structural_check(fixed_dict)
+    if struct_err:
+        logger.warning('[repair/statemachine] structural error, requesting LLM retry: %s', struct_err)
+        retry_prompt = (
+            f'{warnings_section}'
+            f'STRUCTURAL ERROR in your previous output (must fix):\n  - {struct_err}\n\n'
+            f'{hint_section}'
+            f'Current (broken) state.yml:\n{fixed_yaml_out}\n\n'
+            'Return the complete fixed state.yml.'
+        )
+        raw2 = _call_llm(f'{system_prompt}\n\n{retry_prompt}')
+        try:
+            data2 = _extract_json(raw2)
+            fixed_yaml2 = data2.get('state_yaml', '')
+            if fixed_yaml2:
+                fixed_dict2 = yaml.safe_load(fixed_yaml2) or {}
+                if isinstance(fixed_dict2, dict):
+                    fixed_dict = fixed_dict2
+                    fixed_yaml_out = yaml.dump(fixed_dict, allow_unicode=True, sort_keys=False)
+                    struct_err2 = _structural_check(fixed_dict)
+                    if struct_err2:
+                        logger.error('[repair/statemachine] structural error persists after retry: %s', struct_err2)
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f'Repair produced structurally invalid YAML: {struct_err2}',
+                        )
+                    logger.info('[repair/statemachine] structural retry succeeded')
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error('[repair/statemachine] structural retry parse failed: %s', exc)
+            raise HTTPException(
+                status_code=422,
+                detail=f'Repair produced structurally invalid YAML: {struct_err}',
+            ) from exc
+
+    # Final full validation — must pass PluginSpec before we call this a success.
+    # Failure here triggers one more LLM retry with the PluginSpec error injected.
+    final_plugin_yaml_for_check = repaired_plugin_yaml if repaired_plugin_yaml else req.plugin_yaml
+    pluginspec_err = _validate_with_pluginspec(final_plugin_yaml_for_check, fixed_yaml_out)
+    if pluginspec_err:
+        logger.warning('[repair/statemachine] PluginSpec failed, requesting LLM retry: %s', pluginspec_err)
+        retry_prompt = (
+            f'{warnings_section}'
+            f'PLUGINSPEC VALIDATION ERROR in your previous output (must fix):\n  - {pluginspec_err}\n\n'
+            f'{hint_section}'
+            f'Current (invalid) state.yml:\n{fixed_yaml_out}\n\n'
+            'Return the complete fixed state.yml.'
+        )
+        raw3 = _call_llm(f'{system_prompt}\n\n{retry_prompt}')
+        try:
+            data3 = _extract_json(raw3)
+            fixed_yaml3 = data3.get('state_yaml', '')
+            if fixed_yaml3:
+                fixed_dict3 = yaml.safe_load(fixed_yaml3) or {}
+                if isinstance(fixed_dict3, dict):
+                    fixed_dict = fixed_dict3
+                    fixed_yaml_out = yaml.dump(fixed_dict, allow_unicode=True, sort_keys=False)
+        except Exception as exc:
+            logger.error('[repair/statemachine] PluginSpec retry parse failed: %s', exc)
+        pluginspec_err2 = _validate_with_pluginspec(final_plugin_yaml_for_check, fixed_yaml_out)
+        if pluginspec_err2:
+            logger.warning('[repair/statemachine] PluginSpec still fails after retry: %s', pluginspec_err2)
+            raise HTTPException(
+                status_code=422,
+                detail=f'Repair produced invalid YAML (PluginSpec): {pluginspec_err2}',
+            )
+        logger.info('[repair/statemachine] PluginSpec retry succeeded')
+
+    # ── Final slot reference check + repair ──────────────────────────────────
+    # Run this AFTER all structural/PluginSpec retries so that any retry that
+    # regenerates state.yml cannot re-introduce slot errors undetected.
+    # This is the single authoritative slot repair pass.
+    # Also strip any stray 'slots' block from state.yml — slot definitions belong
+    # exclusively in plugin.yaml; the frontend parser ignores them in state.yml but
+    # they are confusing and can mask V8 validation errors if left in.
+    fixed_dict.pop('slots', None)
+    fixed_yaml_out = yaml.dump(fixed_dict, allow_unicode=True, sort_keys=False)
+    slot_errors = _validate_slot_references(plugin_dict, fixed_dict)
+    if slot_errors:
+        logger.info('[repair/statemachine] slot errors on final state: %s', slot_errors)
+        plugin_dict, fixed_dict = _repair_slots_only(plugin_dict, fixed_dict, slot_errors, req.llm_config or {})
+        fixed_dict.pop('slots', None)
+        fixed_yaml_out = yaml.dump(fixed_dict, allow_unicode=True, sort_keys=False)
+        remaining_slot_errors = _validate_slot_references(plugin_dict, fixed_dict)
+        if remaining_slot_errors:
+            logger.warning('[repair/statemachine] slot repair incomplete: %s', remaining_slot_errors)
+            remaining.extend([f'slot repair incomplete: {e}' for e in remaining_slot_errors])
+        else:
+            logger.info('[repair/statemachine] slot repair succeeded')
+        repaired_plugin_yaml = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
+    elif pre_slot_errors:
+        # Pre-existing slot errors were fixed by the LLM rewriting state.yml (good path).
+        logger.info('[repair/statemachine] pre-existing slot errors resolved by state repair')
+
+    logger.info(
+        '[repair/statemachine] SUCCESS state_yaml_len=%d plugin_yaml_updated=%s remaining=%s',
+        len(fixed_yaml_out),
+        bool(repaired_plugin_yaml),
+        remaining,
+    )
+    return RepairResponse(state_yaml=fixed_yaml_out, plugin_yaml=repaired_plugin_yaml, remaining_warnings=remaining)

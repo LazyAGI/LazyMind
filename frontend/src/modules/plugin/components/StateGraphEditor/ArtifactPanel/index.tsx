@@ -222,7 +222,7 @@ function collectBoundSlots(node: CompositePanelNode): string[] {
 }
 
 /** Collect all assignable positions from a PluginUiTab list as flat entries. */
-function collectAssignTargets(tabs: PluginUiTab[], slotMap: Record<string, SlotDef>): AssignTarget[] {
+function collectAssignTargets(tabs: PluginUiTab[], slotMap: Record<string, SlotDef>, blockLabelFallback: (path: number[]) => string): AssignTarget[] {
   const targets: AssignTarget[] = [];
 
   for (const tab of tabs) {
@@ -261,7 +261,7 @@ function collectAssignTargets(tabs: PluginUiTab[], slotMap: Record<string, SlotD
           (node.children ?? []).forEach((c, i) => walkNode(c, [...path, i], tabId, tabLabel, depth + 1));
           return;
         }
-        const blockLabel = node.label ?? `分块 ${path.map((p) => p + 1).join('-') || ''}`;
+        const blockLabel = node.label ?? blockLabelFallback(path);
         if (Array.isArray(node.tabs) && node.tabs.length > 0) {
           node.tabs.forEach((t, idx) => {
             targets.push({
@@ -481,7 +481,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
   };
 
   const compatibleWidgets = SLOT_COMPATIBLE_WIDGETS[slotKey] ?? ['text-single'];
-  const assignTargets = collectAssignTargets(tabs, slotMap);
+  const assignTargets = collectAssignTargets(tabs, slotMap, (path) => t('selfEvolutionRun.artifactBlockLabel', { path: path.map((p) => p + 1).join('-') || '' }));
   const thisCardinality: 'list' | 'single' = art.cardinality === 'list' ? 'list' : 'single';
 
   return (
@@ -556,17 +556,17 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
                 type="button"
                 className="artifact-row-joined-label"
                 onClick={() => onTabNavigate?.(currentLocation.tabId)}
-                title="点击跳转到对应 Tab"
+                title={t('selfEvolutionRun.artifactJoinedTabNavigate')}
               >
                 <CheckOutlined className="artifact-row-joined-check" />
-                已加入：{formatLocation(currentLocation)}
+                {t('selfEvolutionRun.artifactJoinedLabel', { location: formatLocation(currentLocation) })}
               </button>
               <Popconfirm
-                title="移出此素材？"
-                description="素材将从当前位置移出，不会删除素材本身。"
+              title={t('selfEvolutionRun.artifactRemoveTitle')}
+                description={t('selfEvolutionRun.artifactRemoveDesc')}
                 onConfirm={() => onRemoveFromUi(art.id)}
-                okText="确认移出"
-                cancelText="取消"
+                okText={t('selfEvolutionRun.artifactRemoveOk')}
+                cancelText={t('selfEvolutionRun.artifactRemoveCancel')}
                 okButtonProps={{ danger: true }}
                 placement="left"
               >
@@ -575,7 +575,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
                   type="text"
                   icon={<CloseOutlined />}
                   className="artifact-row-joined-remove"
-                  title="移出"
+                  title={t('selfEvolutionRun.artifactRemoveTooltip')}
                 />
               </Popconfirm>
             </div>
@@ -589,8 +589,8 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
                     target.listConstraint !== thisCardinality;
                   const disabledHint = isDisabled
                     ? thisCardinality === 'list'
-                      ? '这个区域里已有「非列表」素材，Composite 要求所有素材类型一致——请加入同为「非列表」的素材，或先清空该区域再试'
-                      : '这个区域里已有「列表」素材，Composite 要求所有素材类型一致——请加入同为「列表」的素材，或先清空该区域再试'
+                      ? t('selfEvolutionRun.artifactListConflictSingle')
+                      : t('selfEvolutionRun.artifactListConflictList')
                     : undefined;
                   return {
                     key: target.key,
@@ -609,7 +609,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
               trigger={['click']}
             >
               <Button size="small" className="artifact-row-join">
-                加入 <DownOutlined />
+                {t('selfEvolutionRun.artifactJoinMenuLabel')} <DownOutlined />
               </Button>
             </Dropdown>
           )}

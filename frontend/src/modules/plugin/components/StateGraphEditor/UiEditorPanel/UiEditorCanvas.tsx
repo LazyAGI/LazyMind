@@ -17,6 +17,7 @@ import {
   rectSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable';
+import { useTranslation } from 'react-i18next';
 import { Empty } from 'antd';
 import { FileTextOutlined } from '@ant-design/icons';
 import type { PluginUiTab, WidgetConfig, CompositePanelNode } from '../core/pluginModel';
@@ -49,6 +50,7 @@ export default function UiEditorCanvas({
   onCompositeLayoutChange,
   onCompositeTabPositionChange,
 }: Props) {
+  const { t } = useTranslation();
   const [isDragOver, setIsDragOver] = useState(false);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [overDragId, setOverDragId] = useState<string | null>(null);
@@ -152,7 +154,7 @@ export default function UiEditorCanvas({
       >
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="将左侧素材拖入此处，或点击素材行「加入 Tab」"
+           description={t('selfEvolutionRun.uiEditorCanvasEmptyDesc')}
         />
       </div>
     );

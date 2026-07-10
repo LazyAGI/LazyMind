@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Button, Empty, Input, Popconfirm, Radio, Table, Tag, Tooltip, message } from 'antd';
+import { Button, Empty, Input, Popconfirm, Radio, Switch, Table, Tag, Tooltip, message } from 'antd';
 import { DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigate } from 'react-router-dom';
@@ -9,6 +9,8 @@ import {
   deletePluginDraft,
   updatePluginDraftContent,
   listBuiltinPlugins,
+  listUserPluginSettings,
+  setUserPluginEnabled,
 } from '@/modules/plugin/pluginDraftApi';
 import type { PluginDraftRecord, BuiltinPlugin } from '@/modules/plugin/pluginDraftApi';
 import PluginInfoModal from '@/modules/plugin/components/StateGraphEditor/PluginInfoModal';
@@ -32,12 +34,13 @@ type PluginRow =
 
 type TypeFilter = 'all' | 'builtin' | 'draft';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledViewProps) {
   const navigate = useNavigate();
   const [draftRecords, setDraftRecords] = useState<PluginDraftRecord[]>([]);
   const [builtinPlugins, setBuiltinPlugins] = useState<BuiltinPlugin[]>([]);
+  const [enabledByRef, setEnabledByRef] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
@@ -50,14 +53,16 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
   const loadList = useCallback(async () => {
     setLoading(true);
     try {
-      const [draftsResp, builtins] = await Promise.all([
+      const [draftsResp, builtins, pluginSettings] = await Promise.all([
         listPluginDrafts({ page: 1, pageSize: 200 }),
         listBuiltinPlugins(),
+        listUserPluginSettings(),
       ]);
       setDraftRecords(draftsResp.records ?? []);
       setBuiltinPlugins(builtins);
+      setEnabledByRef(Object.fromEntries(pluginSettings.map((item) => [item.plugin_ref, item.enabled])));
     } catch {
-      message.error('加载插件列表失败');
+      message.error(t('admin.memoryPluginLoadFailed'));
     } finally {
       setLoading(false);
     }
@@ -70,10 +75,10 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
   const handleDelete = async (id: string) => {
     try {
       await deletePluginDraft(id);
-      message.success('已删除');
+      message.success(t('admin.memoryPluginDeleteSuccess'));
       void loadList();
     } catch {
-      message.error('删除失败');
+      message.error(t('admin.memoryPluginDeleteFailed'));
     }
   };
 
@@ -87,6 +92,13 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
     setQuery('');
     setTypeFilter('all');
     setPage(1);
+  };
+
+  const handleEnabledChange = async (pluginRef: string, enabled: boolean) => {
+    const previous = enabledByRef[pluginRef] ?? false;
+    setEnabledByRef((current) => ({ ...current, [pluginRef]: enabled }));
+    try { await setUserPluginEnabled(pluginRef, enabled); message.success(enabled ? 'Plugin 已默认启用' : 'Plugin 已默认关闭'); }
+    catch { setEnabledByRef((current) => ({ ...current, [pluginRef]: previous })); message.error('Plugin 默认启用状态保存失败'); }
   };
 
   const openInfoModal = (record: PluginDraftRecord) => {
@@ -107,7 +119,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
       plugin_yaml_content: pluginYaml,
       scenario_content: scenarioContent,
     });
-    message.success('已保存');
+    message.success(t('admin.memoryPluginSaveSuccess'));
     void loadList();
   };
 
@@ -141,8 +153,9 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
 
   const columns: ColumnsType<PluginRow> = [
     {
-      title: '插件标识',
+      title: t('admin.memoryPluginColId'),
       key: 'plugin_id',
+      width: 240,
       render: (_: unknown, row: PluginRow) => {
         const pluginId = row._type === 'builtin' ? row.id : getDraftPluginId(row);
         const href =
@@ -150,71 +163,110 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
             ? `/memory-management/plugins/builtin/${row.id}`
             : `/memory-management/plugins/${row.id}`;
         return (
+          <Tooltip title={pluginId} mouseEnterDelay={0.4}>
           <Button
             type="link"
-            style={{ fontFamily: 'monospace', padding: 0 }}
+            style={{ fontFamily: 'monospace', padding: 0, display: 'block', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}
             onClick={() => navigate(href)}
           >
             {pluginId}
           </Button>
+          </Tooltip>
         );
       },
     },
     {
-      title: '显示名称',
+      title: t('admin.memoryPluginColName'),
       key: 'name',
+      width: 220,
       render: (_: unknown, row: PluginRow) => {
         const href =
           row._type === 'builtin'
             ? `/memory-management/plugins/builtin/${row.id}`
             : `/memory-management/plugins/${row.id}`;
         return (
-          <Button type="link" style={{ padding: 0 }} onClick={() => navigate(href)}>
+          <Tooltip title={row.name} mouseEnterDelay={0.4}>
+          <Button type="link" style={{ padding: 0, display: 'block', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }} onClick={() => navigate(href)}>
             {row.name}
           </Button>
+          </Tooltip>
         );
       },
     },
     {
-      title: '类型',
+      title: t('admin.memoryPluginColType'),
       key: 'type',
-      width: 90,
-      render: (_: unknown, row: PluginRow) =>
-        row._type === 'builtin' ? (
-          <Tag color="blue">内置</Tag>
-        ) : (
-          <Tag>自定义</Tag>
-        ),
-    },
-    {
-      title: '状态',
-      key: 'generate_status',
-      width: 100,
+      width: 110,
       render: (_: unknown, row: PluginRow) => {
-        if (row._type === 'builtin') return null;
-        const status = row.generate_status;
-        if (status === 'generating') return <Tag color="processing">生成中</Tag>;
-        if (status === 'failed') return <Tag color="error">生成失败</Tag>;
-        return null;
+        if (row._type === 'builtin') return <Tag color="blue">{t('admin.memoryPluginTypeBuiltin')}</Tag>;
+        if (row.source_type === 'skill') {
+          const skillLabel = row.source_skill_name || row.source_skill_id || t('admin.memoryPluginTypeSkillUnknown');
+          const skillId = row.source_skill_id;
+          const tooltipContent = skillId ? (
+            <span>
+              {t('admin.memoryPluginTypeSkillTooltipPrefix')}{' '}
+              <Button
+                type="link"
+                size="small"
+                style={{ color: '#fff', padding: 0, height: 'auto', textDecoration: 'underline' }}
+                onClick={(e) => { e.stopPropagation(); navigate(`/memory-management/skills/${skillId}`); }}
+              >
+                {skillLabel}
+              </Button>
+              {t('admin.memoryPluginTypeSkillTooltipSuffix') ? ` ${t('admin.memoryPluginTypeSkillTooltipSuffix')}` : ''}
+            </span>
+          ) : t('admin.memoryPluginTypeSkillTooltipNoId', { name: skillLabel });
+          return (
+            <Tooltip title={tooltipContent}>
+              <Tag color="purple" style={{ cursor: 'default' }}>{t('admin.memoryPluginTypeSkill')}</Tag>
+            </Tooltip>
+          );
+        }
+        if (row.source_type === 'ai') return <Tag color="blue">{t('admin.memoryPluginTypeAi')}</Tag>;
+        return <Tag>{t('admin.memoryPluginTypeCustom')}</Tag>;
       },
     },
     {
-      title: '最后更新',
+      title: t('admin.memoryPluginColStatus'),
+      key: 'generate_status',
+      width: 130,
+      render: (_: unknown, row: PluginRow) => {
+        if (row._type === 'builtin') return null;
+        const status = row.generate_status;
+        if (status === 'generating') return <Tag color="processing">{t('admin.memoryPluginStatusGenerating')}</Tag>;
+        if (status === 'failed') return <Tag color="error">{t('admin.memoryPluginStatusFailed')}</Tag>;
+        if (row.published) return <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><Tag color="success" style={{ marginInlineEnd: 0 }}>已发布</Tag><Tag style={{ marginInlineEnd: 0 }}>v{row.current_revision_no}</Tag></div>;
+        return <Tag>未发布</Tag>;
+      },
+    },
+    {
+      title: t('admin.memoryPluginColUpdatedAt'),
       key: 'updated_at',
       width: 180,
       render: (_: unknown, row: PluginRow) => {
         if (row._type === 'builtin') return '—';
-        return new Date(row.updated_at).toLocaleString('zh-CN');
+        return <span style={{ whiteSpace: 'nowrap' }}>{new Date(row.updated_at).toLocaleString('zh-CN')}</span>;
       },
     },
     {
-      title: '操作',
+      title: '默认启用',
+      key: 'default_enabled',
+      width: 110,
+      align: 'center',
+      render: (_: unknown, row: PluginRow) => {
+        const pluginRef = row._type === 'builtin' ? `builtin:${row.id}` : row.published_plugin_ref;
+        if (!pluginRef) return <Tooltip title="发布后才可启用"><Switch size="small" disabled /></Tooltip>;
+        return <Switch size="small" checked={enabledByRef[pluginRef] ?? (row._type === 'builtin')} onChange={(enabled) => void handleEnabledChange(pluginRef, enabled)} />;
+      },
+    },
+    {
+      title: t('common.actions'),
       key: 'actions',
       width: 96,
       render: (_: unknown, row: PluginRow) => {
         if (row._type === 'builtin') {
           return (
-            <Tooltip title="查看插件">
+            <Tooltip title={t('admin.memoryPluginActionView')}>
               <Button
                 type="text"
                 size="small"
@@ -226,7 +278,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
         }
         return (
           <div className="plugin-list-actions">
-            <Tooltip title="修改插件信息">
+            <Tooltip title={t('admin.memoryPluginActionEdit')}>
               <Button
                 type="text"
                 size="small"
@@ -235,9 +287,9 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
               />
             </Tooltip>
             <Popconfirm
-              title="确认删除此插件草稿？"
-              okText="删除"
-              cancelText="取消"
+              title={t('admin.memoryPluginDeleteConfirm')}
+              okText={t('admin.memoryPluginDeleteOk')}
+              cancelText={t('common.cancel')}
               okButtonProps={{ danger: true }}
               onConfirm={() => void handleDelete(row.id)}
             >
@@ -269,7 +321,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           onSearch={handleSearch}
-          placeholder="搜索插件名称..."
+          placeholder={t('admin.memoryPluginSearchPlaceholder')}
           className="memory-skill-installed-search"
         />
         <Radio.Group
@@ -278,9 +330,9 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
           size="small"
           style={{ flexShrink: 0 }}
         >
-          <Radio.Button value="all">全部</Radio.Button>
-          <Radio.Button value="builtin">内置</Radio.Button>
-          <Radio.Button value="draft">自定义</Radio.Button>
+          <Radio.Button value="all">{t('admin.memoryPluginFilterAll')}</Radio.Button>
+          <Radio.Button value="builtin">{t('admin.memoryPluginFilterBuiltin')}</Radio.Button>
+          <Radio.Button value="draft">{t('admin.memoryPluginFilterCustom')}</Radio.Button>
         </Radio.Group>
         <Button onClick={handleReset}>{t('admin.memoryReset')}</Button>
       </div>
@@ -288,11 +340,11 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
       <div className="memory-list-content">
         {filteredRows.length === 0 && !loading ? (
           <Empty
-            description="还没有插件，点击「新建插件」开始创建"
+            description={t('admin.memoryPluginEmptyDesc')}
             style={{ marginTop: 60 }}
           >
             <Button type="primary" icon={<PlusOutlined />} onClick={onNewPlugin}>
-              新建插件
+              {t('admin.memoryPluginNewButton')}
             </Button>
           </Empty>
         ) : (
@@ -303,11 +355,12 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
             dataSource={pageRows}
             columns={columns}
             pagination={pagination}
+            tableLayout="fixed"
             locale={{
               emptyText: (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description="暂无插件"
+                  description={t('admin.memoryPluginEmptyNoResult')}
                 />
               ),
             }}

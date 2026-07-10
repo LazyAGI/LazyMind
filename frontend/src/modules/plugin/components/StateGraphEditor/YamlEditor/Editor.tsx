@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type * as monacoType from 'monaco-editor';
 import type { ValidationError } from '../core/validator';
 
@@ -27,6 +28,7 @@ async function loadMonaco(): Promise<typeof monacoType> {
 }
 
 export default function Editor({ value, onChange, errors, language = 'yaml', readOnly = false }: Props) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
   const onChangeRef = useRef(onChange);
@@ -117,7 +119,7 @@ export default function Editor({ value, onChange, errors, language = 'yaml', rea
     <div
       ref={containerRef}
       style={{ width: '100%', height: '100%', minHeight: 300 }}
-      aria-label="YAML 编辑器"
+      aria-label={t('selfEvolutionRun.yamlEditorAriaLabel')}
     />
   );
 }

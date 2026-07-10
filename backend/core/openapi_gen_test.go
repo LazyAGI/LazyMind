@@ -65,7 +65,7 @@ func TestOpenAPISpecCoversAllRegisteredRoutes(t *testing.T) {
 	}
 }
 
-func TestOpenAPISpecIncludesAgentGateResultContracts(t *testing.T) {
+func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)
 
@@ -78,62 +78,105 @@ func TestOpenAPISpecIncludesAgentGateResultContracts(t *testing.T) {
 	if err := json.Unmarshal(specJSON, &spec); err != nil {
 		t.Fatalf("decode openapi spec: %v", err)
 	}
-	for _, path := range []string{
-		"/api/core/agent/threads/{thread_id}/results/datasets",
-		"/api/core/agent/threads/{thread_id}/results/eval-reports",
-		"/api/core/agent/threads/{thread_id}/results/analysis-reports",
-		"/api/core/agent/threads/{thread_id}/results/diffs",
-		"/api/core/agent/threads/{thread_id}/results/abtests",
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{"get", "/api/core/agent/threads/{thread_id}/events:stream"},
+		{"get", "/api/core/agent/threads/{thread_id}/event-trace:stream"},
+		{"get", "/api/core/agent/threads/{thread_id}/steps"},
+		{"get", "/api/core/agent/threads/{thread_id}/gates"},
+		{"get", "/api/core/agent/threads/{thread_id}/gates/{step}/versions/{version}"},
+		{"get", "/api/core/agent/threads/{thread_id}/gates/{step}/versions/{version}:download"},
+		{"get", "/api/core/agent/threads/{thread_id}/results/traces:compare"},
+		{"get", "/api/core/agent/threads/{thread_id}/results/traces/{trace_id}"},
+		{"get", "/api/core/agent/threads/{thread_id}/messages"},
+		{"post", "/api/core/agent/threads/{thread_id}/messages"},
+		{"post", "/api/core/agent/threads/{thread_id}/start"},
+		{"post", "/api/core/agent/threads/{thread_id}/pause"},
+		{"post", "/api/core/agent/threads/{thread_id}/cancel"},
+		{"post", "/api/core/agent/threads/{thread_id}/retry"},
+		{"post", "/api/core/agent/threads/{thread_id}/continue"},
+		{"get", "/api/core/agent/candidates"},
+		{"get", "/api/core/agent/candidates/{candidate_id:.*}"},
+		{"get", "/api/core/agent/router/status"},
+		{"get", "/api/core/agent/router/algorithms"},
+		{"post", "/api/core/agent/router/algorithms"},
+		{"post", "/api/core/agent/router/algorithms/{algorithm_id}:action"},
+		{"get", "/api/core/agent/router/ab-strategy"},
+		{"put", "/api/core/agent/router/ab-strategy"},
 	} {
-		op := openAPIOperationForTest(t, spec, "get", path)
-		params := openAPIParameterNamesForTest(t, op)
-		for _, name := range []string{"thread_id", "version"} {
-			if _, ok := params[name]; !ok {
-				t.Fatalf("%s missing parameter %q", path, name)
-			}
-		}
-		schema := openAPIResponseSchemaForTest(t, op)
-		if schema["type"] != "object" || schema["additionalProperties"] != true {
-			t.Fatalf("%s should document direct Evo content object, got %#v", path, schema)
-		}
-		if _, ok := schema["items"]; ok {
-			t.Fatalf("%s should not retain legacy row item schema: %#v", path, schema)
-		}
+		openAPIOperationForTest(t, spec, tc.method, tc.path)
 	}
 
-	downloadOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/results/{kind}:download")
-	downloadParams := openAPIParameterNamesForTest(t, downloadOp)
-	for _, name := range []string{"thread_id", "kind", "format", "version"} {
-		if _, ok := downloadParams[name]; !ok {
-			t.Fatalf("download operation missing parameter %q", name)
+	eventTraceOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/event-trace:stream")
+	eventTraceParams := openAPIParameterNamesForTest(t, eventTraceOp)
+	if _, ok := eventTraceParams["step_id"]; !ok {
+		t.Fatalf("event trace stream must document required step_id query")
+	}
+
+	gateOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/gates/{step}/versions/{version}")
+	gateParams := openAPIParameterNamesForTest(t, gateOp)
+	for _, name := range []string{"thread_id", "step", "version"} {
+		if _, ok := gateParams[name]; !ok {
+			t.Fatalf("gate operation missing parameter %q", name)
 		}
 	}
-	kindSchema := openAPIParameterSchemaForTest(t, downloadOp, "kind")
-	wantKinds := []any{"datasets", "eval-reports", "analysis-reports", "diffs", "abtests"}
-	if !reflect.DeepEqual(kindSchema["enum"], wantKinds) {
-		t.Fatalf("download kind enum mismatch: %#v", kindSchema["enum"])
+	gateSchema := openAPIResponseSchemaForTest(t, gateOp)
+	if gateSchema["type"] != "object" || gateSchema["additionalProperties"] != true {
+		t.Fatalf("gate response should document direct Evo object, got %#v", gateSchema)
 	}
+
+	downloadOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/gates/{step}/versions/{version}:download")
 	formatSchema := openAPIParameterSchemaForTest(t, downloadOp, "format")
-	if !reflect.DeepEqual(formatSchema["enum"], []any{"csv"}) {
+	if !reflect.DeepEqual(formatSchema["enum"], []any{"json"}) {
 		t.Fatalf("download format enum mismatch: %#v", formatSchema["enum"])
 	}
 	responses := downloadOp["responses"].(map[string]any)
 	response200 := responses["200"].(map[string]any)
 	content := response200["content"].(map[string]any)
-	csvContent, ok := content["text/csv"].(map[string]any)
+	binaryContent, ok := content["application/octet-stream"].(map[string]any)
 	if !ok {
-		t.Fatalf("download operation should expose text/csv response, got %#v", content)
+		t.Fatalf("download operation should expose application/octet-stream response, got %#v", content)
 	}
-	csvSchema := csvContent["schema"].(map[string]any)
-	if csvSchema["type"] != "string" || csvSchema["format"] != "binary" {
-		t.Fatalf("unexpected csv response schema: %#v", csvSchema)
+	binarySchema := binaryContent["schema"].(map[string]any)
+	if binarySchema["type"] != "string" || binarySchema["format"] != "binary" {
+		t.Fatalf("unexpected download response schema: %#v", binarySchema)
+	}
+
+	traceCompareOp := openAPIOperationForTest(t, spec, "get", "/api/core/agent/threads/{thread_id}/results/traces:compare")
+	traceCompareParams := openAPIParameterNamesForTest(t, traceCompareOp)
+	for _, name := range []string{"thread_id", "a", "b"} {
+		if _, ok := traceCompareParams[name]; !ok {
+			t.Fatalf("trace compare operation missing parameter %q", name)
+		}
 	}
 
 	paths := spec["paths"].(map[string]any)
+	for _, gateDetailPath := range []string{
+		"/api/core/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases",
+		"/api/core/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details",
+	} {
+		if _, ok := paths[gateDetailPath]; !ok {
+			t.Fatalf("gate detail path missing from openapi spec: %s", gateDetailPath)
+		}
+	}
 	for _, legacyPath := range []string{
+		"/api/core/agent/threads/{thread_id}:events",
+		"/api/core/agent/threads/{thread_id}:messages",
+		"/api/core/agent/threads/{thread_id}:start",
+		"/api/core/agent/threads/{thread_id}:pause",
+		"/api/core/agent/threads/{thread_id}:cancel",
+		"/api/core/agent/threads/{thread_id}:retry",
+		"/api/core/agent/threads/{thread_id}:continue",
+		"/api/core/agent/threads/{thread_id}:history",
+		"/api/core/agent/threads/{thread_id}/rounds",
+		"/api/core/agent/threads/{thread_id}/records",
+		"/api/core/agent/threads/{thread_id}/steps/{step_id}/records",
 		"/api/core/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases",
+		"/api/core/agent/threads/{thread_id}/results/{kind}:download",
+		"/api/core/agent/threads/{thread_id}/results/datasets",
 		"/api/core/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details",
-		"/api/core/agent/threads/{thread_id}/results/traces/{trace_id}",
 		"/api/core/agent/threads/{thread_id}/results/traces-compare",
 		"/api/core/agent/reports/{report_id}:content",
 		"/api/core/agent/diffs/{apply_id}/{filename:.*}",

@@ -4,7 +4,7 @@ import svgr from "vite-plugin-svgr";
 import path from "node:path";
 
 const devProxyTarget =
-  process.env.VITE_PROXY_TARGET || "http://localhost:5024";
+  process.env.VITE_PROXY_TARGET || "http://localhost:8090";
 const isDesktopBuild = process.env.VITE_LAZYMIND_MODE === "desktop";
 
 function jsPreviewExcelShimPlugin(): Plugin {
@@ -46,6 +46,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
+        target: devProxyTarget,
+        changeOrigin: true,
+        timeout: 3 * 60 * 1000,
+        proxyTimeout: 3 * 60 * 1000,
+      },
+      "/_local": {
         target: devProxyTarget,
         changeOrigin: true,
         timeout: 3 * 60 * 1000,

@@ -65,7 +65,7 @@ func cleanHostCacheEnv(key string, paths RuntimePaths, fallback string) string {
 		return filepath.Clean(fallback)
 	}
 	value = filepath.Clean(value)
-	if pathIsUnderRoot(value, paths.RuntimeRoot) {
+	if pathIsUnderRoot(value, paths.RuntimeRoot) || pathIsUnderRoot(value, paths.BuildRoot) {
 		return filepath.Clean(fallback)
 	}
 	return value

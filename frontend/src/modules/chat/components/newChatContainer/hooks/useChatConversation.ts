@@ -72,7 +72,6 @@ export function useChatConversation({
   const messageListRef = useRef<any[]>([]);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const conversationMessagesCache = useRef<Map<string, any[]>>(new Map());
-  const tempIdToRealIdRef = useRef<Map<string, string>>(new Map());
 
   const [messageList, setMessageList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -100,6 +99,11 @@ export function useChatConversation({
       conversationMessagesCache.current.clear();
 
       if (currentConversationIdRef.current) {
+        if (streamManager.hasActiveStream(currentConversationIdRef.current)) {
+          disconnectConversationStream(currentConversationIdRef.current, {
+            persistResumeKey: true,
+          });
+        }
         streamManager.setActiveConversation(null);
       }
     };
@@ -115,6 +119,36 @@ export function useChatConversation({
     activeStreamRef.current = false;
     setLoading(false);
     setIsStreaming(false);
+  }
+
+  function disconnectConversationStream(
+    conversationId: string,
+    options?: { persistResumeKey?: boolean },
+  ) {
+    if (!conversationId) {
+      return;
+    }
+    const shouldPersistResumeKey =
+      options?.persistResumeKey === true && !conversationId.startsWith("temp_");
+
+    if (currentConversationIdRef.current === conversationId && sseRef.current) {
+      try {
+        sseRef.current.close();
+      } catch (error) {
+        console.error("Error closing active SSE:", error);
+      }
+    }
+
+    streamManager.closeAndCleanup(conversationId);
+    activeStreamRef.current = false;
+    setLoading(false);
+    setIsStreaming(false);
+
+    if (shouldPersistResumeKey) {
+      sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
+    } else {
+      sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
+    }
   }
 
   function updateAssistantMessage(data: any, id?: string, index?: number) {
@@ -216,36 +250,10 @@ export function useChatConversation({
     const messageConversationId = result.conversation_id || "";
     const currentConversationIdAtStart = currentConversationIdRef.current;
     const isUsingTempId = currentConversationIdAtStart.startsWith("temp_");
-
-    let isActiveConversation = false;
-    if (messageConversationId) {
-      if (isUsingTempId) {
-        const stream = streamManager.getStream(messageConversationId);
-        isActiveConversation = !stream;
-      } else {
-        isActiveConversation =
-          messageConversationId === currentConversationIdAtStart;
-      }
-    } else {
-      isActiveConversation = currentConversationIdAtStart === "";
-    }
-
-    if (messageConversationId && !isActiveConversation) {
-      for (const [tempKey] of tempIdToRealIdRef.current) {
-        if (
-          tempKey.startsWith("temp_") &&
-          conversationMessagesCache.current.has(tempKey) &&
-          !conversationMessagesCache.current.has(messageConversationId)
-        ) {
-          const cachedList = conversationMessagesCache.current.get(tempKey)!;
-          conversationMessagesCache.current.set(messageConversationId, cachedList);
-          conversationMessagesCache.current.delete(tempKey);
-          streamManager.saveMessageList(messageConversationId, cachedList);
-          tempIdToRealIdRef.current.delete(tempKey);
-          break;
-        }
-      }
-    }
+    const isActiveConversation =
+      !messageConversationId ||
+      messageConversationId === currentConversationIdAtStart ||
+      (isUsingTempId && !!messageConversationId);
 
     const isFirstTimeReceivingId =
       result.conversation_id &&
@@ -445,20 +453,6 @@ export function useChatConversation({
       if (scroll.isMouseScrollingRef.current) {
         scroll.scrollToEnd();
       }
-    } else if (messageConversationId) {
-      if (streamManager.hasActiveStream(messageConversationId)) {
-        let savedList = conversationMessagesCache.current.get(
-          messageConversationId,
-        );
-        if (!savedList) {
-          const streamState = streamManager.getStreamState(messageConversationId);
-          savedList = streamState?.messageList || [];
-        }
-
-        const newList = updateMessageListInternal(savedList);
-        conversationMessagesCache.current.set(messageConversationId, newList);
-        streamManager.saveMessageList(messageConversationId, newList);
-      }
     }
   }
 
@@ -475,7 +469,6 @@ export function useChatConversation({
     if (!conversationId) {
       conversationId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
       currentConversationIdRef.current = conversationId;
-      tempIdToRealIdRef.current.set(conversationId, conversationId);
     } else {
       sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
     }
@@ -561,19 +554,7 @@ export function useChatConversation({
       return;
     }
     if (streamManager.hasActiveStream(conversationId)) {
-      if (currentConversationIdRef.current === conversationId) {
-        activeStreamRef.current = true;
-        setLoading(true);
-        setIsStreaming(true);
-        const callbacks: Record<string, (e: CustomEvent) => void> = {
-          message: (e) => onMessage(e),
-          error: (e) => onError(e),
-          timeout: (e) => onTimeout(e),
-        };
-        streamManager.restoreStreamCallbacks(conversationId, callbacks);
-        sseRef.current = streamManager.getStream(conversationId) ?? sseRef.current;
-      }
-      return;
+      disconnectConversationStream(conversationId, { persistResumeKey: true });
     }
     activeStreamRef.current = true;
     setLoading(true);
@@ -818,6 +799,9 @@ export function useChatConversation({
           previousConversationId,
           messageListRef.current,
         );
+        disconnectConversationStream(previousConversationId, {
+          persistResumeKey: true,
+        });
       }
 
       streamManager.setActiveConversation(null);
@@ -832,101 +816,20 @@ export function useChatConversation({
     }
 
     streamManager.setActiveConversation(id || null);
-
-    if (id && streamManager.hasActiveStream(id)) {
-      activeStreamRef.current = true;
-      const callbacks: Record<string, (event: CustomEvent) => void> = {
-        message: (event) => onMessage(event),
-        error: (event) => onError(event),
-        timeout: (event) => onTimeout(event),
-      };
-      streamManager.restoreStreamCallbacks(id, callbacks);
-
-      const streamState = streamManager.getStreamState(id);
-      if (streamState) {
-        const cachedList = conversationMessagesCache.current.get(id);
-        const baseList = mergeChatMessageLists(list, cachedList);
-
-        if (baseList.length > 0) {
-          const savedList = [...baseList];
-          const lastIndex = savedList.length - 1;
-          if (savedList[lastIndex]?.role === RoleTypes.ASSISTANT) {
-            savedList[lastIndex] = {
-              ...savedList[lastIndex],
-              sources: streamState.sources || savedList[lastIndex].sources,
-              finish_reason: streamState.finish_reason,
-              id: streamState.messageId || savedList[lastIndex].id,
-              history_id:
-                streamState.history_id || savedList[lastIndex].history_id,
-            };
-          }
-          messageListRef.current = savedList;
-          setMessageList(savedList);
-          conversationMessagesCache.current.set(id, savedList);
-          streamManager.saveMessageList(id, savedList);
-          setLoading(true);
-          if (
-            streamState.finish_reason ===
-            ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
-          ) {
-            setIsStreaming(true);
-          }
-        } else if (
-          streamState.messageList &&
-          streamState.messageList.length > 0
-        ) {
-          const savedList = [...streamState.messageList];
-          const lastIndex = savedList.length - 1;
-          if (savedList[lastIndex]?.role === RoleTypes.ASSISTANT) {
-            savedList[lastIndex] = {
-              ...savedList[lastIndex],
-              sources: streamState.sources || savedList[lastIndex].sources,
-              finish_reason: streamState.finish_reason,
-              id: streamState.messageId || savedList[lastIndex].id,
-              history_id:
-                streamState.history_id || savedList[lastIndex].history_id,
-            };
-          }
-          messageListRef.current = savedList;
-          setMessageList(savedList);
-          setLoading(true);
-          if (
-            streamState.finish_reason ===
-            ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
-          ) {
-            setIsStreaming(true);
-          }
-        } else {
-          messageListRef.current = list;
-          setMessageList(list);
-          if (
-            streamState.finish_reason ===
-            ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
-          ) {
-            setLoading(true);
-            setIsStreaming(true);
-          }
-        }
+    if (id) {
+      const cachedList = conversationMessagesCache.current.get(id);
+      if (cachedList && cachedList.length > 0) {
+        messageListRef.current = cachedList;
+        setMessageList(cachedList);
       } else {
         messageListRef.current = list;
         setMessageList(list);
       }
     } else {
-      if (id) {
-        const cachedList = conversationMessagesCache.current.get(id);
-        if (cachedList && cachedList.length > 0) {
-          messageListRef.current = cachedList;
-          setMessageList(cachedList);
-        } else {
-          messageListRef.current = list;
-          setMessageList(list);
-        }
-      } else {
-        messageListRef.current = list;
-        setMessageList(list);
-      }
-      closeSSE();
+      messageListRef.current = list;
+      setMessageList(list);
     }
+    closeSSE();
 
     onConversationIdChange?.(id);
 
@@ -960,15 +863,9 @@ export function useChatConversation({
           messageListRef.current,
         );
 
-        if (sseRef.current) {
-          try {
-            sseRef.current.close();
-          } catch (error) {
-            console.error("Error closing SSE when creating new chat:", error);
-          }
-        }
-
-        streamManager.closeAndCleanup(previousConversationId);
+        disconnectConversationStream(previousConversationId, {
+          persistResumeKey: false,
+        });
       }
 
       streamManager.setActiveConversation(null);
@@ -1099,6 +996,7 @@ export function useChatConversation({
     openResumeSSE,
     appendAutoAdvanceTurn,
     ensureAutoAdvanceUserTurn,
+    disconnectConversationStream,
     scroll,
   };
 }

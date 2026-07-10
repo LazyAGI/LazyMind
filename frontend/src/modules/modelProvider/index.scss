@@ -1567,9 +1567,19 @@
   box-shadow: none;
 }
 
+.model-provider-tool-popover {
+  max-width: min(420px, calc(100vw - 32px));
+}
+
 .model-provider-tool-popover-content {
   max-width: 420px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.65;
   white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .model-provider-managed-tool-grid {

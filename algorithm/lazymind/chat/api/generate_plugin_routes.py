@@ -49,7 +49,7 @@ _PLUGIN_FORMAT_SPEC: str = _load_plugin_format_spec()
 
 # Top-level required fields
 _REQUIRED_PLUGIN_TOP = ['id', 'name', 'description', 'steps', 'slots']
-_REQUIRED_STATE_TOP = ['initial', 'transitions', 'steps']
+_REQUIRED_STATE_TOP = ['transitions', 'steps']
 
 # Required per-item fields (checked dynamically)
 _REQUIRED_SLOT_FIELDS = ['id', 'label', 'type', 'cardinality']
@@ -199,13 +199,40 @@ def _call_llm(prompt: str) -> str:
 
 
 def _extract_json(raw: str) -> Dict[str, Any]:
-    """Extract the outermost JSON object from a raw LLM response string."""
-    match = re.search(r'\{[\s\S]*\}', raw)
-    if not match:
-        raise ValueError(f'No JSON found in LLM response: {raw[:300]}')
+    """Extract the first complete JSON object from a raw LLM response string.
+
+    Uses json.JSONDecoder.raw_decode to find the first well-formed object rather
+    than a greedy regex that can fail when the LLM wraps output in markdown fences
+    or when script code contains bare braces outside the JSON.
+    """
+    # Strip common markdown code-fence wrappers that LLMs sometimes add.
+    text = raw.strip()
+    for fence in ('```json', '```JSON', '```'):
+        if text.startswith(fence):
+            text = text[len(fence):]
+            if text.endswith('```'):
+                text = text[:-3]
+            text = text.strip()
+            break
+
+    decoder = json.JSONDecoder()
+    # Scan from the first '{' character so we skip any preamble text.
+    idx = text.find('{')
+    if idx == -1:
+        raise ValueError(f'No JSON object found in LLM response: {raw[:300]}')
     try:
-        return json.loads(match.group(0))
+        obj, _ = decoder.raw_decode(text, idx)
+        if isinstance(obj, dict):
+            return obj
+        raise ValueError(f'Parsed JSON is not a dict: {type(obj)}')
     except json.JSONDecodeError as exc:
+        # Fallback: try the original greedy regex as last resort.
+        match = re.search(r'\{[\s\S]*\}', text)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
         raise ValueError(f'Invalid JSON in LLM response: {exc}') from exc
 
 

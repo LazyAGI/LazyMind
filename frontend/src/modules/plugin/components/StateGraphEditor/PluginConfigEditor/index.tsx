@@ -1,4 +1,5 @@
 import { Form, Input } from 'antd';
+import { useTranslation } from 'react-i18next';
 import type { PluginModel } from '../core/pluginModel';
 import './index.scss';
 
@@ -8,40 +9,41 @@ interface Props {
 }
 
 export default function PluginConfigEditor({ model, onChange }: Props) {
+  const { t } = useTranslation();
   const update = (patch: Partial<PluginModel>) => onChange({ ...model, ...patch });
 
   return (
     <div className="plugin-config-editor">
       <section className="pce-section">
-        <p className="pce-section-title">基本信息</p>
+        <p className="pce-section-title">{t('selfEvolutionRun.pluginConfigEditorBasicInfo')}</p>
         <Form layout="vertical" size="small">
-          <Form.Item label="插件标识">
+          <Form.Item label={t('selfEvolutionRun.pluginConfigEditorPluginId')}>
             <Input
               value={model.id}
               onChange={(e) => update({ id: e.target.value })}
-              placeholder="my-plugin（英文字母开头）"
+              placeholder={t('selfEvolutionRun.pluginConfigEditorPluginIdPlaceholder')}
             />
           </Form.Item>
-          <Form.Item label="显示名称">
+          <Form.Item label={t('selfEvolutionRun.pluginConfigEditorDisplayName')}>
             <Input
               value={model.name}
               onChange={(e) => update({ name: e.target.value })}
-              placeholder="例如：图片处理插件"
+              placeholder={t('selfEvolutionRun.pluginInfoExamplePlaceholder')}
             />
           </Form.Item>
-          <Form.Item label="插件描述">
+          <Form.Item label={t('selfEvolutionRun.pluginInfoFieldDescription')}>
             <Input.TextArea
               value={model.description ?? ''}
               onChange={(e) => update({ description: e.target.value })}
-              placeholder="简短描述插件的用途…"
+              placeholder={t('selfEvolutionRun.pluginInfoFieldDescriptionPlaceholder')}
               autoSize={{ minRows: 2, maxRows: 4 }}
             />
           </Form.Item>
-          <Form.Item label="触发条件（请用英文描述）">
+          <Form.Item label={t('selfEvolutionRun.pluginConfigEditorWhenToUse')}>
             <Input.TextArea
               value={model.when_to_use ?? ''}
               onChange={(e) => update({ when_to_use: e.target.value })}
-              placeholder="Describe in English when this plugin should be triggered…"
+              placeholder={t('selfEvolutionRun.pluginInfoFieldWhenToUsePlaceholder')}
               autoSize={{ minRows: 2, maxRows: 4 }}
             />
           </Form.Item>

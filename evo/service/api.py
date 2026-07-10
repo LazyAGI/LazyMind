@@ -5,7 +5,7 @@ import json
 import os
 import sqlite3
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Mapping
 
 from fastapi import (
     BackgroundTasks,
@@ -20,7 +20,7 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.responses import FileResponse
 
 from evo.message_intent.schemas import MessageRequest
-from evo.message_intent.storage import MessageConflictError, MessageInProgressError
+from evo.message_intent.storage import MessageConflictError, MessageInProgressError, message_history
 from evo.message_intent.turn import run_turn
 
 from .projections import ProjectionService
@@ -67,6 +67,7 @@ class MessageBody(StrictModel):
 CommandBody = Annotated[CommandRequest, Body()]
 EmptyCommandBody = Annotated[EmptyCommandRequest, Body()]
 MessageRequestBody = Annotated[MessageBody, Body()]
+STEP_STREAM_TERMINAL_EVENTS = {'step.finish', 'step.pause', 'step.failed', 'step.cancel'}
 
 
 class EvoService:
@@ -148,6 +149,10 @@ def create_app() -> FastAPI:
     def gates(thread_id: str) -> dict[str, Any]:
         return service.projections.gates(thread_id)
 
+    @app.get('/threads/{thread_id}/steps')
+    def steps(thread_id: str) -> dict[str, Any]:
+        return service.projections.steps(thread_id)
+
     @app.get('/threads/{thread_id}/gates/{step}/versions/{version}:download')
     def gate_download(thread_id: str, step: str, version: int, format: str = 'json') -> FileResponse:  # noqa: A002
         path = service.projections.gate_download(thread_id, step, version, format)
@@ -162,7 +167,14 @@ def create_app() -> FastAPI:
         unsupported = set(request.query_params) - {'step_id'}
         if unsupported:
             raise HTTPException(422, f'unsupported query param: {sorted(unsupported)[0]}')
-        return _event_stream(service, thread_id, step_id, request, service.projections.events)
+        return _event_stream(
+            service,
+            thread_id,
+            step_id,
+            request,
+            service.projections.events,
+            step_terminal_done=True,
+        )
 
     @app.get('/threads/{thread_id}/event-trace:stream')
     def event_trace_stream(thread_id: str, request: Request, step_id: str = '') -> EventSourceResponse:
@@ -173,13 +185,77 @@ def create_app() -> FastAPI:
             raise HTTPException(422, 'step_id is required')
         return _event_stream(service, thread_id, step_id, request, service.projections.event_trace)
 
+    @app.get('/threads/{thread_id}/gates/eval/versions/{version}/bad-cases')
+    def eval_report_bad_cases(
+        thread_id: str,
+        version: int,
+        page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+        page_token: str = '',
+        keyword: str = '',
+        failure_type: str = '',
+    ) -> dict[str, Any]:
+        return service.projections.eval_bad_cases(thread_id, version, page_size, page_token, keyword, failure_type)
+
+    @app.get('/threads/{thread_id}/gates/abtest/versions/{version}/case-details')
+    def abtest_case_details(
+        thread_id: str,
+        version: int,
+        page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+        page_token: str = '',
+        keyword: str = '',
+        outcome: str = '',
+    ) -> dict[str, Any]:
+        return service.projections.abtest_case_details(thread_id, version, page_size, page_token, keyword, outcome)
+
+    @app.get('/threads/{thread_id}/results/traces/{trace_id}')
+    def trace_detail(thread_id: str, trace_id: str) -> dict[str, Any]:
+        if service.threads.runtime.run_config(thread_id) is None:
+            raise HTTPException(404, f'thread not found: {thread_id}')
+        from evo.traces import build_trace_detail_view
+
+        return build_trace_detail_view(trace_id)
+
+    @app.get('/threads/{thread_id}/results/traces:compare')
+    def trace_compare(
+        thread_id: str,
+        a: Annotated[str, Query(min_length=1)],
+        b: Annotated[str, Query(min_length=1)],
+    ) -> dict[str, Any]:
+        if service.threads.runtime.run_config(thread_id) is None:
+            raise HTTPException(404, f'thread not found: {thread_id}')
+        left = a.strip()
+        right = b.strip()
+        if not left or not right:
+            raise HTTPException(422, 'a and b trace ids are required')
+        from evo.traces import build_trace_compare_view
+
+        return build_trace_compare_view(left, right)
+
+    @app.get('/threads/{thread_id}/messages')
+    def message_history_api(
+        thread_id: str,
+        page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+        page_token: str = '',
+    ) -> dict[str, Any]:
+        if service.threads.runtime.run_config(thread_id) is None:
+            raise HTTPException(404, f'thread not found: {thread_id}')
+        try:
+            return message_history(service.root, thread_id, page_size, page_token).model_dump()
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
     @app.post('/threads/{thread_id}/messages')
-    def messages(thread_id: str, payload: MessageRequestBody, request: Request) -> Any:
+    def messages(
+        thread_id: str,
+        payload: MessageRequestBody,
+        request: Request,
+        background_tasks: BackgroundTasks,
+    ) -> Any:
         text = payload.text or payload.content
         if not text.strip():
             raise HTTPException(422, 'text or content is required')
         msg = MessageRequest(message_id=payload.message_id, text=text)
-        result = _message_result(service, thread_id, msg)
+        result = _message_result(service, thread_id, msg, background_tasks)
         if 'text/event-stream' in request.headers.get('accept', ''):
             return _message_stream(result)
         return result.model_dump()
@@ -215,11 +291,14 @@ def _service_root() -> Path:
     return root
 
 
-def _message_result(service: EvoService, thread_id: str, request: MessageRequest):
+def _message_result(service: EvoService, thread_id: str, request: MessageRequest, background_tasks: BackgroundTasks):
     try:
         return run_turn(
             'user', service.root, service.threads.runtime,
-            service.threads.run_message_command, thread_id, request,
+            lambda tid, config, command: service.threads.submit_message_command(
+                tid, config, command, background_tasks.add_task,
+            ),
+            thread_id, request,
         )
     except MessageConflictError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -267,33 +346,84 @@ def _event_stream(
     step_id: str,
     request: Request,
     snapshot_fn,
+    *,
+    step_terminal_done: bool = False,
 ) -> EventSourceResponse:
     async def events():
         last_event_id = request.headers.get('last-event-id', '').strip()
+        pending_step_done = False
         while True:
             snapshot = await asyncio.to_thread(snapshot_fn, thread_id, step_id, last_event_id)
             for item in snapshot['items']:
                 last_event_id = str(item['event_id'])
+                event_type = str(item['event_type'])
                 yield {
                     'id': last_event_id,
-                    'event': str(item['event_type']),
-                    'data': json.dumps(item, ensure_ascii=False),
+                    'event': event_type,
+                    'data': json.dumps(_sse_payload(event_type, item), ensure_ascii=False),
                 }
-            if not snapshot['items'] and await asyncio.to_thread(_thread_events_done, service, thread_id):
+                if step_terminal_done and _step_stream_terminal_event(snapshot, item):
+                    pending_step_done = True
+            if pending_step_done and await asyncio.to_thread(_thread_events_done, service, thread_id):
+                payload = _done_payload(thread_id, last_event_id, snapshot)
+                yield {
+                    'id': last_event_id,
+                    'event': 'done',
+                    'data': json.dumps(_sse_payload('done', payload), ensure_ascii=False),
+                }
+                break
+            if (
+                (not snapshot.get('step_id') or not step_terminal_done)
+                and not snapshot['items']
+                and await asyncio.to_thread(_thread_events_done, service, thread_id)
+            ):
                 public = await asyncio.to_thread(service.threads.public_thread, thread_id, include_inputs=False)
-                yield {'id': last_event_id, 'event': 'done',
-                       'data': json.dumps({
-                           'thread_id': thread_id,
-                           'last_event_id': last_event_id,
-                           'status': public['status'],
-                           'current_step': public['current_step'],
-                       })}
+                payload = _done_payload(thread_id, last_event_id, snapshot)
+                payload.update({
+                    'current_step': public['current_step'],
+                    'checkpoint_state': public['checkpoint_state'],
+                    'first_missing_step': public['first_missing_step'],
+                    'last_released_step': public['last_released_step'],
+                    'retry_from_step': public['retry_from_step'],
+                    'last_error': public['last_error'],
+                })
+                yield {
+                    'id': last_event_id,
+                    'event': 'done',
+                    'data': json.dumps(_sse_payload('done', payload), ensure_ascii=False),
+                }
                 break
             if await request.is_disconnected():
                 break
             await asyncio.sleep(1.0)
 
     return EventSourceResponse(events())
+
+
+def _done_payload(thread_id: str, last_event_id: str, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    payload = {'thread_id': thread_id, 'last_event_id': last_event_id}
+    if snapshot.get('step_id'):
+        payload['step_id'] = snapshot['step_id']
+    return payload
+
+
+def _step_stream_terminal_event(snapshot: Mapping[str, Any], item: Mapping[str, Any]) -> bool:
+    step_id = str(snapshot.get('step_id') or '')
+    return bool(
+        step_id
+        and str(item.get('step_id') or '') == step_id
+        and str(item.get('event_type') or '') in STEP_STREAM_TERMINAL_EVENTS
+    )
+
+
+def _sse_payload(event_type: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    data = dict(payload)
+    if event_type == 'done':
+        data.pop('status', None)
+        data.pop('thread_status', None)
+    data.setdefault('event_type', event_type)
+    data.setdefault('type', data['event_type'])
+    return data
 
 
 def _thread_events_done(service: EvoService, thread_id: str) -> bool:

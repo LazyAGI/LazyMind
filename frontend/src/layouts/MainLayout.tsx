@@ -45,8 +45,8 @@ import {
   CHAT_SELECT_CONVERSATION_EVENT,
 } from "@/modules/chat/constants/chat";
 import { runtimeFeatures } from "@/runtime/features";
-import { shouldHideDesktopUserControls } from "@/runtime/desktopSession";
-import { useDesktopSessionGate } from "@/runtime/useDesktopSessionGate";
+import { shouldHideLocalUserControls } from "@/runtime/localSession";
+import { useLocalSessionGate } from "@/runtime/useLocalSessionGate";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -104,7 +104,7 @@ export default function MainLayout() {
   const isLoggedIn = Boolean(userInfo?.token);
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
-  const hideDesktopUserControls = shouldHideDesktopUserControls();
+  const hideLocalUserControls = shouldHideLocalUserControls();
 
   const [currentSidebarConversationId, setCurrentSidebarConversationId] =
     useState(() => {
@@ -149,7 +149,7 @@ export default function MainLayout() {
       : []),
   ];
   const showSettingsTrigger =
-    settingsMenuItems.length > 0 || !hideDesktopUserControls;
+    settingsMenuItems.length > 0 || !hideLocalUserControls;
   const resourceNavItems = [
     {
       key: "/lib/knowledge",
@@ -203,10 +203,12 @@ export default function MainLayout() {
       setUserInfo(AgentAppsAuth.getUserInfo());
     }
   }, []);
-  const desktopSessionGate = useDesktopSessionGate(isLoggedIn, refreshLayoutUser);
+  const localSessionGate = useLocalSessionGate(refreshLayoutUser);
 
   useEffect(() => {
-    refreshLayoutUser();
+    if (!localSessionGate.enabled) {
+      refreshLayoutUser();
+    }
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -236,7 +238,7 @@ export default function MainLayout() {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener(AUTH_USER_CHANGE_EVENT, handleUserChange);
     };
-  }, [refreshLayoutUser]);
+  }, [localSessionGate.enabled, refreshLayoutUser]);
 
   useEffect(() => {
     if (!isAdminUser && developerActive) {
@@ -629,29 +631,30 @@ export default function MainLayout() {
     }
   };
 
-  if (!isLoggedIn) {
-    if (desktopSessionGate.enabled) {
-      return (
-        <div className="desktop-session-gate">
-          <div className="desktop-session-panel">
-            {desktopSessionGate.loading ? <Spin /> : null}
-            <div className="desktop-session-title">LazyMind</div>
-            <div className="desktop-session-message">
-              {desktopSessionGate.error || t("layout.preparingDesktopSession", "Preparing desktop session...")}
-            </div>
-            {desktopSessionGate.error ? (
-              <Button
-                type="primary"
-                loading={desktopSessionGate.loading}
-                onClick={desktopSessionGate.retry}
-              >
-                {t("common.retry", "Retry")}
-              </Button>
-            ) : null}
+  if (localSessionGate.enabled && (localSessionGate.loading || localSessionGate.error)) {
+    return (
+      <div className="local-session-gate">
+        <div className="local-session-panel">
+          {localSessionGate.loading ? <Spin /> : null}
+          <div className="local-session-title">LazyMind</div>
+          <div className="local-session-message">
+            {localSessionGate.error || t("layout.preparingLocalSession", "Preparing local session...")}
           </div>
+          {localSessionGate.error ? (
+            <Button
+              type="primary"
+              loading={localSessionGate.loading}
+              onClick={localSessionGate.retry}
+            >
+              {t("common.retry", "Retry")}
+            </Button>
+          ) : null}
         </div>
-      );
-    }
+      </div>
+    );
+  }
+
+  if (!isLoggedIn) {
     return <Navigate to="/login" replace />;
   }
 
@@ -819,7 +822,7 @@ export default function MainLayout() {
                       }
                       return btn;
                     })}
-                    {!hideDesktopUserControls && (
+                    {!hideLocalUserControls && (
                       isLoggedIn ? (
                         <Button
                           type="text"
@@ -862,7 +865,7 @@ export default function MainLayout() {
                 </div>
               </Popover>
             )}
-            {userName && !hideDesktopUserControls && (
+            {userName && !hideLocalUserControls && (
               <div
                 className="bottom-item user-item"
                 onClick={handleOpenProfile}

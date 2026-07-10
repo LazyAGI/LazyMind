@@ -140,6 +140,118 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	}
 }
 
+func TestBuildChatResourceContextSkipsInvalidEnabledV2Skill(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now()
+
+	validRevisionID := "rev-valid"
+	validHash := "hash-valid"
+	if err := db.Create(&orm.SkillV2Skill{
+		ID:                 "skill-valid",
+		OwnerUserID:        "u1",
+		OwnerUserName:      "User 1",
+		CreateUserID:       "u1",
+		CreateUserName:     "User 1",
+		Category:           "research",
+		SkillName:          "valid-skill",
+		Tags:               []byte("[]"),
+		RelativeRoot:       "research/valid-skill",
+		SkillMDPath:        "SKILL.md",
+		HeadRevisionID:     &validRevisionID,
+		Version:            1,
+		AutoEvoApplyStatus: "idle",
+		IsEnabled:          true,
+		UpdateStatus:       "up_to_date",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}).Error; err != nil {
+		t.Fatalf("create valid v2 skill: %v", err)
+	}
+	if err := db.Create(&orm.SkillV2Revision{
+		ID:           validRevisionID,
+		SkillID:      "skill-valid",
+		RevisionNo:   1,
+		TreeHash:     "tree-valid",
+		ChangeSource: "create",
+		CreatedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("create valid revision: %v", err)
+	}
+	if err := db.Create(&orm.SkillV2Blob{
+		Hash:           validHash,
+		Size:           int64(len([]byte("# valid\n"))),
+		Mime:           "text/markdown",
+		FileType:       "markdown",
+		Binary:         false,
+		StorageBackend: "postgres",
+		Content:        []byte("# valid\n"),
+		CreatedAt:      now,
+	}).Error; err != nil {
+		t.Fatalf("create valid blob: %v", err)
+	}
+	if err := db.Create(&orm.SkillV2RevisionEntry{
+		RevisionID: validRevisionID,
+		Path:       "SKILL.md",
+		EntryType:  "file",
+		BlobHash:   &validHash,
+		Size:       int64(len([]byte("# valid\n"))),
+		Mime:       "text/markdown",
+		FileType:   "markdown",
+		Mode:       420,
+	}).Error; err != nil {
+		t.Fatalf("create valid revision entry: %v", err)
+	}
+
+	invalidRevisionID := "rev-invalid"
+	if err := db.Create(&orm.SkillV2Skill{
+		ID:                 "skill-invalid",
+		OwnerUserID:        "u1",
+		OwnerUserName:      "User 1",
+		CreateUserID:       "u1",
+		CreateUserName:     "User 1",
+		Category:           "research",
+		SkillName:          "invalid-skill",
+		Tags:               []byte("[]"),
+		RelativeRoot:       "research/invalid-skill",
+		SkillMDPath:        "SKILL.md",
+		HeadRevisionID:     &invalidRevisionID,
+		Version:            1,
+		AutoEvoApplyStatus: "idle",
+		IsEnabled:          true,
+		UpdateStatus:       "up_to_date",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}).Error; err != nil {
+		t.Fatalf("create invalid v2 skill: %v", err)
+	}
+	if err := db.Create(&orm.SkillV2Revision{
+		ID:           invalidRevisionID,
+		SkillID:      "skill-invalid",
+		RevisionNo:   1,
+		TreeHash:     "tree-invalid",
+		ChangeSource: "create",
+		CreatedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("create invalid revision: %v", err)
+	}
+
+	ctx, err := BuildChatResourceContext(context.Background(), db.DB, "u1", "User 1", "session-v2")
+	if err != nil {
+		t.Fatalf("build chat resource context: %v", err)
+	}
+	if len(ctx.AvailableSkills) != 1 || ctx.AvailableSkills[0] != "research/valid-skill" {
+		t.Fatalf("unexpected available_skills: %#v", ctx.AvailableSkills)
+	}
+
+	var skillSnapshotCount int64
+	if err := db.Model(&orm.ResourceSessionSnapshot{}).Where("session_id = ? AND resource_type = ?", "session-v2", ResourceTypeSkill).Count(&skillSnapshotCount).Error; err != nil {
+		t.Fatalf("count skill snapshots: %v", err)
+	}
+	if skillSnapshotCount != 1 {
+		t.Fatalf("skill snapshot count = %d, want 1", skillSnapshotCount)
+	}
+}
+
 func TestBuildChatResourceContextFormatsUserPreferenceForChat(t *testing.T) {
 	db := newTestDB(t)
 

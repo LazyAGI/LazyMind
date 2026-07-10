@@ -28,6 +28,9 @@ export const workflowStepStageMap: Record<WorkflowStep["id"], string> = {
 };
 
 export const EVAL_REPORT_BAD_CASES_PAGE_SIZE = 10;
+export const EVAL_REPORT_BAD_CASES_FETCH_CHUNK_SIZE = 100;
+export const THREAD_STEP_SUBSCRIBE_POLL_INTERVAL_MS = 500;
+export const THREAD_STEP_SUBSCRIBE_POLL_MAX_ATTEMPTS = 60;
 
 export const legacyPlanningThinkingText = "正在理解你的请求并规划下一步。";
 

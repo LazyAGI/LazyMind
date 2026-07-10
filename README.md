@@ -114,7 +114,7 @@ export LAZYLLM_MINERU_API_KEY=your_mineru_key
 ### Step 2 — Start the stack
 
 ```bash
-make up-build-local
+make local-up
 ```
 
 After startup:
@@ -131,7 +131,7 @@ For environment setup and detailed examples, see [`docs/quick_start.md`](docs/qu
 To stop the local runtime:
 
 ```bash
-make down-local
+make local-down
 ```
 
 ---
@@ -158,15 +158,25 @@ make test-hermetic
 
 | Scenario | Command |
 |----------|---------|
-| Local runtime on host (SQLite state backend, no containers) | `make up-build-local` |
-| Stop local runtime | `make down-local` |
+| Local runtime on host (SQLite state backend, no containers) | `make local-up` |
+| Stop local runtime | `make local-down` |
+| Remove local application artifacts | `make local-clean` |
+| Stop local runtime, remove runtime data, and remove local application artifacts | `make local-reset` |
 | Container stack | `make up` |
 | Deploy MinerU OCR (on-prem) | `make up LAZYMIND_DEPLOY_MINERU=1` |
 | Deploy PaddleOCR (on-prem) | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | External Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | Enable store dashboards | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 
-`make up-build-local` runs LazyMind directly on the host through `local/runtime/bin/local-runtime-manager`. If `local/config.env` does not exist, Make copies it from `local/config.env.example` and uses it for local build/run configuration. Generated binaries, runtime state, dependencies, logs, and startup configuration are stored under `local/runtime/`. The local Python runtime is installed under `local/runtime/runtimes/python`, with service dependencies under `local/runtime/deps/`; runtime data is kept under `local/runtime/data/`. Build-time tool caches such as pnpm, uv, pip, corepack, and Go caches use their user-level defaults instead of `local/runtime/`. The whole `local/runtime/` directory can be deleted and rebuilt.
+`make local-up` runs LazyMind directly on the host through `local/build/bin/local-runtime-manager`. If `local/config.env` does not exist, Make copies it from `local/config.env.example` and uses it for local build/run configuration. Application artifacts are repo-local under `local/build`: Go binaries in `local/build/bin`, managed runtimes in `local/build/runtimes`, Python dependencies in `local/build/deps/python`, Node dependencies in `local/build/deps/node`, and desktop staging app files in `local/build/app`. Runtime data, SQLite databases, state, generated startup files, logs, caches, and local document imports use platform paths. Override the `LAZYMIND_*` path variables in `local/config.env` only when a non-standard location is required.
+
+### Platform Path Examples
+
+| Platform | Application artifacts | Runtime data and DB | Logs | Cache | Local documents |
+|----------|-----------------------|---------------------|------|-------|-----------------|
+| macOS | `<repo>/local/build` | `/Users/<User>/Library/Application Support/LazyMind` | `/Users/<User>/Library/Logs/LazyMind` | `/Users/<User>/Library/Caches/LazyMind` | `/Users/<User>/Documents/LazyMind` |
+| Windows | `<repo>\local\build` | `%LOCALAPPDATA%\LazyMind` | `%LOCALAPPDATA%\LazyMind\Logs` | `%LOCALAPPDATA%\LazyMind\Cache` | `%USERPROFILE%\Documents\LazyMind` |
+| Linux | `<repo>/local/build` | `${XDG_DATA_HOME:-/home/<user>/.local/share}/LazyMind` | `${XDG_STATE_HOME:-/home/<user>/.local/state}/LazyMind/logs` | `${XDG_CACHE_HOME:-/home/<user>/.cache}/LazyMind` | `/home/<user>/Documents/LazyMind` |
 
 ---
 

@@ -12,10 +12,11 @@ from evo.artifact_runtime.evo import catalog as C
 from evo.artifact_runtime.evo.adapter import build_evo_artifact_adapter
 from evo.artifact_runtime.evo.flow import EvoFlowSpec
 from evo.artifact_runtime.evo.flow_ops import default_evo_ops
-from evo.artifact_runtime.kernel import ArtifactKey, ArtifactRef, SQLiteArtifactStore
+from evo.artifact_runtime.kernel import ArtifactKey, ArtifactRef, ConcurrencyLimits, SQLiteArtifactStore
 from evo.operations.abtest import abtest_materializers
 from evo.operations.analysis import analysis_materializers
 from evo.operations.dataset import dataset_materializers
+from evo.operations.dataset.csv_loader import as_text, norm_text
 from evo.operations.eval import eval_materializers
 from evo.operations.repair import repair_materializers
 
@@ -27,6 +28,8 @@ CONFIG_ARTIFACTS = {
     'repair_policy': C.REPAIR_POLICY,
     'candidate_config': C.ABTEST_CANDIDATE_CONFIG,
 }
+EVO_MAX_IN_FLIGHT = 8
+EVO_PARTITION_OP_LIMIT = 4
 
 
 class RuntimePort:
@@ -48,12 +51,13 @@ class RuntimePort:
             store,
             default_evo_ops(spec.cases),
             {
-                **dataset_materializers(spec.cases),
+                **dataset_materializers(spec.cases, duplicate_questions=self._duplicate_case_questions),
                 **eval_materializers(),
                 **analysis_materializers(),
                 **repair_materializers(),
                 **abtest_materializers(),
             },
+            concurrency_limits=self._concurrency_limits(),
         )
 
     def flow(self, num_case: int) -> FlowService:
@@ -103,6 +107,24 @@ class RuntimePort:
         finally:
             store.close()
 
+    def _duplicate_case_questions(self, run_id: str, case_id: str, row: Mapping[str, Any]) -> list[str]:
+        question = norm_text(row.get('question'))
+        if not question:
+            return []
+        store = self.store()
+        try:
+            duplicates = []
+            for key, ref in store.effective_artifacts(run_id).items():
+                if key.artifact_id != C.EVAL_CASE or key.partition == case_id:
+                    continue
+                record = store.get(run_id, ref)
+                value = record.value if record is not None else None
+                if isinstance(value, Mapping) and norm_text(value.get('question')) == question:
+                    duplicates.append(as_text(value.get('question')))
+            return list(dict.fromkeys(item for item in duplicates if item))
+        finally:
+            store.close()
+
     def effective_ref(self, run_id: str, artifact_id: str) -> ArtifactRef | None:
         store = self.store()
         try:
@@ -139,6 +161,21 @@ class RuntimePort:
             store.gc()
         finally:
             store.close()
+
+    def _concurrency_limits(self) -> ConcurrencyLimits:
+        return ConcurrencyLimits(
+            max_in_flight=EVO_MAX_IN_FLIGHT,
+            per_materializer={
+                'dataset.prepare_case': EVO_PARTITION_OP_LIMIT,
+                'dataset.generate_case': EVO_PARTITION_OP_LIMIT,
+                'eval.answer': EVO_PARTITION_OP_LIMIT,
+                'eval.judge': EVO_PARTITION_OP_LIMIT,
+                'analysis.trace_summary': EVO_PARTITION_OP_LIMIT,
+                'analysis.classify_case': EVO_PARTITION_OP_LIMIT,
+                'abtest.candidate_rag_answer': EVO_PARTITION_OP_LIMIT,
+                'abtest.candidate_judge': EVO_PARTITION_OP_LIMIT,
+            },
+        )
 
 
 __all__ = ['RuntimePort']

@@ -211,6 +211,23 @@
   }
 }
 
+.data-source-auth-option-card-other {
+  border-style: dashed;
+
+  .data-source-auth-option-other-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    border: 1px dashed #cbd5e1;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 18px;
+  }
+}
+
 .data-source-auth-select-title {
   width: 100%;
   min-width: 0;

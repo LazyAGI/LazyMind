@@ -244,6 +244,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       replaceMessageList: conversation.replaceMessageList,
       createNewChat: conversation.createNewChat,
       sendMessage: conversation.sendMessage,
+      disconnectConversationStream: conversation.disconnectConversationStream,
       uploadFiles: (files: File[]) => {
         chatInputRef.current?.uploadFiles(files);
       },

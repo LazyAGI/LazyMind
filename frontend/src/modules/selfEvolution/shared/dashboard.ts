@@ -1,8 +1,8 @@
-import { type EvoProcessDashboard, type NormalizedThreadEvent, type StepStatus, type WorkflowRuntimeState } from "./types";
+import { type CheckpointWaitPrompt, type EvoProcessDashboard, type NormalizedThreadEvent, type StepStatus, type ThreadEventStage, type WorkflowRuntimeState } from "./types";
 import { stepStageMap } from "./constants";
 import { getWorkflowStepDefinitions, t } from "./i18n";
 import { getLastItem } from "./fields";
-import { dedupeNormalizedEvents, isInactiveTerminalThreadEvent } from "./threadEvents";
+import { buildTerminalStatusByStage, dedupeNormalizedEvents, isInactiveTerminalThreadEvent } from "./threadEvents";
 import { getPendingCheckpointWaitPrompt } from "./checkpoint";
 import { getCompletedProgressSnapshot } from "./progress";
 import { buildVisibleWorkflowSteps, createWorkflowStepFromRuntime } from "./runtimeState";
@@ -14,13 +14,16 @@ export function buildEvoProcessDashboard(
   runtimeState: WorkflowRuntimeState,
   includeFirstStep: boolean,
   terminalStepStatus?: StepStatus,
+  threadStepStatusByStage?: Partial<Record<ThreadEventStage, StepStatus>>,
+  checkpointOverride?: CheckpointWaitPrompt,
 ): EvoProcessDashboard {
   const sortedEvents = dedupeNormalizedEvents(events);
   const cutoverCompleted = sortedEvents.some(isCutoverCompletedEvent);
   const hasInactiveTerminalEvent = sortedEvents.some(isInactiveTerminalThreadEvent);
+  const terminalStatusByStage = buildTerminalStatusByStage(sortedEvents);
   const checkpoint = cutoverCompleted || hasInactiveTerminalEvent || terminalStepStatus
     ? undefined
-    : getPendingCheckpointWaitPrompt(sortedEvents);
+    : checkpointOverride || getPendingCheckpointWaitPrompt(sortedEvents);
   const visibleStepsById = new Map(
     buildVisibleWorkflowSteps(sortedEvents, runtimeState, includeFirstStep, terminalStepStatus)
       .map((step) => [step.id, step]),
@@ -34,18 +37,29 @@ export function buildEvoProcessDashboard(
     const stageEvents = sortedEvents.filter((event) => event.stage === stage);
     const status: StepStatus = cutoverCompleted
       ? "done"
-      : checkpoint?.completedStage === stage
-      ? "paused"
-      : includeFirstStep && !hasStageEvents && step.id === "dataset"
+      : terminalStatusByStage[stage]
+      ?? (checkpoint?.completedStage === stage
+      ? "done"
+      : threadStepStatusByStage?.[stage]
+      ?? (includeFirstStep && !hasStageEvents && step.id === "dataset"
         ? "running"
-        : step.status;
+        : step.status));
+    const resolvedStatus =
+      status === "paused" && checkpoint?.completedStage === stage ? "done" : status;
+    const resolvedProgress = cutoverCompleted
+      ? { ...getCompletedProgressSnapshot(), statusText: stage === "abtest" ? t("selfEvolutionRun.cutoverCompleted") : t("selfEvolutionRun.statusCompleted") }
+      : resolvedStatus === "failed"
+      ? { statusText: t("selfEvolutionRun.statusFailed"), percent: step.progress?.percent ?? 0 }
+      : resolvedStatus === "canceled"
+      ? { statusText: t("selfEvolutionRun.statusCanceled"), percent: step.progress?.percent ?? 0 }
+      : checkpoint?.completedStage === stage
+      ? { ...getCompletedProgressSnapshot(), statusText: t("selfEvolutionRun.statusCompleted") }
+      : step.progress || stageProgressFromEvents(sortedEvents, stage);
     return {
       step: {
         ...step,
-        status,
-        progress: cutoverCompleted
-          ? { ...getCompletedProgressSnapshot(), statusText: stage === "abtest" ? t("selfEvolutionRun.cutoverCompleted") : t("selfEvolutionRun.statusCompleted") }
-          : step.progress || stageProgressFromEvents(sortedEvents, stage),
+        status: resolvedStatus,
+        progress: resolvedProgress,
       },
       stage,
       eventCount: getStageLogicalTaskCount(stageEvents, stage),
@@ -58,7 +72,7 @@ export function buildEvoProcessDashboard(
   const latestStage = cutoverCompleted ? "abtest" : checkpoint?.completedStage || getLastItem(visibleActivityEvents.filter((event) => event.stage))?.stage;
   const activeOverview =
     (latestStage ? overview.find((item) => item.stage === latestStage) : undefined) ||
-    overview.find((item) => ["running", "paused", "failed", "canceled"].includes(item.step.status)) ||
+    overview.find((item) => ["running", "failed", "canceled"].includes(item.step.status)) ||
     overview.find((item) => item.step.status === "pending") ||
     getLastItem(overview);
   const recentActivities = activities.slice().reverse();

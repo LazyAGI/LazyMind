@@ -27,6 +27,10 @@ func NewHandler(cfg config.Config) http.Handler {
 	mux.HandleFunc("/_local/status", func(w http.ResponseWriter, r *http.Request) {
 		status(w, r, cfg)
 	})
+	mux.Handle("/_local/admin-session", &adminSessionHandler{
+		cfg:     cfg,
+		manager: auth.NewAdminSessionManager(cfg.Auth.AuthServiceURL, nil),
+	})
 	mux.Handle("/api/", &apiProxyHandler{
 		routes: cfg.Routes,
 		rbac:   auth.NewRBACAdapter(cfg.Auth.AuthServiceURL, nil),

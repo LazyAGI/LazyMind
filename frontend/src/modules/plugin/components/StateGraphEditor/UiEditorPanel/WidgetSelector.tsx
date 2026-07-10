@@ -1,16 +1,7 @@
 import { Select } from 'antd';
+import { useTranslation } from 'react-i18next';
 import type { WidgetType } from '../core/pluginModel';
 import { SLOT_COMPATIBLE_WIDGETS, SLOT_DEFAULT_WIDGET } from '../core/pluginModel';
-
-const WIDGET_LABELS: Record<WidgetType, string> = {
-  'text-single': '单行文本块',
-  'text-list': '编号文本列表',
-  'text-markdown': 'Markdown 渲染',
-  'image-single': '单张图片',
-  'image-gallery': '图片画廊',
-  'file-card': '文件卡片',
-  'json-block': 'JSON 代码块',
-};
 
 interface Props {
   slotType: string;
@@ -21,6 +12,16 @@ interface Props {
 }
 
 export default function WidgetSelector({ slotType, cardinality, value, onChange, size = 'small' }: Props) {
+  const { t } = useTranslation();
+  const WIDGET_LABELS: Record<WidgetType, string> = {
+    'text-single': t('selfEvolutionRun.widgetTextSingle'),
+    'text-list': t('selfEvolutionRun.widgetTextList'),
+    'text-markdown': t('selfEvolutionRun.widgetTextMarkdown'),
+    'image-single': t('selfEvolutionRun.widgetImageSingle'),
+    'image-gallery': t('selfEvolutionRun.widgetImageGallery'),
+    'file-card': t('selfEvolutionRun.widgetFileCard'),
+    'json-block': t('selfEvolutionRun.widgetJsonBlock'),
+  };
   const key = `${slotType}/${cardinality ?? 'single'}`;
   const compatible = SLOT_COMPATIBLE_WIDGETS[key] ?? ['text-single'];
   const defaultWidget = SLOT_DEFAULT_WIDGET[key] ?? 'text-single';

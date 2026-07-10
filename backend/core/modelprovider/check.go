@@ -58,6 +58,7 @@ type checkModelProviderRequest struct {
 	BaseURL      string `json:"base_url"`
 	APIKey       string `json:"api_key"`
 	DryRun       bool   `json:"dry_run"`
+	Model        string `json:"model,omitempty"`
 }
 
 // algoModelCheckBody matches the algorithm POST /api/model/check JSON contract (lazyllm.OnlineModule).
@@ -84,7 +85,13 @@ type CheckModelProviderData struct {
 }
 
 // doCheck calls the appropriate algorithm endpoint based on provider category and returns the result.
-func doCheck(ctx context.Context, category, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string) (*modelCheckResponse, error) {
+	// The Token Plan mode of SenseNova requires a model name for connectivity check.
+	// If no model is specified, default to a representative model that the platform supports.
+	if model == "" && strings.EqualFold(providerName, "SenseNova") &&
+		normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL) {
+		model = "sensenova-6.7-flash-lite"
+	}
 	var checkEndpoint string
 	switch category {
 	case "ocr":
@@ -96,6 +103,7 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey string
 	}
 	upstream := common.JoinURL(common.ChatServiceEndpoint(), checkEndpoint)
 	body := algoModelCheckBody{
+		Model:  model,
 		Source: providerName,
 		URL:    baseURL,
 		APIKey: apiKey,
@@ -107,14 +115,14 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey string
 	return &result, nil
 }
 
-func doProviderGroupCheck(ctx context.Context, category, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+func doProviderGroupCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string) (*modelCheckResponse, error) {
 	if category == "ocr" && isSupportedOCRCloudProvider(providerName) {
 		return doOCRCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	}
 	if usesSearchCloudServiceCheck(category, providerName) {
 		return doSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	}
-	return doCheck(ctx, category, providerName, baseURL, apiKey)
+	return doCheck(ctx, category, providerName, baseURL, apiKey, model)
 }
 
 func isSupportedOCRCloudProvider(providerName string) bool {
@@ -573,6 +581,7 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 	source := strings.TrimSpace(req.ProviderName)
 	urlStr := strings.TrimSpace(req.BaseURL)
 	apiKey := strings.TrimSpace(req.APIKey)
+	model := strings.TrimSpace(req.Model)
 	if source == "" || urlStr == "" {
 		common.ReplyErr(w, "provider_name and base_url are required", http.StatusBadRequest)
 		return
@@ -642,7 +651,7 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	checkStart := time.Now()
-	algo, err := doProviderGroupCheck(r.Context(), parent.Category, source, urlStr, apiKey)
+	algo, err := doProviderGroupCheck(r.Context(), parent.Category, source, urlStr, apiKey, model)
 	if err != nil {
 		log.Logger.Error().
 			Err(err).

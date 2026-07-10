@@ -30,6 +30,7 @@ const STEP_STATUS_COLOR: Record<string, string> = {
 };
 
 function StepsCell({ steps, onOpenGraph }: { steps: StepInfo[]; onOpenGraph?: () => void }) {
+  const { t } = useTranslation();
   if (!steps || steps.length === 0) return <span style={{ color: '#bbb' }}>—</span>;
 
   // Show up to 2 step tags inline; rest in tooltip.
@@ -70,7 +71,7 @@ function StepsCell({ steps, onOpenGraph }: { steps: StepInfo[]; onOpenGraph?: ()
         role={onOpenGraph ? 'button' : undefined}
         tabIndex={onOpenGraph ? 0 : undefined}
         onKeyDown={onOpenGraph ? (e) => e.key === 'Enter' && onOpenGraph() : undefined}
-        title={onOpenGraph ? '查看工作流图' : undefined}
+        title={onOpenGraph ? t('taskCenter.viewWorkflowGraph') : undefined}
       >
         {visibleSteps.map((s, i) => (
           <Tag
@@ -152,7 +153,7 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
       content: t('taskCenter.stopConfirmContent'),
       okText: t('taskCenter.cancel'),
       okButtonProps: { danger: true },
-      cancelText: '取消',
+      cancelText: t('common.cancel'),
       onOk: async () => {
         try {
           await cancelTask(id);
@@ -171,11 +172,11 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
       if (status === 'running') {
         message.info(t('taskCenter.removeRunningHint'));
       } else {
-        message.success('已移出任务中心');
+        message.success(t('taskCenter.taskRemoveSuccess'));
       }
       void fetchTasks(page, statusFilter, keyword, typeFilter);
     } catch {
-      message.error('移出失败');
+      message.error(t('taskCenter.taskRemoveFailed'));
     }
   };
 
@@ -187,7 +188,7 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
   const columns: ColumnsType<Task> = useMemo(
     () => [
       {
-        title: '任务描述',
+        title: t('taskCenter.taskDescriptionCol'),
         dataIndex: 'conversation_title',
         render: (v: string, record: Task) => {
           const fullTitle = v || record.title || t('taskCenter.noTitle');
@@ -241,7 +242,7 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
         ),
       },
       {
-        title: t('taskCenter.statusCol') || '状态',
+        title: t('taskCenter.statusCol'),
         dataIndex: 'status',
         width: 110,
         render: (v: string) => (
@@ -276,7 +277,7 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
               )}
               {isRemovable && (
                 <Button size='small' onClick={() => handleRemove(record.id, record.status)}>
-                  移出
+                  {t('taskCenter.taskRemoveBtn')}
                 </Button>
               )}
             </Space>
@@ -326,7 +327,7 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
             style={{ width: 120 }}
             onChange={(v) => { setTypeFilter(v); setPage(1); }}
             options={[
-              { value: '', label: t('taskCenter.taskType') + '：全部' },
+              { value: '', label: `${t('taskCenter.taskType')}：${t('taskCenter.taskTypeAll')}` },
               { value: 'plugin_run', label: t('taskCenter.typePluginRun') },
               { value: 'background_chat', label: t('taskCenter.typeBackgroundChat') },
               { value: 'scheduled', label: t('taskCenter.typeScheduled') },
@@ -344,7 +345,7 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
           pageSize: PAGE_SIZE,
           total,
           onChange: (p) => setPage(p),
-          showTotal: (n) => `共 ${n} 条`,
+          showTotal: (n) => t('taskCenter.taskTotalItems', { total: n }),
         }}
       />
     </div>

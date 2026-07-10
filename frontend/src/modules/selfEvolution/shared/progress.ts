@@ -118,7 +118,7 @@ export function getDatasetWorkflowProgressSnapshot(
   const current =
     getNumberField(eventData, ["current", "completed", "done", "processed"]) ??
     operationProgress?.current;
-  const total = getNumberField(eventData, ["total", "num_cases", "cases", "count"]);
+  const total = getNumberField(eventData, ["total", "num_cases", "case_num", "count"]);
   const explicitPercent = getNumberField(eventData, ["percent", "percentage", "progress"]);
   const operationPercent =
     typeof explicitPercent === "number"
@@ -170,10 +170,10 @@ export function getEvalPayloadPhase(
     .map(normalizePhaseText)
     .filter(Boolean);
 
-  if (candidates.some((item) => item.includes("judge"))) {
+  if (candidates.some((item) => item === "eval.judge" || item.includes("judge"))) {
     return "judge";
   }
-  if (candidates.some((item) => item.includes("rag"))) {
+  if (candidates.some((item) => item === "eval.answer" || item.includes("rag"))) {
     return "rag";
   }
   if (isRecord(eventData?.judge) || eventData?.judge === true) {
