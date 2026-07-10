@@ -203,10 +203,12 @@ export default function MainLayout() {
       setUserInfo(AgentAppsAuth.getUserInfo());
     }
   }, []);
-  const localSessionGate = useLocalSessionGate(isLoggedIn, refreshLayoutUser);
+  const localSessionGate = useLocalSessionGate(refreshLayoutUser);
 
   useEffect(() => {
-    refreshLayoutUser();
+    if (!localSessionGate.enabled) {
+      refreshLayoutUser();
+    }
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -236,7 +238,7 @@ export default function MainLayout() {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener(AUTH_USER_CHANGE_EVENT, handleUserChange);
     };
-  }, [refreshLayoutUser]);
+  }, [localSessionGate.enabled, refreshLayoutUser]);
 
   useEffect(() => {
     if (!isAdminUser && developerActive) {
@@ -629,29 +631,30 @@ export default function MainLayout() {
     }
   };
 
-  if (!isLoggedIn) {
-    if (localSessionGate.enabled) {
-      return (
-        <div className="local-session-gate">
-          <div className="local-session-panel">
-            {localSessionGate.loading ? <Spin /> : null}
-            <div className="local-session-title">LazyMind</div>
-            <div className="local-session-message">
-              {localSessionGate.error || t("layout.preparingLocalSession", "Preparing local session...")}
-            </div>
-            {localSessionGate.error ? (
-              <Button
-                type="primary"
-                loading={localSessionGate.loading}
-                onClick={localSessionGate.retry}
-              >
-                {t("common.retry", "Retry")}
-              </Button>
-            ) : null}
+  if (localSessionGate.enabled && (localSessionGate.loading || localSessionGate.error)) {
+    return (
+      <div className="local-session-gate">
+        <div className="local-session-panel">
+          {localSessionGate.loading ? <Spin /> : null}
+          <div className="local-session-title">LazyMind</div>
+          <div className="local-session-message">
+            {localSessionGate.error || t("layout.preparingLocalSession", "Preparing local session...")}
           </div>
+          {localSessionGate.error ? (
+            <Button
+              type="primary"
+              loading={localSessionGate.loading}
+              onClick={localSessionGate.retry}
+            >
+              {t("common.retry", "Retry")}
+            </Button>
+          ) : null}
         </div>
-      );
-    }
+      </div>
+    );
+  }
+
+  if (!isLoggedIn) {
     return <Navigate to="/login" replace />;
   }
 
