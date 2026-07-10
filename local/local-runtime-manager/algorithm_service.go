@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -104,12 +103,18 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 	cmd := exec.CommandContext(ctx, paths.AlgorithmPython, spec.Module...)
 	cmd.Dir = paths.RepoRoot
 	cmd.Env = append(os.Environ(), algorithmServiceEnv(cfg, paths, spec.Name)...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureChildProcess(cmd, false)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s failed: %w", service, err)
 	}
+	releaseJob, err := attachManagedProcess(paths, service, cmd.Process)
+	if err != nil {
+		_ = killAlgorithmProcess(cmd.Process)
+		return fmt.Errorf("attach %s process containment failed: %w", service, err)
+	}
+	defer releaseJob()
 	pidFile := algorithmPIDFile(paths, service)
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
 		_ = killAlgorithmProcess(cmd.Process)
@@ -136,7 +141,7 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 		}
 	}
 
-	err := <-waitErr
+	err = <-waitErr
 	_ = os.Remove(pidFile)
 	unregisterLocalProcess(paths, service, cmd.Process.Pid)
 	if ctx.Err() != nil {
@@ -167,7 +172,7 @@ func (m *AlgorithmServiceManager) Down(ctx context.Context, paths RuntimePaths, 
 		_ = os.Remove(pidFile)
 		return nil
 	}
-	if err := signalProcessGroup(pid, syscall.SIGINT); err != nil {
+	if err := interruptProcess(pid); err != nil {
 		_ = proc.Signal(os.Interrupt)
 	}
 	if !processAlive(pid) {
@@ -181,12 +186,10 @@ func (m *AlgorithmServiceManager) Down(ctx context.Context, paths RuntimePaths, 
 	for {
 		select {
 		case <-ctx.Done():
-			_ = signalProcessGroup(pid, syscall.SIGKILL)
-			_ = proc.Kill()
+			_ = forceStopManagedProcess(paths, service, pid)
 			return ctx.Err()
 		case <-deadline.C:
-			_ = signalProcessGroup(pid, syscall.SIGKILL)
-			_ = proc.Kill()
+			_ = forceStopManagedProcess(paths, service, pid)
 			_ = os.Remove(pidFile)
 			return nil
 		case <-ticker.C:
@@ -198,19 +201,11 @@ func (m *AlgorithmServiceManager) Down(ctx context.Context, paths RuntimePaths, 
 	}
 }
 
-func signalProcessGroup(pid int, signal syscall.Signal) error {
-	if pid <= 0 {
-		return nil
-	}
-	return syscall.Kill(-pid, signal)
-}
-
 func killAlgorithmProcess(proc *os.Process) error {
 	if proc == nil {
 		return nil
 	}
-	_ = signalProcessGroup(proc.Pid, syscall.SIGKILL)
-	return proc.Kill()
+	return forceKillProcessTree(proc.Pid)
 }
 
 func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, includeEvo bool) error {
@@ -254,7 +249,7 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg Runtime
 }
 
 func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
-	lazyllm := filepath.Join(paths.AlgorithmVenv, "bin", "lazyllm")
+	lazyllm := venvExecutable(paths.AlgorithmVenv, "lazyllm")
 	uv, ok := uvCommand()
 	if !ok {
 		return fmt.Errorf("uv is required to install algorithm requirements; install uv or set %s", authServiceUVEnvVar)
@@ -264,6 +259,7 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot, Env: pythonDependencyCacheEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
+		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 	}
 	if includeEvo {
 		installSteps = append(installSteps, Command{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "evo", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)})
@@ -279,7 +275,10 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 
 func algorithmReadyStamp(paths RuntimePaths, includeEvo bool) (string, error) {
 	hash := sha256.New()
-	files := []string{filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")}
+	files := []string{
+		filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt"),
+		filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt"),
+	}
 	prefix := "algorithm"
 	if includeEvo {
 		files = append(files, filepath.Join(paths.RepoRoot, "evo", "requirements.txt"))
@@ -741,9 +740,4 @@ func tcpOK(ctx context.Context, host string, port int, timeout time.Duration) bo
 	}
 	_ = conn.Close()
 	return true
-}
-
-func processAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
 }

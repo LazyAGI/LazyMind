@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -53,10 +52,16 @@ func (m *ScanControlPlaneManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 	cmd.Env = append(os.Environ(), scanControlPlaneEnv(cfg, paths)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureChildProcess(cmd, false)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start scan-control-plane failed: %w", err)
 	}
+	releaseJob, err := attachManagedProcess(paths, scanControlPlaneProcessName, cmd.Process)
+	if err != nil {
+		_ = forceKillProcessTree(cmd.Process.Pid)
+		return fmt.Errorf("attach scan-control-plane process containment failed: %w", err)
+	}
+	defer releaseJob()
 	if err := os.WriteFile(paths.ScanControlPlanePIDFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
 		_ = cmd.Process.Kill()
 		return err
@@ -74,7 +79,7 @@ func (m *ScanControlPlaneManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 		return err
 	}
 
-	err := <-waitErr
+	err = <-waitErr
 	_ = os.Remove(paths.ScanControlPlanePIDFile)
 	unregisterLocalProcess(paths, scanControlPlaneProcessName, cmd.Process.Pid)
 	if ctx.Err() != nil {
@@ -123,7 +128,7 @@ func (m *ScanControlPlaneManager) waitForDatabase(ctx context.Context, cfg Runti
 }
 
 func (m *ScanControlPlaneManager) Down(ctx context.Context, paths RuntimePaths) error {
-	return stopPIDFileProcess(ctx, paths.ScanControlPlanePIDFile)
+	return stopPIDFileProcess(ctx, paths, scanControlPlaneProcessName, paths.ScanControlPlanePIDFile)
 }
 
 type FileWatcherManager struct {
@@ -162,10 +167,16 @@ func (m *FileWatcherManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 	cmd.Env = append(os.Environ(), fileWatcherEnv(cfg, paths)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureChildProcess(cmd, false)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start file-watcher failed: %w", err)
 	}
+	releaseJob, err := attachManagedProcess(paths, fileWatcherProcessName, cmd.Process)
+	if err != nil {
+		_ = forceKillProcessTree(cmd.Process.Pid)
+		return fmt.Errorf("attach file-watcher process containment failed: %w", err)
+	}
+	defer releaseJob()
 	if err := os.WriteFile(paths.FileWatcherPIDFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
 		_ = cmd.Process.Kill()
 		return err
@@ -183,7 +194,7 @@ func (m *FileWatcherManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 		return err
 	}
 
-	err := <-waitErr
+	err = <-waitErr
 	_ = os.Remove(paths.FileWatcherPIDFile)
 	unregisterLocalProcess(paths, fileWatcherProcessName, cmd.Process.Pid)
 	if ctx.Err() != nil {
@@ -219,7 +230,7 @@ func (m *FileWatcherManager) build(ctx context.Context, cfg RuntimeConfig, paths
 }
 
 func (m *FileWatcherManager) Down(ctx context.Context, paths RuntimePaths) error {
-	return stopPIDFileProcess(ctx, paths.FileWatcherPIDFile)
+	return stopPIDFileProcess(ctx, paths, fileWatcherProcessName, paths.FileWatcherPIDFile)
 }
 
 func scanControlPlaneEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
@@ -271,7 +282,7 @@ func fileWatcherHealthAlive(port int, timeout time.Duration) bool {
 	return httpOK(context.Background(), "http://127.0.0.1:"+strconv.Itoa(port)+"/healthz", timeout)
 }
 
-func stopPIDFileProcess(ctx context.Context, pidFile string) error {
+func stopPIDFileProcess(ctx context.Context, paths RuntimePaths, service string, pidFile string) error {
 	raw, err := os.ReadFile(pidFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -289,16 +300,14 @@ func stopPIDFileProcess(ctx context.Context, pidFile string) error {
 		_ = os.Remove(pidFile)
 		return nil
 	}
-	if err := signalProcessGroup(pid, syscall.SIGINT); err != nil {
+	if err := interruptProcess(pid); err != nil {
 		_ = proc.Signal(os.Interrupt)
 	}
 	if !processAlive(pid) {
 		_ = os.Remove(pidFile)
 		return nil
 	}
-	if err := proc.Signal(os.Interrupt); err != nil {
-		_ = proc.Kill()
-	}
+	_ = proc
 
 	deadline := time.NewTimer(10 * time.Second)
 	defer deadline.Stop()
@@ -307,12 +316,10 @@ func stopPIDFileProcess(ctx context.Context, pidFile string) error {
 	for {
 		select {
 		case <-ctx.Done():
-			_ = signalProcessGroup(pid, syscall.SIGKILL)
-			_ = proc.Kill()
+			_ = forceStopManagedProcess(paths, service, pid)
 			return ctx.Err()
 		case <-deadline.C:
-			_ = signalProcessGroup(pid, syscall.SIGKILL)
-			_ = proc.Kill()
+			_ = forceStopManagedProcess(paths, service, pid)
 			_ = os.Remove(pidFile)
 			return nil
 		case <-ticker.C:

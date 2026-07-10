@@ -39,6 +39,7 @@ func TestRuntimeConfigUsesPlatformUserPathsByDefault(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	t.Setenv(localHostHomeEnvVar, home)
 	t.Setenv("HOME", home)
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 	t.Setenv(runtimeRootEnvVar, "")
 	t.Setenv(localSQLiteDirEnvVar, "")
 	t.Setenv(localMilvusLiteDBPathEnvVar, "")
@@ -201,13 +202,17 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	if paths.LocalProxyBin != filepath.Join(resources, "bin", "local-proxy") {
 		t.Fatalf("local-proxy bin = %q", paths.LocalProxyBin)
 	}
-	if paths.AlgorithmPython != filepath.Join(resources, "python", "algorithm", "bin", "python") {
+	if paths.AlgorithmPython != venvExecutable(filepath.Join(resources, "python", "algorithm"), "python") {
 		t.Fatalf("algorithm python = %q", paths.AlgorithmPython)
 	}
 	if paths.FileWatcherBaseRoot != filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher") {
 		t.Fatalf("file watcher base root = %q", paths.FileWatcherBaseRoot)
 	}
-	if !strings.HasSuffix(paths.LogsDir, filepath.Join("LazyMind")) {
+	wantLogSuffix := filepath.Join("LazyMind")
+	if runtime.GOOS == "windows" {
+		wantLogSuffix = filepath.Join("LazyMind", "Logs")
+	}
+	if !strings.HasSuffix(paths.LogsDir, wantLogSuffix) {
 		t.Fatalf("desktop logs dir should use platform log root, got %q", paths.LogsDir)
 	}
 	if strings.HasPrefix(paths.FileWatcherBaseRoot, repo+string(os.PathSeparator)) {
@@ -255,7 +260,7 @@ func TestEnsurePathUnderRootResolvesSymlinks(t *testing.T) {
 	if err := os.WriteFile(python, []byte("python"), 0o755); err != nil {
 		t.Fatalf("write python: %v", err)
 	}
-	if err := os.Symlink(realRoot, linkRoot); err != nil {
+	if err := createDirectoryLink(realRoot, linkRoot); err != nil {
 		t.Fatalf("symlink runtime root: %v", err)
 	}
 	linkPython := filepath.Join(linkRoot, "runtimes", "python", "bin", "python3")
@@ -350,7 +355,7 @@ func TestEnsureAllDirsUsesOnlyApprovedTopLevelDirs(t *testing.T) {
 		if !entry.IsDir() {
 			continue
 		}
-		if !allowed[entry.Name()] {
+		if !allowed[strings.ToLower(entry.Name())] {
 			t.Fatalf("unexpected top-level runtime dir %q", entry.Name())
 		}
 	}
@@ -492,6 +497,15 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 		}
 		if proc.Namespace != "host" {
 			t.Fatalf("process %s namespace = %q, want host", name, proc.Namespace)
+		}
+		if len(proc.Environment) == 0 {
+			t.Fatalf("process %s has no explicit environment", name)
+		}
+		if strings.HasPrefix(proc.Command, "env ") {
+			t.Fatalf("process %s uses POSIX env command: %q", name, proc.Command)
+		}
+		if runtime.GOOS == "windows" && strings.Contains(proc.Command, "'") {
+			t.Fatalf("process %s command is not cmd-compatible: %q", name, proc.Command)
 		}
 	}
 }
@@ -876,7 +890,7 @@ func TestPrepareFrontendNodeModulesLinksSourceTreeToRuntimeRoot(t *testing.T) {
 	if err := prepareFrontendNodeModules(paths, frontendDir); err != nil {
 		t.Fatalf("prepare frontend node_modules: %v", err)
 	}
-	target, ok := symlinkTarget(nodeModules)
+	target, ok := directoryLinkTarget(nodeModules)
 	if !ok {
 		t.Fatalf("node_modules should be a symlink into runtime root")
 	}
@@ -906,7 +920,7 @@ func TestPrepareFrontendNodeModulesKeepsRuntimeRootSymlink(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(runtimeNodeModules, ".modules.yaml"), []byte(frontendModulesYAML(t, paths, runtimeNodeModules)), 0o644); err != nil {
 		t.Fatalf("write pnpm metadata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(runtimeNodeModules, ".bin", "vite"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(frontendToolPath(runtimeNodeModules, "vite"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write vite bin: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(runtimeNodeModules, "vite", "bin", "vite.js"), []byte("console.log('vite')\n"), 0o644); err != nil {
@@ -915,13 +929,13 @@ func TestPrepareFrontendNodeModulesKeepsRuntimeRootSymlink(t *testing.T) {
 	if err := os.MkdirAll(frontendDir, 0o755); err != nil {
 		t.Fatalf("mkdir frontend dir: %v", err)
 	}
-	if err := os.Symlink(runtimeNodeModules, nodeModules); err != nil {
+	if err := createDirectoryLink(runtimeNodeModules, nodeModules); err != nil {
 		t.Fatalf("link node_modules: %v", err)
 	}
 	if err := prepareFrontendNodeModules(paths, frontendDir); err != nil {
 		t.Fatalf("prepare frontend node_modules: %v", err)
 	}
-	target, ok := symlinkTarget(nodeModules)
+	target, ok := directoryLinkTarget(nodeModules)
 	if !ok || target != runtimeNodeModules {
 		t.Fatalf("node_modules symlink = %q ok=%v, want %q", target, ok, runtimeNodeModules)
 	}

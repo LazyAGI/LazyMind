@@ -126,6 +126,7 @@ rm -rf "${RUNTIME_ROOT}/deps/python/algorithm"
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict 'setuptools<81' lazyllm
 "${RUNTIME_ROOT}/deps/python/algorithm/bin/lazyllm" install rag
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
+"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements-local.txt"
 make_internal_symlinks_relative "${RUNTIME_ROOT}"
 echo "==> Pruning Python runtime bytecode and test packages"
 prune_python_runtime "${RUNTIME_ROOT}/runtimes/python"

@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -40,6 +40,7 @@ type processComposeProcess struct {
 	Shutdown    processComposeShutdown `yaml:"shutdown"`
 	LogLocation string                 `yaml:"log_location"`
 	Namespace   string                 `yaml:"namespace"`
+	Environment []string               `yaml:"environment,omitempty"`
 }
 
 type processComposeShutdown struct {
@@ -157,6 +158,10 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 			Namespace:   "host",
 		}
 	}
+	for name, process := range pcCfg.Processes {
+		process.Environment = append([]string(nil), commandEnv...)
+		pcCfg.Processes[name] = process
+	}
 	_ = tokenPath
 	_ = apiPort
 	out, err := yaml.Marshal(pcCfg)
@@ -168,16 +173,8 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 }
 
 func commandWithEnv(env []string, command string) string {
-	if len(env) == 0 {
-		return command
-	}
-	parts := make([]string, 0, len(env)+2)
-	parts = append(parts, "env")
-	for _, item := range env {
-		parts = append(parts, quoteShellArg(item))
-	}
-	parts = append(parts, command)
-	return strings.Join(parts, " ")
+	_ = env
+	return command
 }
 
 func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
@@ -207,7 +204,7 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		localChatPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.ChatPort),
 		localEvoPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.EvoPort),
 		localMilvusPortEnvVar+"="+strconv.Itoa(cfg.ModeProfile.VectorStore.Port),
-		localMilvusLiteDBPathEnvVar+"="+cfg.ModeProfile.VectorStore.DBPath,
+		localMilvusLiteDataDirEnvVar+"="+cfg.ModeProfile.VectorStore.DBPath,
 		localOpenSearchPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.OpenSearchPort),
 		routerPortPoolStartEnvVar+"="+strconv.Itoa(routerPoolStart),
 		routerPortPoolEndEnvVar+"="+strconv.Itoa(routerPoolEnd),
@@ -238,7 +235,7 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 		cmd.Env = append(os.Environ(), processComposeRuntimeEnv(paths)...)
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		configureChildProcess(cmd, true)
 		if err := cmd.Start(); err != nil {
 			_ = logFile.Close()
 			return fmt.Errorf("process-compose up failed: %w", err)
@@ -347,6 +344,16 @@ func processComposeGOBIN(paths RuntimePaths) (string, error) {
 }
 
 func quoteShellArg(value string) string {
+	if runtime.GOOS == "windows" {
+		if value == "" {
+			return `""`
+		}
+		escaped := strings.ReplaceAll(value, "%", "%%")
+		if strings.IndexAny(escaped, " \t&|<>^()!\"") == -1 {
+			return escaped
+		}
+		return `"` + strings.ReplaceAll(escaped, `"`, `\"`) + `"`
+	}
 	if value == "" {
 		return "''"
 	}

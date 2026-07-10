@@ -241,7 +241,7 @@ class ProcessManager:
         # Prepend the grandparent of code_path (parent of the lazymind package) to PYTHONPATH
         code_parent = str(os.path.dirname(os.path.dirname(code_path.rstrip('/'))))
         existing_pp = env.get('PYTHONPATH', '')
-        env['PYTHONPATH'] = f'{code_parent}:{existing_pp}' if existing_pp else code_parent
+        env['PYTHONPATH'] = os.pathsep.join((code_parent, existing_pp)) if existing_pp else code_parent
         # Child processes are plain chat servers behind the router proxy. Force router mode
         # off so they mount chat_routes (/api/chat/stream); otherwise the proxy would forward
         # to a child that has no chat route and get a 404. They only serve proxied request

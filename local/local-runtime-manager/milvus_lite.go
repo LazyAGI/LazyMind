@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -27,7 +25,7 @@ func (m *MilvusLiteManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(cfg.ModeProfile.VectorStore.DBPath), 0o755); err != nil {
+	if err := os.MkdirAll(cfg.ModeProfile.VectorStore.DBPath, 0o755); err != nil {
 		return err
 	}
 	algorithm := NewAlgorithmServiceManager(m.runner)
@@ -35,25 +33,32 @@ func (m *MilvusLiteManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 		return err
 	}
 
-	address := "127.0.0.1:" + strconv.Itoa(cfg.ModeProfile.VectorStore.Port)
-	cmd := exec.CommandContext(ctx, paths.AlgorithmPython,
-		"-m", "lazymind.local_milvus_lite",
-		"--db-file", cfg.ModeProfile.VectorStore.DBPath,
-		"--address", address,
+	milvusLite := venvExecutable(paths.AlgorithmVenv, "milvus-lite")
+	cmd := exec.CommandContext(ctx, milvusLite,
+		"server",
+		"--data-dir", cfg.ModeProfile.VectorStore.DBPath,
+		"--host", "127.0.0.1",
+		"--port", strconv.Itoa(cfg.ModeProfile.VectorStore.Port),
 	)
 	cmd.Dir = paths.RepoRoot
 	cmd.Env = append(os.Environ(), algorithmServiceEnv(cfg, paths, milvusLiteProcessName)...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureChildProcess(cmd, false)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s failed: %w", milvusLiteProcessName, err)
 	}
+	releaseJob, err := attachManagedProcess(paths, milvusLiteProcessName, cmd.Process)
+	if err != nil {
+		_ = killAlgorithmProcess(cmd.Process)
+		return fmt.Errorf("attach %s process containment failed: %w", milvusLiteProcessName, err)
+	}
+	defer releaseJob()
 	if err := os.WriteFile(paths.MilvusLitePIDFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
 		_ = killAlgorithmProcess(cmd.Process)
 		return err
 	}
-	registerLocalProcess(paths, milvusLiteProcessName, cmd.Process.Pid, []int{cfg.ModeProfile.VectorStore.Port}, append([]string{paths.AlgorithmPython}, cmd.Args...))
+	registerLocalProcess(paths, milvusLiteProcessName, cmd.Process.Pid, []int{cfg.ModeProfile.VectorStore.Port}, append([]string{milvusLite}, cmd.Args...))
 
 	waitErr := make(chan error, 1)
 	go func() {
@@ -66,7 +71,7 @@ func (m *MilvusLiteManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 		return err
 	}
 
-	err := <-waitErr
+	err = <-waitErr
 	_ = os.Remove(paths.MilvusLitePIDFile)
 	unregisterLocalProcess(paths, milvusLiteProcessName, cmd.Process.Pid)
 	if ctx.Err() != nil {
@@ -91,7 +96,7 @@ func (m *MilvusLiteManager) Down(ctx context.Context, paths RuntimePaths) error 
 		_ = os.Remove(paths.MilvusLitePIDFile)
 		return nil
 	}
-	if err := signalProcessGroup(pid, syscall.SIGINT); err != nil {
+	if err := interruptProcess(pid); err != nil {
 		_ = proc.Signal(os.Interrupt)
 	}
 	deadline := time.NewTimer(10 * time.Second)
@@ -101,12 +106,10 @@ func (m *MilvusLiteManager) Down(ctx context.Context, paths RuntimePaths) error 
 	for {
 		select {
 		case <-ctx.Done():
-			_ = signalProcessGroup(pid, syscall.SIGKILL)
-			_ = proc.Kill()
+			_ = forceStopManagedProcess(paths, milvusLiteProcessName, pid)
 			return ctx.Err()
 		case <-deadline.C:
-			_ = signalProcessGroup(pid, syscall.SIGKILL)
-			_ = proc.Kill()
+			_ = forceStopManagedProcess(paths, milvusLiteProcessName, pid)
 			_ = os.Remove(paths.MilvusLitePIDFile)
 			return nil
 		case <-ticker.C:

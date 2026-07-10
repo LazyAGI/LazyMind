@@ -4,6 +4,7 @@ import urllib.error
 import urllib.request
 
 from lazymind.config import config as _cfg
+from lazymind.windows_relay import enable_windows_relay_payload_files
 from lazymind.parsing.service.build_document import (
     ALGO_ID,
     build_document,
@@ -45,6 +46,7 @@ def _wait_for_algorithm_registration(processor_url: str, algo_id: str, timeout: 
 
 
 def main() -> None:
+    enable_windows_relay_payload_files()
     processor_url = _cfg['document_processor_url'].rstrip('/')
     retry_interval = float(_cfg['startup_retry_interval'])
     startup_timeout = float(_cfg['startup_timeout'])

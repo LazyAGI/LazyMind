@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"syscall"
 	"time"
 )
 
@@ -40,9 +39,5 @@ func runRuntimeGuard(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths,
 }
 
 func ownerProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
+	return processAlive(pid)
 }

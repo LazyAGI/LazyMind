@@ -21,6 +21,10 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 	if err := os.WriteFile(requirements, []byte("pymilvus==2.4.14\n"), 0o644); err != nil {
 		t.Fatalf("write requirements: %v", err)
 	}
+	localRequirements := filepath.Join(repo, "algorithm", "requirements-local.txt")
+	if err := os.WriteFile(localRequirements, []byte("pymilvus==3.0.0\nmilvus-lite==3.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write local requirements: %v", err)
+	}
 
 	runner := &fakeRunner{t: t}
 	manager := NewAlgorithmServiceManager(runner)
@@ -61,11 +65,15 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, filepath.Join(paths.AlgorithmVenv, "bin", "lazyllm"), "install", "rag")
+			assertCommand(t, cmd, venvExecutable(paths.AlgorithmVenv, "lazyllm"), "install", "rag")
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
 			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "-r", requirements)
+			return CommandResult{}, nil
+		},
+		func(cmd Command) (CommandResult, error) {
+			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "-r", localRequirements)
 			return CommandResult{}, nil
 		},
 	)
@@ -73,7 +81,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 	if err := manager.preparePython(context.Background(), cfg, paths, false); err != nil {
 		t.Fatalf("prepare algorithm python: %v", err)
 	}
-	runner.assertCommandCount(7)
+	runner.assertCommandCount(8)
 }
 
 func TestEnsureLazyLLMSubmoduleInitializesMissingSubmodule(t *testing.T) {

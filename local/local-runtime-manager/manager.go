@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -704,7 +703,7 @@ func (m *RuntimeManager) stopProcessComposeSupervisor(ctx context.Context, paths
 		_ = os.Remove(paths.ProcessComposePIDFile)
 		return nil
 	}
-	if err := signalProcessGroup(pid, syscall.SIGINT); err != nil {
+	if err := interruptProcess(pid); err != nil {
 		_ = proc.Signal(os.Interrupt)
 	}
 	deadline := time.NewTimer(3 * time.Second)
@@ -714,12 +713,10 @@ func (m *RuntimeManager) stopProcessComposeSupervisor(ctx context.Context, paths
 	for {
 		select {
 		case <-ctx.Done():
-			_ = signalProcessGroup(pid, syscall.SIGKILL)
-			_ = proc.Kill()
+			_ = forceKillProcessTree(pid)
 			return ctx.Err()
 		case <-deadline.C:
-			_ = signalProcessGroup(pid, syscall.SIGKILL)
-			_ = proc.Kill()
+			_ = forceKillProcessTree(pid)
 			_ = os.Remove(paths.ProcessComposePIDFile)
 			return nil
 		case <-ticker.C:
@@ -1017,14 +1014,7 @@ func upLockProcessAlive(lockFile string) (bool, error) {
 	if err != nil || pid <= 0 {
 		return false, nil
 	}
-	err = syscall.Kill(pid, 0)
-	if err == nil || err == syscall.EPERM {
-		return true, nil
-	}
-	if err == syscall.ESRCH {
-		return false, nil
-	}
-	return true, err
+	return processAlive(pid), nil
 }
 
 func envDuration(name string, fallback time.Duration) time.Duration {

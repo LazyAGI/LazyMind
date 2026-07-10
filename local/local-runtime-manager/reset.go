@@ -97,7 +97,7 @@ func localKBResetPaths(paths RuntimePaths) []string {
 		paths.ScanControlPlaneTempDir,
 		filepath.Join(paths.FileWatcherBaseRoot, "staging"),
 		filepath.Join(paths.FileWatcherBaseRoot, "snapshots"),
-		filepath.Dir(paths.MilvusLiteDBPath),
+		paths.MilvusLiteDBPath,
 	}
 }
 

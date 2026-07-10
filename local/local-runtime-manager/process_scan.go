@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"sort"
-	"syscall"
 	"time"
 )
 
@@ -42,6 +41,11 @@ func dedupeProcessRecords(records []LocalProcessRecord, paths RuntimePaths) []Lo
 		if record.PID <= 0 || !processAlive(record.PID) || record.PID == os.Getpid() {
 			continue
 		}
+		if record.StartID != 0 {
+			if current := processStartIdentity(record.PID); current != 0 && current != record.StartID {
+				continue
+			}
+		}
 		if !localProcessBelongsToRuntime(record, paths) {
 			continue
 		}
@@ -66,7 +70,7 @@ func stopLocalProcessRecords(ctx context.Context, records []LocalProcessRecord) 
 		return nil
 	}
 	for _, record := range records {
-		_ = signalLocalProcess(record, syscall.SIGTERM)
+		_ = interruptProcess(record.PID)
 	}
 	deadline := time.NewTimer(10 * time.Second)
 	defer deadline.Stop()
@@ -86,26 +90,17 @@ func stopLocalProcessRecords(ctx context.Context, records []LocalProcessRecord) 
 		select {
 		case <-ctx.Done():
 			for _, record := range records {
-				_ = signalLocalProcess(record, syscall.SIGKILL)
+				_ = forceKillProcessTree(record.PID)
 			}
 			return ctx.Err()
 		case <-deadline.C:
 			for _, record := range records {
-				_ = signalLocalProcess(record, syscall.SIGKILL)
+				_ = forceKillProcessTree(record.PID)
 			}
 			return nil
 		case <-ticker.C:
 		}
 	}
-}
-
-func signalLocalProcess(record LocalProcessRecord, signal syscall.Signal) error {
-	if record.PGID > 0 && record.PGID == record.PID && record.PGID != os.Getpid() {
-		if err := syscall.Kill(-record.PGID, signal); err == nil {
-			return nil
-		}
-	}
-	return syscall.Kill(record.PID, signal)
 }
 
 func cleanupLocalProcessRecords(paths RuntimePaths, records []LocalProcessRecord) {
