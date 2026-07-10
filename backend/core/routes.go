@@ -17,7 +17,9 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/plugin"
 	"lazymind/core/preference"
+	"lazymind/core/remotefs"
 	"lazymind/core/resourcechange"
+	"lazymind/core/resourcefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
 	skillv2handler "lazymind/core/skillv2/handler"
@@ -221,8 +223,11 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Plugin Drafts (user-created plugin authoring) -----
 	handleAPI(r, "GET", "/plugin-drafts", []string{"qa.read"}, plugin.ListPluginDrafts)
 	handleAPI(r, "POST", "/plugin-drafts", []string{"qa.write"}, plugin.CreatePluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts:polish-info", []string{"qa.write"}, plugin.PolishPluginDraftInfo)
 	handleAPI(r, "GET", "/plugin-drafts/{draft_id}", []string{"qa.read"}, plugin.GetPluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:save", []string{"qa.write"}, plugin.SavePluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-generate", []string{"qa.write"}, plugin.AIGeneratePluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-repair", []string{"qa.write"}, plugin.AIRepairPluginDraft)
 	handleAPI(r, "DELETE", "/plugin-drafts/{draft_id}", []string{"qa.write"}, plugin.DeletePluginDraft)
 
 	// ----- Task Center -----
@@ -278,6 +283,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{conversation_id}/dismissed-plugin-sessions", []string{"qa.read"}, plugin.ListDismissedSessionsHandler)
 	handleAPI(r, "GET", "/evolution/tasks", []string{"qa.read"}, resourceupdate.ListTasks)
 	handleAPI(r, "GET", "/evolution/tasks/{task_id}", []string{"qa.read"}, resourceupdate.GetTask)
+	handleAPI(r, "GET", "/skill-review:summary", []string{"qa.read"}, resourceupdate.GetSkillReviewSummary)
+	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)
+	handleAPI(r, "GET", "/skill-review/tasks", []string{"qa.read"}, resourceupdate.ListSkillReviewTasks)
 	handleAPI(r, "GET", "/skill-review-results", []string{"qa.read"}, resourceupdate.ListSkillReviewResults)
 	handleAPI(r, "GET", "/skill-review-results/{review_result_id}", []string{"qa.read"}, resourceupdate.GetSkillReviewResult)
 	handleAPI(r, "POST", "/skill-review-results/{review_result_id}:accept", []string{"qa.read"}, resourceupdate.AcceptSkillReviewResult)
@@ -292,6 +300,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/personalization-setting", []string{"qa.read"}, evolution.GetPersonalizationSetting)
 	handleAPI(r, "PUT", "/personalization-setting", []string{"qa.write"}, evolution.SetPersonalizationSetting)
 	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skillv2handler.List)
+	handleAPI(r, "GET", "/skills:trash", []string{"qa.read"}, skillv2handler.ListTrash)
+	handleAPI(r, "DELETE", "/skills:trash", []string{"qa.write"}, skillv2handler.EmptyTrash)
+	handleAPI(r, "POST", "/skill_organize", []string{"qa.write"}, skillv2handler.SubmitSkillOrganize)
 	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skillv2handler.ListTags)
 	handleAPI(r, "GET", "/skills/categories", []string{"qa.read"}, skillv2handler.ListCategories)
 	handleAPI(r, "POST", "/skills", []string{"qa.write"}, skillv2handler.Create)
@@ -330,6 +341,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/skills/{skill_id}/revisions/{revision_id}", []string{"qa.write"}, skillv2handler.DeleteRevision)
 	handleAPI(r, "GET", "/skills/{skill_id}", []string{"qa.read"}, skillv2handler.Get)
 	handleAPI(r, "PATCH", "/skills/{skill_id}", []string{"qa.write"}, skillv2handler.Patch)
+	handleAPI(r, "POST", "/skills/{skill_id}:trash", []string{"qa.write"}, skillv2handler.Trash)
+	handleAPI(r, "POST", "/skills/{skill_id}:restore", []string{"qa.write"}, skillv2handler.Restore)
+	handleAPI(r, "DELETE", "/skills/{skill_id}:purge", []string{"qa.write"}, skillv2handler.Purge)
 	handleAPI(r, "DELETE", "/skills/{skill_id}", []string{"qa.write"}, skillv2handler.Delete)
 	handleAPI(r, "POST", "/skills/{skill_id}:generate", []string{"qa.write"}, skillv2handler.Generate)
 	handleAPI(r, "POST", "/skills/{skill_id}:confirm", []string{"qa.write"}, skillv2handler.Confirm)
@@ -357,6 +371,17 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/user-preference:generate", []string{"qa.write"}, preference.Generate)
 	handleAPI(r, "POST", "/user-preference:confirm", []string{"qa.write"}, preference.Confirm)
 	handleAPI(r, "POST", "/user-preference:discard", []string{"qa.write"}, preference.Discard)
+	handleAPI(r, "GET", "/personal-resource/{resource_type}:file", []string{"qa.read"}, resourcefs.GetFile)
+	handleAPI(r, "PUT", "/personal-resource/{resource_type}:file", []string{"qa.write"}, resourcefs.WriteDraft)
+	handleAPI(r, "PUT", "/personal-resource/{resource_type}:draft", []string{"qa.write"}, resourcefs.WriteDraft)
+	handleAPI(r, "GET", "/personal-resource/{resource_type}:draft-preview", []string{"qa.read"}, resourcefs.DraftPreview)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}/draft-review/{review_id}/actions", []string{"qa.write"}, resourcefs.ReviewAction)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}/draft-review/{review_id}:undo", []string{"qa.write"}, resourcefs.ReviewUndo)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}:commit", []string{"qa.write"}, resourcefs.CommitDraft)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}:discard", []string{"qa.write"}, resourcefs.DiscardDraft)
+	handleAPI(r, "GET", "/personal-resource/{resource_type}/revisions", []string{"qa.read"}, resourcefs.ListRevisions)
+	handleAPI(r, "GET", "/personal-resource/{resource_type}/revisions/{revision_id}", []string{"qa.read"}, resourcefs.GetRevision)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}:rollback", []string{"qa.write"}, resourcefs.Rollback)
 
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
 	handleAPI(r, "GET", "/conversations/{name}:history", []string{"qa.read"}, chat.GetConversationHistory)
@@ -430,16 +455,16 @@ func registerAllRoutes(r *mux.Router) {
 
 	// Algorithm service callbacks: no request-level RBAC, protected by internal service token at infra level.
 	handleAPI(r, "POST", "/skill/create", nil, skillv2handler.InternalCreate)
-	handleAPI(r, "GET", "/remote-fs/list", []string{"qa.read"}, skillv2handler.RemoteFSList)
-	handleAPI(r, "GET", "/remote-fs/info", []string{"qa.read"}, skillv2handler.RemoteFSInfo)
-	handleAPI(r, "GET", "/remote-fs/exists", []string{"qa.read"}, skillv2handler.RemoteFSExists)
-	handleAPI(r, "GET", "/remote-fs/content", []string{"qa.read"}, skillv2handler.RemoteFSContent)
-	handleAPI(r, "PUT", "/remote-fs/content", []string{"qa.write"}, skillv2handler.RemoteFSContent)
-	handleAPI(r, "POST", "/remote-fs/dir", []string{"qa.write"}, skillv2handler.RemoteFSDir)
-	handleAPI(r, "DELETE", "/remote-fs/path", []string{"qa.write"}, skillv2handler.RemoteFSDelete)
-	handleAPI(r, "POST", "/remote-fs/copy", []string{"qa.write"}, skillv2handler.RemoteFSCopy)
-	handleAPI(r, "POST", "/remote-fs/move", []string{"qa.write"}, skillv2handler.RemoteFSMove)
-	handleAPI(r, "POST", "/remote-fs/trash", []string{"qa.write"}, skillv2handler.RemoteFSTrash)
+	handleAPI(r, "GET", "/remote-fs/list", nil, remotefs.List)
+	handleAPI(r, "GET", "/remote-fs/info", nil, remotefs.Info)
+	handleAPI(r, "GET", "/remote-fs/exists", nil, remotefs.Exists)
+	handleAPI(r, "GET", "/remote-fs/content", nil, remotefs.Content)
+	handleAPI(r, "PUT", "/remote-fs/content", nil, remotefs.Content)
+	handleAPI(r, "POST", "/remote-fs/dir", nil, remotefs.Dir)
+	handleAPI(r, "DELETE", "/remote-fs/path", nil, remotefs.Delete)
+	handleAPI(r, "POST", "/remote-fs/copy", nil, remotefs.Copy)
+	handleAPI(r, "POST", "/remote-fs/move", nil, remotefs.Move)
+	handleAPI(r, "POST", "/remote-fs/trash", nil, remotefs.Trash)
 
 	// ----- ACL（Knowledge basetextPermission） -----
 	handleAPI(r, "GET", "/kb/list", []string{"document.read"}, acl.ListKB)

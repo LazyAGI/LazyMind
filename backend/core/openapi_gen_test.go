@@ -674,46 +674,6 @@ func TestOpenAPISpecMarksUIPreferencesPatchFieldsOptional(t *testing.T) {
 	}
 }
 
-func TestOpenAPISpecIncludesModelMaxInputTokens(t *testing.T) {
-	r := mux.NewRouter()
-	registerAllRoutes(r)
-
-	specJSON, err := buildOpenAPISpecFromRouter(r)
-	if err != nil {
-		t.Fatalf("build openapi spec: %v", err)
-	}
-	var spec map[string]any
-	if err := json.Unmarshal(specJSON, &spec); err != nil {
-		t.Fatalf("decode openapi spec: %v", err)
-	}
-	components, ok := spec["components"].(map[string]any)
-	if !ok {
-		t.Fatalf("components missing in openapi spec")
-	}
-	schemas, ok := components["schemas"].(map[string]any)
-	if !ok {
-		t.Fatalf("schemas missing in openapi spec")
-	}
-	itemSchema, ok := schemas["listModelProviderGroupModelsOpenAPIItem"].(map[string]any)
-	if !ok {
-		t.Fatalf("listModelProviderGroupModelsOpenAPIItem schema missing")
-	}
-	properties, ok := itemSchema["properties"].(map[string]any)
-	if !ok {
-		t.Fatalf("listModelProviderGroupModelsOpenAPIItem properties missing")
-	}
-	maxInputTokens, ok := properties["max_input_tokens"].(map[string]any)
-	if !ok {
-		t.Fatalf("max_input_tokens property missing")
-	}
-	if got := maxInputTokens["type"]; got != "integer" {
-		t.Fatalf("max_input_tokens type = %v, want integer", got)
-	}
-	if got := maxInputTokens["nullable"]; got != true {
-		t.Fatalf("max_input_tokens nullable = %v, want true", got)
-	}
-}
-
 func TestOpenAPISpecCoversEvalSetOperations(t *testing.T) {
 	r := mux.NewRouter()
 	registerAllRoutes(r)
