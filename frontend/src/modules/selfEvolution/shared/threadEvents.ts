@@ -2,6 +2,7 @@ import { type ChatStreamDeltaKind, type NormalizedThreadEvent, type StepStatus, 
 import { failedThreadEventTypes, inactiveTerminalThreadStatuses, terminalThreadEventTypes } from "./constants";
 import { getEventActionLabels, getStageLabels, t } from "./i18n";
 import { enrichProjectionEventPayload, getProjectionEventType, mapProjectionAction } from "./projectionEvents";
+import { isRepairTraceRawEventType } from "./repairTrace";
 import { getEventCaseId, getEventPayloadData, getNumberField, getOperationRunId, getStringField, getThreadEventContentFromPayload, getThreadEventPayloadEnvelope, getThreadEventTypeFromPayload, isRecord } from "./fields";
 import { buildCheckpointWaitPrompt, buildFailureRetryPrompt } from "./checkpoint";
 import { buildAbtestEventDisplayText, buildAnalysisEventDisplayText, buildApplyEventDisplayText, buildDatasetEventDisplayText, buildEvalEventDisplayText, compactPayloadForDisplay } from "./eventDisplay";
@@ -48,7 +49,33 @@ export function resolveCompletedStageFromDonePayload(
 
 export function isCheckpointGateFlowStatus(status?: string) {
   const normalized = status?.trim().toLowerCase();
-  return normalized === "paused" || normalized === "waiting_checkpoint";
+  return (
+    normalized === "paused" ||
+    normalized === "waiting_checkpoint" ||
+    normalized === "completed"
+  );
+}
+
+export function isEventStreamTerminalFlowStatus(status?: string) {
+  const normalized = status?.trim().toLowerCase();
+  return (
+    normalized === "completed" ||
+    normalized === "paused" ||
+    normalized === "failed"
+  );
+}
+
+export function isEventStreamTerminalFlowPayload(
+  payload: Record<string, unknown> | undefined,
+): boolean {
+  if (!payload) {
+    return false;
+  }
+  const eventType = getStringField(payload, ["event_type", "eventType", "type"]);
+  if (eventType !== "done" && (!eventType || !isTerminalThreadEvent(eventType))) {
+    return false;
+  }
+  return isEventStreamTerminalFlowStatus(getFlowStatusFromPayload(payload));
 }
 
 export function getFlowStatusFromPayload(
@@ -72,7 +99,11 @@ export function isPausedFlowEvent(
 export function shouldDisconnectThreadEventStream(
   event: Pick<NormalizedThreadEvent, "type" | "payload">,
 ): boolean {
-  return isTerminalThreadEvent(event.type) || isPausedFlowEvent(event);
+  return (
+    isTerminalThreadEvent(event.type) ||
+    isEventStreamTerminalFlowPayload(event.payload) ||
+    isPausedFlowPayload(event.payload)
+  );
 }
 
 export function resolveTerminalStepStatusFromFlowStatus(
@@ -99,7 +130,11 @@ export function buildTerminalStatusByStage(
 ): Partial<Record<ThreadEventStage, StepStatus>> {
   const result: Partial<Record<ThreadEventStage, StepStatus>> = {};
   for (const event of events) {
-    if (!isTerminalThreadEvent(event.type) && !isPausedFlowPayload(event.payload)) {
+    if (
+      !isTerminalThreadEvent(event.type) &&
+      !isEventStreamTerminalFlowPayload(event.payload) &&
+      !isPausedFlowPayload(event.payload)
+    ) {
       continue;
     }
     const stage = event.stage;
@@ -233,7 +268,7 @@ export function isDoneSSEFrame(frame: ThreadEventFrame): boolean {
     return false;
   }
 
-  if (isPausedFlowPayload(payload)) {
+  if (isEventStreamTerminalFlowPayload(payload)) {
     return true;
   }
 
@@ -262,13 +297,26 @@ export function isInactiveTerminalThreadEvent(event: NormalizedThreadEvent) {
 
 export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadEvent {
   let payload = parseThreadEventPayload(frame.data);
-  const projectionEventType = payload ? getProjectionEventType(payload, frame.eventName) : undefined;
+  const rawPayloadType = payload ? getThreadEventTypeFromPayload(payload) : undefined;
+  const rawEventType =
+    rawPayloadType || (frame.eventName !== "message" ? frame.eventName : "");
+  const rawRepairStage = toThreadEventStage(payload?.stage);
+  const isRepairInternalTrace =
+    rawRepairStage === "repair" &&
+    rawEventType !== "done" &&
+    isRepairTraceRawEventType(rawEventType);
+  const projectionEventType =
+    payload && !isRepairInternalTrace
+      ? getProjectionEventType(payload, frame.eventName)
+      : undefined;
   if (payload && projectionEventType) {
     payload = enrichProjectionEventPayload(payload, projectionEventType);
   }
   const eventEnvelope = getThreadEventPayloadEnvelope(payload);
   const payloadType = getThreadEventTypeFromPayload(payload);
   const eventType = payloadType || (frame.eventName !== "message" ? frame.eventName : "");
+  const isRepairTraceEvent =
+    eventType === "done" ? false : isRepairTraceRawEventType(eventType);
   const [typeStage, ...actionParts] = eventType.split(".");
   const isCheckpointEvent = eventType.startsWith("checkpoint.");
   const isAutoOperatorEvent = eventType.startsWith("autooperator.");
@@ -279,9 +327,11 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
     toThreadEventStage(eventEnvelope?.stage);
   const stage = isCheckpointEvent
     ? undefined
-    : stageFromPayload ||
-      (projectionEventType ? toThreadEventStage(projectionEventType.split(".")[0]) : undefined) ||
-      (isAutoOperatorEvent ? undefined : toThreadEventStage(typeStage));
+    : isRepairInternalTrace
+      ? "repair"
+      : stageFromPayload ||
+        (projectionEventType ? toThreadEventStage(projectionEventType.split(".")[0]) : undefined) ||
+        (isAutoOperatorEvent ? undefined : toThreadEventStage(typeStage));
   const action = projectionEventType
     ? getStringField(payload, ["action"])
     : isCheckpointEvent
@@ -300,9 +350,11 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
     ? projectionEventType
     : isCheckpointEvent || isAutoOperatorEvent
       ? eventType
-      : stage && action
-        ? `${stage}.${action}`
-        : eventType || "message";
+      : isRepairTraceEvent
+        ? eventType
+        : stage && action
+          ? `${stage}.${action}`
+          : eventType || "message";
   const isMessageAssistant = isMessageStreamAssistantEvent(type, frame.eventName, payload);
   const role = type === "message.user" ? "user" : isMessageAssistant ? "assistant" : undefined;
   const content = getThreadEventContentFromPayload(payload) || (!payload ? frame.data.trim() : undefined);
