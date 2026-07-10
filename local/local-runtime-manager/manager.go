@@ -707,7 +707,7 @@ func (m *RuntimeManager) stopProcessComposeSupervisor(ctx context.Context, paths
 	if err := signalProcessGroup(pid, syscall.SIGINT); err != nil {
 		_ = proc.Signal(os.Interrupt)
 	}
-	deadline := time.NewTimer(1 * time.Second)
+	deadline := time.NewTimer(3 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()

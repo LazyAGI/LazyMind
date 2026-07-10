@@ -76,6 +76,9 @@ func (m *FrontendManager) Run(ctx context.Context, cfg RuntimeConfig, paths Runt
 		Args: []string{"run", "--config", paths.CaddyConfig, "--adapter", "caddyfile"},
 		Dir:  paths.RepoRoot,
 	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		return err
+	}
 	if err := os.WriteFile(paths.FrontendPIDFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
 		return err
 	}
