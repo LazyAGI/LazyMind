@@ -31,6 +31,7 @@ type DefaultModel struct {
 	ProviderName           string     `gorm:"column:provider_name;type:varchar(255);not null;default:''"`
 	Name                   string     `gorm:"column:name;type:varchar(512);not null;uniqueIndex:uk_default_models_provider_name,priority:2"`
 	ModelType              string     `gorm:"column:model_type;type:varchar(64);not null"`
+	MaxInputTokens         *int64     `gorm:"column:max_input_tokens;type:bigint"`
 	CreatedAt              time.Time  `gorm:"column:created_at;not null"`
 	UpdatedAt              time.Time  `gorm:"column:updated_at;not null"`
 	DeletedAt              *time.Time `gorm:"column:deleted_at"`
@@ -87,6 +88,7 @@ type UserModelProviderGroupModel struct {
 	ProviderName             string `gorm:"column:provider_name;type:varchar(255);not null;default:''"`
 	Name                     string `gorm:"column:name;type:varchar(512);not null;uniqueIndex:uk_user_model_provider_group_models_group_name,priority:2"`
 	ModelType                string `gorm:"column:model_type;type:varchar(64);not null"`
+	MaxInputTokens           *int64 `gorm:"column:max_input_tokens;type:bigint"`
 	IsDefault                bool   `gorm:"column:is_default;type:boolean;not null;default:false"`
 	BaseModel
 }

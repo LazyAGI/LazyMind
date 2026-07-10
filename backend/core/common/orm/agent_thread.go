@@ -48,13 +48,15 @@ func (AgentThreadRecord) TableName() string { return "agent_thread_records" }
 type AgentThreadStep struct {
 	ThreadID      string     `gorm:"column:thread_id;type:varchar(128);primaryKey;index:idx_agent_thread_steps_thread_order,priority:1;index:idx_agent_thread_steps_thread_active,priority:1"`
 	StepID        string     `gorm:"column:step_id;type:varchar(128);primaryKey;index:idx_agent_thread_steps_thread_order,priority:3"`
+	Stage         string     `gorm:"column:stage;type:varchar(32);not null;default:'';index"`
 	Title         string     `gorm:"column:title;type:varchar(255);not null;default:''"`
 	Status        string     `gorm:"column:status;type:varchar(32);not null;default:'running';index"`
 	Active        bool       `gorm:"column:active;not null;default:false;index:idx_agent_thread_steps_thread_active,priority:2"`
 	OrderIndex    int        `gorm:"column:order_index;not null;default:0;index:idx_agent_thread_steps_thread_order,priority:2"`
 	EventCount    int64      `gorm:"column:event_count;not null;default:0"`
 	CurrentTaskID string     `gorm:"column:current_task_id;type:varchar(128);not null;default:''"`
-	NextStepRunID string     `gorm:"column:next_step_run_id;type:varchar(128);not null;default:''"`
+	NextStepID    string     `gorm:"column:next_step_id;type:varchar(128);not null;default:''"`
+	Version       *int       `gorm:"column:version"`
 	StartedAt     *time.Time `gorm:"column:started_at"`
 	EndedAt       *time.Time `gorm:"column:ended_at"`
 	CreatedAt     time.Time  `gorm:"column:created_at;not null"`
