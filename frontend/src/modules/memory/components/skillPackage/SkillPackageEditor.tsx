@@ -35,8 +35,9 @@ import {
   discardSkillDraft,
   getSkillDraftStatus,
   getSkillTree,
+  hasSkillDraftChanges,
   mkdirSkillDraftPath,
-  previewSkillDraft,
+  probeSkillAgentReviewMode,
   readSkillFsFile,
   submitSkillDraftReviewActions,
   undoSkillDraftReview,
@@ -75,18 +76,6 @@ interface SkillPackageEditorProps {
   t: (key: string, options?: Record<string, unknown>) => string;
   onSkillUpdated?: () => void | Promise<void>;
 }
-
-const isAgentReviewDraft = (draftStatus: string, reviewStatus: string) => {
-  const normalizedDraft = draftStatus.trim().toLowerCase();
-  const normalizedReview = reviewStatus.trim().toLowerCase();
-  // Only agent-generated drafts enter review mode.
-  // Manual draft/fs edits use the commit flow instead.
-  return (
-    normalizedDraft === "pending_confirm" ||
-    normalizedReview === "pending_confirm" ||
-    normalizedReview === "pending"
-  );
-};
 
 const { Text } = Typography;
 
@@ -211,31 +200,35 @@ export default function SkillPackageEditor({
     setErrorMessage("");
     contentCacheRef.current.clear();
     try {
-      const [tree, status, preview] = await Promise.all([
+      const [tree, status] = await Promise.all([
         getSkillTree(skillId),
         getSkillDraftStatus(skillId),
-        previewSkillDraft(skillId).catch(() => null),
       ]);
 
       setTreeRoot(tree);
       setDraftStatus(status);
 
-      const agentReview = preview
-        ? isAgentReviewDraft(preview.draftStatus, preview.reviewStatus)
-        : false;
-      setReviewMode(agentReview);
-      if (!agentReview) {
-        setReviewMeta(null);
-        setFileHunkSummaries({});
-      }
+      const hasDraftChanges = hasSkillDraftChanges(status);
 
       let nextDiffFiles: SkillDiffFileRecord[] = [];
-      if (agentReview || status.hasUncommittedDraft || status.overlayCount > 0) {
+      if (hasDraftChanges) {
         const treeDiff = await compareSkillTreeDiff(skillId);
         nextDiffFiles = treeDiff.files;
         setDiffFiles(nextDiffFiles);
       } else {
         setDiffFiles([]);
+      }
+
+      const agentReview = await probeSkillAgentReviewMode(
+        skillId,
+        status,
+        collectChangedFilePaths(nextDiffFiles),
+      );
+
+      setReviewMode(agentReview);
+      if (!agentReview) {
+        setReviewMeta(null);
+        setFileHunkSummaries({});
       }
 
       const files = flattenSkillTree(tree);
@@ -288,10 +281,11 @@ export default function SkillPackageEditor({
       setIsEditing(false);
       try {
         const status = diffStatusMap.get(path);
-        const shouldShowDiff =
-          reviewMode || (status && status !== "unchanged") || hasLocalDraft;
+        const shouldShowDiff = Boolean(
+          status && status !== "unchanged" && status !== "deleted",
+        );
 
-        if (shouldShowDiff && status !== "deleted") {
+        if (shouldShowDiff) {
           const diff = await compareSkillFileDiff(skillId, path);
           setFileDiff(diff);
           if (diff.review) {
@@ -336,7 +330,7 @@ export default function SkillPackageEditor({
         setFileLoading(false);
       }
     },
-    [diffStatusMap, hasLocalDraft, reviewMode, skillId, t, updateFileHunkSummary],
+    [diffStatusMap, reviewMode, skillId, t, updateFileHunkSummary],
   );
 
   useEffect(() => {

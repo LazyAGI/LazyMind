@@ -12,7 +12,6 @@ import {
   type DiffTreeOpenAPIResponse,
   type SkillCreateManagedOpenAPIRequest,
   type SkillDetailOpenAPIResponse,
-  type SkillDraftPreviewOpenAPIResponse,
   type SkillDraftStatusOpenAPIResponse,
   type SkillFileOpenAPIResponse,
   type SkillListItemOpenAPIResponse,
@@ -256,6 +255,37 @@ export interface SkillDraftStatusRecord {
   taskId: string;
 }
 
+export const hasSkillDraftChanges = (status: SkillDraftStatusRecord): boolean =>
+  status.hasUncommittedDraft || status.overlayCount > 0;
+
+export const isSkillAgentDraftContext = (status: SkillDraftStatusRecord): boolean =>
+  hasSkillDraftChanges(status) && Boolean(status.taskId || status.conversationId);
+
+const emptySkillFileDiff = (path: string): SkillDiffFileRecord => ({
+  path,
+  status: "unchanged",
+  binary: false,
+  type: "file",
+  tooLarge: false,
+  diffEntryLines: [],
+});
+
+export async function probeSkillAgentReviewMode(
+  skillId: string,
+  status: SkillDraftStatusRecord,
+  changedPaths: string[],
+): Promise<boolean> {
+  if (!isSkillAgentDraftContext(status)) {
+    return false;
+  }
+  const firstChanged = changedPaths[0];
+  if (!firstChanged) {
+    return false;
+  }
+  const fileDiff = await compareSkillFileDiff(skillId, firstChanged).catch(() => null);
+  return Boolean(fileDiff?.review?.reviewId);
+}
+
 export interface SkillDraftReviewMeta {
   reviewId: string;
   reviewVersion: number;
@@ -266,6 +296,10 @@ export interface SkillDraftReviewMeta {
 }
 
 export type SkillDraftReviewDecision = "accept" | "reject";
+
+const mapSkillDraftReviewDecisionToApi = (
+  decision: SkillDraftReviewDecision,
+): "accepted" | "rejected" => (decision === "accept" ? "accepted" : "rejected");
 
 export interface SkillDraftReviewActionItem {
   hunkId: string;
@@ -843,60 +877,50 @@ export async function generateSkillDraft(
 export async function previewSkillDraft(
   skillId: string,
 ): Promise<SkillDraftPreviewRecord> {
-  const detailResponse = await skillsApi.apiCoreSkillsSkillIdGet({ skillId });
-  const detailPayload = unwrapEnvelope<
-    SkillDetailOpenAPIResponse & {
-      draft_status?: string;
-      review_status?: string;
-      outdated?: boolean;
-    }
-  >(detailResponse.data);
+  const [detailResponse, draftStatus] = await Promise.all([
+    skillsApi.apiCoreSkillsSkillIdGet({ skillId }),
+    getSkillDraftStatus(skillId),
+  ]);
+  const detailPayload = unwrapEnvelope<SkillDetailOpenAPIResponse>(detailResponse.data);
 
-  const [draftStatus, fileDiff, currentContent, draftContent, draftPreviewPayload] =
-    await Promise.all([
-      getSkillDraftStatus(skillId),
-      compareSkillFileDiff(skillId, SKILL_MD_PATH).catch(() => ({
-        path: SKILL_MD_PATH,
-        status: "unchanged",
-        binary: false,
-        type: "file",
-        tooLarge: false,
-        diffEntryLines: [],
-      })),
-      readSkillFileContent(skillId, SKILL_MD_PATH).catch(
-        () => detailPayload.file_content || "",
-      ),
-      readSkillFsContent(skillId, SKILL_MD_PATH).catch(() => ""),
-      skillsApi
-        .apiCoreSkillsSkillIdDraftPreviewGet({ skillId })
-        .then((response) =>
-          unwrapEnvelope<
-            SkillDraftPreviewOpenAPIResponse & {
-              draft_status?: string;
-              review_status?: string;
-            }
-          >(response.data),
-        )
-        .catch(() => null),
-    ]);
+  if (!hasSkillDraftChanges(draftStatus)) {
+    const currentContent = await readSkillFileContent(skillId, SKILL_MD_PATH).catch(
+      () => detailPayload.file_content || "",
+    );
+    return {
+      currentContent,
+      diff: "",
+      draftContent: "",
+      draftSourceVersion: draftStatus.draftVersion,
+      draftStatus: "",
+      outdated: false,
+      skillId: detailPayload.skill_id || skillId,
+      reviewStatus: "",
+      diffLines: [],
+    };
+  }
+
+  const [fileDiff, currentContent, draftContent] = await Promise.all([
+    compareSkillFileDiff(skillId, SKILL_MD_PATH).catch(() => emptySkillFileDiff(SKILL_MD_PATH)),
+    readSkillFileContent(skillId, SKILL_MD_PATH).catch(
+      () => detailPayload.file_content || "",
+    ),
+    readSkillFsContent(skillId, SKILL_MD_PATH).catch(() => ""),
+  ]);
 
   const diffLines = mapDiffEntryLines(fileDiff.diffEntryLines);
+  const isAgentDraft = isSkillAgentDraftContext(draftStatus);
+  const hasReviewSession = Boolean(fileDiff.review?.reviewId);
 
   return {
     currentContent,
-    diff: draftPreviewPayload?.diff || "",
+    diff: "",
     draftContent,
     draftSourceVersion: draftStatus.draftVersion,
-    draftStatus:
-      draftPreviewPayload?.draft_status ||
-      detailPayload.draft_status ||
-      "",
-    outdated: Boolean(detailPayload.outdated ?? draftPreviewPayload?.outdated),
+    draftStatus: isAgentDraft ? "pending_confirm" : "",
+    outdated: false,
     skillId: detailPayload.skill_id || skillId,
-    reviewStatus:
-      draftPreviewPayload?.review_status ||
-      detailPayload.review_status ||
-      "",
+    reviewStatus: isAgentDraft && hasReviewSession ? "pending_confirm" : "",
     diffLines,
   };
 }
@@ -1202,7 +1226,7 @@ export async function submitSkillDraftReviewActions(
       expected_review_version: options.expectedReviewVersion,
       items: options.items.map((item) => ({
         hunk_id: item.hunkId,
-        decision: item.decision,
+        decision: mapSkillDraftReviewDecisionToApi(item.decision),
         ...(item.path ? { path: item.path } : {}),
       })),
     },

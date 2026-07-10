@@ -123,6 +123,13 @@ export function getStatusColor(status: string) {
   return "default";
 }
 
+export function formatTraceStatusLabel(t: TFunction, status: string) {
+  const normalized = status.toLowerCase();
+  const key = `selfEvolutionRun.trace.status.${normalized}`;
+  const translated = t(key, { defaultValue: normalized });
+  return translated || normalized;
+}
+
 export function getMetricItems(t: TFunction, detail: TraceDetailObservation): MetricItem[] {
   return [
     { key: "latency", label: t("selfEvolutionRun.trace.totalLatency"), value: formatDuration(detail.summary.latencyMs) },
