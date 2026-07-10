@@ -47,61 +47,74 @@ func isBuiltinPluginID(id string) bool {
 
 // draftResponse is the JSON shape returned for a single PluginDraft.
 type draftResponse struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	Content            string `json:"content"`
-	PluginYAMLContent  string `json:"plugin_yaml_content"`
-	StateYAMLContent   string `json:"state_yaml_content"`
-	StateLayoutContent string `json:"state_layout_content"`
-	ScenarioContent    string `json:"scenario_content"`
-	ScriptsContent     string `json:"scripts_content"`
-	DesignBriefContent string `json:"design_brief_content"`
-	GenerateStatus     string `json:"generate_status"`
-	GenerateError      string `json:"generate_error"`
-	GenerateWarning    string `json:"generate_warning"`
-	Version            int    `json:"version"`
-	CreatedBy          string `json:"created_by"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
-	SourceType         string `json:"source_type"`
-	SourceSkillID      string `json:"source_skill_id"`
-	SourceSkillName    string `json:"source_skill_name"`
-	Published          bool   `json:"published"`
-	PublishedPluginRef string `json:"published_plugin_ref"`
-	CurrentRevisionID  string `json:"current_revision_id"`
-	CurrentRevisionNo  int64  `json:"current_revision_no"`
-	PublishedStatus    string `json:"published_status"`
-	BaseRevisionID     string `json:"base_revision_id"`
-	DraftDirty         bool   `json:"draft_dirty"`
+	ID                    string `json:"id"`
+	Name                  string `json:"name"`
+	Content               string `json:"content"`
+	PluginYAMLContent     string `json:"plugin_yaml_content"`
+	StateYAMLContent      string `json:"state_yaml_content"`
+	StateLayoutContent    string `json:"state_layout_content"`
+	ScenarioContent       string `json:"scenario_content"`
+	ScriptsContent        string `json:"scripts_content"`
+	DesignBriefContent    string `json:"design_brief_content"`
+	GenerateStatus        string `json:"generate_status"`
+	GenerateError         string `json:"generate_error"`
+	GenerateWarning       string `json:"generate_warning"`
+	Version               int    `json:"version"`
+	CreatedBy             string `json:"created_by"`
+	CreatedAt             string `json:"created_at"`
+	UpdatedAt             string `json:"updated_at"`
+	SourceType            string `json:"source_type"`
+	SourceSkillID         string `json:"source_skill_id"`
+	SourceSkillName       string `json:"source_skill_name"`
+	SourceSkillRevisionID string `json:"source_skill_revision_id"`
+	SourceSkillRevisionNo int64  `json:"source_skill_revision_no"`
+	SourceSkillTreeHash   string `json:"source_skill_tree_hash"`
+	SourceAnalysisID      string `json:"source_analysis_id"`
+	Published             bool   `json:"published"`
+	PublishedPluginRef    string `json:"published_plugin_ref"`
+	CurrentRevisionID     string `json:"current_revision_id"`
+	CurrentRevisionNo     int64  `json:"current_revision_no"`
+	PublishedStatus       string `json:"published_status"`
+	BaseRevisionID        string `json:"base_revision_id"`
+	DraftDirty            bool   `json:"draft_dirty"`
+	LastRepairRunID       string `json:"last_repair_run_id"`
 }
 
 func toDraftResponse(d orm.PluginDraft) draftResponse {
 	return draftResponse{
-		ID:                 d.ID,
-		Name:               d.Name,
-		Content:            d.Content,
-		PluginYAMLContent:  d.PluginYAMLContent,
-		StateYAMLContent:   d.StateYAMLContent,
-		StateLayoutContent: d.StateLayoutContent,
-		ScenarioContent:    d.ScenarioContent,
-		ScriptsContent:     d.ScriptsContent,
-		DesignBriefContent: d.DesignBriefContent,
-		GenerateStatus:     d.GenerateStatus,
-		GenerateError:      d.GenerateError,
-		GenerateWarning:    d.GenerateWarning,
-		Version:            d.Version,
-		CreatedBy:          d.CreatedBy,
-		CreatedAt:          d.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:          d.UpdatedAt.Format(time.RFC3339),
-		SourceType:         d.SourceType,
-		SourceSkillID:      d.SourceSkillID,
-		SourceSkillName:    d.SourceSkillName,
-		BaseRevisionID:     d.BaseRevisionID,
+		ID:                    d.ID,
+		Name:                  d.Name,
+		Content:               d.Content,
+		PluginYAMLContent:     d.PluginYAMLContent,
+		StateYAMLContent:      d.StateYAMLContent,
+		StateLayoutContent:    d.StateLayoutContent,
+		ScenarioContent:       d.ScenarioContent,
+		ScriptsContent:        d.ScriptsContent,
+		DesignBriefContent:    d.DesignBriefContent,
+		GenerateStatus:        d.GenerateStatus,
+		GenerateError:         d.GenerateError,
+		GenerateWarning:       d.GenerateWarning,
+		Version:               d.Version,
+		CreatedBy:             d.CreatedBy,
+		CreatedAt:             d.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:             d.UpdatedAt.Format(time.RFC3339),
+		SourceType:            d.SourceType,
+		SourceSkillID:         d.SourceSkillID,
+		SourceSkillName:       d.SourceSkillName,
+		SourceSkillRevisionID: d.SourceSkillRevisionID,
+		SourceSkillRevisionNo: d.SourceSkillRevisionNo,
+		SourceSkillTreeHash:   d.SourceSkillTreeHash,
+		SourceAnalysisID:      d.SourceAnalysisID,
+		BaseRevisionID:        d.BaseRevisionID,
 	}
 }
 
 func toEnrichedDraftResponse(db *gorm.DB, d orm.PluginDraft) draftResponse {
 	resp := toDraftResponse(d)
+	var repairRun orm.PluginRepairRun
+	if db.Where("draft_id=?", d.ID).Order("created_at DESC").First(&repairRun).Error == nil {
+		resp.LastRepairRunID = repairRun.ID
+	}
 	if d.PluginID != "" {
 		var p orm.PluginResource
 		if db.Where("owner_user_id=? AND plugin_id=?", d.CreatedBy, d.PluginID).First(&p).Error == nil {
@@ -409,8 +422,9 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 
 	skillContent := ""
 	skillName := ""
+	var skillSnapshot pluginSourceSkillSnapshot
 	if body.SkillID != "" {
-		content, name, err := loadPluginSourceSkill(r.Context(), db, userID, body.SkillID)
+		snapshot, err := loadPluginSourceSkill(r.Context(), db, userID, body.SkillID)
 		if err != nil {
 			if isPluginSourceSkillNotFound(err) {
 				common.ReplyErr(w, "skill not found", http.StatusNotFound)
@@ -419,13 +433,17 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		skillContent = content
-		skillName = name
+		skillSnapshot = snapshot
+		skillContent = snapshot.skillMD()
+		skillName = snapshot.Name
 	}
 
 	sourceUpdates := map[string]any{
 		"generate_status": generateStatusGenerating,
 		"updated_at":      time.Now().UTC(),
+	}
+	if body.SkillID != "" {
+		sourceUpdates["generate_status"] = generateStatusAnalyzing
 	}
 	// Set source_type on first generation (don't overwrite if already set by CreatePluginDraft).
 	if draft.SourceType == "" {
@@ -435,9 +453,17 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 			sourceUpdates["source_type"] = "ai"
 		}
 	}
-	if body.SkillID != "" && draft.SourceSkillID == "" {
+	if body.SkillID != "" {
+		sourceUpdates["source_type"] = "skill"
+	}
+	if body.SkillID != "" {
 		sourceUpdates["source_skill_id"] = body.SkillID
 		sourceUpdates["source_skill_name"] = skillName
+	}
+	if body.SkillID != "" {
+		sourceUpdates["source_skill_revision_id"] = skillSnapshot.RevisionID
+		sourceUpdates["source_skill_revision_no"] = skillSnapshot.RevisionNo
+		sourceUpdates["source_skill_tree_hash"] = skillSnapshot.TreeHash
 	}
 
 	if err := db.Model(&draft).Updates(sourceUpdates).Error; err != nil {
@@ -445,6 +471,9 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft.GenerateStatus = generateStatusGenerating
+	if body.SkillID != "" {
+		draft.GenerateStatus = generateStatusAnalyzing
+	}
 	if st, ok := sourceUpdates["source_type"].(string); ok {
 		draft.SourceType = st
 	}
@@ -455,16 +484,24 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 		draft.SourceSkillName = sn
 	}
 
+	var skillPackage map[string]any
+	if body.SkillID != "" {
+		if b, marshalErr := json.Marshal(skillSnapshot); marshalErr == nil {
+			_ = json.Unmarshal(b, &skillPackage)
+		}
+	}
 	_, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{
 		JobType:      pluginDraftGenerateJobType,
 		ResourceType: "plugin_draft",
 		ResourceID:   draftID,
 		Payload: pluginDraftGeneratePayload{
-			DraftID:      draftID,
-			Name:         draft.Name,
-			Description:  body.Description,
-			SkillContent: skillContent,
-			UserID:       userID,
+			DraftID:               draftID,
+			Name:                  draft.Name,
+			Description:           body.Description,
+			SkillContent:          skillContent,
+			SkillPackage:          skillPackage,
+			SourceSkillRevisionID: skillSnapshot.RevisionID,
+			UserID:                userID,
 		},
 		MaxAttempts:  1,
 		CreateUserID: userID,
@@ -538,8 +575,11 @@ func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		RepairHint string `json:"repair_hint"`
-		Target     string `json:"target"` // 'statemachine' | 'ui' | 'scenario'
+		RepairHint       string `json:"repair_hint"`
+		Target           string `json:"target"` // 'statemachine' | 'ui' | 'scenario'
+		Mode             string `json:"mode"`
+		DraftVersion     int    `json:"draft_version"`
+		SourceAnalysisID string `json:"source_analysis_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
@@ -556,6 +596,31 @@ func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
 	if draft.PluginYAMLContent == "" || draft.StateYAMLContent == "" {
 		common.ReplyErr(w, "draft has no generated content to repair", http.StatusBadRequest)
 		return
+	}
+	if body.DraftVersion == 0 {
+		body.DraftVersion = draft.Version
+	}
+	if body.DraftVersion != draft.Version {
+		common.ReplyErr(w, "repair stale draft", http.StatusConflict)
+		return
+	}
+	if body.Mode == "" {
+		body.Mode = "plugin_local"
+	}
+	if body.Mode != "plugin_local" && body.Mode != "source_aware" {
+		common.ReplyErr(w, "invalid repair mode", http.StatusBadRequest)
+		return
+	}
+	if body.Mode == "source_aware" {
+		if body.SourceAnalysisID == "" {
+			body.SourceAnalysisID = draft.SourceAnalysisID
+		}
+		var analysis orm.PluginGenerationAnalysis
+		if body.SourceAnalysisID == "" || db.Where("id=? AND draft_id=?", body.SourceAnalysisID, draft.ID).First(&analysis).Error != nil {
+			common.ReplyErr(w, "source analysis not found", http.StatusBadRequest)
+			return
+		}
+		body.RepairHint = body.RepairHint + "\nRespect source analysis: " + analysis.CandidatesJSON + "\nCoverage: " + analysis.CoverageReportJSON + "\nTool mappings: " + analysis.ToolMappingReportJSON
 	}
 
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), db, userID)
@@ -579,14 +644,22 @@ func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
 
 	prevStatus := draft.GenerateStatus
 	payload := pluginDraftRepairPayload{
-		DraftID:    draftID,
-		UserID:     userID,
-		Target:     strings.TrimSpace(body.Target),
-		RepairHint: strings.TrimSpace(body.RepairHint),
-		Warnings:   warnings,
-		PrevStatus: prevStatus,
-		LLMConfig:  llmConfig,
+		DraftID:      draftID,
+		UserID:       userID,
+		Target:       strings.TrimSpace(body.Target),
+		RepairHint:   strings.TrimSpace(body.RepairHint),
+		Warnings:     warnings,
+		PrevStatus:   prevStatus,
+		LLMConfig:    llmConfig,
+		DraftVersion: draft.Version,
+		Mode:         body.Mode,
 	}
+	repairRun := orm.PluginRepairRun{ID: uuid.NewString(), DraftID: draft.ID, UserID: userID, BasePluginRevisionID: draft.BaseRevisionID, DraftVersionBefore: draft.Version, Target: body.Target, Mode: body.Mode, SourceAnalysisID: body.SourceAnalysisID, SourceSkillRevisionID: draft.SourceSkillRevisionID, RepairHint: body.RepairHint, DiagnosticsBeforeJSON: diagnosticsJSON(diagnosePlugin(draft.PluginYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent)), ChangesJSON: "{}", DiagnosticsAfterJSON: "{}", Status: "queued", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if err := db.Create(&repairRun).Error; err != nil {
+		common.ReplyErr(w, "create repair run failed", http.StatusInternalServerError)
+		return
+	}
+	payload.RepairRunID = repairRun.ID
 
 	// Set status to repairing before enqueueing so the client sees it immediately.
 	if err := db.Model(&draft).Update("generate_status", generateStatusRepairing).Error; err != nil {

@@ -3,9 +3,9 @@ import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { Alert, Breadcrumb, Button, Modal, Input, Spin, Select, Space, Tag, message } from 'antd';
 import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft, publishPluginDraft, listPluginVersions, getPluginVersion, editPluginVersion } from '../../pluginDraftApi';
+import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft, publishPluginDraft, listPluginVersions, getPluginVersion, editPluginVersion, getPluginGenerationAnalysis, confirmPluginWorkflow } from '../../pluginDraftApi';
 import type { PluginDraftRecord } from '../../pluginDraftApi';
-import type { PluginVersionSummary, PluginVersionContent } from '../../pluginDraftApi';
+import type { PluginVersionSummary, PluginVersionContent, PluginGenerationAnalysis } from '../../pluginDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
 import type { SavePayload, RepairTarget } from '../../components/StateGraphEditor';
 import type { ValidationError } from '../../components/StateGraphEditor/core/validator';
@@ -14,7 +14,7 @@ import './index.scss';
 const POLL_INTERVAL_MS = 3000;
 
 // generate_status values that indicate AI generation is still in progress.
-const GENERATING_STATUSES = new Set(['generating', 'brief_done', 'skeleton_done', 'state_done', 'repairing']);
+const GENERATING_STATUSES = new Set(['analyzing', 'generating', 'brief_done', 'skeleton_done', 'state_done', 'repairing']);
 
 // generate_status values where enough content is available to render the editor.
 // state_done means plugin.yaml + state.yml are ready even though Phase 3 is still running.
@@ -87,6 +87,8 @@ export default function PluginDetailPage() {
   const [repairHint, setRepairHint] = useState('');
   const [repairTarget, setRepairTarget] = useState<RepairTarget>('statemachine');
   const [repairValidationErrors, setRepairValidationErrors] = useState<ValidationError[]>([]);
+  const [generationAnalysis, setGenerationAnalysis] = useState<PluginGenerationAnalysis | null>(null);
+  const [confirmingCandidate, setConfirmingCandidate] = useState('');
   const prevStatusRef = useRef<string>('');
   // Per-banner dismissed state. Each banner has a unique key; dismissed keys are stored
   // as a JSON array in localStorage so they survive page refresh.
@@ -260,6 +262,9 @@ export default function PluginDetailPage() {
       const updated = await repairPluginDraft(pluginId, {
         repair_hint: fullHint,
         target: targetSnapshot,
+        mode: draftRef.current?.source_analysis_id ? 'source_aware' : 'plugin_local',
+        draft_version: draftRef.current?.version || 0,
+        source_analysis_id: draftRef.current?.source_analysis_id || undefined,
       });
       setDraft(updated);
       startPolling();
@@ -275,6 +280,21 @@ export default function PluginDetailPage() {
     }
     // repairSubmitting stays true until polling ends (handled in startPolling callback)
   }, [pluginId, repairHint, repairValidationErrors, repairTarget, startPolling]);
+
+  useEffect(() => {
+    if (!pluginId || draft?.generate_status !== 'needs_confirmation') return;
+    getPluginGenerationAnalysis(pluginId).then(setGenerationAnalysis).catch(() => setGenerationAnalysis(null));
+  }, [pluginId, draft?.generate_status]);
+
+  const handleConfirmCandidate = useCallback(async (candidateId: string) => {
+    if (!pluginId || !draft || !generationAnalysis) return;
+    setConfirmingCandidate(candidateId);
+    try {
+      await confirmPluginWorkflow(pluginId,{analysis_id:generationAnalysis.analysis_id,candidate_id:candidateId,source_skill_revision_id:generationAnalysis.source_skill_revision_id,draft_version:draft.version});
+      setDraft(await getPluginDraft(pluginId)); startPolling();
+    } catch { message.error('候选流程确认失败，Skill 或草稿版本可能已变化'); }
+    finally { setConfirmingCandidate(''); }
+  },[pluginId,draft,generationAnalysis,startPolling]);
 
   const handleOpenRepair = useCallback((target: RepairTarget, validationErrors?: ValidationError[]) => {
     setRepairTarget(target);
@@ -430,6 +450,12 @@ export default function PluginDetailPage() {
       <div className="plugin-editor-mask" />
       <div className="plugin-editor-panel">
     <div className="plugin-detail-page">
+      {draft.generate_status === 'needs_confirmation' && generationAnalysis && (
+        <Alert className="plugin-detail-banner" type="warning" showIcon message="请选择要转换成 Plugin 的工作流" description={<Space direction="vertical"><span>{generationAnalysis.message}</span>{Object.entries(generationAnalysis.scripts).filter(([,report])=>report.classification==='unsupported').map(([path,report])=><span key={path}>将忽略不安全脚本 {path}：{report.reason || '未通过安全检查'}</span>)}{generationAnalysis.candidates.map(candidate => <Button key={candidate.id} loading={confirmingCandidate===candidate.id} onClick={()=>handleConfirmCandidate(candidate.id)}>{candidate.name || candidate.goal || candidate.id}</Button>)}</Space>} />
+      )}
+      {draft.generate_status === 'rejected' && (
+        <Alert className="plugin-detail-banner" type="error" showIcon message="该 Skill 不适合生成状态机" description={draft.generate_error} />
+      )}
       {/* Generation progress banner — shown while Phase 3 is still running (editor already ready) */}
       {isPhase3Running && !repairModalOpen && (
         <Alert

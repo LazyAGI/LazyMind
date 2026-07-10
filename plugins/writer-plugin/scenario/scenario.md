@@ -17,10 +17,58 @@ Every step supports a full rerun: when the user is unhappy with a step's result,
 
 ### Cold start (no active session)
 
-- When the user asks for structured writing such as "write a report", "draft an article", "write a survey", "write an introduction to X", "write a short story", "write a novel chapter", or "写一篇小说" → invoke `trigger_writer_plugin(user_input=<user's exact original request>)`.
+- Invoke `trigger_writer_plugin(user_input=<user's exact original request>)` when the user explicitly asks to use the AI Writer plugin.
+- Otherwise, invoke it only when all of the following are true:
+  1. The user requests a complete, independently deliverable piece of writing.
+  2. Producing it reliably depends materially on existing knowledge, source materials, supplied documents, factual background, professional constraints, or continuity with prior content.
+  3. The task genuinely benefits from multiple workflow stages, such as context building, outlining, section planning, drafting, and whole-document review.
+  4. No more specific writing skill or plugin matches the task.
 
-  `user_input` must preserve the user's request verbatim. Do not rewrite, expand, translate, summarize, or add inferred details before calling the trigger tool.
-  If the user does not provide all details, keep the original request intact and trigger the plugin first; the workflow can infer reasonable defaults or collect context during `build_context`.
+`user_input` must preserve the user's request verbatim. Do not rewrite, expand, translate, summarize, or add inferred details before calling the trigger tool. A request is not complex merely because it mentions an article, report, document, story, or word count. If it can be completed reliably in one direct response, do not invoke the plugin.
+
+### Trigger examples
+
+Invoke the plugin for requests such as:
+
+- "Use the AI Writer plugin to complete this article."
+- "Based on the industry materials I provided, write a complete analysis report for senior management. Unify the data definitions, design the chapter structure, and check the final document for consistency."
+- "Synthesize the project background, interview notes, and previous proposals into a complete project retrospective report."
+- "Continue the novel with a complete chapter based on the story bible and previous chapters, preserving character, plot, and world-building continuity."
+- "Use these technical references to produce a complete in-depth article, including structural planning, section-by-section drafting, and final review."
+
+### Do not trigger
+
+Handle requests like these directly without invoking the plugin:
+
+- "Write a short product introduction."
+- "Write a leave-request email."
+- "Polish this paragraph."
+- "Summarize the main points of this material."
+- "Translate this passage into English."
+- "Give me an article outline."
+- "Suggest five titles."
+- "Create a Word document for me."
+- "Explain reinforcement learning."
+- "Let's discuss how this article could be improved."
+- "Write an 800-word introduction to artificial intelligence."
+
+Do not trigger solely because the user says "write," requests a named document type, or specifies a long word count. Simple document-file creation is not a complex writing task.
+
+### Prefer a more specific capability
+
+The AI Writer plugin is a general fallback. If another skill or plugin more precisely matches the writing domain, use it instead:
+
+- "Write a bid proposal." → use a proposal-writing skill or plugin.
+- "Write an academic paper based on these experiment results." → use an academic-writing skill or plugin.
+- "Create a product requirements document." → use a product-document skill or plugin.
+- "Write my résumé." → use a résumé-writing skill or plugin, if available.
+
+### Boundary examples
+
+- "Write an artificial intelligence industry report." → Do not invoke by default; the request does not establish a material dependency on sources or a need for a multi-stage workflow.
+- "Using these ten market research documents, write an artificial intelligence industry report for senior management. Design the structure, reconcile the data, draft it section by section, and review it for consistency." → Invoke, unless a more specific industry-report skill or plugin is available.
+- "Create a meeting-minutes document." → Do not invoke; creating a document is not itself a complex writing task.
+- "Synthesize six meeting transcripts, project records, and decision history into a formal project retrospective report." → Invoke if no more specific project-retrospective writing capability is available.
 
 ### With an active session
 

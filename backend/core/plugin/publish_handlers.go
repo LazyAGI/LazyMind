@@ -124,7 +124,7 @@ func PublishPluginDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if len(files) > 3 {
+	if len(files) > 3 && !scriptsApprovedForPublish(store.DB(), d) {
 		common.ReplyErr(w, "custom plugin scripts require the administrator publishing workflow", http.StatusForbidden)
 		return
 	}
@@ -218,6 +218,35 @@ func PublishPluginDraft(w http.ResponseWriter, r *http.Request) {
 	var setting orm.UserPluginSetting
 	enabled := store.DB().Where("user_id=? AND plugin_ref=?", userID, out.PluginRef).First(&setting).Error == nil && setting.Enabled
 	common.ReplyOK(w, map[string]any{"plugin_ref": out.PluginRef, "revision_id": out.HeadRevisionID, "revision_no": out.Version, "remote_root": "remote://" + out.RelativeRoot, "enabled": enabled})
+}
+
+func scriptsApprovedForPublish(db *gorm.DB, draft orm.PluginDraft) bool {
+	if draft.SourceAnalysisID == "" {
+		return false
+	}
+	var analysis orm.PluginGenerationAnalysis
+	if db.Where("id=? AND draft_id=?", draft.SourceAnalysisID, draft.ID).First(&analysis).Error != nil {
+		return false
+	}
+	var report map[string]struct {
+		Classification string `json:"classification"`
+		SHA256         string `json:"sha256"`
+	}
+	var scripts map[string]string
+	if json.Unmarshal([]byte(analysis.ScriptReportJSON), &report) != nil || json.Unmarshal([]byte(draft.ScriptsContent), &scripts) != nil {
+		return false
+	}
+	for path, source := range scripts {
+		item, ok := report[path]
+		if !ok || (item.Classification != "importable_tool" && item.Classification != "wrappable_command") {
+			return false
+		}
+		hash := sha256.Sum256([]byte(source))
+		if hex.EncodeToString(hash[:]) != item.SHA256 {
+			return false
+		}
+	}
+	return len(scripts) > 0
 }
 
 func RollbackPlugin(w http.ResponseWriter, r *http.Request) {

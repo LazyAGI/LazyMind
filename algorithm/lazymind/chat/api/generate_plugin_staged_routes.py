@@ -20,6 +20,7 @@ Three sequential endpoints for phased plugin generation:
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import logging
 import sys
@@ -615,11 +616,26 @@ def _repair_slots_only(
 class _LLMConfigMixin(BaseModel):
     llm_config: Dict[str, Any] = Field(default_factory=dict)
 
+class AnalyzeSkillRequest(_LLMConfigMixin):
+    name: str
+    skill_package: Dict[str, Any]
+
+class AnalyzeSkillResponse(BaseModel):
+    verdict: str
+    verdict_code: str = ''
+    message: str = ''
+    candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    coverage: Dict[str, Any] = Field(default_factory=dict)
+    tool_mappings: Dict[str, Any] = Field(default_factory=dict)
+    scripts: Dict[str, Any] = Field(default_factory=dict)
+
 
 class DesignBriefRequest(_LLMConfigMixin):
     name: str
     description: Optional[str] = None
     skill_content: Optional[str] = None
+    skill_package: Optional[Dict[str, Any]] = None
+    workflow_analysis: Optional[str] = None
 
 
 class DesignBriefResponse(BaseModel):
@@ -630,6 +646,8 @@ class SkeletonRequest(_LLMConfigMixin):
     name: str
     description: Optional[str] = None
     skill_content: Optional[str] = None
+    skill_package: Optional[Dict[str, Any]] = None
+    workflow_analysis: Optional[str] = None
     design_brief: Optional[str] = None
 
 
@@ -641,6 +659,7 @@ class StateMachineRequest(_LLMConfigMixin):
     name: str
     plugin_yaml: str  # output from Phase 1
     design_brief: Optional[str] = None
+    workflow_analysis: Optional[str] = None
 
 
 class StateMachineResponse(BaseModel):
@@ -654,16 +673,223 @@ class ScenarioScriptsRequest(_LLMConfigMixin):
     plugin_yaml: str   # output from Phase 1
     state_yaml: str    # output from Phase 2
     design_brief: Optional[str] = None
+    source_scripts: Dict[str, str] = Field(default_factory=dict)
 
 
 class ScenarioScriptsResponse(BaseModel):
     scenario_md: str = ''
     scripts: Dict[str, str] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
 # Phase handlers
 # ---------------------------------------------------------------------------
+
+def _skill_package_prompt(package: Optional[Dict[str, Any]], fallback: str) -> str:
+    """Render a bounded, path-preserving package view; never hide omitted files."""
+    if not package:
+        return fallback
+    files = package.get('files') or []
+    header = (
+        f"Skill revision: {package.get('revision_id', '')}\n"
+        f"Tree hash: {package.get('tree_hash', '')}\n"
+        f"Files in manifest: {len(files)}\n"
+    )
+    parts: List[str] = [header]
+    omitted: List[str] = []
+    budget = 120_000
+    used = len(header)
+    for item in files:
+        path = str(item.get('path') or '')
+        if item.get('binary'):
+            parts.append(f"\n=== {path} (binary metadata only, {item.get('size', 0)} bytes) ===\n")
+            continue
+        content = str(item.get('content') or '')
+        block = f"\n=== FILE: {path} ===\n{content}\n=== END FILE ===\n"
+        if used + len(block) > budget:
+            omitted.append(path)
+            continue
+        parts.append(block)
+        used += len(block)
+    if omitted:
+        parts.append(
+            "\n=== UNRESOLVED FILES (context budget; generation must not claim full coverage) ===\n"
+            + "\n".join(omitted)
+        )
+    return ''.join(parts)
+
+def _script_inventory(package: Dict[str, Any]) -> Dict[str, Any]:
+    report: Dict[str, Any] = {}
+    for item in package.get('files') or []:
+        path = str(item.get('path') or '')
+        if not path.endswith('.py') or item.get('binary'):
+            continue
+        source = str(item.get('content') or '')
+        try:
+            tree = ast.parse(source)
+        except SyntaxError as exc:
+            report[path] = {'classification': 'unsupported', 'functions': [], 'reason': f'SyntaxError: {exc}', 'sha256': hashlib.sha256(source.encode()).hexdigest()}
+            continue
+        functions = [n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        violations = _scan_file(source)
+        if violations:
+            report[path] = {'classification': 'unsupported', 'functions': functions,
+                            'reason': '; '.join(error for _, error in violations), 'sha256': hashlib.sha256(source.encode()).hexdigest()}
+            continue
+        has_main = 'main' in functions or any(
+            isinstance(n, ast.If) and isinstance(n.test, ast.Compare)
+            for n in tree.body
+        )
+        classification = 'wrappable_command' if has_main else ('importable_tool' if functions else 'supporting_script')
+        report[path] = {'classification': classification, 'functions': functions, 'reason': '', 'sha256': hashlib.sha256(source.encode()).hexdigest()}
+    return report
+
+def _hierarchical_evidence(package: Dict[str, Any]) -> Tuple[str, List[str]]:
+    """Extract workflow evidence in bounded batches; return unresolved paths explicitly."""
+    chunks: List[Tuple[str, str]] = []
+    for item in package.get('files') or []:
+        path = str(item.get('path') or '')
+        if item.get('binary'):
+            continue
+        content = str(item.get('content') or '')
+        if path.endswith('.py'):
+            try:
+                tree = ast.parse(content)
+                content = ast.dump(tree, annotate_fields=True, include_attributes=False)[:24_000]
+            except SyntaxError:
+                content = content[:24_000]
+        for offset in range(0, len(content) or 1, 24_000):
+            chunks.append((path, content[offset:offset + 24_000]))
+    batches: List[List[Tuple[str, str]]] = []
+    current: List[Tuple[str, str]] = []
+    size = 0
+    for chunk in chunks:
+        if current and size + len(chunk[1]) > 90_000:
+            batches.append(current); current = []; size = 0
+        current.append(chunk); size += len(chunk[1])
+    if current: batches.append(current)
+    summaries: List[str] = []
+    unresolved = sorted({path for batch in batches[8:] for path, _ in batch})
+    for index, batch in enumerate(batches[:8]):
+        material = '\n'.join(f'=== {path} ===\n{text}' for path, text in batch)
+        raw = _call_llm(
+            'Extract only explicit workflow evidence from these versioned skill chunks. '
+            'Return compact raw JSON with paths, goals, ordered actions, branches, inputs, outputs, '
+            'constraints, tools and script roles. Do not invent missing steps.\n' + material
+        )
+        try:
+            summaries.append(yaml.safe_dump(_extract_json(raw), allow_unicode=True, sort_keys=False))
+        except ValueError:
+            unresolved.extend(path for path, _ in batch)
+    return '\n'.join(summaries), sorted(set(unresolved))
+
+def _replacement_mappings(workflow_analysis: Optional[str]) -> List[Tuple[str, str, str]]:
+    try:
+        context = __import__('json').loads(workflow_analysis or '{}')
+    except (TypeError, ValueError):
+        return []
+    raw = context.get('tool_mappings') or {}
+    result: List[Tuple[str, str, str]] = []
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if not isinstance(value, dict):
+                continue
+            action = str(value.get('action') or value.get('status') or '')
+            replacement = str(value.get('replacement') or value.get('framework_tool') or '')
+            if action not in {'replace', 'replaced', 'framework_replaced'} or not replacement:
+                continue
+            result.append((str(value.get('source_tool') or key), replacement, str(value.get('source_script') or '')))
+    return result
+
+def _apply_tool_replacements(plugin: Dict[str, Any], state: Optional[Dict[str, Any]], workflow_analysis: Optional[str]) -> None:
+    mappings = _replacement_mappings(workflow_analysis)
+    skipped_paths = {path for _, _, path in mappings if path}
+    ignored_functions: set[str] = set()
+    try:
+        context = __import__('json').loads(workflow_analysis or '{}')
+        for path, report in (context.get('scripts') or {}).items():
+            if isinstance(report, dict) and report.get('classification') == 'unsupported':
+                skipped_paths.add(str(path))
+                ignored_functions.update(str(name) for name in (report.get('functions') or []))
+    except (TypeError, ValueError):
+        pass
+    if skipped_paths and isinstance(plugin.get('tool_scripts'), list):
+        plugin['tool_scripts'] = [entry for entry in plugin['tool_scripts'] if not isinstance(entry, dict) or str(entry.get('path') or '') not in skipped_paths]
+    if state is None:
+        return
+    replacements = {source: target for source, target, _ in mappings}
+    for config in (state.get('steps') or {}).values():
+        if isinstance(config, dict) and isinstance(config.get('tools'), list):
+            config['tools'] = list(dict.fromkeys(
+                replacements.get(str(tool), str(tool)) for tool in config['tools']
+                if str(tool) not in ignored_functions
+            ))
+
+@router.post('/api/chat/generate_plugin/analyze_skill', response_model=AnalyzeSkillResponse)
+async def analyze_skill(req: AnalyzeSkillRequest) -> AnalyzeSkillResponse:
+    inject_model_config(req.llm_config or {})
+    evidence, deterministically_unresolved = _hierarchical_evidence(req.skill_package)
+    package_prompt = _skill_package_prompt({**req.skill_package, 'files': [
+        {**f, 'content': ''} for f in req.skill_package.get('files', [])
+    ]}, '') + '\n=== HIERARCHICAL EVIDENCE ===\n' + evidence
+    script_inventory = _script_inventory(req.skill_package)
+    from lazymind.chat.service.component.tool_registry import get_all_tool_groups
+    tool_catalog = get_all_tool_groups()
+    prompt = '''You are a conservative workflow suitability analyzer. Decide whether the versioned
+skill package contains a real executable workflow. Never invent steps merely to satisfy a schema.
+Pure rules, preferences, reference knowledge, or unordered tool collections are not workflows.
+Unsafe scripts must be classified as ignored with a user-visible reason; do not fail the whole
+analysis merely because such a script exists. Use needs_confirmation only when the ignored script
+is indispensable to the selected workflow and has no safe framework replacement.
+Return raw JSON with: verdict (generatable|needs_confirmation|rejected), verdict_code, message,
+candidates (id,name,goal,inputs,outputs,steps,evidence_paths), coverage (files map to disposition),
+tool_mappings, and scripts. Use needs_confirmation when one or more independent sub-workflows exist.
+Each tool_mappings value must use {action, source_tool, replacement, source_script, reason}; action is
+replace only for a proven equivalent framework capability, otherwise preserve or confirmation_required.
+Use rejected when no genuine workflow exists. Every manifest path must appear in coverage.
+Framework tool equivalence rules: infrastructure capabilities such as KB search may replace a
+different implementation when I/O semantics match. Provider-bound cloud products are equivalent
+only when provider_id/product_id match; a generic A/B-backed web_search must not replace an
+explicitly requested XX Search. Report every replacement and skipped script to the user.
+
+Framework capability catalog:
+''' + yaml.safe_dump(tool_catalog, allow_unicode=True, sort_keys=False) + '''
+
+Deterministic script inventory (authoritative):
+''' + yaml.safe_dump(script_inventory, allow_unicode=True, sort_keys=False) + '''
+
+''' + package_prompt
+    raw = _call_llm(prompt)
+    try:
+        data = _extract_json(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f'analysis JSON parse error: {exc}') from exc
+    verdict = str(data.get('verdict') or 'rejected')
+    if verdict not in {'generatable', 'needs_confirmation', 'rejected'}:
+        verdict = 'rejected'
+    candidates = data.get('candidates') if isinstance(data.get('candidates'), list) else []
+    if verdict == 'generatable' and not candidates:
+        verdict = 'rejected'
+        data['verdict_code'] = 'workflow_evidence_missing'
+    manifest_paths = [str(f.get('path') or '') for f in req.skill_package.get('files', [])]
+    coverage = data.get('coverage') if isinstance(data.get('coverage'), dict) else {}
+    covered = coverage.setdefault('files', {})
+    for path in manifest_paths:
+        if path and path not in covered:
+            covered[path] = 'unresolved'
+    for path in deterministically_unresolved:
+        covered[path] = 'unresolved'
+    if any(v == 'unresolved' for v in covered.values()) and verdict == 'generatable':
+        verdict = 'needs_confirmation'
+        data['verdict_code'] = 'generation_coverage_incomplete'
+    return AnalyzeSkillResponse(
+        verdict=verdict, verdict_code=str(data.get('verdict_code') or ''),
+        message=str(data.get('message') or ''), candidates=candidates,
+        coverage=coverage,
+        tool_mappings=data.get('tool_mappings') if isinstance(data.get('tool_mappings'), dict) else {},
+        scripts=script_inventory,
+    )
 
 @router.post(
     '/api/chat/generate_plugin/design_brief',
@@ -678,10 +904,12 @@ async def generate_design_brief(req: DesignBriefRequest) -> DesignBriefResponse:
     """
     inject_model_config(req.llm_config or {})
 
-    if req.skill_content and req.skill_content.strip():
+    package_prompt = _skill_package_prompt(req.skill_package, req.skill_content or '')
+    if package_prompt.strip():
         user_prompt = (
             f'Plugin name: {req.name}\n\n'
-            f'Convert the following skill content into a design brief:\n\n{req.skill_content}'
+            f'Convert the following versioned skill package into a design brief. '
+            f'Do not invent behavior for unresolved files. Confirmed workflow:\n{req.workflow_analysis or ""}\n\n{package_prompt}'
         )
     else:
         user_prompt = (
@@ -717,10 +945,12 @@ async def generate_skeleton(req: SkeletonRequest) -> SkeletonResponse:
         spec=_PLUGIN_FORMAT_SPEC,
         design_brief_section=_design_brief_section(req.design_brief),
     )
-    if req.skill_content and req.skill_content.strip():
+    package_prompt = _skill_package_prompt(req.skill_package, req.skill_content or '')
+    if package_prompt.strip():
         user_prompt = (
             f'Plugin name: {req.name}\n\n'
-            f'Convert the following skill content into a plugin skeleton:\n\n{req.skill_content}'
+            f'Convert the following versioned skill package into a plugin skeleton. '
+            f'Do not invent behavior for unresolved files. Confirmed workflow:\n{req.workflow_analysis or ""}\n\n{package_prompt}'
         )
     else:
         user_prompt = (
@@ -743,6 +973,7 @@ async def generate_skeleton(req: SkeletonRequest) -> SkeletonResponse:
         plugin_dict = yaml.safe_load(plugin_yaml) or {}
     except yaml.YAMLError as exc:
         raise HTTPException(status_code=500, detail=f'Phase 1 YAML parse error: {exc}') from exc
+    _apply_tool_replacements(plugin_dict, None, req.workflow_analysis)
 
     # Validate skeleton fields + patch retry
     for attempt in range(MAX_PATCH_RETRIES):
@@ -906,7 +1137,10 @@ async def generate_state_machine(req: StateMachineRequest) -> StateMachineRespon
             logger.warning('[staged/state_machine] %s', warn_msg)
             field_warnings.append(warn_msg)
 
+    _apply_tool_replacements(plugin_dict, state_dict, req.workflow_analysis)
+
     final_plugin_yaml = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
+    state_yaml = yaml.dump(state_dict, allow_unicode=True, sort_keys=False)
     return StateMachineResponse(state_yaml=state_yaml, plugin_yaml=final_plugin_yaml, warnings=field_warnings)
 
 
@@ -958,6 +1192,7 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
 
     scenario_md = data.get('scenario_md', '')
     scripts: Dict[str, str] = data.get('scripts') or {}
+    scripts.update(req.source_scripts)
 
     if not scenario_md:
         logger.warning('[staged/scenario_scripts] scenario_md is empty, using fallback')
@@ -965,6 +1200,7 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
 
     # --- Node-level security check + dry-run import + fix retry loop ---
     safe_scripts: Dict[str, str] = {}
+    script_warnings: List[str] = []
     for filename, code in scripts.items():
         current_code = code
         dropped = False
@@ -1045,8 +1281,10 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
 
         if not dropped:
             safe_scripts[filename] = current_code
+        else:
+            script_warnings.append(f'已忽略未通过安全校验的脚本: {filename}')
 
-    return ScenarioScriptsResponse(scenario_md=scenario_md, scripts=safe_scripts)
+    return ScenarioScriptsResponse(scenario_md=scenario_md, scripts=safe_scripts, warnings=script_warnings)
 
 
 # ---------------------------------------------------------------------------

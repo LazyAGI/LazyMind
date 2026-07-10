@@ -75,6 +75,10 @@ export interface PluginDraftRecord {
   source_type: string;
   source_skill_id: string;
   source_skill_name: string;
+  source_skill_revision_id: string;
+  source_skill_revision_no: number;
+  source_skill_tree_hash: string;
+  source_analysis_id: string;
   // Optimistic-lock version. Increment on every save that touches plugin_yaml_content or state_yaml_content.
   version: number;
   created_at: string;
@@ -87,6 +91,7 @@ export interface PluginDraftRecord {
   published_status: string;
   base_revision_id: string;
   draft_dirty: boolean;
+  last_repair_run_id: string;
 }
 
 export interface ListPluginDraftsResponse {
@@ -210,7 +215,15 @@ export interface RepairPluginDraftPayload {
   // Which part to repair: 'statemachine' | 'ui' | 'scenario'
   // 'statemachine' and 'ui' maps to state.yml repair; 'scenario' maps to scenario.md repair.
   target?: string;
+  mode?: 'plugin_local' | 'source_aware';
+  draft_version: number;
+  source_analysis_id?: string;
 }
+
+export interface WorkflowCandidate { id: string; name?: string; goal?: string; inputs?: unknown; outputs?: unknown; steps?: unknown; evidence_paths?: string[] }
+export interface PluginGenerationAnalysis { analysis_id: string; status: string; verdict_code: string; message: string; source_skill_revision_id: string; source_skill_revision_no: number; source_skill_tree_hash: string; candidates: WorkflowCandidate[]; selected_candidate_id: string; coverage: unknown; tool_mappings: unknown; scripts: Record<string,{classification:string;reason?:string}> }
+export async function getPluginGenerationAnalysis(id: string): Promise<PluginGenerationAnalysis> { const r=await axiosInstance.get<CoreResponse<PluginGenerationAnalysis>>(`${coreBasePath}/plugin-drafts/${id}/generation-analysis`); return r.data.data }
+export async function confirmPluginWorkflow(id: string, payload: {analysis_id:string;candidate_id:string;source_skill_revision_id:string;draft_version:number}): Promise<void> { await axiosInstance.post(`${coreBasePath}/plugin-drafts/${id}:confirm-workflow`,payload) }
 
 // Trigger AI repair for a plugin draft with warnings or incomplete state.yml.
 // Sends current YAML content to Python /repair endpoint and returns the patched draft.

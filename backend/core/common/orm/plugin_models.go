@@ -137,7 +137,7 @@ type PluginDraft struct {
 	StateLayoutContent string `gorm:"column:state_layout_content;type:text;not null;default:''"`
 	ScenarioContent    string `gorm:"column:scenario_content;type:text;not null;default:''"`
 	ScriptsContent     string `gorm:"column:scripts_content;type:text;not null;default:'{}'"`
-	GenerateStatus     string `gorm:"column:generate_status;type:varchar(16);not null;default:''"`
+	GenerateStatus     string `gorm:"column:generate_status;type:varchar(32);not null;default:''"`
 	// GenerateError stores the last error message when GenerateStatus = 'failed' (migration 20260707120000).
 	GenerateError string `gorm:"column:generate_error;type:text;not null;default:''"`
 	// GenerateWarning stores non-fatal warnings produced during generation (migration 20260709120000).
@@ -150,9 +150,13 @@ type PluginDraft struct {
 	Version int `gorm:"column:version;type:int;not null;default:1"`
 	// Source tracking (migration 20260709130000).
 	// SourceType: '' | 'ai' | 'skill' | 'blank'
-	SourceType      string `gorm:"column:source_type;type:varchar(16);not null;default:''"`
-	SourceSkillID   string `gorm:"column:source_skill_id;type:varchar(36);not null;default:''"`
-	SourceSkillName string `gorm:"column:source_skill_name;type:varchar(255);not null;default:''"`
+	SourceType            string `gorm:"column:source_type;type:varchar(16);not null;default:''"`
+	SourceSkillID         string `gorm:"column:source_skill_id;type:varchar(36);not null;default:''"`
+	SourceSkillName       string `gorm:"column:source_skill_name;type:varchar(255);not null;default:''"`
+	SourceSkillRevisionID string `gorm:"column:source_skill_revision_id;type:varchar(36);not null;default:''"`
+	SourceSkillRevisionNo int64  `gorm:"column:source_skill_revision_no;not null;default:0"`
+	SourceSkillTreeHash   string `gorm:"column:source_skill_tree_hash;type:varchar(64);not null;default:''"`
+	SourceAnalysisID      string `gorm:"column:source_analysis_id;type:varchar(36);not null;default:''"`
 	// DesignBriefContent stores the Phase 0 design brief Markdown (migration 20260709140000).
 	// Empty for old drafts that were generated before Phase 0 was introduced.
 	DesignBriefContent string `gorm:"column:design_brief_content;type:text;not null;default:''"`
@@ -165,6 +169,29 @@ type PluginDraft struct {
 }
 
 func (PluginDraft) TableName() string { return "plugin_drafts" }
+
+type PluginGenerationAnalysis struct {
+	ID, DraftID, UserID, SourceType, SourceSkillID           string
+	SourceSkillRevisionID                                    string
+	SourceSkillRevisionNo                                    int64
+	SourceSkillTreeHash, Status, VerdictCode, VerdictMessage string
+	CandidatesJSON, SelectedCandidateID, CoverageReportJSON  string
+	ToolMappingReportJSON, ScriptReportJSON                  string
+	SourcePackageJSON                                        string
+	CreatedAt, UpdatedAt                                     time.Time
+}
+
+func (PluginGenerationAnalysis) TableName() string { return "plugin_generation_analyses" }
+
+type PluginRepairRun struct {
+	ID, DraftID, UserID, BasePluginRevisionID                         string
+	DraftVersionBefore                                                int
+	Target, Mode, SourceAnalysisID, SourceSkillRevisionID, RepairHint string
+	DiagnosticsBeforeJSON, ChangesJSON, DiagnosticsAfterJSON, Status  string
+	CreatedAt, UpdatedAt                                              time.Time
+}
+
+func (PluginRepairRun) TableName() string { return "plugin_repair_runs" }
 
 type PluginResource struct {
 	ID, PluginRef, PluginID, OwnerUserID, OwnerScope, SourceType, RelativeRoot string
