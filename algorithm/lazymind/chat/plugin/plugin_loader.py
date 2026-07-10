@@ -79,6 +79,11 @@ class StateMachine:
         }
         # Per-step route and skipif metadata, keyed by step id.
         steps_raw: Dict[str, Any] = steps or {}
+        self._step_ids: set[str] = {
+            step_id
+            for step_id, step_cfg in steps_raw.items()
+            if isinstance(step_id, str) and isinstance(step_cfg, dict)
+        }
         self._route: Dict[str, str] = {}
         self._skipif: Dict[str, str] = {}
         for step_id, step_cfg in steps_raw.items():
@@ -164,7 +169,7 @@ class StateMachine:
         visited: set = set()
         for e in edges:
             tgt = e['to']
-            if tgt not in self._RESERVED and tgt not in visited:
+            if tgt not in self._RESERVED and tgt in self._step_ids and tgt not in visited:
                 visited.add(tgt)
                 seen.append(tgt)
         return seen
@@ -174,7 +179,7 @@ class StateMachine:
 
         A step is always reachable from itself (retry semantics).
         """
-        if target_step == current_step and target_step not in self._RESERVED:
+        if target_step == current_step and target_step in self._step_ids:
             return True
         return target_step in self.get_reachable_steps(current_step)
 
