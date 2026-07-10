@@ -7,6 +7,7 @@ import { getApiBaseUrl } from "@/runtime/apiBase";
 import {
   ensureLocalSession,
   isLocalSessionEnabled,
+  localSessionInitialized,
   restoreLocalSessionAndGetToken,
 } from "@/runtime/localSession";
 
@@ -336,9 +337,12 @@ export const handleError = async (error: AxiosError) => {
 };
 
 axiosInstance.interceptors.request.use(
-  async (config) => {
-    if (isLocalSessionEnabled()) {
-      await ensureLocalSession();
+  (config) => {
+    if (
+      isLocalSessionEnabled() &&
+      (!AgentAppsAuth.getUserInfo()?.token || !localSessionInitialized)
+    ) {
+      return ensureLocalSession().then(() => applyOptionalAuthHeader(config));
     }
     return applyOptionalAuthHeader(config);
   },

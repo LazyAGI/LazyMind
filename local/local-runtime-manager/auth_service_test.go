@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +110,7 @@ func TestAuthServiceInstallRequirementsUsesUVOnly(t *testing.T) {
 
 func TestAuthServiceGenerateAPIPermissionsUsesRuntimeOutput(t *testing.T) {
 	repo := t.TempDir()
+	t.Setenv(runtimeRootEnvVar, filepath.Join(repo, "runtime"))
 	writeComposeFixture(t, repo)
 	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
 	if err != nil {
@@ -150,4 +152,31 @@ func TestAuthServiceGenerateAPIPermissionsUsesRuntimeOutput(t *testing.T) {
 	}
 	runner.assertCommandCount(1)
 	assertEnvContains(t, authServiceEnv(RuntimeConfig{}, paths), authServicePermissionsEnvVar+"="+output)
+}
+
+func TestAuthServiceGenerateAPIPermissionsPreservesOutputStatError(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv(runtimeRootEnvVar, filepath.Join(repo, "runtime"))
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+
+	runner := &fakeRunner{t: t}
+	runner.handlers = append(runner.handlers, func(Command) (CommandResult, error) {
+		return CommandResult{}, nil
+	})
+
+	manager := NewAuthServiceManager(runner)
+	err = manager.generateAPIPermissions(context.Background(), paths)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("generate API permissions error = %v, want wrapped os.ErrNotExist", err)
+	}
+	if !strings.Contains(err.Error(), "output file error") {
+		t.Fatalf("generate API permissions error = %q, want output file context", err)
+	}
 }

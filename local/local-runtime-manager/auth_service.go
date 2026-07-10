@@ -242,8 +242,12 @@ func (m *AuthServiceManager) generateAPIPermissions(ctx context.Context, paths R
 	if runErr != nil {
 		return fmt.Errorf("generate auth-service API permissions failed: %w (%s)", runErr, strings.TrimSpace(res.Stderr))
 	}
-	if info, err := os.Stat(output); err != nil || info.IsDir() {
-		return fmt.Errorf("generate auth-service API permissions did not create %s", output)
+	info, err := os.Stat(output)
+	if err != nil {
+		return fmt.Errorf("generate auth-service API permissions output file error: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("generate auth-service API permissions output path %s is a directory", output)
 	}
 	return nil
 }

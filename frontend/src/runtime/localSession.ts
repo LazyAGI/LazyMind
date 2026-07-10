@@ -3,7 +3,7 @@ import { apiUrl } from "./apiBase";
 import { runtimeFeatures } from "./features";
 
 let localSessionPromise: Promise<UserInfo | null> | null = null;
-let localSessionInitialized = false;
+export let localSessionInitialized = false;
 
 export interface LocalSessionOptions {
   force?: boolean;
