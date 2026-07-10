@@ -173,12 +173,8 @@ const builtInProviders: ProviderOption[] = [
   },
 ];
 
-// SenseNova base URL presets and new-platform defaults.
-const SENSENOVA_BASE_URL_OPTIONS = [
-  { label: "api.sensenova.cn (经典模式 / Classic Mode)", value: "https://api.sensenova.cn/compatible-mode/v1/" },
-  { label: "token.sensenova.cn (Token Plan 模式 / Token Plan Mode)", value: "https://token.sensenova.cn/v1/chat/completions/" },
-];
-
+// SenseNova base URL values and new-platform defaults.
+const SENSENOVA_CLASSIC_BASE_URL = "https://api.sensenova.cn/compatible-mode/v1/";
 const SENSENOVA_NEW_BASE_URL = "https://token.sensenova.cn/v1/chat/completions/";
 
 const SENSENOVA_DEFAULT_VERIFY_MODEL = "sensenova-6.7-flash-lite";
@@ -630,10 +626,14 @@ export default function ModelProviderPage() {
 
     // Set sensenova base URL preset based on current value.
     if (isSensenovaProvider(providerDraft)) {
-      const matchedOption = SENSENOVA_BASE_URL_OPTIONS.find(
-        (opt) => normalizeFormText(opt.value) === normalizeFormText(currentBaseUrl)
-      );
-      setSensenovaBaseUrlPreset(matchedOption?.value || "");
+      const normalized = normalizeFormText(currentBaseUrl);
+      if (normalized === normalizeFormText(SENSENOVA_CLASSIC_BASE_URL)) {
+        setSensenovaBaseUrlPreset(SENSENOVA_CLASSIC_BASE_URL);
+      } else if (normalized === normalizeFormText(SENSENOVA_NEW_BASE_URL)) {
+        setSensenovaBaseUrlPreset(SENSENOVA_NEW_BASE_URL);
+      } else {
+        setSensenovaBaseUrlPreset("");
+      }
     } else {
       setSensenovaBaseUrlPreset("");
     }
@@ -1335,10 +1335,8 @@ export default function ModelProviderPage() {
               <Select
                 style={{ width: "100%" }}
                 options={[
-                  ...SENSENOVA_BASE_URL_OPTIONS.map((opt) => ({
-                    label: opt.label,
-                    value: opt.value,
-                  })),
+                  { label: t("modelProvider.sensenovaClassicMode"), value: SENSENOVA_CLASSIC_BASE_URL },
+                  { label: t("modelProvider.sensenovaTokenPlanMode"), value: SENSENOVA_NEW_BASE_URL },
                   { label: t("modelProvider.baseUrlCustomOption"), value: "__custom__" },
                 ]}
                 placeholder={t("modelProvider.baseUrlSelectPlaceholder")}

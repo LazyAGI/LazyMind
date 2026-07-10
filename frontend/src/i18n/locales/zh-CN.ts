@@ -261,6 +261,8 @@ const zhCN = {
     baseUrlDefaultExtra: "Base URL 必填，默认值来自供应商内置配置。",
     baseUrlCustomOption: "自定义（在下方输入）",
     baseUrlSelectPlaceholder: "选择 Base URL 预设",
+    sensenovaClassicMode: "经典模式",
+    sensenovaTokenPlanMode: "Token Plan 模式",
     apiKeyCustomExtra: "自定义 Base URL 可不填写 API Key；已配置分组可保留掩码不变。",
     apiKeyDefaultExtra: "默认 Base URL 下 API Key 必填；已配置分组可保留掩码不变。",
     apiKeyPlaceholder: "请输入 API Key",

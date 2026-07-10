@@ -270,6 +270,8 @@ const enUS = {
     baseUrlDefaultExtra: "Base URL is required and defaults to the provider's built-in configuration.",
     baseUrlCustomOption: "Custom (enter below)",
     baseUrlSelectPlaceholder: "Select a Base URL preset",
+    sensenovaClassicMode: "Classic Mode",
+    sensenovaTokenPlanMode: "Token Plan Mode",
     apiKeyCustomExtra: "API Key is optional for custom Base URLs. Existing groups can keep the masked value unchanged.",
     apiKeyDefaultExtra: "API Key is required for the default Base URL. Existing groups can keep the masked value unchanged.",
     apiKeyPlaceholder: "Enter API Key",
@@ -320,7 +322,7 @@ const enUS = {
       qwen:
         "Alibaba Cloud's Qwen model family, covering text, vision, speech, embeddings, rerank, image generation, and image editing with strong China-region ecosystem support.\n\nGet API Key:\nhttps://bailian.console.aliyun.com/?apiKey=1#/api-key\n\nSetup guide:\n\n1. Open Alibaba Cloud Bailian console and sign in with an Alibaba Cloud account.\n\n2. Click your avatar and open API-KEY management.\n\n3. Click Create API-KEY and copy the generated key.",
       sensenova:
-        "SenseNova from SenseTime, a capable Chinese foundation model family for reasoning, multimodal understanding, and general-purpose AI workloads.\n\nOfficial website (register & get API Key):\nhttps://platform.sensenova.cn/\n\nTwo Base URL options are available when configuring:\n- Compatible mode: https://api.sensenova.cn/compatible-mode/v1/\n- Official Platform: https://token.sensenova.cn/v1/chat/completions/\n\nSetup guide:\n\n1. Open the SenseNova platform (https://platform.sensenova.cn/) and complete developer verification if required.\n\n2. Open API-Key management from the console.\n\n3. Create an API key, name it, and copy the generated key.",
+        "SenseNova from SenseTime, a capable Chinese foundation model family for reasoning, multimodal understanding, and general-purpose AI workloads.\n\nOfficial website (register & get API Key):\nhttps://platform.sensenova.cn/\n\nTwo Base URL options are available when configuring:\n- Classic Mode: https://api.sensenova.cn/compatible-mode/v1/\n- Token Plan Mode: https://token.sensenova.cn/v1/chat/completions/\n\nSetup guide:\n\n1. Open the SenseNova platform (https://platform.sensenova.cn/) and complete developer verification if required.\n\n2. Open API-Key management from the console.\n\n3. Create an API key, name it, and copy the generated key.",
       siliconflow:
         "SiliconFlow is an efficient model API aggregation and acceleration platform with broad model access, high concurrency, and cost-effective pricing.\n\nGet API Key:\nhttps://cloud.siliconflow.cn/account/ak\n\nSetup guide:\n\n1. Open SiliconFlow Cloud and register with phone, WeChat, or email.\n\n2. In the console, open API Keys from the left menu.\n\n3. Create a new API key, add an optional description, and copy it for model calls.",
     },

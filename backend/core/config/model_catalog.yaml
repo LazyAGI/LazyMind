@@ -636,8 +636,8 @@ model_providers:
         https://platform.sensenova.cn/
 
         配置时提供两个 Base URL 可选：
-        - 兼容模式：https://api.sensenova.cn/compatible-mode/v1/
-        - 日日新官网平台：https://token.sensenova.cn/v1/chat/completions/
+        - 经典模式：https://api.sensenova.cn/compatible-mode/v1/
+        - Token Plan 模式：https://token.sensenova.cn/v1/chat/completions/
 
         申请教程：
 
