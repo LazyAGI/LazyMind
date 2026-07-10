@@ -86,6 +86,12 @@ type CheckModelProviderData struct {
 
 // doCheck calls the appropriate algorithm endpoint based on provider category and returns the result.
 func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string) (*modelCheckResponse, error) {
+	// The Token Plan mode of SenseNova requires a model name for connectivity check.
+	// If no model is specified, default to a representative model that the platform supports.
+	if model == "" && strings.EqualFold(providerName, "SenseNova") &&
+		normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL) {
+		model = "sensenova-6.7-flash-lite"
+	}
 	var checkEndpoint string
 	switch category {
 	case "ocr":

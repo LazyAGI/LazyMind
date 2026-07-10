@@ -624,7 +624,7 @@ export default function ModelProviderPage() {
       baseUrl: currentBaseUrl,
     });
 
-    // Set sensenova base URL preset based on current value.
+    // Sync the sensenova base URL preset Select with the form value.
     if (isSensenovaProvider(providerDraft)) {
       const normalized = normalizeFormText(currentBaseUrl);
       if (normalized === normalizeFormText(SENSENOVA_CLASSIC_BASE_URL)) {
