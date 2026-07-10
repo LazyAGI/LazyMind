@@ -45,31 +45,31 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 
 	switch args[0] {
 	case "up":
-		profile, repoRoot, err := parseCommonArgs("up", args[1:], c.errOut)
+		opts, err := parseCommonArgs("up", args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
 		return manager.Up(ctx, cfg, paths)
 	case "down":
-		profile, repoRoot, err := parseCommonArgs("down", args[1:], c.errOut)
+		opts, err := parseCommonArgs("down", args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
 		return manager.Down(ctx, cfg, paths)
 	case "status":
-		asJSON, profile, repoRoot, err := parseStatusArgs(args[1:], c.errOut)
+		asJSON, opts, err := parseStatusArgs(args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
@@ -83,25 +83,35 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		}
 		return nil
 	case "reset":
-		scope, profile, repoRoot, err := parseResetArgs(args[1:], c.errOut)
+		scope, opts, err := parseResetArgs(args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
 		return manager.Reset(ctx, cfg, paths, scope)
 	case "service":
-		service, action, profile, repoRoot, err := parseServiceArgs(args[1:], c.errOut)
+		service, action, opts, err := parseServiceArgs(args[1:], c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
 		return manager.RunServiceAction(ctx, cfg, paths, service, action)
+	case "guard":
+		ownerPID, opts, err := parseGuardArgs(args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
+		if err != nil {
+			return err
+		}
+		return runRuntimeGuard(ctx, cfg, paths, ownerPID, defaultGuardPollInterval, ownerProcessAlive, manager.Down)
 	case "internal":
 		return c.runInternal(ctx, manager, args[1:])
 	default:
@@ -119,11 +129,11 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 	sub := args[0]
 	subArgs := args[1:]
 	if sub == "algorithm-run" || sub == "algorithm-down" {
-		service, profile, repoRoot, err := parseAlgorithmInternalArgs(sub, subArgs, c.errOut)
+		service, opts, err := parseAlgorithmInternalArgs(sub, subArgs, c.errOut)
 		if err != nil {
 			return err
 		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
@@ -132,29 +142,16 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		}
 		return manager.algorithm.Down(ctx, paths, service)
 	}
-	profile, repoRoot, err := parseCommonArgs("internal", subArgs, c.errOut)
+	opts, err := parseCommonArgs("internal", subArgs, c.errOut)
 	if err != nil {
 		return err
 	}
-	cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+	cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 	if err != nil {
 		return err
 	}
 
 	switch sub {
-	case "compose-up":
-		return manager.compose.ComposeUp(ctx, cfg, paths)
-	case "compose-down":
-		return manager.compose.ComposeDown(ctx, paths.RepoRoot, cfg.Profile)
-	case "compose-services":
-		services, err := manager.compose.ComposeServices(ctx, paths.RepoRoot)
-		if err != nil {
-			return err
-		}
-		for _, svc := range services {
-			_, _ = io.WriteString(c.out, svc+"\n")
-		}
-		return nil
 	case "local-proxy-run":
 		return manager.localProxy.Run(ctx, cfg, paths)
 	case "local-proxy-down":
@@ -188,100 +185,130 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 	}
 }
 
-func parseAlgorithmInternalArgs(name string, args []string, out io.Writer) (string, string, string, error) {
+func parseAlgorithmInternalArgs(name string, args []string, out io.Writer) (string, RuntimeConfigOptions, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(out)
 	service := fs.String("service", "", "")
-	profile := fs.String("profile", defaultProfileValue(), "")
-	repoRoot := fs.String("repo-root", "", "")
+	opts := addRuntimeFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return "", "", "", err
+		return "", RuntimeConfigOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return "", "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return "", RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
 	if *service == "" {
-		return "", "", "", fmt.Errorf("--service is required")
+		return "", RuntimeConfigOptions{}, fmt.Errorf("--service is required")
 	}
-	return *service, *profile, *repoRoot, nil
+	return *service, opts(), nil
 }
 
-func parseCommonArgs(name string, args []string, out io.Writer) (string, string, error) {
+func parseCommonArgs(name string, args []string, out io.Writer) (RuntimeConfigOptions, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(out)
-	profile := fs.String("profile", defaultProfileValue(), "")
-	repoRoot := fs.String("repo-root", "", "")
+	opts := addRuntimeFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return "", "", err
+		return RuntimeConfigOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
-	return *profile, *repoRoot, nil
+	return opts(), nil
 }
 
-func parseStatusArgs(args []string, out io.Writer) (bool, string, string, error) {
+func parseStatusArgs(args []string, out io.Writer) (bool, RuntimeConfigOptions, error) {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(out)
 	asJSON := fs.Bool("json", false, "")
-	profile := fs.String("profile", defaultProfileValue(), "")
-	repoRoot := fs.String("repo-root", "", "")
+	opts := addRuntimeFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return false, "", "", err
+		return false, RuntimeConfigOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return false, "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return false, RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
-	return *asJSON, *profile, *repoRoot, nil
+	return *asJSON, opts(), nil
 }
 
-func parseResetArgs(args []string, out io.Writer) (ResetScope, string, string, error) {
+func parseResetArgs(args []string, out io.Writer) (ResetScope, RuntimeConfigOptions, error) {
 	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
 	fs.SetOutput(out)
 	scopeText := fs.String("scope", string(ResetScopeKB), "")
-	profile := fs.String("profile", defaultProfileValue(), "")
-	repoRoot := fs.String("repo-root", "", "")
+	opts := addRuntimeFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return "", "", "", err
+		return "", RuntimeConfigOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return "", "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return "", RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
 	scope, err := parseResetScope(*scopeText)
 	if err != nil {
-		return "", "", "", err
+		return "", RuntimeConfigOptions{}, err
 	}
-	return scope, *profile, *repoRoot, nil
+	return scope, opts(), nil
 }
 
-func parseServiceArgs(args []string, out io.Writer) (string, string, string, string, error) {
+func parseServiceArgs(args []string, out io.Writer) (string, string, RuntimeConfigOptions, error) {
 	fs := flag.NewFlagSet("service", flag.ContinueOnError)
 	fs.SetOutput(out)
 	service := fs.String("name", "", "")
 	action := fs.String("action", "", "")
-	profile := fs.String("profile", defaultProfileValue(), "")
-	repoRoot := fs.String("repo-root", "", "")
+	opts := addRuntimeFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return "", "", "", "", err
+		return "", "", RuntimeConfigOptions{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return "", "", "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+		return "", "", RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
 	}
 	if strings.TrimSpace(*service) == "" {
-		return "", "", "", "", fmt.Errorf("--name is required")
+		return "", "", RuntimeConfigOptions{}, fmt.Errorf("--name is required")
 	}
 	if strings.TrimSpace(*action) == "" {
-		return "", "", "", "", fmt.Errorf("--action is required")
+		return "", "", RuntimeConfigOptions{}, fmt.Errorf("--action is required")
 	}
-	return *service, *action, *profile, *repoRoot, nil
+	return *service, *action, opts(), nil
+}
+
+func parseGuardArgs(args []string, out io.Writer) (int, RuntimeConfigOptions, error) {
+	fs := flag.NewFlagSet("guard", flag.ContinueOnError)
+	fs.SetOutput(out)
+	ownerPID := fs.Int("owner-pid", 0, "")
+	opts := addRuntimeFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return 0, RuntimeConfigOptions{}, err
+	}
+	if len(fs.Args()) != 0 {
+		return 0, RuntimeConfigOptions{}, fmt.Errorf("unexpected positional args: %v", fs.Args())
+	}
+	if *ownerPID <= 0 {
+		return 0, RuntimeConfigOptions{}, fmt.Errorf("--owner-pid must be positive")
+	}
+	return *ownerPID, opts(), nil
+}
+
+func addRuntimeFlags(fs *flag.FlagSet) func() RuntimeConfigOptions {
+	repoRoot := fs.String("repo-root", "", "")
+	profile := fs.String("profile", "", "")
+	runtimeRoot := fs.String("runtime-root", "", "")
+	buildRoot := fs.String("build-root", "", "")
+	resourcesRoot := fs.String("resources-root", "", "")
+	return func() RuntimeConfigOptions {
+		return RuntimeConfigOptions{
+			Profile:       *profile,
+			RepoRoot:      *repoRoot,
+			RuntimeRoot:   *runtimeRoot,
+			BuildRoot:     *buildRoot,
+			ResourcesRoot: *resourcesRoot,
+		}
+	}
 }
 
 func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "Usage:\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local up --profile <profile>\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local down --profile <profile>\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local status --json\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local reset --scope kb|all --profile <profile>\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local service --name file-watcher --action build|start|stop --profile <profile>\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|scan-control-plane-run|scan-control-plane-down|file-watcher-run|file-watcher-down|frontend-run|frontend-down|milvus-lite-run|milvus-lite-down|algorithm-run|algorithm-down --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager up\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager down\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager status --json\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager reset --scope kb|all\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager service --name file-watcher --action build|start|stop\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager guard --owner-pid <pid>\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager internal local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|scan-control-plane-run|scan-control-plane-down|file-watcher-run|file-watcher-down|frontend-run|frontend-down|milvus-lite-run|milvus-lite-down|algorithm-run|algorithm-down\n")
 }

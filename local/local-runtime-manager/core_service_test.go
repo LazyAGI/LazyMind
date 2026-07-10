@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -13,7 +14,7 @@ func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
 	manager := NewCoreServiceManager(runner)
-	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
@@ -25,7 +26,7 @@ func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
 		return CommandResult{}, nil
 	})
 
-	if err := manager.buildCore(context.Background(), paths); err != nil {
+	if err := manager.buildCore(context.Background(), cfg, paths); err != nil {
 		t.Fatalf("build core: %v", err)
 	}
 	runner.assertCommandCount(1)
@@ -52,6 +53,24 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_OFFICE_CONVERT_URL=http://127.0.0.1:18082/v1/office/to-pdf")
 	assertEnvContains(t, env, "LAZYMIND_READONLY_DB_DRIVER=sqlite")
 	assertEnvContains(t, env, "LAZYMIND_READONLY_DB_DSN="+paths.LazyLLMDBPath)
+}
+
+func TestCoreServiceEnvUsesRuntimeUploadPaths(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	env := coreServiceEnv(cfg, paths)
+
+	assertEnvContains(t, env, "LAZYMIND_UPLOAD_ROOT="+paths.UploadRoot)
+	assertEnvContains(t, env, "LAZYMIND_SHARED_UPLOAD_DIR="+paths.UploadRoot)
+	assertEnvContains(t, env, "LAZYLLM_TEMP_DIR="+paths.LazyLLMTempDir)
+	assertEnvContains(t, env, "LAZYMIND_OCR_CACHE_DIR="+paths.OCRCacheDir)
+	assertEnvContains(t, env, "LAZYMIND_SUBAGENT_WORKSPACE="+paths.SubagentDataDir)
+	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "core", "uploads"))
+	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "subagent"))
 }
 
 func TestCoreServiceWaitForDatabasePreparesSQLiteDirs(t *testing.T) {
@@ -83,4 +102,13 @@ func assertEnvContains(t *testing.T, env []string, want string) {
 		}
 	}
 	t.Fatalf("missing env %q in %#v", want, env)
+}
+
+func assertEnvNotContains(t *testing.T, env []string, forbidden string) {
+	t.Helper()
+	for _, item := range env {
+		if strings.Contains(item, forbidden) {
+			t.Fatalf("env contains forbidden path %q in %q", forbidden, item)
+		}
+	}
 }

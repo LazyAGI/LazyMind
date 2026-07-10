@@ -143,24 +143,21 @@ func fileRelativePath(fullPath string) string {
 		return ""
 	}
 	cleanPath := filepath.Clean(p)
-	roots := []string{strings.TrimSpace(uploadRoot())}
-	for _, root := range roots {
-		if root == "" {
-			continue
-		}
-		cleanRoot := filepath.Clean(root)
-		rel, err := filepath.Rel(cleanRoot, cleanPath)
-		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			continue
-		}
-		return filepath.ToSlash(rel)
-	}
 	subRoot := filepath.Clean(subagentWorkspaceRoot())
-	rel, err := filepath.Rel(subRoot, cleanPath)
+	if rel, err := filepath.Rel(subRoot, cleanPath); err == nil &&
+		rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "subagent/" + filepath.ToSlash(rel)
+	}
+	root := strings.TrimSpace(uploadRoot())
+	if root == "" {
+		return ""
+	}
+	cleanRoot := filepath.Clean(root)
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return ""
 	}
-	return "subagent/" + filepath.ToSlash(rel)
+	return filepath.ToSlash(rel)
 }
 
 func relFromStaticFilesURL(raw string) string {

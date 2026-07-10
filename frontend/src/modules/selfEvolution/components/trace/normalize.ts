@@ -53,14 +53,33 @@ function normalizeTraceNode(value: unknown, fallbackId: string): TraceNode | und
     name: getStringField(value, ["name", "title", "module_name"]) || "Unnamed",
     type: getStringField(value, ["type", "kind"]) || "node",
     status: getStringField(value, ["status", "state"]) || "unknown",
-    latencyMs: isFiniteNumber(value.latency)
-      ? value.latency * 1000
-      : getNumberField(value, ["latency_ms", "latencyMs", "duration_ms", "durationMs"]),
+    latencyMs: resolveLatencyMs(value),
     input: normalizePayloadPreview(value.input),
     output: normalizePayloadPreview(value.output),
     metadata: getRecordField(value, ["metadata", "meta"]),
     children,
   };
+}
+
+function resolveLatencyMs(value: Record<string, unknown>): number | undefined {
+  if (isFiniteNumber(value.latency)) {
+    return value.latency * 1000;
+  }
+  const latencyFromField = getNumberField(value, [
+    "latency_ms",
+    "latencyMs",
+    "duration_ms",
+    "durationMs",
+  ]);
+  if (isFiniteNumber(latencyFromField)) {
+    return latencyFromField;
+  }
+  const startTime = getNumberField(value, ["start_time", "startTime"]);
+  const endTime = getNumberField(value, ["end_time", "endTime"]);
+  if (isFiniteNumber(startTime) && isFiniteNumber(endTime) && endTime >= startTime) {
+    return (endTime - startTime) * 1000;
+  }
+  return undefined;
 }
 
 function normalizeTraceDetailRecord(value: unknown): TraceDetailObservation | undefined {
@@ -85,8 +104,9 @@ function normalizeTraceDetailRecord(value: unknown): TraceDetailObservation | un
     getNumberField(getRecordField(traceRecord, ["metadata"]), ["latency_ms", "latencyMs"]) ||
     root.latencyMs;
   const status =
-    getStringField(value, ["trace_status", "status"]) ||
-    getStringField(summaryRecord, ["trace_status", "status"]) ||
+    getStringField(summaryRecord, ["status", "trace_status", "traceStatus"]) ||
+    getStringField(getRecordField(traceRecord, ["metadata"]), ["status", "trace_status", "traceStatus"]) ||
+    getStringField(value, ["status", "trace_status", "traceStatus"]) ||
     root.status;
   const query =
     getStringField(value, ["query", "question", "prompt"]) ||

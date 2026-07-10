@@ -28,8 +28,9 @@ type ListenConfig struct {
 }
 
 type AuthConfig struct {
-	Mode           string `yaml:"mode"`
-	AuthServiceURL string `yaml:"authServiceURL"`
+	Mode              string `yaml:"mode"`
+	AuthServiceURL    string `yaml:"authServiceURL"`
+	AutoLoginAllowLAN bool   `yaml:"autoLoginAllowLAN"`
 }
 
 type CORSConfig struct {
@@ -92,8 +93,9 @@ func defaultConfig() Config {
 		},
 		AllowNonLocalBind: false,
 		Auth: AuthConfig{
-			Mode:           "local-rbac",
-			AuthServiceURL: "http://127.0.0.1:8000",
+			Mode:              "local-rbac",
+			AuthServiceURL:    "http://127.0.0.1:8000",
+			AutoLoginAllowLAN: false,
 		},
 		CORS: CORSConfig{
 			AllowedOrigins: []string{"http://localhost:5173", "http://127.0.0.1:5173"},
@@ -172,6 +174,27 @@ func (c *Config) applyEnvOverrides() {
 			return
 		}
 		c.Listen.Port = port
+	}
+
+	if allowLAN := parseBoolEnv(os.Getenv("LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN")); allowLAN != nil {
+		c.Auth.AutoLoginAllowLAN = *allowLAN
+	}
+}
+
+func parseBoolEnv(value string) *bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return nil
+	}
+	switch normalized {
+	case "1", "true", "yes", "on":
+		v := true
+		return &v
+	case "0", "false", "no", "off":
+		v := false
+		return &v
+	default:
+		return nil
 	}
 }
 

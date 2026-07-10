@@ -3,15 +3,27 @@
   width: 100%;
   height: 100%;
   outline: none;
+  overscroll-behavior-x: none;
 
   .react-flow {
     width: 100%;
     height: 100%;
+    overscroll-behavior-x: none;
+  }
+
+  // Tell the browser that horizontal scroll inside the pane is handled
+  // by ReactFlow (pan), so do NOT chain it to browser back/forward navigation.
+  .react-flow__pane,
+  .react-flow__renderer,
+  .react-flow__viewport {
+    overscroll-behavior-x: none;
+    touch-action: pan-y pinch-zoom;
   }
 }
 
 // Step node card
 .step-node {
+  position: relative;
   width: 100%;
   min-width: 90px;
   height: auto;
@@ -27,7 +39,7 @@
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   transition: border-color 0.15s, box-shadow 0.15s;
   box-sizing: border-box;
-  overflow: hidden;
+  // Do not clip — allows source Handle and resize grip to extend beyond the node border
 
   &.is-selected {
     border-color: #1677ff;
@@ -45,11 +57,45 @@
   }
 }
 
+// Right-edge resize grip — always present, visible on node hover
+.step-node-resize-handle {
+  position: absolute;
+  top: 0;
+  // Center the grip on the node's right border: shift it 3px outward so the
+  // 6px-wide hit area straddles the border (3px inside + 3px outside).
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  // Below the source Handle (z-index: 20) so the connection dot stays clickable
+  z-index: 9;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 1px;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 20px;
+    border-radius: 2px;
+    background: #d9d9d9;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+}
+
+.step-node:hover .step-node-resize-handle::after,
+.step-node.is-selected .step-node-resize-handle::after {
+  opacity: 1;
+}
+
 .step-node-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 4px;
+  overflow: hidden;
 }
 
 .step-node-id {
@@ -108,6 +154,8 @@
   height: 10px;
   background: #1677ff;
   border: 2px solid #fff;
+  // Source handle must sit above the resize grip so it is always clickable
+  z-index: 20 !important;
 }
 
 // Terminal nodes — card style (like step nodes)
@@ -139,49 +187,83 @@
   letter-spacing: 0.02em;
 }
 
-// Transition edge label
-.transition-edge-label {
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid #d9d9d9;
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  color: #595959;
+// Transition edge — hover popover
+.transition-edge-popover {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+  padding: 0;
+  min-width: 80px;
+  max-width: 200px;
+  position: relative;
+}
+
+.transition-edge-popover-inner {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background: transparent;
+  border: none;
   cursor: pointer;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: border-color 0.15s;
+  width: 100%;
+  text-align: left;
+  border-radius: 6px;
 
   &:hover {
-    border-color: #1677ff;
-    color: #1677ff;
+    background: #f5f5f5;
   }
 
   &.has-error {
-    border-color: #ff4d4f;
-    color: #cf1322;
+    .transition-edge-popover-text {
+      color: #cf1322;
+    }
   }
 }
 
-.transition-edge-label-empty {
+.transition-edge-popover-icon {
+  font-size: 11px;
+  color: #8c8c8c;
+  flex-shrink: 0;
+}
+
+.transition-edge-popover-text {
+  font-size: 12px;
+  color: #262626;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.transition-edge-popover-empty {
   color: #bfbfbf;
   font-style: italic;
 }
 
-// Static label shown when edge is not selected/hovered but has a condition
-.transition-edge-label-static {
-  background: transparent;
-  padding: 2px 4px;
-  font-size: 11px;
-  color: #8c8c8c;
-  pointer-events: none;
-  max-width: 140px;
+// Down-pointing arrow connecting popover to the edge
+.transition-edge-popover-arrow {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 6px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: block;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 10px;
+    height: 10px;
+    background: #fff;
+    border-right: 1px solid #e0e0e0;
+    border-bottom: 1px solid #e0e0e0;
+  }
 }
 
 // Output slot chips inside step node

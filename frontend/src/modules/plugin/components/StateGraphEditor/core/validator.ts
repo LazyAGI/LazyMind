@@ -140,7 +140,7 @@ export function validateStateGraph(model: GraphModel): ValidationError[] {
     });
   }
 
-  // V7: input slots must be produced by topologically prior nodes
+  // V7: required input slots must be produced by topologically prior nodes
   if (cycleNodes.size === 0) {
     const topoOrder = topoSort(nodes, outgoing);
     const produced = new Set<string>();
@@ -148,28 +148,29 @@ export function validateStateGraph(model: GraphModel): ValidationError[] {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) continue;
       for (const inp of node.inputs) {
-        if (!produced.has(inp)) {
+        // Only enforce slot-produced constraint for required inputs.
+        if (inp.required && !produced.has(inp.slot)) {
           errors.push({
             code: 'V7_INPUT_NOT_PRODUCED',
-            message: `节点 "${nodeId}" 引用的输入 slot "${inp}" 未由前序节点产出`,
+            message: `节点 "${nodeId}" 引用的输入 slot "${inp.slot}" 未由前序节点产出`,
             nodeId: nodeId,
           });
         }
       }
       for (const out of node.outputs) {
-        produced.add(out);
+        produced.add(out.slot);
       }
     }
   }
 
-  // V8: slot types must match definitions
+  // V8: slot references must be defined in plugin.yaml slots
   const slotIds = new Set(Object.keys(model.slots));
   for (const node of nodes) {
     for (const s of [...node.inputs, ...node.outputs]) {
-      if (slotIds.size > 0 && !slotIds.has(s) && s !== '') {
+      if (slotIds.size > 0 && !slotIds.has(s.slot) && s.slot !== '') {
         errors.push({
           code: 'V8_UNKNOWN_SLOT',
-          message: `节点 "${node.id}" 引用了未在 slots 中定义的 slot "${s}"`,
+          message: `节点 "${node.id}" 引用了未在 slots 中定义的 slot "${s.slot}"`,
           nodeId: node.id,
         });
       }

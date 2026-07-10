@@ -103,6 +103,69 @@ components:
                 - deleted_conflict_rows
                 - word
             type: object
+        AggregateDocumentsGroup:
+            properties:
+                count:
+                    format: int64
+                    type: integer
+                key:
+                    additionalProperties:
+                        type: string
+                    type: object
+                size:
+                    format: int64
+                    type: integer
+            required:
+                - count
+                - size
+            type: object
+        AggregateDocumentsRequest:
+            properties:
+                creators:
+                    items:
+                        type: string
+                    type: array
+                data_source_types:
+                    items:
+                        type: string
+                    type: array
+                dataset_ids:
+                    items:
+                        type: string
+                    type: array
+                document_stages:
+                    items:
+                        type: string
+                    type: array
+                file_types:
+                    items:
+                        type: string
+                    type: array
+                group_by:
+                    items:
+                        type: string
+                    type: array
+                tags:
+                    items:
+                        type: string
+                    type: array
+            type: object
+        AggregateDocumentsResponse:
+            properties:
+                groups:
+                    items:
+                        $ref: '#/components/schemas/AggregateDocumentsGroup'
+                    type: array
+                total_count:
+                    format: int64
+                    type: integer
+                total_size:
+                    format: int64
+                    type: integer
+            required:
+                - total_count
+                - total_size
+            type: object
         Algo:
             properties:
                 algo_id:
@@ -358,6 +421,23 @@ components:
                 thinking_duration_s:
                     format: int64
                     type: integer
+            type: object
+        CheckDatabaseConnectionResponse:
+            properties:
+                message:
+                    type: string
+                success:
+                    type: boolean
+                table_count:
+                    type: integer
+                tables:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - message
+                - success
+                - table_count
             type: object
         CheckModelProviderData:
             properties:
@@ -875,6 +955,94 @@ components:
                 - id
                 - word
             type: object
+        DatabaseConnectionRequest:
+            properties:
+                database_name:
+                    type: string
+                db_type:
+                    type: string
+                description:
+                    type: string
+                display_name:
+                    type: string
+                host:
+                    type: string
+                options:
+                    additionalProperties:
+                        type: string
+                    type: object
+                password:
+                    type: string
+                port:
+                    type: integer
+                username:
+                    type: string
+            required:
+                - database_name
+                - db_type
+                - display_name
+                - host
+                - port
+                - username
+            type: object
+        DatabaseConnectionResponse:
+            properties:
+                create_time:
+                    format: date-time
+                    type: string
+                database_name:
+                    type: string
+                db_type:
+                    type: string
+                description:
+                    type: string
+                display_name:
+                    type: string
+                host:
+                    type: string
+                id:
+                    type: string
+                is_verified:
+                    type: boolean
+                last_check_error:
+                    type: string
+                last_checked_at:
+                    format: date-time
+                    type: string
+                options:
+                    additionalProperties:
+                        type: string
+                    type: object
+                port:
+                    type: integer
+                update_time:
+                    format: date-time
+                    type: string
+                username:
+                    type: string
+            required:
+                - create_time
+                - database_name
+                - db_type
+                - description
+                - display_name
+                - host
+                - id
+                - is_verified
+                - port
+                - update_time
+                - username
+            type: object
+        DatabaseConnectionSecretResponse:
+            properties:
+                databaseConnectionResponse:
+                    $ref: '#/components/schemas/DatabaseConnectionResponse'
+                password:
+                    type: string
+            required:
+                - databaseConnectionResponse
+                - password
+            type: object
         Dataset:
             properties:
                 acl:
@@ -888,6 +1056,8 @@ components:
                 create_time:
                     format: date-time
                     type: string
+                created_by_data_source:
+                    type: boolean
                 creator:
                     type: string
                 dataset_id:
@@ -914,10 +1084,6 @@ components:
                     items:
                         $ref: '#/components/schemas/ParserConfig'
                     type: array
-                scan_managed:
-                    type: boolean
-                scan_source_type:
-                    type: string
                 segment_count:
                     format: int64
                     type: integer
@@ -1627,6 +1793,13 @@ components:
                 algos:
                     items:
                         $ref: '#/components/schemas/Algo'
+                    type: array
+            type: object
+        ListDatabaseConnectionsResponse:
+            properties:
+                connections:
+                    items:
+                        $ref: '#/components/schemas/DatabaseConnectionResponse'
                     type: array
             type: object
         ListDatasetDocumentsRequest:
@@ -2401,6 +2574,29 @@ components:
             required:
                 - permission
             type: object
+        UpdateDatabaseConnectionRequest:
+            properties:
+                database_name:
+                    type: string
+                db_type:
+                    type: string
+                description:
+                    type: string
+                display_name:
+                    type: string
+                host:
+                    type: string
+                options:
+                    additionalProperties:
+                        type: string
+                    type: object
+                password:
+                    type: string
+                port:
+                    type: integer
+                username:
+                    type: string
+            type: object
         UpdateDatasetMemberRequest:
             properties:
                 dataset_member:
@@ -2630,221 +2826,6 @@ components:
                 - user_model_provider_group_id
                 - user_model_provider_id
             type: object
-        agentABTestCaseDetailListItemOpenAPIResponse:
-            properties:
-                after:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                baseline:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                before:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                candidate:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                case_id:
-                    type: string
-                delta:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                outcome:
-                    type: string
-                query:
-                    type: string
-            type: object
-        agentABTestCaseDetailListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/agentABTestCaseDetailListItemOpenAPIResponse'
-                    type: array
-                next_page_token:
-                    type: string
-                total_size:
-                    type: integer
-            required:
-                - next_page_token
-                - total_size
-            type: object
-        agentABTestResultOpenAPIResponse:
-            properties:
-                abtest_id:
-                    type: string
-                artifact_id:
-                    type: string
-                artifact_ref:
-                    type: string
-                case_count:
-                    type: integer
-                case_details_summary:
-                    $ref: '#/components/schemas/agentCaseDetailsSummaryOpenAPIResponse'
-                data:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                file_url:
-                    type: string
-                runtime_artifact_id:
-                    type: string
-                schema:
-                    type: string
-                source_artifact_id:
-                    type: string
-            required:
-                - artifact_id
-                - artifact_ref
-                - schema
-            type: object
-        agentCaseDetailsMetricAveragesOpenAPIResponse:
-            properties:
-                answer_correctness:
-                    format: double
-                    type: number
-                context_recall:
-                    format: double
-                    type: number
-                doc_recall:
-                    format: double
-                    type: number
-                faithfulness:
-                    format: double
-                    type: number
-            type: object
-        agentCaseDetailsQuestionTypeOpenAPIResponse:
-            properties:
-                averages:
-                    $ref: '#/components/schemas/agentCaseDetailsMetricAveragesOpenAPIResponse'
-                count:
-                    type: integer
-                question_type:
-                    type: integer
-                question_type_key:
-                    type: string
-                question_type_name:
-                    type: string
-            required:
-                - averages
-                - count
-                - question_type
-                - question_type_key
-                - question_type_name
-            type: object
-        agentCaseDetailsSummaryOpenAPIResponse:
-            properties:
-                question_types:
-                    items:
-                        $ref: '#/components/schemas/agentCaseDetailsQuestionTypeOpenAPIResponse'
-                    type: array
-                total_count:
-                    type: integer
-            required:
-                - total_count
-            type: object
-        agentEvalReportBadCaseListItemOpenAPIResponse:
-            properties:
-                Defect:
-                    type: string
-                Reason:
-                    type: string
-                case_id:
-                    type: string
-                failure_type:
-                    type: string
-                trace_id:
-                    type: string
-            type: object
-        agentEvalReportBadCaseListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/agentEvalReportBadCaseListItemOpenAPIResponse'
-                    type: array
-                next_page_token:
-                    type: string
-                total_size:
-                    type: integer
-            required:
-                - next_page_token
-                - total_size
-            type: object
-        agentEvalReportResultOpenAPIResponse:
-            properties:
-                artifact_id:
-                    type: string
-                artifact_ref:
-                    type: string
-                bad_case_count:
-                    type: integer
-                case_count:
-                    type: integer
-                data:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                report_id:
-                    type: string
-                schema:
-                    type: string
-                trace_coverage:
-                    $ref: '#/components/schemas/agentEvalReportTraceCoverageOpenAPIResponse'
-            required:
-                - artifact_id
-                - artifact_ref
-                - case_count
-                - schema
-            type: object
-        agentEvalReportTraceCoverageOpenAPIResponse:
-            properties:
-                covered_count:
-                    type: integer
-                rate:
-                    format: double
-                    type: number
-                total_count:
-                    type: integer
-            required:
-                - covered_count
-                - rate
-                - total_count
-            type: object
-        agentFileContentOpenAPIRequest:
-            properties:
-                path:
-                    type: string
-            required:
-                - path
-            type: object
-        agentFileContentOpenAPIResponse:
-            properties:
-                content:
-                    type: string
-                file_size:
-                    format: int64
-                    type: integer
-                filename:
-                    type: string
-                path:
-                    type: string
-            required:
-                - content
-                - file_size
-                - filename
-                - path
-            type: object
         agentThreadListOpenAPIResponse:
             properties:
                 next_page_token:
@@ -2882,62 +2863,6 @@ components:
                 - status
                 - thread_id
                 - updated_at
-            type: object
-        agentTraceCompareOpenAPIResponse:
-            properties:
-                a:
-                    $ref: '#/components/schemas/agentTraceDetailOpenAPIResponse'
-                b:
-                    $ref: '#/components/schemas/agentTraceDetailOpenAPIResponse'
-                query:
-                    type: string
-            required:
-                - a
-                - b
-                - query
-            type: object
-        agentTraceDetailOpenAPIResponse:
-            properties:
-                query:
-                    type: string
-                summary:
-                    $ref: '#/components/schemas/agentTraceSummaryOpenAPIResponse'
-                trace:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                trace_id:
-                    type: string
-                trace_status:
-                    type: string
-            required:
-                - query
-                - summary
-                - trace_id
-                - trace_status
-            type: object
-        agentTraceSummaryOpenAPIResponse:
-            properties:
-                latency_ms:
-                    format: double
-                    type: number
-                rerank_count:
-                    type: integer
-                retrieval_count:
-                    type: integer
-                round_count:
-                    type: integer
-                status:
-                    type: string
-                tool_call_count:
-                    type: integer
-            required:
-                - rerank_count
-                - retrieval_count
-                - round_count
-                - status
-                - tool_call_count
             type: object
         checkModelProviderOpenAPIRequest:
             properties:
@@ -2988,6 +2913,13 @@ components:
                 - name
                 - user_model_provider_id
             type: object
+        deleteDatabaseConnectionOpenAPIResponse:
+            properties:
+                deleted:
+                    type: boolean
+            required:
+                - deleted
+            type: object
         deleteModelProviderGroupModelOpenAPIResponse:
             properties:
                 id:
@@ -3001,6 +2933,98 @@ components:
                     type: string
             required:
                 - id
+            type: object
+        diffEntryLineOpenAPIResponse:
+            properties:
+                displayNoNewLineWarning:
+                    type: boolean
+                html:
+                    type: string
+                newLine:
+                    type: integer
+                oldLine:
+                    type: integer
+                text:
+                    type: string
+                type:
+                    type: string
+            required:
+                - text
+                - type
+            type: object
+        diffFileOpenAPIResponse:
+            properties:
+                binary:
+                    type: boolean
+                cache_written:
+                    type: boolean
+                diffEntryLines:
+                    items:
+                        $ref: '#/components/schemas/diffEntryLineOpenAPIResponse'
+                    type: array
+                path:
+                    type: string
+                status:
+                    type: string
+                too_large:
+                    type: boolean
+                type:
+                    type: string
+            required:
+                - binary
+                - cache_written
+                - path
+                - status
+                - too_large
+                - type
+            type: object
+        diffOpenAPIRequest:
+            properties:
+                context_lines:
+                    type: integer
+                lines:
+                    type: integer
+                mode:
+                    type: string
+                new:
+                    $ref: '#/components/schemas/diffRefOpenAPIRequest'
+                new_start:
+                    type: integer
+                old:
+                    $ref: '#/components/schemas/diffRefOpenAPIRequest'
+                old_start:
+                    type: integer
+                path:
+                    type: string
+            required:
+                - new
+                - old
+            type: object
+        diffRefOpenAPIRequest:
+            properties:
+                revision_id:
+                    type: string
+                skill_id:
+                    type: string
+                type:
+                    type: string
+                upload_id:
+                    type: string
+            required:
+                - type
+            type: object
+        diffTreeOpenAPIResponse:
+            properties:
+                cache_written:
+                    type: boolean
+                files:
+                    items:
+                        $ref: '#/components/schemas/diffFileOpenAPIResponse'
+                    type: array
+                user_id:
+                    type: string
+            required:
+                - cache_written
             type: object
         evalSetImportPreviewOpenAPIRequest:
             properties:
@@ -3053,6 +3077,11 @@ components:
                     type: string
                 is_default:
                     type: boolean
+                max_input_tokens:
+                    description: Maximum model input length in tokens; null when unknown
+                    format: int64
+                    nullable: true
+                    type: integer
                 model_type:
                     type: string
                 name:
@@ -3205,6 +3234,98 @@ components:
                 response_style:
                     type: string
             type: object
+        marketEditOpenAPIRequest:
+            properties:
+                category:
+                    type: string
+                description:
+                    type: string
+                name:
+                    type: string
+                source:
+                    $ref: '#/components/schemas/skillSourceOpenAPIRequest'
+                version_note:
+                    type: string
+            type: object
+        marketInstallOpenAPIRequest:
+            properties:
+                market_item_id:
+                    type: string
+            type: object
+        marketInstallOpenAPIResponse:
+            properties:
+                skill_id:
+                    type: string
+            required:
+                - skill_id
+            type: object
+        marketItemOpenAPIResponse:
+            properties:
+                created_at:
+                    type: string
+                icon:
+                    type: string
+                id:
+                    type: string
+                market_item_id:
+                    type: string
+                published_at:
+                    type: string
+                sort_order:
+                    type: integer
+                source:
+                    $ref: '#/components/schemas/skillDetailOpenAPIResponse'
+                source_skill_id:
+                    type: string
+                status:
+                    type: string
+                updated_at:
+                    type: string
+                version_note:
+                    type: string
+            required:
+                - market_item_id
+            type: object
+        marketListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/marketItemOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
+            type: object
+        marketPublishOpenAPIRequest:
+            properties:
+                category:
+                    type: string
+                name:
+                    type: string
+                source:
+                    $ref: '#/components/schemas/skillSourceOpenAPIRequest'
+            required:
+                - category
+                - name
+                - source
+            type: object
+        marketPublishOpenAPIResponse:
+            properties:
+                market_item_id:
+                    type: string
+                source_skill_id:
+                    type: string
+            required:
+                - market_item_id
+                - source_skill_id
+            type: object
         mcpDeleteServerOpenAPIResponse:
             properties:
                 id:
@@ -3277,6 +3398,13 @@ components:
                 content:
                     type: string
             type: object
+        okOpenAPIResponse:
+            properties:
+                ok:
+                    type: boolean
+            required:
+                - ok
+            type: object
         personalizationSettingOpenAPIRequest:
             properties:
                 enabled:
@@ -3290,6 +3418,101 @@ components:
                     type: boolean
             required:
                 - enabled
+            type: object
+        remoteFSCopyOpenAPIRequest:
+            properties:
+                from:
+                    type: string
+                overwrite:
+                    type: boolean
+                to:
+                    type: string
+            required:
+                - from
+                - overwrite
+                - to
+            type: object
+        remoteFSDirOpenAPIRequest:
+            properties:
+                path:
+                    type: string
+                recursive:
+                    type: boolean
+            required:
+                - path
+                - recursive
+            type: object
+        remoteFSExistsOpenAPIResponse:
+            properties:
+                exists:
+                    type: boolean
+            required:
+                - exists
+            type: object
+        remoteFSInfoOpenAPIResponse:
+            properties:
+                binary:
+                    type: boolean
+                file_type:
+                    type: string
+                mime:
+                    type: string
+                path:
+                    type: string
+                size:
+                    format: int64
+                    type: integer
+                type:
+                    type: string
+            required:
+                - path
+                - type
+            type: object
+        remoteFSItemOpenAPIResponse:
+            properties:
+                binary:
+                    type: boolean
+                file_type:
+                    type: string
+                mime:
+                    type: string
+                name:
+                    type: string
+                path:
+                    type: string
+                size:
+                    format: int64
+                    type: integer
+                type:
+                    type: string
+            required:
+                - name
+                - path
+                - type
+            type: object
+        remoteFSListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/remoteFSItemOpenAPIResponse'
+                    type: array
+            type: object
+        remoteFSMoveOpenAPIRequest:
+            properties:
+                from:
+                    type: string
+                to:
+                    type: string
+            required:
+                - from
+                - to
+            type: object
+        remoteFSTrashOpenAPIRequest:
+            properties:
+                path:
+                    type: string
+            required:
+                - path
             type: object
         resourceUpdateTaskListOpenAPIResponse:
             properties:
@@ -3548,25 +3771,24 @@ components:
                         type: string
                     type: array
             type: object
-        skillChildCreateOpenAPIRequest:
+        skillCommitOpenAPIRequest:
             properties:
-                auto_evo:
-                    type: boolean
-                content:
-                    type: string
-                description:
-                    type: string
-                file_ext:
-                    type: string
-                name:
-                    type: string
-                tags:
-                    items:
-                        type: string
-                    type: array
+                draft_version:
+                    format: int64
+                    type: integer
             required:
-                - content
-                - name
+                - draft_version
+            type: object
+        skillCommitOpenAPIResponse:
+            properties:
+                revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+            required:
+                - revision_id
+                - revision_no
             type: object
         skillCreateManagedOpenAPIRequest:
             properties:
@@ -3574,31 +3796,22 @@ components:
                     type: boolean
                 category:
                     type: string
-                children:
-                    items:
-                        $ref: '#/components/schemas/skillChildCreateOpenAPIRequest'
-                    type: array
-                content:
-                    type: string
                 description:
-                    type: string
-                file_ext:
                     type: string
                 is_enabled:
                     type: boolean
                 name:
                     type: string
-                parent_skill_id:
-                    type: string
-                parent_skill_name:
-                    type: string
+                source:
+                    $ref: '#/components/schemas/skillSourceOpenAPIRequest'
                 tags:
                     items:
                         type: string
                     type: array
             required:
-                - content
+                - category
                 - name
+                - source
             type: object
         skillDeleteOpenAPIResponse:
             properties:
@@ -3607,140 +3820,40 @@ components:
             required:
                 - deleted
             type: object
-        skillDetailChildOpenAPIResponse:
-            properties:
-                auto_evo:
-                    type: boolean
-                auto_evo_apply_status:
-                    type: string
-                auto_evo_error:
-                    type: string
-                auto_evo_generation:
-                    format: int64
-                    type: integer
-                content:
-                    type: string
-                description:
-                    type: string
-                file_ext:
-                    type: string
-                has_pending_review_result:
-                    type: boolean
-                is_enabled:
-                    type: boolean
-                latest_version_change:
-                    $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
-                name:
-                    type: string
-                node_type:
-                    type: string
-                parent_id:
-                    type: string
-                parent_skill_id:
-                    type: string
-                parent_skill_name:
-                    type: string
-                review_status:
-                    type: string
-                skill_id:
-                    type: string
-                update_status:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - auto_evo
-                - auto_evo_apply_status
-                - auto_evo_error
-                - auto_evo_generation
-                - content
-                - description
-                - file_ext
-                - has_pending_review_result
-                - is_enabled
-                - name
-                - node_type
-                - parent_id
-                - parent_skill_id
-                - parent_skill_name
-                - review_status
-                - skill_id
-                - update_status
-                - version
-            type: object
         skillDetailOpenAPIResponse:
             properties:
-                auto_evo:
-                    type: boolean
-                auto_evo_apply_status:
-                    type: string
-                auto_evo_error:
-                    type: string
-                auto_evo_generation:
-                    format: int64
-                    type: integer
                 category:
-                    type: string
-                children:
-                    items:
-                        $ref: '#/components/schemas/skillDetailChildOpenAPIResponse'
-                    type: array
-                content:
                     type: string
                 description:
                     type: string
-                file_ext:
+                draft:
+                    $ref: '#/components/schemas/skillDraftSummaryOpenAPIResponse'
+                file_content:
                     type: string
-                has_pending_review_result:
-                    type: boolean
-                is_enabled:
-                    type: boolean
+                head_revision_id:
+                    type: string
+                id:
+                    type: string
                 latest_version_change:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
                     type: string
-                node_type:
-                    type: string
-                parent_id:
-                    type: string
-                parent_skill_id:
-                    type: string
-                parent_skill_name:
-                    type: string
-                review_status:
-                    type: string
                 skill_id:
+                    type: string
+                skill_name:
                     type: string
                 tags:
                     items:
                         type: string
                     type: array
-                update_status:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
             required:
-                - auto_evo
-                - auto_evo_apply_status
-                - auto_evo_error
-                - auto_evo_generation
                 - category
-                - content
                 - description
-                - file_ext
-                - has_pending_review_result
-                - is_enabled
+                - draft
+                - head_revision_id
+                - id
                 - name
-                - node_type
-                - parent_id
-                - parent_skill_id
-                - parent_skill_name
-                - review_status
                 - skill_id
-                - update_status
-                - version
             type: object
         skillDiscardOpenAPIResponse:
             properties:
@@ -3749,13 +3862,54 @@ components:
             required:
                 - discarded
             type: object
+        skillDraftDeleteOpenAPIRequest:
+            properties:
+                expected_draft_version:
+                    format: int64
+                    type: integer
+                path:
+                    type: string
+                recursive:
+                    type: boolean
+            type: object
+        skillDraftMkdirOpenAPIRequest:
+            properties:
+                expected_draft_version:
+                    format: int64
+                    type: integer
+                path:
+                    type: string
+            required:
+                - expected_draft_version
+                - path
+            type: object
+        skillDraftMoveOpenAPIRequest:
+            properties:
+                expected_draft_version:
+                    format: int64
+                    type: integer
+                from:
+                    type: string
+                to:
+                    type: string
+            required:
+                - expected_draft_version
+                - from
+                - to
+            type: object
+        skillDraftMutationOpenAPIResponse:
+            properties:
+                blob_hash:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+            required:
+                - draft_version
+            type: object
         skillDraftPreviewOpenAPIResponse:
             properties:
-                current_content:
-                    type: string
                 diff:
-                    type: string
-                draft_content:
                     type: string
                 draft_source_version:
                     format: int64
@@ -3771,15 +3925,126 @@ components:
                 skill_id:
                     type: string
             required:
-                - current_content
                 - diff
-                - draft_content
                 - draft_source_version
                 - draft_status
                 - outdated
                 - review_result_id
                 - review_status
                 - skill_id
+            type: object
+        skillDraftStateOpenAPIResponse:
+            properties:
+                base_revision_id:
+                    type: string
+                conversation_id:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                has_uncommitted_draft:
+                    type: boolean
+                task_id:
+                    type: string
+            required:
+                - draft_version
+                - has_uncommitted_draft
+            type: object
+        skillDraftStatusOpenAPIResponse:
+            properties:
+                base_revision_id:
+                    type: string
+                conversation_id:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                has_uncommitted_draft:
+                    type: boolean
+                overlay_count:
+                    format: int64
+                    type: integer
+                task_id:
+                    type: string
+            required:
+                - draft_version
+                - has_uncommitted_draft
+                - overlay_count
+            type: object
+        skillDraftSummaryOpenAPIResponse:
+            properties:
+                has_uncommitted_draft:
+                    type: boolean
+                task_id:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - has_uncommitted_draft
+                - version
+            type: object
+        skillDraftUploadOpenAPIRequest:
+            properties:
+                expected_draft_version:
+                    format: int64
+                    type: integer
+                path:
+                    type: string
+                upload_id:
+                    type: string
+            required:
+                - expected_draft_version
+                - path
+                - upload_id
+            type: object
+        skillDraftWriteTextOpenAPIRequest:
+            properties:
+                content:
+                    type: string
+                expected_draft_version:
+                    format: int64
+                    type: integer
+                path:
+                    type: string
+            required:
+                - content
+                - expected_draft_version
+                - path
+            type: object
+        skillExistsOpenAPIResponse:
+            properties:
+                exists:
+                    type: boolean
+            required:
+                - exists
+            type: object
+        skillFSListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/skillTreeNodeOpenAPIResponse'
+                    type: array
+            type: object
+        skillFileOpenAPIResponse:
+            properties:
+                binary:
+                    type: boolean
+                blob_hash:
+                    type: string
+                content:
+                    type: string
+                download_url:
+                    type: string
+                file_type:
+                    type: string
+                mime:
+                    type: string
+                path:
+                    type: string
+            required:
+                - binary
+                - path
             type: object
         skillGenerateOpenAPIRequest:
             properties:
@@ -3805,122 +4070,40 @@ components:
                 - draft_status
                 - outdated
             type: object
-        skillListChildOpenAPIResponse:
-            properties:
-                auto_evo:
-                    type: boolean
-                auto_evo_apply_status:
-                    type: string
-                auto_evo_error:
-                    type: string
-                auto_evo_generation:
-                    format: int64
-                    type: integer
-                description:
-                    type: string
-                file_ext:
-                    type: string
-                has_pending_review_result:
-                    type: boolean
-                is_enabled:
-                    type: boolean
-                latest_version_change:
-                    $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
-                name:
-                    type: string
-                node_type:
-                    type: string
-                parent_id:
-                    type: string
-                parent_skill_id:
-                    type: string
-                parent_skill_name:
-                    type: string
-                review_status:
-                    type: string
-                skill_id:
-                    type: string
-                update_status:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - auto_evo
-                - auto_evo_apply_status
-                - auto_evo_error
-                - auto_evo_generation
-                - description
-                - file_ext
-                - has_pending_review_result
-                - is_enabled
-                - name
-                - node_type
-                - parent_id
-                - parent_skill_id
-                - parent_skill_name
-                - review_status
-                - skill_id
-                - update_status
-                - version
-            type: object
         skillListItemOpenAPIResponse:
             properties:
-                auto_evo:
-                    type: boolean
-                auto_evo_apply_status:
-                    type: string
-                auto_evo_error:
-                    type: string
-                auto_evo_generation:
-                    format: int64
-                    type: integer
                 category:
                     type: string
-                children:
-                    items:
-                        $ref: '#/components/schemas/skillListChildOpenAPIResponse'
-                    type: array
                 description:
                     type: string
-                has_pending_review_result:
-                    type: boolean
-                is_enabled:
-                    type: boolean
+                draft:
+                    $ref: '#/components/schemas/skillDraftSummaryOpenAPIResponse'
+                file_content:
+                    type: string
+                head_revision_id:
+                    type: string
+                id:
+                    type: string
                 latest_version_change:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
                     type: string
-                node_type:
-                    type: string
-                review_status:
-                    type: string
                 skill_id:
+                    type: string
+                skill_name:
                     type: string
                 tags:
                     items:
                         type: string
                     type: array
-                update_status:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
             required:
-                - auto_evo
-                - auto_evo_apply_status
-                - auto_evo_error
-                - auto_evo_generation
                 - category
                 - description
-                - has_pending_review_result
-                - is_enabled
+                - draft
+                - head_revision_id
+                - id
                 - name
-                - node_type
-                - review_status
                 - skill_id
-                - update_status
-                - version
             type: object
         skillListOpenAPIResponse:
             properties:
@@ -3963,6 +4146,10 @@ components:
                     type: string
                 diff:
                     type: string
+                diffEntryLines:
+                    items:
+                        $ref: '#/components/schemas/diffEntryLineOpenAPIResponse'
+                    type: array
                 id:
                     type: string
                 requestid:
@@ -3990,6 +4177,103 @@ components:
                 - time
                 - type
                 - userid
+            type: object
+        skillRevisionListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/skillRevisionOpenAPIResponse'
+                    type: array
+            type: object
+        skillRevisionOpenAPIResponse:
+            properties:
+                change_source:
+                    type: string
+                created_at:
+                    type: string
+                created_by:
+                    type: string
+                file_content:
+                    type: string
+                id:
+                    type: string
+                message:
+                    type: string
+                parent_revision_id:
+                    type: string
+                revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+                skill_id:
+                    type: string
+                tree_hash:
+                    type: string
+            required:
+                - change_source
+                - created_at
+                - id
+                - revision_id
+                - revision_no
+                - skill_id
+                - tree_hash
+            type: object
+        skillRollbackDiffFileOpenAPIResponse:
+            properties:
+                path:
+                    type: string
+                status:
+                    type: string
+            required:
+                - path
+                - status
+            type: object
+        skillRollbackDiffTreeOpenAPIResponse:
+            properties:
+                files:
+                    items:
+                        $ref: '#/components/schemas/skillRollbackDiffFileOpenAPIResponse'
+                    type: array
+            type: object
+        skillRollbackOpenAPIRequest:
+            properties:
+                revision_id:
+                    type: string
+                target_revision_id:
+                    type: string
+            type: object
+        skillRollbackOpenAPIResponse:
+            properties:
+                head_revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+            required:
+                - head_revision_id
+                - revision_no
+            type: object
+        skillRollbackPreviewOpenAPIResponse:
+            properties:
+                tree_diff:
+                    $ref: '#/components/schemas/skillRollbackDiffTreeOpenAPIResponse'
+                warnings:
+                    items:
+                        $ref: '#/components/schemas/skillRollbackWarningOpenAPIResponse'
+                    type: array
+            required:
+                - tree_diff
+            type: object
+        skillRollbackWarningOpenAPIResponse:
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+            required:
+                - code
+                - message
             type: object
         skillShareAcceptOpenAPIResponse:
             properties:
@@ -4081,8 +4365,6 @@ components:
                     type: string
                 source_category:
                     type: string
-                source_parent_skill_name:
-                    type: string
                 source_skill_id:
                     type: string
                 source_user_id:
@@ -4105,7 +4387,6 @@ components:
                 - share_item_id
                 - share_task_id
                 - source_category
-                - source_parent_skill_name
                 - source_skill_id
                 - source_user_id
                 - source_user_name
@@ -4219,6 +4500,20 @@ components:
                 - status_summary
                 - total
             type: object
+        skillSourceOpenAPIRequest:
+            properties:
+                type:
+                    description: 'Source type: uploaded_zip or url.'
+                    type: string
+                upload_id:
+                    description: Completed upload id when type is uploaded_zip.
+                    type: string
+                url:
+                    description: ZIP URL when type is url.
+                    type: string
+            required:
+                - type
+            type: object
         skillTagsOpenAPIResponse:
             properties:
                 tags:
@@ -4226,40 +4521,68 @@ components:
                         type: string
                     type: array
             type: object
+        skillTreeNodeOpenAPIResponse:
+            properties:
+                binary:
+                    type: boolean
+                blob_hash:
+                    type: string
+                children:
+                    items:
+                        $ref: '#/components/schemas/skillTreeNodeOpenAPIResponse'
+                    type: array
+                file_type:
+                    type: string
+                mime:
+                    type: string
+                name:
+                    type: string
+                path:
+                    type: string
+                size:
+                    format: int64
+                    type: integer
+                type:
+                    type: string
+            required:
+                - name
+                - path
+                - type
+            type: object
         skillUpdateManagedOpenAPIRequest:
             properties:
                 auto_evo:
-                    description: Optional. Enable or disable automatic evolution; omit to keep it unchanged.
+                    description: Optional. Enable or disable automatic evolution.
                     type: boolean
                 category:
-                    description: Optional for parent skills. Omit for child skills unless moving to another parent.
-                    type: string
-                content:
-                    description: Optional. If present, replaces stored content; omit to keep content unchanged. Empty string means clear content.
+                    description: Optional. Move the skill to another category.
                     type: string
                 description:
-                    description: Optional. Replace the skill description; omit to keep it unchanged.
-                    type: string
-                file_ext:
-                    description: Optional for child skills. File extension such as md; omit to keep it unchanged.
+                    description: Optional. Replace product metadata description; SKILL.md is not rewritten.
                     type: string
                 is_enabled:
-                    description: Optional for parent skills. Enable or disable the skill; omit to keep it unchanged.
+                    description: Optional. Enable or disable the skill.
                     type: boolean
                 name:
-                    description: Optional. Rename the skill; omit to keep the current name.
+                    description: Optional. Rename the directory skill.
                     type: string
-                parent_skill_id:
-                    description: Optional and only valid for child skill updates. Moves the child under this parent skill. Do not send when updating a parent skill.
-                    type: string
-                parent_skill_name:
-                    description: Optional and only valid for child skill updates when parent_skill_id is omitted. Do not send when updating a parent skill, even as an empty string.
-                    type: string
+                source:
+                    $ref: '#/components/schemas/skillSourceOpenAPIRequest'
+                    description: Optional. Replace the whole skill directory from an uploaded ZIP or URL.
                 tags:
                     description: Optional. Replace tags; omit to keep tags unchanged.
                     items:
                         type: string
                     type: array
+            type: object
+        skillWriteOpenAPIResponse:
+            properties:
+                head_revision_id:
+                    type: string
+                skill_id:
+                    type: string
+            required:
+                - skill_id
             type: object
         systemConfirmOpenAPIResponse:
             properties:
@@ -4500,90 +4823,280 @@ openapi: 3.0.3
 paths:
     /api/core/add_files_to_group:
         post:
-            description: Proxies to parsing service. Multipart form with files.
-            parameters:
-                - in: query
-                  name: group_name
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: override
-                  schema:
-                    default: false
-                    type: boolean
-            requestBody:
-                content:
-                    multipart/form-data:
-                        schema:
-                            properties:
-                                files:
-                                    items:
-                                        format: binary
-                                        type: string
-                                    type: array
-                            type: object
             responses:
                 "200":
-                    description: Returns file ids
-            summary: Upload files and add to knowledge base group
+                    description: OK
+            summary: POST /add_files_to_group
     /api/core/admin:
         get:
             responses:
                 "200":
                     description: OK
-            summary: Admin (requires document.write)
-    /api/core/agent/diffs/{apply_id}/{filename:.*}:
-        get:
-            parameters:
-                - in: path
-                  name: apply_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: filename:.*
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/diffs/{apply_id}/{filename:.*}
-    /api/core/agent/files:content:
+            summary: GET /admin
+    /api/core/admin/skill-market:
         post:
-            description: Read a local agent result file by path and return its text content. Use JSON body to avoid URL path escaping issues.
             requestBody:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/agentFileContentOpenAPIRequest'
+                            $ref: '#/components/schemas/marketPublishOpenAPIRequest'
                 required: true
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/agentFileContentOpenAPIResponse'
-                    description: Agent result file content
-            summary: Read agent result file content
+                                $ref: '#/components/schemas/marketPublishOpenAPIResponse'
+                    description: Published market skill
+            summary: Publish market skill item
             tags:
-                - agent
-    /api/core/agent/reports/{report_id}:content:
-        get:
+                - skill-market
+    /api/core/admin/skill-market/{market_item_id}:
+        patch:
             parameters:
                 - in: path
-                  name: report_id
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/marketEditOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketItemOpenAPIResponse'
+                    description: Edited market skill
+            summary: Edit market skill item
+            tags:
+                - skill-market
+    /api/core/admin/skill-market/{market_item_id}:offline:
+        post:
+            parameters:
+                - in: path
+                  name: market_item_id
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /agent/reports/{report_id}:content
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketItemOpenAPIResponse'
+                    description: Unpublished market skill
+            summary: Unpublish market skill item
+            tags:
+                - skill-market
+    /api/core/agent/candidates:
+        get:
+            description: Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
+            parameters:
+                - in: query
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo candidate list
+            summary: List Evo candidates
+            tags:
+                - agent
+    /api/core/agent/candidates/{candidate_id:.*}:
+        get:
+            description: Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.
+            parameters:
+                - in: path
+                  name: candidate_id:.*
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo candidate
+            summary: Get Evo candidate
+            tags:
+                - agent
+    /api/core/agent/router/ab-strategy:
+        get:
+            description: Proxies Evo GET /router/ab-strategy.
+            parameters:
+                - in: query
+                  name: router_admin_url
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: router_chat_url
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo router AB strategy
+            summary: Get Evo router AB strategy
+            tags:
+                - agent
+        put:
+            description: Proxies Evo PUT /router/ab-strategy.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo router AB strategy
+            summary: Update Evo router AB strategy
+            tags:
+                - agent
+    /api/core/agent/router/algorithms:
+        get:
+            description: Proxies Evo GET /router/algorithms.
+            parameters:
+                - in: query
+                  name: thread_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: algorithm_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: router_admin_url
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: router_chat_url
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo router algorithms
+            summary: List Evo router algorithms
+            tags:
+                - agent
+        post:
+            description: Proxies Evo POST /router/algorithms.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo router algorithm
+            summary: Register Evo router algorithm
+            tags:
+                - agent
+    /api/core/agent/router/algorithms/{algorithm_id}:action:
+        post:
+            description: Proxies Evo POST /router/algorithms/{algorithm_id}:action.
+            parameters:
+                - in: path
+                  name: algorithm_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo router algorithm action
+            summary: Run Evo router algorithm action
+            tags:
+                - agent
+    /api/core/agent/router/status:
+        get:
+            description: Proxies Evo GET /router/status.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo router status
+            summary: Get Evo router status
+            tags:
+                - agent
     /api/core/agent/threads:
         get:
-            description: List the current user's agent threads. Use thread_id from this response to load thread details or history.
+            description: List the current user's Core thread index entries. Core refreshes status from Evo when available.
             parameters:
                 - in: query
                   name: page_size
@@ -4606,95 +5119,28 @@ paths:
             tags:
                 - agent
         post:
+            description: Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /agent/threads
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Created agent thread
+            summary: Create agent thread
+            tags:
+                - agent
     /api/core/agent/threads/{thread_id}:
-        get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}
-    /api/core/agent/threads/{thread_id}/artifacts/{artifact_id}:
-        get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: artifact_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/artifacts/{artifact_id}
-    /api/core/agent/threads/{thread_id}/events/{step_id}:
-        get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: step_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/events/{step_id}
-    /api/core/agent/threads/{thread_id}/flow-status:
-        get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/flow-status
-    /api/core/agent/threads/{thread_id}/history:
-        get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/history
-    /api/core/agent/threads/{thread_id}/records:
-        get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/records
-    /api/core/agent/threads/{thread_id}/results/abtests:
-        get:
-            description: Returns ABTest artifact rows from Evo, with normalized abtest_id, case details summary, and CSV file URL when available.
+        delete:
+            description: Deletes the Evo thread when present and removes Core's local thread index and active-thread row.
             parameters:
                 - in: path
                   name: thread_id
@@ -4706,16 +5152,156 @@ paths:
                     content:
                         application/json:
                             schema:
-                                items:
-                                    $ref: '#/components/schemas/agentABTestResultOpenAPIResponse'
-                                type: array
-                    description: ABTest result rows
-            summary: GET /agent/threads/{thread_id}/results/abtests
+                                additionalProperties: true
+                                type: object
+                    description: Deleted agent thread
+            summary: Delete agent thread
             tags:
                 - agent
-    /api/core/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details:
         get:
-            description: Returns filtered, paginated case details for an ABTest result. keyword matches case text and identifiers; outcome matches exactly.
+            description: Returns the current user's local thread index entry with status refreshed from Evo when available.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Agent thread
+            summary: Get agent thread
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/cancel:
+        post:
+            description: Proxies Evo cancel and releases Core's active-thread lock for the thread.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo command response
+            summary: Cancel agent thread
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/continue:
+        post:
+            description: Proxies Evo continue and updates Core's local thread status and active-thread lock.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo command response
+            summary: Continue agent thread
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/event-trace:stream:
+        get:
+            description: Proxies Evo GET /threads/{thread_id}/event-trace:stream.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: step_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        text/event-stream:
+                            schema:
+                                type: string
+                    description: Evo event stream
+            summary: Stream agent thread event trace
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/events:stream:
+        get:
+            description: Proxies Evo GET /threads/{thread_id}/events:stream.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: step_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        text/event-stream:
+                            schema:
+                                type: string
+                    description: Evo event stream
+            summary: Stream agent thread events
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/gates:
+        get:
+            description: Proxies Evo GET /threads/{thread_id}/gates.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo gate list
+            summary: List agent thread gates
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/gates/{step}/versions/{version}:
+        get:
+            description: Proxies Evo GET /threads/{thread_id}/gates/{step}/versions/{version}.
             parameters:
                 - in: path
                   name: thread_id
@@ -4723,20 +5309,87 @@ paths:
                   schema:
                     type: string
                 - in: path
-                  name: abtest_id
+                  name: step
                   required: true
                   schema:
                     type: string
-                - in: query
-                  name: page_token
-                  required: false
+                - in: path
+                  name: version
+                  required: true
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo gate content
+            summary: Get agent thread gate version
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/gates/{step}/versions/{version}:download:
+        get:
+            description: Proxies Evo GET /threads/{thread_id}/gates/{step}/versions/{version}:download.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
                   schema:
                     type: string
+                - in: path
+                  name: step
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: version
+                  required: true
+                  schema:
+                    type: integer
+                - in: query
+                  name: format
+                  required: false
+                  schema:
+                    enum:
+                        - json
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/octet-stream:
+                            schema:
+                                format: binary
+                                type: string
+                    description: Evo download
+            summary: Download agent thread gate version
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details:
+        get:
+            description: Proxies Evo GET /threads/{thread_id}/gates/abtest/versions/{version}/case-details.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: version
+                  required: true
+                  schema:
+                    type: integer
                 - in: query
                   name: page_size
                   required: false
                   schema:
                     type: integer
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    type: string
                 - in: query
                   name: keyword
                   required: false
@@ -4752,71 +5405,15 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/agentABTestCaseDetailListOpenAPIResponse'
-                    description: ABTest case detail list
-            summary: GET /agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details
+                                additionalProperties: true
+                                type: object
+                    description: Evo AB test case detail page
+            summary: List AB test case details for a gate version
             tags:
                 - agent
-    /api/core/agent/threads/{thread_id}/results/analysis-reports:
+    /api/core/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases:
         get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/results/analysis-reports
-    /api/core/agent/threads/{thread_id}/results/datasets:
-        get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/results/datasets
-    /api/core/agent/threads/{thread_id}/results/diffs:
-        get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/results/diffs
-    /api/core/agent/threads/{thread_id}/results/eval-reports:
-        get:
-            description: Returns eval report artifact rows from Evo, with core-added report_id, bad_case_count, and trace_coverage when available. Existing report fields remain under data except bad_cases, which is served by the dedicated bad-case list endpoint.
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                items:
-                                    $ref: '#/components/schemas/agentEvalReportResultOpenAPIResponse'
-                                type: array
-                    description: Eval report result rows
-            summary: GET /agent/threads/{thread_id}/results/eval-reports
-            tags:
-                - agent
-    /api/core/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases:
-        get:
-            description: Returns filtered, paginated bad cases for an eval report. keyword matches defect and reason text; failure_type matches exactly.
+            description: Proxies Evo GET /threads/{thread_id}/gates/eval/versions/{version}/bad-cases.
             parameters:
                 - in: path
                   name: thread_id
@@ -4824,20 +5421,20 @@ paths:
                   schema:
                     type: string
                 - in: path
-                  name: report_id
+                  name: version
                   required: true
                   schema:
-                    type: string
-                - in: query
-                  name: page_token
-                  required: false
-                  schema:
-                    type: string
+                    type: integer
                 - in: query
                   name: page_size
                   required: false
                   schema:
                     type: integer
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    type: string
                 - in: query
                   name: keyword
                   required: false
@@ -4853,14 +5450,15 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/agentEvalReportBadCaseListOpenAPIResponse'
-                    description: Eval report bad case list
-            summary: GET /agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases
+                                additionalProperties: true
+                                type: object
+                    description: Evo eval bad case page
+            summary: List eval bad cases for a gate version
             tags:
                 - agent
-    /api/core/agent/threads/{thread_id}/results/traces-compare:
+    /api/core/agent/threads/{thread_id}/messages:
         get:
-            description: Compare two trace details in a thread. Query parameters a and b are trace IDs.
+            description: Proxies Evo GET /threads/{thread_id}/messages.
             parameters:
                 - in: path
                   name: thread_id
@@ -4868,13 +5466,13 @@ paths:
                   schema:
                     type: string
                 - in: query
-                  name: a
-                  required: true
+                  name: page_size
+                  required: false
                   schema:
-                    type: string
+                    type: integer
                 - in: query
-                  name: b
-                  required: true
+                  name: page_token
+                  required: false
                   schema:
                     type: string
             responses:
@@ -4882,14 +5480,67 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/agentTraceCompareOpenAPIResponse'
-                    description: Agent trace comparison
-            summary: Compare agent traces
+                                additionalProperties: true
+                                type: object
+                    description: Evo thread messages
+            summary: List agent thread messages
+            tags:
+                - agent
+        post:
+            description: Proxies Evo POST /threads/{thread_id}/messages.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        text/event-stream:
+                            schema:
+                                type: string
+                    description: Evo event stream
+            summary: Send agent thread message
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/pause:
+        post:
+            description: Proxies Evo pause and updates Core's local thread status.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo command response
+            summary: Pause agent thread
             tags:
                 - agent
     /api/core/agent/threads/{thread_id}/results/traces/{trace_id}:
         get:
-            description: Get one trace detail for a thread owned by the current user.
+            description: Proxies Evo GET /threads/{thread_id}/results/traces/{trace_id}.
             parameters:
                 - in: path
                   name: thread_id
@@ -4906,25 +5557,69 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/agentTraceDetailOpenAPIResponse'
-                    description: Agent trace detail
+                                additionalProperties: true
+                                type: object
+                    description: Evo trace detail
             summary: Get agent trace detail
             tags:
                 - agent
-    /api/core/agent/threads/{thread_id}/rounds:
-        get:
+    /api/core/agent/threads/{thread_id}/retry:
+        post:
+            description: Proxies Evo retry and updates Core's local thread status and active-thread lock.
             parameters:
                 - in: path
                   name: thread_id
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: false
             responses:
                 "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/rounds
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo command response
+            summary: Retry agent thread
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/start:
+        post:
+            description: Proxies Evo start and updates Core's local thread status and active-thread lock.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo command response
+            summary: Start agent thread
+            tags:
+                - agent
     /api/core/agent/threads/{thread_id}/steps:
         get:
+            description: Proxies Evo GET /threads/{thread_id}/steps. Core does not read or write step detail rows for this endpoint.
             parameters:
                 - in: path
                   name: thread_id
@@ -4933,121 +5628,15 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/steps
-    /api/core/agent/threads/{thread_id}/steps/{step_id}/records:
-        get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: step_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}/steps/{step_id}/records
-    /api/core/agent/threads/{thread_id}:cancel:
-        post:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /agent/threads/{thread_id}:cancel
-    /api/core/agent/threads/{thread_id}:continue:
-        post:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /agent/threads/{thread_id}:continue
-    /api/core/agent/threads/{thread_id}:events:
-        get:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /agent/threads/{thread_id}:events
-    /api/core/agent/threads/{thread_id}:history:
-        delete:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: DELETE /agent/threads/{thread_id}:history
-    /api/core/agent/threads/{thread_id}:messages:
-        post:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /agent/threads/{thread_id}:messages
-    /api/core/agent/threads/{thread_id}:pause:
-        post:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /agent/threads/{thread_id}:pause
-    /api/core/agent/threads/{thread_id}:retry:
-        post:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /agent/threads/{thread_id}:retry
-    /api/core/agent/threads/{thread_id}:start:
-        post:
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /agent/threads/{thread_id}:start
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo thread steps
+            summary: List agent thread steps
+            tags:
+                - agent
     /api/core/builtin-skills/{builtin_skill_uid}:enable:
         post:
             parameters:
@@ -5058,50 +5647,20 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /builtin-skills/{builtin_skill_uid}:enable
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDetailOpenAPIResponse'
+                    description: Enabled builtin skill
+            summary: Enable builtin directory skill
+            tags:
+                - skills
     /api/core/chat:
         post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            properties:
-                                files:
-                                    items:
-                                        type: string
-                                    type: array
-                                filters:
-                                    type: object
-                                history:
-                                    type: array
-                                query:
-                                    type: string
-                                session_id:
-                                    type: string
-                            type: object
             responses:
                 "200":
-                    description: Chat response
-            summary: Chat with knowledge base
-    /api/core/chat/stream:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            properties:
-                                history:
-                                    type: array
-                                query:
-                                    type: string
-                                session_id:
-                                    type: string
-                            type: object
-            responses:
-                "200":
-                    description: Streaming response
-            summary: Chat with knowledge base (streaming)
+                    description: OK
+            summary: POST /chat
     /api/core/conversation:export:
         post:
             requestBody:
@@ -5155,7 +5714,6 @@ paths:
                     application/json:
                         schema:
                             $ref: '#/components/schemas/ConversationSwitchStatusRequest'
-                            type: object
                 required: true
             responses:
                 "200":
@@ -5191,6 +5749,18 @@ paths:
                                 $ref: '#/components/schemas/ConversationListResponse'
                     description: Conversation list
             summary: Conversation list
+    /api/core/conversations/{conversation_id}/dismissed-plugin-sessions:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/dismissed-plugin-sessions
     /api/core/conversations/{conversation_id}/events:
         get:
             parameters:
@@ -5203,6 +5773,18 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/events
+    /api/core/conversations/{conversation_id}/plugin-sessions:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/plugin-sessions
     /api/core/conversations/{conversation_id}/plugin-sessions:active:
         get:
             parameters:
@@ -5310,6 +5892,18 @@ paths:
                                 $ref: '#/components/schemas/ConversationItem'
                     description: Conversationtext
             summary: Get conversation
+    /api/core/conversations/{name}:ask-answers:
+        patch:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /conversations/{name}:ask-answers
     /api/core/conversations/{name}:detail:
         get:
             parameters:
@@ -5373,16 +5967,10 @@ paths:
             summary: Batch delete conversations
     /api/core/conversations:chat:
         post:
-            description: textConversationtext
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            type: object
             responses:
                 "200":
-                    description: Chat response
-            summary: Conversationtext (requires qa.read)
+                    description: OK
+            summary: POST /conversations:chat
     /api/core/conversations:feedBackChatHistory:
         post:
             requestBody:
@@ -5390,24 +5978,6 @@ paths:
                     application/json:
                         schema:
                             $ref: '#/components/schemas/ConversationFeedbackRequest'
-                            properties:
-                                expected_answer:
-                                    description: text
-                                    type: string
-                                history_id:
-                                    description: text ID
-                                    type: string
-                                reason:
-                                    description: text
-                                    type: string
-                                type:
-                                    description: text
-                                    format: int32
-                                    type: integer
-                            required:
-                                - history_id
-                                - type
-                            type: object
                 required: true
             responses:
                 "200":
@@ -5419,22 +5989,11 @@ paths:
             summary: Feedback conversation history
     /api/core/conversations:resumeChat:
         post:
-            description: Resumetext
             requestBody:
                 content:
                     application/json:
                         schema:
                             $ref: '#/components/schemas/ConversationResumeRequest'
-                            properties:
-                                conversation_id:
-                                    description: Conversation ID
-                                    type: string
-                                history_id:
-                                    description: text，textResumetext ID
-                                    type: string
-                            required:
-                                - conversation_id
-                            type: object
                 required: true
             responses:
                 "200":
@@ -5451,17 +6010,6 @@ paths:
                     application/json:
                         schema:
                             $ref: '#/components/schemas/ConversationSetHistoryRequest'
-                            properties:
-                                deleted_history_id:
-                                    description: textDeletetext ID
-                                    type: string
-                                set_history_id:
-                                    description: text ID
-                                    type: string
-                            required:
-                                - set_history_id
-                                - deleted_history_id
-                            type: object
                 required: true
             responses:
                 "200":
@@ -5473,22 +6021,11 @@ paths:
             summary: Set conversation history
     /api/core/conversations:stopChatGeneration:
         post:
-            description: textConversationtext
             requestBody:
                 content:
                     application/json:
                         schema:
                             $ref: '#/components/schemas/ConversationStopRequest'
-                            properties:
-                                conversation_id:
-                                    description: Conversation ID
-                                    type: string
-                                history_id:
-                                    description: text，text ID
-                                    type: string
-                            required:
-                                - conversation_id
-                            type: object
                 required: true
             responses:
                 "200":
@@ -5498,6 +6035,129 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Stopped successfully
             summary: Stop conversation generation
+    /api/core/data-sources/database-connections:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListDatabaseConnectionsResponse'
+                    description: Database connection list
+            summary: List database connections
+            tags:
+                - data-sources
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DatabaseConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DatabaseConnectionResponse'
+                    description: Created database connection
+            summary: Create database connection
+            tags:
+                - data-sources
+    /api/core/data-sources/database-connections/{connection}:
+        delete:
+            parameters:
+                - in: path
+                  name: connection
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/deleteDatabaseConnectionOpenAPIResponse'
+                    description: Deleted database connection
+            summary: Delete database connection
+            tags:
+                - data-sources
+        get:
+            parameters:
+                - in: path
+                  name: connection
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DatabaseConnectionResponse'
+                    description: Database connection
+            summary: Get database connection
+            tags:
+                - data-sources
+        patch:
+            parameters:
+                - in: path
+                  name: connection
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateDatabaseConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DatabaseConnectionResponse'
+                    description: Updated database connection
+            summary: Update database connection
+            tags:
+                - data-sources
+    /api/core/data-sources/database-connections/{connection}:check:
+        post:
+            parameters:
+                - in: path
+                  name: connection
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CheckDatabaseConnectionResponse'
+                    description: Database connection check result
+            summary: Check database connection
+            tags:
+                - data-sources
+    /api/core/data-sources/database-connections/{connection}:secret:
+        get:
+            parameters:
+                - in: path
+                  name: connection
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DatabaseConnectionSecretResponse'
+                    description: Database connection secret
+            summary: Get database connection secret
+            tags:
+                - data-sources
     /api/core/data-sources/local-fs-chat-setting:
         get:
             responses:
@@ -5610,7 +6270,6 @@ paths:
                     application/json:
                         schema:
                             $ref: '#/components/schemas/Dataset'
-                            type: object
                 required: false
             responses:
                 "200":
@@ -5669,7 +6328,6 @@ paths:
                     application/json:
                         schema:
                             $ref: '#/components/schemas/Dataset'
-                            type: object
                 required: false
             responses:
                 "200":
@@ -7205,13 +7863,13 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: Health check
+            summary: GET /health
     /api/core/hello:
         get:
             responses:
                 "200":
                     description: OK
-            summary: Hello (requires user.read)
+            summary: GET /hello
     /api/core/inner/word_group:apply:
         post:
             requestBody:
@@ -7292,7 +7950,6 @@ paths:
                     application/json:
                         schema:
                             $ref: '#/components/schemas/AddACLRequest'
-                            type: object
                 required: true
             responses:
                 "200":
@@ -7561,50 +8218,22 @@ paths:
             summary: Batch query knowledge base permissions
     /api/core/list_files:
         get:
-            description: Proxies to parsing service.
-            parameters:
-                - in: query
-                  name: limit
-                  schema:
-                    type: integer
-                - in: query
-                  name: details
-                  schema:
-                    default: true
-                    type: boolean
-                - in: query
-                  name: alive
-                  schema:
-                    type: boolean
             responses:
                 "200":
-                    description: Returns file list with status
-            summary: List files in knowledge base
+                    description: OK
+            summary: GET /list_files
     /api/core/list_files_in_group:
         get:
-            parameters:
-                - in: query
-                  name: group_name
-                  schema:
-                    type: string
-                - in: query
-                  name: limit
-                  schema:
-                    type: integer
-                - in: query
-                  name: alive
-                  schema:
-                    type: boolean
             responses:
                 "200":
-                    description: Returns file list
-            summary: List files in a knowledge base group
+                    description: OK
+            summary: GET /list_files_in_group
     /api/core/list_kb_groups:
         get:
             responses:
                 "200":
-                    description: Returns group names
-            summary: List knowledge base groups
+                    description: OK
+            summary: GET /list_kb_groups
     /api/core/mcp_servers:
         get:
             parameters:
@@ -8091,7 +8720,7 @@ paths:
             summary: POST /model_providers/{model_provider_id}/groups/{group_id}/keys
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models:
         get:
-            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models).
+            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input length in tokens. Custom or unknown models return null.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -8216,7 +8845,7 @@ paths:
                 - model_providers
     /api/core/model_providers/models:
         get:
-            description: Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+            description: Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model's maximum input length in tokens; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
             parameters:
                 - in: query
                   name: model_type
@@ -8418,6 +9047,52 @@ paths:
             summary: Set personalization setting
             tags:
                 - personalization
+    /api/core/plugin-drafts:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugin-drafts
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-drafts
+    /api/core/plugin-drafts/{draft_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /plugin-drafts/{draft_id}
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugin-drafts/{draft_id}
+    /api/core/plugin-drafts/{draft_id}:save:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-drafts/{draft_id}:save
     /api/core/plugin-sessions/{session_id}:
         get:
             parameters:
@@ -8630,6 +9305,18 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order
+    /api/core/plugin-sessions/{session_id}/state-graph:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugin-sessions/{session_id}/state-graph
     /api/core/plugin-sessions/{session_id}/steps:
         get:
             parameters:
@@ -8642,7 +9329,7 @@ paths:
                 "200":
                     description: OK
             summary: GET /plugin-sessions/{session_id}/steps
-    /api/core/plugin-sessions/{session_id}:advance:
+    /api/core/plugin-sessions/{session_id}:dismiss:
         post:
             parameters:
                 - in: path
@@ -8653,7 +9340,31 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: POST /plugin-sessions/{session_id}:advance
+            summary: POST /plugin-sessions/{session_id}:dismiss
+    /api/core/plugin-sessions/{session_id}:restore:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-sessions/{session_id}:restore
+    /api/core/plugin-sessions/{session_id}:sync-search-config:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-sessions/{session_id}:sync-search-config
     /api/core/plugins:
         get:
             responses:
@@ -8704,7 +9415,6 @@ paths:
                     application/json:
                         schema:
                             $ref: '#/components/schemas/PromptRequest'
-                            type: object
                 required: true
             responses:
                 "200":
@@ -8757,7 +9467,6 @@ paths:
                     application/json:
                         schema:
                             $ref: '#/components/schemas/PromptPatchRequest'
-                            type: object
                 required: true
             responses:
                 "200":
@@ -8817,39 +9526,368 @@ paths:
             summary: Polish prompt
     /api/core/remote-fs/content:
         get:
+            description: 'Reads package content using task_id semantics: review_ sees existing draft, org_ and editor session ids see publish unless they own the current draft.'
+            parameters:
+                - description: Required. Target user id used to resolve skills owned by the user.
+                  in: query
+                  name: user_id
+                  required: true
+                  schema:
+                    type: string
+                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
+                  in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
+                  in: query
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Optional content encoding for GET /remote-fs/content.
+                  in: query
+                  name: encoding,omitempty
+                  required: false
+                  schema:
+                    enum:
+                        - raw
+                        - base64
+                    type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /remote-fs/content
+                    content:
+                        application/octet-stream:
+                            schema:
+                                format: binary
+                                type: string
+                    description: Remote filesystem raw content
+            summary: Read remote skill filesystem content
+            tags:
+                - remote-fs
         put:
+            description: Writes raw body bytes into the task draft. review_ may write an existing draft without changing draft ownership; org_ and editor session ids conflict with another task draft.
+            parameters:
+                - description: Required. Target user id used to resolve skills owned by the user.
+                  in: query
+                  name: user_id
+                  required: true
+                  schema:
+                    type: string
+                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
+                  in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
+                  in: query
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Optional content encoding for GET /remote-fs/content.
+                  in: query
+                  name: encoding,omitempty
+                  required: false
+                  schema:
+                    enum:
+                        - raw
+                        - base64
+                    type: string
+            requestBody:
+                content:
+                    application/octet-stream:
+                        schema:
+                            format: binary
+                            type: string
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: PUT /remote-fs/content
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/okOpenAPIResponse'
+                    description: Remote filesystem write result
+            summary: Write remote skill filesystem content
+            tags:
+                - remote-fs
+    /api/core/remote-fs/copy:
+        post:
+            parameters:
+                - description: Required. Target user id used to resolve skills owned by the user.
+                  in: query
+                  name: user_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
+                  in: query
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/remoteFSCopyOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/okOpenAPIResponse'
+                    description: Remote filesystem copy result
+            summary: Copy remote skill filesystem path
+            tags:
+                - remote-fs
+    /api/core/remote-fs/dir:
+        post:
+            parameters:
+                - description: Required. Target user id used to resolve skills owned by the user.
+                  in: query
+                  name: user_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
+                  in: query
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/remoteFSDirOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/okOpenAPIResponse'
+                    description: Remote filesystem mkdir result
+            summary: Create remote skill filesystem directory or empty package
+            tags:
+                - remote-fs
     /api/core/remote-fs/exists:
         get:
+            description: Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
+            parameters:
+                - description: Required. Target user id used to resolve skills owned by the user.
+                  in: query
+                  name: user_id
+                  required: true
+                  schema:
+                    type: string
+                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
+                  in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
+                  in: query
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Optional content encoding for GET /remote-fs/content.
+                  in: query
+                  name: encoding,omitempty
+                  required: false
+                  schema:
+                    enum:
+                        - raw
+                        - base64
+                    type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /remote-fs/exists
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/remoteFSExistsOpenAPIResponse'
+                    description: Remote filesystem exists
+            summary: Check remote skill filesystem path exists
+            tags:
+                - remote-fs
     /api/core/remote-fs/info:
         get:
+            description: Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
+            parameters:
+                - description: Required. Target user id used to resolve skills owned by the user.
+                  in: query
+                  name: user_id
+                  required: true
+                  schema:
+                    type: string
+                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
+                  in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
+                  in: query
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Optional content encoding for GET /remote-fs/content.
+                  in: query
+                  name: encoding,omitempty
+                  required: false
+                  schema:
+                    enum:
+                        - raw
+                        - base64
+                    type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /remote-fs/info
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/remoteFSInfoOpenAPIResponse'
+                    description: Remote filesystem info
+            summary: Get remote skill filesystem path info
+            tags:
+                - remote-fs
     /api/core/remote-fs/list:
         get:
+            description: List skills root/category without task_id, or list package content with task-aware view selection.
+            parameters:
+                - description: Required. Target user id used to resolve skills owned by the user.
+                  in: query
+                  name: user_id
+                  required: true
+                  schema:
+                    type: string
+                - description: RemoteFS path. Use skills for categories, skills/<category> for package list, or skills/<category>/<skill_name>[/rel_path] for package content.
+                  in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+                - description: Optional for skills root/category list; required when path enters a package. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
+                  in: query
+                  name: task_id,omitempty
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /remote-fs/list
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/remoteFSListOpenAPIResponse'
+                    description: Remote filesystem list
+            summary: List remote skill filesystem path
+            tags:
+                - remote-fs
+    /api/core/remote-fs/move:
+        post:
+            parameters:
+                - description: Required. Target user id used to resolve skills owned by the user.
+                  in: query
+                  name: user_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
+                  in: query
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/remoteFSMoveOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/okOpenAPIResponse'
+                    description: Remote filesystem move result
+            summary: Move remote skill filesystem path
+            tags:
+                - remote-fs
     /api/core/remote-fs/path:
         delete:
+            parameters:
+                - description: Required. Target user id used to resolve skills owned by the user.
+                  in: query
+                  name: user_id
+                  required: true
+                  schema:
+                    type: string
+                - description: RemoteFS path to delete.
+                  in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+                - description: Required for package-internal delete; not required for confirmed permanent package purge.
+                  in: query
+                  name: task_id,omitempty
+                  required: false
+                  schema:
+                    type: string
+                - description: Required true for package root physical purge.
+                  in: query
+                  name: permanent,omitempty
+                  required: false
+                  schema:
+                    type: boolean
+                - description: Required true for package root physical purge.
+                  in: query
+                  name: confirm,omitempty
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
-                    description: OK
-            summary: DELETE /remote-fs/path
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/okOpenAPIResponse'
+                    description: Remote filesystem delete result
+            summary: Delete remote skill filesystem path
+            tags:
+                - remote-fs
+    /api/core/remote-fs/trash:
+        post:
+            parameters:
+                - description: Required. Target user id used to resolve skills owned by the user.
+                  in: query
+                  name: user_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/remoteFSTrashOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/okOpenAPIResponse'
+                    description: Remote filesystem trash result
+            summary: Trash remote skill package
+            tags:
+                - remote-fs
     /api/core/resource-versions:
         get:
             description: Lists content version history for skills, memory, and user preferences for the current user.
@@ -8914,6 +9952,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /schedules
+    /api/core/schedules/{schedule_id}:
+        put:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /schedules/{schedule_id}
     /api/core/schedules/{schedule_id}:cancel:
         post:
             parameters:
@@ -8926,6 +9976,220 @@ paths:
                 "200":
                     description: OK
             summary: POST /schedules/{schedule_id}:cancel
+    /api/core/schedules/{schedule_id}:enable:
+        post:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /schedules/{schedule_id}:enable
+    /api/core/schedules/{schedule_id}:run-now:
+        post:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /schedules/{schedule_id}:run-now
+    /api/core/skill-diff/file:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/diffOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/diffFileOpenAPIResponse'
+                    description: Skill file diff
+            summary: Compare skill file
+            tags:
+                - skill-diff
+    /api/core/skill-diff/tree:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/diffOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/diffTreeOpenAPIResponse'
+                    description: Skill tree diff
+            summary: Compare skill trees
+            tags:
+                - skill-diff
+    /api/core/skill-market:
+        get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: tags
+                  required: false
+                  schema:
+                    items:
+                        type: string
+                    type: array
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketListOpenAPIResponse'
+                    description: Market skill list
+            summary: List published market skills
+            tags:
+                - skill-market
+    /api/core/skill-market/{market_item_id}:
+        get:
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketItemOpenAPIResponse'
+                    description: Market skill item
+            summary: Get market skill details
+            tags:
+                - skill-market
+    /api/core/skill-market/{market_item_id}:install:
+        post:
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketInstallOpenAPIResponse'
+                    description: Installed market skill
+            summary: Install skill from market item
+            tags:
+                - skill-market
+    /api/core/skill-market/admin/items:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/marketPublishOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketPublishOpenAPIResponse'
+                    description: Published market skill
+            summary: Publish market skill item
+            tags:
+                - skill-market
+    /api/core/skill-market/admin/items/{market_item_id}:
+        patch:
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/marketEditOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketItemOpenAPIResponse'
+                    description: Edited market skill
+            summary: Edit market skill item
+            tags:
+                - skill-market
+    /api/core/skill-market/admin/items/{market_item_id}:unpublish:
+        post:
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketItemOpenAPIResponse'
+                    description: Unpublished market skill
+            summary: Unpublish market skill item
+            tags:
+                - skill-market
+    /api/core/skill-market:install:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/marketInstallOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketInstallOpenAPIResponse'
+                    description: Installed market skill
+            summary: Install skill from market
+            tags:
+                - skill-market
     /api/core/skill-review-results:
         get:
             description: Lists skill draft review results for the current user.
@@ -9140,7 +10404,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/skillDetailOpenAPIResponse'
+                                $ref: '#/components/schemas/skillWriteOpenAPIResponse'
                     description: Created skill
             summary: Create skill directly from internal request
             tags:
@@ -9186,6 +10450,7 @@ paths:
             tags:
                 - skills
         post:
+            description: Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
             requestBody:
                 content:
                     application/json:
@@ -9197,9 +10462,9 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/skillDetailOpenAPIResponse'
+                                $ref: '#/components/schemas/skillWriteOpenAPIResponse'
                     description: Created skill
-            summary: Create managed skill
+            summary: Create directory skill
             tags:
                 - skills
     /api/core/skills/{skill_id}:
@@ -9217,7 +10482,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/skillDeleteOpenAPIResponse'
                     description: Deleted skill
-            summary: Delete managed skill
+            summary: Delete directory skill
             tags:
                 - skills
         get:
@@ -9234,11 +10499,11 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/skillDetailOpenAPIResponse'
                     description: Skill details
-            summary: Get skill details
+            summary: Get directory skill details
             tags:
                 - skills
         patch:
-            description: Partial update. The request body is required, but every field inside it is optional; send only fields that should change. For parent skills, omit parent_skill_id and parent_skill_name entirely. parent_skill_id and parent_skill_name are only for moving child skills to another parent. If content is present, it replaces stored content; omit content to keep it unchanged.
+            description: Partially updates skill metadata. When source is present, the whole directory is replaced from an uploaded ZIP or URL after draft conflict checks.
             parameters:
                 - in: path
                   name: skill_id
@@ -9256,9 +10521,563 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/skillDetailOpenAPIResponse'
+                                $ref: '#/components/schemas/skillWriteOpenAPIResponse'
                     description: Updated skill
-            summary: Update managed skill
+            summary: Update directory skill
+            tags:
+                - skills
+    /api/core/skills/{skill_id}/commit:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillCommitOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillCommitOpenAPIResponse'
+                    description: Committed skill draft
+            summary: Commit skill draft
+            tags:
+                - skill-revisions
+    /api/core/skills/{skill_id}/draft-review/{review_id}/actions:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: review_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /skills/{skill_id}/draft-review/{review_id}/actions
+    /api/core/skills/{skill_id}/draft-review/{review_id}:commit:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: review_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /skills/{skill_id}/draft-review/{review_id}:commit
+    /api/core/skills/{skill_id}/draft-review/{review_id}:undo:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: review_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /skills/{skill_id}/draft-review/{review_id}:undo
+    /api/core/skills/{skill_id}/draft/exists:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDraftStateOpenAPIResponse'
+                    description: Skill draft state
+            summary: Check skill draft exists
+            tags:
+                - skill-drafts
+    /api/core/skills/{skill_id}/draft/fs/dir:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillDraftMkdirOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDraftMutationOpenAPIResponse'
+                    description: Skill draft mutation
+            summary: Create directory in skill draft
+            tags:
+                - skill-drafts
+    /api/core/skills/{skill_id}/draft/fs/move:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillDraftMoveOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDraftMutationOpenAPIResponse'
+                    description: Skill draft mutation
+            summary: Move path in skill draft
+            tags:
+                - skill-drafts
+    /api/core/skills/{skill_id}/draft/fs/path:
+        delete:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: path
+                  required: false
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillDraftDeleteOpenAPIRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDraftMutationOpenAPIResponse'
+                    description: Skill draft mutation
+            summary: Delete path from skill draft
+            tags:
+                - skill-drafts
+    /api/core/skills/{skill_id}/draft/fs/text:
+        put:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillDraftWriteTextOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDraftMutationOpenAPIResponse'
+                    description: Skill draft mutation
+            summary: Write text file to skill draft
+            tags:
+                - skill-drafts
+    /api/core/skills/{skill_id}/draft/fs/upload:
+        put:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillDraftUploadOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDraftMutationOpenAPIResponse'
+                    description: Skill draft mutation
+            summary: Write uploaded file to skill draft
+            tags:
+                - skill-drafts
+    /api/core/skills/{skill_id}/draft/status:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDraftStatusOpenAPIResponse'
+                    description: Skill draft status
+            summary: Get skill draft status
+            tags:
+                - skill-drafts
+    /api/core/skills/{skill_id}/file:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillFileOpenAPIResponse'
+                    description: Skill file
+            summary: Read skill file
+            tags:
+                - skills
+    /api/core/skills/{skill_id}/fs/content:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillFileOpenAPIResponse'
+                    description: Skill file content
+            summary: Read skill file content
+            tags:
+                - skill-fs
+    /api/core/skills/{skill_id}/fs/download:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillFileOpenAPIResponse'
+                    description: Skill file download
+            summary: Download skill file
+            tags:
+                - skill-fs
+    /api/core/skills/{skill_id}/fs/exists:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillExistsOpenAPIResponse'
+                    description: Skill path exists
+            summary: Check skill path exists
+            tags:
+                - skill-fs
+    /api/core/skills/{skill_id}/fs/info:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillTreeNodeOpenAPIResponse'
+                    description: Skill path info
+            summary: Get skill path info
+            tags:
+                - skill-fs
+    /api/core/skills/{skill_id}/fs/list:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: path
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillFSListOpenAPIResponse'
+                    description: Skill directory entries
+            summary: List skill directory entries
+            tags:
+                - skill-fs
+    /api/core/skills/{skill_id}/revisions:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillRevisionListOpenAPIResponse'
+                    description: Skill revisions
+            summary: List skill revisions
+            tags:
+                - skill-revisions
+    /api/core/skills/{skill_id}/revisions/{revision_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: revision_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDeleteOpenAPIResponse'
+                    description: Deleted skill revision
+            summary: Delete skill revision
+            tags:
+                - skill-revisions
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: revision_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillRevisionOpenAPIResponse'
+                    description: Skill revision
+            summary: Get skill revision
+            tags:
+                - skill-revisions
+    /api/core/skills/{skill_id}/revisions/{revision_id}/file:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: revision_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillFileOpenAPIResponse'
+                    description: Skill revision file
+            summary: Read skill revision file
+            tags:
+                - skill-revisions
+    /api/core/skills/{skill_id}/revisions/{revision_id}/tree:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: revision_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillTreeNodeOpenAPIResponse'
+                    description: Skill revision tree
+            summary: Get skill revision tree
+            tags:
+                - skill-revisions
+    /api/core/skills/{skill_id}/rollback:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillRollbackOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillRollbackOpenAPIResponse'
+                    description: Rolled back skill
+            summary: Rollback skill
+            tags:
+                - skill-revisions
+    /api/core/skills/{skill_id}/rollback/preview:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillRollbackOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillRollbackPreviewOpenAPIResponse'
+                    description: Skill rollback preview
+            summary: Preview skill rollback
+            tags:
+                - skill-revisions
+    /api/core/skills/{skill_id}/tree:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillTreeNodeOpenAPIResponse'
+                    description: Skill tree
+            summary: Get skill tree
             tags:
                 - skills
     /api/core/skills/{skill_id}:confirm:
@@ -9438,6 +11257,24 @@ paths:
                 "200":
                     description: OK
             summary: POST /static-files:sign
+    /api/core/system-query/documents:aggregate:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AggregateDocumentsRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/AggregateDocumentsResponse'
+                    description: Document aggregate results
+            summary: Aggregate documents
+            tags:
+                - documents
     /api/core/task-center/schedules/{schedule_id}/tasks:
         get:
             parameters:
@@ -9485,6 +11322,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /task-center/tasks/{task_id}:cancel
+    /api/core/task-center/tasks/{task_id}:remove:
+        post:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /task-center/tasks/{task_id}:remove
     /api/core/tasks/{task_id}:
         get:
             parameters:
@@ -9705,36 +11554,10 @@ paths:
                 - tools
     /api/core/upload_files:
         post:
-            description: Proxies to parsing service. Multipart form with files.
-            parameters:
-                - in: query
-                  name: override
-                  schema:
-                    default: false
-                    type: boolean
-                - in: query
-                  name: metadatas
-                  schema:
-                    type: string
-                - in: query
-                  name: user_path
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    multipart/form-data:
-                        schema:
-                            properties:
-                                files:
-                                    items:
-                                        format: binary
-                                        type: string
-                                    type: array
-                            type: object
             responses:
                 "200":
-                    description: Returns [ids, results]
-            summary: Upload files to knowledge base
+                    description: OK
+            summary: POST /upload_files
     /api/core/user-preference:
         put:
             requestBody:

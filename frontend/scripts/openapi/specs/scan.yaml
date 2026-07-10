@@ -715,6 +715,8 @@ components:
                     type: string
                 core_parent_document_id:
                     type: string
+                core_parent_document_name:
+                    type: string
                 next_sync_at:
                     type: string
                 schedule_policy:

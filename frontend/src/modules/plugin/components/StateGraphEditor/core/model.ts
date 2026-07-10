@@ -24,18 +24,31 @@ export interface Transition {
   condition: string;
 }
 
+export interface StepInputRef {
+  slot: string;
+  required: boolean;
+}
+
 export interface StepNode {
   id: string;
   label: string;
   mode: 'human' | 'auto';
-  inputs: string[];
-  outputs: string[];
+  /** References to input slots. Each entry is either a slot id string (legacy) or a StepInputRef. */
+  inputs: StepInputRef[];
+  /** References to output slots. */
+  outputs: StepInputRef[];
   transitions: Transition[];
   /** How to follow outgoing transitions. 'all' triggers all matching exits simultaneously (default).
    *  'choice' picks the first matching exit exclusively (conditional routing). */
   route?: 'all' | 'choice';
   /** Natural-language condition under which this step is skipped entirely. */
   skipif?: string;
+  /** Agent prompt for this step; may contain {{slot_id}} references. */
+  prompt?: string;
+  /** Tool function names available to the agent for this step. */
+  tools?: string[];
+  /** Natural-language quality criteria the agent must satisfy before completing this step. */
+  acceptanceCriteria?: string;
 }
 
 export interface NodeLayout {
@@ -59,6 +72,11 @@ export interface GraphModel {
    * Empty array means no explicit start is configured.
    */
   startTransitions: Transition[];
+  /**
+   * How __start__ follows its outgoing transitions.
+   * 'all' triggers all simultaneously (default); 'choice' picks the first match.
+   */
+  startRoute?: 'all' | 'choice';
 }
 
 export const VIRTUAL_START = '__start__';
@@ -82,4 +100,5 @@ export const createEmptyModel = (): GraphModel => ({
   slots: {},
   layout: {},
   startTransitions: [],
+  startRoute: undefined,
 });

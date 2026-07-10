@@ -59,7 +59,7 @@ func (m *RuntimeManager) RunServiceAction(ctx context.Context, cfg RuntimeConfig
 		if err := paths.EnsureAllDirs(); err != nil {
 			return err
 		}
-		return m.fileWatcher.build(ctx, paths)
+		return m.fileWatcher.build(ctx, cfg, paths)
 	case "start":
 		return m.fileWatcher.Run(ctx, cfg, paths)
 	case "stop":
@@ -92,8 +92,7 @@ func (m *RuntimeManager) resetAllLocalState(ctx context.Context, paths RuntimePa
 
 func localKBResetPaths(paths RuntimePaths) []string {
 	return []string{
-		filepath.Join(paths.RepoRoot, "data", "core", "uploads"),
-		filepath.Join(paths.RepoRoot, "data", "scan", "staging"),
+		paths.UploadRoot,
 		filepath.Join(paths.AlgorithmHome, "sqlite"),
 		paths.ScanControlPlaneTempDir,
 		filepath.Join(paths.FileWatcherBaseRoot, "staging"),
@@ -104,19 +103,11 @@ func localKBResetPaths(paths RuntimePaths) []string {
 
 func localAllResetPaths(paths RuntimePaths) []string {
 	return []string{
-		filepath.Join(paths.RepoRoot, "data", "core"),
-		filepath.Join(paths.RepoRoot, "data", "evo"),
-		filepath.Join(paths.RepoRoot, "data", "scan"),
-		filepath.Join(paths.RepoRoot, "data", "state", "postgres"),
-		filepath.Join(paths.RepoRoot, "data", "state", "redis"),
-		filepath.Join(paths.RepoRoot, "data", "subagent"),
-		filepath.Join(paths.RepoRoot, "data", "traces"),
+		paths.DataDir,
 		paths.GeneratedDir,
-		paths.AlgorithmHome,
 		paths.LogsDir,
 		paths.RunDir,
 		paths.StateDir,
-		filepath.Join(paths.RuntimeRoot, "stores"),
 		filepath.Join(paths.RuntimeRoot, "tmp"),
 	}
 }
@@ -130,48 +121,17 @@ func (m *RuntimeManager) removeLocalPath(ctx context.Context, repoRoot string, p
 		return nil
 	}
 	m.progressf("  removing %s", displayPath(repoRoot, path))
-	if err := os.RemoveAll(path); err == nil {
-		return nil
-	}
-	if err := m.removeLocalPathWithDocker(ctx, repoRoot, path); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (m *RuntimeManager) removeLocalPathWithDocker(ctx context.Context, repoRoot string, path string) error {
-	absRepoRoot, err := filepath.Abs(repoRoot)
-	if err != nil {
-		return fmt.Errorf("resolve repo root for docker cleanup: %w", err)
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("resolve path for docker cleanup: %w", err)
-	}
-	rel, err := filepath.Rel(absRepoRoot, absPath)
-	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return fmt.Errorf("refusing docker cleanup outside repo: %s", path)
-	}
-	image := envText("POSTGRES_IMAGE", "postgres:16")
-	res, runErr := m.runner.Run(ctx, Command{
-		Name: "docker",
-		Args: []string{
-			"run", "--rm",
-			"-v", absRepoRoot + ":/work",
-			"-w", "/work",
-			image,
-			"sh", "-lc", "rm -rf " + quoteShellArg(filepath.ToSlash(rel)),
-		},
-		Dir: absRepoRoot,
-	})
-	if runErr != nil {
-		return fmt.Errorf("remove %s with docker failed: %w (%s)", rel, runErr, strings.TrimSpace(res.Stderr))
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("remove %s failed: %w", displayPath(repoRoot, path), err)
 	}
 	return nil
 }
 
 func (m *RuntimeManager) resetLocalSQLiteKBState(ctx context.Context, paths RuntimePaths) error {
-	python := envText("PYTHON", "python3")
+	python, err := ensureLocalPythonRuntime(ctx, m.runner, paths, envText(localPythonVersionEnvVar, defaultLocalPythonVersion))
+	if err != nil {
+		return err
+	}
 	script := `
 import os
 import sqlite3
@@ -230,6 +190,7 @@ run(lazyllm_db, ["DROP TABLE IF EXISTS " + table for table in lazyllm_tables])
 		Name: python,
 		Args: []string{"-c", script, paths.CoreDBPath, paths.LazyLLMDBPath},
 		Dir:  paths.RepoRoot,
+		Env:  pythonRuntimeEnv(paths),
 	})
 	if err != nil {
 		return fmt.Errorf("reset local SQLite KB state failed: %w (%s)", err, strings.TrimSpace(res.Stderr))

@@ -53,7 +53,9 @@ const KnowledgeBaseSyncNow: FC<Props> = ({ datasetId, onSyncComplete }) => {
       <Button
         type="primary"
         ghost
-        loading={sourceResolving || syncFlow.detailLoading || syncFlow.syncSubmitting}
+        loading={
+          sourceResolving || syncFlow.detailLoading || syncFlow.syncSubmitting
+        }
         disabled={sourceResolving || !sourceId || syncFlow.detailLoading}
         onClick={() => {
           void syncFlow.openSyncPicker();

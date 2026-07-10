@@ -2,6 +2,7 @@ backend/auth-service/api_permissions.json
 .vscode/settings.json
 backend/core/core
 .env
+docker-compose.override.yml
 
 .flake8-python.path
 __pycache__
@@ -83,10 +84,13 @@ lazyllm_cpp.egg-info/
 .venv-test/
 data/
 volumes/
-.lazymind-local/
+local/config.env
+local/.bin/
+local/runtime/
+desktop/build/
+desktop/cache/
 local/bin/process-compose
 .conda
-local/local-runtime-manager/lazymind-local
 
 # evo runtime artifacts
 evo/output/

@@ -7,7 +7,7 @@ import (
 	"lazymind/core/doc"
 )
 
-// SignArtifactImageValue adds a fresh signed url for image (and file_list) artifact values.
+// SignArtifactImageValue adds a fresh signed url for file-backed artifact values.
 // Stored paths may carry expired /static-files/ signatures; always re-sign on read.
 // Pass contentType "" to attempt image signing (legacy snapshot rows).
 func SignArtifactImageValue(contentType string, raw json.RawMessage) json.RawMessage {
@@ -20,6 +20,9 @@ func SignArtifactImageValue(contentType string, raw json.RawMessage) json.RawMes
 	}
 	if ct == "file_list" {
 		return signFileListArtifactValue(raw)
+	}
+	if ct == "file" {
+		return signFileArtifactValue(raw)
 	}
 	return raw
 }
@@ -90,6 +93,41 @@ func signFileListArtifactValue(raw json.RawMessage) json.RawMessage {
 		return raw
 	}
 	m["paths"] = paths
+	out, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+func signFileArtifactValue(raw json.RawMessage) json.RawMessage {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return raw
+	}
+	pathVal, _ := m["path"].(string)
+	if pathVal == "" {
+		pathVal, _ = m["url"].(string)
+	}
+	if pathVal == "" {
+		return raw
+	}
+	if strings.HasPrefix(pathVal, "http://") || strings.HasPrefix(pathVal, "https://") ||
+		strings.HasPrefix(pathVal, "data:") {
+		if !strings.Contains(pathVal, "/static-files/") {
+			m["url"] = pathVal
+			out, err := json.Marshal(m)
+			if err == nil {
+				return out
+			}
+			return raw
+		}
+	}
+	signed := doc.StaticFileURLFromAnyStoragePath(pathVal)
+	if signed == "" {
+		return raw
+	}
+	m["url"] = signed
 	out, err := json.Marshal(m)
 	if err != nil {
 		return raw

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -32,18 +33,17 @@ func (m *CoreServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
-	if err := ensureLocalDataRootWritable(paths.RepoRoot); err != nil {
-		return err
-	}
 	for _, dir := range []string{
-		filepath.Join(paths.RepoRoot, "data", "core", "uploads"),
-		filepath.Join(paths.RepoRoot, "data", "subagent"),
+		paths.UploadRoot,
+		paths.LazyLLMTempDir,
+		paths.OCRCacheDir,
+		paths.SubagentDataDir,
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 	}
-	if err := m.buildCore(ctx, paths); err != nil {
+	if err := m.buildCore(ctx, cfg, paths); err != nil {
 		return err
 	}
 	if err := m.waitForCoreDatabase(ctx, cfg, paths); err != nil {
@@ -55,6 +55,7 @@ func (m *CoreServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 	cmd.Env = append(os.Environ(), coreServiceEnv(cfg, paths)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start core failed: %w", err)
@@ -63,6 +64,7 @@ func (m *CoreServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 		_ = cmd.Process.Kill()
 		return err
 	}
+	registerLocalProcess(paths, coreProcessName, cmd.Process.Pid, []int{cfg.LocalProxy.CoreHostPort}, []string{paths.CoreBin})
 
 	waitErr := make(chan error, 1)
 	go func() {
@@ -72,11 +74,13 @@ func (m *CoreServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 	if err := waitForCoreServiceHealth(ctx, cfg.LocalProxy.CoreHostPort, coreServiceHealthTimeout, waitErr); err != nil {
 		_ = cmd.Process.Kill()
 		_ = os.Remove(paths.CorePIDFile)
+		unregisterLocalProcess(paths, coreProcessName, cmd.Process.Pid)
 		return err
 	}
 
 	err := <-waitErr
 	_ = os.Remove(paths.CorePIDFile)
+	unregisterLocalProcess(paths, coreProcessName, cmd.Process.Pid)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -86,7 +90,13 @@ func (m *CoreServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 	return nil
 }
 
-func (m *CoreServiceManager) buildCore(ctx context.Context, paths RuntimePaths) error {
+func (m *CoreServiceManager) buildCore(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if cfg.Profile == "desktop" {
+		if info, err := os.Stat(paths.CoreBin); err == nil && !info.IsDir() {
+			return nil
+		}
+		return fmt.Errorf("desktop core binary not found: %s", paths.CoreBin)
+	}
 	if err := os.MkdirAll(filepath.Dir(paths.CoreBin), 0o755); err != nil {
 		return err
 	}
@@ -98,6 +108,7 @@ func (m *CoreServiceManager) buildCore(ctx context.Context, paths RuntimePaths) 
 		Name: goBin,
 		Args: []string{"build", "-buildvcs=false", "-o", paths.CoreBin, "."},
 		Dir:  filepath.Join(paths.RepoRoot, coreSourceDirName),
+		Env:  goToolEnv(paths),
 	})
 	if err != nil {
 		return fmt.Errorf("build core failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
@@ -154,9 +165,6 @@ func (m *CoreServiceManager) Down(ctx context.Context, cfg RuntimeConfig, paths 
 }
 
 func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
-	uploads := filepath.Join(paths.RepoRoot, "data", "core", "uploads")
-	tempDir := filepath.Join(uploads, ".lazyllm_temp")
-	imageCache := filepath.Join(uploads, ".image_cache")
 	endpoints := serviceEndpointsFromConfig(cfg)
 	coreDSN := sqliteDSN(paths.CoreDBPath)
 	coreURL := sqliteURL(paths.CoreDBPath)
@@ -171,10 +179,10 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_REDIS_URL=",
 		"LAZYMIND_STATE_BACKEND=sqlite",
 		"LAZYMIND_STATE_SQLITE_DIR=" + paths.CoreStateDir,
-		"LAZYMIND_UPLOAD_ROOT=" + uploads,
-		"LAZYMIND_SHARED_UPLOAD_DIR=" + uploads,
-		"LAZYLLM_TEMP_DIR=" + tempDir,
-		"LAZYMIND_OCR_CACHE_DIR=" + imageCache,
+		"LAZYMIND_UPLOAD_ROOT=" + paths.UploadRoot,
+		"LAZYMIND_SHARED_UPLOAD_DIR=" + paths.UploadRoot,
+		"LAZYLLM_TEMP_DIR=" + paths.LazyLLMTempDir,
+		"LAZYMIND_OCR_CACHE_DIR=" + paths.OCRCacheDir,
 		"LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED=" + envText("LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED", "true"),
 		"LAZYMIND_PUBLIC_BASE_URL=http://localhost:" + strconv.Itoa(cfg.LocalProxy.Port) + "/api/core",
 		"LAZYMIND_FILE_URL_SIGN_SECRET=" + envText("LAZYMIND_FILE_URL_SIGN_SECRET", "changeme-in-production"),
@@ -190,7 +198,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_SCAN_CONTROL_PLANE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
 		"LAZYMIND_OFFICE_CONVERT_URL=" + endpoints.Host.OfficeConvertURL,
 		"LAZYMIND_OFFICE_CONVERT_WORKERS=" + envText("LAZYMIND_OFFICE_CONVERT_WORKERS", "4"),
-		"LAZYMIND_SUBAGENT_WORKSPACE=" + filepath.Join(paths.RepoRoot, "data", "subagent"),
+		"LAZYMIND_SUBAGENT_WORKSPACE=" + paths.SubagentDataDir,
 		"LAZYMIND_SUBAGENT_DB_DSN=" + coreURL,
 		"LAZYMIND_READONLY_VALIDATE=0",
 		"LAZYMIND_READONLY_DB_DRIVER=sqlite",

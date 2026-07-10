@@ -69,12 +69,10 @@ export default function SkillMarketView({
   onDetail,
   installingUid,
 }: SkillMarketViewProps) {
-  const enabledBuiltinUids = useMemo(
+  const enabledMarketIds = useMemo(
     () =>
       new Set([
-        ...skillAssets
-          .filter((item) => item.originBuiltinSkillUid)
-          .map((item) => item.originBuiltinSkillUid as string),
+        ...skillAssets.map((item) => item.id),
         ...mockInstalledUids,
       ]),
     [mockInstalledUids, skillAssets],
@@ -91,8 +89,8 @@ export default function SkillMarketView({
   );
 
   const recommendationItems = useMemo(
-    () => marketItems.filter((item) => !enabledBuiltinUids.has(item.builtinSkillUid || "")),
-    [enabledBuiltinUids, marketItems],
+    () => marketItems.filter((item) => !enabledMarketIds.has(item.id)),
+    [enabledMarketIds, marketItems],
   );
 
   return (
@@ -160,7 +158,7 @@ export default function SkillMarketView({
           </div>
           <div className="memory-skill-recommend-grid">
             {recommendationItems.map((item) => {
-              const installed = enabledBuiltinUids.has(item.builtinSkillUid || "");
+              const installed = enabledMarketIds.has(item.id);
               const marketSource = getMarketSource(item);
               const sourceLabel =
                 marketSource === "admin"
@@ -216,7 +214,7 @@ export default function SkillMarketView({
                       <Button
                         type="primary"
                         size="small"
-                        loading={installingUid === item.builtinSkillUid}
+                        loading={installingUid === item.id}
                         onClick={() => onInstall(item)}
                       >
                         {t("admin.memorySkillMarketInstall")}

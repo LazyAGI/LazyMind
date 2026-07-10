@@ -238,7 +238,13 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
         return;
       }
 
-      const newSelectedIds = selectedIds.includes(datasetId)
+      const isCurrentlySelected = selectedIds.includes(datasetId);
+      // Pinned knowledge bases stay selected until unpinned; row click only toggles non-pinned items.
+      if (isCurrentlySelected && item.default_dataset) {
+        return;
+      }
+
+      const newSelectedIds = isCurrentlySelected
         ? selectedIds.filter((id) => id !== datasetId)
         : [...selectedIds, datasetId];
 
@@ -287,6 +293,18 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
 
         if (nextDefault && !selectedIds.includes(datasetId)) {
           const nextSelectedIds = mergeSelectedIds(selectedIds, [datasetId]);
+          setSelectedIds(nextSelectedIds);
+          onChange?.(
+            nextSelectedIds,
+            [],
+            [],
+          );
+        } else if (!nextDefault && selectedIds.includes(datasetId)) {
+          // Unpinning should only remove the default flag, not the active selection.
+          const nextSelectedIds = mergeSelectedIds(
+            chatConfig?.knowledgeBaseId ?? [],
+            [datasetId],
+          );
           setSelectedIds(nextSelectedIds);
           onChange?.(
             nextSelectedIds,

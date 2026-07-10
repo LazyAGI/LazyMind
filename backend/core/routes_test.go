@@ -216,6 +216,9 @@ func TestReviewResultActionRoutesRegistered(t *testing.T) {
 	}{
 		{http.MethodPost, "/skill-review-results/review-1:accept", "/skill-review-results/{review_result_id}:accept", "review-1"},
 		{http.MethodPost, "/skill-review-results/review-1:reject", "/skill-review-results/{review_result_id}:reject", "review-1"},
+		{http.MethodGet, "/skill-review:summary", "/skill-review:summary", ""},
+		{http.MethodPost, "/skill-review:run", "/skill-review:run", ""},
+		{http.MethodGet, "/skill-review/tasks", "/skill-review/tasks", ""},
 		{http.MethodPost, "/memory-review-results/review-2:accept", "/memory-review-results/{review_result_id}:accept", "review-2"},
 		{http.MethodGet, "/evolution/tasks/task-1", "/evolution/tasks/{task_id}", "task-1"},
 	}
@@ -236,6 +239,9 @@ func TestReviewResultActionRoutesRegistered(t *testing.T) {
 			if got := match.Vars["task_id"]; got != tc.id {
 				t.Fatalf("expected task_id %q, got %q", tc.id, got)
 			}
+			continue
+		}
+		if tc.id == "" {
 			continue
 		}
 		if got := match.Vars["review_result_id"]; got != tc.id {

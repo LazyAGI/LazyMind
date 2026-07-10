@@ -7,6 +7,7 @@ allowNonLocalBind: false
 auth:
   mode: "local-rbac"
   authServiceURL: "http://127.0.0.1:8000"
+  autoLoginAllowLAN: false
 
 cors:
   allowedOrigins:

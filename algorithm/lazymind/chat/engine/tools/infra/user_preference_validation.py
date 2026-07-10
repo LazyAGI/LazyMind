@@ -34,15 +34,21 @@ def validate_user_preference_content(content: str) -> Optional[str]:
     frontmatter, _ = parse_user_preference_frontmatter(content)
     if not frontmatter:
         return 'user_preference must contain YAML frontmatter.'
+
+    missing_keys = [key for key in _FRONTMATTER_KEYS if key not in frontmatter]
     extra_keys = sorted(str(key) for key in frontmatter if key not in _FRONTMATTER_KEY_SET)
-    if extra_keys:
+    if missing_keys or extra_keys:
+        details = []
+        if missing_keys:
+            details.append(f'missing: {", ".join(missing_keys)}')
+        if extra_keys:
+            details.append(f'extra: {", ".join(extra_keys)}')
         return (
-            'Frontmatter only supports agent_persona, preferred_name, and response_style; '
-            f'move other fields to the Markdown body: {", ".join(extra_keys)}.'
+            'Frontmatter keys must be exactly agent_persona, preferred_name, and response_style; '
+            f'{("; ".join(details))}. Move other fields to the Markdown body.'
         )
+
     for key in _FRONTMATTER_KEYS:
-        if key not in frontmatter:
-            return f"Frontmatter must include '{key}'."
         value = frontmatter.get(key)
         if not isinstance(value, str):
             return f"Frontmatter '{key}' must be a string."

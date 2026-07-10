@@ -32,7 +32,6 @@ const defaultPageSizeOptions = [6, 12, 20, 50];
 export default function SkillInstalledView({
   t,
   loading,
-  skillAssets,
   dataSource,
   searchInput,
   onSearchInputChange,
@@ -110,11 +109,6 @@ export default function SkillInstalledView({
           loading={loading}
           dataSource={dataSource}
           columns={columns}
-          expandable={{
-            defaultExpandAllRows: true,
-            rowExpandable: (record) =>
-              skillAssets.some((item) => item.parentId === record.id),
-          }}
           pagination={pagination}
           locale={{
             emptyText: (

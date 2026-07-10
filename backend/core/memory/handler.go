@@ -14,9 +14,11 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/filediff"
 	appLog "lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/resourcechange"
+	"lazymind/core/resourcefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/store"
 )
@@ -31,13 +33,22 @@ type upsertRequest struct {
 }
 
 type draftPreviewResponse struct {
-	ReviewResultID     string `json:"review_result_id"`
-	ReviewStatus       string `json:"review_status"`
-	DraftStatus        string `json:"draft_status"`
-	DraftSourceVersion int64  `json:"draft_source_version"`
-	CurrentContent     string `json:"current_content"`
-	DraftContent       string `json:"draft_content"`
-	Diff               string `json:"diff"`
+	ReviewResultID     string             `json:"review_result_id"`
+	ReviewStatus       string             `json:"review_status"`
+	DraftStatus        string             `json:"draft_status"`
+	DraftSourceVersion int64              `json:"draft_source_version"`
+	CurrentContent     string             `json:"current_content"`
+	DraftContent       string             `json:"draft_content"`
+	Diff               string             `json:"diff"`
+	FileDiff           *filediff.FileDiff `json:"file_diff,omitempty"`
+	RevisionID         string             `json:"revision_id,omitempty"`
+	DraftVersion       int64              `json:"draft_version,omitempty"`
+	ReviewID           string             `json:"review_id,omitempty"`
+	ReviewVersion      int64              `json:"review_version,omitempty"`
+	CanUndo            bool               `json:"can_undo"`
+	PendingCount       int                `json:"pending_count"`
+	AcceptedCount      int                `json:"accepted_count"`
+	RejectedCount      int                `json:"rejected_count"`
 }
 
 const maxManagedContentChars = 1500
@@ -273,12 +284,42 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	existing, err := evolution.LoadSystemMemory(r.Context(), db, userID)
-	if err != nil && err != gorm.ErrRecordNotFound {
+	if _, err := evolution.LoadSystemMemory(r.Context(), db, userID); err == gorm.ErrRecordNotFound {
+		row, err := upsertManagedMemoryContent(r, db, userID, userName, req, true)
+		if err != nil {
+			common.ReplyErr(w, "update memory failed", http.StatusInternalServerError)
+			return
+		}
+		if _, _, _, err := ensureMemoryResource(r.Context(), db, userID, userName); err != nil {
+			common.ReplyErr(w, "initialize memory resource failed", http.StatusInternalServerError)
+			return
+		}
+		reviewStatus, err := evolution.ManagedReviewStatusForResource(r.Context(), db, userID, evolution.ResourceTypeMemory)
+		if err != nil {
+			common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
+			return
+		}
+		item := evolution.NewManagedStateItem(evolution.ResourceTypeMemory, row, reviewStatus)
+		if summary, err := resourcechange.LatestSummaryForResource(r.Context(), db, userID, orm.ResourceUpdateResourceTypeMemory, row.ID); err == nil {
+			item.LatestVersionChange = summary
+		}
+		common.ReplyOK(w, item)
+		return
+	} else if err != nil {
 		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
 		return
 	}
-	pendingDraft := existing != nil && strings.TrimSpace(existing.DraftStatus) == "pending_confirm"
+
+	existing, fsService, _, err := ensureMemoryResource(r.Context(), db, userID, userName)
+	if err != nil {
+		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
+		return
+	}
+	draft, pendingDraft, err := memoryDraftIsPending(r.Context(), fsService, userID)
+	if err != nil {
+		common.ReplyErr(w, "query memory draft failed", http.StatusInternalServerError)
+		return
+	}
 	if pendingDraft && (req.AutoEvo == nil || !*req.AutoEvo) {
 		common.ReplyErr(w, "memory draft already pending_confirm", http.StatusConflict)
 		return
@@ -286,7 +327,42 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 
 	var row *orm.SystemMemory
 	if pendingDraft {
+		if _, err := fsService.DiscardDraft(r.Context(), memoryResourceRef(userID)); err != nil {
+			common.ReplyErr(w, "discard memory draft failed", http.StatusInternalServerError)
+			return
+		}
 		row, err = enableManagedMemoryAutoEvoWithDiscardedDraft(r, db, existing, userID, userName)
+		if err != nil {
+			common.ReplyErr(w, "update memory failed", http.StatusInternalServerError)
+			return
+		}
+	} else if req.Content != nil {
+		draftResp, err := fsService.WriteDraft(r.Context(), resourcefs.WriteDraftRequest{
+			Ref:                  memoryResourceRef(userID),
+			Content:              *req.Content,
+			ExpectedDraftVersion: draft.DraftVersion,
+			UpdatedBy:            userID,
+		})
+		if err != nil {
+			common.ReplyErr(w, "update memory draft failed", http.StatusInternalServerError)
+			return
+		}
+		commit, err := fsService.CommitDraft(r.Context(), resourcefs.CommitDraftRequest{
+			Ref:                  memoryResourceRef(userID),
+			Message:              "direct memory update",
+			SourceRefType:        "memory",
+			SourceRefID:          existing.ID,
+			ExpectedDraftVersion: draftResp.DraftVersion,
+			CreatedBy:            userID,
+		})
+		if err != nil {
+			common.ReplyErr(w, "commit memory draft failed", http.StatusInternalServerError)
+			return
+		}
+		content := commit.Content
+		syncReq := req
+		syncReq.Content = &content
+		row, err = upsertManagedMemoryContent(r, db, userID, userName, syncReq, true)
 		if err != nil {
 			common.ReplyErr(w, "update memory failed", http.StatusInternalServerError)
 			return
@@ -341,35 +417,42 @@ func DraftPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := evolution.LoadSystemMemory(r.Context(), db, userID)
-	if err == gorm.ErrRecordNotFound {
-		common.ReplyErr(w, "memory not found", http.StatusNotFound)
-		return
-	}
+	_, fsService, _, err := ensureMemoryResource(r.Context(), db, userID, store.UserName(r))
 	if err != nil {
 		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
 		return
 	}
-	result, err := resourceupdate.LatestPendingMemoryReviewResult(r.Context(), db, userID, orm.ResourceUpdateResourceTypeMemory)
+	preview, err := fsService.DraftPreview(r.Context(), resourcefs.DraftPreviewRequest{Ref: memoryResourceRef(userID)})
 	if err != nil {
-		resourceupdate.ReplyReviewError(w, err, "memory draft")
+		common.ReplyErr(w, "memory draft not found", http.StatusNotFound)
 		return
 	}
-
-	diff, err := evolution.BuildContentDiff(row.Content, result.Content)
+	if strings.TrimSpace(preview.DraftStatus) != "pending_confirm" {
+		common.ReplyErr(w, "memory draft not found", http.StatusNotFound)
+		return
+	}
+	diff, err := evolution.BuildContentDiff(preview.HeadContent, preview.DraftContent)
 	if err != nil {
 		common.ReplyErr(w, "build memory diff failed", http.StatusInternalServerError)
 		return
 	}
 
 	common.ReplyOK(w, draftPreviewResponse{
-		ReviewResultID:     result.ID,
-		ReviewStatus:       result.ReviewStatus,
-		DraftStatus:        result.ReviewStatus,
-		DraftSourceVersion: row.Version,
-		CurrentContent:     row.Content,
-		DraftContent:       result.Content,
+		ReviewStatus:       preview.DraftStatus,
+		DraftStatus:        preview.DraftStatus,
+		DraftSourceVersion: preview.DraftVersion,
+		CurrentContent:     preview.HeadContent,
+		DraftContent:       preview.DraftContent,
 		Diff:               diff,
+		FileDiff:           &preview.Diff,
+		RevisionID:         preview.BaseRevisionID,
+		DraftVersion:       preview.DraftVersion,
+		ReviewID:           preview.ReviewID,
+		ReviewVersion:      preview.ReviewVersion,
+		CanUndo:            preview.CanUndo,
+		PendingCount:       preview.PendingCount,
+		AcceptedCount:      preview.AcceptedCount,
+		RejectedCount:      preview.RejectedCount,
 	})
 }
 
@@ -398,19 +481,19 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := evolution.EnsureSystemMemory(r.Context(), db, userID, userName)
+	row, fsService, _, err := ensureMemoryResource(r.Context(), db, userID, userName)
 	if err != nil {
 		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
 		return
 	}
-	content, err := memoryGenerateBaseContent(*row)
+	base, err := memoryCurrentWritableContent(r.Context(), fsService, userID)
 	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusNotFound)
+		common.ReplyErr(w, "query memory content failed", http.StatusInternalServerError)
 		return
 	}
 
 	algoReq := algo.ManagedGenerateRequest{
-		Content:      content,
+		Content:      base.Content,
 		UserInstruct: req.UserInstruct,
 	}
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), db, userID)
@@ -431,18 +514,18 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now()
-	update := map[string]any{
-		"draft_content":        generated,
-		"draft_source_version": row.Version,
-		"draft_status":         "pending_confirm",
-		"draft_updated_at":     now,
-		"updated_by":           userID,
-		"updated_by_name":      userName,
-		"updated_at":           now,
-		"ext":                  evolution.WithDraftSuggestionIDs(row.Ext, nil),
+	draft, _, err := memoryDraftIsPending(r.Context(), fsService, userID)
+	if err != nil {
+		common.ReplyErr(w, "query memory draft failed", http.StatusInternalServerError)
+		return
 	}
-	if err := db.WithContext(r.Context()).Model(&orm.SystemMemory{}).Where("id = ?", row.ID).Updates(update).Error; err != nil {
+	draftResp, err := fsService.WriteDraft(r.Context(), resourcefs.WriteDraftRequest{
+		Ref:                  memoryResourceRef(userID),
+		Content:              generated,
+		ExpectedDraftVersion: draft.DraftVersion,
+		UpdatedBy:            userID,
+	})
+	if err != nil {
 		common.ReplyErr(w, "update memory draft failed", http.StatusInternalServerError)
 		return
 	}
@@ -450,6 +533,7 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		"draft_status":         "pending_confirm",
 		"draft_source_version": row.Version,
 		"draft_content":        generated,
+		"draft_version":        draftResp.DraftVersion,
 	})
 }
 
@@ -472,18 +556,32 @@ func Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := resourceupdate.LatestPendingMemoryReviewResult(r.Context(), db, userID, orm.ResourceUpdateResourceTypeMemory)
-	if err != nil {
-		resourceupdate.ReplyReviewError(w, err, "memory draft")
-		return
-	}
-	if _, err := resourceupdate.AcceptMemoryReviewResultByID(r.Context(), db, userID, result.ID); err != nil {
-		resourceupdate.ReplyReviewError(w, err, "confirm memory draft")
-		return
-	}
-	row, err := evolution.LoadSystemMemory(r.Context(), db, userID)
+	userName := strings.TrimSpace(store.UserName(r))
+	_, fsService, _, err := ensureMemoryResource(r.Context(), db, userID, userName)
 	if err != nil {
 		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
+		return
+	}
+	preview, err := fsService.DraftPreview(r.Context(), resourcefs.DraftPreviewRequest{Ref: memoryResourceRef(userID)})
+	if err != nil || strings.TrimSpace(preview.DraftStatus) != "pending_confirm" {
+		common.ReplyErr(w, "memory draft not found", http.StatusNotFound)
+		return
+	}
+	commit, err := fsService.CommitDraft(r.Context(), resourcefs.CommitDraftRequest{
+		Ref:                  memoryResourceRef(userID),
+		Message:              "confirm memory draft",
+		SourceRefType:        "memory",
+		ExpectedDraftVersion: preview.DraftVersion,
+		CreatedBy:            userID,
+	})
+	if err != nil {
+		common.ReplyErr(w, "confirm memory draft failed", http.StatusInternalServerError)
+		return
+	}
+	content := commit.Content
+	row, err := upsertManagedMemoryContent(r, db, userID, userName, upsertRequest{Content: &content}, true)
+	if err != nil {
+		common.ReplyErr(w, "sync memory failed", http.StatusInternalServerError)
 		return
 	}
 	common.ReplyOK(w, map[string]any{
@@ -504,13 +602,13 @@ func Discard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := resourceupdate.LatestPendingMemoryReviewResult(r.Context(), db, userID, orm.ResourceUpdateResourceTypeMemory)
+	_, fsService, _, err := ensureMemoryResource(r.Context(), db, userID, store.UserName(r))
 	if err != nil {
-		resourceupdate.ReplyReviewError(w, err, "memory draft")
+		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
 		return
 	}
-	if _, err := resourceupdate.RejectMemoryReviewResultByID(r.Context(), db, userID, result.ID); err != nil {
-		resourceupdate.ReplyReviewError(w, err, "discard memory draft")
+	if _, err := fsService.DiscardDraft(r.Context(), memoryResourceRef(userID)); err != nil {
+		common.ReplyErr(w, "discard memory draft failed", http.StatusInternalServerError)
 		return
 	}
 	common.ReplyOK(w, map[string]any{"discarded": true})

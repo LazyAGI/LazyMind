@@ -72,6 +72,16 @@ def mock_layer2_imports():
         yield
 
 
+@pytest.fixture()
+def mock_dynamic_step_waits():
+    """advance_step tests focus on trigger semantics unless they override waits."""
+    with (
+        patch('lazymind.chat.plugin.plugin_manager._wait_for_step_started', return_value='task-ack') as started,
+        patch('lazymind.chat.plugin.plugin_manager._wait_for_step_done', return_value='step done') as done,
+    ):
+        yield started, done
+
+
 # ---------------------------------------------------------------------------
 # build_cold_start_tools
 # ---------------------------------------------------------------------------
@@ -128,10 +138,12 @@ def test_advance_step_tool_rejects_unreachable_step(loaded_plugin, mock_write_ag
     assert not mock_write_agent_data.called
 
 
-def test_advance_step_tool_triggers_reachable_step(loaded_plugin, mock_write_agent_data, mock_agentic_config):
+def test_advance_step_tool_triggers_reachable_step(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_dynamic_step_waits):
     from lazymind.chat.plugin import plugin_manager
     mock_agentic_config.update({
         'plugin_id': 'test-plugin',
+        'session_id': 'chat-sid-123',
         'plugin_session_id': 'ps-456',
         'plugin_step': 'step_a',
     })
@@ -143,9 +155,66 @@ def test_advance_step_tool_triggers_reachable_step(loaded_plugin, mock_write_age
     call_kwargs = mock_write_agent_data.call_args.kwargs
     assert call_kwargs['params']['step_id'] == 'step_b'
     assert call_kwargs['params']['is_cold_start'] is False
+    assert call_kwargs['params']['chat_session_id'] == 'chat-sid-123'
 
 
-def test_advance_step_tool_retrigger_same_step(loaded_plugin, mock_write_agent_data, mock_agentic_config):
+def test_advance_step_tool_waits_for_started_before_done(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_dynamic_step_waits):
+    from lazymind.chat.plugin import plugin_manager
+    started, done = mock_dynamic_step_waits
+    calls = []
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'plugin_session_id': 'ps-ack',
+        'plugin_step': 'step_a',
+    })
+    started.side_effect = lambda step_id: calls.append(('started', step_id)) or 'task-ack'
+
+    def set_local_step(step_id):
+        calls.append(('set_local', step_id))
+        mock_agentic_config['plugin_step'] = step_id
+
+    done.side_effect = lambda step_id, result: calls.append(
+        ('done', step_id, mock_agentic_config['plugin_step'])
+    ) or 'step done'
+    advance = plugin_manager.build_advance_step_tool('test-plugin', 'step_a')
+
+    with (
+        patch('lazymind.chat.plugin.plugin_manager._clear_step_signal_queues'),
+        patch('lazymind.chat.plugin.plugin_manager._trigger_plugin_step', return_value='triggered'),
+        patch('lazymind.chat.plugin.plugin_manager._set_local_plugin_step', side_effect=set_local_step),
+    ):
+        result = advance(step_id='step_b', user_input='proceed')
+
+    assert result.startswith('step done')
+    assert 'Current step: step_b' in result
+    assert 'step_c' in result
+    assert calls == [('started', 'step_b'), ('set_local', 'step_b'), ('done', 'step_b', 'step_b')]
+
+
+def test_advance_step_tool_raises_when_started_ack_missing(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_dynamic_step_waits):
+    from lazymind.chat.plugin import plugin_manager
+    started, done = mock_dynamic_step_waits
+    started.side_effect = TimeoutError('missing start ack')
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'plugin_session_id': 'ps-missing-ack',
+        'plugin_step': 'step_a',
+    })
+    advance = plugin_manager.build_advance_step_tool('test-plugin', 'step_a')
+
+    with pytest.raises(TimeoutError, match='missing start ack'):
+        with (
+            patch('lazymind.chat.plugin.plugin_manager._clear_step_signal_queues'),
+            patch('lazymind.chat.plugin.plugin_manager._trigger_plugin_step', return_value='triggered'),
+        ):
+            advance(step_id='step_b', user_input='proceed')
+    assert not done.called
+
+
+def test_advance_step_tool_retrigger_same_step(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_dynamic_step_waits):
     """step_d can re-trigger step_d itself (full retry or partial retry via list slot)."""
     from lazymind.chat.plugin import plugin_manager
     mock_agentic_config.update({
@@ -159,6 +228,31 @@ def test_advance_step_tool_retrigger_same_step(loaded_plugin, mock_write_agent_d
     assert mock_write_agent_data.called
     call_kwargs = mock_write_agent_data.call_args.kwargs
     assert call_kwargs['params']['step_id'] == 'step_d'
+
+
+def test_advance_step_and_hand_off_uses_live_current_step(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    """Final hand-off after synchronous steps must validate against live state."""
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'session_id': 'chat-sid-live',
+        'plugin_session_id': 'ps-live',
+        'plugin_step': 'step_a',
+    })
+    handoff = plugin_manager.build_advance_step_and_hand_off_tool('test-plugin', 'step_a')
+
+    # Simulate advance_step(step_b) having already updated local state in the
+    # same ChatAgent turn. A stale hand-off tool built at step_a would reject
+    # step_c; the live state should allow it.
+    mock_agentic_config['plugin_step'] = 'step_b'
+    result = handoff(step_id='step_c', user_input='finish boundary')
+
+    assert 'error' not in result.lower()
+    assert mock_write_agent_data.called
+    call_kwargs = mock_write_agent_data.call_args.kwargs
+    assert call_kwargs['params']['step_id'] == 'step_c'
+    assert call_kwargs['params']['chat_session_id'] == 'chat-sid-live'
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +280,39 @@ def test_render_step_objective_empty_prompt():
     from lazymind.chat.plugin.plugin_manager import _render_step_objective
     rendered = _render_step_objective({}, 'anything')
     assert rendered == ''
+
+
+def test_state_machine_filters_transition_targets_without_step_config():
+    from lazymind.chat.plugin.plugin_loader import StateMachine
+    sm = StateMachine(
+        initial='step_a',
+        transitions={'step_a': [{'to': 'missing_step'}]},
+        steps={'step_a': {'prompt': 'ok'}},
+    )
+
+    assert sm.get_reachable_steps('step_a') == []
+    assert sm.is_reachable('step_a', 'missing_step') is False
+
+
+def test_trigger_plugin_step_rejects_missing_step_config(mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+
+    class _FakeStateMachine:
+        def is_reachable(self, current_step, target_step):
+            return True
+
+    mock_agentic_config.update({'plugin_step': 'step_a', 'plugin_session_id': 'ps-missing'})
+    with (
+        patch.object(plugin_manager.plugin_loader, 'get_state_machine', return_value=_FakeStateMachine()),
+        patch.object(plugin_manager.plugin_loader, 'get_step_config', return_value={}),
+    ):
+        with pytest.raises(ValueError, match='not defined'):
+            plugin_manager._trigger_plugin_step(
+                'test-plugin',
+                'missing_step',
+                'go',
+                is_cold_start=False,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +418,7 @@ def test_render_step_objective_empty_runtime_instruction_removed():
 
 
 def test_advance_step_passes_runtime_instruction(
-        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_dynamic_step_waits):
     """runtime_instruction is forwarded into the step objective."""
     from lazymind.chat.plugin import plugin_manager
     mock_agentic_config.update({
@@ -313,7 +440,7 @@ def test_advance_step_passes_runtime_instruction(
 
 
 def test_advance_step_no_runtime_instruction_leaves_no_placeholder(
-        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_dynamic_step_waits):
     """When runtime_instruction is omitted, {{runtime_instruction}} must not appear in objective."""
     from lazymind.chat.plugin import plugin_manager
     mock_agentic_config.update({
@@ -586,8 +713,27 @@ def test_build_advance_step_tool_docstring_no_rewind_when_empty(loaded_plugin):
     assert 'Rewind' not in doc
 
 
+def test_dynamic_guidance_respects_explicit_target_boundary(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    guidance = plugin_manager._build_mode_guidance(
+        'dynamic',
+        terminal_steps=['step_d'],
+        step_labels={'step_d': 'Finalize'},
+    )
+
+    assert 'target boundary' in guidance
+    assert 'Match X against the current plugin' in guidance
+    assert 'Do not assume plugin-specific step' in guidance
+    assert 'higher priority than generic uninterrupted phrases' in guidance
+    assert 'Execute the target boundary step with `advance_step_and_hand_off`' in guidance
+    assert 'Do NOT wait for the boundary step with `advance_step`' in guidance
+    assert 'Do NOT call downstream steps and do NOT call `__end__`' in guidance
+
+
 def test_build_advance_step_tool_rewind_step_is_accepted(
-        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_fetch_succeeded):
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_fetch_succeeded,
+        mock_dynamic_step_waits):
     """advance_step should accept a step_id listed in rewind_steps."""
     from lazymind.chat.plugin import plugin_manager
     mock_agentic_config.update({

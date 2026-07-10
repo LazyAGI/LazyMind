@@ -14,6 +14,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/resourcechange"
+	skilldiff "lazymind/core/skillv2/diff"
 	"lazymind/core/store"
 )
 
@@ -39,17 +40,65 @@ type taskResponse struct {
 }
 
 type skillReviewResultResponse struct {
-	ID             string    `json:"id"`
-	SkillName      string    `json:"skill_name"`
-	Type           string    `json:"type"`
-	ReviewStatus   string    `json:"review_status"`
-	UserID         string    `json:"userid"`
-	RequestID      string    `json:"requestid"`
-	SkillContent   string    `json:"skill_content,omitempty"`
-	CurrentContent string    `json:"current_content,omitempty"`
-	Diff           string    `json:"diff,omitempty"`
-	Summary        string    `json:"summary"`
-	Time           time.Time `json:"time"`
+	ID             string                        `json:"id"`
+	SkillName      string                        `json:"skill_name"`
+	Type           string                        `json:"type"`
+	ReviewStatus   string                        `json:"review_status"`
+	UserID         string                        `json:"userid"`
+	RequestID      string                        `json:"requestid"`
+	SkillContent   string                        `json:"skill_content,omitempty"`
+	CurrentContent string                        `json:"current_content,omitempty"`
+	Diff           string                        `json:"diff,omitempty"`
+	DiffEntryLines []reviewDiffEntryLineResponse `json:"diffEntryLines,omitempty"`
+	Summary        string                        `json:"summary"`
+	Time           time.Time                     `json:"time"`
+}
+
+type reviewDiffEntryLineResponse struct {
+	Type                    string `json:"type"`
+	Text                    string `json:"text"`
+	HTML                    string `json:"html,omitempty"`
+	OldLine                 int    `json:"oldLine,omitempty"`
+	NewLine                 int    `json:"newLine,omitempty"`
+	DisplayNoNewLineWarning bool   `json:"displayNoNewLineWarning,omitempty"`
+}
+
+type skillReviewSummaryResponse struct {
+	QualifiedSessionCount int           `json:"qualified_session_count"`
+	UserTurnCount         int           `json:"user_turn_count"`
+	ToolCallCount         int           `json:"tool_call_count"`
+	MinUserTurns          int           `json:"min_user_turns"`
+	MinToolTurns          int           `json:"min_tool_turns"`
+	QuantityThreshold     int           `json:"quantity_threshold"`
+	WindowStart           time.Time     `json:"window_start"`
+	WindowEnd             time.Time     `json:"window_end"`
+	RunningTask           *taskResponse `json:"running_task,omitempty"`
+	RunningRequestID      string        `json:"running_requestid,omitempty"`
+}
+
+type skillReviewRunResponse struct {
+	Task      taskResponse               `json:"task"`
+	Summary   skillReviewSummaryResponse `json:"summary"`
+	RequestID string                     `json:"requestid"`
+}
+
+type skillReviewTaskStatusResponse struct {
+	Task        taskResponse `json:"task"`
+	RequestID   string       `json:"requestid"`
+	Status      string       `json:"status"`
+	RunStatus   string       `json:"run_status,omitempty"`
+	ResultCount int64        `json:"result_count"`
+}
+
+type skillReviewTaskListResponse struct {
+	Items    []skillReviewTaskStatusResponse `json:"items"`
+	Page     int                             `json:"page"`
+	PageSize int                             `json:"page_size"`
+	Total    int64                           `json:"total"`
+}
+
+type skillReviewRunStatsRow struct {
+	Status string `gorm:"column:status"`
 }
 
 type memoryReviewResultResponse struct {
@@ -143,6 +192,9 @@ func ListSkillReviewResults(w http.ResponseWriter, r *http.Request) {
 	if skillName := strings.TrimSpace(r.URL.Query().Get("skill_name")); skillName != "" {
 		query = query.Where("skill_name = ?", skillName)
 	}
+	if requestID := strings.TrimSpace(r.URL.Query().Get("requestid")); requestID != "" {
+		query = query.Where("requestid = ?", requestID)
+	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		common.ReplyErr(w, "query skill review results failed", http.StatusInternalServerError)
@@ -161,6 +213,172 @@ func ListSkillReviewResults(w http.ResponseWriter, r *http.Request) {
 		items = append(items, skillResultToResponse(row))
 	}
 	common.ReplyOK(w, map[string]any{"items": items, "page": page, "page_size": pageSize, "total": total})
+}
+
+func GetSkillReviewSummary(w http.ResponseWriter, r *http.Request) {
+	db, userID, ok := requestDBAndUser(w, r)
+	if !ok {
+		return
+	}
+	summary, err := buildManualSkillReviewSummary(r.Context(), db, userID, DefaultConfig(), time.Now().UTC())
+	if err != nil {
+		common.ReplyErr(w, "query skill review summary failed", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, summary)
+}
+
+func RunSkillReview(w http.ResponseWriter, r *http.Request) {
+	db, userID, ok := requestDBAndUser(w, r)
+	if !ok {
+		return
+	}
+	task, summary, err := createManualSkillReviewTask(r.Context(), db, userID, DefaultConfig(), time.Now().UTC())
+	if err != nil {
+		switch {
+		case errors.Is(err, errReviewConflict), errors.Is(err, gorm.ErrDuplicatedKey):
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, errReviewInvalid):
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		default:
+			common.ReplyErr(w, "run skill review failed", http.StatusInternalServerError)
+		}
+		return
+	}
+	common.ReplyOK(w, skillReviewRunResponse{
+		Task:      taskToResponse(task),
+		Summary:   summary,
+		RequestID: summary.RunningRequestID,
+	})
+}
+
+func ListSkillReviewTasks(w http.ResponseWriter, r *http.Request) {
+	db, userID, ok := requestDBAndUser(w, r)
+	if !ok {
+		return
+	}
+	page := parsePositiveQueryInt(r.URL.Query().Get("page"), 1, 0)
+	pageSize := parsePositiveQueryInt(r.URL.Query().Get("page_size"), 20, 1000)
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	requestID := strings.TrimSpace(r.URL.Query().Get("requestid"))
+	resp, err := buildSkillReviewTaskList(r.Context(), db, userID, status, requestID, page, pageSize)
+	if err != nil {
+		mapReviewError(w, err, "skill review task")
+		return
+	}
+	common.ReplyOK(w, resp)
+}
+
+func buildSkillReviewTaskList(ctx context.Context, db *gorm.DB, userID, status, requestID string, page, pageSize int) (skillReviewTaskListResponse, error) {
+	var tasks []orm.ResourceUpdateTask
+	if err := db.WithContext(ctx).
+		Where(
+			"user_id = ? AND task_type = ? AND resource_type = ? AND trigger_type = ?",
+			strings.TrimSpace(userID),
+			orm.ResourceUpdateTaskTypeGenerateReview,
+			orm.ResourceUpdateResourceTypeSkill,
+			orm.ResourceUpdateTriggerTypeManual,
+		).
+		Order("created_at DESC").
+		Find(&tasks).Error; err != nil {
+		return skillReviewTaskListResponse{}, err
+	}
+
+	items := make([]skillReviewTaskStatusResponse, 0, len(tasks))
+	for _, task := range tasks {
+		item, err := buildSkillReviewTaskStatus(ctx, db, userID, task)
+		if err != nil {
+			return skillReviewTaskListResponse{}, err
+		}
+		if requestID != "" && item.RequestID != requestID {
+			continue
+		}
+		if status == "" ||
+			item.Status == status ||
+			(status == orm.ResourceUpdateTaskStatusRunning &&
+				(item.Status == orm.ResourceUpdateTaskStatusPending || item.Status == orm.ResourceUpdateTaskStatusRunning)) {
+			items = append(items, item)
+		}
+	}
+
+	total := len(items)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+
+	return skillReviewTaskListResponse{
+		Items:    items[start:end],
+		Page:     page,
+		PageSize: pageSize,
+		Total:    int64(total),
+	}, nil
+}
+
+func buildSkillReviewTaskStatus(ctx context.Context, db *gorm.DB, userID string, task orm.ResourceUpdateTask) (skillReviewTaskStatusResponse, error) {
+	requestID := skillTaskRequestID(task)
+	if strings.TrimSpace(requestID) == "" {
+		return skillReviewTaskStatusResponse{}, errReviewInvalid
+	}
+
+	resp := skillReviewTaskStatusResponse{
+		Task:      taskToResponse(task),
+		RequestID: requestID,
+		Status:    task.Status,
+	}
+	var resultCount int64
+	if err := db.WithContext(ctx).
+		Table("skill_review_results").
+		Where("userid = ? AND requestid = ?", strings.TrimSpace(userID), requestID).
+		Count(&resultCount).Error; err != nil {
+		return skillReviewTaskStatusResponse{}, err
+	}
+	resp.ResultCount = resultCount
+
+	var runStats skillReviewRunStatsRow
+	err := db.WithContext(ctx).
+		Table("skill_review_run_stats").
+		Select("status").
+		Where("userid = ? AND requestid = ?", strings.TrimSpace(userID), requestID).
+		Order("started_at DESC").
+		Take(&runStats).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if task.Status == orm.ResourceUpdateTaskStatusDone {
+			resp.Status = orm.ResourceUpdateTaskStatusRunning
+		}
+		return resp, nil
+	}
+	if err != nil {
+		return skillReviewTaskStatusResponse{}, err
+	}
+
+	resp.RunStatus = runStats.Status
+	resp.Status = skillReviewTaskStatusFromRunStats(task.Status, runStats.Status)
+	return resp, nil
+}
+
+func skillReviewTaskStatusFromRunStats(taskStatus, runStatus string) string {
+	switch taskStatus {
+	case orm.ResourceUpdateTaskStatusPending, orm.ResourceUpdateTaskStatusRunning,
+		orm.ResourceUpdateTaskStatusFailed, orm.ResourceUpdateTaskStatusSkipped:
+		return taskStatus
+	}
+	switch strings.TrimSpace(runStatus) {
+	case "completed":
+		return orm.ResourceUpdateTaskStatusDone
+	case "failed":
+		return orm.ResourceUpdateTaskStatusFailed
+	case "skipped":
+		return orm.ResourceUpdateTaskStatusSkipped
+	case "running":
+		return orm.ResourceUpdateTaskStatusRunning
+	default:
+		return orm.ResourceUpdateTaskStatusRunning
+	}
 }
 
 func GetSkillReviewResult(w http.ResponseWriter, r *http.Request) {
@@ -352,6 +570,16 @@ func acceptSkillReviewResult(ctx context.Context, db *gorm.DB, userID, userName,
 		}
 		switch strings.TrimSpace(row.Type) {
 		case skillReviewTypePatch:
+			v2Resource, err := mapSkillPatchResultToV2Resource(ctx, withUpdateLock(tx), row)
+			if err == nil {
+				if err := applySkillV2PatchResult(ctx, tx, row, v2Resource); err != nil {
+					return err
+				}
+				break
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 			resource, err := mapSkillPatchResultToResource(withUpdateLock(tx).WithContext(ctx), row)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -368,13 +596,18 @@ func acceptSkillReviewResult(ctx context.Context, db *gorm.DB, userID, userName,
 				return err
 			}
 		case skillReviewTypeNew:
-			if _, err := createSkillFromNewResult(ctx, tx, row, userName, now, resourcechange.Source{
-				ChangeSource:  resourcechange.ChangeSourceReviewAccept,
-				SourceRefType: resourcechange.SourceRefTypeSkillReviewResult,
-				SourceRefID:   row.ID,
-				ChangedAt:     now,
-			}); err != nil {
-				return err
+			if _, err := createSkillV2FromNewResult(ctx, tx, row, userName); err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				if _, err := createSkillFromNewResult(ctx, tx, row, userName, now, resourcechange.Source{
+					ChangeSource:  resourcechange.ChangeSourceReviewAccept,
+					SourceRefType: resourcechange.SourceRefTypeSkillReviewResult,
+					SourceRefID:   row.ID,
+					ChangedAt:     now,
+				}); err != nil {
+					return err
+				}
 			}
 			if err := updateSkillReviewStatus(ctx, tx, row.ID, reviewStatusAccepted); err != nil {
 				return err
@@ -520,6 +753,11 @@ func LatestPendingSkillPatchReviewResult(ctx context.Context, db *gorm.DB, userI
 		return SkillReviewResult{}, err
 	}
 	for _, row := range rows {
+		if _, err := mapSkillPatchResultToV2Resource(ctx, db, row); err == nil {
+			return row, nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return SkillReviewResult{}, err
+		}
 		if _, err := mapSkillPatchResultToResource(db.WithContext(ctx), row); err == nil {
 			return row, nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -636,7 +874,20 @@ func skillResultDetailResponse(ctx context.Context, db *gorm.DB, row SkillReview
 				return skillReviewResultResponse{}, err
 			}
 			resp.Diff = diff
+			resp.DiffEntryLines = buildReviewDiffEntryLines(ctx, "", row.SkillContent)
 		}
+		return resp, nil
+	}
+	if current, ok, err := skillV2CurrentContent(ctx, db, row.UserID, row.SkillName); err != nil {
+		return skillReviewResultResponse{}, err
+	} else if ok {
+		resp.CurrentContent = current
+		diff, err := evolution.BuildContentDiff(current, row.SkillContent)
+		if err != nil {
+			return skillReviewResultResponse{}, err
+		}
+		resp.Diff = diff
+		resp.DiffEntryLines = buildReviewDiffEntryLines(ctx, current, row.SkillContent)
 		return resp, nil
 	}
 	resource, err := mapSkillPatchResultToResource(db.WithContext(ctx), row)
@@ -652,7 +903,52 @@ func skillResultDetailResponse(ctx context.Context, db *gorm.DB, row SkillReview
 		return skillReviewResultResponse{}, err
 	}
 	resp.Diff = diff
+	resp.DiffEntryLines = buildReviewDiffEntryLines(ctx, resource.Content, row.SkillContent)
 	return resp, nil
+}
+
+func buildReviewDiffEntryLines(ctx context.Context, currentContent, draftContent string) []reviewDiffEntryLineResponse {
+	oldFS := reviewSingleFileFS{content: currentContent, exists: strings.TrimSpace(currentContent) != ""}
+	newFS := reviewSingleFileFS{content: draftContent, exists: strings.TrimSpace(draftContent) != ""}
+	diff, err := skilldiff.NewService(skilldiff.ServiceDeps{}).CompareFile(ctx, oldFS, newFS, skilldiff.DiffOptions{Path: "SKILL.md"})
+	if err != nil {
+		return nil
+	}
+	out := make([]reviewDiffEntryLineResponse, 0, len(diff.DiffEntryLines))
+	for _, line := range diff.DiffEntryLines {
+		out = append(out, reviewDiffEntryLineResponse{
+			Type:                    line.Type,
+			Text:                    line.Text,
+			HTML:                    line.HTML,
+			OldLine:                 line.OldLine,
+			NewLine:                 line.NewLine,
+			DisplayNoNewLineWarning: line.DisplayNoNewLineWarning,
+		})
+	}
+	return out
+}
+
+type reviewSingleFileFS struct {
+	content string
+	exists  bool
+}
+
+func (fs reviewSingleFileFS) ListAll(context.Context) ([]skilldiff.EntryInfo, error) {
+	if !fs.exists {
+		return nil, nil
+	}
+	return []skilldiff.EntryInfo{{
+		Path:     "SKILL.md",
+		Type:     "file",
+		BlobHash: evolution.HashContent(fs.content),
+		Binary:   false,
+		FileType: "markdown",
+		Size:     int64(len([]byte(fs.content))),
+	}}, nil
+}
+
+func (fs reviewSingleFileFS) ReadFile(context.Context, string) ([]byte, error) {
+	return []byte(fs.content), nil
 }
 
 func memoryResultToResponse(row MemoryReviewResult) memoryReviewResultResponse {

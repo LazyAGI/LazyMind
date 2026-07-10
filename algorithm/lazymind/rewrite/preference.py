@@ -36,31 +36,31 @@ def _build_user_preference_prompt(
         'You are a user_preference editor. Generate the complete new user_preference content based on the input; no explanations or summaries.\n'  # noqa: E501
         'memory type: user_preference\n'
         'user_preference stores long-term stable user profile information, such as: user identity / role / domain, '
-        'long-term preferences (communication tone, output format, language, level of detail), taboos, common workflow preferences, default context assumptions, etc.\n'  # noqa: E501
+        'long-term preferences (communication tone, output format, language, level of detail), taboos, stable personal workflow preferences, default context assumptions, etc.\n'  # noqa: E501
         '\n'
         '[Content boundaries]\n'
         '- Only record long-term stable profile information that can be reused in every future interaction.\n'
         '- Do not record specific experiences, specific project knowledge, or one-time events here; those belong to memory.\n'  # noqa: E501
+        '- Do not record step-by-step SOPs, troubleshooting procedures, implementation recipes, tool usage patterns, or task-specific conventions here.\n'  # noqa: E501
         '- Do not write as chat logs or journals; organize as itemized profile entries that the agent can quickly read.\n'  # noqa: E501
         '\n'
         '[Format requirements]\n'
-        '- Must start with YAML frontmatter delimited by `---`, containing at least agent_persona, preferred_name, and response_style fields, followed by a blank line and Markdown body content.\n'  # noqa: E501
-        '- agent_persona（智能体身份、职责和边界）describes the identity, responsibilities, and boundaries the agent should maintain when replying.\n'  # noqa: E501
-        '- preferred_name（对用户的称呼方式）means how replies should address the user.\n'
-        '- response_style（表达习惯、篇幅和结构偏好）is a short text describing expression habits, length preference, and structure preference.\n'  # noqa: E501
+        '- Must start with YAML frontmatter delimited by `---`, containing exactly agent_persona, preferred_name, and response_style fields, followed by a blank line and Markdown body content.\n'  # noqa: E501
+        '- Use frontmatter only for the explicit stable agent persona, preferred name/address, and short response style.\n'  # noqa: E501
+        '- Do not put language preferences, formatting rules, citation rules, workflow constraints, task procedures, verbs, or full instructions in response_style; write those details in the Markdown body.\n'  # noqa: E501
         '- Each YAML frontmatter value must be a string of 100 characters or less. Use "" when agent_persona, preferred_name, or response_style is unknown.\n'  # noqa: E501
         '- The YAML frontmatter field names (keys) are FIXED. You may ONLY change their values; NEVER add, remove, or rename a frontmatter key. When user_instruct asks to record new information that does not fit an existing frontmatter field, write it in the Markdown body, not as a new frontmatter field.\n'  # noqa: E501
         '- If response_style is missing or invalid during format repair and the user did not specify one, use "".\n'  # noqa: E501
         '- Modify agent_persona, preferred_name, or response_style only when user_instruct explicitly asks to change that specific field or clearly states the corresponding stable preference.\n'  # noqa: E501
-        '- If user_instruct only adds ordinary profile/preferences, keep existing frontmatter values unchanged and write the new information in the Markdown body.\n'  # noqa: E501
-        '- Write concrete user profile/preference entries in the Markdown body after the closing `---`.\n'
-        '- The Markdown body must NOT repeat information already captured in the frontmatter fields (agent_persona, preferred_name, response_style). For example, do not write "智能体身份：技术助理", "称呼方式：老师", or "表达结构：先结论后解释" in the body when those values are already in the frontmatter.\n'  # noqa: E501
+        '- If user_instruct only adds ordinary profile/preferences, keep existing frontmatter values unchanged, including an existing response_style, and write the new information in the Markdown body.\n'  # noqa: E501
+        '- Write concrete user profile/preference entries in the Markdown body after the closing `---`; never use generic acknowledgement text such as "preference recorded" as the body.\n'  # noqa: E501
+        '- The Markdown body must NOT repeat information already captured in the frontmatter fields (agent_persona, preferred_name, response_style).\n'  # noqa: E501
         '\n'
         '[Writing and merging rules]\n'
         '- You do NOT output final user_preference text directly unless you must use replace_all. Normally you output edit operations that will be applied to the existing user_preference inside the generate endpoint.\n'  # noqa: E501
         '- If the current text is empty, free-form, paragraph-based, or missing the required YAML frontmatter, use `replace_all` to convert the whole content to the frontmatter-plus-body format.\n'  # noqa: E501
         '- `replace_text` always replaces the first matching occurrence only. If first-match replacement is unsafe or not enough, use `replace_all` instead.\n'  # noqa: E501
-        '- Prefer small, local `replace_text` edits when the existing content already has the YAML frontmatter skeleton (delimited by `---`). This includes when field values are empty strings or body is empty — you can fill in individual fields by targeting the exact empty-value lines (e.g. replace `agent_persona: ""` with `agent_persona: "技术助理"`), and add body content by targeting the closing `---` line.\n'  # noqa: E501
+        '- Prefer small, local `replace_text` edits when the existing content already has the YAML frontmatter skeleton (delimited by `---`). This includes when field values are empty strings or body is empty; fill in individual fields by targeting exact empty-value lines, and add body content by targeting the closing `---` line.\n'  # noqa: E501
         '- When preferences conflict, the new preference should replace the old text directly, and user_instruct takes precedence.\n'  # noqa: E501
         '- Keep language concise and neutral; no anthropomorphic comments; only state factual user profile entries.\n'
         '- Use `replace_all` only when the current content cannot be edited safely with local text replacement operations.\n'  # noqa: E501

@@ -3,9 +3,10 @@ package resourceupdate
 import "time"
 
 type Stage struct {
-	Window    time.Duration
-	Interval  time.Duration
-	Successes int
+	Window            time.Duration
+	Interval          time.Duration
+	QuantityThreshold int
+	Successes         int
 }
 
 type Config struct {
@@ -53,9 +54,9 @@ func DefaultConfig() Config {
 		MinInterval:           time.Hour,
 		MaxWindow:             7 * 24 * time.Hour,
 		Stages: []Stage{
-			{Window: 3 * time.Hour, Interval: 3 * time.Hour, Successes: 3},
-			{Window: 24 * time.Hour, Interval: 24 * time.Hour, Successes: 7},
-			{Window: 3 * 24 * time.Hour, Interval: 3 * 24 * time.Hour, Successes: 0},
+			{Window: 3 * time.Hour, Interval: 3 * time.Hour, QuantityThreshold: 5, Successes: 3},
+			{Window: 24 * time.Hour, Interval: 24 * time.Hour, QuantityThreshold: 10, Successes: 7},
+			{Window: 3 * 24 * time.Hour, Interval: 3 * 24 * time.Hour, QuantityThreshold: 20, Successes: 0},
 		},
 
 		WorkerInterval:   2 * time.Second,

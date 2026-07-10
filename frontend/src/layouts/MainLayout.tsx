@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Button, Form, Input, Layout, Modal, Popover, Tooltip, message } from "antd";
+import { Button, Form, Input, Layout, Modal, Popover, Spin, Tooltip, message } from "antd";
 import {
   CodeOutlined,
   SettingOutlined,
@@ -17,6 +17,8 @@ import {
   RightOutlined,
   FolderOpenOutlined,
   UnorderedListOutlined,
+  HistoryOutlined,
+  BookOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -43,6 +45,8 @@ import {
   CHAT_SELECT_CONVERSATION_EVENT,
 } from "@/modules/chat/constants/chat";
 import { runtimeFeatures } from "@/runtime/features";
+import { shouldHideLocalUserControls } from "@/runtime/localSession";
+import { useLocalSessionGate } from "@/runtime/useLocalSessionGate";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -100,6 +104,7 @@ export default function MainLayout() {
   const isLoggedIn = Boolean(userInfo?.token);
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
+  const hideLocalUserControls = shouldHideLocalUserControls();
 
   const [currentSidebarConversationId, setCurrentSidebarConversationId] =
     useState(() => {
@@ -143,6 +148,8 @@ export default function MainLayout() {
         ]
       : []),
   ];
+  const showSettingsTrigger =
+    settingsMenuItems.length > 0 || !hideLocalUserControls;
   const resourceNavItems = [
     {
       key: "/lib/knowledge",
@@ -155,7 +162,7 @@ export default function MainLayout() {
       icon: <DatabaseOutlined />,
     },
     {
-      key: "/model-providers/models",
+      key: "/model-providers/default-services",
       label: t("layout.modelProviderManagement"),
       icon: <ApiOutlined />,
     },
@@ -196,9 +203,12 @@ export default function MainLayout() {
       setUserInfo(AgentAppsAuth.getUserInfo());
     }
   }, []);
+  const localSessionGate = useLocalSessionGate(refreshLayoutUser);
 
   useEffect(() => {
-    refreshLayoutUser();
+    if (!localSessionGate.enabled) {
+      refreshLayoutUser();
+    }
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -228,7 +238,7 @@ export default function MainLayout() {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener(AUTH_USER_CHANGE_EVENT, handleUserChange);
     };
-  }, [refreshLayoutUser]);
+  }, [localSessionGate.enabled, refreshLayoutUser]);
 
   useEffect(() => {
     if (!isAdminUser && developerActive) {
@@ -379,9 +389,9 @@ export default function MainLayout() {
           <span>{t("layout.memoryManagement")}</span>
         </div>
         {[
-          { key: "/memory-management/skills", label: t("admin.memoryTabSkills") },
-          { key: "/memory-management/experience", label: t("admin.memoryTabExperience") },
-          { key: "/memory-management/glossary", label: t("admin.memoryTabGlossary") },
+          { key: "/memory-management/skills", label: t("admin.memoryTabSkills"), icon: <AppstoreOutlined /> },
+          { key: "/memory-management/experience", label: t("admin.memoryTabExperience"), icon: <HistoryOutlined /> },
+          { key: "/memory-management/glossary", label: t("admin.memoryTabGlossary"), icon: <BookOutlined /> },
         ].map((item) => (
           <Button
             key={item.key}
@@ -389,6 +399,7 @@ export default function MainLayout() {
             className="sider-module-popover-item sider-module-popover-item--sub"
             onClick={() => handleModuleNavigate(item.key)}
           >
+            {item.icon}
             {item.label}
           </Button>
         ))}
@@ -441,7 +452,7 @@ export default function MainLayout() {
     navigate("/login");
   };
 
-    const currentPasswordRule = ({ getFieldValue }: any) => ({
+  const currentPasswordRule = ({ getFieldValue }: any) => ({
     validator(_: any, value: string) {
       const newPassword = getFieldValue("newPassword");
       const confirmPassword = getFieldValue("confirmPassword");
@@ -620,6 +631,29 @@ export default function MainLayout() {
     }
   };
 
+  if (localSessionGate.enabled && (localSessionGate.loading || localSessionGate.error)) {
+    return (
+      <div className="local-session-gate">
+        <div className="local-session-panel">
+          {localSessionGate.loading ? <Spin /> : null}
+          <div className="local-session-title">LazyMind</div>
+          <div className="local-session-message">
+            {localSessionGate.error || t("layout.preparingLocalSession", "Preparing local session...")}
+          </div>
+          {localSessionGate.error ? (
+            <Button
+              type="primary"
+              loading={localSessionGate.loading}
+              onClick={localSessionGate.retry}
+            >
+              {t("common.retry", "Retry")}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   if (!isLoggedIn) {
     return <Navigate to="/login" replace />;
   }
@@ -750,84 +784,88 @@ export default function MainLayout() {
               <GlobalOutlined className="bottom-icon" />
               {shouldRenderMenuContent && <LanguageSwitcher />}
             </div>
-            <Popover
-              content={
-                <div className="settings-popover">
-                  {settingsMenuItems.map((item) => {
-                    const btn = (
-                      <Button
-                        key={item.key}
-                        type="text"
-                        className={`settings-popover-button${
-                          item.key === "developer-toggle" && developerActive ? " is-active" : ""
-                        }`}
-                        onClick={() => handleSettingsNavigate(item.key)}
-                      >
-                        {item.icon}
-                        <span>{item.label}</span>
-                        {item.key === "developer-toggle" && developerActive && (
-                          <span className="settings-active-badge">{t("admin.developerActiveTag")}</span>
-                        )}
-                      </Button>
-                    );
-                    if (item.key === "developer-toggle") {
-                      return (
-                        <Tooltip
+            {showSettingsTrigger && (
+              <Popover
+                content={
+                  <div className="settings-popover">
+                    {settingsMenuItems.map((item) => {
+                      const btn = (
+                        <Button
                           key={item.key}
-                          placement="right"
-                          title={
-                            <div style={{ whiteSpace: "pre-line", lineHeight: 1.7 }}>
-                              {t("admin.developerModeTooltip")}
-                            </div>
-                          }
+                          type="text"
+                          className={`settings-popover-button${
+                            item.key === "developer-toggle" && developerActive ? " is-active" : ""
+                          }`}
+                          onClick={() => handleSettingsNavigate(item.key)}
                         >
-                          {btn}
-                        </Tooltip>
+                          {item.icon}
+                          <span>{item.label}</span>
+                          {item.key === "developer-toggle" && developerActive && (
+                            <span className="settings-active-badge">{t("admin.developerActiveTag")}</span>
+                          )}
+                        </Button>
                       );
-                    }
-                    return btn;
-                  })}
-                  {isLoggedIn ? (
-                    <Button
-                      type="text"
-                      className="settings-popover-button"
-                      onClick={handleLogout}
-                    >
-                      <span>{t("layout.logout")}</span>
-                    </Button>
-                  ) : (
-                    <Button
-                      type="text"
-                      className="settings-popover-button"
-                      onClick={handleGoLogin}
-                    >
-                      <span>{t("layout.goLogin")}</span>
-                    </Button>
-                  )}
-                </div>
-              }
-              arrow={false}
-              placement="top"
-              trigger="click"
-              open={settingsOpen}
-              onOpenChange={setSettingsOpen}
-            >
-              <div
-                className="bottom-item settings-trigger"
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setSettingsOpen((open) => !open);
-                  }
-                }}
+                      if (item.key === "developer-toggle") {
+                        return (
+                          <Tooltip
+                            key={item.key}
+                            placement="right"
+                            title={
+                              <div style={{ whiteSpace: "pre-line", lineHeight: 1.7 }}>
+                                {t("admin.developerModeTooltip")}
+                              </div>
+                            }
+                          >
+                            {btn}
+                          </Tooltip>
+                        );
+                      }
+                      return btn;
+                    })}
+                    {!hideLocalUserControls && (
+                      isLoggedIn ? (
+                        <Button
+                          type="text"
+                          className="settings-popover-button"
+                          onClick={handleLogout}
+                        >
+                          <span>{t("layout.logout")}</span>
+                        </Button>
+                      ) : (
+                        <Button
+                          type="text"
+                          className="settings-popover-button"
+                          onClick={handleGoLogin}
+                        >
+                          <span>{t("layout.goLogin")}</span>
+                        </Button>
+                      )
+                    )}
+                  </div>
+                }
+                arrow={false}
+                placement="top"
+                trigger="click"
+                open={settingsOpen}
+                onOpenChange={setSettingsOpen}
               >
-                <SettingOutlined className="bottom-icon" />
-                {shouldRenderMenuContent && <span className="bottom-text">{t("layout.settings")}</span>}
-              </div>
-            </Popover>
-            {userName && (
+                <div
+                  className="bottom-item settings-trigger"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSettingsOpen((open) => !open);
+                    }
+                  }}
+                >
+                  <SettingOutlined className="bottom-icon" />
+                  {shouldRenderMenuContent && <span className="bottom-text">{t("layout.settings")}</span>}
+                </div>
+              </Popover>
+            )}
+            {userName && !hideLocalUserControls && (
               <div
                 className="bottom-item user-item"
                 onClick={handleOpenProfile}

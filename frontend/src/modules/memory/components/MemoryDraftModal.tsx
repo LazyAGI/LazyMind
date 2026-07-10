@@ -1,12 +1,14 @@
-import { useState } from "react";
-import { Alert, Button, Input, Modal, Select, Upload, message } from "antd";
-import { DeleteOutlined, UploadOutlined } from "@ant-design/icons";
+import { useEffect, useState } from "react";
+import { Alert, Button, Input, Modal, Radio, Select, Upload, message } from "antd";
+import { LinkOutlined, UploadOutlined } from "@ant-design/icons";
 import {
   GLOSSARY_ALIAS_MAX_LENGTH,
   GLOSSARY_CONTENT_MAX_LENGTH,
   GLOSSARY_TERM_MAX_LENGTH,
   SKILL_TAG_MAX_COUNT,
 } from "../shared";
+
+export type SkillCreateSource = "zip" | "url" | "manual";
 
 interface MemoryDraftModalProps {
   t: any;
@@ -17,23 +19,17 @@ interface MemoryDraftModalProps {
   activeTab: string;
   experienceSaving: boolean;
   glossarySaving: boolean;
+  skillSaving: boolean;
   isReadOnly: boolean;
   draft: any;
   setDraft: any;
   pendingGlossaryMergeSourceIds: string[];
   modalMode: string;
-  isChildSkillDraft: boolean;
-  parentSkillOptions: Array<{ label: string; value: string }>;
-  parentSkillOptionsLoading: boolean;
   tagOptions: Array<{ label: string; value: string }>;
   normalizeTagValues: (values: string[]) => string[];
-  createSkillUploadProps: (childTempId?: string) => any;
-  addChildSkillDraft: () => void;
-  removeChildSkillDraft: (tempId: string) => void;
-  updateChildSkillDraft: (
-    tempId: string,
-    patch: { name?: string; description?: string; tags?: string[]; content?: string },
-  ) => void;
+  applySkillRepoImport: (repoUrl: string) => void;
+  handleImportSkillPackage: (file: File) => void;
+  onSkillCreateSourceChange: (source: SkillCreateSource) => void;
 }
 
 export default function MemoryDraftModal(props: MemoryDraftModalProps) {
@@ -46,23 +42,39 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
     activeTab,
     experienceSaving,
     glossarySaving,
+    skillSaving,
     isReadOnly,
     draft,
     setDraft,
     pendingGlossaryMergeSourceIds,
     modalMode,
-    isChildSkillDraft,
-    parentSkillOptions,
-    parentSkillOptionsLoading,
     tagOptions,
     normalizeTagValues,
-    createSkillUploadProps,
-    addChildSkillDraft,
-    removeChildSkillDraft,
-    updateChildSkillDraft,
+    applySkillRepoImport,
+    handleImportSkillPackage,
+    onSkillCreateSourceChange,
   } = props;
   const [glossaryAliasInput, setGlossaryAliasInput] = useState("");
-  const shouldShowSkillContentEditor = !(activeTab === "skills" && modalMode === "edit");
+  const [skillCreateSource, setSkillCreateSource] = useState<SkillCreateSource>("manual");
+  const [skillRepoUrl, setSkillRepoUrl] = useState("");
+  const [skillPackageFile, setSkillPackageFile] = useState<File | null>(null);
+  const isSkillCreateModal = activeTab === "skills" && modalMode === "add";
+  const isSkillEditModal = activeTab === "skills" && modalMode === "edit";
+
+  useEffect(() => {
+    if (!modalOpen) {
+      setSkillCreateSource("manual");
+      setSkillRepoUrl("");
+      setSkillPackageFile(null);
+    }
+  }, [modalOpen]);
+
+  const handleSkillCreateSourceChange = (source: SkillCreateSource) => {
+    setSkillCreateSource(source);
+    setSkillRepoUrl("");
+    setSkillPackageFile(null);
+    onSkillCreateSourceChange(source);
+  };
 
   const handleGlossaryAliasesChange = (value: string[]) => {
     const normalizedAliases = Array.from(
@@ -95,13 +107,22 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
           ? experienceSaving
           : activeTab === "glossary"
             ? glossarySaving
-            : false
+            : activeTab === "skills"
+              ? skillSaving
+              : false
       }
       okText={isReadOnly ? t("common.close") : t("common.save")}
       cancelText={t("common.cancel")}
       destroyOnClose
       width={760}
-      className={isReadOnly ? "memory-readonly-modal" : undefined}
+      className={
+        [
+          isReadOnly ? "memory-readonly-modal" : undefined,
+          isSkillCreateModal ? "memory-skill-create-modal" : undefined,
+        ]
+          .filter(Boolean)
+          .join(" ") || undefined
+      }
     >
       {activeTab === "experience" ? (
         <div className="memory-modal-grid">
@@ -211,7 +232,22 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
           </div>
         </div>
       ) : (
-        <div className="memory-modal-grid">
+        <div
+          className={[
+            "memory-modal-grid",
+            isSkillCreateModal ? "memory-skill-create-grid" : undefined,
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {isSkillEditModal ? (
+            <Alert
+              type="info"
+              showIcon
+              className="memory-form-field memory-form-field-full"
+              message={t("admin.memorySkillEditMetadataHint")}
+            />
+          ) : null}
           <div className="memory-form-field memory-form-field-full">
             <label>{t("admin.memoryName")}</label>
             <Input
@@ -226,8 +262,11 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
           <div className="memory-form-field memory-form-field-full">
             <label>{t("admin.memoryDescription")}</label>
             <Input.TextArea
-              rows={3}
-              autoSize={{ minRows: 3, maxRows: 6 }}
+              rows={isSkillCreateModal ? 2 : 3}
+              autoSize={{
+                minRows: isSkillCreateModal ? 2 : 3,
+                maxRows: isSkillCreateModal ? 4 : 6,
+              }}
               value={draft.description}
               readOnly={isReadOnly}
               placeholder={t("common.pleaseInput") + t("admin.memoryDescription")}
@@ -239,193 +278,142 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               }
             />
           </div>
-          {activeTab === "skills" ? (
-            <div className="memory-form-field">
-              <label>{t("admin.memoryParentSkill")}</label>
-              <Select
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                value={draft.parentId || undefined}
-                disabled={isReadOnly}
-                loading={parentSkillOptionsLoading}
-                placeholder={t("admin.memoryParentSkillPlaceholder")}
-                options={parentSkillOptions}
-                onChange={(value) =>
-                  setDraft((previous: any) => ({
-                    ...previous,
-                    parentId: value || "",
-                    childSkills: value ? [] : previous.childSkills,
-                  }))
+          <div className="memory-form-field">
+            <label>{t("admin.memoryCategory")}</label>
+            <Input
+              value={draft.category}
+              readOnly={isReadOnly}
+              placeholder={t("admin.memoryCategoryPlaceholder")}
+              onChange={(event) =>
+                setDraft((previous: any) => ({ ...previous, category: event.target.value }))
+              }
+            />
+          </div>
+          <div className="memory-form-field memory-form-field-full">
+            <label>{t("admin.memoryTagSet")}</label>
+            <Select
+              mode="tags"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              tokenSeparators={[",", "，"]}
+              style={{ width: "100%" }}
+              value={draft.tags}
+              disabled={isReadOnly}
+              placeholder={t("admin.memoryTagsPlaceholder")}
+              onChange={(value) => {
+                const normalizedTags = normalizeTagValues(value);
+                if (normalizedTags.length > SKILL_TAG_MAX_COUNT) {
+                  message.warning(
+                    t("admin.memorySkillTagMaxCount", {
+                      count: SKILL_TAG_MAX_COUNT,
+                    }),
+                  );
                 }
-              />
-              <span className="memory-form-hint">{t("admin.memoryRootSkill")}</span>
-            </div>
-          ) : null}
-          {!isChildSkillDraft ? (
-              <div className="memory-form-field">
-                <label>{t("admin.memoryCategory")}</label>
-                <Input
-                  value={draft.category}
-                  readOnly={isReadOnly}
-                  placeholder={t("admin.memoryCategoryPlaceholder")}
-                  onChange={(event) =>
-                    setDraft((previous: any) => ({ ...previous, category: event.target.value }))
-                  }
-                />
-              </div>
-          ) : null}
-          {!isChildSkillDraft ? (
-            <div className="memory-form-field">
-              <label>{t("admin.memoryTagSet")}</label>
-              <Select
-                mode="tags"
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                tokenSeparators={[",", "，"]}
-                style={{ width: "100%" }}
-                value={draft.tags}
-                disabled={isReadOnly}
-                placeholder={t("admin.memoryTagsPlaceholder")}
-                onChange={(value) => {
-                  const normalizedTags = normalizeTagValues(value);
-                  if (normalizedTags.length > SKILL_TAG_MAX_COUNT) {
-                    message.warning(
-                      t("admin.memorySkillTagMaxCount", {
-                        count: SKILL_TAG_MAX_COUNT,
-                      }),
-                    );
-                  }
-                  setDraft((previous: any) => ({
-                    ...previous,
-                    tags: normalizedTags.slice(0, SKILL_TAG_MAX_COUNT),
-                  }));
-                }}
-                options={tagOptions}
-              />
+                setDraft((previous: any) => ({
+                  ...previous,
+                  tags: normalizedTags.slice(0, SKILL_TAG_MAX_COUNT),
+                }));
+              }}
+              options={tagOptions}
+            />
+            {!isSkillCreateModal ? (
               <span className="memory-form-hint">{t("admin.memoryTagsHint")}</span>
-            </div>
-          ) : null}
-          {shouldShowSkillContentEditor ? (
-            <div className="memory-form-field memory-form-field-full">
-              <label>{t("admin.memoryMarkdown")}</label>
-              <Input.TextArea
-                rows={10}
-                value={draft.content}
-                readOnly={isReadOnly}
-                placeholder={t("common.pleaseInput") + t("admin.memoryContent")}
+            ) : null}
+          </div>
+          {isSkillCreateModal ? (
+            <div className="memory-form-field memory-form-field-full memory-skill-create-source">
+              <label>{t("admin.memorySkillCreateSourceTitle")}</label>
+              <Radio.Group
+                value={skillCreateSource}
+                disabled={isReadOnly}
                 onChange={(event) =>
-                  setDraft((previous: any) => ({ ...previous, content: event.target.value }))
+                  handleSkillCreateSourceChange(event.target.value as SkillCreateSource)
                 }
-              />
-              {activeTab === "skills" ? (
-                <div className="memory-upload-actions">
-                  <Upload {...createSkillUploadProps()} disabled={isReadOnly}>
+              >
+                <Radio.Button value="zip">{t("admin.memorySkillCreateSourceZip")}</Radio.Button>
+                <Radio.Button value="url">{t("admin.memorySkillCreateSourceUrl")}</Radio.Button>
+                <Radio.Button value="manual">
+                  {t("admin.memorySkillCreateSourceManual")}
+                </Radio.Button>
+              </Radio.Group>
+              {skillCreateSource === "zip" ? (
+                <div className="memory-skill-import-file-row">
+                  <Upload
+                    accept=".zip"
+                    multiple={false}
+                    disabled={isReadOnly}
+                    showUploadList={false}
+                    beforeUpload={(file) => {
+                      setSkillPackageFile(file);
+                      handleImportSkillPackage(file);
+                      return false;
+                    }}
+                  >
                     <Button icon={<UploadOutlined />} disabled={isReadOnly}>
-                      {t("admin.memoryUploadSkillFile")}
+                      {t("admin.memorySkillUploadFileTitle")}
                     </Button>
                   </Upload>
                   <span className="memory-form-hint">
-                    {t(
-                      isChildSkillDraft
-                        ? "admin.memoryUploadSkillFileHint"
-                        : "admin.memoryUploadSkillFileHintParent",
-                    )}
+                    {skillPackageFile
+                      ? t("admin.memorySkillUploadFileReady", {
+                          size: Math.max(1, Math.round(skillPackageFile.size / 1024)),
+                        })
+                      : t("admin.memorySkillCreateZipHint")}
                   </span>
                 </div>
               ) : null}
-            </div>
-          ) : null}
-          {activeTab === "skills" && modalMode === "add" && !draft.parentId ? (
-            <div className="memory-form-field memory-form-field-full memory-child-skill-section">
-              <div className="memory-child-skill-header">
-                <label>{t("admin.memoryChildSkillSection")}</label>
-                <Button size="small" disabled={isReadOnly} onClick={addChildSkillDraft}>
-                  {t("admin.memoryChildSkillAdd")}
-                </Button>
-              </div>
-              {draft.childSkills.length ? (
-                <div className="memory-child-skill-list">
-                  {draft.childSkills.map((child: any, index: number) => (
-                    <div key={child.tempId} className="memory-child-skill-card">
-                      <div className="memory-child-skill-card-header">
-                        <strong>{`${t("admin.memoryChildSkill")} ${index + 1}`}</strong>
-                        <Button
-                          type="text"
-                          danger
-                          size="small"
-                          disabled={isReadOnly}
-                          icon={<DeleteOutlined />}
-                          onClick={() => removeChildSkillDraft(child.tempId)}
-                        >
-                          {t("admin.memoryChildSkillRemove")}
-                        </Button>
-                      </div>
-
-                      <div className="memory-child-skill-grid">
-                        <div className="memory-form-field">
-                          <label>{t("admin.memoryName")}</label>
-                          <Input
-                            value={child.name}
-                            readOnly={isReadOnly}
-                            placeholder={t("common.pleaseInput") + t("admin.memoryName")}
-                            onChange={(event) =>
-                              updateChildSkillDraft(child.tempId, {
-                                name: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="memory-form-field memory-form-field-full">
-                          <label>{t("admin.memoryDescription")}</label>
-                          <Input.TextArea
-                            rows={3}
-                            autoSize={{ minRows: 3, maxRows: 6 }}
-                            value={child.description}
-                            readOnly={isReadOnly}
-                            placeholder={t("common.pleaseInput") + t("admin.memoryDescription")}
-                            onChange={(event) =>
-                              updateChildSkillDraft(child.tempId, {
-                                description: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="memory-form-field memory-form-field-full">
-                          <label>{t("admin.memoryMarkdown")}</label>
-                          <Input.TextArea
-                            rows={6}
-                            value={child.content}
-                            readOnly={isReadOnly}
-                            placeholder={t("common.pleaseInput") + t("admin.memoryContent")}
-                            onChange={(event) =>
-                              updateChildSkillDraft(child.tempId, {
-                                content: event.target.value,
-                              })
-                            }
-                          />
-                          <div className="memory-upload-actions">
-                            <Upload
-                              {...createSkillUploadProps(child.tempId)}
-                              disabled={isReadOnly}
-                            >
-                              <Button icon={<UploadOutlined />} disabled={isReadOnly}>
-                                {t("admin.memoryUploadSkillFile")}
-                              </Button>
-                            </Upload>
-                            <span className="memory-form-hint">
-                              {t("admin.memoryUploadSkillFileHint")}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+              {skillCreateSource === "url" ? (
+                <div className="memory-skill-import-link-row">
+                  <Input
+                    value={skillRepoUrl}
+                    readOnly={isReadOnly}
+                    prefix={<LinkOutlined className="memory-skill-import-input-icon" />}
+                    placeholder={t("admin.memorySkillUploadRepoPlaceholder")}
+                    onChange={(event) => setSkillRepoUrl(event.target.value)}
+                    onPressEnter={() => applySkillRepoImport(skillRepoUrl)}
+                  />
+                  <Button
+                    type="primary"
+                    disabled={isReadOnly || !skillRepoUrl.trim()}
+                    onClick={() => applySkillRepoImport(skillRepoUrl)}
+                  >
+                    {t("admin.memorySkillImportApply")}
+                  </Button>
                 </div>
-              ) : (
-                <span className="memory-form-hint">{t("admin.memoryChildSkillEmpty")}</span>
-              )}
+              ) : null}
+              {skillCreateSource === "manual" ? (
+                <div className="memory-form-field memory-form-field-full memory-skill-content-field">
+                  <div className="memory-skill-content-header">
+                    <label>{t("admin.memoryMarkdown")}</label>
+                    <Upload
+                      accept=".md,.markdown"
+                      multiple={false}
+                      disabled={isReadOnly}
+                      showUploadList={false}
+                      beforeUpload={(file) => {
+                        handleImportSkillPackage(file);
+                        return false;
+                      }}
+                    >
+                      <Button type="text" size="small" icon={<UploadOutlined />} disabled={isReadOnly}>
+                        {t("admin.memorySkillImportMdFile")}
+                      </Button>
+                    </Upload>
+                  </div>
+                  <Input.TextArea
+                    rows={6}
+                    autoSize={{ minRows: 6, maxRows: 12 }}
+                    value={draft.content}
+                    readOnly={isReadOnly}
+                    placeholder={t("admin.memorySkillCreateManualPlaceholder")}
+                    onChange={(event) =>
+                      setDraft((previous: any) => ({ ...previous, content: event.target.value }))
+                    }
+                  />
+                  <span className="memory-form-hint">{t("admin.memorySkillCreateManualHint")}</span>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

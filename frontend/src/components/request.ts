@@ -4,6 +4,12 @@ import { message } from "antd";
 import { AgentAppsAuth } from "@/components/auth";
 import i18n from "@/i18n";
 import { getApiBaseUrl } from "@/runtime/apiBase";
+import {
+  ensureLocalSession,
+  isLocalSessionEnabled,
+  localSessionInitialized,
+  restoreLocalSessionAndGetToken,
+} from "@/runtime/localSession";
 
 export const BASE_URL = getApiBaseUrl();
 
@@ -178,10 +184,26 @@ function isRefreshEndpoint(url?: string): boolean {
   return url.includes("/auth/refresh") || url.includes("/auth/login") || url.includes("/auth/logout");
 }
 
+async function restoreLocalSessionAndRetry(
+  originalRequest?: InternalAxiosRequestConfig & { _localSessionRetry?: boolean },
+) {
+  if (!isLocalSessionEnabled()) {
+    return null;
+  }
+  if (!originalRequest) {
+    return null;
+  }
+  const token = await restoreLocalSessionAndGetToken();
+  originalRequest._localSessionRetry = true;
+  originalRequest.headers = originalRequest.headers ?? {};
+  originalRequest.headers.authorization = `Bearer ${token}`;
+  return axiosInstance(originalRequest);
+}
+
 export const handleError = async (error: AxiosError) => {
   if (isCanceledError(error)) return Promise.reject(error);
   
-  const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; silentError?: boolean };
+  const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _localSessionRetry?: boolean; silentError?: boolean };
   const silentError = Boolean(originalRequest?.silentError);
   
   if (error.response) {
@@ -206,6 +228,14 @@ export const handleError = async (error: AxiosError) => {
       }
     } else if (error.response.status === 401) {
       if (isRefreshEndpoint(originalRequest?.url)) {
+        if (isLocalSessionEnabled()) {
+          try {
+            await restoreLocalSessionAndGetToken();
+          } catch (localSessionError) {
+            console.error("Local admin session restore failed:", localSessionError);
+          }
+          return Promise.reject(error);
+        }
         if (AgentAppsAuth.isLoggedIn()) {
           message.warning(i18n.t("auth.sessionExpired"));
         }
@@ -214,6 +244,16 @@ export const handleError = async (error: AxiosError) => {
       }
 
       if (!originalRequest || originalRequest._retry) {
+        if (isLocalSessionEnabled() && originalRequest && !originalRequest._localSessionRetry) {
+          try {
+            const localSessionRetryResponse = await restoreLocalSessionAndRetry(originalRequest);
+            if (localSessionRetryResponse) {
+              return localSessionRetryResponse;
+            }
+          } catch (localSessionError) {
+            console.error("Local admin session restore failed:", localSessionError);
+          }
+        }
         if (AgentAppsAuth.isLoggedIn()) {
           message.warning(i18n.t("auth.authFailedRelogin"));
         }
@@ -248,6 +288,19 @@ export const handleError = async (error: AxiosError) => {
         return await axiosInstance(originalRequest);
       } catch (refreshError) {
         console.error("Token refresh failed:", refreshError);
+
+        if (isLocalSessionEnabled()) {
+          try {
+            const token = await restoreLocalSessionAndGetToken();
+            processQueue(token);
+            originalRequest.headers = originalRequest.headers ?? {};
+            originalRequest.headers.authorization = `Bearer ${token}`;
+            originalRequest._localSessionRetry = true;
+            return await axiosInstance(originalRequest);
+          } catch (localSessionError) {
+            console.error("Local admin session restore failed:", localSessionError);
+          }
+        }
         
         refreshQueue.forEach((cb) => {
           cb("");
@@ -284,7 +337,15 @@ export const handleError = async (error: AxiosError) => {
 };
 
 axiosInstance.interceptors.request.use(
-  (config) => applyOptionalAuthHeader(config),
+  (config) => {
+    if (
+      isLocalSessionEnabled() &&
+      (!AgentAppsAuth.getUserInfo()?.token || !localSessionInitialized)
+    ) {
+      return ensureLocalSession().then(() => applyOptionalAuthHeader(config));
+    }
+    return applyOptionalAuthHeader(config);
+  },
   handleError,
 );
 axiosInstance.interceptors.response.use((response) => response, handleError);

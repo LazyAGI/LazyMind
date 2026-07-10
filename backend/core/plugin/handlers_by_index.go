@@ -268,7 +268,7 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 			var ha orm.PluginHumanArtifact
 			if db.WithContext(ctx).Where("id = ?", *rev.HumanArtifactID).First(&ha).Error == nil {
 				ct := resolveContentType(ha.ContentType, ha.Value)
-				item["content_snapshot"] = signArtifactImagePath(ha.Value, ct)
+				item["content_snapshot"] = enrichArtifactValue(ha.Value, ct)
 				item["content_type"] = ct
 			}
 		} else if rev.ArtifactSeq != nil {
@@ -279,12 +279,12 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 					Where("task_id = ? AND slot = ? AND seq = ?", tid, rev.Slot, *rev.ArtifactSeq).
 					First(&art).Error == nil {
 					ct := resolveContentType(art.ContentType, art.Value)
-					item["content_snapshot"] = signArtifactImagePath(art.Value, ct)
+					item["content_snapshot"] = enrichArtifactValue(art.Value, ct)
 					item["content_type"] = ct
 				}
 			}
 		} else if len(rev.ContentSnapshot) > 0 {
-			item["content_snapshot"] = signArtifactImagePath(rev.ContentSnapshot, "")
+			item["content_snapshot"] = enrichArtifactValue(rev.ContentSnapshot, "")
 		}
 		out = append(out, item)
 	}

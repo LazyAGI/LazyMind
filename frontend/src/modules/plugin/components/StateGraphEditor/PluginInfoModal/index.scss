@@ -1,0 +1,114 @@
+.pim-body {
+  padding: 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+/* 两列行（标签 + 输入框） */
+.pim-row {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  align-items: flex-start;
+  gap: 8px 12px;
+}
+
+.pim-row-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 5px;
+  white-space: nowrap;
+}
+
+.pim-row-input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 单列块（标签在上，文本区在下） */
+.pim-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pim-block-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pim-tip-icon {
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.pim-field-error {
+  font-size: 12px;
+  color: #ff4d4f;
+}
+
+.pim-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pim-polish-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin-left: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #8c8c8c;
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+  vertical-align: middle;
+  line-height: 1;
+
+  &:hover:not(:disabled) {
+    color: #722ed1;
+    background: #f9f0ff;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  &--loading {
+    cursor: default;
+  }
+}
+
+.pim-sparkle-icon {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+.pim-polish-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  .pim-sparkle-icon {
+    width: 12px;
+    height: 12px;
+  }
+}

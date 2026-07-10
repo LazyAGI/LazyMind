@@ -1,5 +1,6 @@
 import type { DataNode } from "antd/es/tree";
 import type {
+  DataSourceItem,
   FeishuTargetType,
   NotionTargetType,
   SourceFormValues,
@@ -175,6 +176,34 @@ export function normalizeFeishuTargetRefs(value?: SourceFormValues["target"]) {
       return parseManualFeishuTargetValue(normalizedValue)?.targetRef || normalizedValue;
     })
     .filter(Boolean);
+}
+
+export function buildFeishuTargetSeedNodes(
+  selectedValues: string[],
+  record: Pick<DataSourceItem, "targetLabels" | "targetTypes" | "targetType">,
+): FeishuTargetTreeNode[] {
+  return selectedValues
+    .map((value) => {
+      const normalizedValue = `${value || ""}`.trim();
+      if (!normalizedValue) {
+        return null;
+      }
+      const title = record.targetLabels?.[normalizedValue] || normalizedValue;
+      const targetType =
+        record.targetTypes?.[normalizedValue] ||
+        record.targetType ||
+        "wiki_space";
+      return {
+        key: normalizedValue,
+        value: normalizedValue,
+        title,
+        isLeaf: true,
+        selectable: true,
+        targetRef: normalizedValue,
+        targetType: toUiFeishuTargetType(targetType) || "wiki_space",
+      } satisfies FeishuTargetTreeNode;
+    })
+    .filter((node): node is FeishuTargetTreeNode => Boolean(node));
 }
 
 export function normalizeCloudTargetRefs(value?: SourceFormValues["target"]) {

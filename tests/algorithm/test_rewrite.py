@@ -24,6 +24,17 @@ def _load_rewrite_module():
 
     fake_lazyllm = ModuleType('lazyllm')
     fake_lazyllm.AutoModel = lambda *args, **kwargs: object()
+    fake_lazyllm.config = {}
+    fake_lazyllm_configs = ModuleType('lazyllm.configs')
+
+    class FakeConfig(dict):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+
+        def add(self, name, _type, default, *_args, **_kwargs):
+            self[name] = default
+
+    fake_lazyllm_configs.Config = FakeConfig
 
     fake_tool_infra = ModuleType('lazymind.chat.engine.tools.infra')
     fake_tool_infra.parse_user_preference_frontmatter = (
@@ -39,12 +50,14 @@ def _load_rewrite_module():
 
     original_modules = {
         'lazyllm': sys.modules.get('lazyllm'),
+        'lazyllm.configs': sys.modules.get('lazyllm.configs'),
         'lazymind.chat.engine.tools.infra': sys.modules.get('lazymind.chat.engine.tools.infra'),
         'lazymind.model_config': sys.modules.get('lazymind.model_config'),
     }
 
     try:
         sys.modules['lazyllm'] = fake_lazyllm
+        sys.modules['lazyllm.configs'] = fake_lazyllm_configs
         sys.modules['lazymind.chat.engine.tools.infra'] = fake_tool_infra
         sys.modules['lazymind.model_config'] = fake_load_config
 
@@ -58,6 +71,7 @@ def _load_rewrite_module():
         ns._apply_memory_edit_operations = memory._apply_memory_edit_operations
         ns._apply_user_preference_edit_operations = preference._apply_user_preference_edit_operations
         ns._PROMPT_BUILDERS = base._PROMPT_BUILDERS
+        ns.RewriteTaskType = base.RewriteTaskType
         ns._compact_memory_to_recent_week = memory._compact_memory_to_recent_week
         ns._format_inputs_block = base._format_inputs_block
         ns.parse_user_preference_frontmatter = (
@@ -149,7 +163,7 @@ def test_rewrite_content_requires_user_instruct():
 
 
 def test_generate_prompts_include_stale_content_governance():
-    for task_type in ('skill', 'memory', 'user_preference'):
+    for task_type in ('skill', 'memory'):
         prompt = _PROMPT_BUILDERS[task_type](
             content='old content that may now be stale',
             user_instruct='Outdated=TRUE: replace old KB failure diagnosis with the current service-level cause.',
@@ -186,15 +200,21 @@ def test_user_preference_prompt_requires_yaml_frontmatter():
     assert 'agent_persona' in prompt
     assert 'preferred_name' in prompt
     assert 'response_style' in prompt
-    assert '智能体身份、职责和边界' in prompt
-    assert '对用户的称呼方式' in prompt
-    assert '表达习惯、篇幅和结构偏好' in prompt
-    assert 'legacy/free-form' in prompt
+    assert '智能体角色' not in prompt
+    assert '用户称谓' not in prompt
+    assert '回复风格' not in prompt
+    assert '技术助理' not in prompt
+    assert 'legacy/free-form' not in prompt
+    assert 'free-form without any YAML frontmatter' in prompt
     assert 'frontmatter-plus-body format' in prompt
-    assert 'identity, responsibilities, and boundaries' in prompt
-    assert 'how replies should address the user' in prompt
-    assert 'expression habits, length preference, and structure preference' in prompt
+    assert 'containing exactly agent_persona, preferred_name, and response_style fields' in prompt
+    assert 'explicit stable agent persona' in prompt
+    assert 'preferred name/address' in prompt
+    assert 'short response style' in prompt
     assert '100 characters or less' in prompt
+    assert 'existing response_style' in prompt
+    assert 'Do not put language preferences' in prompt
+    assert 'verbs, or full instructions' in prompt
     assert 'keep existing frontmatter values unchanged' in prompt
     assert 'response_style is unknown' in prompt
     assert 'use ""' in prompt
@@ -243,9 +263,20 @@ def test_user_preference_validation_requires_yaml_frontmatter():
             '---\n'
             'agent_persona: "algorithm collaborator"\n'
             'preferred_name: ""\n'
-            'response_style: "先结论后解释，分点回答"\n'
+            'response_style: "concise, direct"\n'
             '---\n'
             '- Prefer manual git commits.'
+        ),
+    )
+    assert _validate_generated_content(
+        'user_preference',
+        (
+            '---\n'
+            'agent_persona: "algorithm collaborator"\n'
+            'preferred_name: ""\n'
+            'response_style: "轻松"\n'
+            '---\n'
+            '- 偏好轻松风格。'
         ),
     )
 
@@ -253,7 +284,9 @@ def test_user_preference_validation_requires_yaml_frontmatter():
     invalid_cases = [
         'agent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n\nbody',
         '---\nagent_persona: "x"\nresponse_style: "concise"\n---\nbody',
+        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\nextra: "x"\n---\nbody',
         '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\nwork_email: "me@example.com"\n---\nbody',
+        '---\nagent_persona: ["x"]\npreferred_name: ""\nresponse_style: "concise"\n---\nbody',
         f'---\nagent_persona: "{too_long}"\npreferred_name: ""\nresponse_style: ""\n---\nbody',
         f'---\nagent_persona: ""\npreferred_name: "{too_long}"\nresponse_style: ""\n---\nbody',
         f'---\nagent_persona: ""\npreferred_name: ""\nresponse_style: "{too_long}"\n---\nbody',

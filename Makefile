@@ -1,6 +1,18 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build up-build-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-stop-if-present
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
+
+LOCAL_CONFIG_ENV ?= local/config.env
+LOCAL_CONFIG_ENV_EXAMPLE ?= local/config.env.example
+_LOCAL_CONFIG_TARGETS := local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset reset-kb reset-all fresh-start
+_NEEDS_LOCAL_CONFIG := $(filter $(_LOCAL_CONFIG_TARGETS),$(MAKECMDGOALS))
+ifneq (,$(_NEEDS_LOCAL_CONFIG))
+_LOCAL_CONFIG_BOOTSTRAP := $(shell if [ ! -f "$(LOCAL_CONFIG_ENV)" ]; then mkdir -p "$(dir $(LOCAL_CONFIG_ENV))"; cp "$(LOCAL_CONFIG_ENV_EXAMPLE)" "$(LOCAL_CONFIG_ENV)"; fi)
+ifneq (,$(wildcard $(LOCAL_CONFIG_ENV)))
+include $(LOCAL_CONFIG_ENV)
+export $(shell sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' $(LOCAL_CONFIG_ENV))
+endif
+endif
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
 # (which often times out in restricted networks). Override with: make up DOCKER_BUILDKIT=1
@@ -8,11 +20,10 @@ export DOCKER_BUILDKIT ?= 1
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 GO ?= go
-LAZYMIND_LOCAL_PROFILE ?= linux-browser
-LAZYMIND_LOCAL_BIN ?= local/local-runtime-manager/lazymind-local
-LAZYMIND_LOCAL_GOCACHE ?= $(CURDIR)/.codex-gocache/go-build
+LOCAL_BUILD_DIR := $(CURDIR)/local/build
+override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)
+override LOCAL_RUNTIME_MANAGER_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
-export LAZYMIND_LOCAL_MILVUS_DB_PATH ?= $(CURDIR)/.lazymind-local/stores/milvus/lazymind.db
 comma := ,
 
 # ---------------------------------------------------------------------------
@@ -49,11 +60,10 @@ endif
 #        make up COMPOSE_PROJECT=myproj    →  docker compose -p myproj up -d
 #        make down                         →  docker compose down
 #        make down COMPOSE_PROJECT=myproj  →  docker compose -p myproj down
-#        make up-build-local               → use local-runtime-manager with local/docker-compose.local.yml
+#        make local-up                     → use local host-process runtime
 # ---------------------------------------------------------------------------
 _COMPOSE_PROJECT_FLAG := $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),)
 _COMPOSE_DEFAULT := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT_FLAG)
-_COMPOSE_LOCAL := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose -f docker-compose.yml -f local/docker-compose.local.yml $(_COMPOSE_PROJECT_FLAG)
 _COMPOSE := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT_FLAG)
 
 # ---------------------------------------------------------------------------
@@ -62,36 +72,30 @@ _COMPOSE := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT
 # file-watcher runs in compose by default. Host mode is kept for local
 # debugging and disables the compose file-watcher service on make up.
 # Keep its writable roots under the compose volume root by default.
-# LAZYMIND_FILE_WATCHER_BASE_ROOT is exported as a compose-friendly path;
-# internal Makefile bookkeeping uses the resolved absolute path below.
-export LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./.lazymind-local/stores/scan/file-watcher
+# Do not export this default for local runtime: runtime-manager owns local paths.
+LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./data/scan
 LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS := $(abspath $(LAZYMIND_FILE_WATCHER_BASE_ROOT))
 export LAZYMIND_FILE_WATCHER_MODE ?= container
 
-# Auto-detect host OS for path style and default watch directory.
-# Override in .env or on the command line if needed.
+_COMPOSE_WATCH_TARGETS := up up-build file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop
+_NEEDS_COMPOSE_WATCH_CONFIG := $(filter $(_COMPOSE_WATCH_TARGETS),$(MAKECMDGOALS))
+ifneq (,$(_NEEDS_COMPOSE_WATCH_CONFIG))
+# Compose/file-watcher defaults only. Local runtime paths are resolved by
+# local-runtime-manager so make local-up/local-down/local-reset do not inherit
+# Makefile-derived watch paths.
 ifeq ($(OS),Windows_NT)
   export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= windows
-  export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= D:/
+  export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(USERPROFILE)/Documents/LazyMind
 else
-  _UNAME_S := $(shell uname -s 2>/dev/null)
-  _UNAME_R := $(shell uname -r 2>/dev/null | tr '[:upper:]' '[:lower:]')
-  ifeq ($(_UNAME_S),Darwin)
-    export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
-    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)
-  else ifneq (,$(findstring microsoft,$(_UNAME_R))$(findstring wsl,$(_UNAME_R)))
-    export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
-    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= /mnt
-  else
-    export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
-    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)
-  endif
+  export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
+  export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)/Documents/LazyMind
 endif
 
 _LAZYMIND_FW_WATCH_HOST_DIR_RAW := $(LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR)
 _LAZYMIND_FW_WATCH_HOST_DIR_ABS := $(abspath $(_LAZYMIND_FW_WATCH_HOST_DIR_RAW))
 override LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR := $(if $(filter windows,$(LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE)),$(_LAZYMIND_FW_WATCH_HOST_DIR_RAW),$(_LAZYMIND_FW_WATCH_HOST_DIR_ABS))
 export SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT := $(LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR)
+endif
 LAZYMIND_FILE_WATCHER_DIR := backend/file-watcher
 LAZYMIND_FILE_WATCHER_BIN := $(LAZYMIND_FILE_WATCHER_DIR)/file_watcher
 LAZYMIND_FILE_WATCHER_CONFIG := $(LAZYMIND_FILE_WATCHER_DIR)/configs/agent.yaml
@@ -181,9 +185,16 @@ help:
 	@echo "                    Use SERVICES=svc1,svc2 to start specific services only"
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
-	@echo "  make up-build-local - Build/start local LazyMind through local-runtime-manager"
-	@echo "  make down       - Stop services"
-	@echo "                    Tries Cloud/Kong, Local Runtime, and optional Desktop stop paths"
+	@echo "  make local-up - Build/start local LazyMind without containers"
+	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
+	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
+	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
+	@echo "  make desktop-cache-clean - Remove repo-local Desktop caches, if any"
+	@echo "  make desktop-clean - Remove all Desktop generated outputs"
+	@echo "  make local-down - Stop local LazyMind runtime"
+	@echo "  make local-clean - Remove repo-local local/build application artifacts"
+	@echo "  make local-reset - Stop local runtime, clear user-path runtime data, and remove local/build"
+	@echo "  make down       - Stop Cloud/Kong compose services"
 	@echo "                    Use SERVICES=svc1,svc2 to stop specific services only"
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
 	@echo "                    Use SERVICES=svc1,svc2 to build specific services"
@@ -278,9 +289,9 @@ _enable_opensearch_dashboard := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_EN
 _need_milvus_dashboard := $(and $(_need_milvus),$(_enable_milvus_dashboard))
 _need_opensearch_dashboard := $(and $(_need_opensearch),$(_enable_opensearch_dashboard))
 
-# Start/build profile flags are mode-aware. Cleanup profile flags are intentionally exhaustive.
+# Start/build profile flags are mode-aware. Cleanup profiles are intentionally exhaustive.
 _COMPOSE_PROFILES := $(strip $(if $(_need_mineru),--profile mineru) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
-_CLEANUP_COMPOSE_PROFILES := --profile mineru --profile paddleocr --profile milvus --profile opensearch --profile milvus-dashboard --profile opensearch-dashboard --profile file-watcher-artifact
+_CLEANUP_COMPOSE_PROFILE_NAMES := mineru,paddleocr,milvus,opensearch,milvus-dashboard,opensearch-dashboard,file-watcher-artifact
 _COMPOSE_FILE_WATCHER_SCALE := $(if $(filter container,$(LAZYMIND_FILE_WATCHER_MODE)),,--scale file-watcher=0)
 _COMPOSE_DOWN_ACTION := $(if $(SERVICES),stop,down)
 _COMPOSE_DOWN_SERVICES := $(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
@@ -356,17 +367,6 @@ file-watcher-stop:
 		fi; \
 		rm -f "$(LAZYMIND_FILE_WATCHER_PID)"; \
 	fi
-	@if command -v lsof >/dev/null 2>&1; then \
-		for pid in $$(lsof -t -nP -iTCP:19090 -sTCP:LISTEN 2>/dev/null | sort -u); do \
-			cmd=$$(ps -p "$$pid" -o command= 2>/dev/null || true); \
-			case "$$cmd" in \
-				*file_watcher*) \
-					echo "🛑 Stopping host file-watcher on :19090 ($$pid)..."; \
-					kill "$$pid" 2>/dev/null || true; \
-					;; \
-			esac; \
-		done; \
-	fi
 
 file-watcher-run: file-watcher-stop file-watcher-dirs
 	@echo "🚀 Starting file-watcher (LAZYMIND_FILE_WATCHER_BASE_ROOT=$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS))..."
@@ -384,17 +384,6 @@ file-watcher-run: file-watcher-stop file-watcher-dirs
 
 file-watcher-start: file-watcher-build
 	@$(MAKE) --no-print-directory file-watcher-run
-
-desktop-stop-if-present:
-	@if [ -x scripts/desktop-down.sh ]; then \
-		echo "🛑 Stopping Desktop runtime via scripts/desktop-down.sh..."; \
-		scripts/desktop-down.sh || true; \
-	elif [ -x desktop/scripts/down.sh ]; then \
-		echo "🛑 Stopping Desktop runtime via desktop/scripts/down.sh..."; \
-		desktop/scripts/down.sh || true; \
-	else \
-		echo "ℹ️  No Desktop stop hook found; skipping"; \
-	fi
 
 up:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
@@ -414,21 +403,9 @@ up:
 	fi
 
 down:
-	@$(MAKE) --no-print-directory file-watcher-stop
-	@if [ -x "$(LAZYMIND_LOCAL_BIN)" ]; then \
-		timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LAZYMIND_LOCAL_BIN)" down --profile "$(LAZYMIND_LOCAL_PROFILE)" || \
-			echo "⚠️  Local Runtime manager down timed out or failed; continuing cleanup"; \
-	else \
-		echo "ℹ️  No Local Runtime manager found; skipping"; \
-	fi
-	@$(MAKE) --no-print-directory desktop-stop-if-present
-	@echo "🛑 Stopping local compose stack, if present..."
-	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) $(_COMPOSE_DOWN_ACTION) \
-		$(_COMPOSE_DOWN_SERVICES) || true
 	@echo "🛑 Stopping default Cloud/Kong compose stack, if present..."
-	@$(_COMPOSE_DEFAULT) $(_CLEANUP_COMPOSE_PROFILES) $(_COMPOSE_DOWN_ACTION) \
+	@COMPOSE_PROFILES="$(_CLEANUP_COMPOSE_PROFILE_NAMES)" $(_COMPOSE_DEFAULT) $(_COMPOSE_DOWN_ACTION) \
 		$(_COMPOSE_DOWN_SERVICES) || true
-	@rm -f .lazymind-local/run/*.pid .lazymind-local/run/algorithm/*.pid .lazymind-local/run/pc-token 2>/dev/null || true
 
 up-build:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
@@ -448,18 +425,87 @@ up-build:
 	fi
 
 local-runtime-manager-build:
-	@mkdir -p "$(LAZYMIND_LOCAL_GOCACHE)"
-	@cd local/local-runtime-manager && GOCACHE="$(LAZYMIND_LOCAL_GOCACHE)" $(GO) build -buildvcs=false -o lazymind-local .
+	@mkdir -p "$(dir $(LOCAL_RUNTIME_MANAGER_BIN))"
+	@cd local/local-runtime-manager && $(GO) build -buildvcs=false -o "$(LOCAL_RUNTIME_MANAGER_BIN)" .
 
-up-build-local: local-runtime-manager-build
-	@"$(LAZYMIND_LOCAL_BIN)" up --profile "$(LAZYMIND_LOCAL_PROFILE)"
+desktop-darwin-arm64:
+	@bash desktop/scripts/build-darwin-arm64.sh
+
+desktop-darwin-arm64-clean:
+	@echo "🧹 Removing Darwin arm64 Desktop generated outputs..."
+	@for path in \
+		"$(CURDIR)/desktop/build/darwin-arm64" \
+		"$(CURDIR)/desktop/dist" \
+		"$(CURDIR)/desktop/electron/node_modules"; do \
+		if [ -e "$$path" ]; then \
+			chflags -R nouchg "$$path" 2>/dev/null || true; \
+			chmod -R u+rwX "$$path" 2>/dev/null || true; \
+			rm -rf "$$path"; \
+		fi; \
+	done
+
+desktop-cache-clean:
+	@echo "🧹 Removing repo-local Desktop caches, if any..."
+	@for path in \
+		"$(CURDIR)/desktop/cache"; do \
+		if [ -e "$$path" ]; then \
+			chflags -R nouchg "$$path" 2>/dev/null || true; \
+			chmod -R u+rwX "$$path" 2>/dev/null || true; \
+			rm -rf "$$path"; \
+		fi; \
+	done
+
+desktop-clean:
+	@echo "🧹 Removing Desktop generated outputs..."
+	@for path in \
+		"$(CURDIR)/desktop/build" \
+		"$(CURDIR)/desktop/dist" \
+		"$(CURDIR)/desktop/electron/node_modules" \
+		"$(CURDIR)/frontend/dist"; do \
+		if [ -e "$$path" ]; then \
+			chflags -R nouchg "$$path" 2>/dev/null || true; \
+			chmod -R u+rwX "$$path" 2>/dev/null || true; \
+			rm -rf "$$path"; \
+		fi; \
+	done
+
+local-up: local-runtime-manager-build
+	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
+
+local-up-lan: local-runtime-manager-build
+	@LAZYMIND_LOCAL_NETWORK_PROFILE=lan LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN=true "$(LOCAL_RUNTIME_MANAGER_BIN)" up
+
+local-down:
+	@if [ -x "$(LOCAL_RUNTIME_MANAGER_BIN)" ]; then \
+		"$(LOCAL_RUNTIME_MANAGER_BIN)" down; \
+	else \
+		echo "ℹ️  No Local Runtime manager found; skipping"; \
+	fi
+
+local-clean:
+	@echo "🧹 Removing repo-local application artifacts: $(LOCAL_BUILD_DIR)"
+	@if [ -e "$(LOCAL_BUILD_DIR)" ]; then \
+		chflags -R nouchg "$(LOCAL_BUILD_DIR)" 2>/dev/null || true; \
+		chmod -R u+rwX "$(LOCAL_BUILD_DIR)" 2>/dev/null || true; \
+		rm -rf "$(LOCAL_BUILD_DIR)"; \
+	fi
+
+local-reset: local-runtime-manager-build
+	@if [ -x "$(LOCAL_RUNTIME_MANAGER_BIN)" ]; then \
+		"$(LOCAL_RUNTIME_MANAGER_BIN)" reset --scope all || \
+			echo "⚠️  Local Runtime manager reset timed out or failed"; \
+	else \
+		echo "ℹ️  No Local Runtime manager found; skipping reset"; \
+	fi
+	@$(MAKE) --no-print-directory local-clean
+	@echo "✅ Local runtime reset. Run 'make local-up' to rebuild it."
 
 clear:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 	fi
 	@echo "🧹 Stopping containers and removing volumes (keeping built images/base cache)..."
-	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down -v 2>/dev/null || true
+	@COMPOSE_PROFILES="$(_CLEANUP_COMPOSE_PROFILE_NAMES)" $(_COMPOSE) down -v 2>/dev/null || true
 	@echo "🧹 Clearing Python cache..."
 	@find . -type d -name '__pycache__' ! -path '*/\.git/*' -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name '*.pyc' ! -path '*/\.git/*' -delete 2>/dev/null || true
@@ -531,37 +577,10 @@ export _RESET_KB_SQL_APP
 
 reset-kb: local-runtime-manager-build
 	@echo "🧹 Clearing Local Runtime KB state via local-runtime-manager..."
-	@timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LAZYMIND_LOCAL_BIN)" reset --scope kb --profile "$(LAZYMIND_LOCAL_PROFILE)" || \
+	@timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LOCAL_RUNTIME_MANAGER_BIN)" reset --scope kb || \
 		echo "⚠️  Local Runtime manager reset timed out or failed; continuing compose cleanup"
-	@echo "⏫ Starting PostgreSQL only for SQL cleanup..."
-	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) up -d db >/dev/null
-	@echo "⏳ Waiting for PostgreSQL readiness before SQL cleanup..."
-	@ready=0; \
-	for i in $$(seq 1 30); do \
-		if $(_COMPOSE_LOCAL) exec -T db psql -U root -d postgres -c 'SELECT 1' >/dev/null 2>&1; then \
-			echo "✅ PostgreSQL ready for SQL cleanup"; \
-			ready=1; \
-			break; \
-		fi; \
-		echo "  waiting for PostgreSQL ($$i/30)..."; \
-		sleep 1; \
-	done; \
-	if [ "$$ready" -ne 1 ]; then \
-		echo "⚠️  db did not become ready; SQL cleanup may be skipped"; \
-	fi
-	@echo "🗑  Clearing KB tables in PostgreSQL (core DB)..."
-	@$(_COMPOSE_LOCAL) exec -T db psql -U root -d core -c "$$_RESET_KB_SQL_CORE" 2>&1 || \
-		echo "⚠️  core DB not running or tables not found — skipping"
-	@echo "🧹 Clearing stale KB selectors from conversations..."
-	@$(_COMPOSE_LOCAL) exec -T db psql -U root -d core -c "$$_RESET_KB_SQL_CONVERSATIONS" 2>&1 || \
-		echo "⚠️  conversations table not available — skipping"
-	@echo "🗑  Dropping lazyllm schema tables in PostgreSQL (app DB)..."
-	@$(_COMPOSE_LOCAL) exec -T db psql -U root -d app -c "$$_RESET_KB_SQL_APP" 2>&1 || \
-		echo "⚠️  app DB not running or tables not found — skipping"
-	@echo "⏹  Stopping remaining local compose services..."
-	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) down 2>/dev/null || true
 	@echo "⏹  Stopping remaining default Cloud/Kong compose services..."
-	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down 2>/dev/null || true
+	@COMPOSE_PROFILES="$(_CLEANUP_COMPOSE_PROFILE_NAMES)" $(_COMPOSE) down 2>/dev/null || true
 	@echo "🗑  Removing KB volumes: $(_KB_VOLUMES)..."
 	@for vol in $(_KB_VOLUMES); do \
 		full="$$(docker volume ls -q | grep -E "(^|_)$${vol}$$" | head -1)"; \
@@ -579,10 +598,8 @@ reset-kb: local-runtime-manager-build
 # ---------------------------------------------------------------------------
 reset-all: reset-kb
 	@echo "🗑  Removing all remaining persistent volumes (pgdata, redisdata, caches)..."
-	@echo "⏹  Stopping local compose stack and removing local volumes..."
-	@$(_COMPOSE_LOCAL) $(_CLEANUP_COMPOSE_PROFILES) down -v 2>/dev/null || true
 	@echo "⏹  Stopping default Cloud/Kong compose stack and removing default volumes..."
-	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down -v 2>/dev/null || true
+	@COMPOSE_PROFILES="$(_CLEANUP_COMPOSE_PROFILE_NAMES)" $(_COMPOSE) down -v 2>/dev/null || true
 	@for vol in $(_ALL_VOLUMES); do \
 		matches="$$(docker volume ls -q | grep -E "(^|_)$${vol}$$" || true)"; \
 		if [ -z "$$matches" ]; then \
@@ -594,7 +611,7 @@ reset-all: reset-kb
 		fi; \
 	done
 	@echo "🧹 Clearing all Local Runtime persistent state via local-runtime-manager..."
-	@timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LAZYMIND_LOCAL_BIN)" reset --scope all --profile "$(LAZYMIND_LOCAL_PROFILE)" || \
+	@timeout "$(LAZYMIND_LOCAL_DOWN_TIMEOUT)" "$(LOCAL_RUNTIME_MANAGER_BIN)" reset --scope all || \
 		echo "⚠️  Local Runtime manager full reset timed out or failed; continuing Python cache cleanup"
 	@echo "🧹 Clearing Python cache..."
 	@find . -type d -name '__pycache__' ! -path '*/\.git/*' -exec rm -rf {} + 2>/dev/null || true

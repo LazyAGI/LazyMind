@@ -79,6 +79,11 @@ class StateMachine:
         }
         # Per-step route and skipif metadata, keyed by step id.
         steps_raw: Dict[str, Any] = steps or {}
+        self._step_ids: set[str] = {
+            step_id
+            for step_id, step_cfg in steps_raw.items()
+            if isinstance(step_id, str) and isinstance(step_cfg, dict)
+        }
         self._route: Dict[str, str] = {}
         self._skipif: Dict[str, str] = {}
         for step_id, step_cfg in steps_raw.items():
@@ -164,7 +169,7 @@ class StateMachine:
         visited: set = set()
         for e in edges:
             tgt = e['to']
-            if tgt not in self._RESERVED and tgt not in visited:
+            if tgt not in self._RESERVED and tgt in self._step_ids and tgt not in visited:
                 visited.add(tgt)
                 seen.append(tgt)
         return seen
@@ -174,7 +179,7 @@ class StateMachine:
 
         A step is always reachable from itself (retry semantics).
         """
-        if target_step == current_step and target_step not in self._RESERVED:
+        if target_step == current_step and target_step in self._step_ids:
             return True
         return target_step in self.get_reachable_steps(current_step)
 
@@ -234,16 +239,17 @@ class PluginSpec:
         # Load plugin.yaml
         plugin_yaml_path = plugin_dir / 'plugin.yaml'
         with plugin_yaml_path.open('r', encoding='utf-8') as f:
-            self.yaml: Dict[str, Any] = yaml.safe_load(f) or {}
+            self.plugin_yaml_raw: str = f.read()
+        self.yaml: Dict[str, Any] = yaml.safe_load(self.plugin_yaml_raw) or {}
 
         # Load scenario files
         scenario_dir = plugin_dir / 'scenario'
         self.scenario_md: str = self._read_text(scenario_dir / 'scenario.md')
-        state_raw: Dict[str, Any] = {}
         state_path = scenario_dir / 'state.yml'
         with state_path.open('r', encoding='utf-8') as f:
-            state_raw = yaml.safe_load(f) or {}
-        self.state: Dict[str, Any] = state_raw
+            state_text = f.read()
+        self.state_yaml_raw: str = state_text
+        self.state: Dict[str, Any] = yaml.safe_load(state_text) or {}
         self.driver_md: Optional[str] = self._read_text(scenario_dir / 'driver.md', optional=True)
 
         # Build state machine

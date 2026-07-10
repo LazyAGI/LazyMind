@@ -1,0 +1,1134 @@
+// ─── Root ────────────────────────────────────────────────────────────────────
+.uep-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: #fafafa;
+  overflow: hidden;
+}
+
+// ─── Toolbar ─────────────────────────────────────────────────────────────────
+.uep-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+// ─── TabBar ───────────────────────────────────────────────────────────────────
+.uep-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 12px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  min-height: 36px;
+  overflow-x: auto;
+}
+
+.uep-tab {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-bottom: none;
+  color: #595959;
+  font-size: 13px;
+  user-select: none;
+  transition: background 0.12s;
+  white-space: nowrap;
+
+  &:hover {
+    background: #f5f5f5;
+  }
+
+  &--active {
+    background: #fff;
+    border-color: #f0f0f0;
+    border-bottom-color: #fff;
+    color: #1677ff;
+    font-weight: 500;
+    margin-bottom: -1px;
+    z-index: 1;
+  }
+}
+
+.uep-tab-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.uep-tab-input {
+  width: 90px;
+  font-size: 12px;
+}
+
+.uep-tab-menu {
+  opacity: 0;
+  padding: 0 2px;
+  transition: opacity 0.12s;
+
+  .uep-tab:hover &,
+  .uep-tab--active & {
+    opacity: 1;
+  }
+}
+
+.uep-tabbar-add {
+  font-size: 12px;
+  color: #8c8c8c;
+  flex-shrink: 0;
+
+  &:hover {
+    color: #1677ff;
+  }
+}
+
+// ─── Body ─────────────────────────────────────────────────────────────────────
+.uep-body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  min-height: 0;
+}
+
+// ─── Fixed left sidebar (ArtifactPanel) ───────────────────────────────────────
+.uep-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  border-right: 1px solid #f0f0f0;
+  overflow: hidden;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+
+// ─── Right canvas area ────────────────────────────────────────────────────────
+.uep-canvas-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.uep-no-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #bfbfbf;
+  font-size: 13px;
+}
+
+// ─── Canvas ───────────────────────────────────────────────────────────────────
+.uep-canvas {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px;
+  box-sizing: border-box;
+
+  &--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &--horizontal {
+    overflow-x: auto;
+  }
+}
+
+.uep-canvas-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 680px;
+  margin: 0 auto;
+
+  &--grid {
+    display: grid;
+    grid-template-columns: var(--uep-grid-cols, repeat(auto-fill, minmax(240px, 1fr)));
+    gap: 12px;
+    max-width: none;
+  }
+
+  &--horizontal {
+    flex-direction: row;
+    align-items: flex-start;
+    flex-wrap: nowrap;
+    gap: 12px;
+    max-width: none;
+
+    // Each card takes equal share of available width
+    .uep-widget-card {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+}
+
+// Grid layout overrides (legacy)
+.uep-canvas--grid .uep-canvas-slots {
+  display: grid;
+  grid-template-columns: var(--uep-grid-cols, repeat(auto-fill, minmax(240px, 1fr)));
+  gap: 12px;
+  max-width: none;
+}
+
+// Horizontal layout overrides (legacy)
+.uep-canvas--horizontal .uep-canvas-slots {
+  flex-direction: row;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 12px;
+  max-width: none;
+
+  .uep-widget-card {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+// Composite canvas
+.uep-canvas--composite {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.uep-canvas-composite-hint {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin: 0;
+}
+
+.uep-canvas-composite-editor {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+}
+
+// ─── Drop zone highlight ──────────────────────────────────────────────────────
+.uep-canvas--drop-active {
+  outline: 2px dashed #1677ff;
+  outline-offset: -4px;
+  background: rgba(22, 119, 255, 0.04);
+}
+
+// ─── CompositeLayoutEditor (new 5-step editor) ────────────────────────────────
+.cle-root {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.cle-step {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+.cle-step-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
+  margin-bottom: 10px;
+}
+
+.cle-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #1677ff;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.cle-step-hint {
+  font-size: 11px;
+  color: #8c8c8c;
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+
+// ─── Step 1: Page-bar position ────────────────────────────────────────────────
+.cle-tab-positions {
+  display: flex;
+  gap: 8px;
+}
+
+.cle-tab-pos-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  background: #fafafa;
+  cursor: pointer;
+  font-size: 12px;
+  color: #595959;
+  transition: border-color 0.12s, background 0.12s;
+
+  &:hover { border-color: #1677ff; background: #f0f5ff; }
+  &--active { border-color: #1677ff; background: #e6f0ff; color: #1677ff; font-weight: 500; }
+}
+
+// ─── Step 2: Template picker ──────────────────────────────────────────────────
+.cle-templates-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cle-template-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1.5px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fafafa;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
+  font-size: 12px;
+  min-width: 68px;
+
+  &:hover {
+    border-color: #1677ff;
+    background: #f0f5ff;
+    box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12);
+  }
+}
+
+.cle-template-icon {
+  line-height: 1;
+  svg { display: block; }
+}
+.cle-template-label { color: #595959; font-size: 11px; }
+
+// ─── Step canvas ──────────────────────────────────────────────────────────────
+.cle-step-canvas {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-bottom: none;
+}
+
+.cle-canvas-actions { margin-left: auto; }
+
+// ─── Composite desc block ─────────────────────────────────────────────────────
+.cle-composite-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: #f0f5ff;
+  border: 1px solid #bfd3f5;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.cle-composite-desc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cle-composite-desc-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1677ff;
+}
+
+.cle-composite-desc-text {
+  font-size: 12px;
+  color: #595959;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.cle-canvas-wrap {
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  background: #fafafa;
+  margin-top: 4px;
+}
+
+// ─── CompositeCanvas ──────────────────────────────────────────────────────────
+.cc-root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+}
+
+// ─── PageBar wrapper ──────────────────────────────────────────────────────────
+.cc-with-pagebar {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+
+  &--top, &--bottom { flex-direction: column; }
+  &--top { flex-direction: column; }
+  &--bottom { flex-direction: column-reverse; }
+  &--left { flex-direction: row; }
+  &--right { flex-direction: row-reverse; }
+}
+
+.cc-pagebar {
+  flex-shrink: 0;
+  background: #f8f9fb;
+  border: 1px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  user-select: none;
+  transition: width 0.2s ease;
+
+  &--row {
+    flex-direction: row;
+    height: 40px;
+    padding: 0 8px;
+    gap: 2px;
+    border-left: none;
+    border-right: none;
+    justify-content: center;
+  }
+
+  &--col {
+    flex-direction: column;
+    width: 36px;
+    padding: 8px 0;
+    gap: 2px;
+    border-top: none;
+    border-bottom: none;
+    justify-content: center;
+    align-items: center;
+    overflow-y: auto;
+  }
+}
+
+.cc-pagebar-arrow {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #8c8c8c;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  line-height: 1;
+  padding: 0;
+
+  &:hover { color: #1677ff; background: rgba(22, 119, 255, 0.08); }
+}
+
+.cc-pagebar-pages {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+
+  &--row { flex-direction: row; justify-content: center; }
+  &--col { flex-direction: column; align-items: center; }
+}
+
+.cc-pagebar-ellipsis {
+  font-size: 11px;
+  color: #bfbfbf;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  pointer-events: none;
+}
+
+.cc-pagebar-page {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: #595959;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: background 0.1s, color 0.1s;
+  line-height: 1;
+  padding: 0;
+
+  .cc-pagebar--row & {
+    width: 28px;
+    height: 28px;
+  }
+
+  .cc-pagebar--col & {
+    width: 28px;
+    height: 28px;
+  }
+
+  &:hover { background: rgba(22, 119, 255, 0.08); color: #1677ff; }
+
+  &--active {
+    background: #1677ff;
+    color: #fff;
+    font-weight: 600;
+    pointer-events: none;
+
+    &:hover { background: #1677ff; color: #fff; }
+  }
+}
+
+.cc-pagebar-setting {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #8c8c8c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  padding: 0;
+  margin-top: 2px;
+
+  .cc-pagebar--col & { margin-top: 4px; }
+
+  &:hover { color: #1677ff; background: rgba(22, 119, 255, 0.06); }
+}
+
+.cc-pagebar-popover {
+  min-width: 100px;
+}
+
+.cc-pagebar-popover-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #595959;
+  margin-bottom: 8px;
+}
+
+.cc-pagebar-popover-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.cc-pagebar-dock-btn {
+  padding: 4px 8px;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  background: #fafafa;
+  cursor: pointer;
+  font-size: 12px;
+  color: #595959;
+  text-align: center;
+  transition: border-color 0.12s, background 0.12s;
+
+  &:hover { border-color: #1677ff; background: #f0f5ff; }
+  &--active { border-color: #1677ff; background: #e6f0ff; color: #1677ff; font-weight: 500; }
+}
+
+.cc-container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+
+  &--row { flex-direction: row; }
+  &--column { flex-direction: column; }
+}
+
+// ─── DividerHandle ────────────────────────────────────────────────────────────
+.cc-divider {
+  flex-shrink: 0;
+  background: #e8e8e8;
+  transition: background 0.15s;
+  z-index: 10;
+
+  &:hover, &:active { background: rgba(22, 119, 255, 0.5); }
+
+  &--row {
+    width: 4px;
+    height: 100%;
+    cursor: col-resize;
+    align-self: stretch;
+  }
+
+  &--column {
+    width: 100%;
+    height: 4px;
+    cursor: row-resize;
+  }
+}
+
+// ─── LeafPane ─────────────────────────────────────────────────────────────────
+.cc-leaf {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  background: #fff;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  min-height: 80px;
+  min-width: 0;
+  position: relative;
+
+  &--drag-over {
+    border-color: #1677ff;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.2);
+    background: #f0f5ff;
+  }
+
+  &--empty { background: #fafafa; }
+}
+
+.cc-leaf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.cc-leaf-block-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+
+  &-text {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #595959;
+    cursor: default;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &-placeholder {
+    font-style: italic;
+    color: #bfbfbf;
+    font-weight: 400;
+  }
+
+  &-edit-icon {
+    font-size: 11px;
+    color: #bfbfbf;
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity 0.12s, color 0.12s;
+    flex-shrink: 0;
+
+    &:hover { color: #1677ff; }
+  }
+
+  &-input {
+    font-size: 12px;
+    height: 22px;
+    padding: 0 4px;
+  }
+}
+
+.cc-leaf-block-label-text:hover .cc-leaf-block-label-edit-icon {
+  opacity: 1;
+}
+
+.cc-leaf-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.cc-leaf-toolbar-expanded {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width 0.18s ease, opacity 0.18s ease;
+  white-space: nowrap;
+}
+
+.cc-leaf-toolbar-actions--open .cc-leaf-toolbar-expanded {
+  max-width: 180px;
+  opacity: 1;
+}
+
+.cc-leaf-add-trigger {
+  color: #8c8c8c;
+  flex-shrink: 0;
+
+  &:hover { color: #1677ff; }
+}
+
+.cc-leaf-action-btn {
+  color: #595959;
+  font-size: 12px;
+  padding: 0 6px;
+
+  &--tab {
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+
+  &:hover { color: #1677ff; background: #f0f5ff; }
+}
+
+.cc-leaf-remove-btn {
+  flex-shrink: 0;
+}
+
+.cc-leaf-tab-chip-input {
+  width: 72px;
+  font-size: 12px;
+  height: 18px;
+  padding: 0 4px;
+}
+
+.cc-leaf-tab-chip-close {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+}
+
+.cc-leaf-slot-select { flex-shrink: 0; }
+
+.cc-leaf-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #bfbfbf;
+  pointer-events: none;
+}
+
+.cc-leaf-slot-badge {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: #595959;
+  background: #f5f5f5;
+  border-radius: 4px;
+  min-height: 32px;
+  padding: 4px 8px;
+  text-align: center;
+}
+
+.cc-leaf-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+}
+
+.cc-leaf-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.cc-leaf-tab-preview {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.cc-leaf-wysiwyg {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.cc-leaf-tabs--drag-over {
+  border: 1px dashed #1677ff;
+  background: #f0f5ff;
+  border-radius: 4px;
+}
+
+.cc-leaf-tab-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #f0f5ff;
+  border: 1px solid #d6e4ff;
+  border-radius: 4px;
+  padding: 2px 4px 2px 8px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  position: relative;
+
+  &--active {
+    background: #e6f0ff;
+    border-color: #1677ff;
+  }
+
+  .cc-leaf-tab-chip-close {
+    opacity: 0;
+    transition: opacity 0.12s;
+    pointer-events: none;
+  }
+
+  &:hover .cc-leaf-tab-chip-close {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.cc-leaf-tab-chip-label {
+  flex: 1;
+  font-size: 12px;
+  color: #1677ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// ─── Canvas + Properties panel wrapper ───────────────────────────────────────
+.uep-canvas-with-props {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+
+  > .uep-canvas {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+// ─── Right-side properties panel ─────────────────────────────────────────────
+.uep-props-panel {
+  width: 260px;
+  flex-shrink: 0;
+  background: #fff;
+  border-left: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.uep-props-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  border-left: 3px solid #1677ff;
+  padding-left: 8px;
+  flex-shrink: 0;
+  min-height: 40px;
+}
+
+.uep-props-panel-header-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+}
+
+.uep-props-panel-icon {
+  color: #8c8c8c;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.uep-props-panel-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uep-props-panel-subtitle {
+  font-size: 11px;
+  color: #8c8c8c;
+  white-space: nowrap;
+}
+
+.uep-props-panel-close {
+  flex-shrink: 0;
+  opacity: 0.6;
+  &:hover { opacity: 1; }
+}
+
+.uep-props-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px 16px;
+}
+
+.uep-props-panel-widget-type {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+// ─── Widget card wrapper (for drag insert indicator) ─────────────────────────
+.uep-widget-card-wrapper {
+  position: relative;
+
+  // Vertical indicator (top / bottom) for vertical layout
+  &[data-show-before='top']::before,
+  &[data-show-after='bottom']::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #1677ff;
+    border-radius: 1px;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  &[data-show-before='top']::before { top: -7px; }
+  &[data-show-after='bottom']::after { bottom: -7px; }
+
+  // Horizontal indicator (left / right) for horizontal layout
+  &[data-show-before='left']::before,
+  &[data-show-after='right']::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #1677ff;
+    border-radius: 1px;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  &[data-show-before='left']::before { left: -7px; }
+  &[data-show-after='right']::after { right: -7px; }
+}
+
+// ─── Drag ghost overlay ───────────────────────────────────────────────────────
+.uep-drag-ghost {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #fff;
+  border: 1px solid #1677ff;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  color: #262626;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.uep-drag-ghost-icon {
+  color: #8c8c8c;
+  font-size: 14px;
+}
+
+.uep-drag-ghost-label {
+  font-weight: 500;
+}
+
+// ─── WidgetConfigPanel ────────────────────────────────────────────────────────
+.wcp-root {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.wcp-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.wcp-field-label {
+  font-size: 11px;
+  color: #8c8c8c;
+  white-space: nowrap;
+  min-width: 52px;
+}
+
+.wcp-field-value {
+  display: flex;
+  align-items: center;
+}
+
+// ─── UiWidgetCard (two-zone: header + preview) ───────────────────────────────
+.uep-widget-card {
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  &--selected {
+    border-color: #1677ff;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.2);
+  }
+
+  &--drag-over {
+    border-color: #1677ff;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.15);
+  }
+}
+
+.uep-widget-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  min-height: 34px;
+}
+
+.uep-widget-drag {
+  color: #bfbfbf;
+  cursor: grab;
+  font-size: 14px;
+  flex-shrink: 0;
+  padding: 2px 2px;
+  display: flex;
+  align-items: center;
+
+  &:active { cursor: grabbing; }
+}
+
+.uep-widget-icon {
+  color: #8c8c8c;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.uep-widget-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #262626;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uep-widget-type-tag {
+  font-size: 11px;
+  color: #8c8c8c;
+  background: #f5f5f5;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+.uep-widget-remove {
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity 0.12s;
+
+  .uep-widget-card:hover & {
+    opacity: 1;
+  }
+}
+
+.uep-widget-preview {
+  padding: 12px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fff;
+  min-height: 60px;
+}
+
+// ─── Fullscreen mode ──────────────────────────────────────────────────────────
+.uep-root--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  width: 100vw;
+  height: 100vh;
+
+  .uep-sidebar { display: none; }
+  .uep-props-panel { display: none; }
+  .uep-canvas-area { flex: 1; width: 100%; max-width: 100%; }
+}
+
+// ─── Expand/fullscreen button ─────────────────────────────────────────────────
+.uep-expand-btn {
+  flex-shrink: 0;
+  border-radius: 4px;
+
+  &:hover { background: rgba(0, 0, 0, 0.06); }
+}
+

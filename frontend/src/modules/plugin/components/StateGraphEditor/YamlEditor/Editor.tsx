@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type * as monacoType from 'monaco-editor';
 import type { ValidationError } from '../core/validator';
 
@@ -6,6 +7,10 @@ interface Props {
   value: string;
   onChange: (value: string) => void;
   errors: ValidationError[];
+  /** Monaco language identifier. Defaults to 'yaml'. */
+  language?: string;
+  /** If true the editor is read-only. */
+  readOnly?: boolean;
 }
 
 // Lazily loaded monaco instance
@@ -22,7 +27,8 @@ async function loadMonaco(): Promise<typeof monacoType> {
   return loadingPromise;
 }
 
-export default function Editor({ value, onChange, errors }: Props) {
+export default function Editor({ value, onChange, errors, language = 'yaml', readOnly = false }: Props) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
   const onChangeRef = useRef(onChange);
@@ -40,7 +46,7 @@ export default function Editor({ value, onChange, errors }: Props) {
 
       editor = monaco.editor.create(containerRef.current, {
         value,
-        language: 'yaml',
+        language,
         theme: 'vs',
         fontSize: 13,
         minimap: { enabled: false },
@@ -50,6 +56,7 @@ export default function Editor({ value, onChange, errors }: Props) {
         tabSize: 2,
         insertSpaces: true,
         wordWrap: 'on',
+        readOnly,
       });
 
       editorRef.current = editor;
@@ -68,13 +75,22 @@ export default function Editor({ value, onChange, errors }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync external value changes (e.g. from graph operations) without triggering onChange
+  // Sync external value changes (e.g. from graph canvas) without resetting cursor.
+  // We use pushEditOperations instead of setValue so the cursor position is preserved.
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (editor.getValue() === value) return;
+    const editorModel = editor.getModel();
+    if (!editorModel) return;
+    if (editorModel.getValue() === value) return;
+
     externalUpdateRef.current = true;
-    editor.setValue(value);
+    // Replace the entire document content while preserving cursor & scroll
+    editorModel.pushEditOperations(
+      editor.getSelections() ?? [],
+      [{ range: editorModel.getFullModelRange(), text: value }],
+      () => null,
+    );
     externalUpdateRef.current = false;
   }, [value]);
 
@@ -103,7 +119,7 @@ export default function Editor({ value, onChange, errors }: Props) {
     <div
       ref={containerRef}
       style={{ width: '100%', height: '100%', minHeight: 300 }}
-      aria-label="YAML 编辑器"
+      aria-label={t('selfEvolutionRun.yamlEditorAriaLabel')}
     />
   );
 }

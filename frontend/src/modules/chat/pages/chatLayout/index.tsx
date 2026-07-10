@@ -381,21 +381,21 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         : undefined;
 
     // Attach focused_tab and focused_sort_order so the AI knows what the user is looking at.
+    const { focusedTabByConversation, focusedSortOrderByConversation } =
+      usePluginStore.getState();
+    const focusedTab = focusedTabByConversation[sessionId];
+    const focusedSortOrder = focusedSortOrderByConversation[sessionId];
     const pluginUIState =
-      activeSession && (activeSession.focusedTab || activeSession.focusedSortOrder !== undefined)
+      focusedTab || focusedSortOrder !== undefined
         ? {
-            focused_tab: activeSession.focusedTab,
-            focused_sort_order: activeSession.focusedSortOrder,
+            focused_tab: focusedTab,
+            focused_sort_order: focusedSortOrder,
           }
         : undefined;
 
     // Collect pending artifact references from the chat input store.
     const { getArtifactRefs, clearArtifactRefs } = useChatInputStore.getState();
     const artifactRefs = getArtifactRefs(sessionId);
-    // Clear after reading so they are not repeated in the next message.
-    if (artifactRefs.length > 0) {
-      clearArtifactRefs(sessionId);
-    }
     // Clear after reading so they are not repeated in the next message.
     if (artifactRefs.length > 0) {
       clearArtifactRefs(sessionId);
@@ -553,6 +553,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       }
       const conversationId = detail.conversationId || "";
       if (!conversationId) {
+        if (sessionIdRef.current) {
+          chatRef.current?.disconnectConversationStream?.(sessionIdRef.current, {
+            persistResumeKey: true,
+          });
+        }
         setIsRestoringConversation(false);
         setConversationPluginSettings(undefined);
         setChatConfig({});
@@ -562,6 +567,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       }
       if (conversationId === sessionId) {
         return;
+      }
+      if (sessionIdRef.current) {
+        chatRef.current?.disconnectConversationStream?.(sessionIdRef.current, {
+          persistResumeKey: true,
+        });
       }
       setIsChatContent(true);
       loadConversation(conversationId);

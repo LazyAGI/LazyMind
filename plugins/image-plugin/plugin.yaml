@@ -6,14 +6,18 @@ description: >
   optimize_prompt, generate_image, collect_materials, and enhance_image
   based on user intent (CREATE_NEW vs FIND_AND_EDIT vs EDIT_UPLOAD).
   CREATE_NEW and KB_STYLE skip material collection and generate directly after
-  prompt optimization; collect_materials is only for preparing a raw source
-  image for image editing.
+  prompt optimization. collect_materials gathers reference images for
+  REFERENCE_GENERATE (then optimize → generate) or prepares a raw source image
+  for FIND_AND_EDIT / EDIT_UPLOAD editing workflows.
 
 when_to_use: >
   Call this tool whenever the user wants to generate, draw, create, paint,
   edit, or find-and-modify an image as the PRIMARY and DIRECT intent of their
-  request — including "画一张图", "帮我生成图片", "找一张XX的照片然后加上YY",
-  "在这张图上加水印", "根据知识库中的风格画图", or "draw a cat".
+  request — including "画一张图", "帮我生成图片", "启动绘图插件", "打开图片生成插件",
+  "找一张XX的照片然后加上YY", "在这张图上加水印", "根据知识库中的风格画图", or "draw a cat".
+  When the user explicitly says to start/launch the image or drawing plugin, you MUST
+  call trigger_image_plugin immediately — do not reply with text only or call
+  image_generator/image_editor before the plugin is started.
   When the user has selected a knowledge base, use KB_STYLE workflow;
   the analyze_subject step calls kb_search inside the plugin SubAgent.
   Do NOT trigger if image generation is merely one sub-step within a larger
@@ -48,6 +52,12 @@ slots:
     type: text
     cardinality: single
     summary_max_chars: 300
+
+  - id: workflow_routing
+    label: Workflow Routing
+    type: text
+    cardinality: single
+    summary_max_chars: 200
 
   - id: material_images
     label: Reference Materials

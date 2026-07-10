@@ -51,9 +51,6 @@ export function useFeishuOAuthFlow({
   ) => {
     const attempt = oauthAttemptRef.current;
     if (!attempt) {
-      if (messageText) {
-        message[level](messageText);
-      }
       return;
     }
 
@@ -224,6 +221,8 @@ export function useFeishuOAuthFlow({
           if (!popup.closed) {
             return;
           }
+
+          window.clearInterval(timerId);
 
           if (oauthAttemptRef.current?.resolved) {
             clearOauthAttempt();

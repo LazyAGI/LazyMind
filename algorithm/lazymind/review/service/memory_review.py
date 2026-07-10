@@ -8,7 +8,8 @@ from lazyllm import AutoModel, LOG
 from lazyllm.tools.fs.client import FS
 from pydantic import BaseModel, ConfigDict
 
-from lazymind.chat.engine.tools import memory_editor
+from lazymind.chat.engine.tools import memory_editor, read_memory
+from lazymind.chat.engine.tools.infra import MemoryRemoteStore
 from lazymind.chat.service.component.history import normalize_history_for_agent
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
@@ -19,6 +20,7 @@ class MemoryReviewResult(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     status: Literal['success', 'failed']
+    task_id: str
 
 
 def _truncate_log_text(value: Any, limit: int = 4000) -> str:
@@ -29,40 +31,39 @@ def _truncate_log_text(value: Any, limit: int = 4000) -> str:
 
 
 def review_memory(
-    *,
     user_id: str,
     history: List[Dict[str, Any]],
-    memory: str,
-    user: str,
     llm_config: Optional[Dict[str, Any]] = None,
 ) -> MemoryReviewResult:
-    sid = f'memory_review_{user_id.strip() or uuid4().hex}'
-    lazyllm.globals._init_sid(sid=sid)
-    lazyllm.locals._init_sid(sid=sid)
+    task_id = f'memory_review_{uuid4()}'
+    lazyllm.globals._init_sid(sid=task_id)
+    lazyllm.locals._init_sid(sid=task_id)
     inject_model_config(llm_config)
     LOG.info(
         f'[MemoryReview] review started: user_id={user_id} '
-        f'history_len={len(history)} memory_len={len(memory or "")} '
-        f'user_len={len(user or "")} has_llm_config={bool(llm_config)}'
-    )
-
-    prompt = build_memory_review_prompt(
-        memory=memory,
-        user=user,
+        f'task_id={task_id} history_len={len(history)} '
+        f'has_llm_config={bool(llm_config)}'
     )
 
     config = {
         'user_id': user_id,
-        'core_api_url': _cfg['core_api_url'],
-        'memory': memory,
-        'user_preference': user,
+        'task_id': task_id,
     }
     lazyllm.globals['agentic_config'] = config
+
+    store = MemoryRemoteStore()
+    remote_memory = store.read('memory')
+    remote_user = store.read('user_preference')
+
+    prompt = build_memory_review_prompt(
+        memory=remote_memory,
+        user=remote_user,
+    )
 
     llm = AutoModel(model='llm')
     review_agent = lazyllm.tools.agent.ReactAgent(
         llm=llm,
-        tools=[memory_editor],
+        tools=[read_memory, memory_editor],
         max_retries=_cfg['review_max_retries'],
         return_trace=False,
         prompt=' ',
@@ -78,8 +79,9 @@ def review_memory(
     )
     LOG.info(
         f'[MemoryReview] review finished: user_id={user_id} '
-        f'history_len={len(history)} memory_len={len(memory or "")} '
-        f'user_len={len(user or "")} has_llm_config={bool(llm_config)} '
+        f'task_id={task_id} history_len={len(history)} '
+        f'memory_len={len(remote_memory or "")} '
+        f'user_len={len(remote_user or "")} has_llm_config={bool(llm_config)} '
         f'res={_truncate_log_text(res)!r}'
     )
-    return MemoryReviewResult(status='success')
+    return MemoryReviewResult(status='success', task_id=task_id)

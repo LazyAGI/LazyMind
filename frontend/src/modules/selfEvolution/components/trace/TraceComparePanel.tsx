@@ -6,6 +6,7 @@ import {
   formatCount,
   formatDuration,
   formatDurationDelta,
+  formatTraceStatusLabel,
   formatNumberDelta,
   getInsightNode,
   getShortTraceId,
@@ -68,15 +69,19 @@ export function TraceComparePanel({ observation, title }: { observation: Extract
       <div className="self-evolution-trace-ab-summary">
         <article>
           <Text strong>{t("selfEvolutionRun.trace.baselineAlgorithm")}</Text>
-          <span>{`Trace ID ${getShortTraceId(observation.a.traceId)}`}</span>
-          <span>{`Latency ${formatDuration(observation.a.summary.latencyMs)}`}</span>
-          <Tag color={getStatusColor(observation.a.status)}>{observation.a.status}</Tag>
+          <span>{t("selfEvolutionRun.trace.traceIdLabel", { id: getShortTraceId(observation.a.traceId) })}</span>
+          <span>{t("selfEvolutionRun.trace.latencyLabel", { latency: formatDuration(observation.a.summary.latencyMs) })}</span>
+          <Tag color={getStatusColor(observation.a.status)}>
+            {formatTraceStatusLabel(t, observation.a.status)}
+          </Tag>
         </article>
         <article>
           <Text strong>{t("selfEvolutionRun.trace.optimizedAlgorithm")}</Text>
-          <span>{`Trace ID ${getShortTraceId(observation.b.traceId)}`}</span>
-          <span>{`Latency ${formatDuration(observation.b.summary.latencyMs)}`}</span>
-          <Tag color={getStatusColor(observation.b.status)}>{observation.b.status}</Tag>
+          <span>{t("selfEvolutionRun.trace.traceIdLabel", { id: getShortTraceId(observation.b.traceId) })}</span>
+          <span>{t("selfEvolutionRun.trace.latencyLabel", { latency: formatDuration(observation.b.summary.latencyMs) })}</span>
+          <Tag color={getStatusColor(observation.b.status)}>
+            {formatTraceStatusLabel(t, observation.b.status)}
+          </Tag>
         </article>
       </div>
       <div className="self-evolution-trace-compare-grid" aria-label={t("selfEvolutionRun.trace.compareGridAria")}>

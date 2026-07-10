@@ -3,9 +3,9 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Empty, Spin, Tag, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
-import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
+import { getLocalizedErrorMessage } from "@/components/request";
 import {
-  AGENT_API_BASE,
+  fetchThreadGateContent,
   isCanceledRequest,
   isEmptyResultPayload,
   stringifyResultPayload,
@@ -27,63 +27,77 @@ export function SelfEvolutionObservationPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { threadId, kind } = useParams<ObservationRouteParams>();
-  const { isMenuCollapsed, toggleMenu } = useOutletContext<ObservationPageLayoutContext>();
+  const { isMenuCollapsed, toggleMenu } =
+    useOutletContext<ObservationPageLayoutContext>();
   const resultKind = normalizeObservationKind(kind);
   const [reloadToken, setReloadToken] = useState(0);
-  const [state, setState] = useState<ObservationPageState>({ loading: false, loaded: false });
-  const resultUrl = threadId && resultKind
-    ? `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/${resultKind}`
-    : "";
-
+  const [state, setState] = useState<ObservationPageState>({
+    loading: false,
+    loaded: false,
+  });
   useEffect(() => {
     if (!threadId || !resultKind) {
-      setState({ loading: false, loaded: true, error: t("selfEvolutionRun.observation.routeError") });
+      setState({
+        loading: false,
+        loaded: true,
+        error: t("selfEvolutionRun.observation.routeError"),
+      });
       return;
     }
 
     const controller = new AbortController();
     setState((prev) => ({ ...prev, loading: true, error: undefined }));
 
-    axiosInstance
-      .get(resultUrl, { signal: controller.signal })
-      .then((response) => {
+    fetchThreadGateContent(threadId, resultKind, { signal: controller.signal })
+      .then((data) => {
         if (controller.signal.aborted) {
           return;
         }
-        if (isEmptyResultPayload(response.data)) {
+        if (isEmptyResultPayload(data)) {
           setState({
             loading: false,
             loaded: true,
             data: undefined,
-            notice: resultKind === "eval-reports"
-              ? t("selfEvolutionRun.observation.noEvalCsvData")
-              : t("selfEvolutionRun.observation.noObservationData"),
+            notice:
+              resultKind === "eval-reports"
+                ? t("selfEvolutionRun.observation.noEvalCsvData")
+                : t("selfEvolutionRun.observation.noObservationData"),
           });
           return;
         }
-        setState({ loading: false, loaded: true, data: response.data });
+        setState({ loading: false, loaded: true, data });
       })
       .catch((error) => {
         if (isCanceledRequest(error) || controller.signal.aborted) {
           return;
         }
-        const errorMessage = getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.observationLoadFailed"));
+        const errorMessage = getLocalizedErrorMessage(
+          error,
+          t("selfEvolutionRun.observation.observationLoadFailed"),
+        );
         setState({
           loading: false,
           loaded: true,
           data: undefined,
-          notice: resultKind === "eval-reports"
-            ? errorMessage
-            : t("selfEvolutionRun.observation.observationUnavailable", { error: errorMessage }),
+          notice:
+            resultKind === "eval-reports"
+              ? errorMessage
+              : t("selfEvolutionRun.observation.observationUnavailable", {
+                  error: errorMessage,
+                }),
         });
       });
 
     return () => {
       controller.abort();
     };
-  }, [reloadToken, resultKind, resultUrl, threadId]);
+  }, [reloadToken, resultKind, t, threadId]);
 
-  const isEmpty = state.loaded && !state.loading && !state.error && isEmptyResultPayload(state.data);
+  const isEmpty =
+    state.loaded &&
+    !state.loading &&
+    !state.error &&
+    isEmptyResultPayload(state.data);
   const backToDetail = () => {
     if (threadId) {
       navigate(`/self-evolution/detail/${encodeURIComponent(threadId)}`);
@@ -125,22 +139,44 @@ export function SelfEvolutionObservationPage() {
     <div className="self-evolution-observation-page">
       <header className="self-evolution-observation-page-head">
         <div className="self-evolution-observation-page-title">
-          <ObservationHeaderControls isMenuCollapsed={isMenuCollapsed} toggleMenu={toggleMenu} onBack={backToDetail} />
+          <ObservationHeaderControls
+            isMenuCollapsed={isMenuCollapsed}
+            toggleMenu={toggleMenu}
+            onBack={backToDetail}
+          />
           <div>
-            <Title level={3}>{t("selfEvolutionRun.observation.pageTitle")}</Title>
+            <Title level={3}>
+              {t("selfEvolutionRun.observation.pageTitle")}
+            </Title>
             <Paragraph>{t("selfEvolutionRun.observation.pageDesc")}</Paragraph>
           </div>
         </div>
         <div className="self-evolution-observation-page-meta">
           {threadId && <Tag>{`thread ${threadId}`}</Tag>}
           {resultKind && <Tag color="blue">{resultKind}</Tag>}
-          <Button icon={<ReloadOutlined />} loading={state.loading} onClick={reload}>{t("selfEvolutionRun.observation.refresh")}</Button>
+          <Button
+            icon={<ReloadOutlined />}
+            loading={state.loading}
+            onClick={reload}
+          >
+            {t("selfEvolutionRun.observation.refresh")}
+          </Button>
         </div>
       </header>
       <main className="self-evolution-observation-page-body" aria-live="polite">
-        {state.notice && !state.loading && <Alert type="warning" showIcon message={state.notice} />}
+        {state.notice && !state.loading && (
+          <Alert type="warning" showIcon message={state.notice} />
+        )}
         {!resultKind ? (
-          <Alert type="warning" showIcon message={t("selfEvolutionRun.observation.unknownObservationType")} description={t("selfEvolutionRun.observation.unknownObservationTypeDesc", { kind: kind || "-" })} />
+          <Alert
+            type="warning"
+            showIcon
+            message={t("selfEvolutionRun.observation.unknownObservationType")}
+            description={t(
+              "selfEvolutionRun.observation.unknownObservationTypeDesc",
+              { kind: kind || "-" },
+            )}
+          />
         ) : state.loading && !state.loaded ? (
           <div className="self-evolution-observation-page-loading">
             <Spin />
@@ -150,14 +186,25 @@ export function SelfEvolutionObservationPage() {
           <Alert
             type="error"
             showIcon
-            message={t("selfEvolutionRun.observation.observationLoadFailedTitle")}
+            message={t(
+              "selfEvolutionRun.observation.observationLoadFailedTitle",
+            )}
             description={state.error}
-            action={<Button size="small" onClick={reload}>{t("selfEvolutionRun.observation.retry")}</Button>}
+            action={
+              <Button size="small" onClick={reload}>
+                {t("selfEvolutionRun.observation.retry")}
+              </Button>
+            }
           />
         ) : isEmpty ? (
-          <Empty description={t("selfEvolutionRun.observation.emptyObservations")} />
+          <Empty
+            description={t("selfEvolutionRun.observation.emptyObservations")}
+          />
         ) : (
-          <section className="self-evolution-observation-json-card" aria-label={t("selfEvolutionRun.observation.rawDataAria")}>
+          <section
+            className="self-evolution-observation-json-card"
+            aria-label={t("selfEvolutionRun.observation.rawDataAria")}
+          >
             <div className="self-evolution-observation-data-head">
               <div>
                 <Text strong>{t("selfEvolutionRun.observation.rawData")}</Text>

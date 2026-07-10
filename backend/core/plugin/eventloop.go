@@ -23,6 +23,10 @@ import (
 	"lazymind/core/taskcenter"
 )
 
+type chatStatusCacheEntry struct {
+	Status string `json:"status"`
+}
+
 // PluginStepParams are the task_created.params fields for plugin_step agent type.
 type PluginStepParams struct {
 	PluginID    string `json:"plugin_id"`
@@ -30,6 +34,11 @@ type PluginStepParams struct {
 	SessionID   string `json:"session_id"`
 	UserInput   string `json:"user_input"`
 	IsColdStart bool   `json:"is_cold_start"`
+
+	// ChatSessionID is the LazyLLM session id of the ChatAgent turn that emitted
+	// task_created. It is needed by Python signal routes to write FileSystemQueue
+	// messages into the same sid namespace that advance_step is polling.
+	ChatSessionID string `json:"chat_session_id,omitempty"`
 
 	// PluginMode is "auto" | "dynamic" — resolved from the conversation request and
 	// persisted into params so that OnSubAgentDone can branch correctly even when
@@ -71,6 +80,9 @@ func (p PluginStepParams) asMap() map[string]any {
 	if p.PluginMode != "" {
 		m["plugin_mode"] = p.PluginMode
 	}
+	if p.ChatSessionID != "" {
+		m["chat_session_id"] = p.ChatSessionID
+	}
 	if p.RetryHint != "" {
 		m["retry_hint"] = p.RetryHint
 	}
@@ -97,6 +109,7 @@ type PluginChatContext struct {
 	ConvID              string
 	UserID              string
 	PluginMode          string // "auto" | "dynamic"
+	ChatSessionID       string
 	HistoryFilesPerTurn map[string][]string
 }
 
@@ -128,6 +141,12 @@ func HandlePluginStepCreated(
 	stepID := params.StepID
 	isCold := params.IsColdStart
 	returnedTaskID = taskID
+	fmt.Printf("[plugin] task_created received conv=%s session=%s plugin=%s step=%s task=%s cold=%t mode=%s\n",
+		convID, params.SessionID, pluginID, stepID, taskID, isCold, params.PluginMode)
+	if params.ChatSessionID != "" {
+		fmt.Printf("[plugin] task_created chat sid conv=%s chat_sid=%s plugin=%s step=%s task=%s\n",
+			convID, params.ChatSessionID, pluginID, stepID, taskID)
+	}
 
 	// "__end__" is a sentinel emitted by ChatAgent (via advance_step) to signal that the
 	// plugin session is complete.  No SubAgent is started; a step record is written for
@@ -135,6 +154,7 @@ func HandlePluginStepCreated(
 	// then the session is marked completed.
 	if stepID == "__end__" {
 		sessionID = params.SessionID
+		fmt.Printf("[plugin] task_created end signal conv=%s session=%s task=%s\n", convID, sessionID, taskID)
 		if sessionID == "" {
 			return "", "", false, fmt.Errorf("plugin: session_id required for __end__ signal")
 		}
@@ -149,12 +169,16 @@ func HandlePluginStepCreated(
 		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusCompleted); uErr != nil {
 			fmt.Printf("[Plugin] __end__: failed to complete session %s: %v\n", sessionID, uErr)
 		}
-		// Sync TaskCenter status to completed.
-		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, sessionID, "completed")
+		// Sync TaskCenter status to succeeded.
+		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, sessionID, "succeeded")
+		clearGeneratingChatStatus(ctx, stateStore, convID)
+		fmt.Printf("[plugin] plugin session completed by end signal conv=%s session=%s task=%s\n",
+			convID, sessionID, taskID)
 		return sessionID, taskID, true, nil
 	}
 
 	if isCold {
+		fmt.Printf("[plugin] cold-start branch conv=%s plugin=%s step=%s task=%s\n", convID, pluginID, stepID, taskID)
 		existing, gErr := GetActiveSession(ctx, db, convID)
 		if gErr != nil {
 			return "", "", false, fmt.Errorf("plugin: check active session: %w", gErr)
@@ -175,6 +199,8 @@ func HandlePluginStepCreated(
 			return "", "", false, fmt.Errorf("plugin: create session: %w", sErr)
 		}
 		sessionID = psID
+		fmt.Printf("[plugin] plugin session created conv=%s session=%s plugin=%s current_step=%s\n",
+			convID, sessionID, pluginID, stepID)
 		// Register a TaskCenter record for this plugin run so the user can track it.
 		// Prefer conversation display_name as the task title so the task center shows
 		// a human-readable conversation title instead of a raw plugin/step identifier.
@@ -199,8 +225,12 @@ func HandlePluginStepCreated(
 			Title:           &tcTitle,
 			Status:          "running",
 		})
+		fmt.Printf("[plugin] taskcenter plugin_run ensured conv=%s session=%s plugin=%s\n",
+			convID, sessionID, pluginID)
 	} else {
 		sessionID = params.SessionID
+		fmt.Printf("[plugin] advance branch conv=%s session=%s plugin=%s step=%s task=%s\n",
+			convID, sessionID, pluginID, stepID, taskID)
 		if sessionID == "" {
 			return "", "", false, fmt.Errorf("plugin: session_id required for non-cold-start step")
 		}
@@ -211,10 +241,16 @@ func HandlePluginStepCreated(
 		}
 		if uErr := UpdateSessionCurrentStep(ctx, db, sessionID, stepID); uErr != nil {
 			fmt.Printf("[Plugin] failed to update current_step: %v\n", uErr)
+		} else {
+			fmt.Printf("[plugin] session current_step updated conv=%s session=%s step=%s\n",
+				convID, sessionID, stepID)
 		}
 		// Ensure session is marked active when a new step starts (e.g. auto-advance via ChatAgent).
 		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive); uErr != nil {
 			fmt.Printf("[Plugin] failed to reset session status to active: %v\n", uErr)
+		} else {
+			fmt.Printf("[plugin] session status active conv=%s session=%s step=%s\n",
+				convID, sessionID, stepID)
 		}
 	}
 
@@ -234,6 +270,9 @@ func HandlePluginStepCreated(
 	}
 	if params.PluginMode != "" {
 		rawParamsMap["plugin_mode"] = params.PluginMode
+	}
+	if params.ChatSessionID != "" {
+		rawParamsMap["chat_session_id"] = params.ChatSessionID
 	}
 	if params.RetryHint != "" {
 		rawParamsMap["retry_hint"] = params.RetryHint
@@ -277,17 +316,24 @@ func HandlePluginStepCreated(
 	if cErr != nil {
 		return "", sessionID, false, fmt.Errorf("plugin: create sub_agent_task: %w", cErr)
 	}
+	fmt.Printf("[plugin] sub_agent_task created conv=%s session=%s plugin=%s step=%s task=%s workspace=%s\n",
+		convID, sessionID, pluginID, stepID, task.ID, task.WorkspacePath)
 
 	// Create plugin_session_steps record.
 	attempt, _ := NextAttempt(ctx, db, sessionID, stepID)
 	if _, stepErr := CreateSessionStep(ctx, db, sessionID, stepID, task.ID, attempt); stepErr != nil {
 		fmt.Printf("[Plugin] failed to create session step: %v\n", stepErr)
+	} else {
+		fmt.Printf("[plugin] plugin_session_step created conv=%s session=%s step=%s task=%s attempt=%d\n",
+			convID, sessionID, stepID, task.ID, attempt)
 	}
 
 	// Seed Redis status.
 	_ = subagent.WriteStatus(ctx, stateStore, task.ID, map[string]any{
 		"status": subagent.StatusPending, "progress": 0,
 	})
+	fmt.Printf("[plugin] sub_agent status seeded conv=%s session=%s step=%s task=%s status=%s\n",
+		convID, sessionID, stepID, task.ID, subagent.StatusPending)
 
 	// Launch SubAgent goroutine.
 	// input_slots, output_slots, and tools are NOT forwarded here:
@@ -310,6 +356,12 @@ func HandlePluginStepCreated(
 		LLMConfig:     llmConfig,
 		ToolConfig:    toolConfig,
 	})
+	fmt.Printf("[plugin] sub_agent launched conv=%s session=%s step=%s task=%s\n",
+		convID, sessionID, stepID, task.ID)
+
+	go notifyStepStarted(convID, sessionID, stepID, task.ID, params.ChatSessionID)
+	fmt.Printf("[plugin] step_started notify scheduled conv=%s session=%s step=%s task=%s\n",
+		convID, sessionID, stepID, task.ID)
 
 	return sessionID, task.ID, false, nil
 }
@@ -367,12 +419,33 @@ func OnSubAgentDone(
 		}
 	}
 
+	// Once a terminal plugin step succeeds, close the plugin session according
+	// to the state machine instead of requiring a follow-up ChatAgent turn to
+	// emit __end__.
+	if status == subagent.StatusSucceeded && isTerminalPluginStep(ctx, pctx.PluginID, pctx.StepID) {
+		if _, sErr := CreateSessionStep(ctx, db, pctx.SessionID, "__end__", "__end__", 1); sErr == nil {
+			_ = UpdateStepStatus(ctx, db, "__end__", StepStatusSucceeded)
+		}
+		_ = UpdateSessionCurrentStep(ctx, db, pctx.SessionID, "__end__")
+		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusCompleted)
+		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "succeeded")
+		clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
+		onSSE("plugin_completed", map[string]any{
+			"session_id": pctx.SessionID,
+			"step_id":    pctx.StepID,
+		})
+		go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+		return
+	}
+
 	// Determine mode: use context-level PluginMode (set from request body during HandlePluginStepCreated).
 	// Falls back to "dynamic" if not set. Env-var defaultMode() is no longer used.
 	mode := pctx.PluginMode
 	if mode != "auto" && mode != "dynamic" {
 		mode = "dynamic"
 	}
+	fmt.Printf("[plugin] sub_agent terminal conv=%s session=%s step=%s task=%s status=%s mode=%s summary_len=%d\n",
+		pctx.ConvID, pctx.SessionID, pctx.StepID, taskID, status, mode, len(summary))
 
 	if mode == "auto" {
 		// Interrupted steps should not be auto-advanced: surface the interruption to the user
@@ -396,9 +469,35 @@ func OnSubAgentDone(
 			"step_id":    pctx.StepID,
 			"reason":     "dynamic_pause",
 		})
+		// Notify Python ChatAgent to unblock _wait_for_step_done.
+		go notifyStepDone(pctx.ConvID, pctx.SessionID, pctx.StepID, status, summary, pctx.ChatSessionID)
 	}
 	// Write content_snapshot to all selected revisions for this step.
 	go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+}
+
+func clearGeneratingChatStatus(ctx context.Context, stateStore state.Store, convID string) {
+	if stateStore == nil || strings.TrimSpace(convID) == "" {
+		return
+	}
+	key := fmt.Sprintf("rag/chat/status:%s", convID)
+	entries, err := stateStore.HGetAll(ctx, key)
+	if err != nil {
+		return
+	}
+	var fields []string
+	for historyID, raw := range entries {
+		var st chatStatusCacheEntry
+		if json.Unmarshal([]byte(raw), &st) != nil {
+			continue
+		}
+		if st.Status == "generating" {
+			fields = append(fields, historyID)
+		}
+	}
+	if len(fields) > 0 {
+		_ = stateStore.HDel(ctx, key, fields...)
+	}
 }
 
 // advanceAutoMode calls DriverAgent and forwards its natural-language assessment to ChatAgent.
@@ -823,6 +922,34 @@ func resolveSlotBinding(pluginID, slot string) (slotID, cardinality string) {
 		return "", ""
 	}
 	return result.SlotID, result.Cardinality
+}
+
+func isTerminalPluginStep(parentCtx context.Context, pluginID, stepID string) bool {
+	if pluginID == "" || stepID == "" {
+		return false
+	}
+	endpoint := common.ChatServiceEndpoint()
+	url := fmt.Sprintf("%s/api/plugins/%s", endpoint, pluginID)
+	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var spec pluginStateSpec
+	if json.NewDecoder(resp.Body).Decode(&spec) != nil {
+		return false
+	}
+	edges := spec.State.Transitions[stepID]
+	return len(edges) == 1 && edges[0].To == "__end__"
 }
 
 // defaultDriverMaxRetries is the global max retry count for DriverAgent RETRY verdicts.

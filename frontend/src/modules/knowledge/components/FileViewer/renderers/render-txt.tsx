@@ -34,15 +34,22 @@ const RenderTxt = (props: RenderTxtProps) => {
       return `<span style="background-color: yellow; font-weight: bold;" class="txt-keyword">${contentText}</span>${txt}`;
     });
 
-    setTimeout(() => {
-      const txtKeywords = document.querySelectorAll(".txt-keyword");
-      txtKeywords.forEach((txtKeyword) => {
-        txtKeyword.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
-    }, 200);
-
     return newText.join("");
   }, [contentText, originalText]);
+
+  // Scroll the first highlighted keyword into view. Runs only when the
+  // highlighted content changes, not on every parent re-render — otherwise
+  // polling updates would yank the user back to the top.
+  useEffect(() => {
+    if (!contentText || !highlightedText) return;
+    const id = window.setTimeout(() => {
+      const firstKeyword = document.querySelector(".txt-keyword");
+      if (firstKeyword) {
+        firstKeyword.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 200);
+    return () => window.clearTimeout(id);
+  }, [contentText, highlightedText]);
 
   try {
     return (

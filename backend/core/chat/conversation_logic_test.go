@@ -34,6 +34,38 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 }
 
+func TestPluginStepParamsFromEventParamsPreservesChatSessionID(t *testing.T) {
+	params := pluginStepParamsFromEventParams(map[string]any{
+		"plugin_id":              "writer-plugin",
+		"step_id":                "generate_outline",
+		"session_id":             "ps-1",
+		"chat_session_id":        "conv-1_123",
+		"user_input":             "go",
+		"is_cold_start":          false,
+		"retry_hint":             "retry",
+		"partial_indices":        map[string]any{"outline": []any{float64(1), float64(3)}},
+		"history_files_per_turn": map[string]any{"2": []any{"a.png", "b.pdf"}},
+		"filters":                map[string]any{"kb_id": "kb-1"},
+		"user_id":                "user-1",
+	})
+
+	if params.PluginID != "writer-plugin" || params.StepID != "generate_outline" || params.SessionID != "ps-1" {
+		t.Fatalf("unexpected basic params: %+v", params)
+	}
+	if params.ChatSessionID != "conv-1_123" {
+		t.Fatalf("expected chat_session_id to be preserved, got %q", params.ChatSessionID)
+	}
+	if got := params.PartialIndices["outline"]; len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("unexpected partial_indices: %#v", params.PartialIndices)
+	}
+	if got := params.HistoryFilesPerTurn["2"]; len(got) != 2 || got[0] != "a.png" || got[1] != "b.pdf" {
+		t.Fatalf("unexpected history_files_per_turn: %#v", params.HistoryFilesPerTurn)
+	}
+	if params.Filters["kb_id"] != "kb-1" || params.UserID != "user-1" || params.RetryHint != "retry" {
+		t.Fatalf("unexpected remaining params: %+v", params)
+	}
+}
+
 func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
 	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
 		"conversation": map[string]any{
@@ -75,6 +107,24 @@ func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
 	}
 	if len(tags) != 2 || tags[0] != "tag_a" || tags[1] != "tag_b" {
 		t.Fatalf("unexpected tags: %#v", tags)
+	}
+}
+
+func TestBuildLazyChatRequestPreservesDatasetListFilters(t *testing.T) {
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+		"conversation": map[string]any{
+			"search_config": map[string]any{
+				"dataset_list": []any{
+					map[string]any{"id": "ds_1"},
+				},
+			},
+		},
+	}, nil, "", 1)
+
+	req := buildLazyChatRequest(body)
+
+	if req.Retrieval.Filters == nil || len(req.Retrieval.Filters.DatasetIDs) != 1 || req.Retrieval.Filters.DatasetIDs[0] != "ds_1" {
+		t.Fatalf("unexpected retrieval filters: %#v", req.Retrieval.Filters)
 	}
 }
 
@@ -447,6 +497,7 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 		RawContent:     "记住这个是王牌超",
 		Content:        "记住这个是王牌超",
 		Result:         "好的",
+		ToolCallTurns:  8,
 		Ext:            ext,
 		TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}).Error; err != nil {
@@ -466,7 +517,8 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	var resp struct {
 		ConversationID string `json:"conversation_id"`
 		History        []struct {
-			Input []map[string]any `json:"input"`
+			Input         []map[string]any `json:"input"`
+			ToolCallTurns int              `json:"tool_call_turns"`
 		} `json:"history"`
 		TotalSize int `json:"total_size"`
 	}
@@ -487,6 +539,9 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	}
 	if got := resp.History[0].Input[1]["uri"]; got != "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a.jpg" {
 		t.Fatalf("expected image uri in history response, got %#v", got)
+	}
+	if got := resp.History[0].ToolCallTurns; got != 8 {
+		t.Fatalf("expected tool_call_turns 8, got %d", got)
 	}
 }
 
@@ -599,9 +654,6 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 		"plugin_context": map[string]any{
 			"session_id": "plugin-session-1",
 		},
-		"ask_response": map[string]any{
-			"ask_id": "ask-1",
-		},
 	})
 
 	if req.Message.Query != "hello" || req.Conversation.SessionID != "conv-1" {
@@ -668,7 +720,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if len(req.Runtime.MCPConfig) != 1 {
 		t.Fatalf("expected mcp_config to be forwarded, got %#v", req.Runtime.MCPConfig)
 	}
-	if req.Plugin.EnablePlugin == nil || !*req.Plugin.EnablePlugin || req.Plugin.PluginContext["session_id"] != "plugin-session-1" || req.Plugin.AskResponse["ask_id"] != "ask-1" {
+	if req.Plugin.EnablePlugin == nil || !*req.Plugin.EnablePlugin || req.Plugin.PluginContext["session_id"] != "plugin-session-1" {
 		t.Fatalf("unexpected plugin options: %#v", req.Plugin)
 	}
 

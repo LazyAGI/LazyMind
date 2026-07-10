@@ -6,7 +6,7 @@ import {
   persistFeishuAppSetup,
   type FeishuAuthAccount,
 } from "../../common/feishuAccounts";
-import { clearFeishuDataSourceWizardDraft } from "@/modules/dataSource/common/feishuOAuth";
+import { clearFeishuDataSourceWizardDraft, peekFeishuDataSourceWizardDraft } from "@/modules/dataSource/common/feishuOAuth";
 import { DEFAULT_DATA_SOURCE_FILE_TYPES } from "../../constants/options";
 import type {
   DataSourceItem,
@@ -21,6 +21,7 @@ import {
 } from "../../utils/schedule";
 import { normalizeDataSourceFileTypes } from "../../utils/fileTypes";
 import {
+  buildFeishuTargetSeedNodes,
   normalizeCloudTargetRefs,
   normalizeFeishuTargetRefs,
   normalizeLocalPathRefs,
@@ -45,6 +46,7 @@ export function createWizardSetup(ctx: ManagementContext) {
     setEditingId,
     setCreateProviderModalOpen,
     setAuthSelectModalOpen,
+    setAuthSelectProvider,
     setOauthState,
     setConnectionVerified,
     setOauthConnection,
@@ -62,6 +64,7 @@ export function createWizardSetup(ctx: ManagementContext) {
     setNotionAppSetup,
     resetLocalPathBrowseOptions,
     resetFeishuTargetBrowseOptions,
+    seedFeishuTargetTree,
   } = ctx;
 
   const resetWizard = () => {
@@ -72,6 +75,7 @@ export function createWizardSetup(ctx: ManagementContext) {
     setEditingId(null);
     setCreateProviderModalOpen(false);
     setAuthSelectModalOpen(false);
+    setAuthSelectProvider(null);
     setOauthState("pending");
     setConnectionVerified(false);
     setOauthConnection(null);
@@ -139,6 +143,12 @@ export function createWizardSetup(ctx: ManagementContext) {
           : undefined,
       region: record.type === "s3" ? "ap-southeast-1" : undefined,
     });
+    if (record.type === "feishu") {
+      const selectedTargets = normalizeFeishuTargetRefs(
+        record.targetRefs || record.targetRef || record.target,
+      );
+      seedFeishuTargetTree(buildFeishuTargetSeedNodes(selectedTargets, record));
+    }
   };
 
   const handleCloseWizard = () => {
@@ -172,20 +182,28 @@ export function createWizardSetup(ctx: ManagementContext) {
     });
   };
 
+  const getCloudSetupFormValues = (
+    provider: CloudDataSourceProvider,
+    account?: FeishuAuthAccount | null,
+  ) => {
+    const activeSetup = provider === "feishu" ? ctx.feishuAppSetup : ctx.notionAppSetup;
+    return {
+      name: account?.name || "",
+      appId: account?.appId || activeSetup?.appId || "",
+      appSecret: account?.appSecret || activeSetup?.appSecret || "",
+    };
+  };
+
   const openCloudSetupModal = (
     provider: CloudDataSourceProvider,
     intent: CloudSetupIntent = null,
     account?: FeishuAuthAccount | null,
   ) => {
-    const activeSetup = provider === "feishu" ? ctx.feishuAppSetup : ctx.notionAppSetup;
     setCloudSetupProvider(provider);
     setFeishuSetupIntent(intent);
     setEditingFeishuAccountId(account?.id || null);
-    feishuSetupForm.setFieldsValue({
-      name: account?.name || "",
-      appId: account?.appId || activeSetup?.appId || "",
-      appSecret: account?.appSecret || activeSetup?.appSecret || "",
-    });
+    feishuSetupForm.resetFields();
+    feishuSetupForm.setFieldsValue(getCloudSetupFormValues(provider, account));
     setFeishuSetupModalOpen(true);
   };
 
@@ -193,6 +211,51 @@ export function createWizardSetup(ctx: ManagementContext) {
     intent: FeishuSetupIntent = null,
     account?: FeishuAuthAccount | null,
   ) => openCloudSetupModal("feishu", intent, account);
+
+  const handleCancelCloudSetup = () => {
+    if (ctx.feishuSetupSubmitting) {
+      return;
+    }
+
+    const provider = ctx.cloudSetupProvider;
+    const intent = ctx.feishuSetupIntent;
+    const pendingDraft = peekFeishuDataSourceWizardDraft();
+
+    clearFeishuDataSourceWizardDraft();
+    ctx.clearOauthAttempt();
+    feishuSetupForm.resetFields();
+
+    if (intent === "create") {
+      if (provider === "feishu") {
+        clearFeishuAppSetup();
+        setFeishuAppSetup(null);
+      } else {
+        clearNotionAppSetup();
+        setNotionAppSetup(null);
+        setNotionOauthConnection(null);
+      }
+      feishuSetupForm.setFieldsValue({
+        name: "",
+        appId: "",
+        appSecret: "",
+      });
+      setOauthState("pending");
+      setConnectionVerified(false);
+      setOauthConnection(null);
+      setSelectedType(null);
+    } else {
+      feishuSetupForm.setFieldsValue(getCloudSetupFormValues(provider));
+    }
+
+    setFeishuSetupModalOpen(false);
+    setFeishuSetupIntent(null);
+    setEditingFeishuAccountId(null);
+
+    if (intent === "auth" && pendingDraft?.authSelectModalOpen) {
+      setAuthSelectProvider(pendingDraft.authSelectProvider || "feishu");
+      setAuthSelectModalOpen(true);
+    }
+  };
 
   const handleSaveFeishuSetup = async () => {
     if (ctx.feishuSetupSubmitting) {
@@ -246,7 +309,7 @@ export function createWizardSetup(ctx: ManagementContext) {
         };
 
         applySourceType(cloudSetupProvider);
-        setWizardOpen(setupIntent === "create");
+        setWizardOpen(false);
         setWizardStep(1);
         await ctx.startCloudOAuth(cloudSetupProvider, {
           setup: nextSetup,
@@ -261,6 +324,8 @@ export function createWizardSetup(ctx: ManagementContext) {
           previousConnection: null,
           accountId: nextAccount?.id,
           appId: nextSetup.appId,
+          openWizardOnSuccess: setupIntent === "create",
+          reopenSetupOnFailure: setupIntent === "create",
         });
       }
     } finally {
@@ -319,6 +384,7 @@ export function createWizardSetup(ctx: ManagementContext) {
     openCloudSetupModal,
     openFeishuSetupModal,
     handleSaveFeishuSetup,
+    handleCancelCloudSetup,
     handleResetFeishuSetup,
     handleResetNotionSetup,
   };

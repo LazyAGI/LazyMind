@@ -1,5 +1,6 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { ConfigProvider } from "antd";
+import { ConfigProvider, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import MainLayout from "@/layouts/MainLayout";
 import SigninLogin from "@/modules/signin/pages/login";
@@ -35,7 +36,6 @@ import MemoryReviewPage from "@/modules/memory/pages/review";
 import MemoryGlossaryDetailPage from "@/modules/memory/pages/glossaryDetail";
 import MemorySkillDetailPage from "@/modules/memory/pages/skillDetail";
 import MemoryExperienceDetailPage from "@/modules/memory/pages/experienceDetail";
-import PluginDetailPage from "@/modules/plugin/pages/detail";
 import ModelProviderPage from "@/modules/modelProvider";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
 import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
@@ -47,20 +47,37 @@ import {
 } from "@/modules/selfEvolution";
 import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
+import { isLocalSessionEnabled } from "@/runtime/localSession";
+
+const PluginDetailPage = lazy(() => import("@/modules/plugin/pages/detail"));
+const BuiltinPluginDetailPage = lazy(() => import("@/modules/plugin/pages/builtin-detail"));
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
+  const localSessionEnabled = isLocalSessionEnabled();
 
   return (
     <ConfigProvider
       locale={getAntdLocale(i18n.resolvedLanguage || i18n.language)}
     >
       <Routes>
-        <Route path="/login" element={<SigninDashboard />}>
-          <Route index element={<SigninLogin />} />
-        </Route>
+        {localSessionEnabled ? (
+          <Route path="/login" element={<Navigate to="/agent/chat" replace />} />
+        ) : (
+          <Route path="/login" element={<SigninDashboard />}>
+            <Route index element={<SigninLogin />} />
+          </Route>
+        )}
         {runtimeFeatures.hideRegister ? (
-          <Route path="/register" element={<Navigate to="/login" replace />} />
+          <Route
+            path="/register"
+            element={
+              <Navigate
+                to={localSessionEnabled ? "/agent/chat" : "/login"}
+                replace
+              />
+            }
+          />
         ) : (
           <Route path="/register" element={<SigninDashboard />}>
             <Route index element={<SigninRegister />} />
@@ -78,7 +95,16 @@ export default function AppRouter() {
           path="/oauth/notion/callback"
           element={<DataSourceFeishuCallback provider="notion" />}
         />
-        <Route path="/loginTransition" element={<LoginTransition />} />
+        <Route
+          path="/loginTransition"
+          element={
+            localSessionEnabled ? (
+              <Navigate to="/agent/chat" replace />
+            ) : (
+              <LoginTransition />
+            )
+          }
+        />
         <Route path="/" element={<MainLayout />}>
           <Route index element={<Navigate to="/agent/chat" replace />} />
           <Route path="agent/chat" element={<ChatApp />}>
@@ -88,7 +114,14 @@ export default function AppRouter() {
           <Route path="lib/knowledge" element={<KnowledgeApp />}>
             <Route index element={<Navigate to="list" replace />} />
             <Route path="list" element={<KnowledgeList />} />
-            <Route path="auth/:id" element={<KnowledgeAuth />} />
+            {runtimeFeatures.hideUserGroupSurfaces ? (
+              <Route
+                path="auth/:id"
+                element={<Navigate to="/lib/knowledge/list" replace />}
+              />
+            ) : (
+              <Route path="auth/:id" element={<KnowledgeAuth />} />
+            )}
             <Route path="detail/:id" element={<KnowledgeDetail />} />
             <Route
               path="knowledge/:knowledgeBaseId/:knowledgeId"
@@ -159,8 +192,9 @@ export default function AppRouter() {
             />
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
-          <Route path="memory-management/plugins" element={<Navigate to="/memory-management/skills" replace />} />
-          <Route path="memory-management/plugins/:pluginId" element={<PluginDetailPage />} />
+          <Route path="memory-management/plugins" element={<Navigate to="/memory-management/skills?skillView=plugins" replace />} />
+          <Route path="memory-management/plugins/builtin/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><BuiltinPluginDetailPage /></Suspense>} />
+          <Route path="memory-management/plugins/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><PluginDetailPage /></Suspense>} />
           {runtimeFeatures.hideEvo ? (
             <Route
               path="self-evolution/*"

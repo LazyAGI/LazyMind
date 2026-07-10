@@ -242,6 +242,62 @@ function useGlobalPopoverOpen(key: PopoverKey): [boolean, (open: boolean) => voi
 // SlotVersionPopover — 版本历史浮层 (Portal, 居中全屏遮罩)
 // ---------------------------------------------------------------------------
 
+/** Renders a single file revision (icon + name + preview/download) inside the version popover. */
+function FileRevisionPreview({
+  info,
+  label,
+}: {
+  info: { url: string; name: string; size?: number };
+  label: string;
+}) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  return (
+    <>
+      <div className='plugin-slot__version-file-card'>
+        <div className='plugin-slot__version-file-card-header'>
+          <span className='plugin-slot__file-icon' aria-hidden='true'>
+            {getFileIcon(info.name || '')}
+          </span>
+          <div className='plugin-slot__version-file-card-info'>
+            <span className='plugin-slot__version-file-card-name' title={info.name}>
+              {info.name || '—'}
+            </span>
+            <span className='plugin-slot__version-file-card-meta'>
+              {label}
+              {typeof info.size === 'number' && info.size > 0 ? ` · ${formatFileSize(info.size)}` : ''}
+            </span>
+          </div>
+        </div>
+        {info.url && (
+          <div className='plugin-slot__version-file-card-actions'>
+            <button
+              className='plugin-slot__file-action-btn'
+              onClick={() => setPreviewOpen(true)}
+              type='button'
+            >
+              预览
+            </button>
+            <a
+              className='plugin-slot__file-action-btn'
+              href={info.url}
+              download={info.name || undefined}
+              onClick={(e) => e.stopPropagation()}
+            >
+              下载
+            </a>
+          </div>
+        )}
+      </div>
+      <FilePreviewDrawer
+        open={previewOpen}
+        filename={info.name || ''}
+        url={info.url}
+        onClose={() => setPreviewOpen(false)}
+      />
+    </>
+  );
+}
+
 interface SlotVersionPopoverProps {
   sessionId: string;
   slotId: string;
@@ -373,6 +429,7 @@ export function SlotVersionPopover({
   }, [sessionId, slotId, listIndex, patchSlotItemValue, setOpen, onRollbackDone]);
 
   const isImage = contentType === 'image';
+  const isFile = contentType === 'file';
 
   // Extract plain text/URL from a content_snapshot or artifact_value.
   // For image slots, url/path values are passed through resolveCoreAssetUrl so that
@@ -389,9 +446,23 @@ export function SlotVersionPopover({
     return JSON.stringify(snapshot, null, 2);
   };
 
+  // Extract displayable file info {url, name, size} from a content_snapshot.
+  const extractFileInfo = (snapshot: any): { url: string; name: string; size?: number } => {
+    const empty = { url: '', name: '' };
+    if (!snapshot) return empty;
+    if (typeof snapshot === 'string') return { url: resolveCoreAssetUrl(snapshot), name: snapshot.split('/').pop() ?? snapshot };
+    const rawPath: string = snapshot.url ?? snapshot.path ?? '';
+    return {
+      url: rawPath ? resolveCoreAssetUrl(rawPath) : '',
+      name: snapshot.filename ?? snapshot.name ?? (rawPath ? rawPath.split('/').pop() : ''),
+      size: typeof snapshot.size === 'number' ? snapshot.size : undefined,
+    };
+  };
+
   const previewedVersion = versions[previewIndex] ?? null;
   // The currently-selected (active) version
   const currentVersion = versions.find((v) => v.selected) ?? versions[0] ?? null;
+  const activeCurrentValue = currentVersion?.content_snapshot ?? currentValue;
   // Whether the previewed version is already the current one
   const isPreviewingCurrent = previewedVersion?.selected ?? false;
 
@@ -421,7 +492,7 @@ export function SlotVersionPopover({
       role='presentation'
     >
       <div
-        className={`plugin-slot__version-popover${isImage ? ' plugin-slot__version-popover--image' : ''}`}
+        className={`plugin-slot__version-popover${isImage ? ' plugin-slot__version-popover--image' : ''}${isFile ? ' plugin-slot__version-popover--file' : ''}`}
         role='dialog'
         aria-label='版本历史'
         aria-modal='true'
@@ -553,6 +624,70 @@ export function SlotVersionPopover({
               )}
             </div>
           </>
+        ) : isFile ? (
+          /* ── File mode: left version list + right file preview ── */
+          <div className='plugin-slot__version-popover-body'>
+            <ul className='plugin-slot__version-list' role='listbox' aria-label='版本列表'>
+              {versions.map((v) => {
+                const info = extractFileInfo(v.content_snapshot);
+                return (
+                  <li
+                    key={v.revision}
+                    role='option'
+                    aria-selected={!isDraftSelected && effectiveSelectedVersion?.revision === v.revision}
+                    className={[
+                      'plugin-slot__version-item',
+                      v.selected ? 'plugin-slot__version-item--current' : '',
+                      !isDraftSelected && effectiveSelectedVersion?.revision === v.revision ? 'plugin-slot__version-item--focused' : '',
+                    ].join(' ')}
+                    onClick={() => setSelectedRevision(v.revision)}
+                  >
+                    <span className='plugin-slot__version-label'>
+                      <span className={`plugin-slot__version-source-badge plugin-slot__version-source-badge--${v.change_source}`}>
+                        {v.change_source === 'human' ? '手动' : 'AI'}
+                      </span>
+                      v{v.revision}
+                      {v.selected && <span className='plugin-slot__version-current-tag'>当前</span>}
+                    </span>
+                    <span className='plugin-slot__version-file-name' title={info.name}>
+                      {info.name || '—'}
+                    </span>
+                    <span className='plugin-slot__version-time'>
+                      {new Date(v.created_at).toLocaleString()}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {effectiveSelectedVersion && !effectiveSelectedVersion.selected ? (
+              <div className='plugin-slot__version-compare plugin-slot__version-compare--file'>
+                <FileRevisionPreview
+                  info={extractFileInfo(effectiveSelectedVersion.content_snapshot)}
+                  label={`v${effectiveSelectedVersion.revision} · ${effectiveSelectedVersion.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
+                />
+                <button
+                  className='plugin-slot__version-apply-btn'
+                  disabled={rolling}
+                  onClick={() => handleRollback(effectiveSelectedVersion.revision)}
+                  aria-label={`应用 v${effectiveSelectedVersion.revision}`}
+                >
+                  {rolling ? '回退中…' : `应用此版本 (v${effectiveSelectedVersion.revision})`}
+                </button>
+              </div>
+            ) : (
+              <div className='plugin-slot__version-compare plugin-slot__version-compare--file'>
+                {effectiveSelectedVersion ? (
+                  <FileRevisionPreview
+                    info={extractFileInfo(activeCurrentValue)}
+                    label='当前版本'
+                  />
+                ) : (
+                  <div className='plugin-slot__version-compare-hint'>选择版本查看预览</div>
+                )}
+              </div>
+            )}
+          </div>
         ) : (
           /* ── Text mode: left list + right diff (unified, with optional draft entry) ── */
           <div className='plugin-slot__version-popover-body'>
@@ -608,7 +743,7 @@ export function SlotVersionPopover({
               /* Draft selected: show draft vs current diff with discard + flush actions */
               <div className='plugin-slot__version-compare'>
                 <TextDiffView
-                  currentText={extractText(currentValue)}
+                  currentText={extractText(activeCurrentValue)}
                   otherText={draftText}
                   otherLabel='草稿'
                   reversed={true}
@@ -634,7 +769,7 @@ export function SlotVersionPopover({
             ) : effectiveSelectedVersion && !effectiveSelectedVersion.selected ? (
               <div className='plugin-slot__version-compare'>
                 <TextDiffView
-                  currentText={extractText(currentValue)}
+                  currentText={extractText(activeCurrentValue)}
                   otherText={extractText(effectiveSelectedVersion.content_snapshot)}
                   otherLabel={`v${effectiveSelectedVersion.revision} · ${effectiveSelectedVersion.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
                   reversed={currentVersion !== null && effectiveSelectedVersion.revision > currentVersion.revision}
@@ -652,7 +787,7 @@ export function SlotVersionPopover({
               <div className='plugin-slot__version-compare plugin-slot__version-compare--same'>
                 {effectiveSelectedVersion ? (
                   <pre className='plugin-slot__version-current-text'>
-                    {extractText(currentValue) || '（无内容）'}
+                    {extractText(activeCurrentValue) || '（无内容）'}
                   </pre>
                 ) : (
                   <div className='plugin-slot__version-compare-hint'>选择版本查看对比</div>
@@ -700,6 +835,7 @@ interface SlotImageProps {
   onRefresh?: () => void;
   /** Called when the user clicks the reference (cite) button. */
   onReference?: (slot: SlotRevision) => void;
+  readOnly?: boolean;
 }
 
 export function SlotImage({
@@ -711,6 +847,7 @@ export function SlotImage({
   isDraggable,
   onRefresh,
   onReference,
+  readOnly,
 }: SlotImageProps) {
   const raw = slot.artifact_value;
   const { displayUrl: url, pending, hasSource } = useSlotImageUrl(raw);
@@ -800,7 +937,7 @@ export function SlotImage({
     return <SlotPending type='image' cardMode={cardMode} />;
   }
 
-  const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined);
+  const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined) && !readOnly;
 
   // Overlays rendered directly on top of the image (no separate action bar)
   const overlays = hasActions ? (
@@ -968,9 +1105,10 @@ interface SlotTextProps {
   slotId?: string;
   revisionCount?: number;
   onRefresh?: () => void;
+  readOnly?: boolean;
 }
 
-export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: SlotTextProps) {
+export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotTextProps) {
   const raw = slot.artifact_value;
   const { patchSlotCaption } = usePluginStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
@@ -1019,7 +1157,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
     return <SlotPending type='text' />;
   }
 
-  const canEdit = Boolean(sessionId && slotId);
+  const canEdit = Boolean(sessionId && slotId) && !readOnly;
   // For single slots, list_index is undefined from the backend; use 0 as the canonical index
   // for localStorage keys (front-end only convention).
   const effectiveListIndex = slot.list_index ?? 0;
@@ -1258,10 +1396,13 @@ interface SlotFileProps {
   slot: SlotRevision;
   sessionId?: string;
   slotId?: string;
+  /** Number of revisions for this item — shown as version badge. */
+  revisionCount?: number;
   onRefresh?: () => void;
+  readOnly?: boolean;
 }
 
-export function SlotFile({ slot, sessionId, slotId, onRefresh }: SlotFileProps) {
+export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotFileProps) {
   const raw = slot.artifact_value;
   const rawPath: string = raw?.url ?? raw?.path ?? '';
   const url: string = rawPath ? resolveCoreAssetUrl(rawPath) : '';
@@ -1273,7 +1414,7 @@ export function SlotFile({ slot, sessionId, slotId, onRefresh }: SlotFileProps) 
   const [captionEditing, setCaptionEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState('');
 
-  const canEdit = Boolean(sessionId && slotId && slot.list_index !== undefined);
+  const canEdit = Boolean(sessionId && slotId && slot.list_index !== undefined) && !readOnly;
 
   const handlePreview = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1317,6 +1458,10 @@ export function SlotFile({ slot, sessionId, slotId, onRefresh }: SlotFileProps) 
 
   if (!url) return <SlotPending type='file' />;
 
+  const apiListIndex = slot.list_index ?? -1;
+  const showVersionBadge =
+    revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
+
   return (
     <div className='plugin-slot plugin-slot--file plugin-slot--file-enhanced'>
       <div className='plugin-slot__file-card'>
@@ -1328,6 +1473,19 @@ export function SlotFile({ slot, sessionId, slotId, onRefresh }: SlotFileProps) 
               <span className='plugin-slot__file-size'>{formatFileSize(size)}</span>
             )}
           </div>
+          {showVersionBadge && (
+            <SlotVersionPopover
+              sessionId={sessionId!}
+              slotId={slotId!}
+              listIndex={apiListIndex}
+              revisionCount={revisionCount!}
+              currentRevision={slot.revision}
+              currentValue={slot.artifact_value}
+              currentChangeSource={slot.change_source}
+              contentType='file'
+              onRollbackDone={onRefresh}
+            />
+          )}
         </div>
         <div className='plugin-slot__file-card-actions'>
           <button
@@ -1420,6 +1578,7 @@ export function SlotRenderer({
   isDraggable,
   onRefresh,
   onReference,
+  readOnly,
 }: {
   slot: SlotRevision;
   cardMode?: boolean;
@@ -1430,6 +1589,7 @@ export function SlotRenderer({
   isDraggable?: boolean;
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
+  readOnly?: boolean;
 }) {
   if (slot.artifact_value === undefined || slot.artifact_value === null) {
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
@@ -1447,10 +1607,11 @@ export function SlotRenderer({
         isDraggable={isDraggable}
         onRefresh={onRefresh}
         onReference={onReference}
+        readOnly={readOnly}
       />
     );
   }
-  if (normalized === 'file') return <SlotFile slot={slot} sessionId={sessionId} slotId={slotId} onRefresh={onRefresh} />;
+  if (normalized === 'file') return <SlotFile slot={slot} sessionId={sessionId} slotId={slotId} revisionCount={revisionCount} onRefresh={onRefresh} readOnly={readOnly} />;
   return (
     <SlotText
       slot={slot}
@@ -1458,6 +1619,7 @@ export function SlotRenderer({
       slotId={slotId}
       revisionCount={revisionCount}
       onRefresh={onRefresh}
+      readOnly={readOnly}
     />
   );
 }

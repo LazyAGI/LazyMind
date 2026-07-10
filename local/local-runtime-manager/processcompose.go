@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -45,40 +47,28 @@ type processComposeShutdown struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
-func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, paths RuntimePaths, cfg RuntimeConfig, tokenPath string, apiPort int) error {
-	commandEnv := runtimeCommandEnv(cfg)
-	commandForComposeUp := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal compose-up --profile "+profile)
-	commandForComposeDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal compose-down --profile "+profile)
-	commandForLocalProxyRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-run --profile "+profile)
-	commandForLocalProxyDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-down --profile "+profile)
-	commandForAuthServiceRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-run --profile "+profile)
-	commandForAuthServiceDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-down --profile "+profile)
-	commandForCoreRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-run --profile "+profile)
-	commandForCoreDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-down --profile "+profile)
-	commandForScanControlPlaneRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-run --profile "+profile)
-	commandForScanControlPlaneDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-down --profile "+profile)
-	commandForFileWatcherRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-run --profile "+profile)
-	commandForFileWatcherDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-down --profile "+profile)
-	commandForFrontendRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-run --profile "+profile)
-	commandForFrontendDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-down --profile "+profile)
-	commandForMilvusLiteRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-run --profile "+profile)
-	commandForMilvusLiteDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-down --profile "+profile)
+func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, paths RuntimePaths, cfg RuntimeConfig, tokenPath string, apiPort int) error {
+	commandEnv := runtimeCommandEnv(paths, cfg)
+	commandForLocalProxyRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-run")
+	commandForLocalProxyDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-down")
+	commandForAuthServiceRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-run")
+	commandForAuthServiceDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-down")
+	commandForCoreRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-run")
+	commandForCoreDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-down")
+	commandForScanControlPlaneRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-run")
+	commandForScanControlPlaneDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-down")
+	commandForFileWatcherRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-run")
+	commandForFileWatcherDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-down")
+	commandForFrontendRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-run")
+	commandForFrontendDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-down")
+	commandForMilvusLiteRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-run")
+	commandForMilvusLiteDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-down")
 
 	pcCfg := processComposeConfig{
 		Version:         "0.5",
 		IsStrict:        true,
 		OrderedShutdown: true,
 		Processes: map[string]processComposeProcess{
-			processComposeServiceName: {
-				WorkingDir: repoRoot,
-				Command:    commandForComposeUp,
-				Shutdown: processComposeShutdown{
-					Command:        commandForComposeDown,
-					TimeoutSeconds: 60,
-				},
-				LogLocation: paths.LogFilePath,
-				Namespace:   "container",
-			},
 			localProxyProcessName: {
 				WorkingDir: repoRoot,
 				Command:    commandForLocalProxyRun,
@@ -154,8 +144,8 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 		}
 	}
 	for _, svc := range algorithmProcessSpecs(cfg.Algorithm) {
-		run := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-run --service "+svc.Name+" --profile "+profile)
-		down := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-down --service "+svc.Name+" --profile "+profile)
+		run := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-run --service "+svc.Name)
+		down := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-down --service "+svc.Name)
 		pcCfg.Processes[svc.Name] = processComposeProcess{
 			WorkingDir: repoRoot,
 			Command:    run,
@@ -190,33 +180,84 @@ func commandWithEnv(env []string, command string) string {
 	return strings.Join(parts, " ")
 }
 
-func runtimeCommandEnv(cfg RuntimeConfig) []string {
-	env := append([]string{}, localComposeEnv(cfg)...)
+func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
+	routerPoolStart, routerPoolEnd := localRouterPortPool(cfg)
+	env := append([]string{}, localRuntimeEnv(cfg)...)
+	env = append(env, serviceRuntimeEnv(paths)...)
 	env = append(env,
+		runtimeProfileEnvVar+"="+cfg.Profile,
+		runtimeRootEnvVar+"="+cfg.RuntimeRoot,
+		localBuildRootEnvVar+"="+cfg.BuildRoot,
+		runtimeResourcesRootEnvVar+"="+cfg.ResourcesRoot,
 		localPortsPinnedEnvVar+"=1",
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
 		localAuthPortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
 		authServicePortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
+		localCorePortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.CoreHostPort),
+		localProxyCoreHostPortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.CoreHostPort),
+		localProxyChatHostPortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.ChatHostPort),
+		localProxyScanHostPortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.ScanHostPort),
+		localProxyEvoHostPortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.EvoHostPort),
 		localFileWatcherPortEnvVar+"="+strconv.Itoa(cfg.FileWatcher.Port),
+		localPostgresPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.PostgresPort),
+		localDocPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.DocPort),
+		localProcessorPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.ProcessorPort),
+		localAlgoPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.AlgoPort),
+		localWorkerPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.WorkerPort),
+		localChatPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.ChatPort),
+		localEvoPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.EvoPort),
+		localMilvusPortEnvVar+"="+strconv.Itoa(cfg.ModeProfile.VectorStore.Port),
 		localMilvusLiteDBPathEnvVar+"="+cfg.ModeProfile.VectorStore.DBPath,
+		localOpenSearchPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.OpenSearchPort),
+		routerPortPoolStartEnvVar+"="+strconv.Itoa(routerPoolStart),
+		routerPortPoolEndEnvVar+"="+strconv.Itoa(routerPoolEnd),
+		routerPortsPerInstanceEnvVar+"="+strconv.Itoa(defaultRouterPortsPerInstance),
 	)
 	return env
 }
 
 func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	if err := m.EnsureBinary(ctx, paths.RepoRoot); err != nil {
+	if err := m.EnsureBinary(ctx, paths); err != nil {
 		return err
 	}
 	args := []string{
 		"--config", filepath.ToSlash(paths.GeneratedConfig),
-		"-D",
 		"-t=false",
 		"-p", strconv.Itoa(cfg.ProcessComposePort),
 		"--token-file", paths.RunDirTokenFile,
 		"--ordered-shutdown",
 		"up",
 	}
-	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot})
+	if _, ok := m.runner.(*ExecRunner); ok {
+		logFile, err := os.OpenFile(paths.LogFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command(processComposeCommand(paths), args...)
+		cmd.Dir = paths.RepoRoot
+		cmd.Env = append(os.Environ(), processComposeRuntimeEnv(paths)...)
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			_ = logFile.Close()
+			return fmt.Errorf("process-compose up failed: %w", err)
+		}
+		if err := os.WriteFile(paths.ProcessComposePIDFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
+			_ = killAlgorithmProcess(cmd.Process)
+			_ = logFile.Close()
+			return err
+		}
+		registerLocalProcess(paths, processComposeServiceName, cmd.Process.Pid, []int{cfg.ProcessComposePort}, append([]string{processComposeCommand(paths)}, args...))
+		go func() {
+			_ = cmd.Wait()
+			_ = logFile.Close()
+			_ = os.Remove(paths.ProcessComposePIDFile)
+			unregisterLocalProcess(paths, processComposeServiceName, cmd.Process.Pid)
+		}()
+		return nil
+	}
+	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths), Args: args, Dir: paths.RepoRoot, Env: processComposeRuntimeEnv(paths)})
 	if err != nil {
 		return fmt.Errorf("process-compose up failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
@@ -224,35 +265,11 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 }
 
 func (m *ProcessComposeManager) FollowLogs(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, stdout io.Writer, stderr io.Writer) error {
-	streamer, ok := m.runner.(CommandStreamer)
-	if !ok {
-		return nil
-	}
-	if err := m.EnsureBinary(ctx, paths.RepoRoot); err != nil {
-		return err
-	}
-	args := []string{
-		"-p", strconv.Itoa(cfg.ProcessComposePort),
-		"--token-file", paths.RunDirTokenFile,
-		"process",
-		"logs",
-		processComposeServiceName,
-		"--follow",
-		"--tail",
-		"0",
-	}
-	err := streamer.Stream(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot}, stdout, stderr)
-	if ctx.Err() != nil {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("process-compose logs failed: %w", err)
-	}
 	return nil
 }
 
-func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	if err := m.EnsureBinary(ctx, paths.RepoRoot); err != nil {
+func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, stdout io.Writer, stderr io.Writer) error {
+	if err := m.EnsureBinary(ctx, paths); err != nil {
 		return err
 	}
 	args := []string{
@@ -260,7 +277,19 @@ func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, pat
 		"--token-file", paths.RunDirTokenFile,
 		"down",
 	}
-	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot})
+	if streamer, ok := m.runner.(CommandStreamer); ok {
+		if err := streamer.Stream(ctx, Command{Name: processComposeCommand(paths), Args: args, Dir: paths.RepoRoot, Env: processComposeRuntimeEnv(paths)}, stdout, stderr); err != nil {
+			return fmt.Errorf("process-compose down failed: %w", err)
+		}
+		return nil
+	}
+	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths), Args: args, Dir: paths.RepoRoot, Env: processComposeRuntimeEnv(paths)})
+	if res.Stdout != "" && stdout != nil {
+		_, _ = io.WriteString(stdout, res.Stdout)
+	}
+	if res.Stderr != "" && stderr != nil {
+		_, _ = io.WriteString(stderr, res.Stderr)
+	}
 	if err != nil {
 		return fmt.Errorf("process-compose down failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
@@ -284,26 +313,28 @@ func (m *ProcessComposeManager) ProbeAPI(port int, timeout time.Duration) bool {
 	return resp.StatusCode < 500
 }
 
-func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, repoRoot string) error {
+func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, paths RuntimePaths) error {
 	if _, ok := m.runner.(*ExecRunner); !ok {
 		return nil
 	}
-	candidate := filepath.Join(repoRoot, localProcessComposeBin)
-	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+	if paths.ResourcesRoot != "" && filepath.Clean(paths.ResourcesRoot) != filepath.Clean(paths.RepoRoot) && !pathIsUnderRoot(paths.ProcessComposeBin, paths.ResourcesRoot) {
+		return fmt.Errorf("process-compose binary not found in runtime resources: %s", paths.ProcessComposeBin)
+	}
+	if info, err := os.Stat(paths.ProcessComposeBin); err == nil && !info.IsDir() {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(candidate), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(paths.ProcessComposeBin), 0o755); err != nil {
 		return err
 	}
-	gobin, err := processComposeGOBIN(repoRoot)
+	gobin, err := processComposeGOBIN(paths)
 	if err != nil {
 		return fmt.Errorf("resolve process-compose GOBIN: %w", err)
 	}
 	res, err := m.runner.Run(ctx, Command{
 		Name: "go",
 		Args: []string{"install", processComposePackage},
-		Dir:  repoRoot,
-		Env:  []string{"GOBIN=" + gobin},
+		Dir:  paths.RepoRoot,
+		Env:  append(goToolEnv(paths), "GOBIN="+gobin),
 	})
 	if err != nil {
 		return fmt.Errorf("install process-compose failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
@@ -311,8 +342,8 @@ func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, repoRoot strin
 	return nil
 }
 
-func processComposeGOBIN(repoRoot string) (string, error) {
-	return filepath.Abs(filepath.Join(repoRoot, "local", "bin"))
+func processComposeGOBIN(paths RuntimePaths) (string, error) {
+	return filepath.Abs(filepath.Dir(paths.ProcessComposeBin))
 }
 
 func quoteShellArg(value string) string {
@@ -330,8 +361,11 @@ func quoteShellArg(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
-func processComposeCommand(repoRoot string) string {
-	candidate := filepath.Join(repoRoot, localProcessComposeBin)
+func processComposeCommand(paths RuntimePaths) string {
+	if info, err := os.Stat(paths.ProcessComposeBin); err == nil && !info.IsDir() {
+		return paths.ProcessComposeBin
+	}
+	candidate := filepath.Join(paths.RepoRoot, localProcessComposeBin)
 	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 		return candidate
 	}

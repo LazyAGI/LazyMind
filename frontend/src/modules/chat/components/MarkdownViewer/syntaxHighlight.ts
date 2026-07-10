@@ -55,9 +55,13 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   yml: "yaml",
 };
 
-export function getLanguageFromClassName(className?: string) {
+export function getRawLanguageFromClassName(className?: string) {
   const match = /(?:^|\s)language-([^\s]+)/.exec(className || "");
-  const rawLanguage = match?.[1]?.toLowerCase() || "";
+  return match?.[1]?.toLowerCase() || "";
+}
+
+export function getLanguageFromClassName(className?: string) {
+  const rawLanguage = getRawLanguageFromClassName(className);
   return LANGUAGE_ALIASES[rawLanguage] || rawLanguage;
 }
 
