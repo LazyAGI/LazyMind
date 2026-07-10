@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import lazyllm
@@ -30,6 +31,16 @@ from lazyllm.tools.agent.base import _write_agent_data
 from lazymind.chat.plugin import plugin_loader
 
 LOG = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _ReachabilitySnapshot:
+    current_step: str
+    session_id: str
+    forward_steps: List[str]
+    rewind_steps: List[str]
+    reachable_steps: List[str]
+
 
 _COLD_START_PLUGIN_PROMPT = (
     '## Available Plugins\n'
@@ -529,6 +540,78 @@ def build_cold_start_tools() -> List[Any]:
     return tools
 
 
+def _live_reachability_snapshot(
+    plugin_id: str,
+    fallback_current_step: str,
+    rewind_steps: Optional[List[str]] = None,
+) -> _ReachabilitySnapshot:
+    """Compute live step reachability from current ChatAgent state."""
+    cfg = _agentic_config()
+    current_step = cfg.get('plugin_step', '') or fallback_current_step
+    session_id = cfg.get('plugin_session_id', '')
+    sm = plugin_loader.get_state_machine(plugin_id)
+    forward_steps = sm.get_reachable_steps(current_step) if sm else []
+    rewind = list(rewind_steps or [])
+    reachable = list(forward_steps) + rewind
+    if current_step and current_step not in reachable:
+        reachable = [current_step] + reachable
+    return _ReachabilitySnapshot(
+        current_step=current_step,
+        session_id=session_id,
+        forward_steps=forward_steps,
+        rewind_steps=rewind,
+        reachable_steps=reachable,
+    )
+
+
+def _validate_live_step_reachable(
+    *,
+    tool_name: str,
+    plugin_id: str,
+    step_id: str,
+    fallback_current_step: str,
+    rewind_steps: Optional[List[str]],
+    runtime_instruction: Optional[str],
+    partial_indices: Optional[Dict[str, List[int]]],
+    input_len: Optional[int] = None,
+) -> _ReachabilitySnapshot:
+    """Validate a step tool call against live reachability and log consistently."""
+    snapshot = _live_reachability_snapshot(plugin_id, fallback_current_step, rewind_steps)
+    if input_len is None:
+        LOG.info(
+            '[plugin.advance] %s called plugin=%s target=%s session=%s current=%s '
+            'reachable=%s runtime_instruction=%s partial=%s',
+            tool_name, plugin_id, step_id, snapshot.session_id,
+            snapshot.current_step or '__start__', snapshot.reachable_steps,
+            bool(runtime_instruction), bool(partial_indices),
+        )
+    else:
+        LOG.info(
+            '[plugin.advance] %s called plugin=%s target=%s session=%s current=%s '
+            'input_len=%d reachable=%s runtime_instruction=%s partial=%s',
+            tool_name, plugin_id, step_id, snapshot.session_id,
+            snapshot.current_step or '__start__', input_len, snapshot.reachable_steps,
+            bool(runtime_instruction), bool(partial_indices),
+        )
+    if step_id not in snapshot.reachable_steps:
+        LOG.warning(
+            '[plugin.advance] %s rejected unreachable plugin=%s target=%s '
+            'session=%s current=%s reachable=%s',
+            tool_name, plugin_id, step_id, snapshot.session_id,
+            snapshot.current_step or '__start__', snapshot.reachable_steps,
+        )
+        raise ValueError(
+            f'step {step_id!r} is not reachable from '
+            f'{snapshot.current_step!r}. Reachable: {snapshot.reachable_steps}.'
+        )
+    LOG.info(
+        '[plugin.advance] %s reachable plugin=%s target=%s session=%s current=%s reachable=%s',
+        tool_name, plugin_id, step_id, snapshot.session_id,
+        snapshot.current_step or '__start__', snapshot.reachable_steps,
+    )
+    return snapshot
+
+
 def build_advance_step_and_hand_off_tool(
     plugin_id: str,
     current_step: str,
@@ -545,10 +628,6 @@ def build_advance_step_and_hand_off_tool(
     forward = sm.get_reachable_steps(current_step) if sm else []
     rewind = list(rewind_steps or [])
     labels = step_labels or {}
-    all_reachable = list(forward) + rewind
-    # Self-retry: is_reachable allows current_step → current_step even without a graph edge.
-    if current_step and current_step not in all_reachable:
-        all_reachable = [current_step] + all_reachable
 
     choices_doc = _build_step_choices_doc(forward, rewind, labels, plugin_id=plugin_id, current_step=current_step)
 
@@ -569,15 +648,22 @@ def build_advance_step_and_hand_off_tool(
         steps 1 through 3").  In that case use `advance_step` (synchronous, dynamic
         mode only) for intermediate steps and this tool for the final step.
 
-        Use `step_id="__end__"` when the pipeline is fully complete.
+        Terminal plugin steps are normally completed by the plugin event loop after
+        the terminal task succeeds. Use `step_id="__end__"` only as an explicit
+        close signal when the final step has already succeeded and the session is
+        still open.
         """
         if step_id == '__end__':
             return _trigger_plugin_end(plugin_id)
-        if step_id not in all_reachable:
-            raise ValueError(
-                f'step {step_id!r} is not reachable from '
-                f'{current_step!r}. Reachable: {all_reachable}.'
-            )
+        _validate_live_step_reachable(
+            tool_name='advance_step_and_hand_off',
+            plugin_id=plugin_id,
+            step_id=step_id,
+            fallback_current_step=current_step,
+            rewind_steps=rewind_steps,
+            runtime_instruction=runtime_instruction,
+            partial_indices=partial_indices,
+        )
         return _trigger_plugin_step(
             plugin_id, step_id, user_input,
             is_cold_start=False,
@@ -589,7 +675,9 @@ def build_advance_step_and_hand_off_tool(
         'Advance the active plugin to the next step and hand off control to SubAgent/user.\n\n'
         'The step runs in the background. Use this as the DEFAULT tool in single-step mode.\n'
         'In continuous/uninterrupted mode (Rule 4 in system prompt), use `advance_step`\n'
-        'for intermediate steps and call this tool ONLY for the final `__end__` hand-off.\n\n'
+        'for prerequisite steps before the requested target boundary, then call this tool\n'
+        'for the boundary step and stop. Terminal steps are also boundary steps; after a\n'
+        'terminal task succeeds, the plugin event loop completes the session.\n\n'
         '## Intent-change rewind (MUST read before advancing)\n\n'
         'If the user expresses dissatisfaction with or changes to the result of a step that\n'
         'has ALREADY SUCCEEDED, you MUST rewind to the earliest affected step instead of\n'
@@ -610,7 +698,10 @@ def build_advance_step_and_hand_off_tool(
         'When the user says "重试": advance_step_and_hand_off(step_id=..., rewind=True)\n'
         '  (rewind=True discards previous partial artifacts and restarts the step from scratch)\n\n'
         '## Completing the plugin\n\n'
-        'Call with step_id="__end__" when the final step has succeeded.\n\n'
+        'Prefer handing off the terminal pipeline step itself. The plugin event loop will\n'
+        'mark the session completed after that terminal task succeeds. Call with\n'
+        'step_id="__end__" only if the final step has already succeeded but the session\n'
+        'still needs an explicit close signal.\n\n'
         '## Rewind guidance\n\n'
         'If the DriverAgent or user indicates a prior step produced bad output, rewind by\n'
         'passing its step_id. Rewind-eligible steps are listed in the "Rewind" section below.\n\n'
@@ -663,36 +754,15 @@ def build_advance_step_tool(
         """
         if step_id == '__end__':
             return _trigger_plugin_end(plugin_id)
-        # Dynamically recompute reachable set from latest plugin_step state so
-        # consecutive advance_step calls within one turn work correctly.
-        cfg = _agentic_config()
-        _live_current = cfg.get('plugin_step', '') or current_step
-        session_id = cfg.get('plugin_session_id', '')
-        LOG.info(
-            '[plugin.advance] advance_step called plugin=%s target=%s session=%s '
-            'current=%s input_len=%d runtime_instruction=%s partial=%s',
-            plugin_id, step_id, session_id, _live_current or '__start__', len(user_input or ''),
-            bool(runtime_instruction), bool(partial_indices),
-        )
-        sm_live = plugin_loader.get_state_machine(plugin_id)
-        _live_forward = sm_live.get_reachable_steps(_live_current) if sm_live else []
-        _live_rewind = list(rewind_steps or [])
-        _live_reachable = list(_live_forward) + _live_rewind
-        if _live_current and _live_current not in _live_reachable:
-            _live_reachable = [_live_current] + _live_reachable
-        if step_id not in _live_reachable:
-            LOG.warning(
-                '[plugin.advance] advance_step rejected unreachable plugin=%s target=%s '
-                'session=%s current=%s reachable=%s',
-                plugin_id, step_id, session_id, _live_current or '__start__', _live_reachable,
-            )
-            raise ValueError(
-                f'step {step_id!r} is not reachable from '
-                f'{_live_current!r}. Reachable: {_live_reachable}.'
-            )
-        LOG.info(
-            '[plugin.advance] advance_step reachable plugin=%s target=%s session=%s current=%s reachable=%s',
-            plugin_id, step_id, session_id, _live_current or '__start__', _live_reachable,
+        reachability = _validate_live_step_reachable(
+            tool_name='advance_step',
+            plugin_id=plugin_id,
+            step_id=step_id,
+            fallback_current_step=current_step,
+            rewind_steps=rewind_steps,
+            runtime_instruction=runtime_instruction,
+            partial_indices=partial_indices,
+            input_len=len(user_input or ''),
         )
         _clear_step_signal_queues(step_id)
         result = _trigger_plugin_step(
@@ -710,17 +780,17 @@ def build_advance_step_tool(
         _set_local_plugin_step(step_id)
         LOG.info(
             '[plugin.advance] local current_step updated plugin=%s step=%s session=%s task=%s',
-            plugin_id, step_id, session_id, task_id,
+            plugin_id, step_id, reachability.session_id, task_id,
         )
         # Poll for completion via FileSystemQueue.
         LOG.info(
             '[plugin.advance] waiting for step_done plugin=%s step=%s session=%s task=%s',
-            plugin_id, step_id, session_id, task_id,
+            plugin_id, step_id, reachability.session_id, task_id,
         )
         summary = _wait_for_step_done(step_id, result)
         LOG.info(
             '[plugin.advance] advance_step completed plugin=%s step=%s session=%s task=%s summary_len=%d',
-            plugin_id, step_id, session_id, task_id, len(summary or ''),
+            plugin_id, step_id, reachability.session_id, task_id, len(summary or ''),
         )
         return _append_step_transition_hint(
             summary,
@@ -735,8 +805,11 @@ def build_advance_step_tool(
         'Use this tool in continuous/uninterrupted mode (Rule 4 in system prompt).\n'
         'Continuous mode is active when the user intent contains phrases like\n'
         '"一次性完成", "不要中断", "一次性写完", "run all steps", "no interruptions".\n'
-        'In continuous mode, call `advance_step` for EVERY pipeline step in order,\n'
-        'then finish with `advance_step_and_hand_off(step_id="__end__", ...)`.\n\n'
+        'In continuous mode with an explicit target boundary, use `advance_step` only\n'
+        'for prerequisite steps before that boundary, then execute the boundary step\n'
+        'with `advance_step_and_hand_off` and stop. If the user did not set a boundary,\n'
+        'run prerequisite remaining steps with this tool, then execute the terminal step\n'
+        'with `advance_step_and_hand_off` and stop.\n\n'
         'In default single-step mode (no uninterrupted constraint), do NOT use this\n'
         'tool — use `advance_step_and_hand_off` instead so the user can review each result.\n\n'
         + choices_doc + '\n\n'
@@ -774,7 +847,13 @@ def _append_step_transition_hint(
         'Plugin state after this step:\n'
         f'- Current step: {current_step}\n'
         '- The next advance_step call in this same turn must follow this live state:\n\n'
-        f'{choices_doc}'
+        f'{choices_doc}\n\n'
+        'Continuous-mode boundary reminder:\n'
+        '- If the latest user request says to run only up to a specific milestone/step '
+        '(for example "执行到 X", "到 X 为止", "until X", "up to X"), match X against '
+        'the available step ids, labels, and transition descriptions. Execute that '
+        'target boundary step with `advance_step_and_hand_off`, then stop. Do not '
+        'advance to downstream steps or manually close `__end__` after the boundary hand-off.'
     )
 
 
@@ -1400,8 +1479,12 @@ def _build_mode_guidance(
         'If the user clearly asks to proceed with the existing plugin workflow and\n'
         'does not add new requirements, corrections, or dissatisfaction signals:\n'
         '  - If continuous mode is NOT active: call `advance_step_and_hand_off` and stop.\n'
-        '  - If continuous mode IS active (Rule 4): call `advance_step` for every remaining\n'
-        '    step, then finish with `advance_step_and_hand_off(step_id="__end__", ...)`.\n'
+        '  - If continuous mode IS active (Rule 4) and the user set a target boundary:\n'
+        '    use `advance_step` for prerequisite steps before that boundary, then use\n'
+        '    `advance_step_and_hand_off` for the boundary step and stop.\n'
+        '  - If continuous mode IS active with no target boundary: use `advance_step`\n'
+        '    for prerequisite remaining steps, then use `advance_step_and_hand_off`\n'
+        '    for the terminal/final-deliverable step and stop.\n'
         'Select the target from "Next forward steps (valid targets for continuing)"\n'
         'in the step-status block. If multiple forward targets are listed, choose\n'
         'the target whose transition condition best matches the current artifacts\n'
@@ -1427,20 +1510,19 @@ def _build_mode_guidance(
             terminal_hint = (
                 f'\n\n## Terminal steps (last steps before pipeline completion)\n\n'
                 f'The following steps lead directly to the end of the pipeline: {names}.\n'
-                'In continuous/uninterrupted mode (Rule 4), use `advance_step` for terminal '
-                'steps as well, then call `advance_step_and_hand_off(step_id="__end__", ...)` '
-                'after all terminal steps complete.\n'
-                'In default single-step mode, use `advance_step_and_hand_off` and stop.\n\n'
-                'Pipeline completion is handled after the terminal step result is produced. '
-                'If another tool call is needed later to close `__end__`, it must be driven '
-                'by the normal plugin event loop or a later explicit user action, not by '
-                'blocking the current chat stream.'
+                'If the user explicitly targets one of these terminal steps as the boundary,\n'
+                'execute it with `advance_step_and_hand_off` and stop. If the user asks to\n'
+                'complete the whole pipeline and no narrower boundary is specified, run\n'
+                'prerequisite steps with `advance_step`, execute the terminal step with\n'
+                '`advance_step_and_hand_off`, and let the plugin event loop complete the\n'
+                'session after that terminal task finishes.\n'
+                'In default single-step mode, use `advance_step_and_hand_off` and stop.'
             )
         common += (
             '- `advance_step`: Queue a step and WAIT for its result (dynamic mode only). '
             'Use this in continuous/uninterrupted mode (see Rule 4 below). '
-            'Use `advance_step` for every intermediate step, then `advance_step_and_hand_off` '
-            'for the final hand-off.\n'
+            'Use `advance_step` for prerequisite steps before a requested boundary, then '
+            '`advance_step_and_hand_off` for the boundary step.\n'
             'In default single-step mode (no uninterrupted constraint), use '
             '`advance_step_and_hand_off` and stop.\n\n'
             '### Rule 4 — Continuous / uninterrupted execution mode (MUST check before every action)\n'
@@ -1449,13 +1531,28 @@ def _build_mode_guidance(
             '     "一次性完成", "一次性写完", "不要中断", "不要打断", "中间不要停",\n'
             '     "run all steps", "do it all at once", "no interruptions", "without stopping".\n'
             '  b) The current user query contains any of the above phrases.\n'
+            'Before executing continuous mode, determine whether the latest user query sets\n'
+            'an explicit target boundary with phrases like "执行到 X", "做到 X", "到 X 为止",\n'
+            '"生成到 X", "until X", or "up to X". Match X against the current plugin\'s\n'
+            'available step ids, step labels, and transition descriptions shown in the\n'
+            'Plugin Step Status / tool candidate lists. Do not assume plugin-specific step\n'
+            'names or meanings that are not present in the current plugin context.\n'
+            'A target boundary has higher priority than generic uninterrupted phrases. For\n'
+            'example, "一次性执行到 X，中间不要问我" means run only through the\n'
+            'matched boundary step X, then stop after queuing X.\n'
             'In continuous mode:\n'
-            '  1. Use `advance_step` (NOT `advance_step_and_hand_off`) for every pipeline step\n'
-            '     including terminal steps, executing them in order from current to last.\n'
-            '  2. After ALL steps succeed, call `advance_step_and_hand_off(step_id="__end__", ...)`.\n'
-            '  3. NEVER call `advance_step_and_hand_off` for intermediate steps — '
+            '  1. If an explicit target boundary exists, use `advance_step` only for steps\n'
+            '     before the boundary, in pipeline order.\n'
+            '  2. Execute the target boundary step with `advance_step_and_hand_off`, then stop.\n'
+            '     Do NOT wait for the boundary step with `advance_step`.\n'
+            '  3. Do NOT call downstream steps and do NOT call `__end__` after a non-`__end__`\n'
+            '     boundary hand-off.\n'
+            '  4. If there is no explicit target boundary and the user requested the whole\n'
+            '     pipeline/final deliverable, run prerequisite steps with `advance_step`,\n'
+            '     execute the terminal step with `advance_step_and_hand_off`, then stop.\n'
+            '  5. NEVER call `advance_step_and_hand_off` for intermediate steps — '
             '     it hands off control and breaks the continuous run.\n'
-            '  4. If `advance_step` returns an error, stop the sequence immediately and '
+            '  6. If `advance_step` returns an error, stop the sequence immediately and '
             '     report the failure; do not skip or continue to a later step.\n\n'
             'After each step in default (non-continuous) mode, use `advance_step_and_hand_off` '
             'so the user can review the result and decide the next action.\n\n'

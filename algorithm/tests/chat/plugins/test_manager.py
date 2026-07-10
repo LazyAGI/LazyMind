@@ -230,6 +230,31 @@ def test_advance_step_tool_retrigger_same_step(
     assert call_kwargs['params']['step_id'] == 'step_d'
 
 
+def test_advance_step_and_hand_off_uses_live_current_step(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    """Final hand-off after synchronous steps must validate against live state."""
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'session_id': 'chat-sid-live',
+        'plugin_session_id': 'ps-live',
+        'plugin_step': 'step_a',
+    })
+    handoff = plugin_manager.build_advance_step_and_hand_off_tool('test-plugin', 'step_a')
+
+    # Simulate advance_step(step_b) having already updated local state in the
+    # same ChatAgent turn. A stale hand-off tool built at step_a would reject
+    # step_c; the live state should allow it.
+    mock_agentic_config['plugin_step'] = 'step_b'
+    result = handoff(step_id='step_c', user_input='finish boundary')
+
+    assert 'error' not in result.lower()
+    assert mock_write_agent_data.called
+    call_kwargs = mock_write_agent_data.call_args.kwargs
+    assert call_kwargs['params']['step_id'] == 'step_c'
+    assert call_kwargs['params']['chat_session_id'] == 'chat-sid-live'
+
+
 # ---------------------------------------------------------------------------
 # _render_step_objective
 # ---------------------------------------------------------------------------
@@ -686,6 +711,24 @@ def test_build_advance_step_tool_docstring_no_rewind_when_empty(loaded_plugin):
     )
     doc = advance.__doc__ or ''
     assert 'Rewind' not in doc
+
+
+def test_dynamic_guidance_respects_explicit_target_boundary(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    guidance = plugin_manager._build_mode_guidance(
+        'dynamic',
+        terminal_steps=['step_d'],
+        step_labels={'step_d': 'Finalize'},
+    )
+
+    assert 'target boundary' in guidance
+    assert 'Match X against the current plugin' in guidance
+    assert 'Do not assume plugin-specific step' in guidance
+    assert 'higher priority than generic uninterrupted phrases' in guidance
+    assert 'Execute the target boundary step with `advance_step_and_hand_off`' in guidance
+    assert 'Do NOT wait for the boundary step with `advance_step`' in guidance
+    assert 'Do NOT call downstream steps and do NOT call `__end__`' in guidance
 
 
 def test_build_advance_step_tool_rewind_step_is_accepted(
