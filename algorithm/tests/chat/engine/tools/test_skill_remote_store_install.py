@@ -44,6 +44,12 @@ class _FailingFS(_RecordingFS):
         raise RuntimeError('backend down')
 
 
+class _FailingCleanupFS(_FailingFS):
+    def trash(self, path):
+        super().trash(path)
+        raise RuntimeError('trash unavailable')
+
+
 def test_install_package_writes_supporting_bytes_before_skill_md():
     fs = _RecordingFS()
     store = SkillRemoteStore(fs=fs)
@@ -89,6 +95,19 @@ def test_install_package_trashes_new_package_after_remote_write_failure():
         })
 
     assert fs.calls[-1] == ('trash', 'remote://skills/external/example')
+
+
+def test_install_package_preserves_write_and_cleanup_failures():
+    store = SkillRemoteStore(fs=_FailingCleanupFS())
+
+    with pytest.raises(RuntimeError) as exc_info:
+        store.install_package('external', 'example', {
+            'SKILL.md': b'---\nname: example\n---\nBody\n',
+            'assets/logo.bin': b'content',
+        })
+
+    assert 'backend down' in str(exc_info.value)
+    assert 'cleanup also failed: trash unavailable' in str(exc_info.value)
 
 
 def test_install_package_validates_before_creating_remote_package():

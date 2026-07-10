@@ -100,9 +100,9 @@ class GitHubSkillInstaller:
         else:
             ref = self._resolve_default_branch(parsed.owner, parsed.repo)
             skill_path = ''
-        canonical_url = f'https://github.com/{parsed.owner}/{parsed.repo}/tree/{quote(ref, safe="/")}'
+        canonical_url = f'https://github.com/{parsed.owner}/{parsed.repo}'
         if skill_path:
-            canonical_url += f'/{quote(skill_path, safe="/")}'
+            canonical_url += f'/tree/{quote(ref, safe="/")}/{quote(skill_path, safe="/")}'
         source = GitHubSkillSource(
             owner=parsed.owner,
             repo=parsed.repo,

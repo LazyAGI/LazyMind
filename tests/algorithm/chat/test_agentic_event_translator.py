@@ -205,3 +205,22 @@ def test_github_skill_install_tool_rendering_uses_url_and_installed_key():
 
     assert 'Skill **external/example** was installed successfully.' in result_text
     assert '已成功安装 **external/example** 技能。' in zh_result_text
+
+    failure = {
+        'id': 'call-install',
+        'name': 'SkillEditorToolGroup_install_skill',
+        'result': {
+            'success': False,
+            'tool': 'install_skill',
+            'error': {'reason': 'GitHub ZIP download failed.'},
+        },
+    }
+    failure_text = _tool_result_frame_text(failure, preview_value=preview_value)
+    zh_failure_text = _tool_result_frame_text(
+        failure,
+        language='zh',
+        preview_value=preview_value,
+    )
+
+    assert f'Skill from **{github_url}** could not be installed.' in failure_text
+    assert f'未能从 **{github_url}** 安装技能。' in zh_failure_text

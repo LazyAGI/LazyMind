@@ -2,6 +2,7 @@ package remotefs
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,11 +10,23 @@ import (
 	"strings"
 	"testing"
 
+	coreorm "lazymind/core/common/orm"
+	"lazymind/core/evolution"
+	skillservice "lazymind/core/skillv2/service"
 	"lazymind/core/skillv2/testutil"
 )
 
 func TestRemoteFSDir_CreatesEmptyPackage(t *testing.T) {
 	db := testutil.NewTestDB(t)
+	if err := db.AutoMigrate(
+		&coreorm.SystemMemory{},
+		&coreorm.SystemUserPreference{},
+		&coreorm.UserPersonalizationSetting{},
+		&coreorm.ResourceSessionSnapshot{},
+		&coreorm.SkillResource{},
+	); err != nil {
+		t.Fatalf("auto migrate chat resource tables: %v", err)
+	}
 	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
 	body, _ := json.Marshal(map[string]any{"path": "skills/research/new-skill", "recursive": true})
@@ -43,6 +56,38 @@ func TestRemoteFSDir_CreatesEmptyPackage(t *testing.T) {
 	handler.List(list, httptest.NewRequest(http.MethodGet, remoteListURL("skills/research", "user_001", "task1"), nil))
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "new-skill") {
 		t.Fatalf("list category status=%d body=%s", list.Code, list.Body.String())
+	}
+
+	skillMD := "---\nname: new-skill\ndescription: Installed skill.\ncategory: research\n---\nUse this skill.\n"
+	write := httptest.NewRecorder()
+	handler.Content(write, httptest.NewRequest(
+		http.MethodPut,
+		remoteContentURL("skills/research/new-skill/SKILL.md", "user_001", "task1", ""),
+		strings.NewReader(skillMD),
+	))
+	if write.Code != http.StatusOK {
+		t.Fatalf("write SKILL.md status=%d body=%s", write.Code, write.Body.String())
+	}
+	enabled := true
+	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB:        db.DB,
+		BlobStore: handler.blobStore.service,
+	})
+	if _, err := svc.PatchSkill(context.Background(), skillservice.PatchSkillRequest{
+		SkillID:   skill.ID,
+		UserID:    "user_001",
+		IsEnabled: &enabled,
+	}); err != nil {
+		t.Fatalf("enable remote-fs skill: %v", err)
+	}
+	chatContext, err := evolution.BuildChatResourceContext(
+		context.Background(), db.DB, "user_001", "User 1", "next-session",
+	)
+	if err != nil {
+		t.Fatalf("build next chat resource context: %v", err)
+	}
+	if len(chatContext.AvailableSkills) != 1 || chatContext.AvailableSkills[0] != "research/new-skill" {
+		t.Fatalf("available_skills = %#v, want research/new-skill", chatContext.AvailableSkills)
 	}
 }
 

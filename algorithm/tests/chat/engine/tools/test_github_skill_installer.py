@@ -75,7 +75,7 @@ def test_prepare_repository_root_installs_complete_normalized_package():
 
     assert package.name == 'example-skill'
     assert package.category == 'external'
-    assert package.source.canonical_url == 'https://github.com/Owner/example/tree/main'
+    assert package.source.canonical_url == 'https://github.com/Owner/example'
     assert package.source.identity == ('owner/example', '')
     assert package.files['scripts/run.py'] == b'print("ok")\n'
     assert package.files['assets/logo.bin'] == b'\x00\x01'
@@ -84,12 +84,26 @@ def test_prepare_repository_root_installs_complete_normalized_package():
     assert '.DS_Store' not in package.files
     skill_md = package.files['SKILL.md'].decode()
     assert 'category: external' in skill_md
-    assert 'github_url: https://github.com/Owner/example/tree/main' in skill_md
+    assert 'github_url: https://github.com/Owner/example' in skill_md
     assert 'license: MIT' in skill_md
     assert 'https://example.test/old' not in skill_md
     assert skill_md.endswith('Use this skill.\n')
     assert session.calls[0][0] == 'https://api.github.com/repos/Owner/example'
     assert session.calls[1][0] == 'https://codeload.github.com/Owner/example/zip/main'
+
+
+def test_repository_root_canonical_url_resolves_after_installer_restart():
+    session = _FakeSession([
+        _response('metadata', json_data={'default_branch': 'develop'}),
+    ])
+
+    source = GitHubSkillInstaller(session=session).resolve_source(
+        'https://github.com/Owner/example'
+    )
+
+    assert source.identity == ('owner/example', '')
+    assert source.ref == 'develop'
+    assert source.canonical_url == 'https://github.com/Owner/example'
 
 
 def test_prepare_tree_url_resolves_longest_slash_ref_and_exact_skill_path():
@@ -122,6 +136,21 @@ def test_prepare_tree_url_resolves_longest_slash_ref_and_exact_skill_path():
     assert session.calls[0][0].endswith('/commits/feature%2Ffoo%2Fskills')
     assert session.calls[1][0].endswith('/commits/feature%2Ffoo')
     assert session.calls[2][0].endswith('/zip/feature%2Ffoo')
+
+
+@pytest.mark.parametrize('ref', ['v1.2.3', '0123456789abcdef'])
+def test_resolve_source_accepts_tag_or_commit_ref(ref):
+    session = _FakeSession([
+        _response('candidate', status=404),
+        _response('resolved', json_data={'sha': 'abc'}),
+    ])
+
+    source = GitHubSkillInstaller(session=session).resolve_source(
+        f'https://github.com/owner/repo/tree/{ref}/skills/example'
+    )
+
+    assert source.ref == ref
+    assert source.skill_path == 'skills/example'
 
 
 @pytest.mark.parametrize(
@@ -272,3 +301,25 @@ def test_prepare_enforces_streaming_download_limit(monkeypatch):
 
     with pytest.raises(ValueError, match='download limit'):
         GitHubSkillInstaller(session=session).prepare('https://github.com/owner/repo')
+
+
+def test_prepare_reports_github_api_rate_limit():
+    response = _response('metadata', status=403)
+    response.headers['X-RateLimit-Remaining'] = '0'
+
+    with pytest.raises(RuntimeError, match='rate limit exceeded'):
+        GitHubSkillInstaller(session=_FakeSession([response])).prepare(
+            'https://github.com/owner/repo'
+        )
+
+
+def test_prepare_reports_codeload_failure_without_git_fallback():
+    session = _FakeSession([
+        _response('metadata', json_data={'default_branch': 'main'}),
+        _response('archive', status=404),
+    ])
+
+    with pytest.raises(RuntimeError, match='HTTP 404'):
+        GitHubSkillInstaller(session=session).prepare('https://github.com/owner/repo')
+
+    assert len(session.calls) == 2
