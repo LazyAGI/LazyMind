@@ -3,11 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
+
 from evo.artifact_runtime.evo.actions import EvoQuery, dispatch_evo_query
 from evo.artifact_runtime.evo.flow import EvoFlowSpec
 from evo.artifact_runtime.evo.progress import StepProgress, progress_view
 from evo.artifact_runtime.evo.use_cases import EvoArtifactReader
+from evo.artifact_runtime.kernel.artifact import ArtifactRef
 
+from .checkpoints import CheckpointProjection, checkpoint_projection
 from .state import Checkpoint, FlowRunState, FlowStatus
 
 
@@ -21,7 +24,9 @@ class FlowSnapshot:
     run_id: str
     status: FlowStatus
     pending_checkpoint: Checkpoint | None
+    released_checkpoints: dict[str, ArtifactRef]
     progress: tuple[StepProgress, ...]
+    checkpoint: CheckpointProjection
 
 
 class FlowQueryService:
@@ -36,7 +41,17 @@ class FlowQueryService:
     def snapshot(self, run_id: str) -> FlowSnapshot:
         _require_text(run_id, 'run_id')
         state = self._gate.get(run_id) or FlowRunState(run_id)
-        return FlowSnapshot(run_id, state.status, state.pending_checkpoint, self.progress(run_id))
+        adapter = self._adapter_factory()
+        effective = adapter.effective_artifacts(run_id)
+        checkpoint = checkpoint_projection(self._spec, effective, state.released_checkpoints, state.status)
+        return FlowSnapshot(
+            run_id,
+            state.status,
+            state.pending_checkpoint,
+            dict(state.released_checkpoints),
+            progress_view(adapter, self._spec, run_id),
+            checkpoint,
+        )
 
     def progress(self, run_id: str) -> tuple[StepProgress, ...]:
         _require_text(run_id, 'run_id')

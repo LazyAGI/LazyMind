@@ -17,6 +17,9 @@ InstanceId: TypeAlias = tuple[str, str]
 @dataclass(frozen=True)
 class NextOp:
     op_id: str
+    base_op_id: str
+    partition: str
+    sort_key: tuple[int, int]
     materializer_id: str
     input_refs: Mapping[str, ArtifactRef | tuple[ArtifactRef, ...]]
     output_key_by_name: Mapping[str, ArtifactKey]
@@ -25,6 +28,7 @@ class NextOp:
 class DAGGraph:
     def __init__(self) -> None:
         self._ops: dict[str, type[FixedOp]] = {}
+        self._compiled: nx.DiGraph | None = None
 
     def register(self, op_cls: type[FixedOp]) -> None:
         if not isinstance(op_cls, type) or not issubclass(op_cls, FixedOp):
@@ -35,14 +39,15 @@ class DAGGraph:
             raise DuplicateOpError(f'duplicate op_id: {op_id}')
         _validate_op_metadata(op_cls)
         self._ops[op_id] = op_cls
+        self._compiled = None
 
     def validate(self) -> None:
-        self._compile()
+        self._compiled_graph()
 
     def next_ops(self, effective_artifacts: Mapping[ArtifactKey, ArtifactRef]) -> tuple[NextOp, ...]:
         effective = _validate_effective_artifacts(effective_artifacts)
         effective_keys = frozenset(effective)
-        graph = self._compile()
+        graph = self._compiled_graph()
         dirty_nodes = {
             node
             for node, data in graph.nodes(data=True)
@@ -60,6 +65,11 @@ class DAGGraph:
                 and instance_id not in blocked_nodes
             )
         )
+
+    def _compiled_graph(self) -> nx.DiGraph:
+        if self._compiled is None:
+            self._compiled = self._compile()
+        return self._compiled
 
     def _compile(self) -> nx.DiGraph:
         graph = nx.DiGraph()
@@ -142,6 +152,9 @@ def _next_op(instance_id: InstanceId, data: Mapping[str, object],
             input_refs[name] = refs if name in data['collection_input_names'] else refs[0]
     return NextOp(
         op_id=_instance_op_id(instance_id),
+        base_op_id=instance_id[0],
+        partition=instance_id[1],
+        sort_key=data['sort_key'],
         materializer_id=data['materializer_id'],
         input_refs=input_refs,
         output_key_by_name=data['output_key_by_name'],

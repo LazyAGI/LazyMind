@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .schemas import MessageContentRef
+from .schemas import MessageContentRef, MessageHistoryItem, MessageHistoryResponse, MessageRequest, MessageTurnResult
 
 
 class MessageConflictError(RuntimeError):
@@ -81,10 +81,21 @@ class MessageAuditStore:
                     return MessageContentRef.model_validate(json.loads(row[2]))
                 raise MessageInProgressError('message_id is already open or failed; send a new message_id')
             conn.execute(
-                'insert into message_turns values (?, ?, ?, ?, ?, ?, ?, ?)',
-                (thread_id, message_id, turn_id, request_hash, 'open', '', time.time(), time.time()),
+                'insert into message_turns('
+                'thread_id, message_id, turn_id, request_sha256, status, '
+                'request_ref_json, result_ref_json, created_at, updated_at'
+                ') values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (thread_id, message_id, turn_id, request_hash, 'open', '', '', time.time(), time.time()),
             )
         return None
+
+    def record_request_ref(self, thread_id: str, turn_id: str, request_ref: MessageContentRef) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                'update message_turns set request_ref_json = ?, updated_at = ? '
+                'where thread_id = ? and turn_id = ? and request_ref_json = ?',
+                (json_bytes(request_ref.model_dump()).decode(), time.time(), thread_id, turn_id, ''),
+            )
 
     def abort_turn(self, thread_id: str, turn_id: str) -> None:
         with self._conn() as conn:
@@ -114,6 +125,32 @@ class MessageAuditStore:
             row = conn.execute('select data_json from message_projection where thread_id = ?', (thread_id,)).fetchone()
         return json.loads(row[0]) if row and row[0] else {}
 
+    def list_turns(self, thread_id: str, page_size: int, page_token: str) -> tuple[list[sqlite3.Row], str]:
+        offset = int(page_token or 0) if str(page_token or '0').isdigit() else -1
+        if offset < 0:
+            raise ValueError('page_token must be an integer offset')
+        with self._conn() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                'select turn_id, message_id, status, request_ref_json, result_ref_json '
+                'from message_turns where thread_id = ? order by created_at, turn_id limit ? offset ?',
+                (thread_id, page_size + 1, offset),
+            ).fetchall()
+        page = list(rows[:page_size])
+        next_token = str(offset + page_size) if len(rows) > page_size else ''
+        return page, next_token
+
+    def recent_turns(self, thread_id: str, limit: int) -> list[sqlite3.Row]:
+        with self._conn() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                'select turn_id, message_id, status, request_ref_json, result_ref_json '
+                'from message_turns where thread_id = ? and status = ? '
+                'order by created_at desc, turn_id desc limit ?',
+                (thread_id, 'done', limit),
+            ).fetchall()
+        return list(reversed(rows))
+
     def _conn(self) -> sqlite3.Connection:
         if not self.db.is_file():
             raise ValueError('artifact store is not initialized; create a thread first')
@@ -133,11 +170,44 @@ class MessageAuditStore:
             'created_at real not null, updated_at real not null, '
             'primary key(thread_id, turn_id), unique(thread_id, message_id))',
         )
+        columns = {row[1] for row in conn.execute('pragma table_info(message_turns)').fetchall()}
+        if 'request_ref_json' not in columns:
+            conn.execute("alter table message_turns add column request_ref_json text not null default ''")
         conn.execute(
             'create table if not exists message_projection('
             'thread_id text primary key, data_json text not null, updated_at real not null)',
         )
         return conn
+
+
+def message_history(root: Path, thread_id: str, page_size: int, page_token: str) -> MessageHistoryResponse:
+    audit = MessageAuditStore(root)
+    blobs = MessageBlobStore(root)
+    rows, next_token = audit.list_turns(thread_id, page_size, page_token)
+    items = []
+    for row in rows:
+        request = _load_model(blobs, row['request_ref_json'], thread_id, MessageRequest)
+        result = _load_model(blobs, row['result_ref_json'], thread_id, MessageTurnResult)
+        items.append(MessageHistoryItem(
+            turn_id=row['turn_id'],
+            message_id=row['message_id'],
+            command_id=result.command_id if result else '',
+            status=row['status'],
+            user_text=request.text if request else '',
+            assistant_text=result.assistant_text if result else '',
+            turn_decision=result.turn_decision if result else '',
+            observation_ref=result.observation_ref if result else None,
+            pending_approval_ref=result.pending_approval_ref if result else None,
+            action_receipt_ref=result.action_receipt_ref if result else None,
+        ))
+    return MessageHistoryResponse(thread_id=thread_id, items=items, next_page_token=next_token)
+
+
+def _load_model(blobs: MessageBlobStore, ref_json: str, thread_id: str, model: type[Any]) -> Any:
+    if not ref_json:
+        return None
+    ref = MessageContentRef.model_validate(json.loads(ref_json))
+    return model.model_validate_json(blobs.load(ref, thread_id))
 
 
 def _hash(value: str) -> str:

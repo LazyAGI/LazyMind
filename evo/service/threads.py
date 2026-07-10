@@ -79,6 +79,10 @@ class ThreadService:
             'title': str(config.get('title') or ''),
             'status': status['status'],
             'current_step': status['current_step'],
+            'checkpoint_state': status['checkpoint_state'],
+            'first_missing_step': status['first_missing_step'],
+            'last_released_step': status['last_released_step'],
+            'retry_from_step': status['retry_from_step'],
             'last_error': status['last_error'],
         }
         if include_inputs:
@@ -204,6 +208,29 @@ class ThreadService:
             with self._lock:
                 self._active.discard(thread_id)
 
+    def submit_message_command(
+        self,
+        thread_id: str,
+        config: Mapping[str, Any],
+        command: FlowCommand,
+        schedule: Callable[[Callable[[], None]], None],
+    ):
+        if isinstance(command, ContinueFlow):
+            snapshot = self.runtime.query(_num_case(config)).snapshot(thread_id)
+            payload = {'command_id': command.command_id, 'until_step': command.until_step}
+            if not any(item.completed for item in snapshot.progress) and snapshot.status != 'paused':
+                return self.start(thread_id, payload, schedule)
+            return self.continue_thread(thread_id, payload, schedule)
+        if isinstance(command, ResumeFlow):
+            return self.continue_thread(thread_id, {'command_id': command.command_id}, schedule)
+        if isinstance(command, RetryFlow):
+            return self.retry(thread_id, {'command_id': command.command_id}, schedule)
+        if isinstance(command, PauseFlow):
+            return self.pause(thread_id, {'command_id': command.command_id})
+        if isinstance(command, CancelFlow):
+            return self.cancel(thread_id, {'command_id': command.command_id})
+        return self.run_message_command(thread_id, config, command)
+
     def _config(self, thread_id: str) -> Mapping[str, Any]:
         if not THREAD_ID.fullmatch(str(thread_id or '')):
             raise HTTPException(400, 'invalid thread_id')
@@ -259,8 +286,16 @@ class ThreadService:
             status = 'paused'
         else:
             status = 'idle'
-        current = next((item.step for item in progress if not item.completed), progress[-1].step if progress else '')
-        return {'status': status, 'current_step': current, 'last_error': gate.last_error}
+        checkpoint = snapshot.checkpoint
+        return {
+            'status': status,
+            'current_step': checkpoint.current_step,
+            'checkpoint_state': checkpoint.checkpoint_state,
+            'first_missing_step': checkpoint.first_missing_step,
+            'last_released_step': checkpoint.last_released_step,
+            'retry_from_step': checkpoint.retry_from_step,
+            'last_error': gate.last_error,
+        }
 
     def _stop_owned_router_algorithms(self, thread_id: str) -> None:
         ledger = RouterAlgorithmLedger(self.runtime.store_root)

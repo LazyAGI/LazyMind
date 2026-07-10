@@ -1,15 +1,22 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+import threading
 
 from ..kernel import (ArtifactKey, ArtifactRef, ArtifactRecord, ArtifactRuntime, DAGGraph,
-                      FixedOp, Materializer, SQLiteArtifactStore, StoreResult, TickResult)
+                      ConcurrencyLimits, FixedOp, Materializer, SQLiteArtifactStore, StoreResult,
+                      TickInterruptionChecker, TickResult)
 
 
 class EvoArtifactAdapter:
-    def __init__(self, store: SQLiteArtifactStore, runtime: ArtifactRuntime) -> None:
+    def __init__(
+        self,
+        store: SQLiteArtifactStore,
+        runtime: ArtifactRuntime,
+    ) -> None:
         self._store = store
         self._runtime = runtime
+        self._owner_thread_id = threading.get_ident()
 
     def commit_external(self, run_id: str, key: ArtifactKey, value: object, *,
                         idempotency_key: str, expected_ref: ArtifactRef | None = None,
@@ -46,22 +53,32 @@ class EvoArtifactAdapter:
         self._require_owner_thread()
         return self._store.get(run_id, ref)
 
-    def tick(self, run_id: str) -> TickResult:
+    def tick(self, run_id: str, *, should_interrupt: TickInterruptionChecker | None = None,
+             op_selector: Callable[[object], bool] | None = None) -> TickResult:
         self._require_owner_thread()
-        return self._runtime.tick(run_id)
+        return self._runtime.tick(
+            run_id,
+            should_interrupt=should_interrupt,
+            op_selector=op_selector,
+        )
 
     def _require_owner_thread(self) -> None:
-        return None
+        if threading.get_ident() != self._owner_thread_id:
+            raise RuntimeError('EvoArtifactAdapter must only be used from its owner thread')
 
 
 def build_evo_artifact_adapter(store: SQLiteArtifactStore, ops: Sequence[type[FixedOp]],
-                               materializers: Mapping[str, Materializer]
+                               materializers: Mapping[str, Materializer], *,
+                               concurrency_limits: ConcurrencyLimits | None = None,
                                ) -> EvoArtifactAdapter:
     graph = DAGGraph()
     for op in ops:
         graph.register(op)
     graph.validate()
-    return EvoArtifactAdapter(store, ArtifactRuntime(store, graph, materializers))
+    return EvoArtifactAdapter(
+        store,
+        ArtifactRuntime(store, graph, materializers, concurrency_limits=concurrency_limits),
+    )
 
 
 __all__ = ['EvoArtifactAdapter', 'build_evo_artifact_adapter']

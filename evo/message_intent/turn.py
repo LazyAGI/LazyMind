@@ -5,7 +5,7 @@ import json
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -17,8 +17,9 @@ from evo.artifact_runtime.evo import actions as E
 from evo.artifact_runtime.kernel import ArtifactKey, ArtifactRef
 
 from .config_guard import ConfigValidationError, validate_config_patch
-from .planner import StructuredPlanError, plan_next_turn
+from .planner import StructuredPlanError, answer_query, plan_next_turn
 from .schemas import MessageContentRef, MessageRequest, MessageTurnResult, PendingApproval, PlannedAction
+from .schemas import parse_planned_action
 from .storage import MessageAuditStore, MessageBlobStore, MessageInProgressError, json_bytes
 
 
@@ -71,7 +72,8 @@ class _Turn:
             raise
 
     def _handle(self, config: Mapping[str, Any]) -> MessageTurnResult:
-        self._blob('message_received', self.request.model_dump())
+        self.audit.record_request_ref(self.thread_id, self.turn_id,
+                                      self._blob('message_received', self.request.model_dump()))
         context, base_obs, projection = self._observe(config)
         try:
             plan = plan_next_turn(context, config.get('llm_config') if isinstance(config, Mapping) else {})
@@ -90,13 +92,14 @@ class _Turn:
         if action.kind in {'clarify', 'final'}:
             return self._clarify_or_final(action, plan, projection)
         if action.kind == 'approval':
-            return self._approval(action, base_obs, projection)
-        compiled = self._compile_with_reflection(action, context, config, projection)
-        if isinstance(compiled, MessageTurnResult):
-            return compiled
+            return self._approval(action, base_obs, projection, plan.assistant_text)
+        compiled_result = self._compile_with_reflection(action, context, config, projection)
+        if isinstance(compiled_result, MessageTurnResult):
+            return compiled_result
+        compiled, approved_action = compiled_result
         if compiled['needs_approval']:
-            return self._pending_approval(action, compiled, base_obs, projection)
-        return self._dispatch(compiled, config, projection)
+            return self._pending_approval(approved_action, compiled, base_obs, projection)
+        return self._dispatch(compiled, config, projection, context, plan.assistant_text)
 
     def _observe(self, config: Mapping[str, Any]):
         num_case = _num_case(config)
@@ -104,6 +107,7 @@ class _Turn:
         flow_snapshot = {
             'status': snapshot.status,
             'pending_checkpoint': _safe(snapshot.pending_checkpoint),
+            'checkpoint': _safe(snapshot.checkpoint),
             'progress': _safe(snapshot.progress),
         }
         base_obs = self._blob('base_observation', flow_snapshot)
@@ -119,15 +123,16 @@ class _Turn:
                 'active_agenda': old.get('active_agenda') or [],
                 'has_pending_approval': bool(old.get('pending_approval_ref')),
             },
+            'recent_messages': self._recent_messages(),
             'flow_snapshot': flow_snapshot,
         }
         return context, base_obs, projection
 
     def _compile_with_reflection(self, action: PlannedAction, context: Mapping[str, Any],
                                  config: Mapping[str, Any],
-                                 projection: dict[str, Any]) -> dict[str, Any] | MessageTurnResult:
+                                 projection: dict[str, Any]) -> tuple[dict[str, Any], PlannedAction] | MessageTurnResult:
         try:
-            return self._compile(action, config)
+            return self._compile(action, config), action
         except ConfigValidationError as exc:
             if action.kind != 'config_patch':
                 return self._finish('needs_input', _issues(exc.issues), projection)
@@ -145,7 +150,7 @@ class _Turn:
             if next_action.kind != 'config_patch':
                 return self._finish('needs_input', '配置修正只能返回 corrected config_patch 或 clarification', projection)
             try:
-                return self._compile(next_action, config)
+                return self._compile(next_action, config), next_action
             except (ConfigValidationError, ValueError) as retry_exc:
                 text = _issues(retry_exc.issues) if isinstance(retry_exc, ConfigValidationError) else str(retry_exc)
                 return self._finish('needs_input', text, projection)
@@ -203,7 +208,7 @@ class _Turn:
         return {'kind': kind, 'command_id': command_id, 'payload': payload, 'needs_approval': needs_approval}
 
     def _approval(self, action: PlannedAction, base_obs: MessageContentRef,
-                  projection: dict[str, Any]) -> MessageTurnResult:
+                  projection: dict[str, Any], reply: str) -> MessageTurnResult:
         if action.decision in {'reject', 'amend', 'replace'}:
             text = '已取消待审批操作' if action.decision == 'reject' else action.message or '请提供修正后的操作。'
             return self._finish('rejected' if action.decision == 'reject' else 'needs_input',
@@ -216,7 +221,7 @@ class _Turn:
         try:
             pending = PendingApproval.model_validate(self._load(ref))
             compiled = self._load(pending.compiled_ref.model_dump())
-            intent = PlannedAction.model_validate(self._load(pending.intent_ref.model_dump()))
+            intent = parse_planned_action(self._load(pending.intent_ref.model_dump()))
             if not isinstance(compiled, Mapping):
                 raise ValueError('pending compiled action must be an object')
         except (ValueError, ValidationError) as exc:
@@ -236,7 +241,7 @@ class _Turn:
         if _hash(current) != _hash(compiled):
             return self._finish('needs_input', '待审批操作已变化，请重新确认。',
                                 {**projection, 'pending_approval_ref': None})
-        return self._dispatch(compiled, config, {**projection, 'pending_approval_ref': None})
+        return self._dispatch(compiled, config, {**projection, 'pending_approval_ref': None}, {}, reply)
 
     def _pending_approval(self, action: PlannedAction, compiled: Mapping[str, Any], base_obs: MessageContentRef,
                           projection: dict[str, Any]) -> MessageTurnResult:
@@ -251,24 +256,45 @@ class _Turn:
             compiled_ref=compiled_ref,
         )
         pending_ref = self._blob('pending_approval', pending.model_dump())
-        return self._finish('needs_approval', f'需要确认后执行该操作，确认码 {pending.approval_token}',
+        return self._finish('needs_approval', _approval_text(compiled, pending.approval_token),
                             {**projection, 'pending_approval_ref': pending_ref.model_dump()},
                             pending_approval_ref=pending_ref)
 
     def _dispatch(self, compiled: Mapping[str, Any], config: Mapping[str, Any],
-                  projection: dict[str, Any]) -> MessageTurnResult:
+                  projection: dict[str, Any], context: Mapping[str, Any], reply: str) -> MessageTurnResult:
         self._blob('compiled_action', compiled)
-        result = self._read(config, compiled) if compiled['kind'] == 'query' else self._run_command(config, compiled)
-        decision = 'query_answered' if compiled['kind'] == 'query' else (
-            'action_executed' if str(getattr(result, 'command_status', 'ok')) == 'ok' else 'needs_input'
-        )
-        text = '已读取当前信息，详细结果已写入 observation。' if compiled['kind'] == 'query' else (
-            '已执行该操作。' if decision == 'action_executed' else f'操作未完成: {getattr(result, "error", "")}'
-        )
+        command_id = '' if compiled['kind'] == 'query' else str(compiled['command_id'])
+        try:
+            result = self._read(config, compiled) if compiled['kind'] == 'query' else self._run_command(config, compiled)
+        except Exception as exc:
+            if getattr(exc, 'status_code', None) is None:
+                raise
+            detail = str(getattr(exc, 'detail', '') or exc)
+            receipt = self._blob('action_receipt', {
+                'command_status': 'rejected',
+                'status_code': getattr(exc, 'status_code', 0),
+                'error': detail,
+            })
+            obs = self._blob('observation', _safe(self.runtime.query(_num_case(config)).snapshot(self.thread_id)))
+            projection.update({'last_observation_ref': obs.model_dump()})
+            return self._finish('needs_input', f'操作未提交: {detail}', projection, command_id=command_id,
+                                observation_ref=obs, action_receipt_ref=receipt)
+        status = str(getattr(result, 'command_status', 'ok'))
+        ok = status in {'ok', 'blocked'} if compiled['kind'] != 'query' else True
+        decision = 'query_answered' if compiled['kind'] == 'query' else ('action_submitted' if ok else 'needs_input')
+        if compiled['kind'] == 'query':
+            payload = compiled['payload']
+            text = _progress_text(_safe(result)) if payload['query'] == 'progress_snapshot' \
+                else answer_query(context, _safe(result), config.get('llm_config') or {})
+        elif decision == 'action_submitted':
+            text = _action_text(compiled)
+        else:
+            text = f'操作未完成: {getattr(result, "error", "")}'
         receipt = self._blob('action_receipt', _safe(result))
         obs = self._blob('observation', _safe(self.runtime.query(_num_case(config)).snapshot(self.thread_id)))
         projection.update({'last_observation_ref': obs.model_dump()})
-        return self._finish(decision, text, projection, observation_ref=obs, action_receipt_ref=receipt)
+        return self._finish(decision, text, projection, command_id=command_id,
+                            observation_ref=obs, action_receipt_ref=receipt)
 
     def _read(self, config: Mapping[str, Any], compiled: Mapping[str, Any]) -> Any:
         query = self.runtime.query(_num_case(config))
@@ -324,6 +350,22 @@ class _Turn:
     def _blob(self, kind: str, value: object) -> MessageContentRef:
         return self.blobs.append(self.thread_id, self.turn_id, kind, json_bytes(_safe(value)))
 
+    def _recent_messages(self) -> list[dict[str, str]]:
+        items = []
+        for row in self.audit.recent_turns(self.thread_id, 6):
+            if row['turn_id'] == self.turn_id or not row['request_ref_json'] or not row['result_ref_json']:
+                continue
+            request = self._load(json.loads(row['request_ref_json']))
+            result = self._load(json.loads(row['result_ref_json']))
+            items.append({
+                'message_id': str(row['message_id']),
+                'user_text': str(request.get('text') or '')[:1000] if isinstance(request, Mapping) else '',
+                'assistant_text': str(result.get('assistant_text') or '')[:1000] if isinstance(result, Mapping) else '',
+                'turn_decision': str(result.get('turn_decision') or '') if isinstance(result, Mapping) else '',
+                'command_id': str(result.get('command_id') or '') if isinstance(result, Mapping) else '',
+            })
+        return items
+
 
 def _artifact_ref(value: Any) -> ArtifactRef:
     if not isinstance(value, list) or len(value) != 3:
@@ -343,6 +385,69 @@ def _issues(issues: list[Any]) -> str:
     return '；'.join(str(getattr(issue, 'message', issue)) for issue in issues) or '配置参数无效'
 
 
+def _progress_text(result: object) -> str:
+    data = result if isinstance(result, Mapping) else {}
+    status = str(data.get('status') or 'unknown')
+    checkpoint = data.get('checkpoint') if isinstance(data.get('checkpoint'), Mapping) else {}
+    progress = [item for item in data.get('progress') or [] if isinstance(item, Mapping)]
+    done = [str(item.get('step') or '') for item in progress
+            if item.get('root_ref') or item.get('effective_outputs')]
+    current = str(checkpoint.get('current_step') or '')
+    if not current:
+        current = next((str(item.get('step') or '') for item in progress if str(item.get('step') or '') not in done), '')
+    if status == 'idle' and not done:
+        return f'当前线程尚未启动，下一步是 {current or "dataset"}。'
+    if status == 'failed':
+        if checkpoint.get('checkpoint_state') == 'stale':
+            return f'当前流程失败，checkpoint 已失效，已完成步骤: {", ".join(done) if done else "无"}。'
+        retry_from = str(checkpoint.get('retry_from_step') or '')
+        suffix = f'，建议从 {retry_from} 继续' if retry_from else ''
+        return f'当前流程失败{suffix}，已完成步骤: {", ".join(done) if done else "无"}。'
+    if status == 'cancelled':
+        return '当前流程已取消。'
+    if progress and len(done) == len(progress):
+        return '当前流程已完成全部步骤。'
+    text = f'当前状态: {status}'
+    if current:
+        text += f'，当前/下一步是 {current}'
+    if done:
+        text += f'，已完成: {", ".join(done)}'
+    if checkpoint.get('checkpoint_state') == 'stale':
+        text += '，checkpoint 已失效'
+    return text + '。'
+
+
+def _action_text(compiled: Mapping[str, Any]) -> str:
+    command_id = str(compiled['command_id'])
+    verb = '已提交' if compiled['kind'] == 'flow' else '已执行'
+    return f'{verb}{_action_name(compiled)}的操作，command_id={command_id}。'
+
+
+def _approval_text(compiled: Mapping[str, Any], token: str) -> str:
+    return f'{_action_name(compiled)}需要确认后执行，确认码 {token}。'
+
+
+def _action_name(compiled: Mapping[str, Any]) -> str:
+    payload = compiled['payload']
+    if compiled['kind'] == 'flow':
+        command = str(payload['command'])
+        until = str(payload.get('until_step') or '')
+        return {
+            'continue': f'继续执行到 {until}' if until else '继续执行',
+            'pause': '暂停流程',
+            'resume': '恢复并继续执行',
+            'cancel': '取消流程',
+            'retry': '重试失败流程',
+        }[command]
+    mutation = str(payload['mutation'])
+    return {
+        'edit_artifact': '修改产物',
+        'rerun_case_stage': '重跑 case 阶段',
+        'rerun_step': '重跑步骤',
+        'invalidate_from_step': '从指定步骤失效后续产物',
+    }[mutation]
+
+
 def _hash(value: object) -> str:
     return hashlib.sha256(json_bytes(_safe(value))).hexdigest()
 
@@ -351,7 +456,7 @@ def _safe(value: object) -> object:
     if hasattr(value, 'model_dump'):
         return value.model_dump()
     if is_dataclass(value):
-        return _safe(asdict(value))
+        return {field.name: _safe(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
         return {str(key): _safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

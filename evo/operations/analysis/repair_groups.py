@@ -5,6 +5,7 @@ import math
 from collections import Counter, defaultdict
 from collections.abc import Mapping
 from hashlib import sha1
+from importlib.resources import files
 from typing import Any
 
 SCORE_KEYS = (
@@ -20,100 +21,9 @@ SCORE_KEYS = (
     'doc_recall',
 )
 REPAIRABLE_CATEGORIES = {'retrieval', 'generation', 'execution', 'tracing'}
-FUNCTION_BLOCKS: Mapping[str, Mapping[str, Any]] = {
-    'request_intake_routing': {
-        'entrypoints': ('lazymind/chat/api/chat_routes.py', 'lazymind/chat/service/chat_service.py'),
-        'adjacent_blocks': ('query_rewrite', 'tool_orchestration', 'tracing_observability'),
-        'primary_metrics': ('overall_score', 'answer_relevance'),
-        'guard_metrics': ('answer_correctness',),
-    },
-    'query_rewrite': {
-        'entrypoints': ('lazymind/chat/service/chat_service.py', 'lazymind/chat/engine/prompts/guidance.py'),
-        'adjacent_blocks': ('retrieval', 'prompt_build'),
-        'primary_metrics': ('answer_relevance', 'retrieval_quality_score'),
-        'guard_metrics': ('answer_correctness', 'chunk_recall'),
-    },
-    'retrieval': {
-        'entrypoints': (
-            'lazymind/chat/engine/tools/kb.py',
-            'lazymind/chat/engine/tools/algo/search_kb.py',
-            'lazymind/chat/engine/tools/algo/kb_adaptive_topk.py',
-            'lazymind/chat/engine/tools/infra/kb_opensearch_client.py',
-        ),
-        'adjacent_blocks': ('context_assembly', 'rerank', 'tracing_observability'),
-        'primary_metrics': ('chunk_recall', 'doc_recall', 'retrieval_quality_score'),
-        'guard_metrics': ('answer_correctness', 'chunk_precision'),
-    },
-    'rerank': {
-        'entrypoints': ('lazymind/chat/engine/tools/kb.py', 'lazymind/chat/engine/tools/algo/kb_adaptive_topk.py'),
-        'adjacent_blocks': ('retrieval', 'context_assembly'),
-        'primary_metrics': ('chunk_precision', 'doc_precision', 'retrieval_quality_score'),
-        'guard_metrics': ('chunk_recall', 'answer_correctness'),
-    },
-    'context_assembly': {
-        'entrypoints': (
-            'lazymind/chat/engine/tools/kb.py',
-            'lazymind/chat/engine/tools/algo/kb_context_expansion.py',
-            'lazymind/chat/service/utils/citations.py',
-        ),
-        'adjacent_blocks': ('retrieval', 'rerank', 'llm_generation', 'prompt_build'),
-        'primary_metrics': ('chunk_recall', 'groundedness', 'answer_correctness'),
-        'guard_metrics': ('chunk_precision', 'answer_relevance'),
-    },
-    'prompt_build': {
-        'entrypoints': (
-            'lazymind/chat/engine/prompts/system_prompt.py',
-            'lazymind/chat/engine/prompts/guidance.py',
-            'lazymind/chat/service/chat_service.py',
-        ),
-        'adjacent_blocks': ('context_assembly', 'llm_generation'),
-        'primary_metrics': ('answer_relevance', 'groundedness', 'format_compliance'),
-        'guard_metrics': ('answer_correctness', 'chunk_recall'),
-    },
-    'tool_orchestration': {
-        'entrypoints': (
-            'lazymind/chat/engine/agent_core.py',
-            'lazymind/chat/service/component/tool_registry.py',
-            'lazymind/chat/engine/tools/infra/tool_runtime.py',
-            'lazymind/chat/service/chat_service.py',
-        ),
-        'adjacent_blocks': ('retrieval', 'prompt_build', 'llm_generation'),
-        'primary_metrics': ('overall_score', 'answer_correctness'),
-        'guard_metrics': ('format_compliance', 'answer_relevance'),
-    },
-    'llm_generation': {
-        'entrypoints': (
-            'lazymind/chat/engine/agent_core.py',
-            'lazymind/chat/engine/prompts/system_prompt.py',
-            'lazymind/chat/engine/prompts/guidance.py',
-            'lazymind/chat/service/chat_service.py',
-        ),
-        'adjacent_blocks': ('context_assembly', 'prompt_build', 'postprocess_serialization'),
-        'primary_metrics': ('answer_correctness', 'groundedness', 'answer_relevance'),
-        'guard_metrics': ('format_compliance', 'chunk_recall'),
-    },
-    'postprocess_serialization': {
-        'entrypoints': (
-            'lazymind/chat/api/chat_routes.py',
-            'lazymind/chat/service/chat_service.py',
-            'lazymind/chat/service/component/event_translator.py',
-            'lazymind/chat/service/utils/streaming.py',
-        ),
-        'adjacent_blocks': ('llm_generation', 'tracing_observability'),
-        'primary_metrics': ('format_compliance', 'answer_quality_score'),
-        'guard_metrics': ('answer_correctness', 'groundedness'),
-    },
-    'tracing_observability': {
-        'entrypoints': (
-            'lazymind/chat/service/utils/trace_archive.py',
-            'lazymind/chat/service/component/event_translator.py',
-            'lazymind/chat/service/chat_service.py',
-        ),
-        'adjacent_blocks': ('retrieval', 'context_assembly', 'postprocess_serialization'),
-        'primary_metrics': ('overall_score',),
-        'guard_metrics': ('answer_correctness',),
-    },
-}
+FUNCTION_BLOCKS: Mapping[str, Mapping[str, Any]] = json.loads(
+    files(__package__).joinpath('repair_block_registry.json').read_text(encoding='utf-8')
+)
 
 
 def build_repair_group_queue(rows: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -124,6 +34,7 @@ def build_repair_group_queue(rows: list[Mapping[str, Any]]) -> list[dict[str, An
     queue = [_group(block, mode, issue, cluster, route, items)
              for (block, mode, issue, cluster, route), items in groups.items()]
     return sorted(queue, key=lambda item: (
+        -item['answer_impact_score'],
         -item['badcase_count'],
         -item['severity_score'],
         -item['confidence_score'],
@@ -168,14 +79,14 @@ def _group(block: str, mode: str, issue: str, cluster: str, route: str,
         'badcase_count': len(rows),
         'case_ids': case_ids,
         'representative_case_id': case_ids[0] if case_ids else '',
-        'confidence_counts': dict(Counter(_text(row.get('confidence')) for row in rows)),
+        'answer_impact_score': round(max((_answer_gap(row) for row in rows), default=0.0), 4),
         'confidence_score': round(sum(_confidence(row) for row in rows) / len(rows), 4),
         'severity_score': round(sum(_severity(row) for row in rows) / len(rows), 4),
         'candidate_files': list(registry.get('entrypoints') or ()),
         'adjacent_blocks': list(registry.get('adjacent_blocks') or ()),
         'primary_metrics': list(registry.get('primary_metrics') or _metric_focus(rows)),
         'guard_metrics': list(registry.get('guard_metrics') or ('answer_correctness',)),
-        'risk': _risk(block, bool(registry), rows),
+        'invariants': list(registry.get('invariants') or ()),
         'evidence': [_case_evidence(row) for row in rows],
     }
 
@@ -234,23 +145,24 @@ def _metric_focus(rows: list[Mapping[str, Any]]) -> list[str]:
 def _severity(row: Mapping[str, Any]) -> float:
     category = _text(row.get('issue_category'))
     judge = row.get('judge') if isinstance(row.get('judge'), Mapping) else {}
-    score = 1.0 - _score(judge.get('answer_correctness'), 0.0)
+    answer_gap = _answer_gap(row)
+    retrieval_gap = 1.0 - _score(judge.get('retrieval_quality_score'), 1.0)
     weight = {'execution': 1.0, 'retrieval': 0.9, 'generation': 0.8, 'tracing': 0.4}.get(category, 0.2)
-    return round((0.6 * weight) + (0.25 * score) + (0.15 * _confidence(row)), 4)
+    retrieval_signal = retrieval_gap if category == 'retrieval' else 0.0
+    return round((0.55 * answer_gap) + (0.25 * retrieval_signal) + (0.10 * weight) + (0.10 * _confidence(row)), 4)
+
+
+def _answer_gap(row: Mapping[str, Any]) -> float:
+    judge = row.get('judge') if isinstance(row.get('judge'), Mapping) else {}
+    return max(
+        1.0 - _score(judge.get('answer_correctness'), 0.0),
+        1.0 - _score(judge.get('answer_quality_score'), 0.0),
+        1.0 - _score(judge.get('overall_score'), 0.0),
+    )
 
 
 def _confidence(row: Mapping[str, Any]) -> float:
     return {'high': 1.0, 'medium': 0.65, 'low': 0.25}.get(_text(row.get('confidence')), 0.0)
-
-
-def _risk(block: str, known_block: bool, rows: list[Mapping[str, Any]]) -> str:
-    if not known_block:
-        return 'high_no_registry_entry'
-    if block in {'llm_generation', 'postprocess_serialization', 'prompt_build'}:
-        return 'medium_user_visible_behavior'
-    if any(_text(row.get('confidence')) == 'low' for row in rows):
-        return 'medium_mixed_confidence'
-    return 'low_scoped_patch'
 
 
 def _score(value: Any, default: float) -> float:

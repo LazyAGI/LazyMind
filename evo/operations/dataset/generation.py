@@ -1,36 +1,28 @@
 import json
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from .assemble import assemble_dataset
-from .csv_loader import DIFFICULTIES, GENERATED_CASE_FIELDS, QUESTION_TYPES, as_list
-from .csv_loader import as_text, json_object, normalize_eval_case
+from .csv_loader import DIFFICULTIES, GENERATED_CASE_FIELDS, QUESTION_TYPES, as_list, as_text
+from .csv_loader import json_object, norm_text, normalize_eval_case
 from .kb_loader import build_corpus_snapshot, load_corpus
 
+QUESTION_RETRY_COUNT = 3
 
-def generate_case(
-    config: Mapping[str, Any],
-    snapshot: Mapping[str, Any],
-    case_id: str,
-    llm_complete: Callable[[str], str] | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+
+def prepare_case(config: Mapping[str, Any], snapshot: Mapping[str, Any], case_id: str) -> dict[str, Any]:
     index = int(case_id.rsplit('_', 1)[-1]) - 1
-    imported = {as_text(row.get('id')): row for row in snapshot.get('cases') or [] if isinstance(row, Mapping)}
-    if case_id in imported:
-        case = dict(imported[case_id])
+    case = _case_by_id(snapshot, case_id)
+    if case is not None:
         prep = dict(case.get('source_preparation') or {})
         prep.update({'case_id': case_id, 'mode': 'imported_eval_dataset',
                      'question_type': as_text(case.get('question_type')),
                      'difficulty': as_text(case.get('difficulty')),
                      'source_snapshot_dataset_id': as_text(snapshot.get('dataset_id')),
                      'source_message_id': as_text(case.get('source_message_id'))})
-        warnings = [item for item in snapshot.get('warnings', []) if isinstance(item, Mapping)]
-        if index == 0 and warnings:
-            prep['warnings'] = [*list(prep.get('warnings') or []), *warnings]
-        case['source_preparation'] = prep
-        return prep, case
-    if imported and not snapshot.get('source_units'):
+        return _with_warnings(prep, snapshot, index)
+    if snapshot.get('cases') and not snapshot.get('source_units'):
         raise ValueError(f'imported eval dataset has no case for partition {case_id}')
 
     units = [unit for unit in snapshot.get('source_units') or [] if isinstance(unit, Mapping)]
@@ -47,38 +39,72 @@ def generate_case(
         if as_list(config.get('question_types') or config.get('question_type')):
             raise
         qtype, contexts = 'single_hop', _contexts(units, 'single_hop', index)
-    difficulty = _choice(config, 'difficulty', DIFFICULTIES, index)
-    source_ids = list(dict.fromkeys(as_text(item['source_id']) for item in contexts if as_text(item['source_id'])))
     prep = {
         'case_id': case_id,
         'mode': 'generated_kb_dataset',
         'question_type': qtype,
-        'difficulty': difficulty,
+        'difficulty': _choice(config, 'difficulty', DIFFICULTIES, index),
         'context_reference': contexts,
         'source_snapshot_dataset_id': as_text(snapshot.get('dataset_id')),
         'source_message_id': as_text(config.get('source_message_id')),
         'case_source': {'final_id': case_id, 'original_id': '', 'source': 'generated_kb',
-                        'kb_id': ';'.join(source_ids)},
+                        'kb_id': ';'.join(dict.fromkeys(as_text(item['source_id'])
+                                                        for item in contexts if as_text(item['source_id'])))},
     }
-    warnings = [item for item in snapshot.get('warnings', []) if isinstance(item, Mapping)]
-    if index == 0 and warnings:
-        prep['warnings'] = warnings
-    data = _complete_case(config, prep, llm_complete)
-    return prep, normalize_eval_case({
-        **data,
-        'id': case_id,
-        'question_type': qtype,
-        'difficulty': difficulty,
-        'reference_context': [item['content_preview'] for item in contexts],
-        'reference_doc': [item['filename'] for item in contexts],
-        'reference_doc_ids': list(dict.fromkeys(item['doc_ref'] for item in contexts if item['doc_ref'])),
-        'reference_chunk_ids': [item['source_unit_ref'] or item['chunk_id'] for item in contexts],
-        'source_message_id': prep['source_message_id'],
-        'source_preparation': prep,
-    }, default_id=case_id)
+    return _with_warnings(prep, snapshot, index)
 
 
-def dataset_materializers(case_ids, *, llm_complete: Callable[[str], str] | None = None) -> dict[str, Any]:
+def generate_case(config: Mapping[str, Any], snapshot: Mapping[str, Any], prep: Mapping[str, Any],
+                  llm_complete: Callable[[str], str] | None = None,
+                  duplicate_questions: Callable[[Mapping[str, Any]], list[str]] | None = None) -> dict[str, Any]:
+    if not (case_id := as_text(prep.get('case_id'))):
+        raise ValueError('case preparation missing case_id')
+    if prep.get('mode') == 'imported_eval_dataset':
+        case = _case_by_id(snapshot, case_id)
+        if case is None:
+            raise ValueError(f'imported eval dataset has no case for partition {case_id}')
+        return {**dict(case), 'source_preparation': dict(prep)}
+    if prep.get('mode') != 'generated_kb_dataset':
+        raise ValueError(f'unsupported case preparation mode: {as_text(prep.get("mode"))}')
+    contexts = prep.get('context_reference')
+    if not isinstance(contexts, list) or not all(isinstance(item, Mapping) for item in contexts):
+        raise ValueError('case preparation context_reference must be a list of objects')
+    avoid_questions: list[str] = []
+    for attempt in range(QUESTION_RETRY_COUNT + 1):
+        row = normalize_eval_case({
+            **_complete_case(config, prep, llm_complete, avoid_questions=avoid_questions, attempt=attempt + 1),
+            'id': case_id,
+            'question_type': as_text(prep.get('question_type')),
+            'difficulty': as_text(prep.get('difficulty')),
+            'reference_context': [as_text(item.get('content_preview')) for item in contexts],
+            'reference_doc': [as_text(item.get('filename')) for item in contexts],
+            'reference_doc_ids': list(dict.fromkeys(as_text(item.get('doc_ref')) for item in contexts
+                                                    if as_text(item.get('doc_ref')))),
+            'reference_chunk_ids': [as_text(item.get('source_unit_ref') or item.get('chunk_id'))
+                                    for item in contexts],
+            'source_message_id': as_text(prep.get('source_message_id')),
+            'source_preparation': prep,
+        }, default_id=case_id)
+        duplicates = duplicate_questions(row) if duplicate_questions else []
+        if not duplicates:
+            return row
+        avoid_questions = _unique_texts([*avoid_questions, *duplicates, row['question']])
+    question = as_text(row.get('question')) or (duplicates[0] if duplicates else '')
+    raise ValueError(f'dataset.generate_case duplicate_question after {QUESTION_RETRY_COUNT} retries: {question}')
+
+
+def _case_by_id(snapshot: Mapping[str, Any], case_id: str) -> Mapping[str, Any] | None:
+    return next((row for row in snapshot.get('cases') or []
+                 if isinstance(row, Mapping) and as_text(row.get('id')) == case_id), None)
+
+
+def _with_warnings(prep: dict[str, Any], snapshot: Mapping[str, Any], index: int) -> dict[str, Any]:
+    if index == 0 and (warnings := [item for item in snapshot.get('warnings', []) if isinstance(item, Mapping)]):
+        prep['warnings'] = [*list(prep.get('warnings') or []), *warnings]
+    return prep
+
+
+def dataset_materializers(case_ids, *, llm_complete=None, duplicate_questions=None) -> dict[str, Any]:
     partitions = tuple(sorted(dict.fromkeys(case_ids)))
     if not partitions:
         raise ValueError('case_ids must not be empty')
@@ -89,12 +115,19 @@ def dataset_materializers(case_ids, *, llm_complete: Callable[[str], str] | None
     def snapshot(ctx, inputs) -> Mapping[str, object]:
         return {'snapshot': build_corpus_snapshot(inputs['report'], inputs['source_config'])}
 
+    def prepare(ctx, inputs) -> Mapping[str, object]:
+        partition = ctx.output_key_by_name['preparation'].partition
+        return {'preparation': prepare_case(inputs['config'], inputs['snapshot'], partition)}
+
     def case(ctx, inputs) -> Mapping[str, object]:
-        key = ctx.output_key_by_name.get('case') or ctx.output_key_by_name.get('preparation')
-        if key is None or not key.partition:
-            raise ValueError('dataset.generate_case requires a partitioned case output')
-        prep, row = generate_case(inputs['config'], inputs['snapshot'], key.partition, llm_complete)
-        return {'preparation': prep, 'case': row}
+        partition = ctx.output_key_by_name['case'].partition
+        preparation = inputs['preparation']
+        if as_text(preparation.get('case_id')) != partition:
+            raise ValueError('dataset.generate_case preparation case_id does not match partition')
+        check = None
+        if duplicate_questions is not None:
+            check = lambda row: duplicate_questions(ctx.run_id, partition, row)
+        return {'case': generate_case(inputs['config'], inputs['snapshot'], preparation, llm_complete, check)}
 
     def assemble(ctx, inputs) -> Mapping[str, object]:
         values = inputs['cases']
@@ -109,10 +142,11 @@ def dataset_materializers(case_ids, *, llm_complete: Callable[[str], str] | None
                                             min_case_count=len(partitions))}
 
     return {'dataset.load_corpus': load, 'dataset.build_corpus_snapshot': snapshot,
-            'dataset.generate_case': case, 'dataset.assemble': assemble}
+            'dataset.prepare_case': prepare, 'dataset.generate_case': case, 'dataset.assemble': assemble}
 
 
-def _complete_case(config: Mapping[str, Any], prep: Mapping[str, Any], complete: Callable[[str], str] | None):
+def _complete_case(config: Mapping[str, Any], prep: Mapping[str, Any], complete: Callable[[str], str] | None, *,
+                   avoid_questions: Iterable[str] = (), attempt: int = 1):
     if complete is None:
         from evo.llm import LazyLLMClient
 
@@ -127,15 +161,30 @@ def _complete_case(config: Mapping[str, Any], prep: Mapping[str, Any], complete:
         'reasoning_steps, difficulty_rationale, type_rationale. reasoning_steps must be a list of strings. '
         f'source_preparation_json: {json.dumps(prep, ensure_ascii=False, sort_keys=True)}'
     )
+    avoid = _unique_texts(avoid_questions)
+    if avoid:
+        prompt += (
+            f'\nretry_attempt: {attempt}. The previous question was a duplicate. '
+            'Generate a question that is not semantically equivalent to any item in avoid_questions_json. '
+            f'avoid_questions_json: {json.dumps(avoid, ensure_ascii=False)}'
+        )
     data = json_object(complete(prompt), message='LLM did not return a JSON object')
-    missing = [field for field in GENERATED_CASE_FIELDS if not data.get(field)]
-    if missing:
+    if missing := [field for field in GENERATED_CASE_FIELDS if not data.get(field)]:
         raise ValueError(f'generated case missing fields: {", ".join(missing)}')
-    if not isinstance(data.get('reasoning_steps'), list) or not all(
-        as_text(step) for step in data.get('reasoning_steps')
-    ):
+    if not isinstance(steps := data.get('reasoning_steps'), list) or not all(as_text(step) for step in steps):
         raise ValueError('generated case reasoning_steps must be a non-empty list of strings')
     return data
+
+
+def _unique_texts(values: Iterable[object]) -> list[str]:
+    seen, result = set(), []
+    for value in values:
+        text = as_text(value)
+        key = norm_text(text)
+        if text and key not in seen:
+            seen.add(key)
+            result.append(text)
+    return result
 
 
 def _contexts(units: list[Mapping[str, Any]], qtype: str, index: int) -> list[dict[str, str]]:

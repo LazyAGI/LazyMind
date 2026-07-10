@@ -15,7 +15,6 @@ const (
 
 	ResourceUpdateTriggerTypeScheduled        = "scheduled"
 	ResourceUpdateTriggerTypeConversationIdle = "conversation_idle"
-	ResourceUpdateTriggerTypeManual           = "manual"
 	ResourceUpdateTriggerTypeReviewResult     = "review_result"
 	ResourceUpdateTriggerTypeAutoEvoEnabled   = "auto_evo_enabled"
 

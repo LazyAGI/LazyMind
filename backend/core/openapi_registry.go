@@ -290,6 +290,9 @@ func (b *schemaBuilder) inlineSchemaForType(t reflect.Type) map[string]any {
 			if description := strings.TrimSpace(field.Tag.Get("desc")); description != "" {
 				propertySchema["description"] = description
 			}
+			if field.Tag.Get("openapi_nullable") == "true" {
+				propertySchema["nullable"] = true
+			}
 			properties[name] = propertySchema
 			if field.Tag.Get("required") == "true" || (!omitEmpty && !isOptionalField(field.Type)) {
 				required = append(required, name)
@@ -490,23 +493,67 @@ type agentThreadPathParams struct {
 	ThreadID string `path:"thread_id"`
 }
 
-type agentThreadResultDownloadPathParams struct {
+type agentThreadGatePathParams struct {
 	ThreadID string `path:"thread_id"`
-	Kind     string `path:"kind" enum:"datasets,eval-reports,analysis-reports,diffs,abtests"`
+	Step     string `path:"step"`
+	Version  int32  `path:"version"`
 }
 
-type agentThreadResultQueryParams struct {
-	Version int32 `query:"version"`
+type agentThreadGateVersionPathParams struct {
+	ThreadID string `path:"thread_id"`
+	Version  int32  `path:"version"`
 }
 
-type agentThreadResultDownloadQueryParams struct {
-	Format  string `query:"format" enum:"csv"`
-	Version int32  `query:"version"`
+type agentThreadTracePathParams struct {
+	ThreadID string `path:"thread_id"`
+	TraceID  string `path:"trace_id"`
+}
+
+type agentThreadTraceCompareQueryParams struct {
+	A string `query:"a" required:"true"`
+	B string `query:"b" required:"true"`
+}
+
+type agentThreadEvalBadCasesQueryParams struct {
+	PageSize    int32  `query:"page_size"`
+	PageToken   string `query:"page_token"`
+	Keyword     string `query:"keyword"`
+	FailureType string `query:"failure_type"`
+}
+
+type agentThreadABTestCaseDetailsQueryParams struct {
+	PageSize  int32  `query:"page_size"`
+	PageToken string `query:"page_token"`
+	Keyword   string `query:"keyword"`
+	Outcome   string `query:"outcome"`
+}
+
+type agentThreadEventsQueryParams struct {
+	StepID string `query:"step_id"`
+}
+
+type agentThreadEventTraceQueryParams struct {
+	StepID string `query:"step_id" required:"true"`
 }
 
 type agentThreadListQueryParams struct {
 	PageSize  int32  `query:"page_size"`
 	PageToken string `query:"page_token"`
+}
+
+type agentCandidateListQueryParams struct {
+	ThreadID  string `query:"thread_id" required:"true"`
+	Status    string `query:"status"`
+	PageSize  int32  `query:"page_size"`
+	PageToken string `query:"page_token"`
+}
+
+type agentCandidatePathParams struct {
+	CandidateID string `path:"candidate_id:.*"`
+}
+
+type agentRouterAlgorithmPathParams struct {
+	AlgorithmID string `path:"algorithm_id"`
 }
 
 type agentThreadOpenAPIResponse struct {
@@ -625,6 +672,7 @@ type listModelProviderGroupModelsOpenAPIItem struct {
 	GroupName                string `json:"group_name"`
 	BaseURL                  string `json:"base_url"`
 	IsDefault                bool   `json:"is_default"`
+	MaxInputTokens           *int64 `json:"max_input_tokens" desc:"Maximum model input length in tokens; null when unknown" openapi_nullable:"true"`
 }
 
 type listModelProviderGroupModelsOpenAPIResponse struct {
@@ -779,20 +827,11 @@ type resourceUpdateTaskListQueryParams struct {
 	TaskType     string `query:"task_type"`
 }
 
-type skillReviewTaskListQueryParams struct {
-	Page      int32  `query:"page"`
-	PageSize  int32  `query:"page_size"`
-	Status    string `query:"status"`
-	RequestID string `query:"requestid"`
-}
-
 type skillReviewResultListQueryParams struct {
 	Page         int32  `query:"page"`
 	PageSize     int32  `query:"page_size"`
 	ReviewStatus string `query:"review_status"`
 	Type         string `query:"type"`
-	SkillName    string `query:"skill_name"`
-	RequestID    string `query:"requestid"`
 }
 
 type memoryReviewResultListQueryParams struct {
@@ -857,52 +896,6 @@ type skillReviewResultListOpenAPIResponse struct {
 	Page     int32                              `json:"page"`
 	PageSize int32                              `json:"page_size"`
 	Total    int64                              `json:"total"`
-}
-
-type skillReviewSummaryOpenAPIResponse struct {
-	QualifiedSessionCount int32                              `json:"qualified_session_count"`
-	UserTurnCount         int32                              `json:"user_turn_count"`
-	ToolCallCount         int32                              `json:"tool_call_count"`
-	MinUserTurns          int32                              `json:"min_user_turns"`
-	MinToolTurns          int32                              `json:"min_tool_turns"`
-	QuantityThreshold     int32                              `json:"quantity_threshold"`
-	WindowStart           string                             `json:"window_start"`
-	WindowEnd             string                             `json:"window_end"`
-	RunningTask           *resourceUpdateTaskOpenAPIResponse `json:"running_task,omitempty"`
-	RunningRequestID      string                             `json:"running_requestid,omitempty"`
-}
-
-type skillReviewRunOpenAPIResponse struct {
-	Task      resourceUpdateTaskOpenAPIResponse `json:"task"`
-	Summary   skillReviewSummaryOpenAPIResponse `json:"summary"`
-	RequestID string                            `json:"requestid"`
-}
-
-type skillReviewTaskStatusOpenAPIResponse struct {
-	Task        resourceUpdateTaskOpenAPIResponse `json:"task"`
-	RequestID   string                            `json:"requestid"`
-	Status      string                            `json:"status"`
-	RunStatus   string                            `json:"run_status,omitempty"`
-	ResultCount int64                             `json:"result_count"`
-}
-
-type skillReviewTaskListOpenAPIResponse struct {
-	Items    []skillReviewTaskStatusOpenAPIResponse `json:"items"`
-	Page     int32                                  `json:"page"`
-	PageSize int32                                  `json:"page_size"`
-	Total    int64                                  `json:"total"`
-}
-
-type skillOrganizeOpenAPIRequest struct {
-	RequestID   string   `json:"requestid"`
-	Skills      []string `json:"skills"`
-	ArtifactDir string   `json:"artifact_dir,omitempty"`
-}
-
-type skillOrganizeOpenAPIResponse struct {
-	Status    string `json:"status"`
-	RequestID string `json:"requestid"`
-	TaskID    string `json:"taskid"`
 }
 
 type memoryReviewResultOpenAPIResponse struct {
@@ -1635,20 +1628,37 @@ func registeredCoreOperations() []openAPIOperation {
 	refResp := func(description, name string) openAPIResponse {
 		return openAPIResponse{Description: description, ContentType: "application/json", Schema: schemaSource{Ref: name}}
 	}
+	evoObjectSchema := map[string]any{
+		"type":                 "object",
+		"additionalProperties": true,
+	}
+	evoJSONBody := func(required bool) *openAPIBody {
+		return &openAPIBody{Required: required, ContentType: "application/json", Schema: schemaSource{Inline: evoObjectSchema}}
+	}
+	evoJSONResp := func(description string) openAPIResponse {
+		return openAPIResponse{Description: description, ContentType: "application/json", Schema: schemaSource{Inline: evoObjectSchema}}
+	}
+	evoStreamResp := openAPIResponse{
+		Description: "Evo event stream",
+		ContentType: "text/event-stream",
+		Schema: schemaSource{Inline: map[string]any{
+			"type": "string",
+		}},
+	}
+	evoDownloadResp := openAPIResponse{
+		Description: "Evo download",
+		ContentType: "application/octet-stream",
+		Schema: schemaSource{Inline: map[string]any{
+			"type":   "string",
+			"format": "binary",
+		}},
+	}
 	evoGateContentResp := openAPIResponse{
 		Description: "Evo gate content",
 		ContentType: "application/json",
 		Schema: schemaSource{Inline: map[string]any{
 			"type":                 "object",
 			"additionalProperties": true,
-		}},
-	}
-	evoGateCSVResp := openAPIResponse{
-		Description: "Evo gate CSV download",
-		ContentType: "text/csv",
-		Schema: schemaSource{Inline: map[string]any{
-			"type":   "string",
-			"format": "binary",
 		}},
 	}
 	return []openAPIOperation{
@@ -2193,31 +2203,6 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "GET",
-			Path:        "/skill-review:summary",
-			Summary:     "Get skill review summary",
-			Description: "Returns the current review window and depositable conversation count for manual skill review.",
-			Tags:        []string{"skill-review"},
-			Responses:   map[int]openAPIResponse{200: resp("Skill review summary", skillReviewSummaryOpenAPIResponse{})},
-		},
-		{
-			Method:      "POST",
-			Path:        "/skill-review:run",
-			Summary:     "Run manual skill review",
-			Description: "Creates a manual skill review task for the current review window when at least one conversation is depositable.",
-			Tags:        []string{"skill-review"},
-			Responses:   map[int]openAPIResponse{200: resp("Manual skill review task", skillReviewRunOpenAPIResponse{})},
-		},
-		{
-			Method:      "GET",
-			Path:        "/skill-review/tasks",
-			Summary:     "List skill review tasks",
-			Description: "Lists manual skill review tasks for the current user using the algorithm run status when available.",
-			Tags:        []string{"skill-review"},
-			QueryParams: skillReviewTaskListQueryParams{},
-			Responses:   map[int]openAPIResponse{200: resp("Manual skill review task list", skillReviewTaskListOpenAPIResponse{})},
-		},
-		{
-			Method:      "GET",
 			Path:        "/skill-review-results",
 			Summary:     "List skill review results",
 			Description: "Lists skill draft review results for the current user.",
@@ -2327,15 +2312,6 @@ func registeredCoreOperations() []openAPIOperation {
 			Summary:   "List skill categories",
 			Tags:      []string{"skills"},
 			Responses: map[int]openAPIResponse{200: resp("Skill category list", skillCategoriesOpenAPIResponse{})},
-		},
-		{
-			Method:      "POST",
-			Path:        "/skill_organize",
-			Summary:     "Submit skill organize task",
-			Description: "Submits a skill organize task for current user's SkillV2 files. The task runs asynchronously in the algorithm service.",
-			Tags:        []string{"skills"},
-			RequestBody: jsonBodyOf(skillOrganizeOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Skill organize task accepted", skillOrganizeOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",
@@ -2897,7 +2873,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/models",
 			Summary:     "List current user's models by model_type",
-			Description: "Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
+			Description: "Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model's maximum input length in tokens; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
 			Tags:        []string{"model_providers"},
 			QueryParams: listUserModelsByModelTypeQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Models list", listModelProviderGroupModelsOpenAPIResponse{})},
@@ -2961,7 +2937,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models",
 			Summary:     "List models under a connection group",
-			Description: "Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models).",
+			Description: "Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input length in tokens. Custom or unknown models return null.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Group models list", listModelProviderGroupModelsOpenAPIResponse{})},
@@ -3207,70 +3183,289 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/agent/threads",
 			Summary:     "List agent threads",
-			Description: "List the current user's agent threads. Use thread_id from this response to load thread details or history.",
+			Description: "List the current user's Core thread index entries. Core refreshes status from Evo when available.",
 			Tags:        []string{"agent"},
 			QueryParams: agentThreadListQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Agent thread list", agentThreadListOpenAPIResponse{})},
 		},
 		{
-			Method:      "GET",
-			Path:        "/agent/threads/{thread_id}/results/{kind}:download",
-			Summary:     "Download agent thread gate result as CSV",
-			Description: "Downloads one of datasets, eval-reports, analysis-reports, diffs, or abtests as CSV. Core converts Evo gate JSON content to CSV only on this download path.",
+			Method:      "POST",
+			Path:        "/agent/threads",
+			Summary:     "Create agent thread",
+			Description: "Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.",
 			Tags:        []string{"agent"},
-			PathParams:  agentThreadResultDownloadPathParams{},
-			QueryParams: agentThreadResultDownloadQueryParams{},
-			Responses:   map[int]openAPIResponse{200: evoGateCSVResp},
+			RequestBody: evoJSONBody(true),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Created agent thread")},
 		},
 		{
 			Method:      "GET",
-			Path:        "/agent/threads/{thread_id}/results/datasets",
-			Summary:     "GET /agent/threads/{thread_id}/results/datasets",
-			Description: "Returns Evo dataset gate content directly. Core performs no result post-processing on this content path.",
+			Path:        "/agent/threads/{thread_id}/events:stream",
+			Summary:     "Stream agent thread events",
+			Description: "Proxies Evo GET /threads/{thread_id}/events:stream.",
 			Tags:        []string{"agent"},
 			PathParams:  agentThreadPathParams{},
-			QueryParams: agentThreadResultQueryParams{},
+			QueryParams: agentThreadEventsQueryParams{},
+			Responses:   map[int]openAPIResponse{200: evoStreamResp},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/threads/{thread_id}/event-trace:stream",
+			Summary:     "Stream agent thread event trace",
+			Description: "Proxies Evo GET /threads/{thread_id}/event-trace:stream.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			QueryParams: agentThreadEventTraceQueryParams{},
+			Responses:   map[int]openAPIResponse{200: evoStreamResp},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/threads/{thread_id}/steps",
+			Summary:     "List agent thread steps",
+			Description: "Proxies Evo GET /threads/{thread_id}/steps. Core does not read or write step detail rows for this endpoint.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo thread steps")},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/threads/{thread_id}/gates",
+			Summary:     "List agent thread gates",
+			Description: "Proxies Evo GET /threads/{thread_id}/gates.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo gate list")},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/threads/{thread_id}/gates/{step}/versions/{version}:download",
+			Summary:     "Download agent thread gate version",
+			Description: "Proxies Evo GET /threads/{thread_id}/gates/{step}/versions/{version}:download.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadGatePathParams{},
+			QueryParams: struct {
+				Format string `query:"format" enum:"json"`
+			}{},
+			Responses: map[int]openAPIResponse{200: evoDownloadResp},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/threads/{thread_id}/gates/{step}/versions/{version}",
+			Summary:     "Get agent thread gate version",
+			Description: "Proxies Evo GET /threads/{thread_id}/gates/{step}/versions/{version}.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadGatePathParams{},
 			Responses:   map[int]openAPIResponse{200: evoGateContentResp},
 		},
 		{
 			Method:      "GET",
-			Path:        "/agent/threads/{thread_id}/results/eval-reports",
-			Summary:     "GET /agent/threads/{thread_id}/results/eval-reports",
-			Description: "Returns Evo eval gate content directly. Core performs no result post-processing on this content path.",
+			Path:        "/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases",
+			Summary:     "List eval bad cases for a gate version",
+			Description: "Proxies Evo GET /threads/{thread_id}/gates/eval/versions/{version}/bad-cases.",
 			Tags:        []string{"agent"},
-			PathParams:  agentThreadPathParams{},
-			QueryParams: agentThreadResultQueryParams{},
-			Responses:   map[int]openAPIResponse{200: evoGateContentResp},
+			PathParams:  agentThreadGateVersionPathParams{},
+			QueryParams: agentThreadEvalBadCasesQueryParams{},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo eval bad case page")},
 		},
 		{
 			Method:      "GET",
-			Path:        "/agent/threads/{thread_id}/results/analysis-reports",
-			Summary:     "GET /agent/threads/{thread_id}/results/analysis-reports",
-			Description: "Returns Evo analysis gate content directly. Core performs no result post-processing on this content path.",
+			Path:        "/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details",
+			Summary:     "List AB test case details for a gate version",
+			Description: "Proxies Evo GET /threads/{thread_id}/gates/abtest/versions/{version}/case-details.",
 			Tags:        []string{"agent"},
-			PathParams:  agentThreadPathParams{},
-			QueryParams: agentThreadResultQueryParams{},
-			Responses:   map[int]openAPIResponse{200: evoGateContentResp},
+			PathParams:  agentThreadGateVersionPathParams{},
+			QueryParams: agentThreadABTestCaseDetailsQueryParams{},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo AB test case detail page")},
 		},
 		{
 			Method:      "GET",
-			Path:        "/agent/threads/{thread_id}/results/diffs",
-			Summary:     "GET /agent/threads/{thread_id}/results/diffs",
-			Description: "Returns Evo repair gate content directly. Core performs no result post-processing on this content path.",
+			Path:        "/agent/threads/{thread_id}/results/traces:compare",
+			Summary:     "Compare agent traces",
+			Description: "Proxies Evo GET /threads/{thread_id}/results/traces:compare.",
 			Tags:        []string{"agent"},
 			PathParams:  agentThreadPathParams{},
-			QueryParams: agentThreadResultQueryParams{},
-			Responses:   map[int]openAPIResponse{200: evoGateContentResp},
+			QueryParams: agentThreadTraceCompareQueryParams{},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo trace comparison")},
 		},
 		{
 			Method:      "GET",
-			Path:        "/agent/threads/{thread_id}/results/abtests",
-			Summary:     "GET /agent/threads/{thread_id}/results/abtests",
-			Description: "Returns Evo abtest gate content directly. Core performs no result post-processing on this content path.",
+			Path:        "/agent/threads/{thread_id}/results/traces/{trace_id}",
+			Summary:     "Get agent trace detail",
+			Description: "Proxies Evo GET /threads/{thread_id}/results/traces/{trace_id}.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadTracePathParams{},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo trace detail")},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/threads/{thread_id}",
+			Summary:     "Get agent thread",
+			Description: "Returns the current user's local thread index entry with status refreshed from Evo when available.",
 			Tags:        []string{"agent"},
 			PathParams:  agentThreadPathParams{},
-			QueryParams: agentThreadResultQueryParams{},
-			Responses:   map[int]openAPIResponse{200: evoGateContentResp},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Agent thread")},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/agent/threads/{thread_id}",
+			Summary:     "Delete agent thread",
+			Description: "Deletes the Evo thread when present and removes Core's local thread index and active-thread row.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Deleted agent thread")},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/threads/{thread_id}/messages",
+			Summary:     "List agent thread messages",
+			Description: "Proxies Evo GET /threads/{thread_id}/messages.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			QueryParams: struct {
+				PageSize  int32  `query:"page_size"`
+				PageToken string `query:"page_token"`
+			}{},
+			Responses: map[int]openAPIResponse{200: evoJSONResp("Evo thread messages")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/agent/threads/{thread_id}/messages",
+			Summary:     "Send agent thread message",
+			Description: "Proxies Evo POST /threads/{thread_id}/messages.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			RequestBody: evoJSONBody(true),
+			Responses:   map[int]openAPIResponse{200: evoStreamResp},
+		},
+		{
+			Method:      "POST",
+			Path:        "/agent/threads/{thread_id}/start",
+			Summary:     "Start agent thread",
+			Description: "Proxies Evo start and updates Core's local thread status and active-thread lock.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			RequestBody: evoJSONBody(false),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo command response")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/agent/threads/{thread_id}/pause",
+			Summary:     "Pause agent thread",
+			Description: "Proxies Evo pause and updates Core's local thread status.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			RequestBody: evoJSONBody(false),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo command response")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/agent/threads/{thread_id}/cancel",
+			Summary:     "Cancel agent thread",
+			Description: "Proxies Evo cancel and releases Core's active-thread lock for the thread.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			RequestBody: evoJSONBody(false),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo command response")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/agent/threads/{thread_id}/retry",
+			Summary:     "Retry agent thread",
+			Description: "Proxies Evo retry and updates Core's local thread status and active-thread lock.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			RequestBody: evoJSONBody(false),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo command response")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/agent/threads/{thread_id}/continue",
+			Summary:     "Continue agent thread",
+			Description: "Proxies Evo continue and updates Core's local thread status and active-thread lock.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			RequestBody: evoJSONBody(false),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo command response")},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/candidates",
+			Summary:     "List Evo candidates",
+			Description: "Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.",
+			Tags:        []string{"agent"},
+			QueryParams: agentCandidateListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo candidate list")},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/candidates/{candidate_id:.*}",
+			Summary:     "Get Evo candidate",
+			Description: "Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.",
+			Tags:        []string{"agent"},
+			PathParams:  agentCandidatePathParams{},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo candidate")},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/router/status",
+			Summary:     "Get Evo router status",
+			Description: "Proxies Evo GET /router/status.",
+			Tags:        []string{"agent"},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router status")},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/router/algorithms",
+			Summary:     "List Evo router algorithms",
+			Description: "Proxies Evo GET /router/algorithms.",
+			Tags:        []string{"agent"},
+			QueryParams: struct {
+				ThreadID       string `query:"thread_id"`
+				AlgorithmID    string `query:"algorithm_id"`
+				Status         string `query:"status"`
+				RouterAdminURL string `query:"router_admin_url"`
+				RouterChatURL  string `query:"router_chat_url"`
+			}{},
+			Responses: map[int]openAPIResponse{200: evoJSONResp("Evo router algorithms")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/agent/router/algorithms",
+			Summary:     "Register Evo router algorithm",
+			Description: "Proxies Evo POST /router/algorithms.",
+			Tags:        []string{"agent"},
+			RequestBody: evoJSONBody(true),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router algorithm")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/agent/router/algorithms/{algorithm_id}:action",
+			Summary:     "Run Evo router algorithm action",
+			Description: "Proxies Evo POST /router/algorithms/{algorithm_id}:action.",
+			Tags:        []string{"agent"},
+			PathParams:  agentRouterAlgorithmPathParams{},
+			RequestBody: evoJSONBody(true),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router algorithm action")},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/router/ab-strategy",
+			Summary:     "Get Evo router AB strategy",
+			Description: "Proxies Evo GET /router/ab-strategy.",
+			Tags:        []string{"agent"},
+			QueryParams: struct {
+				RouterAdminURL string `query:"router_admin_url"`
+				RouterChatURL  string `query:"router_chat_url"`
+			}{},
+			Responses: map[int]openAPIResponse{200: evoJSONResp("Evo router AB strategy")},
+		},
+		{
+			Method:      "PUT",
+			Path:        "/agent/router/ab-strategy",
+			Summary:     "Update Evo router AB strategy",
+			Description: "Proxies Evo PUT /router/ab-strategy.",
+			Tags:        []string{"agent"},
+			RequestBody: evoJSONBody(true),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router AB strategy")},
 		},
 		{
 			Method:  "POST",

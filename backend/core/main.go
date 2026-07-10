@@ -77,8 +77,8 @@ func exportOpenAPIArtifacts(openAPIJSON []byte) {
 
 // handleAPI textPermissiontext。perms text extract_api_permissions.py text api_permissions.json（Kong RBAC），
 // text core text（text Kong + auth-service Authorization）。text gorilla/mux，text path text，text ":action" text。
-func handleAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) {
-	r.HandleFunc(path, withMutationRequestAudit(method, path, h)).Methods(method)
+func handleAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) *mux.Route {
+	return r.HandleFunc(path, withMutationRequestAudit(method, path, h)).Methods(method)
 }
 
 func registerCoreRoutes(r *mux.Router) {
@@ -196,7 +196,6 @@ func main() {
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
 	evalset.RegisterAsyncJobs()
-	plugin.RegisterPluginDraftGenerateJob()
 	asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
 	asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{
 		Concurrency:  asyncConfig.Concurrency,

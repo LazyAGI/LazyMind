@@ -243,10 +243,9 @@ def _apply_gate_transition(state: FlowRunState, command_kind: str) -> FlowRunSta
     if command_kind == 'resume':
         if state.status != 'paused':
             return state
-        released = dict(state.released_checkpoints)
         if state.pending_checkpoint is not None:
-            released[state.pending_checkpoint.step] = state.pending_checkpoint.ref
-        return replace(state, status='idle', pending_checkpoint=None, released_checkpoints=released, last_error='')
+            return state
+        return replace(state, status='idle', last_error='')
     if command_kind == 'cancel':
         if state.status == 'cancelled':
             return state

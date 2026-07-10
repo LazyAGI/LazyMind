@@ -4,8 +4,6 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
-from evo.operations.public_contracts import build_analysis_summary_root
-
 from .classify import classify_case
 from .cluster import cluster_traces
 from .repair_groups import build_repair_group_queue
@@ -72,7 +70,7 @@ def build_analysis_summary(
     clusters: Mapping[str, Any],
 ) -> dict[str, Any]:
     _validate_clusters(classifications, clusters)
-    return build_analysis_summary_root(run_id, classifications)
+    return build_analysis_detail(classifications, clusters) | {'run_id': str(run_id)}
 
 
 def build_analysis_from_answers(
@@ -118,9 +116,13 @@ def trace_quality(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
     traces = [_mapping(row.get('trace_summary')) for row in rows]
     features = [_mapping(trace.get('features')) for trace in traces]
     total = len(rows)
+    unavailable = [_text(row.get('case_id')) for row in rows
+                   if _mapping(row.get('trace_summary')).get('route_signature') == 'trace_unavailable'
+                   or _mapping(row.get('trace_summary')).get('trace_status') == 'unavailable']
     return {
         'total': total,
-        'complete': total,
+        'complete': total - len(unavailable),
+        'trace_unavailable': unavailable,
         'stage_unknown': [_text(row.get('case_id')) for row in rows
                           if _mapping(row.get('trace_summary')).get('unknown_stage_count')],
         'metrics_missing': [_text(row.get('case_id')) for row in rows
