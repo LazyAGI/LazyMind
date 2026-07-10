@@ -14,8 +14,9 @@ from typing import Any, Callable
 
 from fastapi import HTTPException
 
-from evo.artifact_flow.commands import CancelFlow, ContinueFlow, PauseFlow, ResumeFlow, RetryFlow
+from evo.artifact_flow.commands import ApplyArtifactMutation, CancelFlow, ContinueFlow, PauseFlow, ResumeFlow, RetryFlow
 from evo.artifact_flow.commands import FlowCommand
+from evo.artifact_runtime.evo.actions import InvalidateFromStep, RerunStep
 from evo.operations.router_ledger import RouterAlgorithmLedger
 from evo.operations.router_manager import RouterManager, RouterManagerError
 from .runtime_port import RuntimePort
@@ -229,7 +230,32 @@ class ThreadService:
             return self.pause(thread_id, {'command_id': command.command_id})
         if isinstance(command, CancelFlow):
             return self.cancel(thread_id, {'command_id': command.command_id})
+        if isinstance(command, ApplyArtifactMutation) and _mutation_should_continue(command):
+            return self._submit_mutation_and_continue(thread_id, config, command, schedule)
         return self.run_message_command(thread_id, config, command)
+
+    def _submit_mutation_and_continue(
+        self,
+        thread_id: str,
+        config: Mapping[str, Any],
+        command: ApplyArtifactMutation,
+        schedule: Callable[[Callable[[], None]], None],
+    ) -> dict[str, str]:
+        with self._lock:
+            if thread_id in self._active:
+                raise HTTPException(409, 'thread already has an active command')
+            snapshot = self.runtime.query(_num_case(config)).snapshot(thread_id)
+            if snapshot.status == 'cancelled':
+                raise HTTPException(409, 'cancelled thread cannot be executed')
+            self._active.add(thread_id)
+
+        def run() -> None:
+            flow = self.runtime.flow(_num_case(config))
+            result = flow.handle(thread_id, command)
+            if result.command_status == 'ok':
+                flow.handle(thread_id, ContinueFlow(f'{command.command_id}:continue'))
+
+        return self._submit(thread_id, command.command_id, schedule, run)
 
     def _config(self, thread_id: str) -> Mapping[str, Any]:
         if not THREAD_ID.fullmatch(str(thread_id or '')):
@@ -398,6 +424,10 @@ def _command_id(payload: Mapping[str, Any], prefix: str, thread_id: str) -> str:
 
 def _accepted(thread_id: str, command_id: str) -> dict[str, str]:
     return {'status': 'accepted', 'thread_id': thread_id, 'command_id': command_id}
+
+
+def _mutation_should_continue(command: ApplyArtifactMutation) -> bool:
+    return isinstance(command.mutation, (RerunStep, InvalidateFromStep))
 
 
 def _validate_step(step: str) -> None:

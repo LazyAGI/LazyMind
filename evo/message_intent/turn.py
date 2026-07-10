@@ -13,6 +13,7 @@ from filelock import FileLock, Timeout
 from pydantic import ValidationError
 
 from evo.artifact_flow import commands as F
+from evo.artifact_runtime.evo import catalog as C
 from evo.artifact_runtime.evo import actions as E
 from evo.artifact_runtime.kernel import ArtifactKey, ArtifactRef
 
@@ -119,6 +120,7 @@ class _Turn:
             'thread_id': self.thread_id,
             'origin': self.origin,
             'user_text': self.request.text,
+            'step_catalog': _step_catalog(),
             'projection': {
                 'active_agenda': old.get('active_agenda') or [],
                 'has_pending_approval': bool(old.get('pending_approval_ref')),
@@ -419,7 +421,12 @@ def _progress_text(result: object) -> str:
 
 def _action_text(compiled: Mapping[str, Any]) -> str:
     command_id = str(compiled['command_id'])
-    verb = '已提交' if compiled['kind'] == 'flow' else '已执行'
+    payload = compiled['payload']
+    auto_continue = compiled['kind'] == 'mutation' and str(payload.get('mutation') or '') in {
+        'rerun_step',
+        'invalidate_from_step',
+    }
+    verb = '已提交' if compiled['kind'] == 'flow' or auto_continue else '已执行'
     return f'{verb}{_action_name(compiled)}的操作，command_id={command_id}。'
 
 
@@ -446,6 +453,13 @@ def _action_name(compiled: Mapping[str, Any]) -> str:
         'rerun_step': '重跑步骤',
         'invalidate_from_step': '从指定步骤失效后续产物',
     }[mutation]
+
+
+def _step_catalog() -> list[dict[str, object]]:
+    return [
+        {'order': index, 'step': step, 'title': step}
+        for index, step in enumerate(C.STEPS, start=1)
+    ]
 
 
 def _hash(value: object) -> str:

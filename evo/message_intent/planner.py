@@ -26,6 +26,8 @@ Allowed flow command: continue, pause, resume, cancel, retry.
 Allowed query: progress_snapshot, read_step_root, read_case_artifact.
 Allowed mutation: edit_artifact, rerun_case_stage, rerun_step, invalidate_from_step.
 Allowed config_patch target: run_config, source_config, target_config, eval_policy, repair_policy, candidate_config.
+Use step_catalog as the source of truth for step order, names, and user-facing ordinal references.
+Do not infer step numbers from current_step or from recent progress alone.
 If pending_approval exists, use approval decision approve/reject/amend/replace/unclear,
 or output a replacement executable action with user_message_effect amend/replace.
 When projection.has_pending_approval is true, a user request to cancel/reject/stop
