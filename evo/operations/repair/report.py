@@ -9,7 +9,7 @@ from typing import Any
 def read_worker_report(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding='utf-8'))
-    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, OSError) as exc:
         return {'status': 'missing', 'reason': type(exc).__name__}
     if not isinstance(value, Mapping):
         return {'status': 'invalid', 'reason': 'report_not_mapping'}

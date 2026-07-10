@@ -33,23 +33,33 @@ def pre_validate(
     safe_emit(trace, 'verify.pre_validation_started', status='started', attempt=attempt)
     diff, files = diff_info.get('diff') or '', list(diff_info.get('files') or [])
     if not diff.strip():
-        safe_emit(trace, 'verify.pre_validation_completed', status='failed', attempt=attempt,
-              payload={'reason': 'empty_diff'})
+        safe_emit(
+            trace, 'verify.pre_validation_completed', status='failed', attempt=attempt,
+            payload={'reason': 'empty_diff'},
+        )
         return {'status': 'failed', 'reason': 'empty_diff', 'diff_scope': {}, 'commands': []}
     scope = _diff_scope(files, plan)
-    safe_emit(trace, 'verify.diff_scope_completed', status='completed' if scope['status'] == 'passed' else 'failed',
-          attempt=attempt, payload=scope)
+    safe_emit(
+        trace, 'verify.diff_scope_completed', status='completed' if scope['status'] == 'passed' else 'failed',
+        attempt=attempt, payload=scope,
+    )
     hardcode = _hardcode_check(diff, plan)
-    safe_emit(trace, 'verify.hardcode_check_completed',
-          status='completed' if hardcode['status'] == 'passed' else 'failed', attempt=attempt, payload=hardcode)
+    safe_emit(
+        trace, 'verify.hardcode_check_completed',
+        status='completed' if hardcode['status'] == 'passed' else 'failed', attempt=attempt, payload=hardcode,
+    )
     patch_safety = _patch_safety_check(diff, policy)
     patch_policy = _patch_policy_check(root, diff, files)
-    safe_emit(trace, 'verify.patch_policy_completed',
-          status='completed' if patch_policy['status'] == 'passed' else 'failed', attempt=attempt,
-          payload=patch_policy)
+    safe_emit(
+        trace, 'verify.patch_policy_completed',
+        status='completed' if patch_policy['status'] == 'passed' else 'failed', attempt=attempt,
+        payload=patch_policy,
+    )
     behavior = _behaviorful_check(root, diff, files)
-    safe_emit(trace, 'verify.behaviorful_diff_completed',
-          status='completed' if behavior['status'] == 'passed' else 'failed', attempt=attempt, payload=behavior)
+    safe_emit(
+        trace, 'verify.behaviorful_diff_completed',
+        status='completed' if behavior['status'] == 'passed' else 'failed', attempt=attempt, payload=behavior,
+    )
     if (
         scope['status'] != 'passed'
         or hardcode['status'] != 'passed'
@@ -61,8 +71,10 @@ def pre_validate(
             item['reason'] for item in (scope, hardcode, patch_safety, patch_policy, behavior)
             if item['status'] != 'passed'
         )
-        safe_emit(trace, 'verify.pre_validation_completed', status='failed', attempt=attempt,
-              payload={'reason': reason})
+        safe_emit(
+            trace, 'verify.pre_validation_completed', status='failed', attempt=attempt,
+            payload={'reason': reason},
+        )
         return {'status': 'failed', 'reason': reason, 'diff_scope': scope, 'hardcode_check': hardcode,
                 'patch_safety': patch_safety, 'patch_policy': patch_policy, 'behaviorful_check': behavior,
                 'commands': []}
@@ -75,8 +87,10 @@ def pre_validate(
     reason = '' if status == 'passed' else next(
         item['reason'] for item in (scope, hardcode, commands) if item['status'] != 'passed'
     )
-    safe_emit(trace, 'verify.pre_validation_completed', status='completed' if status == 'passed' else 'failed',
-          attempt=attempt, payload={'outcome': status, 'reason': reason})
+    safe_emit(
+        trace, 'verify.pre_validation_completed', status='completed' if status == 'passed' else 'failed',
+        attempt=attempt, payload={'outcome': status, 'reason': reason},
+    )
     return {'status': status, 'reason': reason, 'diff_scope': scope, 'hardcode_check': hardcode,
             'patch_safety': patch_safety, 'patch_policy': patch_policy, 'behaviorful_check': behavior,
             'commands': commands['results']}
@@ -508,11 +522,15 @@ def _verify(
         except Exception as exc:
             results.append({'command': command, 'returncode': None, 'stdout': '', 'stderr': str(exc),
                             'error_type': type(exc).__name__})
-            safe_emit(trace, 'verify.command_completed', status='failed', attempt=attempt,
-                  payload={'command': label, 'error_type': type(exc).__name__})
+            safe_emit(
+                trace, 'verify.command_completed', status='failed', attempt=attempt,
+                payload={'command': label, 'error_type': type(exc).__name__},
+            )
             return {'status': 'failed', 'reason': 'verification_command_failed', 'results': results}
-        safe_emit(trace, 'verify.command_completed', status='completed' if done.returncode == 0 else 'failed',
-              attempt=attempt, payload={'command': label, 'returncode': done.returncode})
+        safe_emit(
+            trace, 'verify.command_completed', status='completed' if done.returncode == 0 else 'failed',
+            attempt=attempt, payload={'command': label, 'returncode': done.returncode},
+        )
         if results[-1]['returncode'] != 0:
             return {'status': 'failed', 'reason': 'verification_command_failed', 'results': results}
     return {'status': 'passed', 'reason': '', 'results': results}

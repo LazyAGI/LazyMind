@@ -54,7 +54,8 @@ PROGRESS_FINAL_ANSWER = re.compile(
     r'我(?:将|会)直接.{0,30}检索结果.{0,30}(?:提取|回答|分析)|'
     r'首先[，,]?\s*我(?:需要|将|会).{0,40}(?:检索|搜索|查找|激活|调用|使用)|'
     r'接下来(?:我)?(?:将|会)?.{0,40}(?:检索|搜索|查找|激活|调用|使用)|'
-    r'I\s*(?:will|need|am going to|am now).{0,80}\b(?:search|retrieve|activate|call|use)\b.{0,40}\b(?:knowledge|tool|resume|document|file)s?\b|'
+    r'I\s*(?:will|need|am going to|am now).{0,80}\b(?:search|retrieve|activate|call|use)\b'
+    r'.{0,40}\b(?:knowledge|tool|resume|document|file)s?\b|'
     r'Let me.{0,80}\b(?:search|retrieve|activate|call|use)\b.{0,40}\b(?:knowledge|tool|resume|document|file)s?\b|'
     r'The\s*knowledge\s*base\s*search\s*(?:has\s*)?(?:returned|found)|Knowledge\s*base\s*search\s*(?:returned|found)'
     r')',
@@ -586,10 +587,19 @@ def _retry_exhausted_result(state: Any) -> dict[str, Any]:
         'chat_timeout_retry_exhausted': 'chat stream repeatedly exceeded the first-frame deadline',
         'router_algorithm_unhealthy_retry_exhausted': 'router repeatedly reported no healthy algorithm instance',
         'router_algorithm_timeout_retry_exhausted': 'router algorithm detail repeatedly timed out',
-        'router_algorithm_transport_error_retry_exhausted': 'router algorithm detail repeatedly failed with transport errors',
-        'router_algorithm_unavailable_retry_exhausted': 'router algorithm detail repeatedly reported unavailable algorithm',
+        'router_algorithm_transport_error_retry_exhausted': (
+            'router algorithm detail repeatedly failed with transport errors'
+        ),
+        'router_algorithm_unavailable_retry_exhausted': (
+            'router algorithm detail repeatedly reported unavailable algorithm'
+        ),
     }
-    return _failed({}, target, exhausted_type, messages.get(exhausted_type, 'chat stream repeatedly returned retryable failure')) | {
+    return _failed(
+        {},
+        target,
+        exhausted_type,
+        messages.get(exhausted_type, 'chat stream repeatedly returned retryable failure'),
+    ) | {
         'retry_exhausted': True,
     }
 

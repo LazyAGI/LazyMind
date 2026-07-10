@@ -303,6 +303,8 @@ def _output_values(
     if set(outputs_by_name) != set(output_key_by_name):
         raise MaterializerContractError('materializer output names must match op outputs')
     return {output_key_by_name[name]: value for name, value in outputs_by_name.items()}
+
+
 def _execution_key(op_id: str, output_key_by_name: Mapping[str, ArtifactKey]) -> str:
     output_ids = sorted([key.artifact_id, key.partition] for key in output_key_by_name.values())
     payload = json.dumps([op_id, output_ids], separators=(',', ':')).encode()

@@ -286,6 +286,7 @@ def abtest_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
     ops = {op.op_id: op for op in default_evo_ops(cases)}
     return tuple(ops[op_id] for op_id in op_ids)
 
+
 __all__ = [
     'abtest_evo_ops',
     'analysis_evo_ops',

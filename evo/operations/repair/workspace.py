@@ -70,7 +70,10 @@ def workspace_diff(workspace: Path) -> dict[str, Any]:
                  and not path.startswith('.evo_repair_logs/') and not path.endswith('.pyc')]
     if untracked:
         git(workspace, 'add', '-N', '--', *untracked)
-    return {'diff': git(workspace, 'diff', '--', strip=False), 'files': git(workspace, 'diff', '--name-only').splitlines()}
+    return {
+        'diff': git(workspace, 'diff', '--', strip=False),
+        'files': git(workspace, 'diff', '--name-only').splitlines(),
+    }
 
 
 def apply_diff(workspace: Path, diff: str) -> None:

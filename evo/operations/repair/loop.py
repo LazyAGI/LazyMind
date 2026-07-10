@@ -262,8 +262,14 @@ def _validation_input_gap(
     return ''
 
 
-def _task_card(plan: Mapping[str, Any], workspace: Mapping[str, Any], localization: Mapping[str, Any],
-               attempt: int, report_path: Path, previous_attempts: list[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+def _task_card(
+    plan: Mapping[str, Any],
+    workspace: Mapping[str, Any],
+    localization: Mapping[str, Any],
+    attempt: int,
+    report_path: Path,
+    previous_attempts: list[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     prior = _attempt_feedback(previous_attempts or [])
     return {
         'mode': 'lazyrag_validated_repair_v3',
@@ -283,10 +289,13 @@ def _task_card(plan: Mapping[str, Any], workspace: Mapping[str, Any], localizati
             'Do not edit tests, eval, data, generated files, secrets, or vendored lazyllm.',
             'Do not add fallback, retry, second-pass, or "if empty then try original query" retrieval behavior.',
             'Do not treat validation failure by broadening search breadth or bypassing the selected evidence contract.',
-            'If retrieved evidence is present but ids are missing, repair evidence propagation, source serialization, or parsing contracts instead of adding retrieval fallbacks.',
+            'If retrieved evidence is present but ids are missing, repair evidence propagation, source serialization, '
+            'or parsing contracts instead of adding retrieval fallbacks.',
             'Use ranked symbols as localization evidence, not as a hard file whitelist.',
-            'The host repair loop accepts only when validation overall_score improves, badcase overall_score average gains at least 0.10, and goodcase overall_score average drops no more than 0.05.',
-            'Read previous_attempts before editing; do not repeat a rejected strategy, file-only retry tweak, or metric-neutral change.',
+            'The host repair loop accepts only when validation overall_score improves, badcase overall_score average '
+            'gains at least 0.10, and goodcase overall_score average drops no more than 0.05.',
+            'Read previous_attempts before editing; do not repeat a rejected strategy, file-only retry tweak, '
+            'or metric-neutral change.',
             'If a previous attempt failed overall_score_gate, change the root-cause hypothesis before editing.',
             f'Write a JSON worker report to {report_path.as_posix()}.',
         ],
@@ -399,8 +408,9 @@ def _latest_prevalidated_patch(attempts: list[Mapping[str, Any]]) -> Mapping[str
 
 
 def _worker_failure(run: Any) -> str:
-    if getattr(run, 'last_error', None):
-        return _text(getattr(run, 'last_error'))
+    last_error = getattr(run, 'last_error', None)
+    if last_error:
+        return _text(last_error)
     returncode = getattr(run, 'returncode', 0)
     if returncode:
         return f'opencode exited with {returncode}'

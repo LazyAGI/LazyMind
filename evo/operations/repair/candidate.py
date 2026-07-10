@@ -61,15 +61,19 @@ def validate_candidate_patch(
     if not selected:
         return {'status': 'rejected', 'accepted': False, 'reason': 'no_validation_cases'}
     patch = {'status': 'verified', 'workspace_ref': str(root), 'diff': diff}
-    safe_emit(trace, 'candidate.service_started', status='started', attempt=attempt,
-          payload={'case_count': len(selected)})
+    safe_emit(
+        trace, 'candidate.service_started', status='started', attempt=attempt,
+        payload={'case_count': len(selected)},
+    )
     service: Mapping[str, Any] | None = None
     cleanup_service = True
     try:
         service = candidate_service(candidate_config, patch, ctx)
     except Exception as exc:
-        safe_emit(trace, 'candidate.service_failed', status='failed', attempt=attempt,
-              payload={'error_type': type(exc).__name__})
+        safe_emit(
+            trace, 'candidate.service_failed', status='failed', attempt=attempt,
+            payload={'error_type': type(exc).__name__},
+        )
         raise
     try:
         public_service = {key: value for key, value in service.items()
@@ -81,8 +85,10 @@ def validate_candidate_patch(
             if key in health
         }
         if service.get('status') != 'ready':
-            safe_emit(trace, 'candidate.service_failed', status='failed', attempt=attempt,
-                  payload={'reason': 'candidate_service_failed', 'service': public_service})
+            safe_emit(
+                trace, 'candidate.service_failed', status='failed', attempt=attempt,
+                payload={'reason': 'candidate_service_failed', 'service': public_service},
+            )
             return {'status': 'candidate_service_failed', 'accepted': False, 'reason': 'candidate_service_failed',
                     'service': public_service, 'case_ids': list(selected)}
         safe_emit(trace, 'candidate.service_ready', status='completed', attempt=attempt,
@@ -95,8 +101,10 @@ def validate_candidate_patch(
                 answers[case_id] = answer
                 judges[case_id] = judge_case(case, answer, eval_policy)
             except Exception as exc:
-                safe_emit(trace, 'candidate.case_completed', status='failed', attempt=attempt,
-                      payload={'case_id': case_id, 'error_type': type(exc).__name__})
+                safe_emit(
+                    trace, 'candidate.case_completed', status='failed', attempt=attempt,
+                    payload={'case_id': case_id, 'error_type': type(exc).__name__},
+                )
                 raise
             safe_emit(trace, 'candidate.case_completed', status='completed', attempt=attempt, payload={
                 'case_id': case_id,
@@ -160,12 +168,16 @@ def validate_candidate_patch(
                 'early_stop_reason': early_stop_reason,
             }
         try:
-            safe_emit(trace, 'analysis.candidate_started', status='started', attempt=attempt,
-                  payload={'case_count': len(selected)})
+            safe_emit(
+                trace, 'analysis.candidate_started', status='started', attempt=attempt,
+                payload={'case_count': len(selected)},
+            )
             analysis = build_analysis_from_answers(selected, answers, judges) | {'id': 'repair.candidate_analysis'}
         except Exception as exc:
-            safe_emit(trace, 'analysis.candidate_completed', status='failed', attempt=attempt,
-                  payload={'error_type': type(exc).__name__})
+            safe_emit(
+                trace, 'analysis.candidate_completed', status='failed', attempt=attempt,
+                payload={'error_type': type(exc).__name__},
+            )
             return {
                 'status': 'rejected',
                 'accepted': False,
@@ -174,8 +186,10 @@ def validate_candidate_patch(
                 'candidate_analysis_error': str(exc),
             }
         delta = _analysis_delta_from(plan, comparison, analysis, candidate_summary)
-        safe_emit(trace, 'analysis.candidate_completed', status='completed', attempt=attempt,
-              payload={'row_count': len(analysis.get('rows') or [])})
+        safe_emit(
+            trace, 'analysis.candidate_completed', status='completed', attempt=attempt,
+            payload={'row_count': len(analysis.get('rows') or [])},
+        )
         safe_emit(trace, 'analysis.delta_completed', status='completed', attempt=attempt, payload={
             key: delta.get(key)
             for key in ('target_group_status', 'target_remaining_badcase_count',

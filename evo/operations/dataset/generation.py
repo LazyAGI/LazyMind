@@ -126,7 +126,9 @@ def dataset_materializers(case_ids, *, llm_complete=None, duplicate_questions=No
             raise ValueError('dataset.generate_case preparation case_id does not match partition')
         check = None
         if duplicate_questions is not None:
-            check = lambda row: duplicate_questions(ctx.run_id, partition, row)
+            def duplicate_check(row):
+                return duplicate_questions(ctx.run_id, partition, row)
+            check = duplicate_check
         return {'case': generate_case(inputs['config'], inputs['snapshot'], preparation, llm_complete, check)}
 
     def assemble(ctx, inputs) -> Mapping[str, object]:

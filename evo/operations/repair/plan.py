@@ -15,6 +15,8 @@ BUDGET_LIMITS = {
     'evidence_case_budget': (8, 1, 30),
     'seed_file_budget': (5, 1, 10),
 }
+
+
 def build_repair_plan(analysis: Mapping[str, Any], policy: Mapping[str, Any]) -> dict[str, Any]:
     rows = [row for row in _items(analysis.get('rows')) if isinstance(row, Mapping)]
     allowed_roots = _roots(policy.get('allowed_roots'), DEFAULT_ALLOWED_ROOTS)
@@ -253,6 +255,7 @@ def _roots(value: Any, default: tuple[str, ...]) -> list[str]:
     roots = [_path(item) for item in _items(value)]
     return [root for root in roots if root] or list(default)
 
+
 def _path(value: Any) -> str:
     text = str(value or '').strip()
     if not text or text.startswith('/') or '\\' in text or '//' in text:
@@ -274,6 +277,7 @@ def _items(value: Any) -> list[Any]:
     if isinstance(value, (list, tuple)):
         return list(value)
     return [] if value in (None, '') else [value]
+
 
 def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     try:

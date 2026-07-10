@@ -266,6 +266,8 @@ def _emit_trace(trace: Any, attempt: int | None, event: dict[str, Any]) -> None:
             'returncode': compact.get('returncode'),
         },
     )
+
+
 def _command_label(command: object) -> str:
     return ' '.join(str(command or '').split()[:8])[:200]
 
