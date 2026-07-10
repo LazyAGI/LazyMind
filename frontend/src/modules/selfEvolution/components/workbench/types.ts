@@ -12,7 +12,8 @@ import type {
   WorkflowResultKind,
   WorkflowStep as SelfEvolutionRuntimeWorkflowStep,
 } from "../../shared";
-import type { DatasetStreamingRow, EvalStreamingRow } from "../../hooks/controller/types";
+import type { DatasetStreamingRow, EvalStreamingRow, AbtestStreamingRow, AnalysisStreamingRow } from "../../hooks/controller/types";
+import type { RepairTraceRow } from "../../shared/repairTrace";
 
 export type SelfEvolutionSessionSummary = {
   id: string;
@@ -82,7 +83,7 @@ export type SelfEvolutionWorkbenchViewProps = {
   onPromptChange: (value: string) => void;
   onSend: (command?: string) => void;
   onConfirmIntentCheckpoint: () => void;
-  onContinueCheckpoint: (command?: string) => void;
+  onContinueCheckpoint: () => void;
   onOpenArtifact: (kind: WorkflowResultKind) => void;
   onOpenObservation: (kind: SelfEvolutionObservationKind) => void;
   onOpenCaseArtifact: (kind: WorkflowResultKind, artifactId: string, title: string, caseId?: string) => void;
@@ -98,4 +99,9 @@ export type SelfEvolutionWorkbenchViewProps = {
   streamingDatasetProgress?: { current: number; total: number };
   streamingEvalRows?: EvalStreamingRow[];
   streamingEvalProgress?: { current: number; total: number };
+  streamingAbtestRows?: AbtestStreamingRow[];
+  streamingAbtestProgress?: { current: number; total: number };
+  streamingAnalysisRows?: AnalysisStreamingRow[];
+  streamingAnalysisProgress?: { current: number; total: number };
+  repairTraceRows?: RepairTraceRow[];
 };
