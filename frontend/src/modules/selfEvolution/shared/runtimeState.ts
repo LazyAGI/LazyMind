@@ -99,7 +99,7 @@ export function getTerminalFlowStepStatus(status?: string): StepStatus | undefin
   if (["error", "failed"].includes(normalizedStatus)) {
     return "failed";
   }
-  if (["completed", "done", "ended", "success", "succeeded"].includes(normalizedStatus)) {
+  if (["ended"].includes(normalizedStatus)) {
     return "done";
   }
   return undefined;
@@ -124,7 +124,7 @@ export function applyThreadStreamTerminalToState(
   }
 
   const nextStatus: StepStatus =
-    flowStatus === "paused"
+    flowStatus === "paused" || flowStatus === "completed"
       ? "done"
       : resolveTerminalStepStatusFromFlowStatus(flowStatus);
 

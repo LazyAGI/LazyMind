@@ -13,7 +13,11 @@ import { CutoverDecisionCard } from "./workbench/CutoverDecisionCard";
 import { ProcessActivitySection } from "./workbench/ProcessActivitySection";
 import { DatasetStreamingTable } from "./workbench/DatasetStreamingTable";
 import { EvalStreamingTable } from "./workbench/EvalStreamingTable";
+import { AbtestStreamingTable } from "./workbench/AbtestStreamingTable";
+import { AnalysisStreamingTable } from "./workbench/AnalysisStreamingTable";
+import { RepairTraceStreamPanel } from "./workbench/RepairTraceStreamPanel";
 import { WorkbenchSidebar } from "./workbench/WorkbenchSidebar";
+import { requiresManualCheckpointAction } from "../shared/checkpoint";
 import type { SelfEvolutionWorkbenchViewProps } from "./workbench/types";
 
 export type {
@@ -90,6 +94,11 @@ export function SelfEvolutionWorkbenchView({
   streamingDatasetProgress = { current: 0, total: 0 },
   streamingEvalRows = [],
   streamingEvalProgress = { current: 0, total: 0 },
+  streamingAbtestRows = [],
+  streamingAbtestProgress = { current: 0, total: 0 },
+  streamingAnalysisRows = [],
+  streamingAnalysisProgress = { current: 0, total: 0 },
+  repairTraceRows = [],
 }: SelfEvolutionWorkbenchViewProps) {
   const { t } = useTranslation();
   const [isEndedChatOpen, setIsEndedChatOpen] = useState(false);
@@ -245,26 +254,31 @@ export function SelfEvolutionWorkbenchView({
       </div>
     </div>
   );
+  const hasComposerCheckpoint = Boolean(
+    checkpointDecisionPrompt &&
+      !shouldShowCutoverCard &&
+      (!isAutoMode || requiresManualCheckpointAction(checkpointDecisionPrompt)),
+  );
   const renderMainComposer = () => (
     <div className="self-evolution-main-composer">
-      {checkpointDecisionPrompt && !shouldShowCutoverCard && (
+      {hasComposerCheckpoint && (
         <div className="self-evolution-composer-checkpoint">
           <span>{checkpointDecisionDesc}</span>
           <button
             type="button"
-            disabled={!checkpointDecisionPrompt.command || isSendingMessage}
+            disabled={!checkpointDecisionPrompt?.command || isSendingMessage}
             onClick={(event) => {
               event.stopPropagation();
-              if (checkpointDecisionPrompt.command) {
+              if (checkpointDecisionPrompt?.command) {
                 if (isIntentConfirmation) {
                   onConfirmIntentCheckpoint();
                 } else {
-                  onContinueCheckpoint(checkpointDecisionPrompt.command);
+                  onContinueCheckpoint();
                 }
               }
             }}
           >
-            {checkpointDecisionPrompt.command || t("selfEvolutionRun.continueExecution")}
+            {checkpointDecisionPrompt?.command || t("selfEvolutionRun.continueExecution")}
           </button>
         </div>
       )}
@@ -388,6 +402,20 @@ export function SelfEvolutionWorkbenchView({
                     rows={streamingEvalRows}
                     current={streamingEvalProgress.current}
                     total={streamingEvalProgress.total}
+                  />
+                ) : shouldShowStageDetail && displayStage === "analysis" ? (
+                  <AnalysisStreamingTable
+                    rows={streamingAnalysisRows}
+                    current={streamingAnalysisProgress.current}
+                    total={streamingAnalysisProgress.total}
+                  />
+                ) : shouldShowStageDetail && displayStage === "repair" ? (
+                  <RepairTraceStreamPanel rows={repairTraceRows} />
+                ) : shouldShowStageDetail && displayStage === "abtest" ? (
+                  <AbtestStreamingTable
+                    rows={streamingAbtestRows}
+                    current={streamingAbtestProgress.current}
+                    total={streamingAbtestProgress.total}
                   />
                 ) : shouldShowStageDetail ? (
                   <ProcessActivitySection
