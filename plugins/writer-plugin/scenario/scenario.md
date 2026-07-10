@@ -8,7 +8,7 @@ Help users compose structured long-form writing, including articles, reports, te
 2. **generate_outline** — produce a structured outline based on the context
 3. **plan_sections** — generate per-chapter writing instructions from the outline
 4. **generate_draft** — serially draft the full document per the section instructions
-5. **generate_patch** — build the patch for a user modification request: locate targets → modify plan → patch set → validate
+5. **generate_patch** — generate a patch set from the user's modification request and validate it
 6. **apply_patch** — apply the validated patch set, convert the revised DocIR back to a draft, and overwrite the draft with the revised version
 7. **review_document** — review the draft across multiple dimensions, scoring it and surfacing revision suggestions
 8. **finalize_report** — apply the review feedback and produce the final report
@@ -32,8 +32,8 @@ Every step supports a full rerun: when the user is unhappy with a step's result,
 | Unhappy with the outline, regenerate it | generate_outline | `advance_step(step_id='generate_outline', user_input=<note>)` |
 | Re-plan the section instructions | plan_sections | `advance_step(step_id='plan_sections', user_input=<note>)` |
 | Redraft the document | generate_draft | `advance_step(step_id='generate_draft', user_input=<note>)` |
-| Revise the current draft to a modification request (e.g. "shorten section 3", "rewrite the intro") | generate_patch | `advance_step(step_id='generate_patch', user_input=<modification request>)` |
-| Re-apply the patch after regenerating it | apply_patch | `advance_step(step_id='apply_patch', user_input=<note>)` |
+| Revise the draft | generate_patch | `advance_step(step_id='generate_patch', user_input=<modification request>)` |
+| Abandon the revision after seeing the patch | review_document | `advance_step(step_id='review_document', user_input=<note>)` |
 | Re-review | review_document | `advance_step(step_id='review_document', user_input=<note>)` |
 | Produce the final report again | finalize_report | `advance_step(step_id='finalize_report', user_input=<note>)` |
 | Satisfied with the final result | (no action — DriverAgent marks DONE automatically) | — |

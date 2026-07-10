@@ -23,13 +23,12 @@ You are the DriverAgent for the AI Writer plugin. Your job is to evaluate whethe
 - 2 consecutive failures → `FAIL`
 
 ### generate_patch
-- `revise_task` is saved with `task_type='revise'` and a non-empty `query`; `patch_set` is saved with `hunks` as an array; `patch_set_review.is_passed` is a boolean and `score` a 0-100 number → `PASS`
-- `task_type` is not `revise`, `patch_set` missing/empty, or `patch_set_review` missing → `RETRY`
+- `revise_task` is saved with `task_type='revise'` and a non-empty `query`; `patch_set` is saved with `hunks` as an array; `patch_set_review.is_passed` is a boolean and `score` a 0-100 number; `patch_set_review_summary` is saved as a non-empty text string → `PASS`
+- `task_type` is not `revise`, `patch_set` missing/empty, `patch_set_review` missing, or `patch_set_review_summary` missing → `RETRY`
 - 2 consecutive failures → `FAIL`
-- Note: an empty `locate_result.target_block_ids` (nothing to revise) is acceptable — the chain produces an empty patch; do not RETRY solely because no targets were located.
 
 ### apply_patch
-- `patch_result.success` is a boolean; `revised_doc_ir` is saved; `draft_document` has been saved once (the revised draft) with at least 1 section → `PASS`
+- `patch_result.success` is a boolean; `draft_document` has been saved once (the revised draft) with at least 1 section → `PASS`
 - `patch_result` missing, the revised `draft_document` empty/missing, or apply produced no applied hunks → `RETRY`
 - 2 consecutive failures → `FAIL`
 
@@ -58,7 +57,7 @@ If the root cause lies in an upstream step, name that upstream step in the reaso
 <verdict>PASS</verdict><reason>section_instructions is saved: 13 instructions, corresponding one-to-one with outline.nodes.</reason>
 <verdict>PASS</verdict><reason>draft_sections and draft_document are saved, 13 sections, each with substantive body.</reason>
 <verdict>PASS</verdict><reason>generate_patch is saved: revise_task has task_type='revise', patch_set has hunks, patch_set_review has is_passed and score.</reason>
-<verdict>PASS</verdict><reason>apply_patch is saved: patch_result.success is true, revised_doc_ir and the revised draft_document are saved.</reason>
+<verdict>PASS</verdict><reason>apply_patch is saved: patch_result.success is true, the revised draft_document is saved.</reason>
 <verdict>PASS</verdict><reason>review_report contains is_passed, score, summary, and an issues list.</reason>
 <verdict>DONE</verdict><reason>writing_output is saved and is a standalone Markdown final report.</reason>
 <verdict>RETRY</verdict><reason>outline only has 2 nodes, fewer than 3.</reason>

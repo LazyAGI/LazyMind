@@ -162,26 +162,17 @@ steps:
     prompt: |
       {{runtime_instruction}}
 
-      This step builds the revision artifacts for the user's revision request ("{{user_input}}"): build a revise task, convert the draft to DocIR, locate revision targets, generate a modify plan, generate a patch set, and validate it.
+      This step builds the revision artifacts for the user's revision request ("{{user_input}}").
 
       Step 1: Call writer_build_revise_task(query="{{user_input}}") to get the revise_task path, then persist it with save_artifact(content_type='file', key='revise_task').
 
-      Step 2: Call get_artifact to retrieve the draft_document and writing_context paths. Call writer_draft_to_doc_ir(draft_document_path=<draft_document path>) to get the doc_ir path, then persist it with save_artifact(content_type='file', key='doc_ir').
+      Step 2: Call get_artifact to retrieve the draft_document and writing_context paths. Call writer_generate_patch_set(revise_task_path=<revise_task path>, draft_document_path=<draft_document path>, writing_context_path=<writing_context path>) to get the patch_set and doc_ir paths. Persist the patch_set with save_artifact(content_type='file', key='patch_set') and the doc_ir with save_artifact(content_type='file', key='doc_ir'); the doc_ir is a required input for the subsequent apply_patch step.
 
-      Step 3: Call writer_locate_revision_target(revise_task_path=<revise_task path>, doc_ir_path=<doc_ir path>, writing_context_path=<writing_context path>) to get the locate_result path, then persist it with save_artifact(content_type='file', key='locate_result').
-
-      Step 4: Call writer_generate_modify_plan(revise_task_path=<revise_task path>, doc_ir_path=<doc_ir path>, locate_result_path=<locate_result path>, writing_context_path=<writing_context path>) to get the modify_plan path, then persist it with save_artifact(content_type='file', key='modify_plan').
-
-      Step 5: Call writer_generate_patch_set(doc_ir_path=<doc_ir path>, modify_plan_path=<modify_plan path>, writing_context_path=<writing_context path>) to get the patch_set path, then persist it with save_artifact(content_type='file', key='patch_set').
-
-      Step 6: Call writer_validate_patch_set(patch_set_path=<patch_set path>, revise_task_path=<revise_task path>, writing_context_path=<writing_context path>) to get the patch_set_review path, then persist it with save_artifact(content_type='file', key='patch_set_review').
+      Step 3: Call writer_validate_patch_set(patch_set_path=<patch_set path>, revise_task_path=<revise_task path>, writing_context_path=<writing_context path>) to get the patch_set_review path and patch_set_review_summary text. Persist them separately with save_artifact(content_type='file', key='patch_set_review', value=<patch_set_review path>) and save_artifact(content_type='text', key='patch_set_review_summary', value=<patch_set_review_summary content>).
 
       If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
     tools:
       - writer_build_revise_task
-      - writer_draft_to_doc_ir
-      - writer_locate_revision_target
-      - writer_generate_modify_plan
       - writer_generate_patch_set
       - writer_validate_patch_set
     inputs:
@@ -192,12 +183,11 @@ steps:
     outputs:
       - slot: revise_task
       - slot: doc_ir
-      - slot: locate_result
-      - slot: modify_plan
       - slot: patch_set
       - slot: patch_set_review
+      - slot: patch_set_review_summary
     acceptance_criteria: |
-      revise_task is saved with task_type='revise' and a non-empty query; doc_ir is saved with a non-empty blocks array; locate_result is saved with target_block_ids as an array; modify_plan is saved with instructions as an array; patch_set is saved with hunks as an array; patch_set_review is saved with is_passed being a boolean and score a 0-100 number.
+      revise_task is saved with task_type='revise' and a non-empty query; patch_set is saved with hunks as an array; patch_set_review is saved with is_passed being a boolean and score a 0-100 number; patch_set_review_summary is saved as the content summary produced by validate_patch_set (not a path).
 
   apply_patch:
     label: Apply Patch
@@ -206,16 +196,13 @@ steps:
 
       This step applies the validated patch_set to the DocIR, converts the revised DocIR back into a draft, and updates the writing context.
 
-      Step 1: Call get_artifact to retrieve the doc_ir, patch_set, and writing_context paths. Call writer_apply_patch(doc_ir_path=<doc_ir path>, patch_set_path=<patch_set path>, writing_context_path=<writing_context path>) to get the patch_result path and revised_doc_ir path. Persist them separately with save_artifact(content_type='file', key='patch_result') and save_artifact(content_type='file', key='revised_doc_ir').
+      Step 1: Call get_artifact to retrieve the doc_ir, patch_set, and writing_context paths. Call writer_apply_patch(doc_ir_path=<doc_ir path>, patch_set_path=<patch_set path>, writing_context_path=<writing_context path>) to get the patch_result path and draft_document path. Persist them separately with save_artifact(content_type='file', key='patch_result') and save_artifact(content_type='file', key='draft_document').
 
-      Step 2: Call writer_doc_ir_to_draft(doc_ir_path=<revised_doc_ir path>) to get the revised draft_document path, then persist it with save_artifact(content_type='file', key='draft_document').
-
-      Step 3: Call writer_update_writing_context(content_artifact_path=<revised draft_document path>, writing_context_path=<original writing_context path>) to get the updated writing_context path, then persist it with save_artifact(content_type='file', key='writing_context').
+      Step 2: Call writer_update_writing_context(content_artifact_path=<revised draft_document path>, writing_context_path=<original writing_context path>) to get the updated writing_context path, then persist it with save_artifact(content_type='file', key='writing_context').
 
       If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
     tools:
       - writer_apply_patch
-      - writer_doc_ir_to_draft
       - writer_update_writing_context
     inputs:
       - slot: doc_ir
@@ -226,11 +213,10 @@ steps:
         required: true
     outputs:
       - slot: patch_result
-      - slot: revised_doc_ir
       - slot: draft_document
       - slot: writing_context
     acceptance_criteria: |
-      patch_result is saved with success being a boolean; revised_doc_ir is saved; draft_document has been saved once (the revised draft) with at least 1 section; writing_context has been saved once.
+      patch_result is saved with success being a boolean; draft_document has been saved once (the revised draft) with at least 1 section; writing_context has been saved once.
 
   review_document:
     label: Review Document

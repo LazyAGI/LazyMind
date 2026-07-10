@@ -35,13 +35,9 @@ tool_scripts:
       - writer_check_consistency
       - writer_generate_writing_output
       - writer_build_revise_task
-      - writer_draft_to_doc_ir
-      - writer_locate_revision_target
-      - writer_generate_modify_plan
       - writer_generate_patch_set
       - writer_validate_patch_set
       - writer_apply_patch
-      - writer_doc_ir_to_draft
 
 steps:
   - id: build_context
@@ -92,14 +88,6 @@ slots:
     label: Doc IR
     type: text
     cardinality: single
-  - id: locate_result
-    label: Locate Result
-    type: text
-    cardinality: single
-  - id: modify_plan
-    label: Modify Plan
-    type: text
-    cardinality: single
   - id: patch_set
     label: Patch Set
     type: text
@@ -108,12 +96,12 @@ slots:
     label: Patch Set Review
     type: text
     cardinality: single
-  - id: patch_result
-    label: Patch Result
+  - id: patch_set_review_summary
+    label: Patch Set Review Summary
     type: text
     cardinality: single
-  - id: revised_doc_ir
-    label: Revised Doc IR
+  - id: patch_result
+    label: Patch Result
     type: text
     cardinality: single
   - id: review_report
@@ -174,11 +162,9 @@ ui:
       layout: list
       slots:
         - id: revise_task
-        - id: doc_ir
-        - id: locate_result
-        - id: modify_plan
         - id: patch_set
         - id: patch_set_review
+        - id: patch_set_review_summary
 
     - id: apply_patch
       step_id: apply_patch
@@ -186,7 +172,6 @@ ui:
       layout: list
       slots:
         - id: patch_result
-        - id: revised_doc_ir
         - id: draft_document
         - id: writing_context
 
@@ -237,12 +222,10 @@ i18n:
       draft_document: {label: 完整初稿}
       revise_task: {label: 修订任务}
       doc_ir: {label: 文档 IR}
-      locate_result: {label: 定位结果}
-      modify_plan: {label: 修改计划}
       patch_set: {label: 补丁集}
       patch_set_review: {label: 补丁校验}
+      patch_set_review_summary: {label: 补丁校验摘要}
       patch_result: {label: 补丁应用}
-      revised_doc_ir: {label: 修订后文档 IR}
       review_report: {label: 审阅报告}
       review_summary: {label: 审阅摘要}
       writing_output: {label: 最终成稿}

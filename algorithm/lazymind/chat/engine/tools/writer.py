@@ -522,7 +522,10 @@ class WriterToolGroup:
         ).validate_patch_set(
             patch_set=patch_set_path, context=context_path, task=task_path,
         )
-        return _json_dumps(_primary_data(result))
+        return _json_dumps({
+            'patch_set_review': _primary_data(result),
+            'patch_set_review_summary': result.get('summary') or '',
+        })
 
     def apply_patch(
         self,
