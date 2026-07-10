@@ -211,43 +211,6 @@ export function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCas
       applyTerminalStageFailure("abtest", abtestCases, evalCaseSteps, terminalStatus, event.timestamp);
     }
   });
-  const applyTerminalStageFailure = (
-    stage: EvoCaseProgressGroup["stage"],
-    cases: Map<string, CaseProgressState>,
-    steps: readonly string[],
-    terminalStatus: StepStatus,
-    updatedAt?: string,
-  ) => {
-    cases.forEach((item, caseId) => {
-      steps.forEach((step) => {
-        const current = item.steps[step];
-        if (current === "running" || current === "pending" || !current) {
-          updateCaseStep(cases, caseId, step, terminalStatus, updatedAt);
-        }
-      });
-    });
-  };
-  events.forEach((event) => {
-    if (!isTerminalThreadEvent(event.type)) {
-      return;
-    }
-    const terminalStatus = resolveTerminalStepStatusFromFlowStatus(
-      getFlowStatusFromPayload(event.payload),
-    );
-    if (terminalStatus !== "failed" && terminalStatus !== "canceled") {
-      return;
-    }
-    const stage = event.stage;
-    if (stage === "dataset") {
-      applyTerminalStageFailure("dataset", datasetCases, datasetCaseSteps, terminalStatus, event.timestamp);
-    } else if (stage === "eval") {
-      applyTerminalStageFailure("eval", evalCases, evalCaseSteps, terminalStatus, event.timestamp);
-    } else if (stage === "analysis") {
-      applyTerminalStageFailure("analysis", analysisCases, analysisCaseSteps, terminalStatus, event.timestamp);
-    } else if (stage === "abtest") {
-      applyTerminalStageFailure("abtest", abtestCases, evalCaseSteps, terminalStatus, event.timestamp);
-    }
-  });
   const groups: EvoCaseProgressGroup[] = [
     { stage: "dataset", title: t("selfEvolutionRun.caseGroupDataset"), pageSize: 10, cases: Array.from(datasetCases.values()).map((item) => buildCaseItem(item, datasetCaseSteps, "datasets", areCaseStepsDone(item, datasetCaseSteps) ? item.artifactId : undefined, t("selfEvolutionRun.viewCaseDetail"))).sort(sortCaseItems) },
     { stage: "eval", title: t("selfEvolutionRun.caseGroupEval"), pageSize: 10, cases: Array.from(evalCases.values()).map((item) => buildCaseItem(item, evalCaseSteps, "eval-reports", areCaseStepsDone(item, evalCaseSteps) ? item.artifactId : undefined, t("selfEvolutionRun.viewCaseResult"))).sort(sortCaseItems) },
