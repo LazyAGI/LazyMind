@@ -57,3 +57,5 @@ func attachProcessJob(_ RuntimePaths, _ string, _ *os.Process) (func(), error) {
 }
 
 func terminateProcessJob(_ RuntimePaths, _ string) error { return os.ErrNotExist }
+
+func stopSupervisorProcess(pid int) error { return interruptProcess(pid) }

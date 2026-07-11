@@ -703,7 +703,7 @@ func (m *RuntimeManager) stopProcessComposeSupervisor(ctx context.Context, paths
 		_ = os.Remove(paths.ProcessComposePIDFile)
 		return nil
 	}
-	if err := interruptProcess(pid); err != nil {
+	if err := stopSupervisorProcess(pid); err != nil {
 		_ = proc.Signal(os.Interrupt)
 	}
 	deadline := time.NewTimer(3 * time.Second)

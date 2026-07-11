@@ -28,7 +28,11 @@ func interruptProcess(pid int) error {
 	if pid <= 0 {
 		return nil
 	}
-	return windows.GenerateConsoleCtrlEvent(windows.CTRL_BREAK_EVENT, uint32(pid))
+	// CTRL_C/CTRL_BREAK are console-wide mechanisms, not Unix-style targeted
+	// signals. They can interrupt process-compose and its calling PowerShell
+	// host even when a process group is supplied. Use Windows tree termination;
+	// managed service descendants are additionally contained by Job Objects.
+	return forceKillProcessTree(pid)
 }
 
 func forceKillProcessTree(pid int) error {
@@ -119,3 +123,8 @@ func terminateProcessJob(paths RuntimePaths, service string) error {
 	defer windows.CloseHandle(job)
 	return windows.TerminateJobObject(job, 1)
 }
+
+// process-compose has already run its ordered shutdown command by this point.
+// Sending CTRL_BREAK to its console group can also interrupt the calling
+// PowerShell host, so terminate only the remaining supervisor process tree.
+func stopSupervisorProcess(pid int) error { return forceKillProcessTree(pid) }
