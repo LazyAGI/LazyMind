@@ -3,12 +3,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
+
+const windowsProcessScanTimeout = 10 * time.Second
 
 type windowsProcessInfo struct {
 	ProcessID       uint32  `json:"ProcessId"`
@@ -22,8 +27,13 @@ type windowsProcessInfo struct {
 // whose executable itself lives outside the LazyMind runtime tree.
 func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error) {
 	command := "$p=@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine); ConvertTo-Json -InputObject $p -Compress"
-	raw, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), windowsProcessScanTimeout)
+	defer cancel()
+	raw, err := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command).Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("Windows process scan timed out after %s: %w", windowsProcessScanTimeout, ctx.Err())
+		}
 		return nil, err
 	}
 	var processes []windowsProcessInfo

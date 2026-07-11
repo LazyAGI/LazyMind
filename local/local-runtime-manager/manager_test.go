@@ -850,6 +850,7 @@ func TestGoToolEnvUsesHostCacheOutsideRuntimeRoot(t *testing.T) {
 	}
 	hostHome := filepath.Join(t.TempDir(), "host-home")
 	t.Setenv(localHostHomeEnvVar, hostHome)
+	t.Setenv("LOCALAPPDATA", filepath.Join(hostHome, "AppData", "Local"))
 	t.Setenv("HOME", paths.ServiceHome)
 	t.Setenv("GOCACHE", filepath.Join(paths.BuildRoot, "cache", "go-build"))
 	t.Setenv("GOMODCACHE", filepath.Join(paths.RuntimeRoot, "go", "pkg", "mod"))

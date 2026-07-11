@@ -15,7 +15,14 @@ def _expand_payload_args(argv: list[str]) -> list[str]:
         for option in ('function', 'before_function', 'after_function', 'defined_pos'):
             prefix = f'--{option}-file='
             if arg.startswith(prefix):
-                payload = Path(arg[len(prefix):]).read_text(encoding='ascii')
+                path = Path(arg[len(prefix):])
+                try:
+                    payload = path.read_text(encoding='ascii')
+                finally:
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
                 expanded.append(f'--{option}={payload}')
                 matched = True
                 break

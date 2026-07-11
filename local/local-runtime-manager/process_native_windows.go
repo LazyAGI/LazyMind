@@ -16,9 +16,15 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const stillActive = 259
+const (
+	stillActive        = 259
+	jobObjectTerminate = 0x0008
+)
 
-var procOpenJobObjectW = windows.NewLazySystemDLL("kernel32.dll").NewProc("OpenJobObjectW")
+var (
+	procOpenJobObjectW       = windows.NewLazySystemDLL("kernel32.dll").NewProc("OpenJobObjectW")
+	assignProcessToJobObject = windows.AssignProcessToJobObject
+)
 
 func configureChildProcess(cmd *exec.Cmd, _ bool) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
@@ -124,9 +130,12 @@ func attachProcessJob(paths RuntimePaths, service string, proc *os.Process) (fun
 		return nil, err
 	}
 	defer windows.CloseHandle(process)
-	if err := windows.AssignProcessToJobObject(job, process); err != nil {
+	if err := assignProcessToJobObject(job, process); err != nil {
+		// Nested Job Objects can reject assignment when the parent job does not
+		// permit breakaway. Keep startup available and rely on the registered
+		// process inventory/orphan scanner when strict containment is unavailable.
 		windows.CloseHandle(job)
-		return nil, err
+		return func() {}, nil
 	}
 	return func() { _ = windows.CloseHandle(job) }, nil
 }
@@ -136,7 +145,9 @@ func terminateProcessJob(paths RuntimePaths, service string) error {
 	if err != nil {
 		return err
 	}
-	jobHandle, _, callErr := procOpenJobObjectW.Call(uintptr(0x0008), 0, uintptr(unsafe.Pointer(name)))
+	// x/sys/windows v0.30.0 does not expose OpenJobObject, so keep the raw
+	// kernel32 call isolated here and immediately wrap its result as a Handle.
+	jobHandle, _, callErr := procOpenJobObjectW.Call(uintptr(jobObjectTerminate), 0, uintptr(unsafe.Pointer(name)))
 	if jobHandle == 0 {
 		return callErr
 	}
