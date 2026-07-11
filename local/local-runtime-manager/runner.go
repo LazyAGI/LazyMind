@@ -32,12 +32,18 @@ type CommandStreamer interface {
 
 type ExecRunner struct{}
 
-func (r *ExecRunner) Run(ctx context.Context, cmd Command) (CommandResult, error) {
+func execCommand(ctx context.Context, cmd Command) *exec.Cmd {
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	c.Dir = cmd.Dir
 	if len(cmd.Env) > 0 {
 		c.Env = append(os.Environ(), cmd.Env...)
 	}
+	configureRunnerProcess(c)
+	return c
+}
+
+func (r *ExecRunner) Run(ctx context.Context, cmd Command) (CommandResult, error) {
+	c := execCommand(ctx, cmd)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -63,11 +69,7 @@ func (r *ExecRunner) Run(ctx context.Context, cmd Command) (CommandResult, error
 }
 
 func (r *ExecRunner) Stream(ctx context.Context, cmd Command, stdout io.Writer, stderr io.Writer) error {
-	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
-	c.Dir = cmd.Dir
-	if len(cmd.Env) > 0 {
-		c.Env = append(os.Environ(), cmd.Env...)
-	}
+	c := execCommand(ctx, cmd)
 	c.Stdout = stdout
 	c.Stderr = stderr
 	return c.Run()

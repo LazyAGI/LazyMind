@@ -96,9 +96,27 @@ function Invoke-Native([string]$Command, [string[]]$Arguments, [string]$WorkingD
     }
 }
 
-function Build-GoBinary([string]$Directory, [string]$Output, [string[]]$Package = @('.')) {
+function Build-GoBinary([string]$Directory, [string]$Output, [string[]]$Package = @('.'), [switch]$WindowsGUI) {
     New-Item -ItemType Directory -Force -Path (Split-Path $Output) | Out-Null
-    Invoke-Native 'go.exe' (@('build') + $goBuildArgs + @('-o', $Output) + $Package) $Directory
+    $buildArgs = $goBuildArgs
+    if ($WindowsGUI) {
+        $buildArgs = @('-trimpath', '-buildvcs=false', '-ldflags=-s -w -H=windowsgui')
+    }
+    Invoke-Native 'go.exe' (@('build') + $buildArgs + @('-o', $Output) + $Package) $Directory
+}
+
+function Assert-WindowsGUISubsystem([string]$Path) {
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 256) { throw "Invalid PE binary: $Path" }
+    $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+    $subsystemOffset = $peOffset + 24 + 68
+    if ($peOffset -lt 0 -or $subsystemOffset + 2 -gt $bytes.Length) {
+        throw "Invalid PE header: $Path"
+    }
+    $subsystem = [BitConverter]::ToUInt16($bytes, $subsystemOffset)
+    if ($subsystem -ne 2) {
+        throw "Desktop local-runtime-manager must use the Windows GUI subsystem; got PE subsystem $subsystem"
+    }
 }
 
 function Install-GoTool([string]$Package) {
@@ -211,7 +229,9 @@ function Build-Desktop {
     New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'deps\python') | Out-Null
 
     Write-Host '==> Building Go desktop runtime binaries'
-    Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') (Join-Path $runtimeRoot 'bin\local-runtime-manager.exe')
+    $desktopManager = Join-Path $runtimeRoot 'bin\local-runtime-manager.exe'
+    Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') $desktopManager -WindowsGUI
+    Assert-WindowsGUISubsystem $desktopManager
     Build-GoBinary (Join-Path $repoRoot 'local\local-proxy') (Join-Path $runtimeRoot 'bin\local-proxy.exe') @('.\cmd\local-proxy')
     Build-GoBinary (Join-Path $repoRoot 'backend\core') (Join-Path $runtimeRoot 'bin\core.exe')
     Build-GoBinary (Join-Path $repoRoot 'backend\scan-control-plane') (Join-Path $runtimeRoot 'bin\scan-control-plane.exe') @('.\cmd\scan-control-plane')

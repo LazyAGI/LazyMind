@@ -27,7 +27,10 @@ var (
 )
 
 func configureChildProcess(cmd *exec.Cmd, _ bool) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW,
+		HideWindow:    true,
+	}
 }
 
 func interruptProcess(pid int) error {
