@@ -177,6 +177,7 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	}
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 		Profile:       "desktop",
+		OwnerToken:    "desktop-test-owner",
 		RepoRoot:      repo,
 		RuntimeRoot:   runtimeRoot,
 		ResourcesRoot: resources,
@@ -743,6 +744,7 @@ func TestRuntimeManagerUpRequiresBundledLazyLLMSourceInDesktopProfile(t *testing
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 		Profile:       "desktop",
+		OwnerToken:    "desktop-test-owner",
 		RepoRoot:      repo,
 		RuntimeRoot:   filepath.Join(t.TempDir(), "runtime"),
 		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),

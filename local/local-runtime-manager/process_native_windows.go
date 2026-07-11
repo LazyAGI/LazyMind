@@ -54,12 +54,33 @@ func processAlive(pid int) bool {
 		return false
 	}
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
+	if err == nil {
+		defer windows.CloseHandle(h)
+		var code uint32
+		return windows.GetExitCodeProcess(h, &code) == nil && code == stillActive
+	}
+
+	// A watchdog created through Win32_Process.Create can run outside the
+	// Electron Job Object but under a provider token that cannot open the
+	// Electron process. Toolhelp32 enumerates the native process table without
+	// requiring a handle to the target process.
+	snapshot, snapshotErr := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if snapshotErr != nil {
 		return false
 	}
-	defer windows.CloseHandle(h)
-	var code uint32
-	return windows.GetExitCodeProcess(h, &code) == nil && code == stillActive
+	defer windows.CloseHandle(snapshot)
+	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
+	if snapshotErr = windows.Process32First(snapshot, &entry); snapshotErr != nil {
+		return false
+	}
+	for {
+		if entry.ProcessID == uint32(pid) {
+			return true
+		}
+		if snapshotErr = windows.Process32Next(snapshot, &entry); snapshotErr != nil {
+			return false
+		}
+	}
 }
 
 func nativeProcessGroupID(_ int) int { return 0 }

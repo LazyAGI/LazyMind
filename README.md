@@ -182,6 +182,15 @@ make test-hermetic
 
 `local-win-*` delegates to `local/scripts/local-win.ps1`, builds with `CGO_ENABLED=0`, uses `.exe`/`Scripts`/`.cmd` paths, and creates a Windows directory junction for frontend dependencies. Core SQLite uses a Pure Go driver, so MinGW is not required. Host-local runtimes on all three platforms install `algorithm/requirements-local.txt` and use pymilvus/Milvus Lite 3.0 under `LAZYMIND_LOCAL_MILVUS_DATA_DIR`; its storage format is intentionally incompatible with the old 2.x local database. Container builds instead install `algorithm/requirements-cloud.txt`, which explicitly pins the Cloud pymilvus client to 2.4.14.
 
+### Desktop Builds
+
+| Platform | Local source runtime | Desktop package |
+|----------|----------------------|-----------------|
+| macOS arm64 | `make local-up` / `make local-down` | `make desktop-darwin-arm64` |
+| Windows x64 | `make local-win-up` / `make local-win-down` | `make desktop-windows-x64` |
+
+Windows Desktop produces `desktop/dist/win-unpacked/` and the portable `desktop/dist/LazyMind-windows-x64.zip`. The package includes the compiled frontend and full Local/RAG runtime; it does not include raw frontend `node_modules` or model weights. See [`desktop/README.md`](desktop/README.md) for runtime ownership and platform details.
+
 ### Platform Path Examples
 
 | Platform | Application artifacts | Runtime data and DB | Logs | Cache | Local documents |

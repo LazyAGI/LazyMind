@@ -15,6 +15,7 @@ const (
 	runtimeRootEnvVar                = "LAZYMIND_RUNTIME_ROOT"
 	localBuildRootEnvVar             = "LAZYMIND_LOCAL_BUILD_ROOT"
 	runtimeResourcesRootEnvVar       = "LAZYMIND_RUNTIME_RESOURCES_ROOT"
+	runtimeOwnerTokenEnvVar          = "LAZYMIND_RUNTIME_OWNER_TOKEN"
 	localPortsPinnedEnvVar           = "LAZYMIND_LOCAL_PORTS_PINNED"
 	processComposePortEnvVar         = "LAZYMIND_PROCESS_COMPOSE_PORT"
 	processComposeDownTimeoutEnvVar  = "LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT"
@@ -203,6 +204,7 @@ type RuntimePaths struct {
 
 type RuntimeConfig struct {
 	Profile            string
+	OwnerToken         string
 	RepoRoot           string
 	BuildRoot          string
 	ResourcesRoot      string
@@ -221,6 +223,7 @@ type RuntimeConfig struct {
 
 type RuntimeConfigOptions struct {
 	Profile       string
+	OwnerToken    string
 	RepoRoot      string
 	RuntimeRoot   string
 	BuildRoot     string
@@ -843,6 +846,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	milvusLiteDBPath := filepath.Clean(milvusDataDir)
 	return RuntimeConfig{
 		Profile:            profile,
+		OwnerToken:         strings.TrimSpace(firstNonEmpty(opts.OwnerToken, os.Getenv(runtimeOwnerTokenEnvVar))),
 		RepoRoot:           p.RepoRoot,
 		BuildRoot:          p.BuildRoot,
 		ResourcesRoot:      p.ResourcesRoot,

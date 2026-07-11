@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -25,6 +25,7 @@ override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)
 override LOCAL_RUNTIME_MANAGER_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager
 override LOCAL_RUNTIME_MANAGER_WIN_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager.exe
 LOCAL_WIN_SCRIPT := $(CURDIR)/local/scripts/local-win.ps1
+DESKTOP_WIN_SCRIPT := $(CURDIR)/desktop/scripts/build-windows-x64.ps1
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
 comma := ,
 
@@ -193,6 +194,8 @@ help:
 	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
 	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
 	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
+	@echo "  make desktop-windows-x64 - Build Windows x64 Desktop portable ZIP"
+	@echo "  make desktop-windows-x64-clean - Remove Windows x64 Desktop build outputs"
 	@echo "  make desktop-cache-clean - Remove repo-local Desktop caches, if any"
 	@echo "  make desktop-clean - Remove all Desktop generated outputs"
 	@echo "  make local-down - Stop local LazyMind runtime"
@@ -441,14 +444,20 @@ desktop-darwin-arm64-clean:
 	@echo "🧹 Removing Darwin arm64 Desktop generated outputs..."
 	@for path in \
 		"$(CURDIR)/desktop/build/darwin-arm64" \
-		"$(CURDIR)/desktop/dist" \
-		"$(CURDIR)/desktop/electron/node_modules"; do \
+		"$(CURDIR)/desktop/dist/mac-arm64" \
+		"$(CURDIR)/desktop/dist/LazyMind-darwin-arm64.zip"; do \
 		if [ -e "$$path" ]; then \
 			chflags -R nouchg "$$path" 2>/dev/null || true; \
 			chmod -R u+rwX "$$path" 2>/dev/null || true; \
 			rm -rf "$$path"; \
 		fi; \
 	done
+
+desktop-windows-x64:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(DESKTOP_WIN_SCRIPT)" build
+
+desktop-windows-x64-clean:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(DESKTOP_WIN_SCRIPT)" clean
 
 desktop-cache-clean:
 	@echo "🧹 Removing repo-local Desktop caches, if any..."
@@ -461,6 +470,10 @@ desktop-cache-clean:
 		fi; \
 	done
 
+ifeq ($(OS),Windows_NT)
+desktop-clean:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(DESKTOP_WIN_SCRIPT)" clean-all
+else
 desktop-clean:
 	@echo "🧹 Removing Desktop generated outputs..."
 	@for path in \
@@ -474,6 +487,7 @@ desktop-clean:
 			rm -rf "$$path"; \
 		fi; \
 	done
+endif
 
 local-up: local-runtime-manager-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up

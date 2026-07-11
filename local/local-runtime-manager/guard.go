@@ -15,6 +15,9 @@ func runRuntimeGuard(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths,
 	if ownerPID <= 0 {
 		return fmt.Errorf("--owner-pid must be positive")
 	}
+	if err := validateRequestedRuntimeOwner(cfg); err != nil {
+		return err
+	}
 	if pollInterval <= 0 {
 		pollInterval = defaultGuardPollInterval
 	}

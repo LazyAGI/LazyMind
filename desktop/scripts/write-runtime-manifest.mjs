@@ -4,11 +4,33 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "
 import path from "node:path";
 import process from "node:process";
 
-const runtimeRoot = process.argv[2];
-if (!runtimeRoot) {
-  console.error("usage: write-runtime-manifest.mjs <runtime-root>");
+const args = process.argv.slice(2);
+const runtimeRoot = args.shift();
+const options = {};
+while (args.length > 0) {
+  const key = args.shift();
+  const value = args.shift();
+  if (!key?.startsWith("--") || !value) {
+    console.error("invalid runtime manifest arguments");
+    process.exit(2);
+  }
+  options[key.slice(2)] = value;
+}
+
+if (!runtimeRoot || !options.platform || !options.arch) {
+  console.error("usage: write-runtime-manifest.mjs <runtime-root> --platform darwin|windows --arch arm64|amd64");
   process.exit(2);
 }
+
+const supportedTargets = new Set(["darwin/arm64", "windows/amd64"]);
+const target = `${options.platform}/${options.arch}`;
+if (!supportedTargets.has(target)) {
+  console.error(`unsupported desktop runtime target: ${target}`);
+  process.exit(2);
+}
+
+const executableSuffix = options.platform === "windows" ? ".exe" : "";
+const executable = (name) => `bin/${name}${executableSuffix}`;
 
 function sha256(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -20,7 +42,7 @@ function walk(dir, base = dir, out = {}) {
   }
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry);
-    const rel = path.relative(base, full);
+    const rel = path.relative(base, full).split(path.sep).join("/");
     const stat = statSync(full);
     if (stat.isDirectory()) {
       walk(full, base, out);
@@ -34,15 +56,15 @@ function walk(dir, base = dir, out = {}) {
 const manifest = {
   version: 1,
   profile: "desktop",
-  platform: "darwin",
-  arch: "arm64",
+  platform: options.platform,
+  arch: options.arch,
   binaries: {
-    "process-supervisor": "bin/process-compose",
-    "local-proxy": "bin/local-proxy",
-    "core": "bin/core",
-    "scan-control-plane": "bin/scan-control-plane",
-    "file-watcher": "bin/file-watcher",
-    "caddy": "bin/caddy"
+    "process-supervisor": executable("process-compose"),
+    "local-proxy": executable("local-proxy"),
+    "core": executable("core"),
+    "scan-control-plane": executable("scan-control-plane"),
+    "file-watcher": executable("file-watcher"),
+    "caddy": executable("caddy")
   },
   paths: {
     appRoot: "app",

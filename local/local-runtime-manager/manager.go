@@ -105,8 +105,14 @@ func randomHexToken() (string, error) {
 }
 
 func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := validateRequestedRuntimeOwner(cfg); err != nil {
+		return err
+	}
 	freshCfg := cfg
 	if err := paths.EnsureAllDirs(); err != nil {
+		return err
+	}
+	if err := relocateDesktopPythonVenvs(cfg, paths); err != nil {
 		return err
 	}
 	state, err := readOrNewState(paths, cfg)
@@ -114,6 +120,11 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	stateCfg := applyStateConfig(freshCfg, state)
+	if claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
+		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
+			return err
+		}
+	}
 	if m.isExistingRuntimeRunning(ctx, state, stateCfg, paths) {
 		return m.reportExistingRuntime(ctx, state, paths)
 	}
@@ -125,6 +136,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	}
 	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 		Profile:       cfg.Profile,
+		OwnerToken:    cfg.OwnerToken,
 		RepoRoot:      paths.RepoRoot,
 		RuntimeRoot:   cfg.RuntimeRoot,
 		ResourcesRoot: cfg.ResourcesRoot,
@@ -147,6 +159,11 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	stateCfg = applyStateConfig(freshCfg, state)
+	if claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
+		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
+			return err
+		}
+	}
 	if m.isExistingRuntimeRunning(ctx, state, stateCfg, paths) {
 		return m.reportExistingRuntime(ctx, state, paths)
 	}
@@ -158,6 +175,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	}
 	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 		Profile:       cfg.Profile,
+		OwnerToken:    cfg.OwnerToken,
 		RepoRoot:      paths.RepoRoot,
 		RuntimeRoot:   cfg.RuntimeRoot,
 		ResourcesRoot: cfg.ResourcesRoot,
@@ -202,6 +220,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	}
 
 	state.Profile = cfg.Profile
+	state.OwnerToken = cfg.OwnerToken
 	state.RepoRoot = cfg.RepoRoot
 	state.ResourcesRoot = cfg.ResourcesRoot
 	state.RuntimeRoot = cfg.RuntimeRoot
@@ -474,12 +493,25 @@ func frontendHealthAlive(port int, timeout time.Duration) bool {
 }
 
 func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := validateRequestedRuntimeOwner(cfg); err != nil {
+		return err
+	}
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
 	state, err := readOrNewState(paths, cfg)
 	if err != nil {
 		return err
+	}
+	if err := activeRuntimeOwnershipError(state, cfg); err != nil {
+		active := claimsRuntimeRunning(state) ||
+			(state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond)) ||
+			processComposeSupervisorAlive(paths)
+		if active {
+			return err
+		}
+		m.progressf("runtime state belongs to another profile or instance; skipping shutdown")
+		return nil
 	}
 	cfg = applyStateConfig(cfg, state)
 	if state.ProcessCompose.APIPort > 0 {
@@ -1054,6 +1086,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 	resp := StatusResponse{
 		Runtime:        state.Profile,
 		Profile:        state.Profile,
+		OwnerMatched:   cfg.Profile == "desktop" && cfg.OwnerToken != "" && cfg.OwnerToken == state.OwnerToken,
 		OverallStatus:  state.OverallStatus,
 		RepoRoot:       state.RepoRoot,
 		ResourcesRoot:  state.ResourcesRoot,
