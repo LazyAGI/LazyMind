@@ -1,5 +1,7 @@
 import type { DatasetImportRecord, DatasetItem, DatasetListItem } from "./shared";
 
+export const DATASET_PAGE_SIZE_OPTIONS = ["10", "20", "50", "100"];
+
 export const mockDatasets: DatasetListItem[] = [
   {
     id: "dataset-service-qa",
