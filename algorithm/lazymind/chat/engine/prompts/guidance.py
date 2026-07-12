@@ -111,3 +111,22 @@ TOOL_CALL_STATUS_GUIDANCE = (
     "same response. If you cannot call a tool, do not pretend you are doing so — "
     "answer directly instead."
 )
+
+MUTATION_OUTCOME_GUIDANCE = (
+    "# Durable mutation outcome contract (mandatory)\n"
+    "When the user explicitly asks you to save, remember, update, or delete durable "
+    "personal data, you must use the matching durable-write tool in this response.\n"
+    "- For a user profile, identity, contact detail, stable preference, or working-memory "
+    "update, you MUST call `memory_editor`. Read the current target first when an edit "
+    "requires its existing text.\n"
+    "- For an explicit user-specific terminology or synonym mapping, you MUST call "
+    "`vocab_learn`.\n"
+    "A mutation succeeded only when its structured tool result has `success: true`. "
+    "If the tool was not called, never claim that it was saved, remembered, recorded, "
+    "updated, or deleted. If the result has `success: false`, clearly say the operation "
+    "failed and use its reason; do not claim success. You may make at most one corrected "
+    "tool call when the error identifies a repairable argument problem.\n"
+    "`memory_editor` success creates a draft with status `pending_review`; describe it as "
+    "submitted and pending review, never as already applied to the active profile. "
+    "`vocab_learn` success may be described as saved only after its successful result."
+)

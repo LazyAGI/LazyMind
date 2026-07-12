@@ -100,6 +100,29 @@ def test_translator_counts_tool_call_turns_not_individual_calls():
         ],
     })
     assert translator.tool_call_turns == 2
+    assert translator.called_tool_names == {'kb_search', 'calculator', 'web_search'}
+
+
+def test_translator_tracks_only_successful_structured_tool_results():
+    translator = AgentEventFrameTranslator(query='q')
+
+    translator.feed({
+        'tag': 'tool_results',
+        'tool_results': [
+            {'id': 'call-1', 'name': 'memory_editor', 'result': {
+                'success': False,
+                'tool': 'memory_editor',
+                'error': {'reason': 'conflict'},
+            }},
+            {'id': 'call-2', 'name': 'vocab_learn', 'result': {
+                'success': True,
+                'tool': 'vocab_learn',
+                'result': {'persisted': 'core_api'},
+            }},
+        ],
+    })
+
+    assert translator.successful_tool_names == {'vocab_learn'}
 
 
 def test_searchbase_tool_rendering_extracts_provider_brand():

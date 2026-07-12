@@ -1,16 +1,4 @@
-"""PostgreSQL helpers for backend-managed vocabulary and chat tables.
-
-Vocabulary rows are now read from ``core.public.words`` and filtered by
-``deleted_at IS NULL`` so soft-deleted words are excluded from both vocab
-manager reloads and vocabulary evolution planning.
-
-Connection priority for vocab reads:
-
-1. explicit ``db_url`` argument
-2. ``LAZYMIND_CORE_DATABASE_URL``
-3. ``ACL_DB_DSN``
-4. ``LAZYMIND_DATABASE_URL``
-"""
+"""Core API vocabulary reads and PostgreSQL helpers for chat-history jobs."""
 from __future__ import annotations
 
 import shlex
@@ -25,17 +13,8 @@ from sqlalchemy.engine import URL, Engine
 
 from lazymind.config import config as _cfg
 
-VOCAB_SCHEMA = 'public'
-VOCAB_TABLE = 'words'
-VOCAB_TABLE_QUALIFIED = f'{VOCAB_SCHEMA}.{VOCAB_TABLE}'
-VOCAB_REFERENCE_COLUMN = 'reference_info'
-_DB_URL_ENV = 'LAZYMIND_DATABASE_URL'
-_CORE_DB_DSN_ENV = 'LAZYMIND_ACL_DB_DSN'
-_CORE_DB_URL_ENV = 'LAZYMIND_CORE_DATABASE_URL'
-_VOCAB_DB_ENV_HINT = f'{_CORE_DB_URL_ENV}, {_CORE_DB_DSN_ENV}, or {_DB_URL_ENV}'
+from .core_api_client import get_core_api
 
-_table_ensured = False
-_table_ensure_lock = threading.Lock()
 _engine_cache: Dict[str, Engine] = {}
 _engine_cache_lock = threading.Lock()
 
@@ -43,11 +22,6 @@ _engine_cache_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-def _get_db_url() -> Optional[str]:
-    value = _cfg['database_url']
-    return value if value and value.strip() else None
-
 
 def _ensure_postgres_driver(url: str) -> str:
     normalized = url.strip()
@@ -119,35 +93,6 @@ def _get_core_db_url() -> Optional[str]:
     return value if value and value.strip() else None
 
 
-def _resolve_vocab_conn_target(db_url: Optional[str] = None) -> tuple[Optional[str], Optional[str]]:
-    if db_url and db_url.strip():
-        return db_url.strip(), None
-    core_db_url = _get_core_db_url()
-    if core_db_url:
-        return core_db_url, None
-    core_db_dsn = _get_core_db_dsn()
-    if core_db_dsn:
-        return None, core_db_dsn
-    vocab_db_url = _get_db_url()
-    if vocab_db_url:
-        return vocab_db_url, None
-    return None, None
-
-
-def _has_vocab_conn_target(db_url: Optional[str] = None) -> bool:
-    url, dsn = _resolve_vocab_conn_target(db_url=db_url)
-    return bool(url or dsn)
-
-
-def _get_vocab_conn(db_url: Optional[str] = None) -> Engine:
-    url, dsn = _resolve_vocab_conn_target(db_url=db_url)
-    if not (url or dsn):
-        raise RuntimeError(
-            f'[VocabDB] {_VOCAB_DB_ENV_HINT} is not set; cannot connect to vocab database.'
-        )
-    return _get_engine(url=url, dsn=dsn)
-
-
 def _get_core_conn(*, db_dsn: Optional[str] = None, db_url: Optional[str] = None) -> Engine:
     return _get_engine(
         url=db_url or _get_core_db_url(),
@@ -156,48 +101,35 @@ def _get_core_conn(*, db_dsn: Optional[str] = None, db_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
-# Table bootstrap
-# ---------------------------------------------------------------------------
-
-def ensure_vocab_table(db_url: Optional[str] = None) -> None:
-    """Verify backend-managed vocab table is reachable in the configured database."""
-    if not _has_vocab_conn_target(db_url=db_url):
-        LOG.warning(f'[VocabDB] {_VOCAB_DB_ENV_HINT} not set; skipping vocab table check.')
-        return
-    try:
-        engine = _get_vocab_conn(db_url=db_url)
-        with engine.connect() as conn:
-            exists = conn.execute(
-                text(
-                    """SELECT 1
-                           FROM information_schema.tables
-                          WHERE table_schema = :table_schema
-                            AND table_name = :table_name
-                          LIMIT 1"""
-                ),
-                {'table_schema': VOCAB_SCHEMA, 'table_name': VOCAB_TABLE},
-            ).scalar()
-        if exists:
-            LOG.info(f'[VocabDB] verified table {VOCAB_TABLE_QUALIFIED} is available.')
-            return
-        LOG.warning(f'[VocabDB] table {VOCAB_TABLE_QUALIFIED} not found in configured vocab database.')
-    except Exception as exc:
-        LOG.error(f'[VocabDB] ensure_vocab_table failed: {exc}')
-
-
-def _ensure_table_once(db_url: Optional[str] = None) -> None:
-    """Verify the vocab table exactly once per process."""
-    global _table_ensured
-    if not _table_ensured:
-        with _table_ensure_lock:
-            if not _table_ensured:
-                ensure_vocab_table(db_url=db_url)
-                _table_ensured = True
-
-
-# ---------------------------------------------------------------------------
 # Public query API
 # ---------------------------------------------------------------------------
+
+def _fetch_vocab_group_pages(user_id: str) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    page_token = ''
+    while True:
+        params: Dict[str, Any] = {'page_size': 100}
+        if page_token:
+            params['page_token'] = page_token
+        page = get_core_api('/word_group', params, user_id=user_id)
+        items.extend(item for item in (page.get('items') or []) if isinstance(item, dict))
+        next_page_token = str(page.get('next_page_token') or '').strip()
+        if not next_page_token or next_page_token == page_token:
+            return items
+        page_token = next_page_token
+
+
+def _item_words(item: Dict[str, Any]) -> List[str]:
+    words: List[str] = []
+    term = str(item.get('term') or '').strip()
+    if term:
+        words.append(term)
+    for alias in item.get('aliases') or []:
+        word = str(alias.get('word') or '').strip() if isinstance(alias, dict) else ''
+        if word and word not in words:
+            words.append(word)
+    return words
+
 
 def fetch_vocab_for_user_id(user_id: str) -> List[Dict[str, Any]]:
     """Return all vocab rows for *user_id* as a list of ``{'word': ..., 'cluster_id': ...}`` dicts.
@@ -206,25 +138,13 @@ def fetch_vocab_for_user_id(user_id: str) -> List[Dict[str, Any]]:
     The ``cluster_id`` key matches the default ``cluster_key`` of
     :class:`lazyllm.tools.rag.QueryEnhACProcessor`.
     """
-    _ensure_table_once()
-    if not _has_vocab_conn_target():
-        LOG.warning(
-            f'[VocabDB] {_VOCAB_DB_ENV_HINT} not set; returning empty vocab for user_id={user_id!r}.'
-        )
-        return []
     try:
-        engine = _get_vocab_conn()
-        with engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    f"""SELECT word, group_id
-                          FROM {VOCAB_TABLE_QUALIFIED}
-                         WHERE create_user_id = :user_id
-                           AND deleted_at IS NULL"""
-                ),
-                {'user_id': user_id},
-            ).mappings().all()
-        result = [{'word': row['word'], 'cluster_id': row['group_id']} for row in rows]
+        result = [
+            {'word': word, 'cluster_id': str(item.get('group_id') or '')}
+            for item in _fetch_vocab_group_pages(user_id)
+            for word in _item_words(item)
+            if item.get('group_id')
+        ]
         LOG.info(f'[VocabDB] fetched {len(result)} vocab entries for user_id={user_id!r}.')
         return result
     except Exception as exc:
@@ -235,51 +155,26 @@ def fetch_vocab_for_user_id(user_id: str) -> List[Dict[str, Any]]:
 def fetch_vocab_groups_for_user_id(
         user_id: str, *, db_url: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
     """Return existing vocab groups for a user keyed by ``group_id``."""
-    _ensure_table_once(db_url=db_url)
-    if not _has_vocab_conn_target(db_url=db_url):
-        LOG.warning(
-            f'[VocabDB] {_VOCAB_DB_ENV_HINT} not set; returning empty vocab groups '
-            f'for user_id={user_id!r}.'
-        )
-        return {}
+    del db_url  # Retained for caller compatibility; vocabulary storage belongs to Core.
     try:
-        engine = _get_vocab_conn(db_url=db_url)
-        with engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    f"""SELECT group_id,
-                               word,
-                               COALESCE(description, '') AS description,
-                               COALESCE({VOCAB_REFERENCE_COLUMN}, '') AS reference
-                          FROM {VOCAB_TABLE_QUALIFIED}
-                                                 WHERE create_user_id = :user_id
-                           AND deleted_at IS NULL
-                         ORDER BY group_id, id"""
-                ),
-                {'user_id': user_id},
-            ).mappings().all()
+        items = _fetch_vocab_group_pages(user_id)
     except Exception as exc:
         LOG.error(f'[VocabDB] fetch_vocab_groups_for_user_id({user_id!r}) failed: {exc}')
         return {}
 
     groups: Dict[str, Dict[str, Any]] = {}
-    for row in rows:
-        group_id = row['group_id']
-        word = row['word']
-        description = row['description']
-        reference = row['reference']
+    for source in items:
+        group_id = str(source.get('group_id') or '').strip()
+        if not group_id:
+            continue
+        description = str(source.get('description') or '')
+        reference = str(source.get('reference') or '')
         item = groups.setdefault(group_id, {
             'group_id': group_id,
             'description': description or '',
-            'words': [],
-            'references': [],
+            'words': _item_words(source),
+            'references': [reference] if reference else [],
         })
-        if word and word not in item['words']:
-            item['words'].append(word)
-        if reference and reference not in item['references']:
-            item['references'].append(reference)
-        if not item['description'] and description:
-            item['description'] = description
     return groups
 
 

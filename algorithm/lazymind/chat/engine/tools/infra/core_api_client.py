@@ -8,12 +8,12 @@ import requests
 from lazymind.config import config as _cfg
 
 
-def _current_user_headers() -> Dict[str, str]:
+def _current_user_headers(user_id: str | None = None) -> Dict[str, str]:
     agentic_config = lazyllm.globals.get('agentic_config') or {}
-    user_id = str(agentic_config.get('user_id') or '').strip()
+    resolved_user_id = str(user_id or agentic_config.get('user_id') or '').strip()
     headers: Dict[str, str] = {}
-    if user_id:
-        headers['X-User-Id'] = user_id
+    if resolved_user_id:
+        headers['X-User-Id'] = resolved_user_id
     internal_token = str(_cfg['core_internal_token'] or '').strip()
     if internal_token:
         headers['X-LazyMind-Internal-Token'] = internal_token
@@ -58,7 +58,12 @@ def post_core_api(
     }
 
 
-def get_core_api(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def get_core_api(
+    path: str,
+    params: Dict[str, Any] | None = None,
+    *,
+    user_id: str | None = None,
+) -> Dict[str, Any]:
     base_url = str(_cfg['core_api_url'] or '').strip().rstrip('/')
     if not base_url:
         raise RuntimeError("'core_api_url' is required in config.")
@@ -67,7 +72,12 @@ def get_core_api(path: str, params: Dict[str, Any] | None = None) -> Dict[str, A
     timeout = int(_cfg['core_api_timeout'])
     with requests.sessions.Session() as session:
         session.trust_env = False
-        response = session.get(url, params=params, headers=_current_user_headers(), timeout=timeout)
+        response = session.get(
+            url,
+            params=params,
+            headers=_current_user_headers(user_id),
+            timeout=timeout,
+        )
 
     try:
         body = response.json()

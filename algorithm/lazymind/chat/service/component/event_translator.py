@@ -71,6 +71,8 @@ class AgentEventFrameTranslator:
         self._pending_previews: dict[str, str] = {}
         self.streamed_text = False
         self.tool_call_turns = 0
+        self.called_tool_names: set[str] = set()
+        self.successful_tool_names: set[str] = set()
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
 
     def feed(self, event: Any) -> list[dict[str, Any]]:
@@ -115,6 +117,10 @@ class AgentEventFrameTranslator:
                 self.tool_call_turns += 1
                 parts: list[str] = []
                 for tc in tool_calls:
+                    function = tc.get('function') if isinstance(tc.get('function'), dict) else {}
+                    tool_name = str(function.get('name') or tc.get('name') or '').strip()
+                    if tool_name:
+                        self.called_tool_names.add(tool_name)
                     text, pv = _tool_call_frame_text(tc, self.language)
                     parts.append(text)
                     if pv:
@@ -125,6 +131,13 @@ class AgentEventFrameTranslator:
         if event_type == 'tool_results':
             tool_results = [tr for tr in (event.get('tool_results', []) or []) if isinstance(tr, dict)]
             if tool_results:
+                for tool_result in tool_results:
+                    payload = tool_result.get('result')
+                    if not isinstance(payload, dict) or payload.get('success') is not True:
+                        continue
+                    tool_name = str(payload.get('tool') or tool_result.get('name') or '').strip()
+                    if tool_name:
+                        self.successful_tool_names.add(tool_name)
                 parts = [
                     _tool_result_frame_text(
                         tr,

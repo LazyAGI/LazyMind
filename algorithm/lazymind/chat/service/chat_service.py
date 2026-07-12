@@ -29,6 +29,11 @@ from lazymind.chat.service.component.status_retry import (
     build_status_retry_query,
     is_status_only_answer,
 )
+from lazymind.chat.service.component.mutation_retry import (
+    build_mutation_retry_query,
+    detect_durable_mutation_tool,
+    mutation_failure_message,
+)
 from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.utils import (
     SensitiveFilter,
@@ -517,6 +522,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     active_configs = filter_tools(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
     )
+    active_group_names = {cfg.name for cfg in active_configs}
     agent_tools = build_agent_tools(active_configs)
     # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
     enable_subagent = agentic_config.get('enable_subagent', True)
@@ -541,7 +547,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         'request_tags': ['handle_chat'],
     })
     runtime_prompt = build_system_prompt(
-        {cfg.name for cfg in active_configs},
+        active_group_names,
         environment_context=runtime.environment_context,
         use_memory=personalization.use_memory,
         user_preference=personalization.user_preference,
@@ -586,7 +592,12 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                         # if future.result() raised, drive_agent propagated it before yielding.
                         final_result = payload
 
-                if translator.tool_call_turns == 0 and is_status_only_answer(final_result):
+                required_mutation_tool = detect_durable_mutation_tool(query)
+                if (
+                    not required_mutation_tool
+                    and translator.tool_call_turns == 0
+                    and is_status_only_answer(final_result)
+                ):
                     LOG.info(
                         f'[ChatServer] [STATUS_ONLY_RETRY] [sid={conversation.session_id}] '
                         f'[result={str(final_result)[:120]}]'
@@ -613,6 +624,50 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                                 f'[result_type={type(payload).__name__}] [result={str(payload)[:200]}]'
                             )
                             final_result = payload
+
+                if (
+                    required_mutation_tool
+                    and required_mutation_tool in active_group_names
+                    and required_mutation_tool not in translator.successful_tool_names
+                ):
+                    LOG.info(
+                        f'[ChatServer] [MUTATION_RETRY] [sid={conversation.session_id}] '
+                        f'[tool={required_mutation_tool}] '
+                        f'[called={sorted(translator.called_tool_names)}]'
+                    )
+                    mutation_retry_agent = _new_react_agent(
+                        all_tools=all_tools,
+                        query=query,
+                        runtime_prompt=runtime_prompt,
+                        agent=agent,
+                        config=_cfg,
+                        fs=FS,
+                        stop_tools=stop_tools,
+                    )
+                    retry_query = build_mutation_retry_query(agent_query, required_mutation_tool)
+                    async for kind, payload in drive_agent(
+                        mutation_retry_agent,
+                        retry_query,
+                        history=agent_history,
+                    ):
+                        if kind == 'event':
+                            for frame in translator.feed(payload):
+                                cost = round(time.time() - start_time, 3)
+                                yield log_and_emit_frame(
+                                    frame,
+                                    cost,
+                                    query,
+                                    conversation.session_id,
+                                    tag='MUTATION_RETRY_FEED',
+                                )
+                        else:
+                            final_result = payload
+
+                if (
+                    required_mutation_tool
+                    and required_mutation_tool not in translator.successful_tool_names
+                ):
+                    final_result = mutation_failure_message(query, required_mutation_tool)
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)

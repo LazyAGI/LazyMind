@@ -51,3 +51,25 @@ def test_system_prompt_includes_web_search_guidance_when_web_search_is_active() 
     prompt = build_system_prompt({'web_search'})
 
     assert 'When using `web_search`, the `query` must represent one search intent.' in prompt
+
+
+def test_system_prompt_requires_real_tool_result_for_memory_mutations() -> None:
+    prompt = build_system_prompt({'memory_editor'})
+
+    assert 'Durable mutation outcome contract' in prompt
+    assert 'MUST call `memory_editor`' in prompt
+    assert 'pending review' in prompt
+    assert 'never claim that it was saved' in prompt
+
+
+def test_system_prompt_requires_vocab_tool_for_explicit_term_mapping() -> None:
+    prompt = build_system_prompt({'vocab_learn'})
+
+    assert 'MUST call `vocab_learn`' in prompt
+    assert 'structured tool result has `success: true`' in prompt
+
+
+def test_system_prompt_omits_mutation_contract_without_mutation_tools() -> None:
+    prompt = build_system_prompt({'calculator'})
+
+    assert 'Durable mutation outcome contract' not in prompt

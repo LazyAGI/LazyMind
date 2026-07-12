@@ -8,12 +8,14 @@ from .guidance import (
     DEFAULT_SYSTEM_PROMPT,
     IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
     KNOWLEDGE_EVIDENCE_CITATION_GUIDANCE,
+    MUTATION_OUTCOME_GUIDANCE,
     SEARCH_GUIDANCE,
     TOOL_CALL_STATUS_GUIDANCE,
     WEB_SEARCH_GUIDANCE,
 )
 
 _KNOWLEDGE_EVIDENCE_GROUPS = {'kb', 'temp_kb'}
+_DURABLE_MUTATION_GROUPS = {'memory_editor', 'vocab_learn'}
 
 
 def _format_user_time(time_now: object, timezone: object) -> str:
@@ -109,6 +111,8 @@ def build_system_prompt(
 
     if active_groups:
         prompt_parts.append(TOOL_CALL_STATUS_GUIDANCE)
+    if active_groups & _DURABLE_MUTATION_GROUPS:
+        prompt_parts.append(MUTATION_OUTCOME_GUIDANCE)
     if active_groups & _KNOWLEDGE_EVIDENCE_GROUPS:
         prompt_parts.append(SEARCH_GUIDANCE)
         prompt_parts.append(KNOWLEDGE_EVIDENCE_CITATION_GUIDANCE)

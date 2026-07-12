@@ -18,6 +18,78 @@ from lazymind.chat.engine.tools.infra import vocab_db  # noqa: E402
 vocab_tool = importlib.import_module('lazymind.chat.engine.tools.vocab_learn')
 
 
+def test_fetch_vocab_uses_paginated_core_api(monkeypatch):
+    calls = []
+
+    def _fake_get(path, params=None, *, user_id=None):
+        calls.append((path, params, user_id))
+        if params.get('page_token') == '2':
+            return {
+                'items': [{
+                    'term': 'GPU',
+                    'group_id': 'g2',
+                    'aliases': [],
+                    'description': '',
+                    'reference': '',
+                }],
+                'next_page_token': '',
+            }
+        return {
+            'items': [{
+                'term': '大模型',
+                'group_id': 'g1',
+                'aliases': [{'id': 'a1', 'word': 'LLM'}],
+                'description': 'AI terminology',
+                'reference': '["m1"]',
+            }],
+            'next_page_token': '2',
+        }
+
+    monkeypatch.setattr(vocab_db, 'get_core_api', _fake_get)
+
+    assert vocab_db.fetch_vocab_for_user_id('user-local') == [
+        {'word': '大模型', 'cluster_id': 'g1'},
+        {'word': 'LLM', 'cluster_id': 'g1'},
+        {'word': 'GPU', 'cluster_id': 'g2'},
+    ]
+    assert calls == [
+        ('/word_group', {'page_size': 100}, 'user-local'),
+        ('/word_group', {'page_size': 100, 'page_token': '2'}, 'user-local'),
+    ]
+
+
+def test_fetch_vocab_groups_maps_core_api_response(monkeypatch):
+    monkeypatch.setattr(vocab_db, 'get_core_api', lambda path, params=None, *, user_id=None: {
+        'items': [{
+            'term': '大模型',
+            'group_id': 'g1',
+            'aliases': [{'id': 'a1', 'word': 'LLM'}],
+            'description': 'AI terminology',
+            'reference': '["m1"]',
+        }],
+        'next_page_token': '',
+    })
+
+    assert vocab_db.fetch_vocab_groups_for_user_id('user-local') == {
+        'g1': {
+            'group_id': 'g1',
+            'description': 'AI terminology',
+            'words': ['大模型', 'LLM'],
+            'references': ['["m1"]'],
+        },
+    }
+
+
+def test_fetch_vocab_returns_empty_when_core_api_fails(monkeypatch):
+    def _fail(*args, **kwargs):
+        raise RuntimeError('core unavailable')
+
+    monkeypatch.setattr(vocab_db, 'get_core_api', _fail)
+
+    assert vocab_db.fetch_vocab_for_user_id('user-local') == []
+    assert vocab_db.fetch_vocab_groups_for_user_id('user-local') == {}
+
+
 def test_fetch_chat_histories_for_timestamped_session(monkeypatch):
     seen_conversation_ids = []
 
