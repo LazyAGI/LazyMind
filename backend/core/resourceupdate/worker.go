@@ -11,6 +11,7 @@ import (
 
 	"lazymind/core/algo"
 	"lazymind/core/common/orm"
+	"lazymind/core/evolution"
 	"lazymind/core/modelconfig"
 	"lazymind/core/state"
 )
@@ -166,9 +167,17 @@ func (w *Worker) claimPending(ctx context.Context, now time.Time) ([]orm.Resourc
 			}).Error; err != nil {
 			return err
 		}
-		return tx.Where("id IN ? AND status = ? AND locked_by = ?", ids, orm.ResourceUpdateTaskStatusRunning, w.workerID).
+		if err := tx.Where("id IN ? AND status = ? AND locked_by = ?", ids, orm.ResourceUpdateTaskStatusRunning, w.workerID).
 			Order("created_at ASC").
-			Find(&claimed).Error
+			Find(&claimed).Error; err != nil {
+			return err
+		}
+		for _, task := range claimed {
+			if err := updateAutoEvoResourceState(tx, task, evolution.AutoEvoApplyStatusRunning, "", &now, nil); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return claimed, err
 }
@@ -235,9 +244,19 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 			"finished_at":   now,
 			"updated_at":    now,
 		}
-		return w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
+		if err := w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
 			Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
-			Updates(updates).Error
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		if outcome.Status == orm.ResourceUpdateTaskStatusSkipped {
+			return updateAutoEvoResourceState(
+				w.db.WithContext(ctx), task, evolution.AutoEvoApplyStatusFailed,
+				firstNonEmpty(outcome.ErrorMessage, outcome.ErrorCode, "auto apply skipped"),
+				nil, &now,
+			)
+		}
+		return nil
 	}
 
 	if outcome.ErrorCode == "" {
@@ -260,7 +279,7 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 			Int("attempt_count", task.AttemptCount).
 			Int("max_attempts", w.cfg.MaxAttempts).
 			Msg(logEventWorkerFinished)
-		return w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
+		if err := w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
 			Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
 			Updates(map[string]any{
 				"status":        orm.ResourceUpdateTaskStatusFailed,
@@ -270,7 +289,13 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 				"locked_until":  nil,
 				"finished_at":   now,
 				"updated_at":    now,
-			}).Error
+			}).Error; err != nil {
+			return err
+		}
+		return updateAutoEvoResourceState(
+			w.db.WithContext(ctx), task, evolution.AutoEvoApplyStatusFailed,
+			outcome.ErrorMessage, nil, &now,
+		)
 	}
 	nextRunAt := now.Add(w.retryBackoff(task.AttemptCount))
 	resourceUpdateWarn(logEventWorkerFinished, nil).
@@ -297,6 +322,59 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 			"locked_until":  nil,
 			"updated_at":    now,
 		}).Error
+}
+
+func updateAutoEvoResourceState(
+	db *gorm.DB,
+	task orm.ResourceUpdateTask,
+	status string,
+	errorMessage string,
+	startedAt *time.Time,
+	finishedAt *time.Time,
+) error {
+	if task.TaskType != orm.ResourceUpdateTaskTypeAutoApplyReview {
+		return nil
+	}
+	stateTime := time.Now().UTC()
+	if startedAt != nil {
+		stateTime = startedAt.UTC()
+	} else if finishedAt != nil {
+		stateTime = finishedAt.UTC()
+	}
+	updates := map[string]any{
+		"auto_evo_apply_status": status,
+		"auto_evo_error":        strings.TrimSpace(errorMessage),
+		"updated_at":            stateTime,
+	}
+	if startedAt != nil {
+		updates["auto_evo_started_at"] = *startedAt
+		updates["auto_evo_finished_at"] = nil
+	}
+	if finishedAt != nil {
+		updates["auto_evo_finished_at"] = *finishedAt
+	}
+
+	var model any
+	switch task.ResourceType {
+	case orm.ResourceUpdateResourceTypeMemory:
+		model = &orm.SystemMemory{}
+	case orm.ResourceUpdateResourceTypeUserPreference:
+		model = &orm.SystemUserPreference{}
+	case orm.ResourceUpdateResourceTypeSkill:
+		model = &orm.SkillResource{}
+	default:
+		return nil
+	}
+	return db.Model(model).Where("id = ?", task.ResourceID).Updates(updates).Error
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (w *Worker) retryBackoff(attemptCount int) time.Duration {

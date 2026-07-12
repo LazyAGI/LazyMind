@@ -22,6 +22,8 @@ export interface BaseAsset {
   autoEvo?: boolean;
   autoEvoApplyStatus?: string;
   autoEvoGeneration?: number;
+  autoEvoStartedAt?: string;
+  autoEvoFinishedAt?: string;
   autoEvoError?: string;
 }
 

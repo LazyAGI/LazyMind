@@ -18,6 +18,8 @@ interface ManagedStateItem {
   auto_evo?: boolean;
   auto_evo_apply_status?: string;
   auto_evo_generation?: number;
+  auto_evo_started_at?: string;
+  auto_evo_finished_at?: string;
   auto_evo_error?: string;
   content?: string;
   content_summary?: string;
@@ -50,6 +52,8 @@ export interface PreferenceAssetRecord {
   preferredName?: string;
   autoEvoApplyStatus?: string;
   autoEvoGeneration?: number;
+  autoEvoStartedAt?: string;
+  autoEvoFinishedAt?: string;
   autoEvoError?: string;
 }
 
@@ -566,6 +570,8 @@ const normalizeManagedPreference = (item: ManagedStateItem): PreferenceAssetReco
     suggestionStatus,
     autoEvoApplyStatus: toStringValue(item.auto_evo_apply_status, ""),
     autoEvoGeneration: toNumberValue(item.auto_evo_generation, 0),
+    autoEvoStartedAt: toStringValue(item.auto_evo_started_at, ""),
+    autoEvoFinishedAt: toStringValue(item.auto_evo_finished_at, ""),
     autoEvoError: toStringValue(item.auto_evo_error, ""),
   };
 };

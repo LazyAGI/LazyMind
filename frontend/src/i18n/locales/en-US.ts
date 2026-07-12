@@ -2988,6 +2988,15 @@ const enUS = {
     memorySkillDisableSuccess: "Skill disabled",
     memorySkillEnableToggleFailed: "Failed to toggle skill enabled state",
     memoryAutoEvoToggleFailed: "Auto evolution toggle failed",
+    memoryAutoEvoState: {
+      off: "Off",
+      waiting: "Waiting for suggestions",
+      pending_review: "Pending review",
+      applying: "Applying",
+      applied: "Applied",
+      failed: "Failed",
+    },
+    memoryAutoEvoLatestAt: "Last run: {{time}}",
     memorySkillPendingRemoveTag: "Delete Suggested",
     memorySkillAutoEvoDisabledByRemove:
       "This skill has a delete suggestion, so auto evolution cannot be enabled",

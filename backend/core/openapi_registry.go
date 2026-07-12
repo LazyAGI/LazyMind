@@ -1972,6 +1972,8 @@ type managedStateOpenAPIResponse struct {
 	AutoEvo                bool                                `json:"auto_evo"`
 	AutoEvoApplyStatus     string                              `json:"auto_evo_apply_status"`
 	AutoEvoGeneration      int64                               `json:"auto_evo_generation"`
+	AutoEvoStartedAt       *string                             `json:"auto_evo_started_at,omitempty"`
+	AutoEvoFinishedAt      *string                             `json:"auto_evo_finished_at,omitempty"`
 	AutoEvoError           string                              `json:"auto_evo_error"`
 }
 
