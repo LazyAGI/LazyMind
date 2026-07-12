@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildLocalPathChildrenRequest,
   buildLocalPathInitialChildrenRequest,
-} from '../../frontend/src/modules/dataSource/utils/localPathTreeContract.ts';
+} from '../../frontend/src/modules/dataSource/utils/localPathTreeContract';
 
 describe('local path tree request contract', () => {
   it('uses an empty target ref to list initial mounted roots', () => {
