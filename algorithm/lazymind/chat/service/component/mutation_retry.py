@@ -4,7 +4,8 @@ import re
 
 
 _PERSIST_VERB = re.compile(
-    r'(记住|保存|记录|写入|更新|删除|移除|忘记|remember|save|record|persist|update|delete|remove|forget)',
+    r'(记住|保存|记录|写入|更新|删除|移除|忘记|修改|更改|设置|新增|添加|'
+    r'remember|save|record|persist|update|delete|remove|forget|change|set|add)',
     re.IGNORECASE,
 )
 _VOCAB_TARGET = re.compile(
@@ -12,8 +13,8 @@ _VOCAB_TARGET = re.compile(
     re.IGNORECASE,
 )
 _MEMORY_TARGET = re.compile(
-    r'(用户画像|个人画像|用户偏好|个人偏好|工作邮箱|邮箱|手机号|电话号码|称呼|回复风格|'
-    r'user profile|preference|work email|email address|phone number|address me|call me)',
+    r'(用户画像|个人画像|用户偏好|个人偏好|工作邮箱|邮箱|手机号|电话号码|称呼|回复风格|名字|姓名|联系方式|'
+    r'user profile|preference|work email|email address|phone number|address me|call me|name)',
     re.IGNORECASE,
 )
 

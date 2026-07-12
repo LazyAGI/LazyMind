@@ -11,10 +11,23 @@ def test_detects_explicit_profile_mutation() -> None:
     ) == 'memory_editor'
 
 
+def test_detects_common_profile_mutation_verbs_and_targets() -> None:
+    assert detect_durable_mutation_tool('把我的名字修改为小明') == 'memory_editor'
+    assert detect_durable_mutation_tool('设置我的联系方式为 123456') == 'memory_editor'
+    assert detect_durable_mutation_tool('change my name to Alice') == 'memory_editor'
+
+
 def test_detects_explicit_vocab_mutation() -> None:
     assert detect_durable_mutation_tool(
         '请记住词表映射：星河协议就是 Galaxy Protocol。'
     ) == 'vocab_learn'
+
+
+def test_detects_common_vocab_mutation_verbs() -> None:
+    assert detect_durable_mutation_tool(
+        '添加专属词表映射：LM 就是 LazyMind'
+    ) == 'vocab_learn'
+    assert detect_durable_mutation_tool('add a glossary mapping for LM') == 'vocab_learn'
 
 
 def test_ignores_non_durable_or_unrelated_requests() -> None:

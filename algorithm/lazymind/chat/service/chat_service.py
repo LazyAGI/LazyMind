@@ -668,6 +668,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                     and required_mutation_tool not in translator.successful_tool_names
                 ):
                     final_result = mutation_failure_message(query, required_mutation_tool)
+                    translator.streamed_text = False
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)

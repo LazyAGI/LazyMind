@@ -169,7 +169,7 @@ def fetch_vocab_groups_for_user_id(
             continue
         description = str(source.get('description') or '')
         reference = str(source.get('reference') or '')
-        item = groups.setdefault(group_id, {
+        groups.setdefault(group_id, {
             'group_id': group_id,
             'description': description or '',
             'words': _item_words(source),
