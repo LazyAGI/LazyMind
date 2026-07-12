@@ -7,20 +7,12 @@ import {
   Space,
   Switch,
   Table,
-  Tag,
   Tooltip,
 } from "antd";
-import {
-  BulbOutlined,
-  CheckCircleOutlined,
-  InfoCircleOutlined,
-  QuestionCircleOutlined,
-  ReloadOutlined,
-} from "@ant-design/icons";
+import { QuestionCircleOutlined } from "@ant-design/icons";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import { useMemoryManagementOutletContext } from "../../context";
 import type { ExperienceAsset } from "../../shared";
-import type { SkillReviewResultRecord } from "../../skillApi";
 import GlossaryListSection from "../../components/GlossaryListSection";
 import SkillManagementSection from "../../components/SkillManagementSection";
 
@@ -76,13 +68,6 @@ export default function MemoryManagementListPage() {
     setGlossaryListPage,
     setGlossaryListPageSize,
     setSelectedGlossaryAssetIds,
-    manualSkillReviewSummary,
-    manualSkillReviewLoading,
-    manualSkillReviewRunning,
-    manualSkillReviewResults = [] as SkillReviewResultRecord[],
-    manualSkillReviewResultStatus = "",
-    refreshManualSkillReviewSummary,
-    handleRunManualSkillReview,
   } = useMemoryManagementOutletContext();
 
   const activeListTotal = useMemo(() => {
@@ -129,48 +114,6 @@ export default function MemoryManagementListPage() {
   const memoryTableScroll = memoryTableBodyHeight
     ? { x: 980, y: memoryTableBodyHeight }
     : { x: 980 };
-  const manualSkillReviewCount = manualSkillReviewSummary?.qualifiedSessionCount ?? 0;
-  const manualSkillReviewHasRunningTask =
-    manualSkillReviewSummary?.runningTask?.status === "pending" ||
-    manualSkillReviewSummary?.runningTask?.status === "running";
-  const manualSkillReviewButtonBusy =
-    manualSkillReviewRunning || manualSkillReviewHasRunningTask;
-  const manualSkillReviewButtonDisabled =
-    manualSkillReviewLoading || manualSkillReviewButtonBusy || manualSkillReviewCount <= 0;
-  const manualSkillReviewButtonTip = manualSkillReviewButtonBusy
-    ? t("admin.memoryManualSkillReviewStarted")
-    : manualSkillReviewCount <= 0
-      ? t("admin.memoryManualSkillReviewNoContent")
-      : t("admin.memoryManualSkillReviewReady");
-  const manualSkillReviewStatusText =
-    manualSkillReviewCount > 0
-      ? t("admin.memoryManualSkillReviewCount", {
-          count: manualSkillReviewCount,
-        })
-      : t("admin.memoryManualSkillReviewEmpty");
-  const manualSkillReviewNewResults = useMemo(
-    () =>
-      manualSkillReviewResults.filter(
-        (item: SkillReviewResultRecord) => item.type === "new",
-      ),
-    [manualSkillReviewResults],
-  );
-  const manualSkillReviewUpdatedResults = useMemo(
-    () =>
-      manualSkillReviewResults.filter(
-        (item: SkillReviewResultRecord) => item.type === "patch",
-      ),
-    [manualSkillReviewResults],
-  );
-  const manualSkillReviewHasResult =
-    manualSkillReviewNewResults.length > 0 ||
-    manualSkillReviewUpdatedResults.length > 0;
-  const manualSkillReviewResultMessage =
-    manualSkillReviewResultStatus === "skipped"
-      ? t("admin.memoryManualSkillReviewSkipped")
-      : manualSkillReviewResultStatus === "failed"
-        ? t("admin.memoryManualSkillReviewFailed")
-        : t("admin.memoryManualSkillReviewNoResult");
 
   useEffect(() => {
     if (activeTab === "glossary" || activeTab === "skills") {
@@ -183,7 +126,8 @@ export default function MemoryManagementListPage() {
     }
 
     const updateTableHeight = () => {
-      const headerElement = contentElement.querySelector<HTMLElement>(".ant-table-thead");
+      const headerElement =
+        contentElement.querySelector<HTMLElement>(".ant-table-thead");
       const paginationElement = contentElement.querySelector<HTMLElement>(
         ".ant-table-pagination",
       );
@@ -242,7 +186,7 @@ export default function MemoryManagementListPage() {
               })}
             </Button>
           ) : null}
-          {activeTab !== "experience" ? (
+          {activeTab !== "experience" && activeTab !== "skills" ? (
             <Button
               type="primary"
               className="admin-page-primary-button"
@@ -293,7 +237,9 @@ export default function MemoryManagementListPage() {
               }`}
             >
               <span className="memory-experience-feature-status-dot" />
-              {experienceFeatureEnabled ? t("admin.enabled") : t("admin.disabled")}
+              {experienceFeatureEnabled
+                ? t("admin.enabled")
+                : t("admin.disabled")}
             </span>
             <div className="memory-experience-feature-text">
               <strong>{t("admin.memoryHabitFeatureToggle")}</strong>
@@ -343,123 +289,7 @@ export default function MemoryManagementListPage() {
         ref={activeTab === "skills" ? undefined : listContentRef}
       >
         {activeTab === "skills" ? (
-          <>
-            <div className="memory-manual-skill-review-row">
-              <div
-                className={`memory-manual-skill-review ${
-                  manualSkillReviewCount > 0 ? "is-ready" : "is-empty"
-                }`}
-              >
-                <div className="memory-manual-skill-review-copy">
-                  <strong>{t("admin.memoryManualSkillReviewTitle")}</strong>
-                  <span>{manualSkillReviewStatusText}</span>
-                </div>
-                <Space className="memory-manual-skill-review-actions">
-                  <Tooltip title={t("admin.memoryManualSkillReviewRefresh")}>
-                    <Button
-                      className="memory-manual-skill-review-icon-button"
-                      icon={<ReloadOutlined />}
-                      loading={manualSkillReviewLoading}
-                      onClick={() => void refreshManualSkillReviewSummary()}
-                    />
-                  </Tooltip>
-                  <Tooltip title={manualSkillReviewButtonTip}>
-                    <Button
-                      className="memory-manual-skill-review-run-button"
-                      type="primary"
-                      icon={<BulbOutlined />}
-                      disabled={manualSkillReviewButtonDisabled}
-                      loading={manualSkillReviewButtonBusy}
-                      onClick={() => void handleRunManualSkillReview()}
-                    >
-                      {t("admin.memoryManualSkillReviewRun")}
-                    </Button>
-                  </Tooltip>
-                </Space>
-              </div>
-              {manualSkillReviewRunning ? (
-                <div className="memory-manual-skill-review-result is-running">
-                  <span className="memory-manual-skill-review-result-icon">
-                    <InfoCircleOutlined />
-                  </span>
-                  <div className="memory-manual-skill-review-result-body">
-                    <span className="memory-manual-skill-review-result-hint">
-                      {t("admin.memoryManualSkillReviewRunningHint")}
-                    </span>
-                  </div>
-                </div>
-              ) : manualSkillReviewResultStatus ? (
-                <div
-                  className={`memory-manual-skill-review-result ${
-                    manualSkillReviewResultStatus === "done"
-                      ? "is-done"
-                      : manualSkillReviewResultStatus === "empty"
-                        ? "is-empty"
-                        : "is-warning"
-                  }`}
-                >
-                  <span className="memory-manual-skill-review-result-icon">
-                    {manualSkillReviewResultStatus === "done" ? (
-                      <CheckCircleOutlined />
-                    ) : (
-                      <InfoCircleOutlined />
-                    )}
-                  </span>
-                  <div className="memory-manual-skill-review-result-body">
-                    {manualSkillReviewResultStatus === "done" &&
-                    manualSkillReviewHasResult ? (
-                      <>
-                        {manualSkillReviewNewResults.length > 0 ? (
-                          <div className="memory-manual-skill-review-result-line">
-                            <span className="memory-manual-skill-review-result-label">
-                              {t("admin.memoryManualSkillReviewNewSkills")}
-                            </span>
-                            <span className="memory-manual-skill-review-result-tags">
-                              {manualSkillReviewNewResults.map((item: SkillReviewResultRecord) => (
-                                <Tag
-                                  className="memory-manual-skill-review-result-tag"
-                                  key={item.id}
-                                >
-                                  {item.skillName}
-                                </Tag>
-                              ))}
-                            </span>
-                          </div>
-                        ) : null}
-                        {manualSkillReviewUpdatedResults.length > 0 ? (
-                          <div className="memory-manual-skill-review-result-line">
-                            <span className="memory-manual-skill-review-result-label">
-                              {t("admin.memoryManualSkillReviewUpdatedSkills")}
-                            </span>
-                            <span className="memory-manual-skill-review-result-tags">
-                              {manualSkillReviewUpdatedResults.map(
-                                (item: SkillReviewResultRecord) => (
-                                  <Tag
-                                    className="memory-manual-skill-review-result-tag"
-                                    key={item.id}
-                                  >
-                                    {item.skillName}
-                                  </Tag>
-                                ),
-                              )}
-                            </span>
-                          </div>
-                        ) : null}
-                        <span className="memory-manual-skill-review-result-hint">
-                          {t("admin.memoryManualSkillReviewConfirmHint")}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="memory-manual-skill-review-result-hint">
-                        {manualSkillReviewResultMessage}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <SkillManagementSection />
-          </>
+          <SkillManagementSection />
         ) : activeTab === "experience" ? (
           <Table<ExperienceAsset>
             className="admin-page-table memory-table"

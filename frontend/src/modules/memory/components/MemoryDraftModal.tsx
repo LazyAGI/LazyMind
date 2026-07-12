@@ -30,6 +30,7 @@ interface MemoryDraftModalProps {
   applySkillRepoImport: (repoUrl: string) => void;
   handleImportSkillPackage: (file: File) => void;
   onSkillCreateSourceChange: (source: SkillCreateSource) => void;
+  initialSkillCreateSource?: SkillCreateSource;
 }
 
 export default function MemoryDraftModal(props: MemoryDraftModalProps) {
@@ -53,6 +54,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
     applySkillRepoImport,
     handleImportSkillPackage,
     onSkillCreateSourceChange,
+    initialSkillCreateSource = "manual",
   } = props;
   const [glossaryAliasInput, setGlossaryAliasInput] = useState("");
   const [skillCreateSource, setSkillCreateSource] = useState<SkillCreateSource>("manual");
@@ -66,8 +68,16 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
       setSkillCreateSource("manual");
       setSkillRepoUrl("");
       setSkillPackageFile(null);
+      return;
     }
-  }, [modalOpen]);
+
+    if (isSkillCreateModal) {
+      setSkillCreateSource(initialSkillCreateSource);
+      setSkillRepoUrl("");
+      setSkillPackageFile(null);
+      onSkillCreateSourceChange(initialSkillCreateSource);
+    }
+  }, [modalOpen, isSkillCreateModal, initialSkillCreateSource, onSkillCreateSourceChange]);
 
   const handleSkillCreateSourceChange = (source: SkillCreateSource) => {
     setSkillCreateSource(source);

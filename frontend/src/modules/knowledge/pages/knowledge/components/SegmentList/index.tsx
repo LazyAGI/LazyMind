@@ -83,8 +83,8 @@ const SegmentList = forwardRef<SegmentListImperativeProps, IProps>(
       <div
         className="segmentList"
         id={`scrollableDiv-${group}`}
-        style={{ 
-          height: editable ? "calc(100% - 40px)" : "100%"
+        style={{
+          height: editable ? "calc(100% - 40px)" : "100%",
         }}
       >
         <Virtuoso

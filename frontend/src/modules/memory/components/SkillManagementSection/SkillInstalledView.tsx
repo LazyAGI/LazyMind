@@ -73,7 +73,7 @@ export default function SkillInstalledView({
           value={searchInput}
           onChange={(event) => onSearchInputChange(event.target.value)}
           onSearch={onSearch}
-          placeholder={t("admin.memorySearchPlaceholder")}
+          placeholder={t("admin.memorySkillSearchPlaceholder")}
           className="memory-skill-installed-search"
         />
         <Select
@@ -99,7 +99,9 @@ export default function SkillInstalledView({
           ]}
           onChange={onSourceChange}
         />
-        <Button onClick={onReset}>{t("admin.memoryReset")}</Button>
+        <Button type="default" className="memory-skill-reset-button" onClick={onReset}>
+          {t("admin.memoryReset")}
+        </Button>
       </div>
 
       <div className="memory-list-content" ref={listContentRef}>

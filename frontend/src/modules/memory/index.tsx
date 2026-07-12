@@ -37,6 +37,7 @@ import GlossaryInboxModal from "./components/GlossaryInboxModal";
 import MemoryDraftModal, { type SkillCreateSource } from "./components/MemoryDraftModal";
 import ShareModal from "./components/ShareModal";
 import SkillShareCenterModal from "./components/SkillShareCenterModal";
+import { renderSkillCategoryIcon } from "./components/SkillManagementSection/skillCategoryIcon";
 import {
   acceptSkillShare,
   buildSkillUpdatePayload,
@@ -83,13 +84,21 @@ import {
   previewManagedPreferenceDraft,
   rejectEvolutionSuggestion,
   resolveManagedPreferenceDraftKind,
-  upsertPreferenceAsset,
+  reviewManagedPreferenceDraftHunks,
+  undoManagedPreferenceDraftReview,
+  patchPersonalResourceMetadata,
+  readPersonalResourceFile,
+  resolvePersonalResourceApiType,
+  saveAndCommitPersonalResourceContent,
   updatePersonalizationSetting,
   type EvolutionSuggestionListResult,
   type EvolutionSuggestionRecord,
   type ManagedPreferenceDraftKind,
+  type ManagedPreferenceDraftDecision,
+  type PersonalResourceMetadataPatch,
   type PreferenceDraftPreviewRecord,
 } from "./preferenceApi";
+import { mapDiffEntryLines } from "./components/skillPackage/skillDiffUtils";
 import {
   addGlossaryConflictToGroups,
   batchRemoveGlossaryAssets,
@@ -179,6 +188,10 @@ const isReviewableSuggestionStatus = (status?: string) => {
 };
 const isPendingReviewStatus = (status?: string) =>
   String(status || "").trim().toLowerCase() === "pending";
+const isPendingConfirmDraftStatus = (status?: string) => {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "pending_confirm" || normalized === "pending";
+};
 const isSkillRemoveSuggestion = (suggestion: EvolutionSuggestionRecord) =>
   String(suggestion.action || "").trim().toLowerCase() === "remove";
 const mapSkillAssetRecordToStructuredAsset = (
@@ -196,7 +209,8 @@ const mapSkillAssetRecordToStructuredAsset = (
   isEnabled: item.isEnabled,
 });
 const hasDraftPreviewStatus = (record: ExperienceAsset) =>
-  isPendingReviewStatus(record.reviewStatus);
+  isPendingReviewStatus(record.reviewStatus) ||
+  isPendingConfirmDraftStatus(record.draftStatus);
 const hasSkillDraftPreviewStatus = (record: StructuredAsset) =>
   Boolean(record.hasPendingReviewResult) ||
   Boolean(record.hasPendingReviewSuggestions) ||
@@ -320,6 +334,7 @@ export default function MemoryManagement() {
   const [skillAssets, setSkillAssets] = useState<StructuredAsset[]>(initialSkills);
   const [pendingSkillPackageFile, setPendingSkillPackageFile] = useState<File | null>(null);
   const [pendingSkillSourceUrl, setPendingSkillSourceUrl] = useState("");
+  const [skillCreateSource, setSkillCreateSource] = useState<SkillCreateSource>("manual");
   const [skillLoading, setSkillLoading] = useState(false);
   const [skillCategories, setSkillCategories] = useState<string[]>([]);
   const [skillCategoriesLoaded, setSkillCategoriesLoaded] = useState(false);
@@ -328,6 +343,7 @@ export default function MemoryManagement() {
   const [skillTagsLoaded, setSkillTagsLoaded] = useState(false);
   const [skillTagsLoading, setSkillTagsLoading] = useState(false);
   const [skillAutoEvoLoading, setSkillAutoEvoLoading] = useState<Set<string>>(new Set());
+  const [skillEnableLoading, setSkillEnableLoading] = useState<Set<string>>(new Set());
   const [builtinSkillEnableLoading, setBuiltinSkillEnableLoading] = useState<Set<string>>(new Set());
   const [manualSkillReviewSummary, setManualSkillReviewSummary] =
     useState<SkillReviewSummaryRecord | null>(null);
@@ -468,6 +484,10 @@ export default function MemoryManagement() {
   const [backendDraftSubmitting, setBackendDraftSubmitting] = useState<
     "confirm" | "discard" | ""
   >("");
+  const [backendDraftHunkSubmitting, setBackendDraftHunkSubmitting] = useState<
+    Record<string, ManagedPreferenceDraftDecision | undefined>
+  >({});
+  const [backendDraftReviewUndoing, setBackendDraftReviewUndoing] = useState(false);
   const [glossaryChangeProposals, setGlossaryChangeProposals] =
     useState<GlossaryChangeProposal[]>([]);
   const [activeProposalId, setActiveProposalId] = useState<string | undefined>(
@@ -652,12 +672,32 @@ export default function MemoryManagement() {
 
       try {
         const records = await listPreferenceAssets();
+        const recordsWithDraftStatus = await Promise.all(
+          records.map(async (item) => {
+            try {
+              const draftFile = await readPersonalResourceFile(
+                resolvePersonalResourceApiType(item.resourceType),
+                { ref: "draft" },
+              );
+              return {
+                ...item,
+                draftStatus: draftFile.draftStatus,
+              };
+            } catch {
+              return {
+                ...item,
+                draftStatus: item.draftStatus,
+              };
+            }
+          }),
+        );
         setExperienceAssets(
-          records.map((item) => ({
+          recordsWithDraftStatus.map((item) => ({
             id: item.id,
             title: item.title,
             content: item.content,
             agentPersona: item.agentPersona,
+            draftStatus: item.draftStatus,
             hasPendingReviewSuggestions: item.hasPendingReviewSuggestions,
             protect: item.protect,
             responseStyle: item.responseStyle,
@@ -1907,8 +1947,11 @@ export default function MemoryManagement() {
     if (activeProposal?.tab === "skills") {
       return backendSkillDiffLines;
     }
+    if (backendDraftPreview?.fileDiff?.diffEntryLines.length) {
+      return mapDiffEntryLines(backendDraftPreview.fileDiff.diffEntryLines);
+    }
     return buildUnifiedDiffLines(backendDraftPreview?.diff || "");
-  }, [activeProposal?.tab, backendDraftPreview?.diff, backendSkillDiffLines]);
+  }, [activeProposal?.tab, backendDraftPreview, backendSkillDiffLines]);
 
   const loadSkillDraftPreview = useCallback(async (skillId: string) => {
     const preview = await previewSkillDraft(skillId);
@@ -2057,6 +2100,8 @@ export default function MemoryManagement() {
       setBackendSkillDiffLines([]);
       setBackendDraftLoading(false);
       setBackendDraftSubmitting("");
+      setBackendDraftHunkSubmitting({});
+      setBackendDraftReviewUndoing(false);
       return () => {
         ignore = true;
       };
@@ -2090,6 +2135,8 @@ export default function MemoryManagement() {
     setBackendSkillDiffLines([]);
     setBackendDraftLoading(false);
     setBackendDraftSubmitting("");
+    setBackendDraftHunkSubmitting({});
+    setBackendDraftReviewUndoing(false);
 
     if (
       (activeProposal.tab === "skills" || activeProposal.tab === "experience") &&
@@ -2469,21 +2516,26 @@ export default function MemoryManagement() {
   }, []);
 
   const saveExperienceProfileDraft = useCallback(
-    async (record: ExperienceAsset) => {
+    async (record: ExperienceAsset, fieldKey: ExperienceProfileFieldKey) => {
       const draft = experienceProfileDrafts[record.id] || getExperienceProfileDraft(record);
+      const patch: PersonalResourceMetadataPatch = {};
+
+      if (fieldKey === "agentPersona") {
+        patch.agentPersona = draft.agentPersona.trim();
+      }
+      if (fieldKey === "preferredName") {
+        patch.preferredName = draft.preferredName.trim();
+      }
+      if (fieldKey === "responseStyle") {
+        patch.responseStyle = draft.responseStyle.trim();
+      }
 
       setExperienceProfileSaving((previous) => new Set(previous).add(record.id));
       try {
-        await upsertPreferenceAsset({
-          title: record.title,
-          content: record.content,
-          protect: Boolean(record.protect),
-          autoEvo: Boolean(record.autoEvo),
-          agentPersona: draft.agentPersona.trim(),
-          responseStyle: draft.responseStyle.trim(),
-          resourceType: record.resourceType,
-          preferredName: draft.preferredName.trim(),
-        });
+        await patchPersonalResourceMetadata(
+          resolvePersonalResourceApiType(record.resourceType),
+          patch,
+        );
         resetExperienceProfileDraft(record);
         await refreshExperienceSection({ silent: true });
         message.success(
@@ -2585,6 +2637,7 @@ export default function MemoryManagement() {
   };
 
   const handleSkillCreateSourceChange = (source: SkillCreateSource) => {
+    setSkillCreateSource(source);
     if (source !== "zip") {
       setPendingSkillPackageFile(null);
     }
@@ -2900,6 +2953,11 @@ export default function MemoryManagement() {
     }
 
     setModalOpen(true);
+  };
+
+  const openSkillCreateModal = (source: SkillCreateSource = "manual") => {
+    handleSkillCreateSourceChange(source);
+    openModal("add");
   };
 
   const closeModal = () => {
@@ -3731,6 +3789,73 @@ export default function MemoryManagement() {
       setBackendDraftLoading(false);
     }
   };
+  const submitBackendDraftHunkDecision = async (
+    hunkId: string,
+    decision: ManagedPreferenceDraftDecision,
+  ) => {
+    if (
+      !backendDraftPreview?.reviewId ||
+      !backendDraftPreview.reviewVersion ||
+      Object.keys(backendDraftHunkSubmitting).length
+    ) {
+      return;
+    }
+
+    setBackendDraftHunkSubmitting({ [hunkId]: decision });
+    try {
+      const draftKind = getActiveManagedDraftKind();
+      await reviewManagedPreferenceDraftHunks(draftKind, {
+        reviewId: backendDraftPreview.reviewId,
+        expectedReviewVersion: backendDraftPreview.reviewVersion,
+        items: [{ hunkId, decision }],
+      });
+      setBackendDraftPreview(await previewManagedPreferenceDraft(draftKind));
+      message.success(
+        t(
+          decision === "accept"
+            ? "admin.memoryDraftHunkAcceptSuccess"
+            : "admin.memoryDraftHunkRejectSuccess",
+        ),
+      );
+    } catch (error) {
+      console.error("Submit personal resource draft hunk decision failed:", error);
+      message.error(
+        getLocalizedErrorMessage(error, t("admin.memoryDraftHunkActionFailed")) ||
+          t("admin.memoryDraftHunkActionFailed"),
+      );
+    } finally {
+      setBackendDraftHunkSubmitting({});
+    }
+  };
+  const undoBackendDraftReview = async () => {
+    if (
+      !backendDraftPreview?.reviewId ||
+      !backendDraftPreview.reviewVersion ||
+      !backendDraftPreview.canUndo ||
+      backendDraftReviewUndoing
+    ) {
+      return;
+    }
+
+    setBackendDraftReviewUndoing(true);
+    try {
+      const draftKind = getActiveManagedDraftKind();
+      await undoManagedPreferenceDraftReview(draftKind, {
+        reviewId: backendDraftPreview.reviewId,
+        expectedReviewVersion: backendDraftPreview.reviewVersion,
+      });
+      setBackendDraftPreview(await previewManagedPreferenceDraft(draftKind));
+      message.success(t("admin.memoryDraftReviewUndoSuccess"));
+    } catch (error) {
+      console.error("Undo personal resource draft review failed:", error);
+      message.error(
+        getLocalizedErrorMessage(error, t("admin.memoryDraftReviewUndoFailed")) ||
+          t("admin.memoryDraftReviewUndoFailed"),
+      );
+    } finally {
+      setBackendDraftReviewUndoing(false);
+    }
+  };
   const confirmBackendDraft = async () => {
     if (!activeProposal) {
       return;
@@ -4156,16 +4281,11 @@ export default function MemoryManagement() {
           }
           if (activeProposal.tab === "experience") {
             const mergedExperience = effectiveProposalMerged as ExperienceAsset;
-            await upsertPreferenceAsset({
-              title: mergedExperience.title,
-              content: mergedExperience.content,
-              protect: Boolean(mergedExperience.protect),
-              autoEvo: Boolean(mergedExperience.autoEvo),
-              agentPersona: mergedExperience.agentPersona,
-              responseStyle: mergedExperience.responseStyle,
-              resourceType: mergedExperience.resourceType,
-              preferredName: mergedExperience.preferredName,
-            });
+            await saveAndCommitPersonalResourceContent(
+              resolvePersonalResourceApiType(mergedExperience.resourceType),
+              mergedExperience.content,
+              { message: "apply evolution suggestion" },
+            );
           }
           message.success(t("admin.memoryDiffApproveSuccess"));
         } else {
@@ -4300,11 +4420,6 @@ export default function MemoryManagement() {
       okButtonProps: { danger: true },
       onOk: async () => {
         if (activeTab === "skills") {
-          if (item.id.startsWith("mock-installed-")) {
-            message.info(t("admin.memorySkillMarketMockUninstallHint"));
-            return;
-          }
-
           try {
             await removeSkillAsset(item.id);
             await refreshSkillAssets({ page: skillListPage });
@@ -4653,16 +4768,11 @@ export default function MemoryManagement() {
             ? experienceAssets.find((item) => item.id === draft.id)
             : undefined;
 
-        await upsertPreferenceAsset({
-          title: draft.title.trim(),
-          content: draft.content.trim(),
-          protect: draft.protect,
-          autoEvo: currentExperienceItem?.autoEvo,
-          agentPersona: draft.agentPersona,
-          responseStyle: draft.responseStyle,
-          resourceType: currentExperienceItem?.resourceType,
-          preferredName: draft.preferredName,
-        });
+        await saveAndCommitPersonalResourceContent(
+          resolvePersonalResourceApiType(currentExperienceItem?.resourceType),
+          draft.content.trim(),
+          { message: "update experience content" },
+        );
         if (modalMode === "edit" && draft.id) {
           setChangeProposals((previous) =>
             previous.filter(
@@ -5198,49 +5308,60 @@ export default function MemoryManagement() {
           !record.autoEvo && (Boolean(pendingProposal) || hasReviewableDraft);
 
         return (
-          <div className="memory-table-main">
-            <div className="memory-table-main-title">
-              {activeTab === "skills" ? (
-                <button
-                  type="button"
-                  className="memory-term-link"
-                  onClick={() => navigateToSkillDetail(record.id)}
+          <div
+            className={`memory-table-main${
+              activeTab === "skills" ? " memory-table-main-with-icon" : ""
+            }`}
+          >
+            {activeTab === "skills" ? (
+              <span className="memory-table-main-icon" aria-hidden="true">
+                {renderSkillCategoryIcon(record.category)}
+              </span>
+            ) : null}
+            <div className="memory-table-main-copy">
+              <div className="memory-table-main-title">
+                {activeTab === "skills" ? (
+                  <button
+                    type="button"
+                    className="memory-term-link"
+                    onClick={() => navigateToSkillDetail(record.id)}
+                  >
+                    {record.name}
+                  </button>
+                ) : (
+                  <span>{record.name}</span>
+                )}
+                {record.draft?.hasUncommittedDraft ? (
+                  <Tag color="gold">{t("admin.memoryDiffPendingTag")}</Tag>
+                ) : null}
+                {showPendingTag ? (
+                  <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
+                ) : null}
+                {activeTab === "skills" && record.hasPendingRemoveSuggestion ? (
+                  <Tag color="red">{t("admin.memorySkillPendingRemoveTag")}</Tag>
+                ) : null}
+                {record.protect ? (
+                  <Tag className="memory-protect-tag" bordered={false}>
+                    <LockOutlined />
+                    <span>{t("admin.memoryProtect", { defaultValue: "保护" })}</span>
+                  </Tag>
+                ) : null}
+              </div>
+              {record.description ? (
+                <Tooltip
+                  title={
+                    <div className="memory-text-popover-content">{record.description}</div>
+                  }
+                  overlayClassName="memory-text-popover"
+                  placement="topLeft"
+                  trigger="hover"
                 >
-                  {record.name}
-                </button>
+                  <div className="memory-table-main-desc">{record.description}</div>
+                </Tooltip>
               ) : (
-                <span>{record.name}</span>
-              )}
-              {record.draft?.hasUncommittedDraft ? (
-                <Tag color="gold">{t("admin.memoryDiffPendingTag")}</Tag>
-              ) : null}
-              {showPendingTag ? (
-                <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
-              ) : null}
-              {activeTab === "skills" && record.hasPendingRemoveSuggestion ? (
-                <Tag color="red">{t("admin.memorySkillPendingRemoveTag")}</Tag>
-              ) : null}
-              {record.protect ? (
-                <Tag className="memory-protect-tag" bordered={false}>
-                  <LockOutlined />
-                  <span>{t("admin.memoryProtect", { defaultValue: "保护" })}</span>
-                </Tag>
-              ) : null}
-            </div>
-            {record.description ? (
-              <Tooltip
-                title={
-                  <div className="memory-text-popover-content">{record.description}</div>
-                }
-                overlayClassName="memory-text-popover"
-                placement="topLeft"
-                trigger="hover"
-              >
                 <div className="memory-table-main-desc">{record.description}</div>
-              </Tooltip>
-            ) : (
-              <div className="memory-table-main-desc">{record.description}</div>
-            )}
+              )}
+            </div>
           </div>
         );
       },
@@ -5279,6 +5400,47 @@ export default function MemoryManagement() {
 
   const genericColumns: ColumnsType<StructuredAsset> = [
     ...structuredInfoColumns,
+    {
+      title: t("admin.memorySkillEnabled"),
+      key: "isEnabled",
+      width: 90,
+      render: (_value, record) => (
+        <Switch
+          checked={record.isEnabled !== false}
+          loading={skillEnableLoading.has(record.id)}
+          onChange={(checked) => {
+            void (async () => {
+              setSkillEnableLoading((prev) => new Set(prev).add(record.id));
+              try {
+                await patchSkillAsset(
+                  record.id,
+                  buildSkillPatchPayload(record, { isEnabled: checked }),
+                );
+                await refreshSkillAssets({ preserveChangeProposals: true });
+                message.success(
+                  checked
+                    ? t("admin.memorySkillEnableSuccess")
+                    : t("admin.memorySkillDisableSuccess"),
+                );
+              } catch (error) {
+                console.error("Toggle is_enabled failed:", error);
+                await refreshSkillAssets({ preserveChangeProposals: true });
+                message.error(
+                  getLocalizedErrorMessage(error, t("admin.memorySkillEnableToggleFailed")) ||
+                    t("admin.memorySkillEnableToggleFailed"),
+                );
+              } finally {
+                setSkillEnableLoading((prev) => {
+                  const next = new Set(prev);
+                  next.delete(record.id);
+                  return next;
+                });
+              }
+            })();
+          }}
+        />
+      ),
+    },
     {
       title: t("admin.memoryAutoUpdate"),
       key: "autoEvo",
@@ -5330,75 +5492,36 @@ export default function MemoryManagement() {
     {
       title: t("admin.memoryOperations"),
       key: "actions",
-      width: 250,
+      width: 200,
       fixed: "right",
-      render: (_value, record) => {
-        const pendingProposal =
-          activeTab === "skills" ? getPendingProposal("skills", record.id) : undefined;
-        const hasReviewableDraft =
-          activeTab === "skills" && hasSkillDraftPreviewStatus(record);
-        const canReviewChange = Boolean(pendingProposal) || hasReviewableDraft;
-        const reviewTooltip = pendingProposal
-          ? t("admin.memoryDiffReviewAction")
-          : hasReviewableDraft
-            ? t("admin.memorySkillUpdateReviewAction")
-            : t("admin.memoryDiffNoPending");
-
-        return (
-          <Space size={4}>
-            {activeTab !== "skills" ? (
-              <Tooltip title={t("admin.memoryViewItem")}>
-                <Button
-                  type="text"
-                  icon={<EyeOutlined />}
-                  onClick={() => openModal("view", record)}
-                />
-              </Tooltip>
-            ) : null}
-            {!isBuiltinTemplate ? (
-              <>
-                {!isChildSkill ? (
-                  <Tooltip title={reviewTooltip}>
-                    <Button
-                      type="text"
-                      icon={<HistoryOutlined />}
-                      loading={reviewSuggestionLoadingId === record.id}
-                      disabled={!canReviewChange}
-                      onClick={() =>
-                        void openChangeReview("skills", record.id, record.updateStatus)
-                      }
-                    />
-                  </Tooltip>
-                ) : null}
-                <Tooltip title={t("admin.memoryEditItem")}>
-                  <Button
-                    type="text"
-                    icon={<EditOutlined />}
-                    onClick={() => openModal("edit", record)}
-                  />
-                </Tooltip>
-                {!hideUserGroupSurfaces && !record.parentId ? (
-                  <Tooltip title={t("admin.memoryShareItem")}>
-                    <Button
-                      type="text"
-                      icon={<LinkOutlined />}
-                      onClick={() => openShareModal("skills", record)}
-                    />
-                  </Tooltip>
-                ) : null}
-                <Tooltip title={t("admin.memoryDeleteItem")}>
-                  <Button
-                    type="text"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDelete(record)}
-                  />
-                </Tooltip>
-              </>
-            ) : null}
-          </Space>
-        );
-      },
+      render: (_value, record) => (
+        <Space size={4}>
+          <Tooltip title={t("admin.memoryEditItem")}>
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openModal("edit", record)}
+            />
+          </Tooltip>
+          {!hideUserGroupSurfaces ? (
+            <Tooltip title={t("admin.memoryShareItem")}>
+              <Button
+                type="text"
+                icon={<LinkOutlined />}
+                onClick={() => openShareModal("skills", record)}
+              />
+            </Tooltip>
+          ) : null}
+          <Tooltip title={t("admin.memoryDeleteItem")}>
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleDelete(record)}
+            />
+          </Tooltip>
+        </Space>
+      ),
     },
   ];
 
@@ -5600,16 +5723,10 @@ export default function MemoryManagement() {
             void (async () => {
               setExperienceAutoEvoLoading((prev) => new Set(prev).add(record.id));
               try {
-                await upsertPreferenceAsset({
-                  title: record.title,
-                  content: record.content,
-                  protect: Boolean(record.protect),
-                  autoEvo: checked,
-                  agentPersona: record.agentPersona,
-                  responseStyle: record.responseStyle,
-                  resourceType: record.resourceType,
-                  preferredName: record.preferredName,
-                });
+                await patchPersonalResourceMetadata(
+                  resolvePersonalResourceApiType(record.resourceType),
+                  { autoEvo: checked },
+                );
                 await refreshExperienceSection({ silent: true });
               } catch (error) {
                 console.error("Toggle auto_evo failed:", error);
@@ -5629,38 +5746,6 @@ export default function MemoryManagement() {
           }}
         />
       ),
-    },
-    {
-      title: t("admin.memoryOperations"),
-      key: "actions",
-      width: 210,
-      render: (_value, record) => {
-        const canReviewChange = isPendingReviewStatus(record.reviewStatus);
-        const reviewTooltip = canReviewChange
-          ? t("admin.memoryDiffReviewAction")
-          : t("admin.memoryDiffNoPending");
-
-        return (
-          <Space size={4}>
-            <Tooltip title={reviewTooltip}>
-              <Button
-                type="text"
-                icon={<HistoryOutlined />}
-                loading={reviewSuggestionLoadingId === record.id}
-                disabled={!canReviewChange}
-                onClick={() => void openChangeReview("experience", record.id)}
-              />
-            </Tooltip>
-            <Tooltip title={t("admin.memoryEditItem")}>
-              <Button
-                type="text"
-                icon={<EditOutlined />}
-                onClick={() => openModal("edit", record)}
-              />
-            </Tooltip>
-          </Space>
-        );
-      },
     },
   ];
   const glossaryColumns: ColumnsType<GlossaryAsset> = [
@@ -5802,12 +5887,13 @@ export default function MemoryManagement() {
       ? activeExperienceProfileDraft[activeExperienceProfileField.key]
       : "";
   const activeExperienceProfileHasChanges =
-    Boolean(activeExperienceProfileDraft && activeExperienceProfileOriginal) &&
-    experienceProfileFields.some(
-      (field) =>
-        activeExperienceProfileDraft?.[field.key] !==
-        activeExperienceProfileOriginal?.[field.key],
-    );
+    Boolean(
+      activeExperienceProfileDraft &&
+        activeExperienceProfileOriginal &&
+        activeExperienceProfileField,
+    ) &&
+    activeExperienceProfileDraft?.[activeExperienceProfileField!.key] !==
+      activeExperienceProfileOriginal?.[activeExperienceProfileField!.key];
 
   const outletContext = {
     t,
@@ -5834,6 +5920,7 @@ export default function MemoryManagement() {
     glossaryDetailExists,
     closeGlossaryDetail,
     openModal,
+    openSkillCreateModal,
     glossarySourceColorMap,
     glossarySourceLabelMap,
     resetFilters,
@@ -5948,6 +6035,11 @@ export default function MemoryManagement() {
     setBackendSuggestionSelected,
     submitBackendSuggestionDecision,
     backendDraftDiffLines,
+    backendDraftPreview,
+    backendDraftHunkSubmitting,
+    backendDraftReviewUndoing,
+    submitBackendDraftHunkDecision,
+    undoBackendDraftReview,
     backendDraftReady: Boolean(backendDraftPreview),
     qaQuestionDraft,
     setQaQuestionDraft,
@@ -6022,6 +6114,7 @@ export default function MemoryManagement() {
         applySkillRepoImport={applySkillRepoImport}
         handleImportSkillPackage={handleImportSkillPackage}
         onSkillCreateSourceChange={handleSkillCreateSourceChange}
+        initialSkillCreateSource={skillCreateSource}
       />
 
       {!hideUserGroupSurfaces && (
@@ -6092,10 +6185,13 @@ export default function MemoryManagement() {
           setExperienceProfileEditTarget(null);
         }}
         onOk={async () => {
-          if (!activeExperienceProfileRecord) {
+          if (!activeExperienceProfileRecord || !activeExperienceProfileField) {
             return;
           }
-          const saved = await saveExperienceProfileDraft(activeExperienceProfileRecord);
+          const saved = await saveExperienceProfileDraft(
+            activeExperienceProfileRecord,
+            activeExperienceProfileField.key,
+          );
           if (saved) {
             setExperienceProfileEditTarget(null);
           }
