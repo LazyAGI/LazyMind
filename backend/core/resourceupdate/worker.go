@@ -244,19 +244,21 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 			"finished_at":   now,
 			"updated_at":    now,
 		}
-		if err := w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
-			Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
-			Updates(updates).Error; err != nil {
-			return err
-		}
-		if outcome.Status == orm.ResourceUpdateTaskStatusSkipped {
-			return updateAutoEvoResourceState(
-				w.db.WithContext(ctx), task, evolution.AutoEvoApplyStatusFailed,
-				firstNonEmpty(outcome.ErrorMessage, outcome.ErrorCode, "auto apply skipped"),
-				nil, &now,
-			)
-		}
-		return nil
+		return w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&orm.ResourceUpdateTask{}).
+				Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
+				Updates(updates).Error; err != nil {
+				return err
+			}
+			if outcome.Status == orm.ResourceUpdateTaskStatusSkipped {
+				return updateAutoEvoResourceState(
+					tx, task, evolution.AutoEvoApplyStatusFailed,
+					firstNonEmpty(outcome.ErrorMessage, outcome.ErrorCode, "auto apply skipped"),
+					nil, &now,
+				)
+			}
+			return nil
+		})
 	}
 
 	if outcome.ErrorCode == "" {
@@ -355,7 +357,7 @@ func updateAutoEvoResourceState(
 	}
 
 	var model any
-	switch task.ResourceType {
+	switch strings.TrimSpace(task.ResourceType) {
 	case orm.ResourceUpdateResourceTypeMemory:
 		model = &orm.SystemMemory{}
 	case orm.ResourceUpdateResourceTypeUserPreference:
@@ -365,7 +367,7 @@ func updateAutoEvoResourceState(
 	default:
 		return nil
 	}
-	return db.Model(model).Where("id = ?", task.ResourceID).Updates(updates).Error
+	return db.Model(model).Where("id = ?", strings.TrimSpace(task.ResourceID)).Updates(updates).Error
 }
 
 func firstNonEmpty(values ...string) string {

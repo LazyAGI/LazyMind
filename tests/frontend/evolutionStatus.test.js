@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { projectPersonalizationEvolutionState } from "../../frontend/src/modules/memory/evolutionStatus.ts";
+import {
+  formatPersonalizationEvolutionTime,
+  projectPersonalizationEvolutionState,
+} from "../../frontend/src/modules/memory/evolutionStatus.ts";
 
 describe("personalization evolution status", () => {
   it.each([
@@ -26,5 +29,10 @@ describe("personalization evolution status", () => {
       error: "conflict",
       latestAt: "2026-07-12T02:00:00Z",
     });
+  });
+
+  it("does not render invalid evolution timestamps", () => {
+    expect(formatPersonalizationEvolutionTime("not-a-date")).toBe("");
+    expect(formatPersonalizationEvolutionTime()).toBe("");
   });
 });

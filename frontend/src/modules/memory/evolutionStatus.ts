@@ -24,6 +24,12 @@ export interface PersonalizationEvolutionProjection {
 
 const normalized = (value?: string) => String(value || "").trim().toLowerCase();
 
+export const formatPersonalizationEvolutionTime = (value?: string): string => {
+  if (!value) return "";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleString();
+};
+
 export const projectPersonalizationEvolutionState = (
   source: PersonalizationEvolutionSource,
 ): PersonalizationEvolutionProjection => {
