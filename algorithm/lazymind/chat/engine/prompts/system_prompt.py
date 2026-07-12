@@ -24,20 +24,25 @@ _EXPLICIT_LANGUAGE_PATTERNS = (
         'Chinese',
         re.compile(
             r'(?:请|始终|默认|务必|改为|切换到|使用|用|以).{0,16}'
-            r'(?:中文|汉语|普通话)|'
-            r'(?:语言偏好|首选语言|默认语言).{0,8}(?:中文|汉语|普通话)|'
+            r'(?:中文|汉语|普通话|Chinese|Mandarin)|'
+            r'(?:语言偏好|首选语言|默认语言).{0,8}(?:中文|汉语|普通话|Chinese|Mandarin)|'
             r'(?:preferred language|language preference).{0,8}(?:Chinese|Mandarin)|'
-            r'(?:reply|answer|respond|write|speak).{0,16}(?:in\s+)?(?:Chinese|Mandarin)',
+            r'(?:reply|answer|respond|write|speak|use|using|in).{0,16}'
+            r'(?:in\s+)?(?:Chinese|Mandarin)|'
+            r'(?:Chinese|Mandarin)\s+please',
             re.IGNORECASE,
         ),
     ),
     (
         'English',
         re.compile(
-            r'(?:请|始终|默认|务必|改为|切换到|使用|用|以).{0,16}(?:英文|英语)|'
-            r'(?:语言偏好|首选语言|默认语言).{0,8}(?:英文|英语)|'
+            r'(?:请|始终|默认|务必|改为|切换到|使用|用|以).{0,16}'
+            r'(?:英文|英语|English)|'
+            r'(?:语言偏好|首选语言|默认语言).{0,8}(?:英文|英语|English)|'
             r'(?:preferred language|language preference).{0,8}English|'
-            r'(?:reply|answer|respond|write|speak).{0,16}(?:in\s+)?English',
+            r'(?:reply|answer|respond|write|speak|use|using|in).{0,16}'
+            r'(?:in\s+)?English|'
+            r'English\s+please',
             re.IGNORECASE,
         ),
     ),
@@ -63,7 +68,7 @@ def _explicit_language(text: object) -> str:
 
 
 def _dominant_language(text: object) -> str:
-    value = str(text or '')
+    value = str(text or '')[:2000]
     cjk_count = len(_CJK_PATTERN.findall(value))
     latin_count = len(_LATIN_PATTERN.findall(value))
     if cjk_count >= 2 and cjk_count * 2 >= latin_count:

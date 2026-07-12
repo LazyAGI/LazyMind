@@ -57,6 +57,40 @@ def test_explicit_switch_beats_conversation_language():
     assert 'Selected response language for this turn: English (explicit instruction' in prompt
 
 
+def test_common_explicit_language_phrasings_are_recognized():
+    cases = (
+        ('use English', 'English'),
+        ('in English', 'English'),
+        ('English please', 'English'),
+        ('请用 English 回答', 'English'),
+        ('use Mandarin', 'Chinese'),
+        ('Mandarin please', 'Chinese'),
+        ('请用 Chinese 回答', 'Chinese'),
+    )
+
+    for query, expected_language in cases:
+        prompt = build_system_prompt(
+            set(),
+            current_query=query,
+            environment_context={'locale': 'zh-CN' if expected_language == 'English' else 'en-US'},
+        )
+
+        assert (
+            f'Selected response language for this turn: {expected_language} '
+            '(explicit instruction in the current request)' in prompt
+        )
+
+
+def test_dominant_language_detection_only_samples_first_2000_characters():
+    prompt = build_system_prompt(
+        set(),
+        current_query='?' * 2000 + ' This English text is outside the detection sample.',
+        environment_context={'locale': 'zh-CN'},
+    )
+
+    assert 'Selected response language for this turn: Chinese (default UI locale zh-CN).' in prompt
+
+
 def test_recent_user_language_beats_ui_locale_for_ambiguous_follow_up():
     prompt = build_system_prompt(
         set(),
