@@ -6,6 +6,10 @@ import { dataSourceScanApi } from "../api/clients";
 import type { SourceFormValues } from "../constants/types";
 import { getScanTreeNodePath, type ScanV2TreeNode } from "../utils/scanAccessors";
 import type { LocalPathTreeNode } from "../utils/feishuTarget";
+import {
+  buildLocalPathChildrenRequest,
+  buildLocalPathInitialChildrenRequest,
+} from "../utils/localPathTreeContract";
 
 interface UseLocalPathTreeParams {
   t: TFunction;
@@ -126,15 +130,9 @@ export function useLocalPathTree({
             } as any,
           })
         : await client.listBindingTargetChildren({
-            bindingTargetChildrenRequest: {
-              connector_type: "local_fs",
-              target_type: "local_path",
-              target_ref: "/",
-              agent_id: agentId || undefined,
-              include_files: false,
-              list_mode: "page",
-              page_size: 50,
-            } as any,
+            bindingTargetChildrenRequest: buildLocalPathInitialChildrenRequest(
+              agentId,
+            ) as any,
           });
 
       if (localPathRequestSeqRef.current !== requestSeq) {
@@ -213,16 +211,11 @@ export function useLocalPathTree({
     }
 
     const response = await dataSourceScanApi.listBindingTargetChildren({
-      bindingTargetChildrenRequest: {
-        connector_type: "local_fs",
-        target_type: "local_path",
-        target_ref: targetRef,
-        node_ref: nodeRef || undefined,
-        agent_id: agentId || undefined,
-        include_files: false,
-        list_mode: "page",
-        page_size: 50,
-      } as any,
+      bindingTargetChildrenRequest: buildLocalPathChildrenRequest({
+        targetRef,
+        nodeRef,
+        agentId,
+      }) as any,
     });
 
     const children = mapLocalPathNodes(response.data.items || []);
