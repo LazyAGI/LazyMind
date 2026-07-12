@@ -84,6 +84,10 @@ export const isMarketSkillInstalled = (
   marketItem: StructuredAsset,
 ): boolean => {
   const marketSkill = marketItem as MarketSkillAsset;
+  if (marketSkill.installed) {
+    return true;
+  }
+
   const marketItemId = marketSkill.marketItemId?.trim() || marketItem.id.trim();
   const normalizedName = marketItem.name.trim().toLowerCase();
 

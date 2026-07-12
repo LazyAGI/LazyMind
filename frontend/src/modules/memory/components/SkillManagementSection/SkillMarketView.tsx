@@ -20,7 +20,6 @@ interface SkillMarketViewProps {
   categories: string[];
   onReset: () => void;
   onInstall: (item: StructuredAsset) => void;
-  onUninstall: (item: StructuredAsset) => void;
   onDetail: (item: StructuredAsset) => void;
   installingUid?: string;
 }
@@ -39,7 +38,6 @@ export default function SkillMarketView({
   categories,
   onReset,
   onInstall,
-  onUninstall,
   onDetail,
   installingUid,
 }: SkillMarketViewProps) {
@@ -53,11 +51,7 @@ export default function SkillMarketView({
     [category, keyword, skillAssets, source],
   );
 
-  const recommendationItems = useMemo(
-    () =>
-      marketItems.filter((item) => !isMarketSkillInstalled(installedSkills, item)),
-    [installedSkills, marketItems],
-  );
+  const recommendationItems = marketItems;
 
   return (
     <div className="memory-skill-market">
@@ -173,8 +167,8 @@ export default function SkillMarketView({
                       {t("admin.memorySkillMarketDetail")}
                     </Button>
                     {installed ? (
-                      <Button size="small" danger onClick={() => onUninstall(item)}>
-                        {t("admin.memorySkillMarketUninstall")}
+                      <Button size="small" disabled>
+                        {t("admin.memorySkillInstalledBadge")}
                       </Button>
                     ) : (
                       <Button

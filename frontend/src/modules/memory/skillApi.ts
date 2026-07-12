@@ -369,6 +369,8 @@ export interface MarketSkillRecord extends SkillAssetRecord {
   sourceSkillId: string;
   marketSource: "builtin" | "admin";
   marketStatus?: string;
+  installed?: boolean;
+  installedSkillId?: string;
 }
 
 export interface MarketSkillListResult {
@@ -412,6 +414,8 @@ const normalizeMarketItem = (item: MarketItemOpenAPIResponse): MarketSkillRecord
     sourceSkillId: item.source_skill_id || base.skillId,
     marketSource: "admin",
     marketStatus: item.status,
+    installed: Boolean(item.installed),
+    installedSkillId: item.installed_skill_id || "",
   };
 };
 

@@ -5,6 +5,8 @@ export type MarketSkillAsset = StructuredAsset & {
   marketSource?: "builtin" | "admin";
   marketItemId?: string;
   sourceSkillId?: string;
+  installed?: boolean;
+  installedSkillId?: string;
 };
 
 export const getMarketSource = (item: StructuredAsset): "builtin" | "admin" | "personal" => {
@@ -35,4 +37,6 @@ export const mapMarketSkillRecordToAsset = (
   marketSource: item.marketSource,
   marketItemId: item.marketItemId,
   sourceSkillId: item.sourceSkillId,
+  installed: item.installed,
+  installedSkillId: item.installedSkillId,
 });

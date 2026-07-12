@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Modal, message } from "antd";
+import { message } from "antd";
 import { InfoCircleOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import PluginInstalledView from "./PluginInstalledView";
@@ -13,16 +13,12 @@ import {
   getSkillMarketItem,
   installSkillFromMarket,
   listSkillMarketPage,
-  removeSkillAsset,
 } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
 import SkillInstalledView from "./SkillInstalledView";
 import SkillManagementToolbar from "./SkillManagementToolbar";
 import SkillMarketView from "./SkillMarketView";
-import {
-  collectMarketCategories,
-  isMarketSkillInstalled,
-} from "./skillHelpers";
+import { collectMarketCategories } from "./skillHelpers";
 import { mapMarketSkillRecordToAsset } from "./skillMarketMockData";
 import NewPluginModal from "@/modules/plugin/components/NewPluginModal";
 import "./index.scss";
@@ -224,6 +220,7 @@ export default function SkillManagementSection() {
       try {
         await installSkillFromMarket(marketItemId);
         await refreshSkillAssets({ page: skillListPage });
+        await loadMarketCatalog();
         message.success(t("admin.memoryBuiltinSkillEnableSuccess"));
       } catch (error) {
         console.error("Install market skill failed:", error);
@@ -235,36 +232,6 @@ export default function SkillManagementSection() {
         setMarketInstallingId(undefined);
       }
     })();
-  };
-
-  const handleMarketUninstall = (item: StructuredAsset) => {
-    const enabledCopy = skillAssets.find((candidate: StructuredAsset) =>
-      isMarketSkillInstalled([candidate], item),
-    );
-
-    if (!enabledCopy) {
-      message.info(t("admin.memorySkillMarketNotInstalled"));
-      return;
-    }
-
-    Modal.confirm({
-      title: t("admin.memorySkillMarketUninstallTitle"),
-      content: t("admin.memorySkillMarketUninstallContent", {
-        name: enabledCopy.name,
-      }),
-      okText: t("common.confirm"),
-      cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        await removeSkillAsset(enabledCopy.id);
-        await refreshSkillAssets({ page: skillListPage });
-        message.success(
-          t("admin.memorySkillMarketUninstallSuccess", {
-            name: enabledCopy.name,
-          }),
-        );
-      },
-    });
   };
 
   const handleSkillReviewClick = () => {
@@ -366,7 +333,6 @@ export default function SkillManagementSection() {
             categories={marketCategories}
             onReset={handleMarketReset}
             onInstall={handleMarketInstall}
-            onUninstall={handleMarketUninstall}
             onDetail={handleMarketDetail}
             installingUid={installingUid}
           />

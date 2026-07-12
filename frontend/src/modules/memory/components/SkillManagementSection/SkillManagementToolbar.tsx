@@ -50,20 +50,6 @@ export default function SkillManagementToolbar({
 }: SkillManagementToolbarProps) {
   const createMenuItems: MenuProps["items"] = [
     {
-      key: "manual",
-      label: (
-        <div className="memory-skill-create-option">
-          <span className="memory-skill-create-option__icon is-manual">
-            <PlusOutlined />
-          </span>
-          <span className="memory-skill-create-option__copy">
-            <strong>{t("admin.memorySkillCreateDirectTitle")}</strong>
-            <span>{t("admin.memorySkillCreateDirectDesc")}</span>
-          </span>
-        </div>
-      ),
-    },
-    {
       key: "zip",
       label: (
         <div className="memory-skill-create-option">
@@ -114,7 +100,11 @@ export default function SkillManagementToolbar({
           placement="bottomRight"
           overlayClassName="memory-skill-create-dropdown"
         >
-          <button type="button" className="memory-skill-create-split__trigger" aria-label={t("admin.memorySkillCreateButton")}>
+          <button
+            type="button"
+            className="memory-skill-create-split__trigger"
+            aria-label={t("admin.memorySkillCreateButton")}
+          >
             <DownOutlined />
           </button>
         </Dropdown>
