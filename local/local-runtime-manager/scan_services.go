@@ -255,6 +255,7 @@ func fileWatcherEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_FILE_WATCHER_ADVERTISE_ADDR=http://127.0.0.1:" + strconv.Itoa(cfg.FileWatcher.Port),
 		"LAZYMIND_FILE_WATCHER_CONTROL_PLANE_BASE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
 		"LAZYMIND_FILE_WATCHER_BASE_ROOT=" + paths.FileWatcherBaseRoot,
+		"LAZYMIND_FILE_WATCHER_STAGING_RUNTIME_ROOT=" + filepath.Join(paths.FileWatcherBaseRoot, "staging"),
 		"LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE=" + cfg.FileWatcher.HostPathStyle,
 		"LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR=" + cfg.FileWatcher.WatchHostDir,
 		"LAZYMIND_FILE_WATCHER_WATCH_CONTAINER_DIR=" + cfg.FileWatcher.WatchHostDir,
