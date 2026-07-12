@@ -469,15 +469,23 @@ export async function listQuestionTypes(): Promise<string[]> {
     .filter(Boolean);
 }
 
-export async function listDatasetQuestionTypes(datasetId: string): Promise<string[]> {
+export async function listDatasetQuestionTypes(
+  datasetId: string,
+  filters: {
+    keyword?: string;
+    source?: DatasetItemSource;
+  } = {},
+): Promise<string[]> {
   const normalizedDatasetId = `${datasetId || ""}`.trim();
   if (!normalizedDatasetId) {
     return [];
   }
-  const response = await axiosInstance.get(
-    `/api/core/eval-sets/${encodeURIComponent(normalizedDatasetId)}/question-types`,
-  );
-  const payload = unwrapPayload(response.data as { items?: Array<{ label?: string; value?: string }> });
+  const response = await evalSetItemsClient.apiCoreEvalSetsEvalSetIdQuestionTypesGet({
+    evalSetId: normalizedDatasetId,
+    keyword: `${filters.keyword || ""}`.trim() || undefined,
+    source: filters.source || undefined,
+  });
+  const payload = unwrapPayload(response.data);
   return (payload.items || [])
     .map((item) => `${item.value || item.label || ""}`.trim())
     .filter(Boolean);

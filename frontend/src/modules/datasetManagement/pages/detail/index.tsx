@@ -484,6 +484,10 @@ function referenceContextChunkIDs(raw?: string) {
     .filter(Boolean);
 }
 
+function hasReferenceContextChunks(raw?: string) {
+  return parseReferenceContextValue(raw).parts.some((part) => part.type === "chunk");
+}
+
 function removeReferenceContextPart(raw: string | undefined, partIndex: number) {
   return serializeReferenceContextValue({
     parts: referenceContextEditorValue(raw).parts.filter((_, index) => index !== partIndex),
@@ -926,6 +930,7 @@ export default function DatasetDetailPage() {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [total, setTotal] = useState(0);
   const [questionTypeOptions, setQuestionTypeOptions] = useState<string[]>([]);
+  const [questionTypeFilterOptions, setQuestionTypeFilterOptions] = useState<string[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DatasetItemFormValues>>({});
   const [dirtyItemIds, setDirtyItemIds] = useState<string[]>([]);
@@ -1120,7 +1125,7 @@ export default function DatasetDetailPage() {
     loadDetailRequestIdRef.current = requestId;
     setLoading(true);
     try {
-      const [datasetDetail, itemList, remoteQuestionTypes] = await Promise.all([
+      const [datasetDetail, itemList, remoteQuestionTypes, remoteFilterQuestionTypes] = await Promise.all([
         getDataset(datasetId),
         listDatasetItems(datasetId, {
           keyword: appliedFilters.keyword,
@@ -1130,6 +1135,10 @@ export default function DatasetDetailPage() {
           pageSize: pagination.pageSize,
         }),
         listDatasetQuestionTypes(datasetId).catch(() => []),
+        listDatasetQuestionTypes(datasetId, {
+          keyword: appliedFilters.keyword,
+          source: appliedFilters.source,
+        }).catch(() => []),
       ]);
       if (loadDetailRequestIdRef.current !== requestId) {
         return;
@@ -1138,6 +1147,7 @@ export default function DatasetDetailPage() {
       setItems(itemList.items);
       setTotal(itemList.total);
       setQuestionTypeOptions(remoteQuestionTypes);
+      setQuestionTypeFilterOptions(remoteFilterQuestionTypes);
     } catch (error: any) {
       if (loadDetailRequestIdRef.current !== requestId) {
         return;
@@ -2030,10 +2040,17 @@ export default function DatasetDetailPage() {
       field === "reference_doc" &&
       record.id !== NEW_ITEM_ID &&
       Boolean(record.reference_doc_invalid);
+    const referenceContextValue =
+      field === "reference_context"
+        ? referenceContextEditingValueRef.current[record.id] ??
+          draft?.reference_context ??
+          ""
+        : "";
     const shouldShowInvalidReferenceContextClear =
       field === "reference_context" &&
       record.id !== NEW_ITEM_ID &&
-      Boolean(record.reference_chunk_invalid);
+      Boolean(record.reference_chunk_invalid) &&
+      hasReferenceContextChunks(referenceContextValue);
     return (
       <div
         className={`dataset-inline-display-wrapper${
@@ -2618,7 +2635,7 @@ export default function DatasetDetailPage() {
               value={questionType}
               onChange={setQuestionType}
               placeholder={t("datasetManagement.detail.questionTypePlaceholder")}
-              options={questionTypeOptions}
+              options={questionTypeFilterOptions}
             />
             <Select
               allowClear

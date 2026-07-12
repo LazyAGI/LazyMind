@@ -18637,10 +18637,12 @@ export const EvalSetItemsApiAxiosParamCreator = function (configuration?: Config
          * 
          * @summary List eval set question types
          * @param {string} evalSetId 
+         * @param {string} [keyword] 
+         * @param {string} [source] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreEvalSetsEvalSetIdQuestionTypesGet: async (evalSetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreEvalSetsEvalSetIdQuestionTypesGet: async (evalSetId: string, keyword?: string, source?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'evalSetId' is not null or undefined
             assertParamExists('apiCoreEvalSetsEvalSetIdQuestionTypesGet', 'evalSetId', evalSetId)
             const localVarPath = `/api/core/eval-sets/{eval_set_id}/question-types`
@@ -18655,6 +18657,14 @@ export const EvalSetItemsApiAxiosParamCreator = function (configuration?: Config
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (source !== undefined) {
+                localVarQueryParameter['source'] = source;
+            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -18775,11 +18785,13 @@ export const EvalSetItemsApiFp = function(configuration?: Configuration) {
          * 
          * @summary List eval set question types
          * @param {string} evalSetId 
+         * @param {string} [keyword] 
+         * @param {string} [source] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreEvalSetsEvalSetIdQuestionTypesGet(evalSetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<QuestionTypeOptionsResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreEvalSetsEvalSetIdQuestionTypesGet(evalSetId, options);
+        async apiCoreEvalSetsEvalSetIdQuestionTypesGet(evalSetId: string, keyword?: string, source?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<QuestionTypeOptionsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreEvalSetsEvalSetIdQuestionTypesGet(evalSetId, keyword, source, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['EvalSetItemsApi.apiCoreEvalSetsEvalSetIdQuestionTypesGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -18861,7 +18873,7 @@ export const EvalSetItemsApiFactory = function (configuration?: Configuration, b
          * @throws {RequiredError}
          */
         apiCoreEvalSetsEvalSetIdQuestionTypesGet(requestParameters: EvalSetItemsApiApiCoreEvalSetsEvalSetIdQuestionTypesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<QuestionTypeOptionsResponse> {
-            return localVarFp.apiCoreEvalSetsEvalSetIdQuestionTypesGet(requestParameters.evalSetId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreEvalSetsEvalSetIdQuestionTypesGet(requestParameters.evalSetId, requestParameters.keyword, requestParameters.source, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -18947,6 +18959,10 @@ export interface EvalSetItemsApiApiCoreEvalSetsEvalSetIdItemsPostRequest {
  */
 export interface EvalSetItemsApiApiCoreEvalSetsEvalSetIdQuestionTypesGetRequest {
     readonly evalSetId: string
+
+    readonly keyword?: string
+
+    readonly source?: string
 }
 
 /**
@@ -19027,7 +19043,7 @@ export class EvalSetItemsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreEvalSetsEvalSetIdQuestionTypesGet(requestParameters: EvalSetItemsApiApiCoreEvalSetsEvalSetIdQuestionTypesGetRequest, options?: RawAxiosRequestConfig) {
-        return EvalSetItemsApiFp(this.configuration).apiCoreEvalSetsEvalSetIdQuestionTypesGet(requestParameters.evalSetId, options).then((request) => request(this.axios, this.basePath));
+        return EvalSetItemsApiFp(this.configuration).apiCoreEvalSetsEvalSetIdQuestionTypesGet(requestParameters.evalSetId, requestParameters.keyword, requestParameters.source, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

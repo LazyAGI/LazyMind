@@ -110,7 +110,12 @@ func ListEvalSetQuestionTypes(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err, "query eval set failed")
 		return
 	}
-	resp, err := svc.ListEvalSetQuestionTypes(r.Context(), evalSet)
+	query := r.URL.Query()
+	filter := ListEvalSetQuestionTypesFilter{
+		Keyword: query.Get("keyword"),
+		Source:  query.Get("source"),
+	}
+	resp, err := svc.ListEvalSetQuestionTypes(r.Context(), evalSet, filter)
 	if err != nil {
 		replyServiceError(w, err, "list eval set question types failed")
 		return
