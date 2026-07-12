@@ -1,0 +1,16 @@
+EXTERNAL_CHAT_FAILURE_TYPES = frozenset({
+    'chat_config_error',
+    'chat_http_error',
+    'chat_protocol_error',
+    'chat_runtime_error',
+    'chat_timeout',
+    'chat_transport_error',
+    'chat_unknown_error',
+    'router_algorithm_mismatch',
+    'router_algorithm_protocol_error',
+    'router_algorithm_timeout',
+    'router_algorithm_transport_error',
+    'router_algorithm_unavailable',
+    'router_algorithm_unhealthy',
+    'router_header_missing',
+})

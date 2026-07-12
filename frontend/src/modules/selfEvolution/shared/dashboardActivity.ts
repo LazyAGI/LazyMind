@@ -114,7 +114,7 @@ export function getActivityArtifactKind(event: NormalizedThreadEvent): WorkflowR
     getStringField(eventData, ["artifact_id", "writes_artifact_id", "current_item"]) ||
     getOperationRunId(event.payload);
   const finalArtifactIds: Record<ThreadEventStage, string[]> = {
-    dataset: ["eval_dataset"],
+    dataset: ["eval_dataset", "eval.dataset"],
     eval: ["eval_report", "candidate_eval_report"],
     analysis: ["classification_report", "repair_loop_plan"],
     repair: ["verified_repair", "repair_loop_agent", "candidate_workspace"],
@@ -162,9 +162,10 @@ export function buildEventActivity(event: NormalizedThreadEvent): EvoStageActivi
 }
 
 export function stageProgressFromEvents(events: NormalizedThreadEvent[], stage: ThreadEventStage) {
+  const evalCaseEventKinds = new Set(["eval.answer_and_judge", "eval.answer", "eval.judge"]);
   return getLastItem(
     events.filter((event) => event.stage === stage && event.progress &&
-      !(stage === "eval" && getEventFlowKind(event.payload) === "eval.answer_and_judge")),
+      !(stage === "eval" && evalCaseEventKinds.has(getEventFlowKind(event.payload) || ""))),
   )?.progress;
 }
 
@@ -206,7 +207,7 @@ export function getStageLogicalTaskCount(events: NormalizedThreadEvent[], stage:
       return;
     }
     const flowKind = getEventFlowKind(payload) || operationFlowKindFromRef(operationRunId);
-    if (stage === "eval" && flowKind !== "eval.rag_answer" && flowKind !== "eval.judge_answer") {
+    if (stage === "eval" && flowKind !== "eval.rag_answer" && flowKind !== "eval.judge_answer" && flowKind !== "eval.answer" && flowKind !== "eval.judge") {
       return;
     }
     keys.add(operationRunId);

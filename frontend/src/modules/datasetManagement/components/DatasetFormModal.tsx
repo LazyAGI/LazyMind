@@ -113,7 +113,6 @@ export default function DatasetFormModal({
         <Form.Item
           name="name"
           label={t("datasetManagement.fields.datasetName")}
-          extra={t("knowledge.knowledgeNameRule")}
           rules={[
             {
               required: true,

@@ -34,7 +34,8 @@
   }
 }
 
-.md-mermaid-block {
+.md-mermaid-block,
+.md-html-block {
   overflow: hidden;
   border: 1px solid var(--color-border-muted);
   border-radius: 6px;
@@ -180,4 +181,24 @@
   max-height: 78vh;
   overflow: auto;
   padding: 16px;
+}
+
+.md-html-preview {
+  overflow: hidden;
+  padding: 0;
+  background: var(--color-canvas-default);
+}
+
+.md-html-preview-iframe {
+  display: block;
+  width: 100%;
+  min-height: 160px;
+  border: 0;
+  background: #fff;
+}
+
+.md-html-modal-content {
+  max-height: 78vh;
+  overflow: auto;
+  padding: 0;
 }

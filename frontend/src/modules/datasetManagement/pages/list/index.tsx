@@ -36,9 +36,12 @@ import type {
   KnowledgeBaseOption,
 } from "../../shared";
 import { formatDateTime } from "../../shared";
+import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import "../../index.scss";
 
 const { Text, Paragraph } = Typography;
+
+const DATASET_LIST_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 export default function DatasetListPage() {
   const navigate = useNavigate();
@@ -52,6 +55,7 @@ export default function DatasetListPage() {
   const [editingDatasetId, setEditingDatasetId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [editingLoadingId, setEditingLoadingId] = useState("");
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
 
   const loadDatasets = async (nextKeyword = keyword) => {
     setLoading(true);
@@ -75,6 +79,7 @@ export default function DatasetListPage() {
   }, []);
 
   const handleSearch = () => {
+    setPagination((current) => ({ ...current, current: 1 }));
     void loadDatasets(keyword);
   };
 
@@ -285,10 +290,21 @@ export default function DatasetListPage() {
           dataSource={datasets}
           scroll={{ x: 1050, y: "calc(100vh - 340px)" }}
           tableLayout="fixed"
-          pagination={{
-            pageSize: 10,
-            showTotal: (total) => t("common.totalItems", { total }),
-          }}
+          pagination={getLocalizedTablePagination(
+            {
+              ...pagination,
+              showSizeChanger: true,
+              pageSizeOptions: DATASET_LIST_PAGE_SIZE_OPTIONS,
+              showTotal: (total) => t("common.totalItems", { total }),
+              onChange: (current, pageSize) => {
+                setPagination({ current, pageSize });
+              },
+              onShowSizeChange: (_current, pageSize) => {
+                setPagination({ current: 1, pageSize });
+              },
+            },
+            t,
+          )}
         />
       </Card>
 

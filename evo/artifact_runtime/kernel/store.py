@@ -49,6 +49,14 @@ class StoreResult:
     refs: tuple[ArtifactRef, ...] = ()
 
 
+ClaimStatus = Literal['ok', 'stale', 'already_done', 'busy']
+
+
+@dataclass(frozen=True)
+class ClaimResult:
+    status: ClaimStatus
+
+
 class SQLiteArtifactStore:
     def __init__(self, root: str | Path) -> None:
         self._root = Path(root)
@@ -69,6 +77,10 @@ class SQLiteArtifactStore:
 
     def close(self) -> None:
         self._conn.close()
+
+    @property
+    def root(self) -> Path:
+        return self._root
 
     def commit_external(self, run_id: str, key: ArtifactKey, value: object, *,
                         idempotency_key: str, expected_ref: ArtifactRef | None = None,
@@ -167,7 +179,7 @@ class SQLiteArtifactStore:
 
     def claim_materialization(self, run_id: str, materialization_key: str, output_keys: Sequence[ArtifactKey],
                               input_refs: Mapping[ArtifactKey, ArtifactRef], *, claim_token: str,
-                              claim_ttl_seconds: float = MATERIALIZATION_CLAIM_TTL_SECONDS) -> StoreResult:
+                              claim_ttl_seconds: float = MATERIALIZATION_CLAIM_TTL_SECONDS) -> ClaimResult:
         _require_text(run_id, 'run_id')
         _require_text(materialization_key, 'materialization_key')
         _require_text(claim_token, 'claim_token')
@@ -188,9 +200,9 @@ class SQLiteArtifactStore:
         with self._transaction():
             effective = self.effective_artifacts(run_id)
             if any(effective.get(key) != ref for key, ref in inputs.items()):
-                return StoreResult('stale')
+                return ClaimResult('stale')
             if set(outputs) <= set(effective):
-                return StoreResult('stale')
+                return ClaimResult('already_done')
             now = time.time()
             expires_at = now + claim_ttl_seconds
             changed = self._conn.execute(
@@ -204,8 +216,8 @@ class SQLiteArtifactStore:
                 (run_id, materialization_key, claim_token, expires_at, now),
             ).rowcount
             if changed != 1:
-                return StoreResult('stale')
-            return StoreResult('ok')
+                return ClaimResult('busy')
+            return ClaimResult('ok')
 
     def release_materialization(self, run_id: str, materialization_key: str, *, claim_token: str) -> None:
         _require_text(run_id, 'run_id')

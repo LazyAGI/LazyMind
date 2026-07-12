@@ -55,6 +55,9 @@
 .sge-plugin-name {
   font-size: 13px;
   color: #262626;
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 /* ─── Auto-save status ───────────────────────────────────── */

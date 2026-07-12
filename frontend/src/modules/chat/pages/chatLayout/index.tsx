@@ -553,6 +553,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       }
       const conversationId = detail.conversationId || "";
       if (!conversationId) {
+        if (sessionIdRef.current) {
+          chatRef.current?.disconnectConversationStream?.(sessionIdRef.current, {
+            persistResumeKey: true,
+          });
+        }
         setIsRestoringConversation(false);
         setConversationPluginSettings(undefined);
         setChatConfig({});
@@ -562,6 +567,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       }
       if (conversationId === sessionId) {
         return;
+      }
+      if (sessionIdRef.current) {
+        chatRef.current?.disconnectConversationStream?.(sessionIdRef.current, {
+          persistResumeKey: true,
+        });
       }
       setIsChatContent(true);
       loadConversation(conversationId);

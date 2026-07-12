@@ -14,14 +14,11 @@ import {
 } from "@/modules/dataSource/common/feishuAccounts";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
-  consumeCloudDataSourceOAuthResult,
-  consumeFeishuDataSourceOAuthResult,
-  consumeFeishuDataSourceWizardDraft,
+  bootstrapOAuthSession,
   type CloudDataSourceProvider,
   type FeishuDataSourceConnection,
   type FeishuDataSourceOAuthMessage,
 } from "@/modules/dataSource/common/feishuOAuth";
-import { DEFAULT_DATA_SOURCE_FILE_TYPES } from "@/modules/dataSource/constants/options";
 import type {
   DataSourceItem,
   FeishuAppSetup,
@@ -64,6 +61,8 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   const [editingId, setEditingId] = useState<string | null>(null);
   const [createProviderModalOpen, setCreateProviderModalOpen] = useState(false);
   const [authSelectModalOpen, setAuthSelectModalOpen] = useState(false);
+  const [authSelectProvider, setAuthSelectProvider] =
+    useState<CloudDataSourceProvider | null>(null);
   const [oauthState, setOauthState] = useState<OAuthState>("pending");
   const [connectionVerified, setConnectionVerified] = useState(false);
   const [oauthConnection, setOauthConnection] =
@@ -80,6 +79,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   );
   const [notionOauthConnection, setNotionOauthConnection] =
     useState<FeishuDataSourceConnection | null>(null);
+  const [notionAuthAccounts, setNotionAuthAccounts] = useState<FeishuAuthAccount[]>([]);
   const [cloudSetupProvider, setCloudSetupProvider] =
     useState<CloudDataSourceProvider>("feishu");
   const [feishuSetupModalOpen, setFeishuSetupModalOpen] = useState(false);
@@ -118,10 +118,12 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     (account) =>
       account.status === "connected" && Boolean(account.connection?.connectionId),
   );
+  const validNotionAccounts = notionAuthAccounts.filter(
+    (account) =>
+      account.status === "connected" && Boolean(account.connection?.connectionId),
+  );
   const isFeishuAuthValid = validFeishuAccounts.length > 0;
-  const isNotionAuthValid =
-    notionOauthConnection?.status === "connected" &&
-    Boolean(notionOauthConnection.connectionId);
+  const isNotionAuthValid = validNotionAccounts.length > 0;
 
   const getPreferredLocalAgentId = () => {
     const selectedAgent = pickScanAgent(scanAgents, validatedAgentId);
@@ -146,6 +148,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     handleSearchFeishuTargetOptions,
     handleLoadFeishuTargetChildren,
     resetFeishuTargetBrowseOptions,
+    seedFeishuTargetTree,
   } = useFeishuTargetTree({ t, feishuTargetType, getActiveFeishuAuthConnectionId });
 
   const refreshSourcesAfterCreate = useCallback(async () => {
@@ -190,6 +193,8 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     setCreateProviderModalOpen,
     authSelectModalOpen,
     setAuthSelectModalOpen,
+    authSelectProvider,
+    setAuthSelectProvider,
     cloudSetupProvider,
     setCloudSetupProvider,
     feishuSetupModalOpen,
@@ -212,6 +217,8 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     setOauthConnection,
     notionOauthConnection,
     setNotionOauthConnection,
+    notionAuthAccounts,
+    setNotionAuthAccounts,
     feishuAuthAccounts,
     setFeishuAuthAccounts,
     editingFeishuAccountId,
@@ -238,6 +245,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     feishuTargetTreeData,
     resetLocalPathBrowseOptions,
     resetFeishuTargetBrowseOptions,
+    seedFeishuTargetTree,
     createSuccessMessageKey: "knowledge.createFromCloudDocumentsSuccess",
     refreshSources: refreshSourcesAfterCreate,
     handleToggleLocalScanChat: async () => undefined,
@@ -251,28 +259,28 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   Object.assign(ctx, createSaveActions(ctx));
 
   useEffect(() => {
-    const draft = consumeFeishuDataSourceWizardDraft();
-    if (draft) {
-      const normalizedWizardStep = Math.min(Math.max(draft.wizardStep, 0), 1);
-      if (draft.authSelectModalOpen !== undefined) {
-        setAuthSelectModalOpen(Boolean(draft.authSelectModalOpen));
-      }
-      setWizardMode(draft.wizardMode);
-      setWizardOpen(draft.wizardOpen);
-      setWizardStep(normalizedWizardStep);
-      setSelectedType((draft.selectedType as SourceType | null) || null);
-      setEditingId(draft.editingId);
-      setValidatedAgentId(draft.validatedAgentId || null);
-      setOauthState((draft.oauthState as OAuthState) || "pending");
-      setConnectionVerified(Boolean(draft.connectionVerified));
-      setOauthConnection(draft.oauthConnection || null);
-      window.setTimeout(() => {
-        form.setFieldsValue({
-          fileTypes: DEFAULT_DATA_SOURCE_FILE_TYPES,
-          ...draft.formValues,
-        });
-      }, 0);
-    }
+    bootstrapOAuthSession({
+      form,
+      setAuthSelectModalOpen,
+      setAuthSelectProvider,
+      setWizardMode,
+      setWizardOpen,
+      setWizardStep,
+      setSelectedType,
+      setEditingId,
+      setValidatedAgentId,
+      setOauthState,
+      setConnectionVerified,
+      setOauthConnection,
+      applyOauthResult: (payload, options) => {
+        ctx.applyOauthResult(payload, options);
+      },
+      reopenCloudSetupModal: (type) => {
+        if (type === "feishu" || type === "notion") {
+          ctx.openCloudSetupModal(type, "create");
+        }
+      },
+    });
 
     if (feishuAuthAccounts.length === 0 && feishuAppSetup) {
       const seededAccounts: FeishuAuthAccount[] = [
@@ -289,20 +297,6 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
       ];
       setFeishuAuthAccounts(seededAccounts);
       persistFeishuAuthAccounts(seededAccounts);
-    }
-
-    const storedResult = consumeFeishuDataSourceOAuthResult();
-    if (storedResult) {
-      window.setTimeout(() => {
-        ctx.applyOauthResult(storedResult);
-      }, 0);
-    }
-
-    const storedNotionResult = consumeCloudDataSourceOAuthResult("notion");
-    if (storedNotionResult) {
-      window.setTimeout(() => {
-        ctx.applyOauthResult(storedNotionResult);
-      }, 0);
     }
 
     const handleMessage = (event: MessageEvent<FeishuDataSourceOAuthMessage>) => {
@@ -326,7 +320,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
 
   useEffect(() => {
     void ctx.refreshFeishuAuthAccounts();
-    void ctx.refreshNotionAuthConnection();
+    void ctx.refreshNotionAuthAccounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -353,6 +347,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     setCreateProviderModalOpen,
     authSelectModalOpen,
     setAuthSelectModalOpen,
+    authSelectProvider,
     manualOauthModalOpen,
     setManualOauthModalOpen,
     manualOauthCallbackValue,
@@ -364,6 +359,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     isFeishuAuthValid,
     isNotionAuthValid,
     validFeishuAccounts,
+    validNotionAccounts,
     localPathOptions,
     localPathLoading,
     loadLocalPathOptions,
@@ -378,7 +374,11 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     resetFeishuTargetBrowseOptions,
     handleCreateProviderSelect: ctx.handleCreateProviderSelect,
     handleOpenFeishuGuideFromAuthSelect: ctx.handleOpenFeishuGuideFromAuthSelect,
+    handleAddFeishuAuthFromSelect: ctx.handleAddFeishuAuthFromSelect,
+    handleAddNotionAuthFromSelect: ctx.handleAddNotionAuthFromSelect,
     handleSelectFeishuAuthConnection: ctx.handleSelectFeishuAuthConnection,
+    handleSelectNotionAuthConnection: ctx.handleSelectNotionAuthConnection,
+    handleOpenNotionGuideFromAuthSelect: ctx.handleOpenNotionGuideFromAuthSelect,
     handleSubmitManualOauthCallback: ctx.handleSubmitManualOauthCallback,
     handleCloseWizard: ctx.handleCloseWizard,
     handleNextStep: ctx.handleNextStep,
@@ -387,6 +387,15 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     handleResetNotionSetup: ctx.handleResetNotionSetup,
     requestSaveWithSyncConfirm,
     openCreateModal,
+    feishuSetupForm: ctx.feishuSetupForm,
+    cloudSetupProvider: ctx.cloudSetupProvider,
+    feishuSetupModalOpen: ctx.feishuSetupModalOpen,
+    setFeishuSetupModalOpen: ctx.setFeishuSetupModalOpen,
+    setFeishuSetupIntent: ctx.setFeishuSetupIntent,
+    feishuSetupSubmitting: ctx.feishuSetupSubmitting,
+    handleSaveFeishuSetup: ctx.handleSaveFeishuSetup,
+    handleCancelCloudSetup: ctx.handleCancelCloudSetup,
+    openEditWizard: ctx.openEditWizard,
   };
 }
 

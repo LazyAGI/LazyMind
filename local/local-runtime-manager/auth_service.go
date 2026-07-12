@@ -21,6 +21,7 @@ import (
 
 const (
 	authServiceOpenAPIExportEnvVar = "LAZYMIND_AUTH_OPENAPI_EXPORT_ENABLED"
+	authServicePermissionsEnvVar   = "LAZYMIND_AUTH_API_PERMISSIONS_FILE"
 	authServiceHealthPath          = "/api/authservice/auth/health"
 	authServiceHealthTimeout       = 180 * time.Second
 	authServiceDBWaitTimeout       = 180 * time.Second
@@ -39,6 +40,9 @@ func (m *AuthServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 		return err
 	}
 	if err := m.preparePythonEnv(ctx, cfg, paths); err != nil {
+		return err
+	}
+	if err := m.generateAPIPermissions(ctx, paths); err != nil {
 		return err
 	}
 	if err := waitForAuthDatabase(ctx, cfg.AuthService.DatabaseURL); err != nil {
@@ -215,6 +219,43 @@ func (m *AuthServiceManager) installRequirements(ctx context.Context, paths Runt
 	return fmt.Errorf("install auth-service requirements failed: %w (%s)", runErr, strings.TrimSpace(res.Stderr))
 }
 
+func (m *AuthServiceManager) generateAPIPermissions(ctx context.Context, paths RuntimePaths) error {
+	output := authServicePermissionsPath(paths)
+	script := filepath.Join(paths.RepoRoot, "backend", "scripts", "extract_api_permissions.py")
+	sources := []string{
+		filepath.Join(paths.RepoRoot, "backend", "core"),
+		filepath.Join(paths.RepoRoot, "backend", "auth-service"),
+		filepath.Join(paths.RepoRoot, "backend", "scan-control-plane"),
+	}
+	args := []string{
+		script,
+		"--output", output,
+		"--exclude", "scripts,core,vendor",
+	}
+	args = append(args, sources...)
+	res, runErr := m.runner.Run(ctx, Command{
+		Name: authServicePythonPath(paths),
+		Args: args,
+		Dir:  paths.RepoRoot,
+		Env:  pythonRuntimeEnv(paths),
+	})
+	if runErr != nil {
+		return fmt.Errorf("generate auth-service API permissions failed: %w (%s)", runErr, strings.TrimSpace(res.Stderr))
+	}
+	info, err := os.Stat(output)
+	if err != nil {
+		return fmt.Errorf("generate auth-service API permissions output file error: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("generate auth-service API permissions output path %s is a directory", output)
+	}
+	return nil
+}
+
+func authServicePermissionsPath(paths RuntimePaths) string {
+	return filepath.Join(paths.GeneratedDir, "auth-api-permissions.json")
+}
+
 func authServicePythonPath(paths RuntimePaths) string {
 	if runtime.GOOS == "windows" {
 		return filepath.Join(paths.AuthServiceVenvDir, "Scripts", "python.exe")
@@ -246,6 +287,7 @@ func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD=" + envText("LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD", "admin"),
 		"LAZYMIND_MODEL_CONFIG_PATH=" + envText("LAZYMIND_MODEL_CONFIG_PATH", "dynamic"),
 		"LAZYMIND_CHAT_UNLIKE_SWITCH=" + envText("LAZYMIND_CHAT_UNLIKE_SWITCH", "true"),
+		authServicePermissionsEnvVar + "=" + authServicePermissionsPath(paths),
 		authServiceOpenAPIExportEnvVar + "=0",
 	}
 }

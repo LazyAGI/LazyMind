@@ -30,10 +30,20 @@ type chatStatusCacheEntry struct {
 // PluginStepParams are the task_created.params fields for plugin_step agent type.
 type PluginStepParams struct {
 	PluginID    string `json:"plugin_id"`
+	PluginRef   string `json:"plugin_ref,omitempty"`
+	RevisionID  string `json:"revision_id,omitempty"`
+	RevisionNo  int64  `json:"revision_no,omitempty"`
+	TreeHash    string `json:"tree_hash,omitempty"`
+	RemoteRoot  string `json:"remote_root,omitempty"`
 	StepID      string `json:"step_id"`
 	SessionID   string `json:"session_id"`
 	UserInput   string `json:"user_input"`
 	IsColdStart bool   `json:"is_cold_start"`
+
+	// ChatSessionID is the LazyLLM session id of the ChatAgent turn that emitted
+	// task_created. It is needed by Python signal routes to write FileSystemQueue
+	// messages into the same sid namespace that advance_step is polling.
+	ChatSessionID string `json:"chat_session_id,omitempty"`
 
 	// PluginMode is "auto" | "dynamic" — resolved from the conversation request and
 	// persisted into params so that OnSubAgentDone can branch correctly even when
@@ -75,6 +85,9 @@ func (p PluginStepParams) asMap() map[string]any {
 	if p.PluginMode != "" {
 		m["plugin_mode"] = p.PluginMode
 	}
+	if p.ChatSessionID != "" {
+		m["chat_session_id"] = p.ChatSessionID
+	}
 	if p.RetryHint != "" {
 		m["retry_hint"] = p.RetryHint
 	}
@@ -101,6 +114,7 @@ type PluginChatContext struct {
 	ConvID              string
 	UserID              string
 	PluginMode          string // "auto" | "dynamic"
+	ChatSessionID       string
 	HistoryFilesPerTurn map[string][]string
 }
 
@@ -132,6 +146,12 @@ func HandlePluginStepCreated(
 	stepID := params.StepID
 	isCold := params.IsColdStart
 	returnedTaskID = taskID
+	fmt.Printf("[plugin] task_created received conv=%s session=%s plugin=%s step=%s task=%s cold=%t mode=%s\n",
+		convID, params.SessionID, pluginID, stepID, taskID, isCold, params.PluginMode)
+	if params.ChatSessionID != "" {
+		fmt.Printf("[plugin] task_created chat sid conv=%s chat_sid=%s plugin=%s step=%s task=%s\n",
+			convID, params.ChatSessionID, pluginID, stepID, taskID)
+	}
 
 	// "__end__" is a sentinel emitted by ChatAgent (via advance_step) to signal that the
 	// plugin session is complete.  No SubAgent is started; a step record is written for
@@ -139,6 +159,7 @@ func HandlePluginStepCreated(
 	// then the session is marked completed.
 	if stepID == "__end__" {
 		sessionID = params.SessionID
+		fmt.Printf("[plugin] task_created end signal conv=%s session=%s task=%s\n", convID, sessionID, taskID)
 		if sessionID == "" {
 			return "", "", false, fmt.Errorf("plugin: session_id required for __end__ signal")
 		}
@@ -156,10 +177,13 @@ func HandlePluginStepCreated(
 		// Sync TaskCenter status to succeeded.
 		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, sessionID, "succeeded")
 		clearGeneratingChatStatus(ctx, stateStore, convID)
+		fmt.Printf("[plugin] plugin session completed by end signal conv=%s session=%s task=%s\n",
+			convID, sessionID, taskID)
 		return sessionID, taskID, true, nil
 	}
 
 	if isCold {
+		fmt.Printf("[plugin] cold-start branch conv=%s plugin=%s step=%s task=%s\n", convID, pluginID, stepID, taskID)
 		existing, gErr := GetActiveSession(ctx, db, convID)
 		if gErr != nil {
 			return "", "", false, fmt.Errorf("plugin: check active session: %w", gErr)
@@ -169,9 +193,10 @@ func HandlePluginStepCreated(
 		}
 		psID := "ps_" + common.GenerateID()
 		_, sErr := CreateSession(ctx, db, CreateSessionInput{
-			SessionID:        psID,
-			ConversationID:   convID,
-			PluginID:         pluginID,
+			SessionID:      psID,
+			ConversationID: convID,
+			PluginID:       pluginID,
+			PluginRef:      params.PluginRef, PluginRevisionID: params.RevisionID, PluginRevisionNo: params.RevisionNo, PluginTreeHash: params.TreeHash, PluginRemoteRoot: params.RemoteRoot,
 			TriggerHistoryID: historyID,
 			CurrentStepID:    stepID,
 			CreateUserID:     userID,
@@ -180,6 +205,8 @@ func HandlePluginStepCreated(
 			return "", "", false, fmt.Errorf("plugin: create session: %w", sErr)
 		}
 		sessionID = psID
+		fmt.Printf("[plugin] plugin session created conv=%s session=%s plugin=%s current_step=%s\n",
+			convID, sessionID, pluginID, stepID)
 		// Register a TaskCenter record for this plugin run so the user can track it.
 		// Prefer conversation display_name as the task title so the task center shows
 		// a human-readable conversation title instead of a raw plugin/step identifier.
@@ -204,8 +231,12 @@ func HandlePluginStepCreated(
 			Title:           &tcTitle,
 			Status:          "running",
 		})
+		fmt.Printf("[plugin] taskcenter plugin_run ensured conv=%s session=%s plugin=%s\n",
+			convID, sessionID, pluginID)
 	} else {
 		sessionID = params.SessionID
+		fmt.Printf("[plugin] advance branch conv=%s session=%s plugin=%s step=%s task=%s\n",
+			convID, sessionID, pluginID, stepID, taskID)
 		if sessionID == "" {
 			return "", "", false, fmt.Errorf("plugin: session_id required for non-cold-start step")
 		}
@@ -216,10 +247,16 @@ func HandlePluginStepCreated(
 		}
 		if uErr := UpdateSessionCurrentStep(ctx, db, sessionID, stepID); uErr != nil {
 			fmt.Printf("[Plugin] failed to update current_step: %v\n", uErr)
+		} else {
+			fmt.Printf("[plugin] session current_step updated conv=%s session=%s step=%s\n",
+				convID, sessionID, stepID)
 		}
 		// Ensure session is marked active when a new step starts (e.g. auto-advance via ChatAgent).
 		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive); uErr != nil {
 			fmt.Printf("[Plugin] failed to reset session status to active: %v\n", uErr)
+		} else {
+			fmt.Printf("[plugin] session status active conv=%s session=%s step=%s\n",
+				convID, sessionID, stepID)
 		}
 	}
 
@@ -239,6 +276,9 @@ func HandlePluginStepCreated(
 	}
 	if params.PluginMode != "" {
 		rawParamsMap["plugin_mode"] = params.PluginMode
+	}
+	if params.ChatSessionID != "" {
+		rawParamsMap["chat_session_id"] = params.ChatSessionID
 	}
 	if params.RetryHint != "" {
 		rawParamsMap["retry_hint"] = params.RetryHint
@@ -282,17 +322,24 @@ func HandlePluginStepCreated(
 	if cErr != nil {
 		return "", sessionID, false, fmt.Errorf("plugin: create sub_agent_task: %w", cErr)
 	}
+	fmt.Printf("[plugin] sub_agent_task created conv=%s session=%s plugin=%s step=%s task=%s workspace=%s\n",
+		convID, sessionID, pluginID, stepID, task.ID, task.WorkspacePath)
 
 	// Create plugin_session_steps record.
 	attempt, _ := NextAttempt(ctx, db, sessionID, stepID)
 	if _, stepErr := CreateSessionStep(ctx, db, sessionID, stepID, task.ID, attempt); stepErr != nil {
 		fmt.Printf("[Plugin] failed to create session step: %v\n", stepErr)
+	} else {
+		fmt.Printf("[plugin] plugin_session_step created conv=%s session=%s step=%s task=%s attempt=%d\n",
+			convID, sessionID, stepID, task.ID, attempt)
 	}
 
 	// Seed Redis status.
 	_ = subagent.WriteStatus(ctx, stateStore, task.ID, map[string]any{
 		"status": subagent.StatusPending, "progress": 0,
 	})
+	fmt.Printf("[plugin] sub_agent status seeded conv=%s session=%s step=%s task=%s status=%s\n",
+		convID, sessionID, stepID, task.ID, subagent.StatusPending)
 
 	// Launch SubAgent goroutine.
 	// input_slots, output_slots, and tools are NOT forwarded here:
@@ -315,6 +362,12 @@ func HandlePluginStepCreated(
 		LLMConfig:     llmConfig,
 		ToolConfig:    toolConfig,
 	})
+	fmt.Printf("[plugin] sub_agent launched conv=%s session=%s step=%s task=%s\n",
+		convID, sessionID, stepID, task.ID)
+
+	go notifyStepStarted(convID, sessionID, stepID, task.ID, params.ChatSessionID)
+	fmt.Printf("[plugin] step_started notify scheduled conv=%s session=%s step=%s task=%s\n",
+		convID, sessionID, stepID, task.ID)
 
 	return sessionID, task.ID, false, nil
 }
@@ -397,6 +450,8 @@ func OnSubAgentDone(
 	if mode != "auto" && mode != "dynamic" {
 		mode = "dynamic"
 	}
+	fmt.Printf("[plugin] sub_agent terminal conv=%s session=%s step=%s task=%s status=%s mode=%s summary_len=%d\n",
+		pctx.ConvID, pctx.SessionID, pctx.StepID, taskID, status, mode, len(summary))
 
 	if mode == "auto" {
 		// Interrupted steps should not be auto-advanced: surface the interruption to the user
@@ -420,6 +475,8 @@ func OnSubAgentDone(
 			"step_id":    pctx.StepID,
 			"reason":     "dynamic_pause",
 		})
+		// Notify Python ChatAgent to unblock _wait_for_step_done.
+		go notifyStepDone(pctx.ConvID, pctx.SessionID, pctx.StepID, status, summary, pctx.ChatSessionID)
 	}
 	// Write content_snapshot to all selected revisions for this step.
 	go OnSubAgentDoneSnapshot(context.Background(), db, pctx)

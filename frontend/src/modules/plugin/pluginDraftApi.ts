@@ -80,6 +80,13 @@ export interface PluginDraftRecord {
   created_at: string;
   updated_at: string;
   created_by: string;
+  published: boolean;
+  published_plugin_ref: string;
+  current_revision_id: string;
+  current_revision_no: number;
+  published_status: string;
+  base_revision_id: string;
+  draft_dirty: boolean;
 }
 
 export interface ListPluginDraftsResponse {
@@ -132,6 +139,40 @@ export async function updatePluginDraftContent(id: string, payload: UpdateDraftP
 
 export async function deletePluginDraft(id: string): Promise<void> {
   await axiosInstance.delete(`${coreBasePath}/plugin-drafts/${id}`);
+}
+
+export interface PublishedPluginVersion {
+  plugin_ref: string;
+  revision_id: string;
+  revision_no: number;
+  remote_root: string;
+  enabled: boolean;
+}
+
+export async function publishPluginDraft(id: string): Promise<PublishedPluginVersion> {
+  const resp = await axiosInstance.post<CoreResponse<PublishedPluginVersion>>(`${coreBasePath}/plugin-drafts/${id}:publish`);
+  return resp.data.data;
+}
+
+export interface PluginVersionSummary { revision_id: string; revision_no: number; tree_hash: string; message: string; created_by: string; created_at: string; current: boolean }
+export interface PluginVersionContent { plugin_ref: string; revision_id: string; revision_no: number; tree_hash: string; plugin_yaml_content: string; state_yaml_content: string; scenario_content: string; scripts_content: string; readonly: true }
+export async function listPluginVersions(pluginRef: string): Promise<PluginVersionSummary[]> { const r=await axiosInstance.get<CoreResponse<{versions:PluginVersionSummary[]}>>(`${coreBasePath}/published-plugins/${encodeURIComponent(pluginRef)}/versions`);return r.data.data.versions }
+export async function getPluginVersion(pluginRef: string, revisionId: string): Promise<PluginVersionContent> { const r=await axiosInstance.get<CoreResponse<PluginVersionContent>>(`${coreBasePath}/published-plugins/${encodeURIComponent(pluginRef)}/versions/${encodeURIComponent(revisionId)}`);return r.data.data }
+export async function editPluginVersion(pluginRef: string, revisionId: string): Promise<PluginDraftRecord> { const r=await axiosInstance.post<CoreResponse<PluginDraftRecord>>(`${coreBasePath}/published-plugins/${encodeURIComponent(pluginRef)}/versions/${encodeURIComponent(revisionId)}:edit`);return r.data.data }
+
+export interface UserPluginSetting {
+  plugin_ref: string; plugin_id: string; name: string; description: string;
+  when_to_use: string; source_type: string; revision_id: string;
+  revision_no: number; remote_root: string; enabled: boolean; status: string;
+}
+
+export async function listUserPluginSettings(): Promise<UserPluginSetting[]> {
+  const resp = await axiosInstance.get<CoreResponse<{ plugins: UserPluginSetting[] }>>(`${coreBasePath}/chat/settings/plugins`);
+  return resp.data.data.plugins;
+}
+
+export async function setUserPluginEnabled(pluginRef: string, enabled: boolean): Promise<void> {
+  await axiosInstance.patch(`${coreBasePath}/chat/settings/plugins/${encodeURIComponent(pluginRef)}`, { enabled });
 }
 
 // Trigger AI generation for a plugin draft.

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import json
 import math
 import os
@@ -9,6 +8,8 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+from filelock import FileLock
 
 PAYLOAD_LIMIT = 8192
 COLLECTION_LIMIT = 50
@@ -25,13 +26,12 @@ URL = re.compile(r'(?i)\bhttps?://[^\s,;)\]}]+')
 ABS_PATH = re.compile(r'(?<![:/\w])/(?!/)(?:[^\s,;)\]}\"\']*/)+[^\s,;)\]}\"\']*')
 EVENT_TYPES = {
     'repair.attempt_started',
+    'repair.attempt_completed',
     'repair.base_selected',
-    'repair.decision_completed',
     'repair.loop_completed',
     'repair.patch_verified',
     'opencode.setup',
     'opencode.process_start',
-    'opencode.heartbeat',
     'opencode.tool_use.search',
     'opencode.tool_use.read_file',
     'opencode.tool_use.edit_file',
@@ -43,12 +43,15 @@ EVENT_TYPES = {
     'verify.pre_validation_started',
     'verify.diff_scope_completed',
     'verify.hardcode_check_completed',
+    'verify.behaviorful_diff_completed',
+    'verify.patch_policy_completed',
     'verify.command_started',
     'verify.command_completed',
     'verify.pre_validation_completed',
     'candidate.service_started',
     'candidate.service_ready',
     'candidate.service_failed',
+    'candidate.service_stopped',
     'candidate.case_started',
     'candidate.case_completed',
     'candidate.eval_summary_completed',
@@ -67,10 +70,9 @@ class RepairTraceStore:
     def append(self, thread_id: str, event: Mapping[str, Any], *, terminal: bool = False) -> dict[str, Any]:
         path = self._path(thread_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with self._lock_file(thread_id) as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-            last_seq = self._repair_and_last_seq(path)
-            row = dict(event, seq=last_seq + 1, created_at=event.get('created_at') or time.time())
+        with self._lock(thread_id):
+            row = dict(event, seq=self._last_seq(path, repair=True) + 1,
+                       created_at=event.get('created_at') or time.time())
             clean = _clean(row)
             line = _line(clean)
             saved = json.loads(line)
@@ -85,8 +87,7 @@ class RepairTraceStore:
         path = self._path(thread_id)
         if not path.exists():
             return []
-        with self._lock_file(thread_id) as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_SH)
+        with self._lock(thread_id):
             rows = self._read_valid(path, repair=False)
         return [
             row for row in rows
@@ -97,13 +98,8 @@ class RepairTraceStore:
         path = self._path(thread_id)
         if not path.exists():
             return 0
-        with self._lock_file(thread_id) as lock_file:
-            fcntl.flock(lock_file, fcntl.LOCK_SH)
-            row = self._tail_row(path, repair=False)
-            if row is None:
-                rows = self._read_valid(path, repair=False)
-                row = rows[-1] if rows else {}
-        return int(row.get('seq') or 0) if row else 0
+        with self._lock(thread_id):
+            return self._last_seq(path, repair=False)
 
     def fallback(self, thread_id: str, event_type: str, error: Exception) -> None:
         try:
@@ -123,15 +119,15 @@ class RepairTraceStore:
     def _path(self, thread_id: str) -> Path:
         return self.root / f'{self._safe_thread_id(thread_id)}.jsonl'
 
-    def _lock_file(self, thread_id: str):
-        return (self.root / f'{self._safe_thread_id(thread_id)}.lock').open('a+', encoding='utf-8')
+    def _lock(self, thread_id: str) -> FileLock:
+        return FileLock(str(self.root / f'{self._safe_thread_id(thread_id)}.lock'))
 
-    def _repair_and_last_seq(self, path: Path) -> int:
+    def _last_seq(self, path: Path, *, repair: bool) -> int:
         if not path.exists():
             return 0
-        row = self._tail_row(path, repair=True)
+        row = self._tail_row(path, repair=repair)
         if row is None:
-            rows = self._read_valid(path, repair=True)
+            rows = self._read_valid(path, repair=repair)
             row = rows[-1] if rows else {}
         return int(row.get('seq') or 0) if row else 0
 
@@ -213,9 +209,8 @@ class RepairTraceSink:
         payload: Mapping[str, Any] | None = None,
         terminal: bool = False,
     ) -> None:
-        event_type = event_type if event_type in EVENT_TYPES else (
-            'opencode.error' if event_type.startswith('opencode.') and status == 'failed' else 'opencode.message'
-        )
+        if event_type not in EVENT_TYPES:
+            raise ValueError(f'unknown repair trace event type: {event_type}')
         event = {
             'thread_id': self.thread_id,
             'trace_id': self.trace_id,
@@ -243,6 +238,25 @@ class RepairTraceSink:
             'seq_end': self.seq_end,
             'status': 'partial' if self.failures else 'ok',
         }
+
+
+def safe_emit(trace: Any | None, event_type: str, **kwargs: Any) -> None:
+    if trace is None:
+        return
+    try:
+        trace.emit(event_type, **kwargs)
+    except Exception:
+        pass
+
+
+def trace_cursor(trace: Any | None) -> dict[str, Any]:
+    if trace is None:
+        return {}
+    try:
+        cursor = trace.cursor()
+    except Exception:
+        return {}
+    return cursor if isinstance(cursor, dict) else {}
 
 
 def _clean(value: Any, depth: int = 0) -> Any:

@@ -44,6 +44,8 @@ export interface StartCloudOAuthOptions {
   previousConnection?: FeishuDataSourceConnection | null;
   accountId?: string;
   appId?: string;
+  openWizardOnSuccess?: boolean;
+  reopenSetupOnFailure?: boolean;
 }
 
 export interface RefreshSourcesOptions {
@@ -104,6 +106,8 @@ export interface ManagementContext {
   setCreateProviderModalOpen: Dispatch<SetStateAction<boolean>>;
   authSelectModalOpen: boolean;
   setAuthSelectModalOpen: Dispatch<SetStateAction<boolean>>;
+  authSelectProvider: CloudDataSourceProvider | null;
+  setAuthSelectProvider: Dispatch<SetStateAction<CloudDataSourceProvider | null>>;
   cloudSetupProvider: CloudDataSourceProvider;
   setCloudSetupProvider: Dispatch<SetStateAction<CloudDataSourceProvider>>;
   feishuSetupModalOpen: boolean;
@@ -132,6 +136,8 @@ export interface ManagementContext {
   setOauthConnection: Dispatch<SetStateAction<FeishuDataSourceConnection | null>>;
   notionOauthConnection: FeishuDataSourceConnection | null;
   setNotionOauthConnection: Dispatch<SetStateAction<FeishuDataSourceConnection | null>>;
+  notionAuthAccounts: FeishuAuthAccount[];
+  setNotionAuthAccounts: Dispatch<SetStateAction<FeishuAuthAccount[]>>;
   feishuAuthAccounts: FeishuAuthAccount[];
   setFeishuAuthAccounts: Dispatch<SetStateAction<FeishuAuthAccount[]>>;
   editingFeishuAccountId: string | null;
@@ -164,6 +170,7 @@ export interface ManagementContext {
   feishuTargetTreeData: FeishuTargetTreeNode[];
   resetLocalPathBrowseOptions: () => void;
   resetFeishuTargetBrowseOptions: () => void;
+  seedFeishuTargetTree: (nodes: FeishuTargetTreeNode[]) => void;
 
   /** i18n key override for create success toast (defaults to admin.dataSourceCreated) */
   createSuccessMessageKey?: string;
@@ -175,9 +182,13 @@ export interface ManagementContext {
   // OAuth engine handlers (createOAuthEngine)
   clearOauthAttempt: () => void;
   restorePreviousOauthState: (messageText?: string, level?: "warning" | "error") => void;
-  applyOauthResult: (payload: FeishuDataSourceOAuthMessage) => void;
+  applyOauthResult: (
+    payload: FeishuDataSourceOAuthMessage,
+    options?: { openWizardOnSuccess?: boolean },
+  ) => void;
   refreshFeishuAuthAccounts: () => Promise<void>;
   refreshNotionAuthConnection: () => Promise<void>;
+  refreshNotionAuthAccounts: () => Promise<void>;
   upsertFeishuAuthAccount: (
     setup: FeishuAccountFormValues,
     status?: OAuthState,
@@ -206,6 +217,7 @@ export interface ManagementContext {
     account?: FeishuAuthAccount | null,
   ) => void;
   handleSaveFeishuSetup: () => Promise<void>;
+  handleCancelCloudSetup: () => void;
   handleResetFeishuSetup: () => void;
   handleResetNotionSetup: () => void;
 
@@ -217,8 +229,12 @@ export interface ManagementContext {
   ) => void;
   handleCreateProviderSelect: (type: SourceType) => void;
   handleSelectFeishuAuthConnection: (connection: FeishuDataSourceConnection) => void;
+  handleSelectNotionAuthConnection: (connection: FeishuDataSourceConnection) => void;
   handleManageFeishuAuth: () => void;
+  handleAddFeishuAuthFromSelect: () => void;
+  handleAddNotionAuthFromSelect: () => void;
   handleOpenFeishuGuideFromAuthSelect: () => void;
+  handleOpenNotionGuideFromAuthSelect: () => void;
   handleNextStep: () => void;
   handleSubmitManualOauthCallback: () => Promise<void>;
   openDetailPage: (record: DataSourceItem) => void;

@@ -260,6 +260,22 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			reqBody["enable_subagent"] = v
 		}
 	}
+	if enabled, _ := reqBody["enable_plugin"].(bool); enabled {
+		catalog, catalogErr := plugin.EnabledCatalog(db, userID)
+		if catalogErr != nil {
+			common.ReplyErr(w, "load plugin catalog failed", http.StatusInternalServerError)
+			return
+		}
+		reqBody["plugin_catalog"] = catalog
+		disabledBuiltins, disabledErr := plugin.DisabledBuiltinPluginIDs(db, userID)
+		if disabledErr != nil {
+			common.ReplyErr(w, "load builtin plugin settings failed", http.StatusInternalServerError)
+			return
+		}
+		reqBody["disabled_builtin_plugins"] = disabledBuiltins
+	} else {
+		reqBody["plugin_catalog"] = []map[string]any{}
+	}
 
 	if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {
 		existing, hasPC := reqBody["plugin_context"].(map[string]any)
@@ -270,6 +286,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 				"plugin_id":    activeSess.PluginID,
 				"current_step": activeSess.CurrentStepID,
 				"plugin_mode":  pluginMode,
+				"plugin_ref":   activeSess.PluginRef, "revision_id": activeSess.PluginRevisionID, "revision_no": activeSess.PluginRevisionNo, "tree_hash": activeSess.PluginTreeHash, "remote_root": activeSess.PluginRemoteRoot,
 			}
 			fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s plugin_mode=%s\n",
 				convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID, pluginMode)
@@ -289,6 +306,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 				stale = true
 			}
 			existing["plugin_mode"] = pluginMode
+			existing["plugin_ref"] = activeSess.PluginRef
+			existing["revision_id"] = activeSess.PluginRevisionID
+			existing["revision_no"] = activeSess.PluginRevisionNo
+			existing["tree_hash"] = activeSess.PluginTreeHash
+			existing["remote_root"] = activeSess.PluginRemoteRoot
 			if stale {
 				fmt.Printf("[PLUGIN_CONTEXT_CORRECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
 					convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)

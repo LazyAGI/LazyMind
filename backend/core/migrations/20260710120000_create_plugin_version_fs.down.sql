@@ -1,0 +1,11 @@
+ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS base_revision_id;
+ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS plugin_remote_root;
+ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS plugin_tree_hash;
+ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS plugin_revision_no;
+ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS plugin_revision_id;
+ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS plugin_ref;
+DROP TABLE IF EXISTS user_plugin_settings;
+DROP TABLE IF EXISTS plugin_revision_entries;
+DROP TABLE IF EXISTS plugin_revisions;
+DROP TABLE IF EXISTS plugin_blobs;
+DROP TABLE IF EXISTS plugins;

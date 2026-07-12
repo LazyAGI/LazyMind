@@ -54,7 +54,7 @@ import TreeUtils from "@/modules/knowledge/utils/tree";
 import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
 import TypedConfirmModal, {
   type TypedConfirmModalRef,
-} from '@/components/ui/TypedConfirmModal';
+} from "@/components/ui/TypedConfirmModal";
 import CreateUpdateModal, {
   UpdateImperativeProps,
 } from "@/modules/knowledge/components/UpdateModal";
@@ -128,9 +128,11 @@ const Detail = () => {
   const [runningTotal, setRunningTotal] = useState(0);
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
-  const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<boolean | null>(null);
+  const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
+    boolean | null
+  >(null);
   const [uploadingNoticeVisible, setUploadingNoticeVisible] = useState(false);
-  const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
+  const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
 
   const { id = "" } = useParams();
 
@@ -153,38 +155,45 @@ const Detail = () => {
     console.log("searchParams", searchParams);
     getDetail();
     getImportingTotal();
-    const unwrap = (resp: { data: { data?: { ready: boolean } } | { ready: boolean } } | null): boolean | null => {
+    const unwrap = (
+      resp: { data: { data?: { ready: boolean } } | { ready: boolean } } | null,
+    ): boolean | null => {
       if (!resp) return null;
       const body = resp.data;
-      const d = body && typeof body === "object" && "data" in body
-        ? (body as { data?: { ready: boolean } }).data
-        : (body as { ready: boolean });
+      const d =
+        body && typeof body === "object" && "data" in body
+          ? (body as { data?: { ready: boolean } }).data
+          : (body as { ready: boolean });
       return d?.ready ?? null;
     };
     const loadEmbeddingReady = () => {
-      fetchModelFeatures(true).then((features) => {
-        const imageEmbedRequired = isImageEmbedRequired(features);
-        return Promise.all([
-          axiosInstance
-            .get<{ data?: { ready: boolean } } | { ready: boolean }>(
-              `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`
-            )
-            .catch(() => null),
-          imageEmbedRequired
-            ? axiosInstance
-                .get<{ data?: { ready: boolean } } | { ready: boolean }>(
-                  `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`
-                )
-                .catch(() => null)
-            : Promise.resolve(null),
-        ]).then(([embResp, multiResp]) => {
-          setEmbeddingReady(unwrap(embResp));
-          setMultimodalEmbeddingReady(imageEmbedRequired ? unwrap(multiResp) : null);
+      fetchModelFeatures(true)
+        .then((features) => {
+          const imageEmbedRequired = isImageEmbedRequired(features);
+          return Promise.all([
+            axiosInstance
+              .get<
+                { data?: { ready: boolean } } | { ready: boolean }
+              >(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`)
+              .catch(() => null),
+            imageEmbedRequired
+              ? axiosInstance
+                  .get<
+                    { data?: { ready: boolean } } | { ready: boolean }
+                  >(`${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`)
+                  .catch(() => null)
+              : Promise.resolve(null),
+          ]).then(([embResp, multiResp]) => {
+            setEmbeddingReady(unwrap(embResp));
+            setMultimodalEmbeddingReady(
+              imageEmbedRequired ? unwrap(multiResp) : null,
+            );
+          });
+        })
+        .catch(() => {
+          setEmbeddingReady(null);
+          setMultimodalEmbeddingReady(null);
         });
-      }).catch(() => {
-        setEmbeddingReady(null);
-        setMultimodalEmbeddingReady(null);
-      });
     };
     loadEmbeddingReady();
     window.addEventListener(MODEL_FEATURES_CHANGED_EVENT, loadEmbeddingReady);
@@ -196,7 +205,10 @@ const Detail = () => {
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
-      window.removeEventListener(MODEL_FEATURES_CHANGED_EVENT, loadEmbeddingReady);
+      window.removeEventListener(
+        MODEL_FEATURES_CHANGED_EVENT,
+        loadEmbeddingReady,
+      );
       document.removeEventListener("visibilitychange", onVisibilityChange);
       pollingRef.current.cancel();
       clearDataset();
@@ -210,18 +222,25 @@ const Detail = () => {
     };
 
     const handleDeveloperActiveChange = (event: Event) => {
-      const nextActive = (event as CustomEvent<{ active?: boolean }>).detail?.active;
+      const nextActive = (event as CustomEvent<{ active?: boolean }>).detail
+        ?.active;
       setDeveloperActive(
         typeof nextActive === "boolean" ? nextActive : isDeveloperModeActive(),
       );
     };
 
     window.addEventListener("storage", syncDeveloperActive);
-    window.addEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperActiveChange);
+    window.addEventListener(
+      DEVELOPER_ACTIVE_EVENT,
+      handleDeveloperActiveChange,
+    );
 
     return () => {
       window.removeEventListener("storage", syncDeveloperActive);
-      window.removeEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperActiveChange);
+      window.removeEventListener(
+        DEVELOPER_ACTIVE_EVENT,
+        handleDeveloperActiveChange,
+      );
     };
   }, []);
 
@@ -231,12 +250,18 @@ const Detail = () => {
       interval: IMPORT_TASK_POLL_INTERVAL,
       // Filter to running tasks on the backend so total_size is accurate and
       // we are not limited by the default page size of 20.
-      request: () => TaskServiceApi().listTasks(id, { taskStatus: 'running', pageSize: 1000 }),
+      request: () =>
+        TaskServiceApi().listTasks(id, {
+          taskStatus: "running",
+          pageSize: 1000,
+        }),
       onSuccess: ({ data = {} }) => {
         const newTaskList = data.tasks || [];
         // Tasks in WORKING state are actively being parsed by the algorithm service.
         // Tasks in WAITING state are still uploading / queued before parsing starts.
-        const uploadingTasks = newTaskList.filter((t: any) => t.task_state === 'WAITING');
+        const uploadingTasks = newTaskList.filter(
+          (t: any) => t.task_state === "WAITING",
+        );
         if (newTaskList.length === 0) {
           pollingRef.current.cancel();
         }
@@ -532,7 +557,9 @@ const Detail = () => {
                           required: true,
                           validator: (_: any, value: string) => {
                             if (!value) {
-                              return Promise.reject(t("knowledge.inputFolderName"));
+                              return Promise.reject(
+                                t("knowledge.inputFolderName"),
+                              );
                             }
                             if (
                               !/^[a-zA-Z\d\u4e00-\u9fa5_]+$/.test(value) ||
@@ -558,33 +585,46 @@ const Detail = () => {
             )}
             <Badge count={runningTotal} size="small" style={{ zIndex: 2 }}>
               <Space.Compact>
-                <Tooltip title={
-                  (embeddingReady === false || multimodalEmbeddingReady === false)
-                    ? (
+                <Tooltip
+                  title={
+                    embeddingReady === false ||
+                    multimodalEmbeddingReady === false ? (
                       isAdmin ? (
                         <span>
                           {embeddingReady === false
                             ? t("knowledge.embeddingNotReadyBannerAdmin")
-                            : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
+                            : t(
+                                "knowledge.multimodalEmbeddingNotReadyBannerAdmin",
+                              )}
                           <a
                             href="/model-providers"
-                            style={{ marginLeft: 8, color: '#fff', textDecoration: 'underline' }}
-                            onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+                            style={{
+                              marginLeft: 8,
+                              color: "#fff",
+                              textDecoration: "underline",
+                            }}
+                            onClick={(e: MouseEvent<HTMLAnchorElement>) => {
+                              e.preventDefault();
+                              navigate("/model-providers");
+                            }}
                           >
                             {t("knowledge.goToConfig")}
                           </a>
                         </span>
+                      ) : embeddingReady === false ? (
+                        t("knowledge.embeddingNotReadyBanner")
                       ) : (
-                        embeddingReady === false
-                          ? t("knowledge.embeddingNotReadyBanner")
-                          : t("knowledge.multimodalEmbeddingNotReadyBanner")
+                        t("knowledge.multimodalEmbeddingNotReadyBanner")
                       )
-                    )
-                    : undefined
-                }>
+                    ) : undefined
+                  }
+                >
                   <Button
                     type="primary"
-                    disabled={embeddingReady === false || multimodalEmbeddingReady === false}
+                    disabled={
+                      embeddingReady === false ||
+                      multimodalEmbeddingReady === false
+                    }
                     onClick={() => openImportModal({ importMode: "file" })}
                   >
                     {t("knowledge.importFile")}
@@ -596,17 +636,23 @@ const Detail = () => {
                       {
                         key: "importFile",
                         label: t("knowledge.importFile"),
-                        disabled: embeddingReady === false || multimodalEmbeddingReady === false,
+                        disabled:
+                          embeddingReady === false ||
+                          multimodalEmbeddingReady === false,
                       },
                       {
                         key: "importFolder",
                         label: t("knowledge.importFolder"),
-                        disabled: embeddingReady === false || multimodalEmbeddingReady === false,
+                        disabled:
+                          embeddingReady === false ||
+                          multimodalEmbeddingReady === false,
                       },
                       {
                         key: "importZip",
                         label: t("knowledge.importZip"),
-                        disabled: embeddingReady === false || multimodalEmbeddingReady === false,
+                        disabled:
+                          embeddingReady === false ||
+                          multimodalEmbeddingReady === false,
                       },
                       {
                         key: "taskManage",

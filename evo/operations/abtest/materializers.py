@@ -6,6 +6,7 @@ import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
+from statistics import fmean
 from typing import Any, Callable
 
 from evo.operations.eval.answer import answer_case, case_kb_id, failed_rag_answer
@@ -38,6 +39,7 @@ ENV_PASSTHROUGH = (
     'LAZYLLM_TRACE_LOCAL_STORAGE_DIR',
     'LAZYLLM_TRACE_CONSUME_BACKEND',
 )
+DEFAULT_CANDIDATE_MAX_RETRIES = '8'
 COMPARE_METRICS = (
     'overall_score',
     'answer_quality_score',
@@ -46,7 +48,9 @@ COMPARE_METRICS = (
     'groundedness',
     'correct_rate',
 )
+GOODCASE_MAX_OVERALL_DROP = 0.05
 SAFE_ID = re.compile(r'[^A-Za-z0-9_.-]+')
+ABTEST_PATCH_STATUSES = {'verified', 'unvalidated'}
 
 
 def abtest_materializers() -> dict[str, Callable[[Any, Mapping[str, object]], Mapping[str, object]]]:
@@ -88,9 +92,16 @@ def abtest_materializers() -> dict[str, Callable[[Any, Mapping[str, object]], Ma
 
 def candidate_service(config: Mapping[str, Any], patch: Mapping[str, Any], ctx: Any | None = None) -> dict[str, Any]:
     base = {'candidate_config': dict(config), 'patch_status': _text(patch.get('status'))}
-    if patch.get('status') != 'verified':
-        return base | {'status': 'skipped', 'healthcheck': {'status': 'skipped'}}
+    if not _text(patch.get('diff')):
+        return base | _failed_service('', '', '', '', 'invalid_repair_patch', 'repair patch has empty diff')
+    if _text(patch.get('status')) not in ABTEST_PATCH_STATUSES:
+        message = f"candidate evaluation requires final repair patch, got {_text(patch.get('status'))}"
+        return base | _failed_service('', '', '', '', 'invalid_repair_patch', message)
+    algorithm_id = router_chat_url = admin_url = code_path = ''
+    manager: RouterManager | None = None
+    stop_on_failure = False
     try:
+        explicit_algorithm_id = bool(_text(config.get('algorithm_id')))
         algorithm_id = _candidate_algorithm_id(config, patch, getattr(ctx, 'run_id', 'run'))
         if not _text(config.get('router_chat_url')):
             raise ValueError('candidate_config.router_chat_url is required')
@@ -120,8 +131,16 @@ def candidate_service(config: Mapping[str, Any], patch: Mapping[str, Any], ctx: 
                 'candidate_id_conflict',
                 'algorithm_id already exists with different code_path/config',
             )
-        registered = {'reused': True} if existing else manager.register_algorithm(spec, timeout_s=timeout_s)
-        ready = manager.wait_ready(algorithm_id, timeout_s=timeout_s)
+        health = manager.healthcheck_from_detail(existing) if existing else {}
+        stop_on_failure = existing is None and not explicit_algorithm_id
+        registered, ready = _ensure_candidate_ready(
+            manager,
+            spec,
+            existing,
+            health,
+            timeout_s,
+            restart_existing=not explicit_algorithm_id,
+        )
         _write_candidate_ledger(ctx, spec, router_chat_url, manager.router_admin_url, body, patch)
         return base | {
             'status': 'ready',
@@ -129,6 +148,7 @@ def candidate_service(config: Mapping[str, Any], patch: Mapping[str, Any], ctx: 
             'algorithm_id': algorithm_id,
             'router_chat_url': router_chat_url,
             'router_admin_url': manager.router_admin_url,
+            'cleanup_allowed': stop_on_failure,
             'workspace_ref': _text(patch.get('workspace_ref')),
             'code_path': code_path,
             'register_request': body,
@@ -136,9 +156,17 @@ def candidate_service(config: Mapping[str, Any], patch: Mapping[str, Any], ctx: 
             'healthcheck': manager.healthcheck_from_detail(ready),
         }
     except RouterManagerError as exc:
-        return base | _failed_service('', '', '', '', exc.kind, str(exc))
+        _stop_failed_candidate(manager, algorithm_id, exc.kind, stop_on_failure)
+        return base | _failed_service(
+            algorithm_id,
+            router_chat_url,
+            manager.router_admin_url if manager else admin_url,
+            code_path,
+            exc.kind,
+            str(exc),
+        )
     except Exception as exc:
-        return base | _failed_service('', '', '', '', type(exc).__name__, str(exc))
+        return base | _failed_service(algorithm_id, router_chat_url, admin_url, code_path, type(exc).__name__, str(exc))
 
 
 def candidate_rag_answer(case: Mapping[str, Any], service: Mapping[str, Any]) -> dict[str, Any]:
@@ -151,18 +179,13 @@ def candidate_rag_answer(case: Mapping[str, Any], service: Mapping[str, Any]) ->
     }
     if service.get('status') != 'ready':
         health = service.get('healthcheck') if isinstance(service.get('healthcheck'), Mapping) else {}
-        error_type = 'candidate_service_skipped' if service.get('status') == 'skipped' else \
-            'candidate_service_unavailable'
-        message = _text(health.get('message')) or (
-            'candidate evaluation skipped because repair patch is not verified'
-            if service.get('status') == 'skipped' else 'candidate not ready'
-        )
+        error_type = 'candidate_service_unavailable'
+        message = _text(health.get('message')) or _service_unavailable_message(service)
         return failed_rag_answer(case, {}, target, error_type, message)
     return answer_case(case, target_config)
 
 
 def compare_eval_detail_for_repair(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) -> dict[str, Any]:
-    skipped = candidate.get('total') and candidate.get('quality_counts', {}).get('skipped') == candidate.get('total')
     baseline_rows, candidate_rows = _rows_by_case(baseline.get('rows')), _rows_by_case(candidate.get('rows'))
     case_ids = list(dict.fromkeys([*baseline_rows, *candidate_rows, *baseline.get('case_ids', ()),
                                    *candidate.get('case_ids', ())]))
@@ -172,26 +195,21 @@ def compare_eval_detail_for_repair(baseline: Mapping[str, Any], candidate: Mappi
                    for case_id in case_ids]
     failures = list(candidate.get('execution_failures') or [])
     candidate_failed = bool(failures) or not (candidate.get('checks') or {}).get('ready')
-    regressions = [row for row in case_deltas if row['outcome'] == 'regressed']
-    guard = _goodcase_guard(case_deltas, baseline_rows)
+    guard = _goodcase_guard(case_deltas)
     reasons = []
-    if skipped:
-        reasons.append('candidate evaluation skipped because repair patch is not verified')
     if candidate_failed:
         reasons.append('candidate evaluation produced execution failures')
-    if regressions:
-        reasons.append(f'{len(regressions)} case(s) regressed on overall_score')
-    verdict = 'skipped' if skipped else 'candidate_eval_failed' if candidate_failed else 'review_candidate'
+    verdict = 'candidate_eval_failed' if candidate_failed else 'review_candidate'
     return {
         'id': 'abtest.comparison',
-        'status': 'skipped' if skipped else 'failed' if candidate_failed else 'completed',
+        'status': 'failed' if candidate_failed else 'completed',
         'verdict': verdict,
         'case_ids': case_ids,
         'case_count': len(case_ids),
         'metrics': {'baseline': before, 'candidate': after, 'delta': delta},
         'case_deltas': case_deltas,
         'goodcase_guard': guard,
-        'policy': {'primary_metric': 'overall_score', 'guard_metrics': ['overall_score', 'answer_correctness']},
+        'policy': {'primary_metric': 'overall_score', 'guard_metrics': ['overall_score']},
         'decision': {'status': verdict, 'primary_metric': 'overall_score', 'reasons': reasons},
         'reasons': reasons,
         'missing_metrics': [{'case_id': row['case_id'], 'outcome': row['outcome']} for row in case_deltas
@@ -215,17 +233,64 @@ def _candidate_target_config(service: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _service_unavailable_message(service: Mapping[str, Any]) -> str:
+    return 'candidate not ready'
+
+
 def _service_patch(patch: Mapping[str, Any], workspace: Mapping[str, Any]) -> dict[str, Any]:
     diff = patch.get('diff') if isinstance(patch.get('diff'), Mapping) else {}
     return {
         'status': patch.get('status'),
-        'workspace_ref': workspace.get('workspace_ref'),
+        'workspace_ref': _text(patch.get('workspace_ref')) or workspace.get('workspace_ref'),
         'diff': ''.join(str(value) for value in diff.values()),
     }
 
 
 def _same_registration(existing: Mapping[str, Any], body: Mapping[str, Any]) -> bool:
     return existing.get('code_path') == body.get('code_path') and dict(existing.get('config') or {}) == body['config']
+
+
+def _ensure_candidate_ready(
+    manager: RouterManager,
+    spec: RouterAlgorithmSpec,
+    existing: Mapping[str, Any] | None,
+    health: Mapping[str, Any],
+    timeout_s: int,
+    *,
+    restart_existing: bool,
+) -> tuple[dict[str, Any], Mapping[str, Any]]:
+    if existing:
+        if health.get('status') == 'passed':
+            return {'reused': True}, existing
+        if not restart_existing:
+            raise RouterManagerError(
+                'candidate_existing_unhealthy',
+                f'algorithm {spec.id} exists but is not healthy',
+            )
+        if _text(existing.get('status')) != 'active':
+            registered = manager.register_algorithm(spec, timeout_s=timeout_s)
+            return dict(registered) | {'reused': True, 'reactivated': True}, manager.wait_ready(
+                spec.id,
+                timeout_s=timeout_s,
+            )
+        manager.restart_algorithm(spec.id, timeout_s=timeout_s)
+        return {'reused': True, 'restarted': True}, manager.get_algorithm(spec.id) or {}
+    registered = manager.register_algorithm(spec, timeout_s=timeout_s)
+    return registered, manager.wait_ready(spec.id, timeout_s=timeout_s)
+
+
+def _stop_failed_candidate(
+    manager: RouterManager | None,
+    algorithm_id: str,
+    error_type: str,
+    enabled: bool,
+) -> None:
+    if not enabled or not manager or not algorithm_id or error_type != 'router_timeout':
+        return
+    try:
+        manager.stop_algorithm(algorithm_id)
+    except RouterManagerError:
+        pass
 
 
 def _register_request(spec: RouterAlgorithmSpec) -> dict[str, Any]:
@@ -286,6 +351,7 @@ def _candidate_env(config: Mapping[str, Any], algorithm_id: str) -> dict[str, st
     env = {'LAZYMIND_ALGO_ID': _text(config.get('algo_id')) or kb_name,
            'LAZYMIND_AGENTIC_KB_NAME': kb_name,
            'LAZYMIND_ROUTER_ALGORITHM_ID': algorithm_id,
+           'LAZYMIND_MAX_RETRIES': _candidate_max_retries(config),
            'LAZYMIND_ENABLE_ROUTER': 'false',
            'LAZYMIND_ROUTER_CHILD_PROXIED_ONLY': 'true'}
     env.update({key: _text(os.getenv(key)) for key in ENV_PASSTHROUGH if _text(os.getenv(key))})
@@ -294,13 +360,20 @@ def _candidate_env(config: Mapping[str, Any], algorithm_id: str) -> dict[str, st
     return env
 
 
+def _candidate_max_retries(config: Mapping[str, Any]) -> str:
+    value = _text(config.get('max_retries') or os.getenv('LAZYMIND_EVO_CHAT_MAX_RETRIES'))
+    return value if value.isdigit() and int(value) > 0 else DEFAULT_CANDIDATE_MAX_RETRIES
+
+
 def _code_path(config: Mapping[str, Any], patch: Mapping[str, Any]) -> str:
-    if config.get('code_path'):
-        return _text(config['code_path'])
     workspace = Path(_text(patch.get('workspace_ref'))).as_posix()
     if not workspace:
-        raise ValueError('verified repair patch must provide workspace_ref or candidate_config.code_path')
-    return f'{workspace.rstrip("/")}/lazymind/chat'
+        raise ValueError('final repair patch must provide workspace_ref')
+    expected = f'{workspace.rstrip("/")}/algorithm/lazymind/chat'
+    explicit = Path(_text(config.get('code_path'))).as_posix().rstrip('/') if _text(config.get('code_path')) else ''
+    if explicit and explicit != expected:
+        raise ValueError('candidate_config.code_path must match final repair patch workspace')
+    return expected
 
 
 def _summary_metrics(summary: Mapping[str, Any]) -> dict[str, float]:
@@ -339,11 +412,25 @@ def _row_metrics(row: Mapping[str, Any]) -> dict[str, float]:
     return {key: _float(row.get(key)) for key in COMPARE_METRICS if key != 'correct_rate'}
 
 
-def _goodcase_guard(case_deltas: list[dict[str, Any]], baseline_rows: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
-    violations = [row for row in case_deltas
-                  if baseline_rows.get(row['case_id'], {}).get('quality_label') == 'good'
-                  and row['delta']['overall_score'] < -0.05]
-    return {'status': 'failed' if violations else 'passed', 'violations': violations}
+def _goodcase_guard(case_deltas: list[dict[str, Any]]) -> dict[str, Any]:
+    pairs = [
+        (row['before']['overall_score'], row['after']['overall_score'])
+        for row in case_deltas
+        if row.get('baseline_quality') == 'good'
+    ]
+    if not pairs:
+        return {'status': 'not_applicable', 'count': 0}
+    before = fmean(pair[0] for pair in pairs)
+    after = fmean(pair[1] for pair in pairs)
+    drop = round(before - after, 4)
+    return {
+        'status': 'failed' if drop > GOODCASE_MAX_OVERALL_DROP else 'passed',
+        'count': len(pairs),
+        'baseline_overall_avg': round(before, 4),
+        'candidate_overall_avg': round(after, 4),
+        'overall_delta': round(after - before, 4),
+        'allowed_drop': GOODCASE_MAX_OVERALL_DROP,
+    }
 
 
 def _mapping(value: object, name: str) -> Mapping[str, Any]:

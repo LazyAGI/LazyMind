@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,4 +106,77 @@ func TestAuthServiceInstallRequirementsUsesUVOnly(t *testing.T) {
 		t.Fatalf("install requirements: %v", err)
 	}
 	runner.assertCommandCount(1)
+}
+
+func TestAuthServiceGenerateAPIPermissionsUsesRuntimeOutput(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv(runtimeRootEnvVar, filepath.Join(repo, "runtime"))
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+
+	script := filepath.Join(repo, "backend", "scripts", "extract_api_permissions.py")
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+	if err := os.WriteFile(script, []byte("# fixture\n"), 0o644); err != nil {
+		t.Fatalf("write permission extractor: %v", err)
+	}
+
+	output := authServicePermissionsPath(paths)
+	runner := &fakeRunner{t: t}
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommand(t, cmd,
+			authServicePythonPath(paths),
+			script,
+			"--output", output,
+			"--exclude", "scripts,core,vendor",
+			filepath.Join(repo, "backend", "core"),
+			filepath.Join(repo, "backend", "auth-service"),
+			filepath.Join(repo, "backend", "scan-control-plane"),
+		)
+		if err := os.WriteFile(output, []byte("[]\n"), 0o600); err != nil {
+			t.Fatalf("write generated permissions: %v", err)
+		}
+		return CommandResult{}, nil
+	})
+
+	manager := NewAuthServiceManager(runner)
+	if err := manager.generateAPIPermissions(context.Background(), paths); err != nil {
+		t.Fatalf("generate API permissions: %v", err)
+	}
+	runner.assertCommandCount(1)
+	assertEnvContains(t, authServiceEnv(RuntimeConfig{}, paths), authServicePermissionsEnvVar+"="+output)
+}
+
+func TestAuthServiceGenerateAPIPermissionsPreservesOutputStatError(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv(runtimeRootEnvVar, filepath.Join(repo, "runtime"))
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+
+	runner := &fakeRunner{t: t}
+	runner.handlers = append(runner.handlers, func(Command) (CommandResult, error) {
+		return CommandResult{}, nil
+	})
+
+	manager := NewAuthServiceManager(runner)
+	err = manager.generateAPIPermissions(context.Background(), paths)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("generate API permissions error = %v, want wrapped os.ErrNotExist", err)
+	}
+	if !strings.Contains(err.Error(), "output file error") {
+		t.Fatalf("generate API permissions error = %q, want output file context", err)
+	}
 }

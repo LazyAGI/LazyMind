@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Tooltip, message } from "antd";
-import { PlusOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { Button, Modal, message } from "antd";
+import { InfoCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import PluginInstalledView from "./PluginInstalledView";
 import { AgentAppsAuth } from "@/components/auth";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
 import { useMemoryManagementOutletContext } from "../../context";
 import type { StructuredAsset } from "../../shared";
-import { isSkillUpdatePendingForRecord } from "../../shared";
-import { removeSkillAsset, listSkillAssetsPage } from "../../skillApi";
+import type { MarketSkillAsset } from "./skillMarketMockData";
+import { installSkillFromMarket, listSkillMarketPage, removeSkillAsset } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
 import SkillInstalledView from "./SkillInstalledView";
 import SkillMarketView from "./SkillMarketView";
-import SkillUploadView from "./SkillUploadView";
 import {
   collectMarketCategories,
   mapSkillAssetRecordToStructuredAsset,
@@ -64,7 +63,7 @@ export default function SkillManagementSection() {
     setCategory,
     availableCategories,
     skillCategoriesLoading,
-    handleEnableBuiltinSkill,
+    handleEnableBuiltinSkill: _handleEnableBuiltinSkill,
     builtinSkillEnableLoading,
     openChangeReview,
     searchInput,
@@ -91,7 +90,7 @@ export default function SkillManagementSection() {
 
     void (async () => {
       try {
-        const firstResult = await listSkillAssetsPage({
+        const firstResult = await listSkillMarketPage({
           page: 1,
           pageSize: 100,
         });
@@ -104,7 +103,7 @@ export default function SkillManagementSection() {
         const totalPages = Math.ceil(firstResult.total / pageSize);
 
         for (let page = 2; page <= totalPages; page += 1) {
-          const pageResult = await listSkillAssetsPage({ page, pageSize });
+          const pageResult = await listSkillMarketPage({ page, pageSize });
           if (ignore) {
             return;
           }
@@ -118,7 +117,7 @@ export default function SkillManagementSection() {
         setMarketCatalogAssets(Array.from(deduped.values()));
       } catch (error) {
         if (!ignore) {
-          console.error("Load skill market catalog failed:", error);
+          console.error("Load skill plaza catalog failed:", error);
           setMarketCatalogAssets([]);
         }
       } finally {
@@ -184,10 +183,7 @@ export default function SkillManagementSection() {
   );
 
   const usingMockMarketData = useMemo(
-    () =>
-      !marketCatalogAssets.some(
-        (item) => item.isBuiltinTemplate && !item.parentId,
-      ),
+    () => marketCatalogAssets.length === 0,
     [marketCatalogAssets],
   );
 
@@ -217,23 +213,12 @@ export default function SkillManagementSection() {
   ]);
 
   const marketCategories = useMemo(
-    () =>
-      collectMarketCategories(
-        marketSkillAssets.filter(
-          (item) => item.isBuiltinTemplate && !item.parentId,
-        ),
-      ),
+    () => collectMarketCategories(marketSkillAssets),
     [marketSkillAssets],
   );
 
   const installedUpdateCount = useMemo(
-    () =>
-      skillAssets.filter(
-        (item) =>
-          !item.isBuiltinTemplate &&
-          !item.parentId &&
-          isSkillUpdatePendingForRecord(item),
-      ).length,
+    () => skillAssets.filter((item: StructuredAsset) => item.draft?.hasUncommittedDraft).length,
     [skillAssets],
   );
 
@@ -262,10 +247,7 @@ export default function SkillManagementSection() {
     }
 
     const firstUpdatedSkill = skillAssets.find(
-      (item) =>
-        !item.isBuiltinTemplate &&
-        !item.parentId &&
-        isSkillUpdatePendingForRecord(item),
+      (item: StructuredAsset) => item.draft?.hasUncommittedDraft,
     );
 
     if (firstUpdatedSkill) {
@@ -285,7 +267,7 @@ export default function SkillManagementSection() {
 
   const handleMarketInstall = (item: StructuredAsset) => {
     if (isMockMarketSkill(item)) {
-      const uid = item.builtinSkillUid || item.id;
+      const uid = item.id;
       if (mockInstalledUids.has(uid)) {
         return;
       }
@@ -295,20 +277,26 @@ export default function SkillManagementSection() {
         ...previous,
         createInstalledSkillFromMock(item),
       ]);
-      message.success(
-        usingMockMarketData
-          ? t("admin.memorySkillMarketMockInstallSuccess", { name: item.name })
-          : t("admin.memoryBuiltinSkillEnableSuccess"),
-      );
+      message.success(t("admin.memorySkillMarketMockInstallSuccess", { name: item.name }));
       return;
     }
 
-    void handleEnableBuiltinSkill(item);
+    const marketItemId = (item as MarketSkillAsset).marketItemId || item.id;
+    void (async () => {
+      try {
+        await installSkillFromMarket(marketItemId);
+        await refreshSkillAssets({ page: skillListPage });
+        message.success(t("admin.memoryBuiltinSkillEnableSuccess"));
+      } catch (error) {
+        console.error("Install market skill failed:", error);
+        message.error(t("admin.memoryBuiltinSkillEnableFailed"));
+      }
+    })();
   };
 
   const handleMarketUninstall = (item: StructuredAsset) => {
     if (isMockMarketSkill(item)) {
-      const uid = item.builtinSkillUid || item.id;
+      const uid = item.id;
       if (!mockInstalledUids.has(uid)) {
         message.info(t("admin.memorySkillMarketNotInstalled"));
         return;
@@ -329,7 +317,7 @@ export default function SkillManagementSection() {
             return next;
           });
           setMockInstalledSkills((previous) =>
-            previous.filter((skill) => skill.originBuiltinSkillUid !== uid),
+            previous.filter((skill) => skill.id !== `mock-installed-${item.id}`),
           );
           message.success(
             t("admin.memorySkillMarketUninstallSuccess", { name: item.name }),
@@ -340,7 +328,7 @@ export default function SkillManagementSection() {
     }
 
     const enabledCopy = skillAssets.find(
-      (candidate) => candidate.originBuiltinSkillUid === item.builtinSkillUid,
+      (candidate: StructuredAsset) => candidate.name === item.name,
     );
 
     if (!enabledCopy) {
@@ -400,25 +388,6 @@ export default function SkillManagementSection() {
             onClick={() => setSkillView("market")}
           >
             {t("admin.memorySkillViewMarket")}
-            <Tooltip title={t("admin.memorySkillViewMarketHelp")}>
-              <button
-                type="button"
-                className="memory-skill-tooltip-help"
-                aria-label={t("admin.memorySkillViewMarketHelp")}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <QuestionCircleOutlined />
-              </button>
-            </Tooltip>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`memory-skill-view-tab ${skillView === "upload" ? "is-active" : ""}`}
-            aria-selected={skillView === "upload"}
-            onClick={() => setSkillView("upload")}
-          >
-            {t("admin.memorySkillViewUpload")}
           </button>
           <button
             type="button"
@@ -486,7 +455,15 @@ export default function SkillManagementSection() {
       ) : null}
 
       {skillView === "market" ? (
-        <>
+        <div className="memory-skill-market-panel">
+          <div className="memory-skill-view-market-desc">
+            <span className="memory-skill-view-market-desc__icon" aria-hidden="true">
+              <InfoCircleOutlined />
+            </span>
+            <p className="memory-skill-view-market-desc__text">
+              {t("admin.memorySkillViewMarketHelp")}
+            </p>
+          </div>
           {usingMockMarketData ? (
             <div className="memory-skill-market-demo-banner">
               {t("admin.memorySkillMarketMockBanner")}
@@ -510,17 +487,7 @@ export default function SkillManagementSection() {
             onDetail={handleMarketDetail}
             installingUid={installingUid}
           />
-        </>
-      ) : null}
-
-      {skillView === "upload" ? (
-        <SkillUploadView
-          t={t}
-          onUploaded={async () => {
-            await refreshSkillAssets({ page: skillListPage });
-          }}
-          onNavigateInstalled={() => setSkillView("installed")}
-        />
+        </div>
       ) : null}
 
       <SkillAdminPublishModal

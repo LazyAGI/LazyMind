@@ -118,6 +118,24 @@ export function isTerminalAbtestCheckpoint(prompt: CheckpointWaitPrompt | undefi
   return prompt?.completedStage === "abtest" && !prompt.nextStage;
 }
 
+export function requiresManualCheckpointAction(
+  prompt: CheckpointWaitPrompt | undefined,
+): boolean {
+  if (!prompt) {
+    return false;
+  }
+  if (prompt.kind === "failure") {
+    return true;
+  }
+  if (prompt.checkpointKind === "manual_cutover") {
+    return true;
+  }
+  if (prompt.checkpointKind === "intent_confirmation") {
+    return true;
+  }
+  return false;
+}
+
 export function buildFailureRetryPrompt(
   stage: ThreadEventStage | undefined,
   payload: Record<string, unknown> | undefined,

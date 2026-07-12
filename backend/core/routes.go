@@ -1,6 +1,9 @@
 package main
 
 import (
+	"net/http"
+	"strings"
+
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/chat"
@@ -27,6 +30,19 @@ import (
 
 	"github.com/gorilla/mux"
 )
+
+func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) {
+	handleAPI(r, method, path, perms, h).MatcherFunc(func(r *http.Request, _ *mux.RouteMatch) bool {
+		path := strings.TrimPrefix(r.URL.EscapedPath(), "/api/core")
+		const prefix = "/agent/threads/"
+		rest := strings.TrimPrefix(path, prefix)
+		if rest == path {
+			return true
+		}
+		threadID, _, _ := strings.Cut(rest, "/")
+		return !strings.Contains(threadID, ":")
+	})
+}
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
@@ -155,29 +171,33 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Agent thread stream -----
 	handleAPI(r, "GET", "/agent/threads", []string{"qa.read"}, agent.ListThreads)
 	handleAPI(r, "POST", "/agent/threads", []string{"qa.write"}, agent.CreateThread)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}:events", []string{"qa.read"}, agent.StreamThreadEvents)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/events/{step_id}", []string{"qa.read"}, agent.StreamThreadStepEvents)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/steps", []string{"qa.read"}, agent.ListThreadSteps)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/steps/{step_id}/records", []string{"qa.read"}, agent.ListThreadStepRecords)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}", []string{"qa.read"}, agent.GetThread)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/history", []string{"qa.read"}, agent.GetThreadHistory)
-	handleAPI(r, "DELETE", "/agent/threads/{thread_id}:history", []string{"qa.write"}, agent.DeleteThreadHistory)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/rounds", []string{"qa.read"}, agent.ListThreadRounds)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/records", []string{"qa.read"}, agent.ListThreadRecords)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/{kind}:download", []string{"qa.read"}, agent.DownloadThreadResult)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/datasets", []string{"qa.read"}, agent.GetThreadResultDatasets)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/eval-reports", []string{"qa.read"}, agent.GetThreadResultEvalReports)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/analysis-reports", []string{"qa.read"}, agent.GetThreadResultAnalysisReports)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/diffs", []string{"qa.read"}, agent.GetThreadResultDiffs)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/abtests", []string{"qa.read"}, agent.GetThreadResultAbtests)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/flow-status", []string{"qa.read"}, agent.GetThreadFlowStatus)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/artifacts/{artifact_id}", []string{"qa.read"}, agent.GetThreadArtifact)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:messages", []string{"qa.write"}, agent.StreamThreadMessages)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:start", []string{"qa.write"}, agent.StartThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:pause", []string{"qa.write"}, agent.PauseThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:cancel", []string{"qa.write"}, agent.CancelThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:retry", []string{"qa.write"}, agent.RetryThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:continue", []string{"qa.write"}, agent.ContinueThread)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/events:stream", []string{"qa.read"}, agent.StreamThreadEvents)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/event-trace:stream", []string{"qa.read"}, agent.StreamThreadEventTrace)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/steps", []string{"qa.read"}, agent.ListThreadSteps)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates", []string{"qa.read"}, agent.ListThreadGates)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/{step}/versions/{version}:download", []string{"qa.read"}, agent.DownloadThreadGate)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/{step}/versions/{version}", []string{"qa.read"}, agent.GetThreadGateContent)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases", []string{"qa.read"}, agent.GetThreadEvalGateBadCases)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details", []string{"qa.read"}, agent.GetThreadABTestGateCaseDetails)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/results/traces:compare", []string{"qa.read"}, agent.CompareThreadTraces)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/results/traces/{trace_id}", []string{"qa.read"}, agent.GetThreadTraceDetail)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}", []string{"qa.read"}, agent.GetThread)
+	handleAgentThreadAPI(r, "DELETE", "/agent/threads/{thread_id}", []string{"qa.write"}, agent.DeleteThread)
+	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/messages", []string{"qa.read"}, agent.GetThreadMessages)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/messages", []string{"qa.write"}, agent.StreamThreadMessages)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/start", []string{"qa.write"}, agent.StartThread)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/pause", []string{"qa.write"}, agent.PauseThread)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/cancel", []string{"qa.write"}, agent.CancelThread)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/retry", []string{"qa.write"}, agent.RetryThread)
+	handleAgentThreadAPI(r, "POST", "/agent/threads/{thread_id}/continue", []string{"qa.write"}, agent.ContinueThread)
+	handleAPI(r, "GET", "/agent/candidates", []string{"qa.read"}, agent.ListCandidates)
+	handleAPI(r, "GET", "/agent/candidates/{candidate_id:.*}", []string{"qa.read"}, agent.GetCandidate)
+	handleAPI(r, "GET", "/agent/router/status", []string{"qa.read"}, agent.GetRouterStatus)
+	handleAPI(r, "GET", "/agent/router/algorithms", []string{"qa.read"}, agent.ListRouterAlgorithms)
+	handleAPI(r, "POST", "/agent/router/algorithms", []string{"qa.write"}, agent.RegisterRouterAlgorithm)
+	handleAPI(r, "POST", "/agent/router/algorithms/{algorithm_id}:action", []string{"qa.write"}, agent.PostRouterAlgorithmAction)
+	handleAPI(r, "GET", "/agent/router/ab-strategy", []string{"qa.read"}, agent.GetRouterABStrategy)
+	handleAPI(r, "PUT", "/agent/router/ab-strategy", []string{"qa.write"}, agent.PutRouterABStrategy)
 
 	// ----- Conversation -----
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)
@@ -208,7 +228,15 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:save", []string{"qa.write"}, plugin.SavePluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-generate", []string{"qa.write"}, plugin.AIGeneratePluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-repair", []string{"qa.write"}, plugin.AIRepairPluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:publish", []string{"qa.write"}, plugin.PublishPluginDraft)
 	handleAPI(r, "DELETE", "/plugin-drafts/{draft_id}", []string{"qa.write"}, plugin.DeletePluginDraft)
+	handleAPI(r, "GET", "/chat/settings/plugins", []string{"qa.read"}, plugin.ListUserPluginSettings)
+	handleAPI(r, "PATCH", "/chat/settings/plugins/{plugin_ref:.+}", []string{"qa.write"}, plugin.PatchUserPluginSetting)
+	handleAPI(r, "POST", "/published-plugins/{plugin_ref:.+}:rollback", []string{"qa.write"}, plugin.RollbackPlugin)
+	handleAPI(r, "POST", "/published-plugins/{plugin_ref:.+}:archive", []string{"qa.write"}, plugin.ArchivePlugin)
+	handleAPI(r, "GET", "/published-plugins/{plugin_ref:.+}/versions", []string{"qa.read"}, plugin.ListPluginVersions)
+	handleAPI(r, "GET", "/published-plugins/{plugin_ref:.+}/versions/{revision_id}", []string{"qa.read"}, plugin.GetPluginVersion)
+	handleAPI(r, "POST", "/published-plugins/{plugin_ref:.+}/versions/{revision_id}:edit", []string{"qa.write"}, plugin.ReplaceDraftFromPluginVersion)
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)

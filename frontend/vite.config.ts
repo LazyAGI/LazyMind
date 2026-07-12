@@ -4,7 +4,7 @@ import svgr from "vite-plugin-svgr";
 import path from "node:path";
 
 const devProxyTarget =
-  process.env.VITE_PROXY_TARGET || "http://localhost:5024";
+  process.env.VITE_PROXY_TARGET || "http://localhost:8090";
 const isDesktopBuild = process.env.VITE_LAZYMIND_MODE === "desktop";
 
 function jsPreviewExcelShimPlugin(): Plugin {

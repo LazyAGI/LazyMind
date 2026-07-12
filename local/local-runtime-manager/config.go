@@ -11,106 +11,108 @@ import (
 )
 
 const (
-	runtimeProfileEnvVar          = "LAZYMIND_RUNTIME_PROFILE"
-	runtimeRootEnvVar             = "LAZYMIND_RUNTIME_ROOT"
-	localBuildRootEnvVar          = "LAZYMIND_LOCAL_BUILD_ROOT"
-	runtimeResourcesRootEnvVar    = "LAZYMIND_RUNTIME_RESOURCES_ROOT"
-	localPortsPinnedEnvVar        = "LAZYMIND_LOCAL_PORTS_PINNED"
-	processComposePortEnvVar      = "LAZYMIND_PROCESS_COMPOSE_PORT"
-	localUpTimeoutEnvVar          = "LAZYMIND_LOCAL_UP_TIMEOUT"
-	localDownTimeoutEnvVar        = "LAZYMIND_LOCAL_DOWN_TIMEOUT"
-	localNetworkProfileEnvVar     = "LAZYMIND_LOCAL_NETWORK_PROFILE"
-	localAutoLoginAllowLANEnvVar  = "LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN"
-	localProxyAddressEnvVar       = "LAZYMIND_LOCAL_PROXY_ADDRESS"
-	localProxyPortEnvVar          = "LAZYMIND_LOCAL_PROXY_PORT"
-	localAuthPortEnvVar           = "LAZYMIND_LOCAL_AUTH_PORT"
-	localProxyAuthHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT"
-	localProxyCoreHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT"
-	localProxyChatHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT"
-	localProxyScanHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT"
-	localProxyEvoHostPortEnvVar   = "LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT"
-	localFileWatcherPortEnvVar    = "LAZYMIND_LOCAL_FILE_WATCHER_PORT"
-	localPostgresPortEnvVar       = "LAZYMIND_LOCAL_POSTGRES_PORT"
-	localCorePortEnvVar           = "LAZYMIND_LOCAL_CORE_PORT"
-	localDocPortEnvVar            = "LAZYMIND_LOCAL_DOC_PORT"
-	localProcessorPortEnvVar      = "LAZYMIND_LOCAL_PROCESSOR_PORT"
-	localAlgoPortEnvVar           = "LAZYMIND_LOCAL_ALGO_PORT"
-	localWorkerPortEnvVar         = "LAZYMIND_LOCAL_WORKER_PORT"
-	localChatPortEnvVar           = "LAZYMIND_LOCAL_CHAT_PORT"
-	localEvoPortEnvVar            = "LAZYMIND_LOCAL_EVO_PORT"
-	localMilvusPortEnvVar         = "LAZYMIND_LOCAL_MILVUS_PORT"
-	localMilvusLiteDBPathEnvVar   = "LAZYMIND_LOCAL_MILVUS_DB_PATH"
-	localOpenSearchPortEnvVar     = "LAZYMIND_LOCAL_OPENSEARCH_PORT"
-	localEnableEvoEnvVar          = "LAZYMIND_LOCAL_ENABLE_EVO"
-	routerPortPoolStartEnvVar     = "LAZYMIND_ROUTER_PORT_POOL_START"
-	routerPortPoolEndEnvVar       = "LAZYMIND_ROUTER_PORT_POOL_END"
-	routerPortsPerInstanceEnvVar  = "LAZYMIND_ROUTER_PORTS_PER_INSTANCE"
-	frontendPortEnvVar            = "LAZYMIND_FRONTEND_PORT"
-	frontendLANOriginEnvVar       = "LAZYMIND_FRONTEND_LAN_ORIGIN"
-	authServicePortEnvVar         = "LAZYMIND_AUTH_SERVICE_PORT"
-	authServiceUVEnvVar           = "LAZYMIND_AUTH_SERVICE_UV"
-	authServiceDatabaseURLEnvVar  = "LAZYMIND_AUTH_SERVICE_DATABASE_URL"
-	authServiceInstallDepsEnvVar  = "LAZYMIND_AUTH_SERVICE_INSTALL_DEPS"
-	localPythonVersionEnvVar      = "LAZYMIND_LOCAL_PYTHON_VERSION"
-	localSQLiteDirEnvVar          = "LAZYMIND_LOCAL_SQLITE_DIR"
-	caddyBinEnvVar                = "LAZYMIND_CADDY_BIN"
-	caddyVersionEnvVar            = "LAZYMIND_CADDY_VERSION"
-	processComposeVersion         = 2
-	defaultCaddyVersion           = "2.10.2"
-	defaultLocalPythonVersion     = "3.11.15"
-	defaultProcessComposePort     = 19080
-	defaultLocalUpTimeout         = 30 * 60
-	defaultLocalDownTimeout       = 2 * 60
-	defaultFrontendPort           = 8090
-	defaultLocalNetworkProfile    = "localhost"
-	defaultLocalProxyAddress      = "127.0.0.1"
-	defaultLocalProxyPort         = 5024
-	defaultLocalProxyAuthHostPort = 18000
-	defaultLocalProxyCoreHostPort = 18001
-	defaultLocalProxyChatHostPort = 18046
-	defaultLocalProxyScanHostPort = 18080
-	defaultLocalProxyEvoHostPort  = 18047
-	defaultLocalFileWatcherPort   = 19090
-	defaultLocalPostgresPort      = 15432
-	defaultLocalDocPort           = 18002
-	defaultLocalProcessorPort     = 18003
-	defaultLocalAlgoPort          = 18004
-	defaultLocalWorkerPort        = 18005
-	defaultLocalMilvusPort        = 19530
-	defaultLocalOpenSearchPort    = 19200
-	defaultRouterPortPoolStart    = 18100
-	defaultRouterPortsPerInstance = 100
-	stateFileName                 = "runtime-state.json"
-	composeGeneratedFileName      = "process-compose.generated.yaml"
-	serviceEndpointsJSONName      = "service-endpoints.json"
-	serviceEndpointsEnvName       = "service-endpoints.env"
-	tokenFileName                 = "pc-token"
-	upLockFileName                = "up.lock"
-	logFileName                   = "process-compose.log"
-	localProxyLogFileName         = "local-proxy.log"
-	authServiceLogFileName        = "auth-service.log"
-	coreLogFileName               = "core.log"
-	frontendLogFileName           = "frontend.log"
-	localProcessComposeBin        = "local/build/bin/process-compose"
-	localProxyConfigName          = "local/local-proxy/configs/cloud-replace-kong.yaml"
-	localProxyScriptDirName       = "local/local-proxy/scripts"
-	localProxySourceDirName       = "local/local-proxy"
-	authServiceSourceDirName      = "backend/auth-service"
-	coreSourceDirName             = "backend/core"
-	processComposeServiceName     = "process-supervisor"
-	localProxyProcessName         = "local-proxy"
-	authServiceProcessName        = "auth-service"
-	coreProcessName               = "core"
-	scanControlPlaneProcessName   = "scan-control-plane"
-	fileWatcherProcessName        = "file-watcher"
-	frontendProcessName           = "frontend"
-	docServerProcessName          = "lazyllm-doc-server"
-	processorServerProcessName    = "lazyllm-parse-server"
-	processorWorkerProcessName    = "lazyllm-parse-worker"
-	algoProcessName               = "lazyllm-algo"
-	chatProcessName               = "chat"
-	evoProcessName                = "evo-api"
-	milvusLiteProcessName         = "milvus-lite"
+	runtimeProfileEnvVar             = "LAZYMIND_RUNTIME_PROFILE"
+	runtimeRootEnvVar                = "LAZYMIND_RUNTIME_ROOT"
+	localBuildRootEnvVar             = "LAZYMIND_LOCAL_BUILD_ROOT"
+	runtimeResourcesRootEnvVar       = "LAZYMIND_RUNTIME_RESOURCES_ROOT"
+	localPortsPinnedEnvVar           = "LAZYMIND_LOCAL_PORTS_PINNED"
+	processComposePortEnvVar         = "LAZYMIND_PROCESS_COMPOSE_PORT"
+	processComposeDownTimeoutEnvVar  = "LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT"
+	localUpTimeoutEnvVar             = "LAZYMIND_LOCAL_UP_TIMEOUT"
+	localDownTimeoutEnvVar           = "LAZYMIND_LOCAL_DOWN_TIMEOUT"
+	localNetworkProfileEnvVar        = "LAZYMIND_LOCAL_NETWORK_PROFILE"
+	localAutoLoginAllowLANEnvVar     = "LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN"
+	localProxyAddressEnvVar          = "LAZYMIND_LOCAL_PROXY_ADDRESS"
+	localProxyPortEnvVar             = "LAZYMIND_LOCAL_PROXY_PORT"
+	localAuthPortEnvVar              = "LAZYMIND_LOCAL_AUTH_PORT"
+	localProxyAuthHostPortEnvVar     = "LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT"
+	localProxyCoreHostPortEnvVar     = "LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT"
+	localProxyChatHostPortEnvVar     = "LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT"
+	localProxyScanHostPortEnvVar     = "LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT"
+	localProxyEvoHostPortEnvVar      = "LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT"
+	localFileWatcherPortEnvVar       = "LAZYMIND_LOCAL_FILE_WATCHER_PORT"
+	localPostgresPortEnvVar          = "LAZYMIND_LOCAL_POSTGRES_PORT"
+	localCorePortEnvVar              = "LAZYMIND_LOCAL_CORE_PORT"
+	localDocPortEnvVar               = "LAZYMIND_LOCAL_DOC_PORT"
+	localProcessorPortEnvVar         = "LAZYMIND_LOCAL_PROCESSOR_PORT"
+	localAlgoPortEnvVar              = "LAZYMIND_LOCAL_ALGO_PORT"
+	localWorkerPortEnvVar            = "LAZYMIND_LOCAL_WORKER_PORT"
+	localChatPortEnvVar              = "LAZYMIND_LOCAL_CHAT_PORT"
+	localEvoPortEnvVar               = "LAZYMIND_LOCAL_EVO_PORT"
+	localMilvusPortEnvVar            = "LAZYMIND_LOCAL_MILVUS_PORT"
+	localMilvusLiteDBPathEnvVar      = "LAZYMIND_LOCAL_MILVUS_DB_PATH"
+	localOpenSearchPortEnvVar        = "LAZYMIND_LOCAL_OPENSEARCH_PORT"
+	localEnableEvoEnvVar             = "LAZYMIND_LOCAL_ENABLE_EVO"
+	routerPortPoolStartEnvVar        = "LAZYMIND_ROUTER_PORT_POOL_START"
+	routerPortPoolEndEnvVar          = "LAZYMIND_ROUTER_PORT_POOL_END"
+	routerPortsPerInstanceEnvVar     = "LAZYMIND_ROUTER_PORTS_PER_INSTANCE"
+	frontendPortEnvVar               = "LAZYMIND_FRONTEND_PORT"
+	frontendLANOriginEnvVar          = "LAZYMIND_FRONTEND_LAN_ORIGIN"
+	authServicePortEnvVar            = "LAZYMIND_AUTH_SERVICE_PORT"
+	authServiceUVEnvVar              = "LAZYMIND_AUTH_SERVICE_UV"
+	authServiceDatabaseURLEnvVar     = "LAZYMIND_AUTH_SERVICE_DATABASE_URL"
+	authServiceInstallDepsEnvVar     = "LAZYMIND_AUTH_SERVICE_INSTALL_DEPS"
+	localPythonVersionEnvVar         = "LAZYMIND_LOCAL_PYTHON_VERSION"
+	localSQLiteDirEnvVar             = "LAZYMIND_LOCAL_SQLITE_DIR"
+	caddyBinEnvVar                   = "LAZYMIND_CADDY_BIN"
+	caddyVersionEnvVar               = "LAZYMIND_CADDY_VERSION"
+	processComposeVersion            = 2
+	defaultCaddyVersion              = "2.10.2"
+	defaultLocalPythonVersion        = "3.11.15"
+	defaultProcessComposePort        = 19080
+	defaultProcessComposeDownTimeout = 60
+	defaultLocalUpTimeout            = 30 * 60
+	defaultLocalDownTimeout          = 2 * 60
+	defaultFrontendPort              = 8090
+	defaultLocalNetworkProfile       = "localhost"
+	defaultLocalProxyAddress         = "127.0.0.1"
+	defaultLocalProxyPort            = 5024
+	defaultLocalProxyAuthHostPort    = 18000
+	defaultLocalProxyCoreHostPort    = 18001
+	defaultLocalProxyChatHostPort    = 18046
+	defaultLocalProxyScanHostPort    = 18080
+	defaultLocalProxyEvoHostPort     = 18047
+	defaultLocalFileWatcherPort      = 19090
+	defaultLocalPostgresPort         = 15432
+	defaultLocalDocPort              = 18002
+	defaultLocalProcessorPort        = 18003
+	defaultLocalAlgoPort             = 18004
+	defaultLocalWorkerPort           = 18005
+	defaultLocalMilvusPort           = 19530
+	defaultLocalOpenSearchPort       = 19200
+	defaultRouterPortPoolStart       = 18100
+	defaultRouterPortsPerInstance    = 100
+	stateFileName                    = "runtime-state.json"
+	composeGeneratedFileName         = "process-compose.generated.yaml"
+	serviceEndpointsJSONName         = "service-endpoints.json"
+	serviceEndpointsEnvName          = "service-endpoints.env"
+	tokenFileName                    = "pc-token"
+	upLockFileName                   = "up.lock"
+	logFileName                      = "process-compose.log"
+	localProxyLogFileName            = "local-proxy.log"
+	authServiceLogFileName           = "auth-service.log"
+	coreLogFileName                  = "core.log"
+	frontendLogFileName              = "frontend.log"
+	localProcessComposeBin           = "local/build/bin/process-compose"
+	localProxyConfigName             = "local/local-proxy/configs/cloud-replace-kong.yaml"
+	localProxyScriptDirName          = "local/local-proxy/scripts"
+	localProxySourceDirName          = "local/local-proxy"
+	authServiceSourceDirName         = "backend/auth-service"
+	coreSourceDirName                = "backend/core"
+	processComposeServiceName        = "process-supervisor"
+	localProxyProcessName            = "local-proxy"
+	authServiceProcessName           = "auth-service"
+	coreProcessName                  = "core"
+	scanControlPlaneProcessName      = "scan-control-plane"
+	fileWatcherProcessName           = "file-watcher"
+	frontendProcessName              = "frontend"
+	docServerProcessName             = "lazyllm-doc-server"
+	processorServerProcessName       = "lazyllm-parse-server"
+	processorWorkerProcessName       = "lazyllm-parse-worker"
+	algoProcessName                  = "lazyllm-algo"
+	chatProcessName                  = "chat"
+	evoProcessName                   = "evo-api"
+	milvusLiteProcessName            = "milvus-lite"
 )
 
 type RuntimePaths struct {
@@ -173,6 +175,7 @@ type RuntimePaths struct {
 	FileWatcherBin           string
 	FileWatcherBaseRoot      string
 	FrontendLog              string
+	FrontendPIDFile          string
 	DocServerLog             string
 	ProcessorServerLog       string
 	ProcessorWorkerLog       string
@@ -749,6 +752,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		FileWatcherBin:           filepath.Join(buildRoot, "bin", fileWatcherProcessName),
 		FileWatcherBaseRoot:      defaultFileWatcherBaseRoot(runtimeRoot),
 		FrontendLog:              filepath.Join(logsRoot, frontendLogFileName),
+		FrontendPIDFile:          filepath.Join(runtimeRoot, "run", frontendProcessName+".pid"),
 		DocServerLog:             filepath.Join(logsRoot, docServerProcessName+".log"),
 		ProcessorServerLog:       filepath.Join(logsRoot, processorServerProcessName+".log"),
 		ProcessorWorkerLog:       filepath.Join(logsRoot, processorWorkerProcessName+".log"),

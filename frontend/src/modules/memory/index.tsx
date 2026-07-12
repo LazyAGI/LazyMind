@@ -8,8 +8,6 @@ import {
   Switch,
   Tag,
   Tooltip,
-  Upload,
-  type UploadProps,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -36,7 +34,7 @@ import type { GroupItem, UserItem } from "@/api/generated/auth-client";
 import { createGroupApi, createUserApi } from "@/modules/signin/utils/request";
 import { runtimeFeatures } from "@/runtime/features";
 import GlossaryInboxModal from "./components/GlossaryInboxModal";
-import MemoryDraftModal from "./components/MemoryDraftModal";
+import MemoryDraftModal, { type SkillCreateSource } from "./components/MemoryDraftModal";
 import ShareModal from "./components/ShareModal";
 import SkillShareCenterModal from "./components/SkillShareCenterModal";
 import {
@@ -68,7 +66,10 @@ import {
   type SkillReviewSummaryRecord,
   type SkillShareRecord,
   type SkillShareStatus,
+  type CreateSkillPayload,
 } from "./skillApi";
+import { buildSkillZipBlob } from "./skillPackage";
+import { uploadSkillTempFile } from "./skillUpload";
 import {
   approveEvolutionSuggestion,
   batchApproveEvolutionSuggestions,
@@ -109,7 +110,6 @@ import {
   type AssetDraft,
   type ChangeProposal,
   type ChangeProposalTab,
-  type ChildSkillDraft,
   type ExperienceAsset,
   type ExperienceChangeProposal,
   type GlossaryAsset,
@@ -138,7 +138,6 @@ import {
   cloneExperienceAsset,
   cloneGlossaryAsset,
   cloneStructuredAsset,
-  createChildSkillDraft,
   createDraft,
   createId,
   createStructuredDraft,
@@ -146,7 +145,6 @@ import {
   getBaseName,
   getPreferenceSuggestionResourceParam,
   getSkillBodyContentForDisplay,
-  inferSkillFileExt,
   initialChangeProposals,
   initialSkills,
   isMarkdownSkillFile,
@@ -156,7 +154,6 @@ import {
   normalizeSuggestionValue,
   normalizeTagValues,
   normalizeTextValues,
-  parentSkillUploadAccept,
   parseChangeProposalTab,
   parseMarkdownFrontMatter,
   parseMemoryTab,
@@ -166,13 +163,11 @@ import {
   serializePreferenceYaml,
   parsePreferenceYamlAndBody,
   SKILL_TAG_MAX_COUNT,
-  skillUploadAccept,
 } from "./shared";
 import "./index.scss";
 
 const backendSuggestionPageSize = 20;
 const defaultSkillListPageSize = 6;
-const parentSkillOptionPageSize = 200;
 const defaultGlossaryListPageSize = 4;
 const showGlossaryInboxUi = true;
 const MERGED_GLOSSARY_GROUP_OPTION_ID = "__merged_glossary_group__";
@@ -195,27 +190,10 @@ const mapSkillAssetRecordToStructuredAsset = (
   category: item.category,
   tags: item.tags,
   content: item.content,
-  parentId: item.parentId,
-  parentSkillName: item.parentSkillName,
-  protect: item.protect,
+  headRevisionId: item.headRevisionId,
+  draft: item.draft,
   autoEvo: item.autoEvo,
-  autoEvoApplyStatus: item.autoEvoApplyStatus,
-  autoEvoGeneration: item.autoEvoGeneration,
-  autoEvoError: item.autoEvoError,
-  fileExt: item.fileExt,
   isEnabled: item.isEnabled,
-  hasPendingReviewSuggestions: item.hasPendingReviewSuggestions,
-  hasPendingReviewResult: item.hasPendingReviewResult,
-  hasPendingRemoveSuggestion: item.hasPendingRemoveSuggestion,
-  reviewStatus: item.reviewStatus,
-  suggestionStatus: item.suggestionStatus,
-  nodeType: item.nodeType,
-  updateStatus: item.updateStatus,
-  builtinSkillUid: item.builtinSkillUid,
-  originBuiltinSkillUid: item.originBuiltinSkillUid,
-  isBuiltinTemplate: item.isBuiltinTemplate,
-  activationStatus: item.activationStatus,
-  readonly: item.readonly,
 });
 const hasDraftPreviewStatus = (record: ExperienceAsset) =>
   isPendingReviewStatus(record.reviewStatus);
@@ -340,9 +318,8 @@ export default function MemoryManagement() {
   })();
   const [activeTab, setActiveTab] = useState<MemoryTab>(routeMemoryTab);
   const [skillAssets, setSkillAssets] = useState<StructuredAsset[]>(initialSkills);
-  const [parentSkillAssets, setParentSkillAssets] =
-    useState<StructuredAsset[]>(initialSkills);
-  const [parentSkillOptionsLoading, setParentSkillOptionsLoading] = useState(false);
+  const [pendingSkillPackageFile, setPendingSkillPackageFile] = useState<File | null>(null);
+  const [pendingSkillSourceUrl, setPendingSkillSourceUrl] = useState("");
   const [skillLoading, setSkillLoading] = useState(false);
   const [skillCategories, setSkillCategories] = useState<string[]>([]);
   const [skillCategoriesLoaded, setSkillCategoriesLoaded] = useState(false);
@@ -379,10 +356,10 @@ export default function MemoryManagement() {
   const [skillListPage, setSkillListPage] = useState(1);
   const [skillListPageSize, setSkillListPageSize] = useState(defaultSkillListPageSize);
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
-  const [skillView, setSkillView] = useState<"installed" | "market" | "upload" | "plugins">(
+  const [skillView, setSkillView] = useState<"installed" | "market" | "plugins">(
     () => {
       const sv = new URLSearchParams(window.location.search).get("skillView");
-      if (sv === "plugins" || sv === "market" || sv === "upload") return sv;
+      if (sv === "plugins" || sv === "market") return sv;
       return "installed";
     },
   );
@@ -414,6 +391,7 @@ export default function MemoryManagement() {
   const [glossaryInitialized, setGlossaryInitialized] = useState(false);
   const [glossaryLoadError, setGlossaryLoadError] = useState("");
   const [glossarySaving, setGlossarySaving] = useState(false);
+  const [skillSaving, setSkillSaving] = useState(false);
   const [glossaryListPage, setGlossaryListPage] = useState(1);
   const [glossaryListPageSize, setGlossaryListPageSize] = useState(
     defaultGlossaryListPageSize,
@@ -483,6 +461,9 @@ export default function MemoryManagement() {
     useState<ManagedPreferenceDraftKind>("user-preference");
   const [backendDraftPreview, setBackendDraftPreview] =
     useState<PreferenceDraftPreviewRecord | null>(null);
+  const [backendSkillDiffLines, setBackendSkillDiffLines] = useState<import("./shared").DiffLine[]>(
+    [],
+  );
   const [backendDraftLoading, setBackendDraftLoading] = useState(false);
   const [backendDraftSubmitting, setBackendDraftSubmitting] = useState<
     "confirm" | "discard" | ""
@@ -547,45 +528,18 @@ export default function MemoryManagement() {
 
   const currentTabMeta = tabMeta[activeTab];
   const currentStructuredItems = activeTab === "skills" ? skillAssets : [];
-  const parentSkillCandidateAssets =
-    parentSkillAssets.length > 0 ? parentSkillAssets : skillAssets;
-
-  const topLevelSkills = useMemo(
-    () => parentSkillCandidateAssets.filter((item) => !item.parentId),
-    [parentSkillCandidateAssets],
-  );
-  const parentSkillOptions = useMemo(
-    () =>
-      topLevelSkills
-        .filter((item) => item.id !== draft.id && !item.isBuiltinTemplate)
-        .map((item) => ({
-          label: item.name,
-          value: item.id,
-        })),
-    [draft.id, topLevelSkills],
-  );
-  const resolveSkillParentName = useCallback(
-    (item: StructuredAsset) =>
-      item.parentSkillName ||
-      (item.parentId
-        ? parentSkillCandidateAssets.find((candidate) => candidate.id === item.parentId)?.name || ""
-        : ""),
-    [parentSkillCandidateAssets],
-  );
   const buildSkillPatchPayload = useCallback(
     (item: StructuredAsset, overrides: Record<string, unknown> = {}) =>
-      buildSkillUpdatePayload(
-        {
-          ...item,
-          content: item.parentId ? item.content : getSkillBodyContentForDisplay(item.content || ""),
-          parentSkillName: resolveSkillParentName(item),
-        },
-        {
-          is_locked: Boolean(item.protect),
-          ...overrides,
-        },
-      ),
-    [resolveSkillParentName],
+      buildSkillUpdatePayload({
+        name: item.name,
+        description: item.description,
+        category: item.category,
+        tags: item.tags,
+        autoEvo: item.autoEvo,
+        isEnabled: item.isEnabled,
+        ...(overrides as Partial<StructuredAsset>),
+      }),
+    [],
   );
 
   const localAvailableCategories = [...new Set(currentStructuredItems.map((item) => item.category))]
@@ -1174,52 +1128,6 @@ export default function MemoryManagement() {
       }
     }
   }, [category, skillKeyword, tag]);
-
-  const refreshParentSkillAssets = useCallback(async () => {
-    const requestId = parentSkillListRequestIdRef.current + 1;
-    parentSkillListRequestIdRef.current = requestId;
-    setParentSkillOptionsLoading(true);
-
-    try {
-      const firstResult = await listSkillAssetsPage({
-        page: 1,
-        pageSize: parentSkillOptionPageSize,
-      });
-      if (parentSkillListRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      const records = [...firstResult.records];
-      const pageSize = Math.max(1, firstResult.pageSize || parentSkillOptionPageSize);
-      const totalPages = Math.ceil(firstResult.total / pageSize);
-
-      for (let page = 2; page <= totalPages; page += 1) {
-        const pageResult = await listSkillAssetsPage({ page, pageSize });
-        if (parentSkillListRequestIdRef.current !== requestId) {
-          return;
-        }
-        records.push(...pageResult.records);
-      }
-
-      const deduped = new Map<string, SkillAssetRecord>();
-      records.forEach((item) => {
-        deduped.set(item.id, item);
-      });
-      setParentSkillAssets(
-        Array.from(deduped.values()).map(mapSkillAssetRecordToStructuredAsset),
-      );
-    } catch (error) {
-      if (parentSkillListRequestIdRef.current !== requestId) {
-        return;
-      }
-      console.error("Load parent skill options failed:", error);
-      setParentSkillAssets(skillAssets);
-    } finally {
-      if (parentSkillListRequestIdRef.current === requestId) {
-        setParentSkillOptionsLoading(false);
-      }
-    }
-  }, [skillAssets]);
 
   const refreshGlossaryAssets = useCallback(
     async (options?: {
@@ -1995,10 +1903,19 @@ export default function MemoryManagement() {
 
     return activeProposal.before.content;
   }, [activeProposal]);
-  const backendDraftDiffLines = useMemo(
-    () => buildUnifiedDiffLines(backendDraftPreview?.diff || ""),
-    [backendDraftPreview?.diff],
-  );
+  const backendDraftDiffLines = useMemo(() => {
+    if (activeProposal?.tab === "skills") {
+      return backendSkillDiffLines;
+    }
+    return buildUnifiedDiffLines(backendDraftPreview?.diff || "");
+  }, [activeProposal?.tab, backendDraftPreview?.diff, backendSkillDiffLines]);
+
+  const loadSkillDraftPreview = useCallback(async (skillId: string) => {
+    const preview = await previewSkillDraft(skillId);
+    setBackendDraftPreview(preview);
+    setBackendSkillDiffLines(preview.diffLines);
+    return preview;
+  }, []);
   const activeProposalFieldChanges = useMemo<ProposalFieldChange[]>(() => {
     if (!activeProposal) {
       return [];
@@ -2137,6 +2054,7 @@ export default function MemoryManagement() {
       setApprovedBackendSuggestionIds([]);
       setRejectedBackendSuggestionIds([]);
       setBackendDraftPreview(null);
+      setBackendSkillDiffLines([]);
       setBackendDraftLoading(false);
       setBackendDraftSubmitting("");
       return () => {
@@ -2169,6 +2087,7 @@ export default function MemoryManagement() {
     setApprovedBackendSuggestionIds([]);
     setRejectedBackendSuggestionIds([]);
     setBackendDraftPreview(null);
+    setBackendSkillDiffLines([]);
     setBackendDraftLoading(false);
     setBackendDraftSubmitting("");
 
@@ -2188,6 +2107,13 @@ export default function MemoryManagement() {
         setBackendDraftPreview(activeProposal.backendDraftPreview);
         if (!isSkillProposal) {
           setBackendDraftKind(resolveManagedPreferenceDraftKind(activeProposal.before.resourceType));
+        } else {
+          setBackendDraftLoading(true);
+          void loadSkillDraftPreview(activeProposal.targetId).finally(() => {
+            if (!ignore) {
+              setBackendDraftLoading(false);
+            }
+          });
         }
         return () => {
           ignore = true;
@@ -2197,7 +2123,7 @@ export default function MemoryManagement() {
       void (async () => {
         try {
           const preview = isSkillProposal
-            ? await previewSkillDraft(activeProposal.targetId)
+            ? await loadSkillDraftPreview(activeProposal.targetId)
             : await previewManagedPreferenceDraft(
                 resolveManagedPreferenceDraftKind(activeProposal.before.resourceType),
               );
@@ -2206,8 +2132,8 @@ export default function MemoryManagement() {
               setBackendDraftKind(
                 resolveManagedPreferenceDraftKind(activeProposal.before.resourceType),
               );
+              setBackendDraftPreview(preview);
             }
-            setBackendDraftPreview(preview);
           }
         } catch (error) {
           if (!ignore) {
@@ -2634,53 +2560,15 @@ export default function MemoryManagement() {
   );
 
   const filteredSkillTree = useMemo<SkillTreeNode[]>(() => {
-    const skillMap = new Map(skillAssets.map((item) => [item.id, item]));
-    const rootSkills = skillAssets.filter(
-      (item) => !item.parentId || !skillMap.has(item.parentId),
-    );
-    const matchedIds = new Set(
-      skillAssets.filter((item) => matchesStructuredFilter(item)).map((item) => item.id),
-    );
-
-    return rootSkills
-      .map((parent): SkillTreeNode | null => {
-        const childItems = skillAssets.filter((item) => item.parentId === parent.id);
-        const parentMatched = matchedIds.has(parent.id);
-        const visibleChildren = childItems.filter(
-          (item) => !hasStructuredFilter || parentMatched || matchedIds.has(item.id),
-        );
-        const visibleParent =
-          !hasStructuredFilter || parentMatched || visibleChildren.length > 0;
-
-        if (!visibleParent) {
-          return null;
-        }
-
-        return {
-          ...parent,
-          children: visibleChildren.length ? visibleChildren : undefined,
-        };
-      })
-      .filter((item): item is SkillTreeNode => Boolean(item));
-  }, [hasStructuredFilter, matchesStructuredFilter, skillAssets]);
+    return skillAssets.filter((item) => matchesStructuredFilter(item));
+  }, [matchesStructuredFilter, skillAssets]);
 
   const filteredInstalledSkillTree = useMemo<SkillTreeNode[]>(() => {
-    const installedRoots = skillAssets.filter((item) => {
-      if (item.isBuiltinTemplate || item.parentId) {
-        return false;
-      }
+    return skillAssets.filter((item) => {
       if (installedSkillSource === "all") {
         return true;
       }
       return resolveSkillSourceType(item) === installedSkillSource;
-    });
-
-    return installedRoots.map((parent) => {
-      const children = skillAssets.filter((item) => item.parentId === parent.id);
-      return {
-        ...parent,
-        children: children.length ? children : undefined,
-      };
     });
   }, [installedSkillSource, skillAssets]);
 
@@ -2696,30 +2584,13 @@ export default function MemoryManagement() {
     setSkillView("installed");
   };
 
-  const addChildSkillDraft = () => {
-    setDraft((previous) => ({
-      ...previous,
-      childSkills: [...previous.childSkills, createChildSkillDraft()],
-    }));
-  };
-
-  const updateChildSkillDraft = (
-    tempId: string,
-    patch: Partial<Omit<ChildSkillDraft, "tempId">>,
-  ) => {
-    setDraft((previous) => ({
-      ...previous,
-      childSkills: previous.childSkills.map((item) =>
-        item.tempId === tempId ? { ...item, ...patch } : item,
-      ),
-    }));
-  };
-
-  const removeChildSkillDraft = (tempId: string) => {
-    setDraft((previous) => ({
-      ...previous,
-      childSkills: previous.childSkills.filter((item) => item.tempId !== tempId),
-    }));
+  const handleSkillCreateSourceChange = (source: SkillCreateSource) => {
+    if (source !== "zip") {
+      setPendingSkillPackageFile(null);
+    }
+    if (source !== "url") {
+      setPendingSkillSourceUrl("");
+    }
   };
 
   const readFileAsText = (file: File) =>
@@ -2874,21 +2745,38 @@ export default function MemoryManagement() {
     }
   };
 
-  const createSkillUploadProps = (childTempId?: string): UploadProps => {
-    const isParentSkillUpload = activeTab === "skills" && !childTempId && !draft.parentId;
+  const applySkillRepoImport = (repoUrl: string) => {
+    const trimmedUrl = repoUrl.trim();
+    if (!trimmedUrl) {
+      return;
+    }
 
-    return {
-      accept: isParentSkillUpload ? parentSkillUploadAccept : skillUploadAccept,
-      maxCount: 1,
-      showUploadList: false,
-      beforeUpload: (file) => {
-        void handleUploadSkillFile(file as File, {
-          childTempId,
-          parentOnlyMarkdown: isParentSkillUpload,
-        });
-        return Upload.LIST_IGNORE;
-      },
-    };
+    setPendingSkillSourceUrl(trimmedUrl);
+    setPendingSkillPackageFile(null);
+
+    const rawName = trimmedUrl.split("/").filter(Boolean).pop() || "";
+    const name = rawName.replace(/[-_]/g, " ") || t("admin.memorySkillUploadDefaultName");
+
+    setDraft((previous) => ({
+      ...previous,
+      name: previous.name.trim() || name,
+      description: previous.description.trim() || t("admin.memorySkillUploadPersonalDesc"),
+      category: previous.category.trim() || "personal",
+    }));
+  };
+
+  const handleImportSkillPackage = (file: File) => {
+    const isZipPackage = /\.(zip|tgz|tar|gz)$/i.test(file.name);
+    if (isZipPackage) {
+      setPendingSkillPackageFile(file);
+      setPendingSkillSourceUrl("");
+      message.success(t("admin.memoryUploadSkillSuccess"));
+      return;
+    }
+
+    void handleUploadSkillFile(file, {
+      parentOnlyMarkdown: true,
+    });
   };
 
   const syncShareParams = (nextTab?: MemoryTab, nextItemId?: string) => {
@@ -2921,8 +2809,9 @@ export default function MemoryManagement() {
     setPendingGlossaryMergeSourceIds([]);
     setModalMode(mode);
 
-    if (activeTab === "skills" && (mode === "add" || mode === "edit")) {
-      void refreshParentSkillAssets();
+    if (activeTab === "skills" && mode === "add") {
+      setPendingSkillPackageFile(null);
+      setPendingSkillSourceUrl("");
     }
 
     if (!item) {
@@ -2999,8 +2888,6 @@ export default function MemoryManagement() {
                   category: detail.category,
                   tags: detail.tags,
                   content: detail.content,
-                  parentId: detail.parentId || previous.parentId,
-                  protect: detail.protect,
                 },
                 { stripFrontMatter: true },
               );
@@ -3018,6 +2905,8 @@ export default function MemoryManagement() {
   const closeModal = () => {
     setModalOpen(false);
     setPendingGlossaryMergeSourceIds([]);
+    setPendingSkillPackageFile(null);
+    setPendingSkillSourceUrl("");
     syncShareParams(activeTab);
   };
 
@@ -3180,18 +3069,10 @@ export default function MemoryManagement() {
           category: detail.category,
           tags: detail.tags,
           content: detail.content,
-          parentId: detail.parentId,
-          protect: detail.protect,
-          fileExt: detail.fileExt,
+          headRevisionId: detail.headRevisionId,
+          draft: detail.draft,
           isEnabled: detail.isEnabled,
-          hasPendingReviewSuggestions:
-            detail.hasPendingReviewSuggestions ?? item.hasPendingReviewSuggestions,
-          hasPendingReviewResult:
-            detail.hasPendingReviewResult ?? item.hasPendingReviewResult,
-          reviewStatus: detail.reviewStatus || item.reviewStatus,
-          suggestionStatus: detail.suggestionStatus || item.suggestionStatus,
-          nodeType: detail.nodeType || item.nodeType,
-          updateStatus: detail.updateStatus || item.updateStatus,
+          autoEvo: detail.autoEvo,
         }
       : item;
 
@@ -3761,6 +3642,7 @@ export default function MemoryManagement() {
   const startBackendDraftPreviewLoading = () => {
     setActiveReviewStep(1);
     setBackendDraftPreview(null);
+    setBackendSkillDiffLines([]);
     setIsPreviewContentEditing(false);
     setManualPreviewContentDraft("");
     setBackendDraftLoading(true);
@@ -3774,14 +3656,14 @@ export default function MemoryManagement() {
     try {
       const preview =
         activeProposal.tab === "skills"
-          ? await previewSkillDraft(activeProposal.targetId)
+          ? await loadSkillDraftPreview(activeProposal.targetId)
           : await previewManagedPreferenceDraft(
               resolveManagedPreferenceDraftKind(activeProposal.before.resourceType),
             );
       if (activeProposal.tab === "experience") {
         setBackendDraftKind(resolveManagedPreferenceDraftKind(activeProposal.before.resourceType));
+        setBackendDraftPreview(preview);
       }
-      setBackendDraftPreview(preview);
       return true;
     } catch (error) {
       console.error("Load draft preview failed:", error);
@@ -3821,7 +3703,7 @@ export default function MemoryManagement() {
                 suggestionIds: shouldOmitSuggestionIds ? undefined : suggestionIds,
                 userInstruct,
               });
-              return previewSkillDraft(activeProposal.targetId);
+              return loadSkillDraftPreview(activeProposal.targetId);
             })()
           : await (async () => {
               const draftKind = getActiveManagedDraftKind();
@@ -3831,7 +3713,9 @@ export default function MemoryManagement() {
               });
               return previewManagedPreferenceDraft(draftKind);
             })();
-      setBackendDraftPreview(preview);
+      if (activeProposal?.tab !== "skills") {
+        setBackendDraftPreview(preview);
+      }
       return true;
     } catch (error) {
       console.error("Load managed draft preview failed:", error);
@@ -4474,7 +4358,9 @@ export default function MemoryManagement() {
 
   const handleEnableBuiltinSkill = useCallback(
     async (item: StructuredAsset) => {
-      const builtinSkillUid = item.builtinSkillUid?.trim();
+      const builtinSkillUid =
+        (item as StructuredAsset & { marketItemId?: string }).marketItemId?.trim() ||
+        item.id.trim();
       if (!builtinSkillUid) {
         message.warning(t("admin.memoryBuiltinSkillMissing"));
         return;
@@ -4799,8 +4685,7 @@ export default function MemoryManagement() {
       }
 
       return;
-    } else {
-      const isChildSkill = activeTab === "skills" && Boolean(draft.parentId);
+    } else if (activeTab === "skills") {
       if (!draft.name.trim()) {
         message.warning(`${t("common.pleaseInput")}${t("admin.memoryName")}`);
         return;
@@ -4809,13 +4694,9 @@ export default function MemoryManagement() {
         message.warning(`${t("common.pleaseInput")}${t("admin.memoryDescription")}`);
         return;
       }
-      if (!draft.content.trim()) {
-        message.warning(`${t("common.pleaseInput")}${t("admin.memoryMarkdown")}`);
-        return;
-      }
 
       const normalizedSkillTags = normalizeTagValues(draft.tags);
-      if (activeTab === "skills" && normalizedSkillTags.length > SKILL_TAG_MAX_COUNT) {
+      if (normalizedSkillTags.length > SKILL_TAG_MAX_COUNT) {
         message.warning(
           t("admin.memorySkillTagMaxCount", {
             count: SKILL_TAG_MAX_COUNT,
@@ -4828,148 +4709,81 @@ export default function MemoryManagement() {
         id: draft.id || createId("skill"),
         name: draft.name.trim(),
         description: draft.description.trim(),
-        category: isChildSkill ? "" : draft.category.trim(),
+        category: draft.category.trim(),
         tags: normalizedSkillTags,
-        parentId: activeTab === "skills" ? draft.parentId || undefined : undefined,
         content: draft.content.trim(),
-        protect: draft.protect,
       };
 
-      if (activeTab === "skills") {
-        const parentSkill = payload.parentId
-          ? parentSkillCandidateAssets.find((item) => item.id === payload.parentId)
-          : undefined;
-        if (payload.parentId && payload.parentId === payload.id) {
-          message.warning(t("admin.memoryParentSkillSelf"));
-          return;
-        }
-
-        if (parentSkill?.parentId) {
-          message.warning(t("admin.memoryParentSkillSecondLevelOnly"));
-          return;
-        }
-
-        const hasChildren = parentSkillCandidateAssets.some(
-          (item) => item.parentId === payload.id,
-        );
-        if (payload.parentId && hasChildren) {
-          message.warning(t("admin.memoryParentSkillHasChildren"));
-          return;
-        }
-
-        if (payload.parentId && parentSkill) {
-          payload.protect = Boolean(parentSkill.protect);
-        }
-
-        try {
-          if (modalMode === "edit") {
-            if (!payload.id) {
-              message.warning(t("admin.memoryDiffTargetMissing"));
-              return;
-            }
-
-            const existingSkill = skillAssets.find((item) => item.id === payload.id);
-            const patchFileExt = payload.parentId
-              ? payload.fileExt || existingSkill?.fileExt || inferSkillFileExt(undefined, payload.content)
-              : "md";
-            const patchCategory = payload.parentId
-              ? existingSkill?.category || payload.category
-              : payload.category;
-            const patchParentSkillName = payload.parentId
-              ? parentSkill?.name || existingSkill?.parentSkillName || ""
-              : "";
-            const patchSource: StructuredAsset = {
-              ...(existingSkill || payload),
-              ...payload,
-              category: patchCategory,
-              parentSkillName: patchParentSkillName,
-              autoEvo: existingSkill?.autoEvo ?? payload.autoEvo,
-              isEnabled: existingSkill?.isEnabled ?? payload.isEnabled ?? true,
-              fileExt: patchFileExt,
-            };
-            const patchPayload = buildSkillPatchPayload(patchSource, {
-              name: payload.name,
-              description: payload.description,
-              tags: payload.tags,
-              content: payload.content,
-              category: patchCategory,
-              parent_skill_id: payload.parentId || "",
-              parent_skill_name: patchParentSkillName,
-              file_ext: patchFileExt,
-              is_locked: Boolean(payload.protect),
-            });
-
-            await patchSkillAsset(payload.id, patchPayload);
-            setChangeProposals((previous) =>
-              previous.filter(
-                (item) => !(item.tab === "skills" && item.targetId === payload.id),
-              ),
-            );
-          } else if (payload.parentId) {
-            if (!parentSkill) {
-              message.warning(t("admin.memoryDiffTargetMissing"));
-              return;
-            }
-
-            await createSkillAsset({
-              name: payload.name,
-              description: payload.description,
-              category: parentSkill.category || draft.category.trim(),
-              tags: payload.tags,
-              parent_skill_name: parentSkill.name,
-              content: payload.content,
-              file_ext: payload.fileExt || inferSkillFileExt(undefined, payload.content),
-              is_locked: Boolean(payload.protect),
-              is_enabled: true,
-            });
-          } else {
-            const canCreateChildSkills = draft.childSkills.length > 0;
-            let childPayloads: Array<Record<string, unknown>> = [];
-
-            if (canCreateChildSkills) {
-              const hasInvalidChild = draft.childSkills.some(
-                (child) =>
-                  !child.name.trim() ||
-                  !child.description.trim() ||
-                  !child.content.trim(),
-              );
-              if (hasInvalidChild) {
-                message.warning(t("admin.memoryChildSkillRequired"));
-                return;
-              }
-
-              childPayloads = draft.childSkills.map((child) => ({
-                name: child.name.trim(),
-                description: child.description.trim(),
-                content: child.content.trim(),
-                file_ext: inferSkillFileExt(undefined, child.content),
-                is_locked: Boolean(payload.protect),
-              }));
-            }
-
-            await createSkillAsset({
-              name: payload.name,
-              description: payload.description,
-              category: payload.category,
-              tags: payload.tags,
-              content: payload.content,
-              file_ext: "md",
-              is_locked: Boolean(payload.protect),
-              is_enabled: true,
-              children: childPayloads,
-            });
+      try {
+        setSkillSaving(true);
+        if (modalMode === "edit") {
+          if (!payload.id) {
+            message.warning(t("admin.memoryDiffTargetMissing"));
+            return;
           }
 
-          await refreshSkillAssets();
-        } catch (error) {
-          console.error("Save skill draft failed:", error);
-          return;
+          await patchSkillAsset(
+            payload.id,
+            buildSkillPatchPayload(payload, {
+              name: payload.name,
+              description: payload.description,
+              tags: payload.tags,
+              category: payload.category,
+            }),
+          );
+          setChangeProposals((previous) =>
+            previous.filter(
+              (item) => !(item.tab === "skills" && item.targetId === payload.id),
+            ),
+          );
+        } else {
+          if (!draft.content.trim() && !pendingSkillPackageFile && !pendingSkillSourceUrl.trim()) {
+            message.warning(t("admin.memorySkillUploadMissing"));
+            return;
+          }
+
+          let source: CreateSkillPayload["source"];
+          if (pendingSkillSourceUrl.trim()) {
+            source = { type: "url", url: pendingSkillSourceUrl.trim() };
+          } else {
+            const packageFile =
+              pendingSkillPackageFile ||
+              (await buildSkillZipBlob({
+                name: payload.name,
+                description: payload.description,
+                body: draft.content,
+                filename: payload.name,
+              }));
+            const upload = await uploadSkillTempFile(packageFile);
+            source = { type: "uploaded_zip", uploadId: upload.uploadId };
+          }
+
+          await createSkillAsset({
+            name: payload.name,
+            description: payload.description,
+            category: payload.category || "personal",
+            tags: payload.tags,
+            isEnabled: true,
+            source,
+          });
+          setPendingSkillPackageFile(null);
+          setPendingSkillSourceUrl("");
         }
 
-        setModalOpen(false);
-        message.success(t(saveSuccessMessageKey));
+        await refreshSkillAssets();
+      } catch (error) {
+        console.error("Save skill draft failed:", error);
+        message.error(
+          getLocalizedErrorMessage(error, t("common.saveFailed")) || t("common.saveFailed"),
+        );
         return;
+      } finally {
+        setSkillSaving(false);
       }
+
+      setModalOpen(false);
+      message.success(t(saveSuccessMessageKey));
+      return;
     }
 
     setModalOpen(false);
@@ -5384,13 +5198,9 @@ export default function MemoryManagement() {
           !record.autoEvo && (Boolean(pendingProposal) || hasReviewableDraft);
 
         return (
-          <div
-            className={`memory-table-main ${
-              record.isBuiltinTemplate ? "is-builtin-template" : ""
-            }`}
-          >
+          <div className="memory-table-main">
             <div className="memory-table-main-title">
-              {activeTab === "skills" && !record.isBuiltinTemplate ? (
+              {activeTab === "skills" ? (
                 <button
                   type="button"
                   className="memory-term-link"
@@ -5398,15 +5208,11 @@ export default function MemoryManagement() {
                 >
                   {record.name}
                 </button>
-              ) : activeTab === "skills" ? (
-                <span className="memory-term-link is-disabled">{record.name}</span>
               ) : (
                 <span>{record.name}</span>
               )}
-              {activeTab === "skills" && record.isBuiltinTemplate ? (
-                <Tag color="default">{t("admin.memoryBuiltinSkillTemplateTag")}</Tag>
-              ) : record.originBuiltinSkillUid ? (
-                <Tag color="blue">{t("admin.memoryBuiltinSkillEnabledTag")}</Tag>
+              {record.draft?.hasUncommittedDraft ? (
+                <Tag color="gold">{t("admin.memoryDiffPendingTag")}</Tag>
               ) : null}
               {showPendingTag ? (
                 <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
@@ -5421,7 +5227,7 @@ export default function MemoryManagement() {
                 </Tag>
               ) : null}
             </div>
-            {!record.parentId && record.description ? (
+            {record.description ? (
               <Tooltip
                 title={
                   <div className="memory-text-popover-content">{record.description}</div>
@@ -5432,9 +5238,9 @@ export default function MemoryManagement() {
               >
                 <div className="memory-table-main-desc">{record.description}</div>
               </Tooltip>
-            ) : !record.parentId ? (
+            ) : (
               <div className="memory-table-main-desc">{record.description}</div>
-            ) : null}
+            )}
           </div>
         );
       },
@@ -5444,8 +5250,8 @@ export default function MemoryManagement() {
       dataIndex: "category",
       key: "category",
       width: 180,
-      render: (value: string, record) =>
-        !record.parentId && value ? (
+      render: (value: string) =>
+        value ? (
           <Tag className="memory-category-tag" bordered={false}>
             {value}
           </Tag>
@@ -5458,8 +5264,8 @@ export default function MemoryManagement() {
       dataIndex: "tags",
       key: "tags",
       width: 260,
-      render: (tags: string[], record) =>
-        !record.parentId && tags.length ? (
+      render: (tags: string[]) =>
+        tags.length ? (
           <div className="memory-tag-group">
             {tags.map((item) => (
               <Tag key={item}>{item}</Tag>
@@ -5478,13 +5284,6 @@ export default function MemoryManagement() {
       key: "autoEvo",
       width: 90,
       render: (_value, record) => {
-        if (activeTab === "skills" && record.parentId) {
-          return "-";
-        }
-        if (activeTab === "skills" && record.isBuiltinTemplate) {
-          return "-";
-        }
-
         const disabledByRemoveSuggestion =
           activeTab === "skills" && Boolean(record.hasPendingRemoveSuggestion);
         const switchNode = (
@@ -5501,7 +5300,7 @@ export default function MemoryManagement() {
               void (async () => {
                 setSkillAutoEvoLoading((prev) => new Set(prev).add(record.id));
                 try {
-                  await patchSkillAsset(record.id, buildSkillPatchPayload(record, { auto_evo: checked }));
+                  await patchSkillAsset(record.id, buildSkillPatchPayload(record, { autoEvo: checked }));
                   await refreshSkillAssets({ preserveChangeProposals: true });
                 } catch (error) {
                   console.error("Toggle auto_evo failed:", error);
@@ -5534,8 +5333,6 @@ export default function MemoryManagement() {
       width: 250,
       fixed: "right",
       render: (_value, record) => {
-        const isChildSkill = activeTab === "skills" && Boolean(record.parentId);
-        const isBuiltinTemplate = activeTab === "skills" && Boolean(record.isBuiltinTemplate);
         const pendingProposal =
           activeTab === "skills" ? getPendingProposal("skills", record.id) : undefined;
         const hasReviewableDraft =
@@ -5549,20 +5346,6 @@ export default function MemoryManagement() {
 
         return (
           <Space size={4}>
-            {isBuiltinTemplate && !record.parentId ? (
-              <Button
-                type="primary"
-                size="small"
-                loading={
-                  record.builtinSkillUid
-                    ? builtinSkillEnableLoading.has(record.builtinSkillUid)
-                    : false
-                }
-                onClick={() => void handleEnableBuiltinSkill(record)}
-              >
-                {t("admin.memoryBuiltinSkillEnable")}
-              </Button>
-            ) : null}
             {activeTab !== "skills" ? (
               <Tooltip title={t("admin.memoryViewItem")}>
                 <Button
@@ -5976,7 +5759,6 @@ export default function MemoryManagement() {
         : "admin.memoryModalView",
   )}${currentTabMeta.unit}`;
   const isReadOnly = modalMode === "view";
-  const isChildSkillDraft = activeTab === "skills" && Boolean(draft.parentId);
   const tagOptions = [...new Set([...availableTags, ...draft.tags])].map((item) => ({
     label: item,
     value: item,
@@ -6229,20 +6011,17 @@ export default function MemoryManagement() {
         activeTab={activeTab}
         experienceSaving={experienceSaving}
         glossarySaving={glossarySaving}
+        skillSaving={skillSaving}
         isReadOnly={isReadOnly}
         draft={draft}
         setDraft={setDraft}
         pendingGlossaryMergeSourceIds={pendingGlossaryMergeSourceIds}
         modalMode={modalMode}
-        isChildSkillDraft={isChildSkillDraft}
-        parentSkillOptions={parentSkillOptions}
-        parentSkillOptionsLoading={parentSkillOptionsLoading}
         tagOptions={tagOptions}
         normalizeTagValues={normalizeTagValues}
-        createSkillUploadProps={createSkillUploadProps}
-        addChildSkillDraft={addChildSkillDraft}
-        removeChildSkillDraft={removeChildSkillDraft}
-        updateChildSkillDraft={updateChildSkillDraft}
+        applySkillRepoImport={applySkillRepoImport}
+        handleImportSkillPackage={handleImportSkillPackage}
+        onSkillCreateSourceChange={handleSkillCreateSourceChange}
       />
 
       {!hideUserGroupSurfaces && (

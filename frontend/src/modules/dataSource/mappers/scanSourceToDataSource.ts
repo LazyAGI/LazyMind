@@ -26,6 +26,8 @@ import {
   getScanBindingAgentId,
   getScanBindingId,
   getScanBindingTarget,
+  buildScanBindingTargetLabels,
+  getFeishuBindingFormTarget,
   getScanSourceConfigVersion,
   getScanSourceDatasetId,
   getScanSourceId,
@@ -50,8 +52,12 @@ export function mapScanSourceToDataSource(
   const isNotionSource = sourceKind === "notion";
   const sourceId = getScanSourceId(source);
   const sourceName = getScanSourceName(source);
-  const targetRef = getScanBindingTarget(binding);
-  const targetRefs = bindings.map(getScanBindingTarget).filter(Boolean);
+  const targetRef = isFeishuSource
+    ? getFeishuBindingFormTarget(binding)
+    : getScanBindingTarget(binding);
+  const targetRefs = isFeishuSource
+    ? bindings.map(getFeishuBindingFormTarget).filter(Boolean)
+    : bindings.map(getScanBindingTarget).filter(Boolean);
   const targetLabel =
     targetRefs.length > 1 ? targetRefs.join("、") : targetRef || fallback?.target || "-";
   const sourceStatus = normalizeDataSourceStatus(
@@ -77,6 +83,10 @@ export function mapScanSourceToDataSource(
   );
   const storageUsed = resolveStorageUsed(summary, fallback?.storageUsed);
   const fileTypes = getBindingFileTypes(binding, fallback?.fileTypes);
+  const targetLabels = {
+    ...(fallback?.targetLabels || {}),
+    ...buildScanBindingTargetLabels(bindings, binding),
+  };
 
   if (isFeishuSource) {
     const bindingTargetTypes = getFeishuBindingTargetTypes(bindings);
@@ -144,6 +154,7 @@ export function mapScanSourceToDataSource(
       rootPath: targetRef,
       targetRef: targetRef || fallback?.targetRef,
       targetRefs: targetRefs.length > 0 ? targetRefs : fallback?.targetRefs,
+      targetLabels,
       targetType: toUiFeishuTargetType(binding?.target_type) || fallback?.targetType,
       targetTypes,
       authConnectionId: binding?.auth_connection_id || fallback?.authConnectionId,
@@ -219,6 +230,7 @@ export function mapScanSourceToDataSource(
       rootPath: targetRef,
       targetRef: targetRef || fallback?.targetRef,
       targetRefs: targetRefs.length > 0 ? targetRefs : fallback?.targetRefs,
+      targetLabels,
       targetType: normalizeNotionTargetType(binding?.target_type) || fallback?.targetType,
       authConnectionId: binding?.auth_connection_id || fallback?.authConnectionId,
       datasetId: getScanSourceDatasetId(source),
@@ -288,6 +300,7 @@ export function mapScanSourceToDataSource(
     rootPath: targetRef,
     targetRef,
     targetRefs: targetRefs.length > 0 ? targetRefs : fallback?.targetRefs,
+    targetLabels,
     targetType: toUiFeishuTargetType(binding?.target_type),
     datasetId: getScanSourceDatasetId(source),
     bindingId: getScanBindingId(binding),
