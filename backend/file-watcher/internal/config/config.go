@@ -141,7 +141,7 @@ func (c *Config) expandEnvOverrides() error {
 	c.HostPathStyle = strings.TrimSpace(expandEnvWithDefault(c.HostPathStyle))
 	c.LogLevel = strings.TrimSpace(expandEnvWithDefault(c.LogLevel))
 	if raw := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_STAGING_RUNTIME_ROOT")); raw != "" {
-		c.Staging.ContainerRoot = raw
+		c.Staging.ContainerRoot = filepath.Clean(raw)
 	}
 	for i := range c.Security.AllowedRoots {
 		c.Security.AllowedRoots[i] = strings.TrimSpace(expandEnvWithDefault(c.Security.AllowedRoots[i]))
