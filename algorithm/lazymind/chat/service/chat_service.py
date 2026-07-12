@@ -547,6 +547,8 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         user_preference=personalization.user_preference,
         memory=personalization.memory,
         files=display_files,
+        current_query=query,
+        conversation_history=agent_history,
     )
     if plugin_system_prompt:
         runtime_prompt = runtime_prompt + '\n\n' + plugin_system_prompt
