@@ -22,6 +22,7 @@ import SkillMarketView from "./SkillMarketView";
 import { collectMarketCategories } from "./skillHelpers";
 import { mapMarketSkillRecordToAsset } from "./skillMarketMockData";
 import NewPluginModal from "@/modules/plugin/components/NewPluginModal";
+import { shouldShowSkillMessageCenter } from "./collaborationVisibility";
 import "./index.scss";
 
 export default function SkillManagementSection() {
@@ -40,6 +41,7 @@ export default function SkillManagementSection() {
     openSkillShareCenter,
     incomingPendingCount,
     openSkillCreateModal,
+    hideUserGroupSurfaces,
     openModal,
     skillAssets,
     skillLoading,
@@ -287,6 +289,10 @@ export default function SkillManagementSection() {
         onSkillReviewClick={handleSkillReviewClick}
         messageCenterCount={messageCenterCount}
         onMessageCenterClick={handleSkillMessageCenter}
+        showMessageCenter={shouldShowSkillMessageCenter({
+          skillView,
+          hideUserGroupSurfaces,
+        })}
         isAdmin={isAdmin}
         onAdminPublish={() => setAdminPublishOpen(true)}
         onNewPlugin={() => setNewPluginOpen(true)}

@@ -1455,6 +1455,10 @@ export default function MemoryManagement() {
       skillId: string,
       options?: { silent?: boolean; showErrorToast?: boolean },
     ) => {
+      if (hideUserGroupSurfaces) {
+        return;
+      }
+
       const requestId = shareStatusRequestIdRef.current + 1;
       shareStatusRequestIdRef.current = requestId;
 
@@ -1491,7 +1495,7 @@ export default function MemoryManagement() {
         }
       }
     },
-    [t],
+    [hideUserGroupSurfaces, t],
   );
 
   useEffect(() => {
@@ -5157,7 +5161,7 @@ export default function MemoryManagement() {
   };
 
   const handleConfirmShare = async () => {
-    if (!shareTarget) {
+    if (hideUserGroupSurfaces || !shareTarget) {
       return;
     }
 
@@ -5230,7 +5234,12 @@ export default function MemoryManagement() {
   }, [hideUserGroupSurfaces, shareModalOpen, t]);
 
   useEffect(() => {
-    if (!shareModalOpen || !shareTarget || shareTarget.tab !== "skills") {
+    if (
+      hideUserGroupSurfaces ||
+      !shareModalOpen ||
+      !shareTarget ||
+      shareTarget.tab !== "skills"
+    ) {
       setShareStatusError("");
       setShareStatusRecords([]);
       setShareStatusLoading(false);
@@ -5238,7 +5247,7 @@ export default function MemoryManagement() {
     }
 
     void refreshShareStatus(shareTarget.item.id, { showErrorToast: false });
-  }, [shareModalOpen, shareTarget, refreshShareStatus]);
+  }, [hideUserGroupSurfaces, shareModalOpen, shareTarget, refreshShareStatus]);
 
   useEffect(() => {
     const sharedTab = routeListTab || parseMemoryTab(searchParams.get("tab"));
