@@ -1254,8 +1254,21 @@
 .model-provider-service-title-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
+  min-width: 0;
+
+  h4 {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+  }
+
+  .model-provider-service-status {
+    flex-shrink: 0;
+  }
 }
 
 .model-provider-service-status.ant-tag {

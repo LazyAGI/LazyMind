@@ -1,5 +1,19 @@
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
 
+/** Slot ids rendered by WriterArtifactContent in the writer-plugin panel. */
+export const WRITER_ARTIFACT_SLOT_IDS = new Set([
+  'writing_task',
+  'resource_profiles',
+  'writing_context',
+  'outline',
+  'section_instructions',
+  'draft_sections',
+  'draft_document',
+  'review_report',
+  'review_summary',
+  'writing_output',
+]);
+
 export function unwrapArtifactPayload(raw: unknown): unknown {
   if (raw && typeof raw === 'object' && 'data' in raw) {
     return (raw as { data: unknown }).data;

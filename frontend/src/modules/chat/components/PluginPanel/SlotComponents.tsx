@@ -7,7 +7,11 @@ import { buildDiffLinesWithInline } from "@/modules/memory/shared";
 import { DiffLineContent } from "@/modules/memory/components/DiffLineContent";
 import { uploadFileInChunks } from "@/modules/chat/utils/chunkUpload";
 import { FilePreviewDrawer } from "./FilePreviewDrawer";
-import { WriterArtifactContent, unwrapArtifactPayload } from "./writerArtifactViews";
+import {
+  WriterArtifactContent,
+  WRITER_ARTIFACT_SLOT_IDS,
+  unwrapArtifactPayload,
+} from './writerArtifactViews';
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
 
 /**
@@ -1508,6 +1512,54 @@ function isMarkdownArtifactFile(slot: SlotRevision): boolean {
     || path.endsWith('.markdown');
 }
 
+function isOffloadedArtifactReference(raw: Record<string, unknown>): boolean {
+  const hasPath = Boolean(String(raw.path ?? raw.url ?? '').trim());
+  return hasPath && (raw.type === 'text' || raw.type === 'json');
+}
+
+function getInlineStructuredArtifactPayload(slot: SlotRevision): unknown | null {
+  const raw = slot.artifact_value;
+  if (!raw || typeof raw !== 'object') return null;
+  const record = raw as Record<string, unknown>;
+
+  if (isOffloadedArtifactReference(record)) {
+    return null;
+  }
+
+  if (record.data !== undefined) {
+    const payload = unwrapArtifactPayload(raw);
+    if (payload !== null && payload !== undefined && typeof payload === 'object') {
+      return payload;
+    }
+    if (typeof payload === 'string') {
+      try {
+        return JSON.parse(payload);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  if (slot.content_type === 'json' && record.text === undefined) {
+    return unwrapArtifactPayload(raw);
+  }
+
+  return null;
+}
+
+function shouldRenderInlineStructuredContent(
+  slot: SlotRevision,
+  expectedType?: 'image' | 'file' | 'text',
+  slotId?: string,
+): boolean {
+  if (expectedType !== 'text') return false;
+  const payload = getInlineStructuredArtifactPayload(slot);
+  if (payload === null) return false;
+  if (slot.content_type === 'json') return true;
+  const resolvedSlotId = slotId ?? slot.slot;
+  return WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
+}
+
 function shouldRenderJsonFileAsContent(
   slot: SlotRevision,
   expectedType?: 'image' | 'file' | 'text',
@@ -1664,6 +1716,79 @@ function SlotJsonFile({
           >
             下载
           </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface SlotInlineStructuredProps {
+  slot: SlotRevision;
+  sessionId?: string;
+  slotId?: string;
+  revisionCount?: number;
+  onRefresh?: () => void;
+}
+
+function SlotInlineStructured({
+  slot,
+  sessionId,
+  slotId,
+  revisionCount,
+  onRefresh,
+}: SlotInlineStructuredProps) {
+  const payload = getInlineStructuredArtifactPayload(slot);
+  const [showRaw, setShowRaw] = useState(false);
+  const apiListIndex = slot.list_index ?? -1;
+  const resolvedSlotId = slotId ?? slot.slot;
+  const showVersionBadge =
+    revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
+
+  const handleToggleRaw = useCallback(() => {
+    setShowRaw((value) => !value);
+  }, []);
+
+  if (payload === null) {
+    return (
+      <div className='plugin-slot plugin-slot--artifact plugin-slot--error'>
+        <span className='plugin-slot__placeholder'>内容加载失败</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className='plugin-slot plugin-slot--artifact'>
+      <div className='plugin-slot__artifact-body'>
+        {showRaw ? (
+          <pre className='writer-artifact__raw'>{JSON.stringify(payload, null, 2)}</pre>
+        ) : (
+          <WriterArtifactContent slotId={resolvedSlotId} data={payload} />
+        )}
+      </div>
+      <div className='plugin-slot__artifact-footer'>
+        <div className='plugin-slot__artifact-footer-left'>
+          {showVersionBadge && (
+            <SlotVersionPopover
+              sessionId={sessionId!}
+              slotId={slotId!}
+              listIndex={apiListIndex}
+              revisionCount={revisionCount!}
+              currentRevision={slot.revision}
+              currentValue={slot.artifact_value}
+              currentChangeSource={slot.change_source}
+              contentType='json'
+              onRollbackDone={onRefresh}
+            />
+          )}
+        </div>
+        <div className='plugin-slot__artifact-actions'>
+          <button
+            className='plugin-slot__file-action-btn'
+            onClick={handleToggleRaw}
+            type='button'
+          >
+            {showRaw ? '查看内容' : '原始数据'}
+          </button>
         </div>
       </div>
     </div>
@@ -2044,6 +2169,17 @@ export function SlotRenderer({
   if (shouldRenderJsonFileAsContent(slot, expectedType)) {
     return (
       <SlotJsonFile
+        slot={slot}
+        sessionId={sessionId}
+        slotId={slotId}
+        revisionCount={revisionCount}
+        onRefresh={onRefresh}
+      />
+    );
+  }
+  if (shouldRenderInlineStructuredContent(slot, expectedType, slotId)) {
+    return (
+      <SlotInlineStructured
         slot={slot}
         sessionId={sessionId}
         slotId={slotId}
