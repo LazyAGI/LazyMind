@@ -17,28 +17,4 @@ CREATE TABLE IF NOT EXISTS prompt_user_states (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_prompt_user_states_user_prompt
     ON prompt_user_states (create_user_id, prompt_id);
 
-INSERT INTO prompt_user_states (
-    id,
-    prompt_id,
-    is_favorite,
-    usage_count,
-    create_user_id,
-    create_user_name,
-    created_at,
-    updated_at
-)
-SELECT
-    'pus_' || md5(create_user_id || ':' || prompt_id),
-    prompt_id,
-    TRUE,
-    0,
-    create_user_id,
-    MIN(create_user_name),
-    MIN(created_at),
-    MAX(updated_at)
-FROM default_prompts
-WHERE deleted_at IS NULL
-GROUP BY create_user_id, prompt_id
-ON CONFLICT (create_user_id, prompt_id) DO UPDATE
-SET is_favorite = TRUE,
-    updated_at = EXCLUDED.updated_at;
+DROP TABLE IF EXISTS default_prompts CASCADE;

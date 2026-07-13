@@ -447,7 +447,6 @@ func DeletePrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = corestore.DB().Unscoped().Where("create_user_id = ? AND prompt_id = ?", userID, promptID).Delete(&orm.PromptUserState{}).Error
-	_ = corestore.DB().Where("create_user_id = ? AND prompt_id = ?", userID, promptID).Delete(&orm.DefaultPrompt{}).Error
 	writePromptJSON(w, http.StatusOK, nil)
 }
 

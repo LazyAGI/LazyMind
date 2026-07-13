@@ -82,16 +82,6 @@ type PromptCategory struct {
 
 func (PromptCategory) TableName() string { return "prompt_categories" }
 
-type DefaultPrompt struct {
-	ID         int    `gorm:"column:id;primaryKey;autoIncrement"`
-	PromptID   string `gorm:"column:prompt_id;type:varchar(64);not null"`
-	PromptName string `gorm:"column:prompt_name;type:varchar(255);not null"`
-
-	BaseModel
-}
-
-func (DefaultPrompt) TableName() string { return "default_prompts" }
-
 type PromptUserState struct {
 	ID             string     `gorm:"column:id;type:varchar(64);primaryKey"`
 	PromptID       string     `gorm:"column:prompt_id;type:varchar(64);not null;uniqueIndex:uk_prompt_user_states_user_prompt,priority:2"`
