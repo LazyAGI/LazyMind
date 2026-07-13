@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"lazymind/core/common/orm"
 	"lazymind/core/subagent"
 )
 
@@ -44,6 +46,41 @@ func seedSessionAndTask(t *testing.T, ctx context.Context, gdb interface {
 // ──────────────────────────────────────────────
 // OnSubAgentDone — status routing
 // ──────────────────────────────────────────────
+
+func TestConversationPreflightMustBeReadyAndIsConsumed(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+		t.Fatalf("migrate conversation: %v", err)
+	}
+	extJSON, _ := json.Marshal(map[string]any{
+		"keep": "value",
+		"plugin_preflight": map[string]any{
+			"preflight_id": "pf-ready",
+			"status":       "ready",
+		},
+	})
+	if err := db.Create(&orm.Conversation{ID: "conv-preflight", Ext: extJSON}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	if err := validateConversationPreflight(ctx, db.DB, "conv-preflight", "pf-stale"); err == nil {
+		t.Fatal("stale preflight id must be rejected")
+	}
+	if err := validateConversationPreflight(ctx, db.DB, "conv-preflight", "pf-ready"); err != nil {
+		t.Fatalf("ready preflight rejected: %v", err)
+	}
+	if err := consumeConversationPreflight(ctx, db.DB, "conv-preflight", "pf-ready"); err != nil {
+		t.Fatalf("consume ready preflight: %v", err)
+	}
+	ext, preflight := conversationPreflight(ctx, db.DB, "conv-preflight")
+	if preflight != nil {
+		t.Fatalf("preflight was not consumed: %v", preflight)
+	}
+	if ext["keep"] != "value" {
+		t.Fatalf("unrelated conversation ext was lost: %v", ext)
+	}
+}
 
 func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	db := newTestDB(t)
@@ -89,6 +126,39 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	interrupted, _ := gotPayload["interrupted"].(bool)
 	if interrupted {
 		t.Fatal("succeeded step must not set interrupted=true in step_waiting")
+	}
+}
+
+func TestOnSubAgentDone_ExplicitNoHandOffWaitsForChatAgent(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "ps-inline", ConversationID: "conv-inline", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if _, err := CreateSessionStep(ctx, db.DB, "ps-inline", "analyze_subject", "task-inline", 1); err != nil {
+		t.Fatalf("step: %v", err)
+	}
+
+	handOff := false
+	pctx := &PluginChatContext{
+		SessionID: "ps-inline", PluginID: "image-plugin", StepID: "analyze_subject",
+		ConvID: "conv-inline", PluginMode: "auto", HandOff: &handOff,
+	}
+	var gotEvent string
+	var gotReason any
+	OnSubAgentDone(
+		ctx, db.DB, nil, "task-inline", subagent.StatusSucceeded, "analysis done",
+		func(eventType string, payload map[string]any) {
+			gotEvent = eventType
+			gotReason = payload["reason"]
+		},
+		pctx,
+	)
+
+	if gotEvent != "step_waiting" || gotReason != "inline_complete" {
+		t.Fatalf("expected inline_complete step_waiting, got event=%q reason=%v", gotEvent, gotReason)
 	}
 }
 

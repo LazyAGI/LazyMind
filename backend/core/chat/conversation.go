@@ -249,6 +249,21 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	// It is injected into plugin_context (below) so Python can use it; it is not sent
 	// as a top-level reqBody field because Python reads it exclusively from plugin_context.
 	pluginMode := resolvePluginModeWithFallback(raw, reqBody)
+	existingPluginContext, _ := reqBody["plugin_context"].(map[string]any)
+	if existingPluginContext == nil {
+		existingPluginContext = map[string]any{}
+	}
+	existingPluginContext["plugin_mode"] = pluginMode
+	reqBody["plugin_context"] = existingPluginContext
+	if preflight := loadPluginPreflightContext(r.Context(), db, convID); len(preflight) > 0 {
+		existing, _ := reqBody["plugin_context"].(map[string]any)
+		if existing == nil {
+			existing = map[string]any{}
+		}
+		existing["plugin_mode"] = pluginMode
+		existing["plugin_preflight"] = preflight
+		reqBody["plugin_context"] = existing
+	}
 
 	// Promote enable_plugin and enable_subagent from agentic_config to top-level
 	// so Python chat_routes can receive them as explicit parameters.
@@ -316,11 +331,23 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 					convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
 			}
 		}
-	} else if _, hasPC := reqBody["plugin_context"]; hasPC {
+	} else if existing, hasPC := reqBody["plugin_context"].(map[string]any); hasPC {
 		// No active session in DB but frontend sent a plugin_context — clear it to avoid
 		// Python entering advance-step mode with a stale/non-existent session.
-		delete(reqBody, "plugin_context")
-		fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
+		if preflight, ok := existing["plugin_preflight"].(map[string]any); ok && len(preflight) > 0 {
+			for _, key := range []string{"session_id", "plugin_id", "current_step", "plugin_ref", "revision_id", "revision_no", "tree_hash", "remote_root"} {
+				delete(existing, key)
+			}
+			existing["plugin_mode"] = pluginMode
+			reqBody["plugin_context"] = existing
+		} else {
+			for _, key := range []string{"session_id", "plugin_id", "current_step", "plugin_ref", "revision_id", "revision_no", "tree_hash", "remote_root"} {
+				delete(existing, key)
+			}
+			existing["plugin_mode"] = pluginMode
+			reqBody["plugin_context"] = existing
+			fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
+		}
 	}
 	historyExt := buildChatHistoryExt(raw, query)
 	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {

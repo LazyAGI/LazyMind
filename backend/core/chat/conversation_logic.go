@@ -1115,7 +1115,26 @@ func streamSingleAnswer(
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
 			pluginModeForTask := pluginModeFromReqBody(reqBody)
-			notice := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), pluginModeForTask)
+			notice, taskErr := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), pluginModeForTask)
+			if taskErr != nil {
+				failurePrefix := "TASK_START_FAILED: "
+				if d.TaskCreated.AgentType == "plugin_step" {
+					failurePrefix = "PLUGIN_START_FAILED: "
+				}
+				failure := failurePrefix + taskErr.Error()
+				fullText += failure
+				fullResult += failure
+				if reqCtx.Err() == nil {
+					writeSSEChunk(w, flusher, &ChatChunkResponse{
+						ConversationID: convID,
+						Seq:            int32(seq),
+						HistoryID:      historyID,
+						Delta:          failure,
+						FinishReason:   "FINISH_REASON_UNSPECIFIED",
+					})
+				}
+				continue
+			}
 			if notice != nil {
 				taskChunk := &ChatChunkResponse{
 					ConversationID: convID,
@@ -1163,6 +1182,10 @@ func streamSingleAnswer(
 		}
 		if d.IntentUpdated != nil {
 			handleIntentUpdated(chatCtx, db, stateStore, convID, d.IntentUpdated)
+			continue
+		}
+		if d.PluginPreflightUpdated != nil {
+			handlePluginPreflightUpdated(chatCtx, db, convID, d.PluginPreflightUpdated)
 			continue
 		}
 		if d.Heartbeat {
@@ -1532,9 +1555,9 @@ func handleTaskCreated(
 	llmConfig map[string]any,
 	toolConfig map[string]any,
 	pluginMode string,
-) *TaskCreatedNotice {
+) (*TaskCreatedNotice, error) {
 	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
-		return nil
+		return nil, fmt.Errorf("task_created event is missing task_id")
 	}
 
 	// Plugin Step path — handled separately.
@@ -1576,7 +1599,7 @@ func handleTaskCreated(
 				Mode:              existing.Mode,
 				Status:            subagent.StatusRunning,
 				SeqInConversation: existing.SeqInConversation,
-			}
+			}, nil
 		}
 	}
 
@@ -1596,7 +1619,7 @@ func handleTaskCreated(
 	})
 	if err != nil {
 		fmt.Println("[Core] [SUBAGENT_CREATE_TASK_FAILED] err=", err)
-		return nil
+		return nil, fmt.Errorf("create subagent task: %w", err)
 	}
 	_ = subagent.WriteStatus(chatCtx, stateStore, task.ID, map[string]any{
 		"status": subagent.StatusPending, "progress": 0,
@@ -1621,7 +1644,7 @@ func handleTaskCreated(
 		Mode:              task.Mode,
 		Status:            task.Status,
 		SeqInConversation: task.SeqInConversation,
-	}
+	}, nil
 }
 
 // handlePluginStepCreated processes a task_created event for agent_type='plugin_step'.
@@ -1635,7 +1658,7 @@ func handlePluginStepCreated(
 	llmConfig map[string]any,
 	toolConfig map[string]any,
 	pluginMode string,
-) *TaskCreatedNotice {
+) (*TaskCreatedNotice, error) {
 	params := pluginStepParamsFromEventParams(ev.Params)
 	// Carry the resolved plugin_mode into params so it is persisted with the task
 	// and available when OnSubAgentDone reconstructs PluginChatContext from DB.
@@ -1646,7 +1669,7 @@ func handlePluginStepCreated(
 	}
 	if params.PluginID == "" || params.StepID == "" {
 		fmt.Println("[Core] [PLUGIN_STEP_INVALID_PARAMS] plugin_id or step_id missing")
-		return nil
+		return nil, fmt.Errorf("plugin_id or step_id missing")
 	}
 
 	sessionID, taskID, pluginCompleted, err := plugin.HandlePluginStepCreated(
@@ -1658,7 +1681,7 @@ func handlePluginStepCreated(
 	)
 	if err != nil {
 		fmt.Printf("[Core] [PLUGIN_STEP_FAILED] err=%v\n", err)
-		return nil
+		return nil, err
 	}
 
 	// When ChatAgent signals plugin completion via __end__, emit plugin_completed
@@ -1671,14 +1694,14 @@ func handlePluginStepCreated(
 				"plugin_id":  params.PluginID,
 			},
 		})
-		return nil
+		return nil, nil
 	}
 
 	// Fetch the created task for the notice.
 	task, getErr := subagent.GetTask(ctx, db, taskID)
 	if getErr != nil {
 		fmt.Printf("[Core] [PLUGIN_STEP_GET_TASK_FAILED] err=%v\n", getErr)
-		return nil
+		return nil, fmt.Errorf("plugin step was accepted but task lookup failed: %w", getErr)
 	}
 	return &TaskCreatedNotice{
 		TaskID:            task.ID,
@@ -1688,7 +1711,7 @@ func handlePluginStepCreated(
 		Status:            task.Status,
 		SeqInConversation: task.SeqInConversation,
 		PluginSessionID:   sessionID,
-	}
+	}, nil
 }
 
 func pluginStepParamsFromEventParams(raw map[string]any) plugin.PluginStepParams {
@@ -1734,6 +1757,12 @@ func pluginStepParamsFromEventParams(raw map[string]any) plugin.PluginStepParams
 	if cold, ok := raw["is_cold_start"].(bool); ok {
 		params.IsColdStart = cold
 	}
+	if handOff, ok := raw["hand_off"].(bool); ok {
+		params.HandOff = &handOff
+	}
+	if preflightID, ok := raw["preflight_id"].(string); ok {
+		params.PreflightID = preflightID
+	}
 	if rh, ok := raw["retry_hint"].(string); ok {
 		params.RetryHint = rh
 	}
@@ -1774,6 +1803,50 @@ func pluginStepParamsFromEventParams(raw map[string]any) plugin.PluginStepParams
 		params.UserID = uid
 	}
 	return params
+}
+
+// handlePluginPreflightUpdated stores the latest trigger context outside chat history,
+// so long clarification sequences are not lost to agent history compaction.
+func handlePluginPreflightUpdated(
+	ctx context.Context,
+	db *gorm.DB,
+	convID string,
+	ev *PluginPreflightUpdatedEvent,
+) {
+	if db == nil || ev == nil || strings.TrimSpace(convID) == "" {
+		return
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("id", "ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return
+	}
+	ext := map[string]any{}
+	if len(conv.Ext) > 0 {
+		_ = json.Unmarshal(conv.Ext, &ext)
+	}
+	if ev.Clear {
+		delete(ext, "plugin_preflight")
+	} else if len(ev.Snapshot) > 0 {
+		ext["plugin_preflight"] = ev.Snapshot
+	}
+	raw, _ := json.Marshal(ext)
+	_ = db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
+}
+
+func loadPluginPreflightContext(ctx context.Context, db *gorm.DB, convID string) map[string]any {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return nil
+	}
+	ext := map[string]any{}
+	if json.Unmarshal(conv.Ext, &ext) != nil {
+		return nil
+	}
+	preflight, _ := ext["plugin_preflight"].(map[string]any)
+	return preflight
 }
 
 // mergeAskPendingIntoExt merges ask_pending data into the ext JSON field so that

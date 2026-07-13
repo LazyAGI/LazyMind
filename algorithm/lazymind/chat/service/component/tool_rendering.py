@@ -211,7 +211,7 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_step': 'Switching to step {value}.',
     'advance_step_and_hand_off': 'Switching to step {value} and handing off.',
     'regex:get_(.+)_methods': 'Expanding the {match} tool group.',
-    'regex:trigger_(.+)_plugin': 'Loading the {match} plugin now.',
+    'regex:trigger_(.+)_plugin': 'Checking whether the {match} plugin fits this request.',
 }
 _TOOL_CALL_FALLBACK_TEMPLATE = 'Calling {tool_name} to handle the request.'
 _TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = 'Gathering questions for you, please wait…'
@@ -277,7 +277,7 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_step': '正在切换到步骤 {value}...',
     'advance_step_and_hand_off': '正在切换到步骤 {value} 并交出控制权...',
     'regex:get_(.+)_methods': '正在展开{match}工具组。',
-    'regex:trigger_(.+)_plugin': '正在加载 {match} 插件...',
+    'regex:trigger_(.+)_plugin': '正在检查 {match} 插件是否适合当前需求...',
 }
 _ZH_TOOL_CALL_FALLBACK_TEMPLATE = '正在调用工具 {tool_name}...'
 _ZH_TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = '我正在组织问题，请稍后'
@@ -346,7 +346,7 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_step': 'Plugin launched.',
     'advance_step_and_hand_off': 'Step queued. Plugin launched.',
     'regex:get_(.+)_methods': 'The {match} tool group has been expanded.',
-    'regex:trigger_(.+)_plugin': 'Plugin launched.',
+    'regex:trigger_(.+)_plugin': 'Plugin preflight completed.',
 }
 
 _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
@@ -411,7 +411,7 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_step': '插件已启动',
     'advance_step_and_hand_off': '步骤已排队，插件已启动',
     'regex:get_(.+)_methods': '已经展开{match}工具组。',
-    'regex:trigger_(.+)_plugin': '插件已启动',
+    'regex:trigger_(.+)_plugin': '插件启动检查已完成',
 }
 
 _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {

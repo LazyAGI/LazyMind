@@ -225,6 +225,20 @@ steps:
 
 **不要**在 scenario.md 里描述冷启动触发逻辑、`advance_step` 工具调用规则等框架机制——那些由框架自动处理，与具体插件无关。
 
+### 冷启动预检与首次步骤
+
+冷启动时，ChatAgent 初始只看到插件的 `name`、`description` 和 `when_to_use`。
+调用 `trigger_<plugin>(request_context)` 后，框架才加载完整插件并执行启动预检；trigger
+本身不会创建 PluginSession 或任务。预检结果可能为 `need_information`、
+`not_applicable`、`preflight_failed` 或带有 `launch_plan` 的 `ready`。
+
+`ready` 表示首步、规范化后的完整用户意图以及是否 hand-off 均已确定并通过状态机校验。
+ChatAgent 必须在同一回合调用对应 advance 工具；若模型未调用，执行层会先强制继续一次
+ReAct，再按已校验的 `launch_plan` 确定性提交。只有首次 advance 被后端接受时才创建
+PluginSession，并原子消费对话中持久化的 preflight。
+
+`auto` 模式不会注册 `ask_user`。预检缺少必需信息时返回阻塞结果，等待用户下一轮主动补充。
+
 ### 推荐结构
 
 ```markdown

@@ -94,6 +94,7 @@ func loadPluginChatContextFromDB(ctx context.Context, db *gorm.DB, taskID string
 		PluginMode:          params.PluginMode,
 		ChatSessionID:       params.ChatSessionID,
 		HistoryFilesPerTurn: params.HistoryFilesPerTurn,
+		HandOff:             params.HandOff,
 	}
 }
 

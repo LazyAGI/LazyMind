@@ -149,9 +149,15 @@ async def step_started_notify(req: StepStartedRequest) -> StepStartedResponse:
             )
             return StepStartedResponse(ok=False)
         queue_key = f'step_started_{req.session_id}_{req.step_id}'
-        msg = json.dumps({'tag': 'step_started', 'task_id': req.task_id}, ensure_ascii=False)
+        msg = json.dumps({
+            'tag': 'step_started',
+            'task_id': req.task_id,
+            'session_id': req.session_id,
+        }, ensure_ascii=False)
         lazyllm.globals._init_sid(sid=sid)
         FileSystemQueue(klass=queue_key).enqueue(msg)
+        if req.task_id:
+            FileSystemQueue(klass=f'step_started_task_{req.task_id}').enqueue(msg)
         logger.info(
             '[plugin.signal] step_started enqueued conv=%s session=%s chat_sid=%s step=%s task=%s queue=%s',
             req.conversation_id, req.session_id, sid, req.step_id, req.task_id, queue_key,

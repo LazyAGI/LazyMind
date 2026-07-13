@@ -39,6 +39,8 @@ type PluginStepParams struct {
 	SessionID   string `json:"session_id"`
 	UserInput   string `json:"user_input"`
 	IsColdStart bool   `json:"is_cold_start"`
+	HandOff     *bool  `json:"hand_off,omitempty"`
+	PreflightID string `json:"preflight_id,omitempty"`
 
 	// ChatSessionID is the LazyLLM session id of the ChatAgent turn that emitted
 	// task_created. It is needed by Python signal routes to write FileSystemQueue
@@ -85,6 +87,12 @@ func (p PluginStepParams) asMap() map[string]any {
 	if p.PluginMode != "" {
 		m["plugin_mode"] = p.PluginMode
 	}
+	if p.HandOff != nil {
+		m["hand_off"] = *p.HandOff
+	}
+	if p.PreflightID != "" {
+		m["preflight_id"] = p.PreflightID
+	}
 	if p.ChatSessionID != "" {
 		m["chat_session_id"] = p.ChatSessionID
 	}
@@ -116,6 +124,47 @@ type PluginChatContext struct {
 	PluginMode          string // "auto" | "dynamic"
 	ChatSessionID       string
 	HistoryFilesPerTurn map[string][]string
+	HandOff             *bool
+}
+
+func conversationPreflight(ctx context.Context, db *gorm.DB, convID string) (map[string]any, map[string]any) {
+	var conv orm.Conversation
+	if db == nil || db.WithContext(ctx).Select("ext").Where("id = ?", convID).First(&conv).Error != nil {
+		return nil, nil
+	}
+	ext := map[string]any{}
+	if json.Unmarshal(conv.Ext, &ext) != nil {
+		return nil, nil
+	}
+	preflight, _ := ext["plugin_preflight"].(map[string]any)
+	return ext, preflight
+}
+
+func validateConversationPreflight(ctx context.Context, db *gorm.DB, convID, preflightID string) error {
+	if strings.TrimSpace(preflightID) == "" {
+		return nil // backward compatibility for callers that predate trigger preflight
+	}
+	_, preflight := conversationPreflight(ctx, db, convID)
+	if preflight == nil || fmt.Sprint(preflight["preflight_id"]) != preflightID {
+		return fmt.Errorf("plugin: prepared preflight is missing or stale")
+	}
+	if fmt.Sprint(preflight["status"]) != "ready" {
+		return fmt.Errorf("plugin: preflight is not ready")
+	}
+	return nil
+}
+
+func consumeConversationPreflight(ctx context.Context, db *gorm.DB, convID, preflightID string) error {
+	if strings.TrimSpace(preflightID) == "" {
+		return nil
+	}
+	ext, preflight := conversationPreflight(ctx, db, convID)
+	if preflight == nil || fmt.Sprint(preflight["preflight_id"]) != preflightID {
+		return fmt.Errorf("plugin: prepared preflight changed before it could be consumed")
+	}
+	delete(ext, "plugin_preflight")
+	raw, _ := json.Marshal(ext)
+	return db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
 }
 
 // HandlePluginStepCreated processes a task_created event for agent_type='plugin_step'.
@@ -184,25 +233,41 @@ func HandlePluginStepCreated(
 
 	if isCold {
 		fmt.Printf("[plugin] cold-start branch conv=%s plugin=%s step=%s task=%s\n", convID, pluginID, stepID, taskID)
-		existing, gErr := GetActiveSession(ctx, db, convID)
-		if gErr != nil {
-			return "", "", false, fmt.Errorf("plugin: check active session: %w", gErr)
-		}
-		if existing != nil {
-			return "", "", false, fmt.Errorf("plugin: active session already exists (id=%s)", existing.ID)
-		}
 		psID := "ps_" + common.GenerateID()
-		_, sErr := CreateSession(ctx, db, CreateSessionInput{
-			SessionID:      psID,
-			ConversationID: convID,
-			PluginID:       pluginID,
-			PluginRef:      params.PluginRef, PluginRevisionID: params.RevisionID, PluginRevisionNo: params.RevisionNo, PluginTreeHash: params.TreeHash, PluginRemoteRoot: params.RemoteRoot,
-			TriggerHistoryID: historyID,
-			CurrentStepID:    stepID,
-			CreateUserID:     userID,
+		coldErr := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			existing, gErr := GetActiveSession(ctx, tx, convID)
+			if gErr != nil {
+				return fmt.Errorf("plugin: check active session: %w", gErr)
+			}
+			if existing != nil {
+				return fmt.Errorf("plugin: active session already exists (id=%s)", existing.ID)
+			}
+			if pErr := validateConversationPreflight(ctx, tx, convID, params.PreflightID); pErr != nil {
+				return pErr
+			}
+			if _, sErr := CreateSession(ctx, tx, CreateSessionInput{
+				SessionID:      psID,
+				ConversationID: convID,
+				PluginID:       pluginID,
+				PluginRef:      params.PluginRef, PluginRevisionID: params.RevisionID, PluginRevisionNo: params.RevisionNo, PluginTreeHash: params.TreeHash, PluginRemoteRoot: params.RemoteRoot,
+				TriggerHistoryID: historyID,
+				CurrentStepID:    stepID,
+				CreateUserID:     userID,
+			}); sErr != nil {
+				return fmt.Errorf("plugin: create session: %w", sErr)
+			}
+			if strings.TrimSpace(params.UserInput) != "" {
+				intentJSON, _ := json.Marshal(map[string]string{"text": params.UserInput})
+				if err := tx.WithContext(ctx).Model(&orm.PluginSession{}).
+					Where("id = ?", psID).
+					Update("intent_context", string(intentJSON)).Error; err != nil {
+					return fmt.Errorf("plugin: persist launch intent: %w", err)
+				}
+			}
+			return consumeConversationPreflight(ctx, tx, convID, params.PreflightID)
 		})
-		if sErr != nil {
-			return "", "", false, fmt.Errorf("plugin: create session: %w", sErr)
+		if coldErr != nil {
+			return "", "", false, coldErr
 		}
 		sessionID = psID
 		fmt.Printf("[plugin] plugin session created conv=%s session=%s plugin=%s current_step=%s\n",
@@ -273,6 +338,12 @@ func HandlePluginStepCreated(
 		"session_id":    sessionID,
 		"user_input":    params.UserInput,
 		"is_cold_start": isCold,
+	}
+	if params.HandOff != nil {
+		rawParamsMap["hand_off"] = *params.HandOff
+	}
+	if params.PreflightID != "" {
+		rawParamsMap["preflight_id"] = params.PreflightID
 	}
 	if params.PluginMode != "" {
 		rawParamsMap["plugin_mode"] = params.PluginMode
@@ -452,6 +523,22 @@ func OnSubAgentDone(
 	}
 	fmt.Printf("[plugin] sub_agent terminal conv=%s session=%s step=%s task=%s status=%s mode=%s summary_len=%d\n",
 		pctx.ConvID, pctx.SessionID, pctx.StepID, taskID, status, mode, len(summary))
+
+	handOff := true // legacy tasks only had the hand-off advancement tool by default
+	if pctx.HandOff != nil {
+		handOff = *pctx.HandOff
+	}
+	if !handOff {
+		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+		onSSE("step_waiting", map[string]any{
+			"session_id": pctx.SessionID,
+			"step_id":    pctx.StepID,
+			"reason":     "inline_complete",
+		})
+		go notifyStepDone(pctx.ConvID, pctx.SessionID, pctx.StepID, status, summary, pctx.ChatSessionID)
+		go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+		return
+	}
 
 	if mode == "auto" {
 		// Interrupted steps should not be auto-advanced: surface the interruption to the user
