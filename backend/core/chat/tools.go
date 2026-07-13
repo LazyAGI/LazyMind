@@ -23,7 +23,12 @@ import (
 	"lazymind/core/store"
 )
 
-const chatToolsPath = "/api/chat/tools"
+const (
+	chatToolsPath           = "/api/chat/tools"
+	chatToolsRequestTimeout = 30 * time.Second
+)
+
+var chatToolsHTTPClient = &http.Client{Timeout: chatToolsRequestTimeout}
 
 type chatToolGroup map[string]any
 
@@ -143,7 +148,7 @@ func fetchChatTools(ctx context.Context, db *gorm.DB, userID, acceptLanguage str
 	if strings.TrimSpace(acceptLanguage) != "" {
 		req.Header.Set("Accept-Language", acceptLanguage)
 	}
-	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
+	resp, err := chatToolsHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
