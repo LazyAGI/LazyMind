@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import FileViewer from '@/modules/knowledge/components/FileViewer';
 import { resolveCoreAssetUrl } from '@/modules/knowledge/utils/imageUrl';
+import { useTranslation } from 'react-i18next';
 
 interface FilePreviewDrawerProps {
   open: boolean;
@@ -11,6 +12,7 @@ interface FilePreviewDrawerProps {
 }
 
 export function FilePreviewDrawer({ open, filename, url, onClose }: FilePreviewDrawerProps) {
+  const { t } = useTranslation();
   const [resolvedUrl, setResolvedUrl] = useState<string>('');
 
   useEffect(() => {
@@ -27,13 +29,13 @@ export function FilePreviewDrawer({ open, filename, url, onClose }: FilePreviewD
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       role='presentation'
     >
-      <div className='file-preview-drawer' role='dialog' aria-label={`预览 ${filename}`} aria-modal='true'>
+      <div className='file-preview-drawer' role='dialog' aria-label={t('chat.previewNamedFile', { name: filename })} aria-modal='true'>
         <div className='file-preview-drawer__header'>
           <span className='file-preview-drawer__title'>{filename}</span>
           <button
             className='file-preview-drawer__close'
             onClick={onClose}
-            aria-label='关闭预览'
+            aria-label={t('chat.closePreview')}
             type='button'
           >×</button>
         </div>
@@ -41,7 +43,7 @@ export function FilePreviewDrawer({ open, filename, url, onClose }: FilePreviewD
           {resolvedUrl ? (
             <FileViewer file={resolvedUrl} fileName={filename} />
           ) : (
-            <div className='file-preview-drawer__loading'>加载中…</div>
+            <div className='file-preview-drawer__loading'>{t('common.loading')}</div>
           )}
         </div>
       </div>

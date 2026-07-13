@@ -63,14 +63,25 @@ func (UserGroupModel) TableName() string { return "acl_user_groups" }
 // ----- Chat / Prompt text -----
 
 type Prompt struct {
-	ID      string `gorm:"column:id;type:varchar(64);primaryKey"`
-	Name    string `gorm:"column:name;type:varchar(255);not null"`
-	Content string `gorm:"column:content;type:text;not null"`
+	ID       string `gorm:"column:id;type:varchar(64);primaryKey"`                    // 话术唯一标识
+	Name     string `gorm:"column:name;type:varchar(255);not null"`                   // 话术名称
+	Content  string `gorm:"column:content;type:text;not null"`                        // 话术正文
+	Category string `gorm:"column:category;type:varchar(64);not null;default:custom"` // 固定分类编码
 
 	BaseModel
 }
 
 func (Prompt) TableName() string { return "prompts" }
+
+// PromptCategory stores a user-defined prompt category.
+type PromptCategory struct {
+	ID   string `gorm:"column:id;type:varchar(64);primaryKey"` // 分类唯一标识
+	Name string `gorm:"column:name;type:varchar(64);not null"` // 分类名称
+
+	BaseModel
+}
+
+func (PromptCategory) TableName() string { return "prompt_categories" }
 
 type DefaultPrompt struct {
 	ID         int    `gorm:"column:id;primaryKey;autoIncrement"`
@@ -81,6 +92,21 @@ type DefaultPrompt struct {
 }
 
 func (DefaultPrompt) TableName() string { return "default_prompts" }
+
+type PromptUserState struct {
+	ID             string     `gorm:"column:id;type:varchar(64);primaryKey"`                                                                     // 用户状态唯一标识
+	PromptID       string     `gorm:"column:prompt_id;type:varchar(64);not null;uniqueIndex:uk_prompt_user_states_user_prompt,priority:2"`       // 话术唯一标识
+	IsFavorite     bool       `gorm:"column:is_favorite;type:boolean;not null;default:false"`                                                    // 是否已收藏
+	UsageCount     int64      `gorm:"column:usage_count;type:bigint;not null;default:0"`                                                         // 累计使用次数
+	LastUsedAt     *time.Time `gorm:"column:last_used_at"`                                                                                       // 最近使用时间
+	CreateUserID   string     `gorm:"column:create_user_id;type:varchar(255);not null;uniqueIndex:uk_prompt_user_states_user_prompt,priority:1"` // 所属用户标识
+	CreateUserName string     `gorm:"column:create_user_name;type:varchar(255);not null"`                                                        // 所属用户名称
+	CreatedAt      time.Time  `gorm:"column:created_at;not null"`                                                                                // 创建时间
+	UpdatedAt      time.Time  `gorm:"column:updated_at;not null"`                                                                                // 更新时间
+	DeletedAt      *time.Time `gorm:"column:deleted_at"`                                                                                         // 软删除时间
+}
+
+func (PromptUserState) TableName() string { return "prompt_user_states" }
 
 type UserDisabledTool struct {
 	ID             int64      `gorm:"column:id;primaryKey;autoIncrement"`

@@ -368,7 +368,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
           className="task-card-collapse-btn"
           onClick={() => setCollapsed((v) => !v)}
           aria-expanded={!collapsed}
-          aria-label={collapsed ? "展开" : "收起"}
+          aria-label={collapsed ? t("common.expand") : t("common.collapse")}
         >
           {collapsed ? <RightOutlined /> : <DownOutlined />}
         </button>

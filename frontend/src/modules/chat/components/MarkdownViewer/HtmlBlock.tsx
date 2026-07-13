@@ -1,6 +1,7 @@
 import { CheckOutlined, CopyOutlined, FullscreenOutlined, LoadingOutlined } from "@ant-design/icons";
 import { Modal, Tooltip, message } from "antd";
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 
 import {
   DEVELOPER_ACTIVE_EVENT,
@@ -51,23 +52,19 @@ async function copyTextToClipboard(text: string) {
 }
 
 function getCopyTooltip(status: CopyStatus) {
-  if (status === "copied") {
-    return "已复制";
-  }
-  if (status === "failed") {
-    return "复制失败";
-  }
-  return "复制源码";
+  return status === "copied"
+    ? "chat.markdownCopied"
+    : status === "failed"
+      ? "chat.markdownCopyFailed"
+      : "chat.markdownCopySource";
 }
 
 function getCopyAnnouncement(status: CopyStatus) {
-  if (status === "copied") {
-    return "源码已复制";
-  }
-  if (status === "failed") {
-    return "源码复制失败";
-  }
-  return "";
+  return status === "copied"
+    ? "chat.markdownSourceCopied"
+    : status === "failed"
+      ? "chat.markdownSourceCopyFailed"
+      : "";
 }
 
 const VISIBLE_HTML_PATTERN =
@@ -257,6 +254,7 @@ const HtmlBlockComponent = ({
   code: string;
   isStreaming?: boolean;
 }) => {
+  const { t } = useTranslation();
   const [activeView, setActiveView] = useState<HtmlView>("preview");
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -333,10 +331,10 @@ const HtmlBlockComponent = ({
     try {
       await copyTextToClipboard(code);
       setCopyStatus("copied");
-      message.success("源码已复制");
+      message.success(t("chat.markdownSourceCopied"));
     } catch {
       setCopyStatus("failed");
-      message.error("复制失败，请手动复制");
+      message.error(t("chat.copyFailedManual"));
     } finally {
       resetCopyStatusLater();
     }
@@ -366,7 +364,7 @@ const HtmlBlockComponent = ({
           aria-live="polite"
         >
           <LoadingOutlined spin className="md-html-generating-icon" />
-          <span>正在生成 HTML 页面，请稍候...</span>
+          <span>{t("chat.markdownHtmlGenerating")}</span>
         </div>
       );
     }
@@ -381,7 +379,7 @@ const HtmlBlockComponent = ({
     >
       {developerActive && (
         <div className="md-mermaid-toolbar">
-          <div className="md-mermaid-tabs" role="tablist" aria-label="HTML展示">
+          <div className="md-mermaid-tabs" role="tablist" aria-label={t("chat.markdownHtmlDisplay")}>
             <button
               aria-selected={activeView === "preview"}
               className={activeView === "preview" ? "active" : ""}
@@ -390,7 +388,7 @@ const HtmlBlockComponent = ({
               type="button"
               onClick={() => setActiveView("preview")}
             >
-              渲染
+              {t("chat.markdownRender")}
             </button>
             <button
               aria-selected={activeView === "source"}
@@ -399,13 +397,13 @@ const HtmlBlockComponent = ({
               type="button"
               onClick={() => setActiveView("source")}
             >
-              源码
+              {t("chat.markdownSource")}
             </button>
           </div>
           <div className="md-mermaid-actions">
             {canShowPreview && activeView === "preview" && (
               <button
-                aria-label="放大预览"
+                aria-label={t("chat.markdownEnlargePreview")}
                 className="md-mermaid-icon-button"
                 type="button"
                 onClick={() => setIsModalOpen(true)}
@@ -414,9 +412,9 @@ const HtmlBlockComponent = ({
               </button>
             )}
             {activeView === "source" && (
-              <Tooltip title={getCopyTooltip(copyStatus)}>
+              <Tooltip title={t(getCopyTooltip(copyStatus))}>
                 <button
-                  aria-label="复制源码"
+                  aria-label={t("chat.markdownCopySource")}
                   className={`md-mermaid-icon-button ${
                     copyStatus === "copied" ? "copied" : ""
                   }`}
@@ -433,7 +431,7 @@ const HtmlBlockComponent = ({
               </Tooltip>
             )}
             <span className="md-mermaid-copy-status" aria-live="polite">
-              {getCopyAnnouncement(copyStatus)}
+              {getCopyAnnouncement(copyStatus) ? t(getCopyAnnouncement(copyStatus)) : ""}
             </span>
           </div>
         </div>
@@ -446,7 +444,7 @@ const HtmlBlockComponent = ({
         className="md-html-modal"
         footer={null}
         open={isModalOpen}
-        title="HTML 预览"
+        title={t("chat.markdownHtmlPreview")}
         width="80vw"
         onCancel={() => setIsModalOpen(false)}
       >
@@ -457,7 +455,7 @@ const HtmlBlockComponent = ({
               className="md-html-preview-iframe"
               sandbox="allow-same-origin"
               srcDoc={previewDocument}
-              title="HTML fullscreen preview"
+              title={t("chat.markdownHtmlFullscreenPreview")}
               onLoad={() => {
                 if (modalIframeRef.current) {
                   resizeHtmlPreview(modalIframeRef.current);

@@ -1202,20 +1202,104 @@ export interface PersonalizationSettingOpenAPIRequest {
 export interface PersonalizationSettingOpenAPIResponse {
     'enabled': boolean;
 }
+export interface PromptCategory {
+    /**
+     * 用户自定义分类唯一标识
+     */
+    'id': string;
+    /**
+     * 用户自定义分类名称
+     */
+    'name': string;
+}
+export interface PromptCategoryListResponse {
+    'categories'?: Array<PromptCategory>;
+}
+export interface PromptCategoryRequest {
+    /**
+     * 用户自定义分类名称
+     */
+    'name': string;
+}
+export interface PromptFacets {
+    /**
+     * 各分类的匹配数量
+     */
+    'categories'?: { [key: string]: number; };
+    /**
+     * 各范围的匹配数量
+     */
+    'scopes'?: { [key: string]: number; };
+}
 export interface PromptItem {
+    /**
+     * 固定分类编码
+     */
+    'category'?: string;
+    /**
+     * 话术正文
+     */
     'content'?: string;
+    /**
+     * 创建时间
+     */
+    'created_at'?: string;
+    /**
+     * 话术展示名称
+     */
     'display_name'?: string;
+    /**
+     * 话术唯一标识
+     */
     'id'?: string;
+    /**
+     * 兼容旧版的收藏标记
+     */
     'is_default'?: boolean;
+    /**
+     * 是否已收藏
+     */
+    'is_favorite'?: boolean;
+    /**
+     * 最近使用时间
+     */
+    'last_used_at'?: string;
+    /**
+     * 资源名称
+     */
     'name'?: string;
+    /**
+     * 话术来源
+     */
+    'source'?: string;
+    /**
+     * 更新时间
+     */
+    'updated_at'?: string;
+    /**
+     * 累计使用次数
+     */
+    'usage_count'?: number;
 }
 export interface PromptListResponse {
+    'custom_categories'?: Array<PromptCategory>;
+    'facets'?: PromptFacets;
     'next_page_token'?: string;
     'prompts'?: Array<PromptItem>;
     'total'?: number;
 }
 export interface PromptPatchRequest {
+    /**
+     * 固定分类编码
+     */
+    'category'?: string;
+    /**
+     * 话术正文
+     */
     'content'?: string;
+    /**
+     * 话术展示名称
+     */
     'display_name'?: string;
 }
 export interface PromptPolishRequest {
@@ -1226,8 +1310,36 @@ export interface PromptPolishResponse {
     'content'?: string;
 }
 export interface PromptRequest {
+    /**
+     * 固定分类编码
+     */
+    'category'?: string;
+    /**
+     * 话术正文
+     */
     'content': string;
+    /**
+     * 话术展示名称
+     */
     'display_name': string;
+}
+export interface PromptStateResponse {
+    /**
+     * 话术唯一标识
+     */
+    'id'?: string;
+    /**
+     * 是否已收藏
+     */
+    'is_favorite'?: boolean;
+    /**
+     * 最近使用时间
+     */
+    'last_used_at'?: string;
+    /**
+     * 累计使用次数
+     */
+    'usage_count'?: number;
 }
 export interface QuestionTypeOption {
     'label': string;
@@ -9638,14 +9750,117 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
+         * @summary Prompt category list
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptCategoriesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/prompt_categories`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Delete prompt category
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptCategoriesNameDelete: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCorePromptCategoriesNameDelete', 'name', name)
+            const localVarPath = `/api/core/prompt_categories/{name}`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create prompt category
+         * @param {PromptCategoryRequest} promptCategoryRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptCategoriesPost: async (promptCategoryRequest: PromptCategoryRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'promptCategoryRequest' is not null or undefined
+            assertParamExists('apiCorePromptCategoriesPost', 'promptCategoryRequest', promptCategoryRequest)
+            const localVarPath = `/api/core/prompt_categories`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(promptCategoryRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Prompt list
          * @param {number} [pageSize] 
          * @param {string} [pageToken] 
          * @param {string} [keyword] 
+         * @param {string} [category]
+         * @param {string} [scope]
+         * @param {string} [sort]
+         * @param {string} [locale]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCorePromptsGet: async (pageSize?: number, pageToken?: string, keyword?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCorePromptsGet: async (pageSize?: number, pageToken?: string, keyword?: string, category?: string, scope?: string, sort?: string, locale?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/prompts`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -9668,6 +9883,22 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
 
             if (keyword !== undefined) {
                 localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (category !== undefined) {
+                localVarQueryParameter['category'] = category;
+            }
+
+            if (scope !== undefined) {
+                localVarQueryParameter['scope'] = scope;
+            }
+
+            if (sort !== undefined) {
+                localVarQueryParameter['sort'] = sort;
+            }
+
+            if (locale !== undefined) {
+                localVarQueryParameter['locale'] = locale;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -9717,6 +9948,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
+         * @summary Favorite prompt
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptsNameFavoritePost: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCorePromptsNameFavoritePost', 'name', name)
+            const localVarPath = `/api/core/prompts/{name}:favorite`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Get prompt
          * @param {string} name 
          * @param {*} [options] Override http request option.
@@ -9824,6 +10089,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
+         * @summary Unfavorite prompt
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptsNameUnfavoritePost: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCorePromptsNameUnfavoritePost', 'name', name)
+            const localVarPath = `/api/core/prompts/{name}:unfavorite`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Unset default prompt
          * @param {string} name 
          * @param {*} [options] Override http request option.
@@ -9858,6 +10157,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
+         * @summary Record prompt usage
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptsNameUsePost: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCorePromptsNameUsePost', 'name', name)
+            const localVarPath = `/api/core/prompts/{name}:use`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Polish prompt
          * @param {PromptPolishRequest} promptPolishRequest 
          * @param {*} [options] Override http request option.
@@ -12515,15 +12848,57 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Prompt category list
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePromptCategoriesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PromptCategoryListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptCategoriesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptCategoriesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Delete prompt category
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePromptCategoriesNameDelete(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptCategoriesNameDelete(name, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptCategoriesNameDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create prompt category
+         * @param {PromptCategoryRequest} promptCategoryRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePromptCategoriesPost(promptCategoryRequest: PromptCategoryRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PromptCategory>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptCategoriesPost(promptCategoryRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptCategoriesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Prompt list
          * @param {number} [pageSize] 
          * @param {string} [pageToken] 
          * @param {string} [keyword] 
+         * @param {string} [category]
+         * @param {string} [scope]
+         * @param {string} [sort]
+         * @param {string} [locale]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCorePromptsGet(pageSize?: number, pageToken?: string, keyword?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PromptListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptsGet(pageSize, pageToken, keyword, options);
+        async apiCorePromptsGet(pageSize?: number, pageToken?: string, keyword?: string, category?: string, scope?: string, sort?: string, locale?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PromptListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptsGet(pageSize, pageToken, keyword, category, scope, sort, locale, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -12543,6 +12918,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Favorite prompt
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePromptsNameFavoritePost(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PromptStateResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptsNameFavoritePost(name, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptsNameFavoritePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Get prompt
          * @param {string} name 
          * @param {*} [options] Override http request option.
@@ -12583,6 +12971,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Unfavorite prompt
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePromptsNameUnfavoritePost(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PromptStateResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptsNameUnfavoritePost(name, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptsNameUnfavoritePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Unset default prompt
          * @param {string} name 
          * @param {*} [options] Override http request option.
@@ -12596,6 +12997,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Record prompt usage
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePromptsNameUsePost(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PromptStateResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptsNameUsePost(name, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptsNameUsePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Polish prompt
          * @param {PromptPolishRequest} promptPolishRequest 
          * @param {*} [options] Override http request option.
@@ -14106,13 +14520,42 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
+         * @summary Prompt category list
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptCategoriesGet(options?: RawAxiosRequestConfig): AxiosPromise<PromptCategoryListResponse> {
+            return localVarFp.apiCorePromptCategoriesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Delete prompt category
+         * @param {DefaultApiApiCorePromptCategoriesNameDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptCategoriesNameDelete(requestParameters: DefaultApiApiCorePromptCategoriesNameDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+            return localVarFp.apiCorePromptCategoriesNameDelete(requestParameters.name, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create prompt category
+         * @param {DefaultApiApiCorePromptCategoriesPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptCategoriesPost(requestParameters: DefaultApiApiCorePromptCategoriesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PromptCategory> {
+            return localVarFp.apiCorePromptCategoriesPost(requestParameters.promptCategoryRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Prompt list
          * @param {DefaultApiApiCorePromptsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCorePromptsGet(requestParameters: DefaultApiApiCorePromptsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<PromptListResponse> {
-            return localVarFp.apiCorePromptsGet(requestParameters.pageSize, requestParameters.pageToken, requestParameters.keyword, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCorePromptsGet(requestParameters.pageSize, requestParameters.pageToken, requestParameters.keyword, requestParameters.category, requestParameters.scope, requestParameters.sort, requestParameters.locale, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -14126,6 +14569,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
+         * @summary Favorite prompt
+         * @param {DefaultApiApiCorePromptsNameFavoritePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptsNameFavoritePost(requestParameters: DefaultApiApiCorePromptsNameFavoritePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PromptStateResponse> {
+            return localVarFp.apiCorePromptsNameFavoritePost(requestParameters.name, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Get prompt
          * @param {DefaultApiApiCorePromptsNameGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -14156,6 +14609,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
+         * @summary Unfavorite prompt
+         * @param {DefaultApiApiCorePromptsNameUnfavoritePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptsNameUnfavoritePost(requestParameters: DefaultApiApiCorePromptsNameUnfavoritePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PromptStateResponse> {
+            return localVarFp.apiCorePromptsNameUnfavoritePost(requestParameters.name, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Unset default prompt
          * @param {DefaultApiApiCorePromptsNameUnsetDefaultPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -14166,6 +14629,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
+         * @summary Record prompt usage
+         * @param {DefaultApiApiCorePromptsNameUsePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptsNameUsePost(requestParameters: DefaultApiApiCorePromptsNameUsePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PromptStateResponse> {
+            return localVarFp.apiCorePromptsNameUsePost(requestParameters.name, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Polish prompt
          * @param {DefaultApiApiCorePromptsPolishPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -15229,6 +15702,20 @@ export interface DefaultApiApiCorePluginsPluginIdGetRequest {
 }
 
 /**
+ * Request parameters for apiCorePromptCategoriesNameDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePromptCategoriesNameDeleteRequest {
+    readonly name: string
+}
+
+/**
+ * Request parameters for apiCorePromptCategoriesPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePromptCategoriesPostRequest {
+    readonly promptCategoryRequest: PromptCategoryRequest
+}
+
+/**
  * Request parameters for apiCorePromptsGet operation in DefaultApi.
  */
 export interface DefaultApiApiCorePromptsGetRequest {
@@ -15237,12 +15724,27 @@ export interface DefaultApiApiCorePromptsGetRequest {
     readonly pageToken?: string
 
     readonly keyword?: string
+
+    readonly category?: string
+
+    readonly scope?: string
+
+    readonly sort?: string
+
+    readonly locale?: string
 }
 
 /**
  * Request parameters for apiCorePromptsNameDelete operation in DefaultApi.
  */
 export interface DefaultApiApiCorePromptsNameDeleteRequest {
+    readonly name: string
+}
+
+/**
+ * Request parameters for apiCorePromptsNameFavoritePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePromptsNameFavoritePostRequest {
     readonly name: string
 }
 
@@ -15270,9 +15772,23 @@ export interface DefaultApiApiCorePromptsNameSetDefaultPostRequest {
 }
 
 /**
+ * Request parameters for apiCorePromptsNameUnfavoritePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePromptsNameUnfavoritePostRequest {
+    readonly name: string
+}
+
+/**
  * Request parameters for apiCorePromptsNameUnsetDefaultPost operation in DefaultApi.
  */
 export interface DefaultApiApiCorePromptsNameUnsetDefaultPostRequest {
+    readonly name: string
+}
+
+/**
+ * Request parameters for apiCorePromptsNameUsePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePromptsNameUsePostRequest {
     readonly name: string
 }
 
@@ -16571,13 +17087,45 @@ export class DefaultApi extends BaseAPI {
 
     /**
      * 
+     * @summary Prompt category list
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePromptCategoriesGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePromptCategoriesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Delete prompt category
+     * @param {DefaultApiApiCorePromptCategoriesNameDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePromptCategoriesNameDelete(requestParameters: DefaultApiApiCorePromptCategoriesNameDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePromptCategoriesNameDelete(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create prompt category
+     * @param {DefaultApiApiCorePromptCategoriesPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePromptCategoriesPost(requestParameters: DefaultApiApiCorePromptCategoriesPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePromptCategoriesPost(requestParameters.promptCategoryRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Prompt list
      * @param {DefaultApiApiCorePromptsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCorePromptsGet(requestParameters: DefaultApiApiCorePromptsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCorePromptsGet(requestParameters.pageSize, requestParameters.pageToken, requestParameters.keyword, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCorePromptsGet(requestParameters.pageSize, requestParameters.pageToken, requestParameters.keyword, requestParameters.category, requestParameters.scope, requestParameters.sort, requestParameters.locale, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -16593,6 +17141,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      * 
+     * @summary Favorite prompt
+     * @param {DefaultApiApiCorePromptsNameFavoritePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePromptsNameFavoritePost(requestParameters: DefaultApiApiCorePromptsNameFavoritePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePromptsNameFavoritePost(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Get prompt
      * @param {DefaultApiApiCorePromptsNameGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -16626,6 +17185,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      * 
+     * @summary Unfavorite prompt
+     * @param {DefaultApiApiCorePromptsNameUnfavoritePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePromptsNameUnfavoritePost(requestParameters: DefaultApiApiCorePromptsNameUnfavoritePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePromptsNameUnfavoritePost(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Unset default prompt
      * @param {DefaultApiApiCorePromptsNameUnsetDefaultPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -16637,6 +17207,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      * 
+     * @summary Record prompt usage
+     * @param {DefaultApiApiCorePromptsNameUsePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePromptsNameUsePost(requestParameters: DefaultApiApiCorePromptsNameUsePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePromptsNameUsePost(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Polish prompt
      * @param {DefaultApiApiCorePromptsPolishPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

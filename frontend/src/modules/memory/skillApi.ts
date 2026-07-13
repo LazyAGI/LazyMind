@@ -1157,6 +1157,27 @@ export async function getSkillRevisionFile(
   return payload.content || "";
 }
 
+export async function rollbackSkill(
+  skillId: string,
+  targetRevisionId: string,
+): Promise<{ headRevisionId: string; revisionNo: number }> {
+  const response = await skillRevisionsApi.apiCoreSkillsSkillIdRollbackPost({
+    skillId,
+    skillRollbackOpenAPIRequest: {
+      revision_id: targetRevisionId,
+      target_revision_id: targetRevisionId,
+    },
+  });
+  const payload = unwrapEnvelope<{
+    head_revision_id?: string;
+    revision_no?: number;
+  }>(response.data);
+  return {
+    headRevisionId: payload.head_revision_id || "",
+    revisionNo: payload.revision_no ?? 0,
+  };
+}
+
 const readRawString = (value: Record<string, unknown>, keys: string[]): string => {
   for (const key of keys) {
     const field = value[key];

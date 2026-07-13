@@ -144,6 +144,18 @@ export default function ChatConfigPopover({
         </p>
       </div>
 
+      {pluginEnabled && pluginItems.length > 0 && (
+        <div className="chat-config-section">
+          <div className="chat-config-label">{t('chat.conversationConfigDefaultPlugins')}</div>
+          {pluginItems.map((item) => (
+            <div className="chat-config-row" key={item.plugin_ref}>
+              <span className="chat-config-row-label">{item.name || item.plugin_id}</span>
+              <Switch checked={item.enabled} onChange={(value) => void handlePluginToggle(item, value)} />
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Allow subtask toggle */}
       <div className="chat-config-section chat-config-subagent-section">
         <div className="chat-config-row">

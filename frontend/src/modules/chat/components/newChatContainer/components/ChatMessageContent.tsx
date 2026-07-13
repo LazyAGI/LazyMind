@@ -74,7 +74,7 @@ export default function ChatMessageContent({
           >
             <img src={ThinkIcon} className="chat-think-icon" alt="" />
             <span className="chat-think-title">
-              {item.delta ? "已深度思考" : "思考中"}
+              {item.delta ? t("chat.thinkingDone") : t("chat.thinking")}
               {(item.thinking_duration_s || item.thinking_time_s) &&
                 item.thinking_duration_s !== "0" &&
                 item.thinking_time_s !== "0" &&
