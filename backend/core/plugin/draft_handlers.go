@@ -306,11 +306,9 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 
 	// --- Optimistic-lock check for versioned fields ---
 	needsVersionCheck := body.PluginYAMLContent != nil || body.StateYAMLContent != nil
-	if needsVersionCheck && body.Version != nil {
-		if *body.Version != draft.Version {
-			common.ReplyErrWithData(w, "conflict", toDraftResponse(draft), http.StatusConflict)
-			return
-		}
+	if needsVersionCheck && body.Version == nil {
+		common.ReplyErr(w, "version required", http.StatusBadRequest)
+		return
 	}
 
 	updates := map[string]any{"updated_at": time.Now().UTC()}
@@ -334,17 +332,34 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 	if body.ScriptsContent != nil {
 		updates["scripts_content"] = *body.ScriptsContent
 	}
-	if needsVersionCheck && body.Version != nil {
-		updates["version"] = draft.Version + 1
+	if needsVersionCheck {
+		updates["version"] = gorm.Expr("version + 1")
 	}
 
-	if err := db.Model(&draft).Updates(updates).Error; err != nil {
+	query := db.Model(&orm.PluginDraft{}).Where("id = ? AND created_by = ?", draftID, userID)
+	if needsVersionCheck {
+		query = query.Where("version = ?", *body.Version)
+	}
+	result := query.Updates(updates)
+	if result.Error != nil {
+		err := result.Error
 		if strings.Contains(err.Error(), "idx_plugin_drafts_user_plugin_id") ||
 			strings.Contains(err.Error(), "unique") && strings.Contains(err.Error(), "plugin_id") {
 			common.ReplyErr(w, "plugin id already exists for this user", http.StatusConflict)
 			return
 		}
 		common.ReplyErr(w, "save failed", http.StatusInternalServerError)
+		return
+	}
+	if needsVersionCheck && result.RowsAffected == 0 {
+		// The version predicate and update execute as one SQL statement, so two
+		// concurrent writers cannot both pass a separate check and overwrite one
+		// another. Return the winner's authoritative state to the stale caller.
+		if err := db.Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+			common.ReplyErr(w, "reload failed", http.StatusInternalServerError)
+			return
+		}
+		common.ReplyErrWithData(w, "conflict", toDraftResponse(draft), http.StatusConflict)
 		return
 	}
 	// Reload to return the authoritative post-save state.

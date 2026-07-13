@@ -129,6 +129,42 @@ def test_pluginspec_loads_valid_plugin(tmp_path):
     assert spec.yaml['name'] == 'Test Plugin'
     assert spec.scenario_md.strip() == _SCENARIO_MD.strip()
     assert spec.driver_md is not None
+    assert spec.get_step_mode('step_a') == 'human'
+
+
+def test_pluginspec_normalises_editor_step_list_and_preserves_mode(tmp_path):
+    from lazymind.chat.plugin.plugin_loader import PluginSpec
+
+    plugins_dir = make_plugin_dir(tmp_path)
+    state_path = plugins_dir / 'test-plugin' / 'scenario' / 'state.yml'
+    state_path.write_text(textwrap.dedent("""\
+        initial: __start__
+        transitions:
+          __start__:
+            - to: step_a
+          step_a:
+            - to: step_b
+          step_b:
+            - to: __end__
+        steps:
+          - id: step_a
+            label: Step A
+            mode: auto
+            prompt: Run A
+            outputs: [draft]
+          - id: step_b
+            label: Step B
+            mode: human
+            prompt: Run B
+    """))
+
+    spec = PluginSpec('test-plugin', plugins_dir / 'test-plugin')
+
+    assert spec.get_step_config('step_a')['prompt'] == 'Run A'
+    assert spec.get_step_config('step_a')['outputs'] == [{'slot': 'draft'}]
+    assert spec.get_step_mode('step_a') == 'auto'
+    assert spec.get_step_mode('step_b') == 'human'
+    assert spec.state_machine.get_reachable_steps('__start__') == ['step_a']
 
 
 def test_pluginspec_missing_plugin_yaml_raises(tmp_path):

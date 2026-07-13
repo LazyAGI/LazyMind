@@ -3,8 +3,7 @@
     padding: 0;
     border-radius: 12px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
-    min-width: 280px;
-    max-width: 320px;
+    width: min(390px, calc(100vw - 32px));
   }
 
   .ant-popover-inner-content {
@@ -13,7 +12,7 @@
 }
 
 .chat-config-popover-content {
-  padding: 12px 16px 14px;
+  padding: 18px 20px;
 
   .chat-config-section {
     margin-bottom: 14px;
@@ -24,19 +23,55 @@
   }
 
   .chat-config-label {
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 15px;
+    font-weight: 600;
     color: #374151;
   }
 
-  .chat-config-radio-group {
-    display: flex;
-    gap: 16px;
-    margin-top: 8px;
+  .chat-config-section-title {
+    margin-bottom: 12px;
+  }
 
-    .ant-radio-wrapper {
-      font-size: 13px;
+  .chat-config-plugin-mode {
+    width: 100%;
+    padding: 0;
+    border: 1px solid #d9e0ea;
+    background: #fff;
+
+    .ant-segmented-group {
+      width: 100%;
     }
+
+    .ant-segmented-item {
+      flex: 1;
+      color: #596579;
+      border-radius: 5px;
+    }
+
+    .ant-segmented-item-selected {
+      color: #1677ff;
+      font-weight: 600;
+      box-shadow: 0 0 0 1px #1677ff;
+    }
+
+    .ant-segmented-item-label {
+      min-height: 38px;
+      line-height: 38px;
+      padding: 0 10px;
+    }
+  }
+
+  .chat-config-plugin-description {
+    margin: 12px 0 0;
+    color: #7c8798;
+    font-size: 12px;
+    line-height: 1.65;
+  }
+
+  .chat-config-subagent-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #edf0f4;
   }
 
   .chat-config-row {
@@ -53,7 +88,7 @@
   }
 
   .chat-config-help-icon {
-    font-size: 12px;
+    font-size: 14px;
     color: #9ca3af;
     cursor: default;
 

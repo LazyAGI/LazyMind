@@ -64,7 +64,7 @@ const TERMINAL_IDS = new Set(['__start__', '__end__']);
 const S: Record<string, { color: string; dot: string; label: string }> = {
   succeeded:   { color: '#389e0d', dot: '#52c41a', label: '已完成' },
   running:     { color: '#0958d9', dot: '#1677ff', label: '运行中' },
-  waiting:     { color: '#d46b08', dot: '#fa8c16', label: '等待确认' },
+  waiting:     { color: '#d46b08', dot: '#fa8c16', label: '等待审批' },
   failed:      { color: '#cf1322', dot: '#ff4d4f', label: '失败' },
   interrupted: { color: '#cf1322', dot: '#ff4d4f', label: '中断' },
   pending:     { color: '#8c8c8c', dot: '#bfbfbf', label: '未执行' },
