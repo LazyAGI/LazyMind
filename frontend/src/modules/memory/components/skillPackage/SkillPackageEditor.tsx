@@ -151,7 +151,7 @@ export default function SkillPackageEditor({
   );
   const allFilesViewed =
     !reviewMode || changedPaths.every((path) => reviewedPaths.has(path));
-  const usesHunkReview = reviewMode && Boolean(reviewMeta?.reviewId);
+  const usesHunkReview = Boolean(reviewMeta?.reviewId);
   const allHunksDecided =
     !usesHunkReview ||
     changedPaths.every((path) => {
@@ -431,7 +431,7 @@ export default function SkillPackageEditor({
     hunkId: string,
     decision: SkillDraftReviewDecision,
   ) => {
-    if (!reviewMode || !selectedPath || !reviewMeta?.reviewId) {
+    if (!selectedPath || !reviewMeta?.reviewId) {
       return;
     }
     setHunkSubmitting((previous) => ({ ...previous, [hunkId]: decision }));
@@ -749,7 +749,7 @@ export default function SkillPackageEditor({
     return (
       <SkillDiffHunkPanel
         diffEntryLines={diffEntryLines}
-        reviewMode={reviewMode && Boolean(reviewMeta?.reviewId)}
+        hunkReviewActive={Boolean(reviewMeta?.reviewId || fileDiff?.review?.reviewId)}
         hunkSubmitting={hunkSubmitting}
         onHunkDecision={(hunk, decision) => void handleHunkDecision(hunk.hunkId, decision)}
         t={t}

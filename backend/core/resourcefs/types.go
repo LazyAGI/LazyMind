@@ -105,6 +105,32 @@ type DraftResponse struct {
 	DraftUpdatedAt *time.Time  `json:"draft_updated_at,omitempty"`
 }
 
+type UpdateMetadataRequest struct {
+	Ref           ResourceRef
+	AutoEvo       *bool
+	AgentPersona  *string
+	PreferredName *string
+	ResponseStyle *string
+	UpdatedBy     string
+	UpdatedByName string
+}
+
+type MetadataResponse struct {
+	Ref                ResourceRef `json:"ref"`
+	ResourceID         string      `json:"resource_id"`
+	AutoEvo            bool        `json:"auto_evo"`
+	AutoEvoApplyStatus string      `json:"auto_evo_apply_status"`
+	AutoEvoGeneration  int64       `json:"auto_evo_generation"`
+	AutoEvoError       string      `json:"auto_evo_error"`
+	UpdatedBy          string      `json:"updated_by,omitempty"`
+	UpdatedByName      string      `json:"updated_by_name,omitempty"`
+	UpdatedAt          time.Time   `json:"updated_at"`
+	EnabledFromOff     bool        `json:"enabled_from_off"`
+	AgentPersona       *string     `json:"agent_persona,omitempty"`
+	PreferredName      *string     `json:"preferred_name,omitempty"`
+	ResponseStyle      *string     `json:"response_style,omitempty"`
+}
+
 type DraftPreviewRequest struct {
 	Ref ResourceRef
 }
@@ -178,6 +204,7 @@ type CommitDraftRequest struct {
 	ExpectedHeadRevisionID string
 	ExpectedDraftVersion   int64
 	CreatedBy              string
+	CreatedByName          string
 }
 
 type CommitResponse struct {
@@ -227,6 +254,7 @@ type RollbackRequest struct {
 	Message                string
 	ExpectedHeadRevisionID string
 	CreatedBy              string
+	CreatedByName          string
 }
 
 type RollbackResponse struct {

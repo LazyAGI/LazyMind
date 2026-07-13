@@ -1,23 +1,16 @@
 import { useMemo } from "react";
 import { Button, Empty, Input, Select, Tooltip } from "antd";
-import {
-  AppstoreOutlined,
-  BookOutlined,
-  DatabaseOutlined,
-  FileTextOutlined,
-  StarOutlined,
-  TeamOutlined,
-  ToolOutlined,
-} from "@ant-design/icons";
+import { AppstoreOutlined } from "@ant-design/icons";
 import type { StructuredAsset } from "../../shared";
 import { getMarketSource } from "./skillMarketMockData";
-import { filterMarketSkills } from "./skillHelpers";
+import { filterMarketSkills, isMarketSkillInstalled } from "./skillHelpers";
+import { renderSkillCategoryIcon } from "./skillCategoryIcon";
 
 interface SkillMarketViewProps {
   t: (key: string, options?: Record<string, unknown>) => string;
   loading: boolean;
   skillAssets: StructuredAsset[];
-  mockInstalledUids: Set<string>;
+  installedSkills: StructuredAsset[];
   keyword: string;
   onKeywordChange: (value: string) => void;
   source: "all" | "builtin" | "admin";
@@ -27,35 +20,15 @@ interface SkillMarketViewProps {
   categories: string[];
   onReset: () => void;
   onInstall: (item: StructuredAsset) => void;
-  onUninstall: (item: StructuredAsset) => void;
   onDetail: (item: StructuredAsset) => void;
   installingUid?: string;
 }
-
-const categoryIconMap: Record<string, typeof AppstoreOutlined> = {
-  research: BookOutlined,
-  review: FileTextOutlined,
-  search: DatabaseOutlined,
-  team: TeamOutlined,
-  personal: ToolOutlined,
-  推荐技能: StarOutlined,
-  文档处理: FileTextOutlined,
-  知识库增强: DatabaseOutlined,
-  业务流程: ToolOutlined,
-  研发与运维: TeamOutlined,
-  团队共享: TeamOutlined,
-};
-
-const getCategoryIcon = (category: string) => {
-  const Icon = categoryIconMap[category.toLowerCase()] || StarOutlined;
-  return <Icon />;
-};
 
 export default function SkillMarketView({
   t,
   loading,
   skillAssets,
-  mockInstalledUids,
+  installedSkills,
   keyword,
   onKeywordChange,
   source,
@@ -65,19 +38,9 @@ export default function SkillMarketView({
   categories,
   onReset,
   onInstall,
-  onUninstall,
   onDetail,
   installingUid,
 }: SkillMarketViewProps) {
-  const enabledMarketIds = useMemo(
-    () =>
-      new Set([
-        ...skillAssets.map((item) => item.id),
-        ...mockInstalledUids,
-      ]),
-    [mockInstalledUids, skillAssets],
-  );
-
   const marketItems = useMemo(
     () =>
       filterMarketSkills(skillAssets, {
@@ -88,10 +51,7 @@ export default function SkillMarketView({
     [category, keyword, skillAssets, source],
   );
 
-  const recommendationItems = useMemo(
-    () => marketItems.filter((item) => !enabledMarketIds.has(item.id)),
-    [enabledMarketIds, marketItems],
-  );
+  const recommendationItems = marketItems;
 
   return (
     <div className="memory-skill-market">
@@ -134,7 +94,7 @@ export default function SkillMarketView({
                 className={`memory-skill-category-pill ${category === item ? "is-active" : ""}`}
                 onClick={() => onCategoryChange(item)}
               >
-                {getCategoryIcon(item)}
+                {renderSkillCategoryIcon(item)}
                 {item}
               </button>
             ))}
@@ -158,7 +118,7 @@ export default function SkillMarketView({
           </div>
           <div className="memory-skill-recommend-grid">
             {recommendationItems.map((item) => {
-              const installed = enabledMarketIds.has(item.id);
+              const installed = isMarketSkillInstalled(installedSkills, item);
               const marketSource = getMarketSource(item);
               const sourceLabel =
                 marketSource === "admin"
@@ -178,7 +138,7 @@ export default function SkillMarketView({
                   key={item.id}
                   className={`memory-skill-tile ${installed ? "is-installed" : ""}`}
                 >
-                  <span className="memory-skill-tile-icon">{getCategoryIcon(item.category)}</span>
+                  <span className="memory-skill-tile-icon">{renderSkillCategoryIcon(item.category)}</span>
                   <div className="memory-skill-tile-copy">
                     <div className="memory-skill-tile-title-line">
                       <strong className="memory-skill-tile-name">{item.name}</strong>
@@ -207,8 +167,8 @@ export default function SkillMarketView({
                       {t("admin.memorySkillMarketDetail")}
                     </Button>
                     {installed ? (
-                      <Button size="small" danger onClick={() => onUninstall(item)}>
-                        {t("admin.memorySkillMarketUninstall")}
+                      <Button size="small" disabled>
+                        {t("admin.memorySkillInstalledBadge")}
                       </Button>
                     ) : (
                       <Button

@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
 
+	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	skillservice "lazymind/core/skillv2/service"
@@ -27,12 +30,20 @@ func MarketList(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
+	installedByMarketID, err := loadInstalledMarketSkills(r.Context(), db, common.UserID(r))
+	if err != nil {
+		replyServiceError(w, err)
+		return
+	}
 	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
 	category := strings.TrimSpace(r.URL.Query().Get("category"))
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		source, err := newSkillService(db).GetSkill(r.Context(), skillservice.GetSkillRequest{SkillID: row.SourceSkillID})
 		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
 			replyServiceError(w, err)
 			return
 		}
@@ -42,7 +53,7 @@ func MarketList(w http.ResponseWriter, r *http.Request) {
 		if keyword != "" && !strings.Contains(strings.ToLower(source.Name+" "+source.SkillName+" "+source.Description), keyword) {
 			continue
 		}
-		items = append(items, marketItemDTO(row, source))
+		items = append(items, marketItemDTO(row, source, installedByMarketID[row.ID]))
 	}
 	total := len(items)
 	page := positiveQueryInt(r, "page", 1)
@@ -81,21 +92,53 @@ func MarketGet(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
-	common.ReplyOK(w, marketItemDTO(item, source))
+	installedByMarketID, err := loadInstalledMarketSkills(r.Context(), db, common.UserID(r))
+	if err != nil {
+		replyServiceError(w, err)
+		return
+	}
+	common.ReplyOK(w, marketItemDTO(item, source, installedByMarketID[item.ID]))
 }
 
-func marketItemDTO(item orm.SkillMarketItem, source skillservice.SkillDetail) map[string]any {
+func loadInstalledMarketSkills(ctx context.Context, db *gorm.DB, userID string) (map[string]string, error) {
+	installed := map[string]string{}
+	if strings.TrimSpace(userID) == "" {
+		return installed, nil
+	}
+	var rows []struct {
+		MarketItemID string `gorm:"column:market_item_id"`
+		SkillID      string `gorm:"column:skill_id"`
+	}
+	if err := db.WithContext(ctx).
+		Table("skill_market_installs AS installs").
+		Select("installs.market_item_id, installs.skill_id").
+		Joins("JOIN skills AS skills ON skills.id = installs.skill_id AND skills.owner_user_id = installs.user_id AND skills.deleted_at IS NULL").
+		Where("installs.user_id = ?", userID).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if row.MarketItemID != "" && row.SkillID != "" {
+			installed[row.MarketItemID] = row.SkillID
+		}
+	}
+	return installed, nil
+}
+
+func marketItemDTO(item orm.SkillMarketItem, source skillservice.SkillDetail, installedSkillID string) map[string]any {
 	return map[string]any{
-		"id":              item.ID,
-		"market_item_id":  item.ID,
-		"source_skill_id": item.SourceSkillID,
-		"status":          item.Status,
-		"icon":            item.Icon,
-		"sort_order":      item.SortOrder,
-		"version_note":    item.VersionNote,
-		"published_at":    item.PublishedAt,
-		"created_at":      item.CreatedAt,
-		"updated_at":      item.UpdatedAt,
-		"source":          skillDetailDTO(source),
+		"id":                 item.ID,
+		"market_item_id":     item.ID,
+		"source_skill_id":    item.SourceSkillID,
+		"status":             item.Status,
+		"installed":          installedSkillID != "",
+		"installed_skill_id": installedSkillID,
+		"icon":               item.Icon,
+		"sort_order":         item.SortOrder,
+		"version_note":       item.VersionNote,
+		"published_at":       item.PublishedAt,
+		"created_at":         item.CreatedAt,
+		"updated_at":         item.UpdatedAt,
+		"source":             skillDetailDTO(source),
 	}
 }

@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	skillsearch "lazymind/core/skillv2/search"
 )
@@ -129,17 +130,88 @@ func (s *Service) Install(ctx context.Context, req InstallRequest) (InstallRespo
 		if err := tx.Where("id = ? AND status = ?", req.MarketItemID, "published").Take(&item).Error; err != nil {
 			return err
 		}
+		now := time.Now()
+		installedSkillID, err := existingInstalledSkillID(ctx, tx, item.ID, req.UserID)
+		if err != nil {
+			return err
+		}
+		if installedSkillID != "" {
+			out.SkillID = installedSkillID
+			return nil
+		}
+		sourceOwned, err := sourceSkillOwnedByUser(ctx, tx, item.SourceSkillID, req.UserID)
+		if err != nil {
+			return err
+		}
+		if sourceOwned {
+			if err := recordMarketInstall(ctx, tx, item.ID, req.UserID, item.SourceSkillID, now); err != nil {
+				return err
+			}
+			out.SkillID = item.SourceSkillID
+			return nil
+		}
 		skillID, _, err := copyHeadRevision(ctx, tx, item.SourceSkillID, req.UserID, req.UserName, "market_install", req.UserID)
 		if err != nil {
 			return err
 		}
-		if err := skillsearch.RebuildSkillTx(ctx, tx, skillID, time.Now()); err != nil {
+		if err := skillsearch.RebuildSkillTx(ctx, tx, skillID, now); err != nil {
+			return err
+		}
+		if err := recordMarketInstall(ctx, tx, item.ID, req.UserID, skillID, now); err != nil {
 			return err
 		}
 		out.SkillID = skillID
 		return nil
 	})
 	return out, err
+}
+
+func existingInstalledSkillID(ctx context.Context, tx *gorm.DB, marketItemID, userID string) (string, error) {
+	var row skillMarketInstallRow
+	result := tx.WithContext(ctx).
+		Table("skill_market_installs AS installs").
+		Select("installs.*").
+		Joins("JOIN skills AS skills ON skills.id = installs.skill_id AND skills.owner_user_id = installs.user_id AND skills.deleted_at IS NULL").
+		Where("installs.market_item_id = ? AND installs.user_id = ?", marketItemID, userID).
+		Limit(1).
+		Find(&row)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected == 0 {
+		return "", nil
+	}
+	return row.SkillID, nil
+}
+
+func sourceSkillOwnedByUser(ctx context.Context, tx *gorm.DB, skillID, userID string) (bool, error) {
+	var source skillRow
+	result := tx.WithContext(ctx).
+		Select("id").
+		Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", skillID, userID).
+		Limit(1).
+		Find(&source)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func recordMarketInstall(ctx context.Context, tx *gorm.DB, marketItemID, userID, skillID string, now time.Time) error {
+	row := skillMarketInstallRow{
+		MarketItemID: marketItemID,
+		UserID:       userID,
+		SkillID:      skillID,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	return tx.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "market_item_id"}, {Name: "user_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"skill_id":   skillID,
+			"updated_at": now,
+		}),
+	}).Create(&row).Error
 }
 
 func (s *Service) GetInstalledTree(ctx context.Context, req GetInstalledTreeRequest) (TreeNode, error) {
@@ -230,6 +302,11 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishRespo
 		}
 		if err := skillsearch.RebuildSkillTx(ctx, tx, sourceSkillID, now); err != nil {
 			return err
+		}
+		if strings.TrimSpace(req.AdminUserID) != "" {
+			if err := recordMarketInstall(ctx, tx, marketItemID, req.AdminUserID, sourceSkillID, now); err != nil {
+				return err
+			}
 		}
 		out = PublishResponse{MarketItemID: marketItemID, SourceSkillID: sourceSkillID}
 		return nil
@@ -360,7 +437,7 @@ func copyHeadRevision(ctx context.Context, tx *gorm.DB, sourceSkillID, ownerUser
 	copy.CreateUserID = createdBy
 	copy.CreateUserName = ownerUserName
 	copy.HeadRevisionID = &revisionID
-	copy.RelativeRoot = path.Join(ownerUserID, source.Category, source.SkillName)
+	copy.RelativeRoot = path.Join(source.Category, source.SkillName)
 	copy.Version = 1
 	copy.CreatedAt = now
 	copy.UpdatedAt = now
@@ -535,7 +612,40 @@ func readZipFiles(zipPath string) (map[string][]byte, error) {
 		}
 		files[name] = data
 	}
-	return files, nil
+	return normalizeSkillPackageRoot(files), nil
+}
+
+func normalizeSkillPackageRoot(files map[string][]byte) map[string][]byte {
+	if _, ok := files["SKILL.md"]; ok {
+		return files
+	}
+	root := ""
+	for filePath := range files {
+		parts := strings.SplitN(filePath, "/", 2)
+		if len(parts) != 2 || parts[1] == "" {
+			return files
+		}
+		if root == "" {
+			root = parts[0]
+			continue
+		}
+		if root != parts[0] {
+			return files
+		}
+	}
+	if root == "" {
+		return files
+	}
+	normalized := make(map[string][]byte, len(files))
+	prefix := root + "/"
+	for filePath, data := range files {
+		relPath := strings.TrimPrefix(filePath, prefix)
+		normalized[relPath] = data
+	}
+	if _, ok := normalized["SKILL.md"]; ok {
+		return normalized
+	}
+	return files
 }
 
 func cleanSkillPath(name string) (string, error) {
@@ -693,3 +803,13 @@ type skillMarketItemRow struct {
 }
 
 func (skillMarketItemRow) TableName() string { return "skill_market_items" }
+
+type skillMarketInstallRow struct {
+	MarketItemID string    `gorm:"column:market_item_id;type:varchar(36);primaryKey"`
+	UserID       string    `gorm:"column:user_id;type:text;primaryKey"`
+	SkillID      string    `gorm:"column:skill_id;type:varchar(36);not null"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (skillMarketInstallRow) TableName() string { return "skill_market_installs" }

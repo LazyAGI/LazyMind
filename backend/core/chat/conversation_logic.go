@@ -19,7 +19,6 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/log"
 	"lazymind/core/plugin"
-	"lazymind/core/resourceupdate"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
@@ -53,22 +52,6 @@ func toolConfigFromBody(reqBody map[string]any) map[string]any {
 		return cfg
 	}
 	return nil
-}
-
-func recordConversationIdleAfterPersist(ctx context.Context, db *gorm.DB, stateStore state.Store, convID, userID, historyID string, at time.Time, query, answer string) {
-	if db == nil || stateStore == nil {
-		return
-	}
-	if err := resourceupdate.RecordConversationIdleMessage(ctx, db, stateStore, resourceupdate.ConversationIdleRecord{
-		SessionID:      convID,
-		UserID:         userID,
-		LastMessageID:  historyID,
-		LastActivityAt: at,
-		UserContent:    query,
-		AssistantText:  answer,
-	}); err != nil {
-		log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("record conversation idle event failed")
-	}
 }
 
 func marshalRetrievalResult(sources []any) json.RawMessage {
@@ -1008,7 +991,6 @@ func handleNonStreamChat(
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
-		recordConversationIdleAfterPersist(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, now, query, answer)
 	}
 	common.ReplyOK(w, map[string]any{
 		"conversation_id": convID,
@@ -1279,7 +1261,6 @@ func streamSingleAnswer(
 	}
 	if persisted && !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
-		recordConversationIdleAfterPersist(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, now, query, stripToolTags(fullText))
 	}
 	if reqCtx.Err() == nil {
 		// text：message text，finish_reason text STOP

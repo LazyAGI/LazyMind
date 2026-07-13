@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/filediff"
+	"lazymind/core/preferencefile"
 	"lazymind/core/versionfs"
 )
 
@@ -76,13 +78,16 @@ func (s *Service) EnsureResource(ctx context.Context, ref ResourceRef, initialCo
 		revisionID := uuid.NewString()
 		head := revisionID
 		resource := orm.PersonalResource{
-			ID:             resourceID,
-			UserID:         ref.UserID,
-			ResourceType:   string(ref.ResourceType),
-			HeadRevisionID: &head,
-			Version:        1,
-			CreatedAt:      now,
-			UpdatedAt:      now,
+			ID:                 resourceID,
+			UserID:             ref.UserID,
+			ResourceType:       string(ref.ResourceType),
+			HeadRevisionID:     &head,
+			Version:            1,
+			AutoEvo:            true,
+			AutoEvoApplyStatus: "idle",
+			UpdatedBy:          ref.UserID,
+			CreatedAt:          now,
+			UpdatedAt:          now,
 		}
 		if err := tx.Create(&resource).Error; err != nil {
 			return err
@@ -272,6 +277,195 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 	return out, normalizeGormErr(err)
 }
 
+func (s *Service) UpdateMetadata(ctx context.Context, req UpdateMetadataRequest) (MetadataResponse, error) {
+	if err := validateRef(req.Ref); err != nil {
+		return MetadataResponse{}, err
+	}
+	hasPreferencePatch := req.AgentPersona != nil || req.PreferredName != nil || req.ResponseStyle != nil
+	if req.AutoEvo == nil && !hasPreferencePatch {
+		return MetadataResponse{}, ErrInvalidResourceType
+	}
+	if hasPreferencePatch && req.Ref.ResourceType != ResourceTypeUserPreference {
+		return MetadataResponse{}, ErrInvalidResourceType
+	}
+	var out MetadataResponse
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		resource, err := findResource(ctx, tx.Clauses(clause.Locking{Strength: "UPDATE"}), req.Ref)
+		if err != nil {
+			return err
+		}
+		now := s.clock.Now()
+		enabledFromOff := false
+		var patchedPreference *preferencefile.PreferenceFile
+		if hasPreferencePatch {
+			if resource.HeadRevisionID == nil {
+				return ErrRevisionNotFound
+			}
+			preferencePatch := preferencefile.PreferencePatch{
+				AgentPersona:  req.AgentPersona,
+				PreferredName: req.PreferredName,
+				ResponseStyle: req.ResponseStyle,
+			}
+			patchedBlobs := map[string]orm.PersonalResourceBlob{}
+			patchBlob := func(hash string) (orm.PersonalResourceBlob, preferencefile.PreferenceFile, error) {
+				if blob, ok := patchedBlobs[hash]; ok {
+					parsed, err := preferencefile.ParseFileContent(string(blob.Content))
+					return blob, parsed, err
+				}
+				content, err := readBlobContent(ctx, tx, hash)
+				if err != nil {
+					return orm.PersonalResourceBlob{}, preferencefile.PreferenceFile{}, err
+				}
+				nextContent, parsed, err := preferencefile.PatchFileContent(string(content), preferencePatch)
+				if err != nil {
+					return orm.PersonalResourceBlob{}, preferencefile.PreferenceFile{}, err
+				}
+				blob, err := putBlob(ctx, tx, []byte(nextContent), now)
+				if err != nil {
+					return orm.PersonalResourceBlob{}, preferencefile.PreferenceFile{}, err
+				}
+				patchedBlobs[hash] = blob
+				return blob, parsed, nil
+			}
+			head, err := findRevisionByID(ctx, tx, resource.ID, *resource.HeadRevisionID)
+			if err != nil {
+				return err
+			}
+			headBlob, parsed, err := patchBlob(head.BlobHash)
+			if err != nil {
+				return err
+			}
+			if err := tx.WithContext(ctx).Model(&orm.PersonalResourceRevision{}).
+				Where("id = ? AND resource_id = ?", head.ID, resource.ID).
+				Updates(map[string]any{
+					"blob_hash":    headBlob.Hash,
+					"content_hash": headBlob.Hash,
+					"size":         headBlob.Size,
+					"mime":         headBlob.Mime,
+					"file_type":    headBlob.FileType,
+					"binary":       headBlob.Binary,
+				}).Error; err != nil {
+				return err
+			}
+
+			var draft orm.PersonalResourceDraft
+			if err := tx.WithContext(ctx).Where("resource_id = ?", resource.ID).Take(&draft).Error; err != nil {
+				return err
+			}
+			draftBlob, _, err := patchBlob(draft.BlobHash)
+			if err != nil {
+				return err
+			}
+			result := tx.WithContext(ctx).Model(&orm.PersonalResourceDraft{}).
+				Where("resource_id = ? AND version = ?", resource.ID, draft.Version).
+				Updates(map[string]any{
+					"blob_hash":        draftBlob.Hash,
+					"content_hash":     draftBlob.Hash,
+					"size":             draftBlob.Size,
+					"mime":             draftBlob.Mime,
+					"file_type":        draftBlob.FileType,
+					"binary":           draftBlob.Binary,
+					"draft_updated_at": now,
+					"updated_by":       nullableString(req.UpdatedBy),
+					"version":          draft.Version + 1,
+					"updated_at":       now,
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return ErrConflict
+			}
+
+			var sessions []orm.PersonalResourceReviewSession
+			if err := tx.WithContext(ctx).
+				Where("resource_id = ? AND status = ?", resource.ID, reviewStatusActive).
+				Find(&sessions).Error; err != nil {
+				return err
+			}
+			for _, session := range sessions {
+				var batches []orm.PersonalResourceReviewActionBatch
+				if err := tx.WithContext(ctx).Where("session_id = ?", session.ID).Find(&batches).Error; err != nil {
+					return err
+				}
+				for _, batch := range batches {
+					beforeBlob, _, err := patchBlob(batch.BeforeDraftBlobHash)
+					if err != nil {
+						return err
+					}
+					afterBlob, _, err := patchBlob(batch.AfterDraftBlobHash)
+					if err != nil {
+						return err
+					}
+					if err := tx.WithContext(ctx).Model(&orm.PersonalResourceReviewActionBatch{}).
+						Where("id = ? AND session_id = ?", batch.ID, session.ID).
+						Updates(map[string]any{
+							"before_draft_blob_hash": beforeBlob.Hash,
+							"after_draft_blob_hash":  afterBlob.Hash,
+						}).Error; err != nil {
+						return err
+					}
+				}
+				if err := tx.WithContext(ctx).Model(&orm.PersonalResourceReviewSession{}).
+					Where("id = ? AND status = ?", session.ID, reviewStatusActive).
+					Updates(map[string]any{
+						"draft_version":   draft.Version + 1,
+						"draft_blob_hash": draftBlob.Hash,
+						"updated_at":      now,
+					}).Error; err != nil {
+					return err
+				}
+			}
+			patchedPreference = &parsed
+		}
+
+		updates := map[string]any{
+			"updated_by":      strings.TrimSpace(req.UpdatedBy),
+			"updated_by_name": strings.TrimSpace(req.UpdatedByName),
+			"updated_at":      now,
+		}
+		if req.AutoEvo != nil {
+			enabledFromOff = !resource.AutoEvo && *req.AutoEvo
+			updates["auto_evo"] = *req.AutoEvo
+			updates["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
+			updates["auto_evo_apply_status"] = "idle"
+			updates["auto_evo_error"] = ""
+			if *req.AutoEvo {
+				updates["auto_evo_finished_at"] = nil
+			} else {
+				updates["auto_evo_started_at"] = nil
+				updates["auto_evo_finished_at"] = now
+			}
+		}
+		if err := tx.Model(&orm.PersonalResource{}).Where("id = ?", resource.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		var updated orm.PersonalResource
+		if err := tx.Where("id = ?", resource.ID).Take(&updated).Error; err != nil {
+			return err
+		}
+		out = MetadataResponse{
+			Ref:                req.Ref,
+			ResourceID:         updated.ID,
+			AutoEvo:            updated.AutoEvo,
+			AutoEvoApplyStatus: updated.AutoEvoApplyStatus,
+			AutoEvoGeneration:  updated.AutoEvoGeneration,
+			AutoEvoError:       updated.AutoEvoError,
+			UpdatedBy:          updated.UpdatedBy,
+			UpdatedByName:      updated.UpdatedByName,
+			UpdatedAt:          updated.UpdatedAt,
+			EnabledFromOff:     enabledFromOff,
+		}
+		if patchedPreference != nil {
+			out.AgentPersona = &patchedPreference.AgentPersona
+			out.PreferredName = &patchedPreference.PreferredName
+			out.ResponseStyle = &patchedPreference.ResponseStyle
+		}
+		return nil
+	})
+	return out, normalizeGormErr(err)
+}
+
 func (s *Service) DraftPreview(ctx context.Context, req DraftPreviewRequest) (DraftPreviewResponse, error) {
 	head, err := s.ReadFile(ctx, ReadFileRequest{Ref: req.Ref, RefType: FileRefHead})
 	if err != nil {
@@ -332,6 +526,15 @@ func (s *Service) CommitDraft(ctx context.Context, req CommitDraftRequest) (Comm
 	})
 	if err != nil {
 		return CommitResponse{}, normalizeVersionFSErr(err)
+	}
+	if strings.TrimSpace(req.CreatedBy) != "" {
+		if err := s.db.WithContext(ctx).Model(&orm.PersonalResource{}).Where("id = ?", resource.ID).Updates(map[string]any{
+			"updated_by":      strings.TrimSpace(req.CreatedBy),
+			"updated_by_name": strings.TrimSpace(req.CreatedByName),
+			"updated_at":      s.clock.Now(),
+		}).Error; err != nil {
+			return CommitResponse{}, normalizeGormErr(err)
+		}
 	}
 	revision, err := findRevisionByID(ctx, s.db, resource.ID, resp.RevisionID)
 	if err != nil {
@@ -453,6 +656,15 @@ func (s *Service) Rollback(ctx context.Context, req RollbackRequest) (RollbackRe
 	if err != nil {
 		return RollbackResponse{}, normalizeVersionFSErr(err)
 	}
+	if strings.TrimSpace(req.CreatedBy) != "" {
+		if err := s.db.WithContext(ctx).Model(&orm.PersonalResource{}).Where("id = ?", resource.ID).Updates(map[string]any{
+			"updated_by":      strings.TrimSpace(req.CreatedBy),
+			"updated_by_name": strings.TrimSpace(req.CreatedByName),
+			"updated_at":      s.clock.Now(),
+		}).Error; err != nil {
+			return RollbackResponse{}, normalizeGormErr(err)
+		}
+	}
 	revision, err := findRevisionByID(ctx, s.db, resource.ID, resp.RevisionID)
 	if err != nil {
 		return RollbackResponse{}, normalizeGormErr(err)
@@ -486,11 +698,7 @@ func (s *Service) Action(ctx context.Context, req ReviewActionRequest) (ReviewAc
 		if resource.HeadRevisionID == nil {
 			return ErrRevisionNotFound
 		}
-		head, err := findRevisionByID(ctx, tx, resource.ID, *resource.HeadRevisionID)
-		if err != nil {
-			return err
-		}
-		diff, headContent, draftContent, err := diffForReviewRows(ctx, tx, req.Ref.ResourceType, head, draft)
+		diff, headContent, draftContent, err := diffForReviewSession(ctx, tx, req.Ref.ResourceType, resource.ID, session)
 		if err != nil {
 			return err
 		}
@@ -506,6 +714,7 @@ func (s *Service) Action(ctx context.Context, req ReviewActionRequest) (ReviewAc
 		}
 
 		actionDecisions := map[string]string{}
+		nextDecisions := copyReviewDecisions(decisions)
 		outItems := make([]ReviewActionItem, 0, len(req.Items))
 		rows := make([]orm.PersonalResourceReviewActionItem, 0, len(req.Items))
 		for _, item := range req.Items {
@@ -526,6 +735,7 @@ func (s *Service) Action(ctx context.Context, req ReviewActionRequest) (ReviewAc
 				return err
 			}
 			actionDecisions[hunkID] = decision
+			nextDecisions[hunkID] = decision
 			outItems = append(outItems, ReviewActionItem{Path: session.Path, HunkID: hunkID, Decision: decision})
 			rows = append(rows, orm.PersonalResourceReviewActionItem{
 				ID:       uuid.NewString(),
@@ -538,7 +748,7 @@ func (s *Service) Action(ctx context.Context, req ReviewActionRequest) (ReviewAc
 			})
 		}
 
-		nextContent, err := versionfs.ApplyTextReview(headContent, draftContent, reviewFile, actionDecisions)
+		nextContent, err := versionfs.ApplyTextReview(headContent, draftContent, reviewFile, nextDecisions)
 		if err != nil {
 			return err
 		}
@@ -768,9 +978,15 @@ func (s *Service) prepareReviewDiff(ctx context.Context, ref ResourceRef, diff f
 	if err != nil {
 		return filediff.FileDiff{}, reviewPreviewMeta{}, err
 	}
-	reviewFile := reviewFileFromFileDiff(diff)
+	displayDiff, _, _, err := diffForReviewSession(ctx, s.db, ref.ResourceType, session.ResourceID, session)
+	if err != nil {
+		return filediff.FileDiff{}, reviewPreviewMeta{}, err
+	}
+	reviewFile := reviewFileFromFileDiff(displayDiff)
 	versionfs.AnnotateReviewFile(&reviewFile, reviewSessionMeta(session), decisions, canUndo)
-	return fileDiffFromReviewFile(reviewFile, diff), reviewMetaFromFile(reviewFile), nil
+	out := fileDiffFromReviewFile(reviewFile, displayDiff)
+	out.DiffEntryLines = reviewDisplayDiffEntryLines(out.DiffEntryLines)
+	return out, reviewMetaFromFile(reviewFile), nil
 }
 
 func (s *Service) ensureReviewSession(ctx context.Context, ref ResourceRef) (orm.PersonalResourceReviewSession, error) {
@@ -868,18 +1084,30 @@ func validateReviewSnapshot(resource orm.PersonalResource, draft orm.PersonalRes
 	return nil
 }
 
-func diffForReviewRows(ctx context.Context, tx *gorm.DB, resourceType ResourceType, head orm.PersonalResourceRevision, draft orm.PersonalResourceDraft) (filediff.FileDiff, string, string, error) {
+func diffForReviewSession(ctx context.Context, tx *gorm.DB, resourceType ResourceType, resourceID string, session orm.PersonalResourceReviewSession) (filediff.FileDiff, string, string, error) {
+	head, err := findRevisionByID(ctx, tx, resourceID, session.HeadRevisionID)
+	if err != nil {
+		return filediff.FileDiff{}, "", "", err
+	}
+	basisBlobHash, err := reviewBasisDraftBlobHash(ctx, tx, session)
+	if err != nil {
+		return filediff.FileDiff{}, "", "", err
+	}
+	basisBlob, err := findBlob(ctx, tx, basisBlobHash)
+	if err != nil {
+		return filediff.FileDiff{}, "", "", err
+	}
 	headContent, err := readBlobContent(ctx, tx, head.BlobHash)
 	if err != nil {
 		return filediff.FileDiff{}, "", "", err
 	}
-	draftContent, err := readBlobContent(ctx, tx, draft.BlobHash)
+	basisContent, err := readBlobContent(ctx, tx, basisBlob.Hash)
 	if err != nil {
 		return filediff.FileDiff{}, "", "", err
 	}
 	diff, err := filediff.CompareContent(
 		filediff.Content{Path: mustPath(resourceType), Data: headContent, Binary: head.Binary, EditableText: true, Size: head.Size},
-		filediff.Content{Path: mustPath(resourceType), Data: draftContent, Binary: draft.Binary, EditableText: true, Size: draft.Size},
+		filediff.Content{Path: mustPath(resourceType), Data: basisContent, Binary: basisBlob.Binary, EditableText: true, Size: basisBlob.Size},
 		filediff.Options{},
 	)
 	if err != nil {
@@ -888,7 +1116,22 @@ func diffForReviewRows(ctx context.Context, tx *gorm.DB, resourceType ResourceTy
 	if !diff.Supported {
 		return filediff.FileDiff{}, "", "", ErrUnsupported
 	}
-	return diff, string(headContent), string(draftContent), nil
+	return diff, string(headContent), string(basisContent), nil
+}
+
+func reviewBasisDraftBlobHash(ctx context.Context, tx *gorm.DB, session orm.PersonalResourceReviewSession) (string, error) {
+	var batch orm.PersonalResourceReviewActionBatch
+	err := tx.WithContext(ctx).
+		Where("session_id = ?", session.ID).
+		Order("created_at ASC, id ASC").
+		Take(&batch).Error
+	if err == nil {
+		return batch.BeforeDraftBlobHash, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return session.DraftBlobHash, nil
+	}
+	return "", err
 }
 
 func normalizeReviewDecision(value string) (string, error) {
@@ -973,6 +1216,77 @@ func fileDiffFromReviewFile(review versionfs.ReviewFile, file filediff.FileDiff)
 	file.HunkCount = review.HunkCount
 	file.DiffEntryLines = lines
 	return file
+}
+
+func reviewDisplayDiffEntryLines(lines []filediff.DiffEntryLine) []filediff.DiffEntryLine {
+	out := make([]filediff.DiffEntryLine, 0, len(lines))
+	for i := 0; i < len(lines); {
+		line := lines[i]
+		if line.Type != "HUNK" {
+			out = append(out, line)
+			i++
+			continue
+		}
+		end := len(lines)
+		for j := i + 1; j < len(lines); j++ {
+			if lines[j].Type == "HUNK" {
+				end = j
+				break
+			}
+		}
+		switch strings.TrimSpace(line.Decision) {
+		case decisionAccepted:
+			out = append(out, line)
+			out = append(out, resolvedReviewHunkLines(lines[i+1:end], decisionAccepted)...)
+		case decisionRejected:
+			out = append(out, line)
+			out = append(out, resolvedReviewHunkLines(lines[i+1:end], decisionRejected)...)
+		default:
+			out = append(out, lines[i:end]...)
+		}
+		i = end
+	}
+	return out
+}
+
+func resolvedReviewHunkLines(lines []filediff.DiffEntryLine, decision string) []filediff.DiffEntryLine {
+	out := make([]filediff.DiffEntryLine, 0, len(lines))
+	for _, line := range lines {
+		switch line.Type {
+		case "CONTEXT":
+			out = append(out, line)
+		case "ADDITION":
+			if decision == decisionAccepted {
+				out = append(out, resolvedReviewContextLine(line, line.NewLine))
+			}
+		case "DELETION":
+			if decision == decisionRejected {
+				out = append(out, resolvedReviewContextLine(line, line.OldLine))
+			}
+		default:
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func resolvedReviewContextLine(line filediff.DiffEntryLine, lineNo int) filediff.DiffEntryLine {
+	return filediff.DiffEntryLine{
+		Type:                    "CONTEXT",
+		Text:                    line.Text,
+		HTML:                    html.EscapeString(line.Text),
+		OldLine:                 lineNo,
+		NewLine:                 lineNo,
+		DisplayNoNewLineWarning: line.DisplayNoNewLineWarning,
+	}
+}
+
+func copyReviewDecisions(decisions map[string]string) map[string]string {
+	out := make(map[string]string, len(decisions))
+	for key, value := range decisions {
+		out[key] = value
+	}
+	return out
 }
 
 func currentReviewDecisions(ctx context.Context, db *gorm.DB, sessionID string) (map[string]string, error) {

@@ -2,15 +2,13 @@ package evolution
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
-	"lazymind/core/common/orm"
-	"lazymind/core/resourcechange"
+	"lazymind/core/preferencefile"
 	"lazymind/core/store"
 )
 
@@ -20,22 +18,22 @@ const (
 )
 
 type ManagedStateItem struct {
-	ResourceID             string                               `json:"resource_id"`
-	ResourceType           string                               `json:"resource_type"`
-	Title                  string                               `json:"title"`
-	Content                string                               `json:"content"`
-	AgentPersona           *string                              `json:"agent_persona,omitempty"`
-	PreferredName          *string                              `json:"preferred_name,omitempty"`
-	ResponseStyle          *string                              `json:"response_style,omitempty"`
-	ContentSummary         string                               `json:"content_summary"`
-	Version                int64                                `json:"version"`
-	LatestVersionChange    *resourcechange.VersionChangeSummary `json:"latest_version_change"`
-	HasPendingReviewResult bool                                 `json:"has_pending_review_result"`
-	ReviewStatus           string                               `json:"review_status"`
-	AutoEvo                bool                                 `json:"auto_evo"`
-	AutoEvoApplyStatus     string                               `json:"auto_evo_apply_status"`
-	AutoEvoGeneration      int64                                `json:"auto_evo_generation"`
-	AutoEvoError           string                               `json:"auto_evo_error"`
+	ResourceID             string                `json:"resource_id"`
+	ResourceType           string                `json:"resource_type"`
+	Title                  string                `json:"title"`
+	Content                string                `json:"content"`
+	AgentPersona           *string               `json:"agent_persona,omitempty"`
+	PreferredName          *string               `json:"preferred_name,omitempty"`
+	ResponseStyle          *string               `json:"response_style,omitempty"`
+	ContentSummary         string                `json:"content_summary"`
+	Version                int64                 `json:"version"`
+	LatestVersionChange    *VersionChangeSummary `json:"latest_version_change"`
+	HasPendingReviewResult bool                  `json:"has_pending_review_result"`
+	ReviewStatus           string                `json:"review_status"`
+	AutoEvo                bool                  `json:"auto_evo"`
+	AutoEvoApplyStatus     string                `json:"auto_evo_apply_status"`
+	AutoEvoGeneration      int64                 `json:"auto_evo_generation"`
+	AutoEvoError           string                `json:"auto_evo_error"`
 }
 
 func ListManagedStates(w http.ResponseWriter, r *http.Request) {
@@ -51,102 +49,64 @@ func ListManagedStates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	memoryRow, err := LoadSystemMemory(r.Context(), db, userID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	memoryRow, err := EnsurePersonalResourceContent(r.Context(), db, userID, ResourceTypeMemory)
+	if err != nil {
 		common.ReplyErr(w, "query managed states failed", http.StatusInternalServerError)
 		return
 	}
-	preferenceRow, err := LoadSystemUserPreference(r.Context(), db, userID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	preferenceRow, err := EnsurePersonalResourceContent(r.Context(), db, userID, ResourceTypeUserPreference)
+	if err != nil {
 		common.ReplyErr(w, "query managed states failed", http.StatusInternalServerError)
 		return
 	}
-	reviewStatuses, err := LoadManagedReviewStatuses(r.Context(), db, userID)
+	preference, err := preferencefile.ParseFileContent(preferenceRow.Content)
 	if err != nil {
 		common.ReplyErr(w, "query managed states failed", http.StatusInternalServerError)
 		return
 	}
 
 	items := []ManagedStateItem{
-		NewManagedStateItem(ResourceTypeMemory, memoryRow, reviewStatuses[ResourceTypeMemory]),
-		NewManagedStateItem(ResourceTypeUserPreference, preferenceRow, reviewStatuses[ResourceTypeUserPreference]),
-	}
-	if memoryRow != nil {
-		summary, err := resourcechange.LatestSummaryForResource(r.Context(), db, userID, orm.ResourceUpdateResourceTypeMemory, memoryRow.ID)
-		if err != nil {
-			common.ReplyErr(w, "query managed states failed", http.StatusInternalServerError)
-			return
-		}
-		items[0].LatestVersionChange = summary
-	}
-	if preferenceRow != nil {
-		summary, err := resourcechange.LatestSummaryForResource(r.Context(), db, userID, orm.ResourceUpdateResourceTypeUserPreference, preferenceRow.ID)
-		if err != nil {
-			common.ReplyErr(w, "query managed states failed", http.StatusInternalServerError)
-			return
-		}
-		items[1].LatestVersionChange = summary
+		NewManagedStateItem(ResourceTypeMemory, memoryRow, nil),
+		NewManagedStateItem(ResourceTypeUserPreference, preferenceRow, &preference),
 	}
 
 	common.ReplyOK(w, map[string]any{"items": items})
 }
 
-func LoadSystemMemory(ctx context.Context, db *gorm.DB, userID string) (*orm.SystemMemory, error) {
-	var row orm.SystemMemory
-	if err := db.WithContext(ctx).
-		Where("user_id = ?", strings.TrimSpace(userID)).
-		Order("created_at ASC").
-		Take(&row).Error; err != nil {
-		return nil, err
-	}
-	return &row, nil
+type VersionChangeSummary struct {
+	ChangeSource  string `json:"change_source"`
+	SourceRefType string `json:"source_ref_type"`
+	SourceRefID   string `json:"source_ref_id"`
+	ChangedAt     string `json:"changed_at"`
 }
 
-func LoadSystemUserPreference(ctx context.Context, db *gorm.DB, userID string) (*orm.SystemUserPreference, error) {
-	var row orm.SystemUserPreference
-	if err := db.WithContext(ctx).
-		Where("user_id = ?", strings.TrimSpace(userID)).
-		Order("created_at ASC").
-		Take(&row).Error; err != nil {
-		return nil, err
-	}
-	return &row, nil
-}
-
-func NewManagedStateItem(resourceType string, row any, reviewStatus string) ManagedStateItem {
-	reviewStatus = CanonicalReviewStatus(reviewStatus)
+func NewManagedStateItem(resourceType string, row *PersonalResourceContent, preference *preferencefile.PreferenceFile) ManagedStateItem {
 	item := ManagedStateItem{
-		ResourceType:           strings.TrimSpace(resourceType),
-		Title:                  ManagedStateTitle(resourceType),
-		HasPendingReviewResult: reviewStatus == ReviewStatusPending,
-		ReviewStatus:           reviewStatus,
+		ResourceType:       strings.TrimSpace(resourceType),
+		Title:              ManagedStateTitle(resourceType),
+		ReviewStatus:       ReviewStatusNone,
+		AutoEvoApplyStatus: NormalizeAutoEvoApplyStatus(""),
 	}
-	switch typed := row.(type) {
-	case *orm.SystemMemory:
-		if typed != nil {
-			item.ResourceID = strings.TrimSpace(typed.ID)
-			item.Content = typed.Content
-			item.ContentSummary = ManagedStateSummary(typed.Content)
-			item.Version = typed.Version
-			item.AutoEvo = typed.AutoEvo
-			item.AutoEvoApplyStatus = NormalizeAutoEvoApplyStatus(typed.AutoEvoApplyStatus)
-			item.AutoEvoGeneration = typed.AutoEvoGeneration
-			item.AutoEvoError = typed.AutoEvoError
-		}
-	case *orm.SystemUserPreference:
-		if typed != nil {
-			item.ResourceID = strings.TrimSpace(typed.ID)
-			item.Content = typed.Content
-			item.AgentPersona = stringPtr(typed.AgentPersona)
-			item.PreferredName = stringPtr(typed.PreferredName)
-			item.ResponseStyle = stringPtr(typed.ResponseStyle)
-			item.ContentSummary = ManagedStateSummary(typed.Content)
-			item.Version = typed.Version
-			item.AutoEvo = typed.AutoEvo
-			item.AutoEvoApplyStatus = NormalizeAutoEvoApplyStatus(typed.AutoEvoApplyStatus)
-			item.AutoEvoGeneration = typed.AutoEvoGeneration
-			item.AutoEvoError = typed.AutoEvoError
-		}
+	if row == nil {
+		return item
+	}
+	item.ResourceID = strings.TrimSpace(row.ResourceID)
+	item.Content = row.Content
+	item.ContentSummary = ManagedStateSummary(row.Content)
+	item.Version = row.Version
+	item.LatestVersionChange = row.LatestVersionChange
+	item.HasPendingReviewResult = row.HasPendingReviewResult
+	item.ReviewStatus = CanonicalReviewStatus(row.ReviewStatus)
+	item.AutoEvo = row.AutoEvo
+	item.AutoEvoApplyStatus = NormalizeAutoEvoApplyStatus(row.AutoEvoApplyStatus)
+	item.AutoEvoGeneration = row.AutoEvoGeneration
+	item.AutoEvoError = row.AutoEvoError
+	if preference != nil {
+		item.Content = preference.Content
+		item.AgentPersona = stringPtr(preference.AgentPersona)
+		item.PreferredName = stringPtr(preference.PreferredName)
+		item.ResponseStyle = stringPtr(preference.ResponseStyle)
+		item.ContentSummary = ManagedStateSummary(preference.Content)
 	}
 	return item
 }
@@ -168,38 +128,44 @@ func CanonicalReviewStatus(status string) string {
 }
 
 func LoadManagedReviewStatuses(ctx context.Context, db *gorm.DB, userID string) (map[string]string, error) {
-	var reviewRows []struct {
-		Target string `gorm:"column:target"`
+	out := map[string]string{
+		ResourceTypeMemory:         ReviewStatusNone,
+		ResourceTypeUserPreference: ReviewStatusNone,
+	}
+	var rows []struct {
+		ResourceType string `gorm:"column:resource_type"`
+		Count        int64  `gorm:"column:count"`
 	}
 	if err := db.WithContext(ctx).
-		Model(&orm.MemoryReviewResult{}).
-		Select("target").
-		Where("user_id = ? AND state = ? AND review_status = ? AND target IN ?",
-			strings.TrimSpace(userID),
-			"success",
-			ReviewStatusPending,
-			[]string{ResourceTypeMemory, ResourceTypeUserPreference},
-		).
-		Find(&reviewRows).Error; err != nil {
+		Table("personal_resources AS pr").
+		Select("pr.resource_type, COUNT(s.id) AS count").
+		Joins("JOIN personal_resource_review_sessions AS s ON s.resource_id = pr.id AND s.status = ?", "active").
+		Where("pr.user_id = ?", strings.TrimSpace(userID)).
+		Group("pr.resource_type").
+		Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	result := make(map[string]string, len(reviewRows))
-	for _, row := range reviewRows {
-		resourceType := strings.TrimSpace(row.Target)
-		if resourceType == "" {
-			continue
+	for _, row := range rows {
+		if row.Count > 0 {
+			out[strings.TrimSpace(row.ResourceType)] = ReviewStatusPending
 		}
-		result[resourceType] = ReviewStatusPending
 	}
-	return result, nil
+	return out, nil
 }
 
 func ManagedReviewStatusForResource(ctx context.Context, db *gorm.DB, userID, resourceType string) (string, error) {
-	statuses, err := LoadManagedReviewStatuses(ctx, db, userID)
-	if err != nil {
+	var count int64
+	if err := db.WithContext(ctx).
+		Table("personal_resources AS pr").
+		Joins("JOIN personal_resource_review_sessions AS s ON s.resource_id = pr.id AND s.status = ?", "active").
+		Where("pr.user_id = ? AND pr.resource_type = ?", strings.TrimSpace(userID), strings.TrimSpace(resourceType)).
+		Count(&count).Error; err != nil {
 		return ReviewStatusNone, err
 	}
-	return CanonicalReviewStatus(statuses[strings.TrimSpace(resourceType)]), nil
+	if count > 0 {
+		return ReviewStatusPending, nil
+	}
+	return ReviewStatusNone, nil
 }
 
 func ManagedStateTitle(resourceType string) string {

@@ -10,6 +10,8 @@ import {
   type DiffEntryLineOpenAPIResponse,
   type DiffFileOpenAPIResponse,
   type DiffTreeOpenAPIResponse,
+  type MarketItemOpenAPIResponse,
+  type MarketListOpenAPIResponse,
   type SkillCreateManagedOpenAPIRequest,
   type SkillDetailOpenAPIResponse,
   type SkillDraftStatusOpenAPIResponse,
@@ -354,6 +356,30 @@ export interface CreateSkillPayload {
     | { type: "url"; url: string };
 }
 
+export interface PublishSkillToMarketPayload {
+  name: string;
+  category: string;
+  source:
+    | { type: "uploaded_zip"; uploadId: string }
+    | { type: "url"; url: string };
+}
+
+export interface MarketSkillRecord extends SkillAssetRecord {
+  marketItemId: string;
+  sourceSkillId: string;
+  marketSource: "builtin" | "admin";
+  marketStatus?: string;
+  installed?: boolean;
+  installedSkillId?: string;
+}
+
+export interface MarketSkillListResult {
+  records: MarketSkillRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 const normalizeDraftSummary = (
   draft: SkillDetailOpenAPIResponse["draft"] | undefined,
 ): SkillDraftSummary => ({
@@ -361,6 +387,37 @@ const normalizeDraftSummary = (
   taskId: draft?.task_id || "",
   version: draft?.version ?? 0,
 });
+
+const normalizeMarketItem = (item: MarketItemOpenAPIResponse): MarketSkillRecord => {
+  const source = item.source;
+  const base = source
+    ? normalizeSkillItem(source)
+    : {
+        id: item.market_item_id || item.id || "",
+        skillId: item.source_skill_id || "",
+        name: "",
+        skillName: "",
+        description: "",
+        category: "",
+        tags: [] as string[],
+        content: "",
+        headRevisionId: "",
+        draft: { hasUncommittedDraft: false, taskId: "", version: 0 },
+        autoEvo: false,
+        isEnabled: true,
+      };
+
+  return {
+    ...base,
+    id: item.market_item_id || item.id || base.id,
+    marketItemId: item.market_item_id || item.id || "",
+    sourceSkillId: item.source_skill_id || base.skillId,
+    marketSource: "admin",
+    marketStatus: item.status,
+    installed: Boolean(item.installed),
+    installedSkillId: item.installed_skill_id || "",
+  };
+};
 
 const normalizeSkillItem = (
   item: SkillListItemOpenAPIResponse | SkillDetailOpenAPIResponse,
@@ -380,8 +437,8 @@ const normalizeSkillItem = (
     content: content || item.file_content || "",
     headRevisionId: item.head_revision_id || "",
     draft: normalizeDraftSummary(item.draft),
-    autoEvo: false,
-    isEnabled: true,
+    autoEvo: toBoolean(item.auto_evo, false),
+    isEnabled: toBoolean(item.is_enabled, true),
   };
 };
 
@@ -578,6 +635,28 @@ const toNumberValue = (value: unknown, fallback = 0): number => {
       return parsed;
     }
   }
+  return fallback;
+};
+
+const toBoolean = (value: unknown, fallback = false): boolean => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
+
   return fallback;
 };
 
@@ -1383,32 +1462,58 @@ export async function listSkillMarketPage(options?: {
   pageSize?: number;
   keyword?: string;
   category?: string;
-}) {
+}): Promise<MarketSkillListResult> {
   const response = await skillMarketApi.apiCoreSkillMarketGet({
     page: options?.page ?? 1,
     pageSize: options?.pageSize ?? 20,
-    keyword: options?.keyword,
-    category: options?.category,
+    keyword: options?.keyword?.trim() || undefined,
+    category:
+      options?.category && options.category !== "all"
+        ? options.category.trim()
+        : undefined,
   });
-  const payload = unwrapEnvelope<{
-    items?: SkillListItemOpenAPIResponse[];
-    page?: number;
-    page_size?: number;
-    total?: number;
-  }>(
-    response.data as WrappedPayload<{
-      items?: SkillListItemOpenAPIResponse[];
-      page?: number;
-      page_size?: number;
-      total?: number;
-    }>,
-  );
+  const payload = unwrapEnvelope<MarketListOpenAPIResponse>(response.data);
 
   return {
-    records: (payload.items || []).map((item) => normalizeSkillItem(item)),
+    records: (payload.items || []).map((item) => normalizeMarketItem(item)),
     total: payload.total ?? 0,
     page: payload.page ?? 1,
     pageSize: payload.page_size ?? 20,
+  };
+}
+
+export async function getSkillMarketItem(
+  marketItemId: string,
+): Promise<MarketSkillRecord | null> {
+  const response = await skillMarketApi.apiCoreSkillMarketMarketItemIdGet({
+    marketItemId,
+  });
+  const payload = unwrapEnvelope<MarketItemOpenAPIResponse>(response.data);
+  if (!payload?.market_item_id && !payload?.id) {
+    return null;
+  }
+  return normalizeMarketItem(payload);
+}
+
+export async function publishSkillToMarket(
+  payload: PublishSkillToMarketPayload,
+): Promise<{ marketItemId: string; sourceSkillId: string }> {
+  const response = await skillMarketApi.apiCoreSkillMarketAdminItemsPost({
+    marketPublishOpenAPIRequest: {
+      name: payload.name,
+      category: payload.category,
+      source:
+        payload.source.type === "uploaded_zip"
+          ? { type: "uploaded_zip", upload_id: payload.source.uploadId }
+          : { type: "url", url: payload.source.url },
+    },
+  });
+  const body = unwrapEnvelope<{ market_item_id?: string; source_skill_id?: string }>(
+    response.data,
+  );
+  return {
+    marketItemId: body.market_item_id || "",
+    sourceSkillId: body.source_skill_id || "",
   };
 }
 

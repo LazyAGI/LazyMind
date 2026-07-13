@@ -32,6 +32,43 @@ func TestCreateSkillFromUploadedZip_RequiresSkillMD(t *testing.T) {
 	assertNoSkillTruthRows(t, db)
 }
 
+func TestCreateSkillFromUploadedZip_AllowsSingleTopLevelDirectory(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	zipPath := filepath.Join(t.TempDir(), "wrapped.zip")
+	writeSkillZip(t, zipPath, map[string][]byte{
+		"openclaw-openclaw-changelog-update/SKILL.md":        []byte("# OpenClaw\n"),
+		"openclaw-openclaw-changelog-update/references/a.md": []byte("# A\n"),
+	})
+	uploadStore := newFakeUploadStore()
+	uploadStore.Put(UploadSession{
+		UploadID:    "upload_wrapped_skill",
+		OwnerUserID: "user_001",
+		State:       "completed",
+		StoredPath:  zipPath,
+		Filename:    "wrapped.zip",
+	})
+	svc := newCreateSkillValidationService(t, db, uploadStore)
+
+	resp, err := svc.CreateSkill(context.Background(), validCreateSkillRequest("upload_wrapped_skill"))
+	if err != nil {
+		t.Fatalf("CreateSkill returned error: %v", err)
+	}
+	entries := listRevisionEntries(t, db, resp.HeadRevisionID)
+	if _, ok := entries["SKILL.md"]; !ok {
+		t.Fatal("revision entries missing normalized SKILL.md")
+	}
+	if _, ok := entries["references/a.md"]; !ok {
+		t.Fatal("revision entries missing normalized references/a.md")
+	}
+	if _, ok := entries["openclaw-openclaw-changelog-update/SKILL.md"]; ok {
+		t.Fatal("revision entries kept wrapper directory path")
+	}
+	skillBlob := getBlobByPath(t, db, resp.HeadRevisionID, "SKILL.md")
+	if skillBlob.StorageBackend != "postgres" || len(skillBlob.Content) == 0 || skillBlob.StorageKey != nil {
+		t.Fatalf("SKILL.md blob storage invalid: %#v", skillBlob)
+	}
+}
+
 func TestCreateSkillFromUploadedZip_RejectsUnsafePathCases(t *testing.T) {
 	cases := map[string]string{
 		"dotdot":        "../evil.md",

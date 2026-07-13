@@ -11,7 +11,7 @@ import {
   Typography,
   message,
 } from "antd";
-import type { ColumnsType } from "antd/es/table";
+import type { ColumnsType, TableProps } from "antd/es/table";
 import {
   DeleteOutlined,
   EditOutlined,
@@ -36,12 +36,11 @@ import type {
   KnowledgeBaseOption,
 } from "../../shared";
 import { formatDateTime } from "../../shared";
+import { DATASET_PAGE_SIZE_OPTIONS } from "../../constants";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import "../../index.scss";
 
 const { Text, Paragraph } = Typography;
-
-const DATASET_LIST_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 export default function DatasetListPage() {
   const navigate = useNavigate();
@@ -255,6 +254,29 @@ export default function DatasetListPage() {
     [editingLoadingId, navigate, t],
   );
 
+  const tablePagination = useMemo(
+    () =>
+      getLocalizedTablePagination(
+        {
+          current: pagination.current,
+          pageSize: pagination.pageSize,
+          total: datasets.length,
+          showSizeChanger: true,
+          pageSizeOptions: DATASET_PAGE_SIZE_OPTIONS,
+          showTotal: (total) => t("common.totalItems", { total }),
+        },
+        t,
+      ),
+    [datasets.length, pagination.current, pagination.pageSize, t],
+  );
+
+  const handleTableChange: TableProps<DatasetListItem>["onChange"] = (nextPagination) => {
+    setPagination({
+      current: nextPagination.current || 1,
+      pageSize: nextPagination.pageSize || pagination.pageSize,
+    });
+  };
+
   return (
     <div className="dataset-page">
       <div className="dataset-page-header">
@@ -290,21 +312,8 @@ export default function DatasetListPage() {
           dataSource={datasets}
           scroll={{ x: 1050, y: "calc(100vh - 340px)" }}
           tableLayout="fixed"
-          pagination={getLocalizedTablePagination(
-            {
-              ...pagination,
-              showSizeChanger: true,
-              pageSizeOptions: DATASET_LIST_PAGE_SIZE_OPTIONS,
-              showTotal: (total) => t("common.totalItems", { total }),
-              onChange: (current, pageSize) => {
-                setPagination({ current, pageSize });
-              },
-              onShowSizeChange: (_current, pageSize) => {
-                setPagination({ current: 1, pageSize });
-              },
-            },
-            t,
-          )}
+          pagination={tablePagination}
+          onChange={handleTableChange}
         />
       </Card>
 

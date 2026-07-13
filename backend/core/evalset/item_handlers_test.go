@@ -13,6 +13,10 @@ import (
 	"lazymind/core/common/orm"
 )
 
+func sampleReferenceContextWithChunk(chunkID string) string {
+	return `{"type":"reference_context","version":1,"parts":[{"type":"chunk","id":"` + chunkID + `","content":"chunk content"}]}`
+}
+
 func seedEvalSetItem(t *testing.T, db *orm.DB, item orm.EvalSetItem) orm.EvalSetItem {
 	t.Helper()
 	now := time.Now().UTC()
@@ -273,6 +277,31 @@ func TestListEvalSetQuestionTypesReturnsCurrentEvalSetDistinctTypes(t *testing.T
 	}
 }
 
+func TestListEvalSetQuestionTypesFiltersBySource(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	seedEvalSet(t, db, "eval_set_question_types_source", "user_1", "", "", time.Now().UTC())
+	seedEvalSetItem(t, db, orm.EvalSetItem{ID: "eval_item_manual_type", EvalSetID: "eval_set_question_types_source", Source: SourceManual, QuestionType: "操作问答"})
+	seedEvalSetItem(t, db, orm.EvalSetItem{ID: "eval_item_upload_type", EvalSetID: "eval_set_question_types_source", Source: SourceUpload, QuestionType: "事实问答"})
+	seedEvalSetItem(t, db, orm.EvalSetItem{ID: "eval_item_upload_type_2", EvalSetID: "eval_set_question_types_source", Source: SourceUpload, QuestionType: "总结问答"})
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_question_types_source/question-types?source=manual", "", "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_question_types_source"})
+	ListEvalSetQuestionTypes(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[QuestionTypeOptionsResponse](t, rec)
+	got := make([]string, 0, len(resp.Items))
+	for _, item := range resp.Items {
+		got = append(got, item.Value)
+	}
+	want := []string{"操作问答"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected question types %v, got %v", want, got)
+	}
+}
+
 func TestListEvalSetItemsMarksKnowledgeBaseReferenceDocAndChunkSelection(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	now := time.Now().UTC()
@@ -311,12 +340,14 @@ func TestListEvalSetItemsMarksKnowledgeBaseReferenceDocAndChunkSelection(t *test
 		EvalSetID:         "eval_set_items_reference",
 		ReferenceDocIDs:   "doc_external",
 		ReferenceChunkIDs: "chunk_external",
+		ReferenceContext:  sampleReferenceContextWithChunk("chunk_external"),
 	})
 	seedEvalSetItem(t, db, orm.EvalSetItem{
 		ID:                "eval_item_partial_doc",
 		EvalSetID:         "eval_set_items_reference",
 		ReferenceDocIDs:   "doc_kb, doc_missing",
 		ReferenceChunkIDs: "chunk_1",
+		ReferenceContext:  sampleReferenceContextWithChunk("chunk_1"),
 	})
 	seedEvalSetItem(t, db, orm.EvalSetItem{
 		ID:        "eval_item_empty_doc",
@@ -397,6 +428,7 @@ func TestListInvalidReferenceEvalSetItemsReturnsOnlyInvalidRows(t *testing.T) {
 		EvalSetID:         "eval_set_invalid_reference_items",
 		ReferenceDocIDs:   "doc_missing_3",
 		ReferenceChunkIDs: "chunk_3",
+		ReferenceContext:  sampleReferenceContextWithChunk("chunk_3"),
 		CreatedAt:         now.Add(5 * time.Minute),
 	})
 	seedEvalSetItem(t, db, orm.EvalSetItem{
@@ -410,6 +442,7 @@ func TestListInvalidReferenceEvalSetItemsReturnsOnlyInvalidRows(t *testing.T) {
 		EvalSetID:         "eval_set_invalid_reference_items",
 		ReferenceDocIDs:   "doc_missing_2",
 		ReferenceChunkIDs: "chunk_2",
+		ReferenceContext:  sampleReferenceContextWithChunk("chunk_2"),
 		CreatedAt:         now.Add(3 * time.Minute),
 	})
 	seedEvalSetItem(t, db, orm.EvalSetItem{
@@ -460,6 +493,35 @@ func TestListInvalidReferenceEvalSetItemsReturnsOnlyInvalidRows(t *testing.T) {
 	}
 	if !secondPage.Items[0].ReferenceDocInvalid || secondPage.Items[0].ReferenceChunkInvalid {
 		t.Fatalf("expected invalid doc without chunk invalid, got %#v", secondPage.Items[0])
+	}
+}
+
+func TestListEvalSetItemsDoesNotMarkChunkInvalidWithoutContextChunks(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	now := time.Now().UTC()
+	seedEvalSet(t, db, "eval_set_chunk_ids_only", "user_1", "", "kb_1", now)
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:                "eval_item_chunk_ids_only",
+		EvalSetID:         "eval_set_chunk_ids_only",
+		ReferenceDocIDs:   "doc_missing",
+		ReferenceChunkIDs: "chunk_only",
+		ReferenceContext:  "plain text without chunk parts",
+	})
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_chunk_ids_only/items", "", "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_chunk_ids_only"})
+	ListEvalSetItems(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[ListEvalSetItemsResponse](t, rec)
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected one item, got %#v", resp)
+	}
+	item := resp.Items[0]
+	if !item.ReferenceDocInvalid || item.ReferenceChunkInvalid || !item.ReferenceChunkSelected {
+		t.Fatalf("expected invalid doc with selected chunk ids but no context chunk invalid, got %#v", item)
 	}
 }
 

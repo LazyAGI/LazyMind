@@ -29,6 +29,11 @@ type ListEvalSetItemsFilter struct {
 	OrderBy      string
 }
 
+type ListEvalSetQuestionTypesFilter struct {
+	Keyword string
+	Source  string
+}
+
 const invalidReferenceScanBatchSize = 500
 
 func (s *Service) requireEvalSetPermission(ctx context.Context, id, userID string, groupIDs []string, want string) (*orm.EvalSet, error) {
@@ -180,8 +185,21 @@ func normalizeListEvalSetItemsFilter(filter ListEvalSetItemsFilter) (ListEvalSet
 	return filter, nil
 }
 
-func (s *Service) ListEvalSetQuestionTypes(ctx context.Context, evalSet *orm.EvalSet) (*QuestionTypeOptionsResponse, error) {
-	values, err := s.repo.ListEvalSetQuestionTypes(ctx, evalSet.ID, evalSet.ShardID)
+func normalizeListEvalSetQuestionTypesFilter(filter ListEvalSetQuestionTypesFilter) (ListEvalSetQuestionTypesFilter, error) {
+	filter.Keyword = strings.TrimSpace(filter.Keyword)
+	filter.Source = strings.TrimSpace(filter.Source)
+	if filter.Source != "" && !isValidItemSource(filter.Source) {
+		return ListEvalSetQuestionTypesFilter{}, errors.New("invalid source")
+	}
+	return filter, nil
+}
+
+func (s *Service) ListEvalSetQuestionTypes(ctx context.Context, evalSet *orm.EvalSet, filter ListEvalSetQuestionTypesFilter) (*QuestionTypeOptionsResponse, error) {
+	normalized, err := normalizeListEvalSetQuestionTypesFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	values, err := s.repo.ListEvalSetQuestionTypes(ctx, evalSet.ID, evalSet.ShardID, normalized)
 	if err != nil {
 		return nil, err
 	}
@@ -309,11 +327,18 @@ func listItemsOrderBy(filter ListEvalSetItemsFilter) string {
 	return "created_at DESC, id DESC"
 }
 
-func (r *Repository) ListEvalSetQuestionTypes(ctx context.Context, evalSetID, shardID string) ([]string, error) {
+func (r *Repository) ListEvalSetQuestionTypes(ctx context.Context, evalSetID, shardID string, filter ListEvalSetQuestionTypesFilter) ([]string, error) {
+	q := r.db.WithContext(ctx).Model(&orm.EvalSetItem{}).
+		Where("shard_id = ? AND eval_set_id = ?", shardID, evalSetID)
+	if filter.Keyword != "" {
+		like := containsLikePattern(filter.Keyword)
+		q = q.Where("(question LIKE ? ESCAPE '!' OR ground_truth LIKE ? ESCAPE '!')", like, like)
+	}
+	if filter.Source != "" {
+		q = q.Where("source = ?", filter.Source)
+	}
 	var values []string
-	err := r.db.WithContext(ctx).Model(&orm.EvalSetItem{}).
-		Distinct("question_type").
-		Where("shard_id = ? AND eval_set_id = ?", shardID, evalSetID).
+	err := q.Distinct("question_type").
 		Where("question_type <> ''").
 		Order("question_type ASC").
 		Pluck("question_type", &values).Error
@@ -745,6 +770,28 @@ func normalizeReferenceContextText(value string) string {
 	return strings.TrimSpace(strings.ReplaceAll(value, "\r\n", "\n"))
 }
 
+func referenceContextHasChunks(referenceContext string) bool {
+	normalized := normalizeReferenceContextText(referenceContext)
+	if normalized == "" {
+		return false
+	}
+	var payload struct {
+		Type  string `json:"type"`
+		Parts []struct {
+			Type string `json:"type"`
+		} `json:"parts"`
+	}
+	if err := json.Unmarshal([]byte(normalized), &payload); err != nil || payload.Type != "reference_context" {
+		return false
+	}
+	for _, part := range payload.Parts {
+		if part.Type == "chunk" {
+			return true
+		}
+	}
+	return false
+}
+
 func itemResponses(items []orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[string]struct{}) []EvalSetItemResponse {
 	out := make([]EvalSetItemResponse, 0, len(items))
 	for i := range items {
@@ -755,7 +802,8 @@ func itemResponses(items []orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[str
 
 func itemResponse(item *orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[string]struct{}) *EvalSetItemResponse {
 	referenceDocInvalid := hasInvalidReferenceDoc(item.ReferenceDocIDs, knowledgeBaseReferenceDocIDs)
-	referenceChunkSelected := len(splitListIDs(item.ReferenceChunkIDs)) > 0
+	referenceContextHasChunkParts := referenceContextHasChunks(item.ReferenceContext)
+	referenceChunkSelected := referenceContextHasChunkParts || len(splitListIDs(item.ReferenceChunkIDs)) > 0
 	return &EvalSetItemResponse{
 		ID:                            item.ID,
 		EvalSetID:                     item.EvalSetID,
@@ -773,7 +821,7 @@ func itemResponse(item *orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[string
 		ReferenceDocFromKnowledgeBase: hasReferenceDocInSet(item.ReferenceDocIDs, knowledgeBaseReferenceDocIDs),
 		ReferenceDocInvalid:           referenceDocInvalid,
 		ReferenceChunkSelected:        referenceChunkSelected,
-		ReferenceChunkInvalid:         referenceChunkSelected && referenceDocInvalid,
+		ReferenceChunkInvalid:         referenceDocInvalid && referenceContextHasChunkParts,
 		IsDeleted:                     item.IsDeleted,
 		Source:                        item.Source,
 		SourceSessionID:               item.SourceSessionID,

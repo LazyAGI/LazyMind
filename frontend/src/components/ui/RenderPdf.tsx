@@ -48,15 +48,15 @@ export default function RenderPdf({
   const [containerWidth, setContainerWidth] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
 
-const pageWidthPx = useMemo(() => {
-  if (defaultPageWidth) {
-    return defaultPageWidth;
-  }
-  if (!containerWidth) {
-    return 900;
-  }
-  return Math.floor(containerWidth * 0.94);
-}, [defaultPageWidth, containerWidth]);
+  const pageWidthPx = useMemo(() => {
+    if (defaultPageWidth) {
+      return defaultPageWidth;
+    }
+    if (!containerWidth) {
+      return 900;
+    }
+    return Math.floor(containerWidth * 0.94);
+  }, [defaultPageWidth, containerWidth]);
   const [pageSlotHeight, setPageSlotHeight] = useState(0);
 
   const [pendingHighlight, setPendingHighlight] = useState(false);

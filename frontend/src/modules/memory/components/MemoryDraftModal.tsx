@@ -1,6 +1,14 @@
-import { useEffect, useState } from "react";
-import { Alert, Button, Input, Modal, Radio, Select, Upload, message } from "antd";
-import { LinkOutlined, UploadOutlined } from "@ant-design/icons";
+import { useState } from "react";
+import {
+  Alert,
+  Button,
+  Input,
+  Modal,
+  Select,
+  Upload,
+  message,
+} from "antd";
+import { UploadOutlined } from "@ant-design/icons";
 import {
   GLOSSARY_ALIAS_MAX_LENGTH,
   GLOSSARY_CONTENT_MAX_LENGTH,
@@ -27,9 +35,9 @@ interface MemoryDraftModalProps {
   modalMode: string;
   tagOptions: Array<{ label: string; value: string }>;
   normalizeTagValues: (values: string[]) => string[];
-  applySkillRepoImport: (repoUrl: string) => void;
   handleImportSkillPackage: (file: File) => void;
-  onSkillCreateSourceChange: (source: SkillCreateSource) => void;
+  pendingSkillPackageFile?: File | null;
+  pendingSkillSourceUrl?: string;
 }
 
 export default function MemoryDraftModal(props: MemoryDraftModalProps) {
@@ -50,31 +58,16 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
     modalMode,
     tagOptions,
     normalizeTagValues,
-    applySkillRepoImport,
     handleImportSkillPackage,
-    onSkillCreateSourceChange,
+    pendingSkillPackageFile = null,
+    pendingSkillSourceUrl = "",
   } = props;
   const [glossaryAliasInput, setGlossaryAliasInput] = useState("");
-  const [skillCreateSource, setSkillCreateSource] = useState<SkillCreateSource>("manual");
-  const [skillRepoUrl, setSkillRepoUrl] = useState("");
-  const [skillPackageFile, setSkillPackageFile] = useState<File | null>(null);
   const isSkillCreateModal = activeTab === "skills" && modalMode === "add";
   const isSkillEditModal = activeTab === "skills" && modalMode === "edit";
-
-  useEffect(() => {
-    if (!modalOpen) {
-      setSkillCreateSource("manual");
-      setSkillRepoUrl("");
-      setSkillPackageFile(null);
-    }
-  }, [modalOpen]);
-
-  const handleSkillCreateSourceChange = (source: SkillCreateSource) => {
-    setSkillCreateSource(source);
-    setSkillRepoUrl("");
-    setSkillPackageFile(null);
-    onSkillCreateSourceChange(source);
-  };
+  const isExternalSkillImport = Boolean(
+    pendingSkillPackageFile || pendingSkillSourceUrl.trim(),
+  );
 
   const handleGlossaryAliasesChange = (value: string[]) => {
     const normalizedAliases = Array.from(
@@ -131,10 +124,17 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
             <Input
               value={draft.title}
               readOnly={isReadOnly || modalMode === "edit"}
-              className={modalMode === "edit" ? "memory-experience-title-readonly" : undefined}
+              className={
+                modalMode === "edit"
+                  ? "memory-experience-title-readonly"
+                  : undefined
+              }
               placeholder={t("common.pleaseInput") + t("admin.memoryTitle")}
               onChange={(event) =>
-                setDraft((previous: any) => ({ ...previous, title: event.target.value }))
+                setDraft((previous: any) => ({
+                  ...previous,
+                  title: event.target.value,
+                }))
               }
             />
           </div>
@@ -146,7 +146,10 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               readOnly={isReadOnly}
               placeholder={t("common.pleaseInput") + t("admin.memoryContent")}
               onChange={(event) =>
-                setDraft((previous: any) => ({ ...previous, content: event.target.value }))
+                setDraft((previous: any) => ({
+                  ...previous,
+                  content: event.target.value,
+                }))
               }
             />
           </div>
@@ -170,9 +173,14 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               maxLength={GLOSSARY_TERM_MAX_LENGTH}
               showCount
               readOnly={isReadOnly}
-              placeholder={t("common.pleaseInput") + t("admin.memoryGlossaryTerm")}
+              placeholder={
+                t("common.pleaseInput") + t("admin.memoryGlossaryTerm")
+              }
               onChange={(event) =>
-                setDraft((previous: any) => ({ ...previous, term: event.target.value }))
+                setDraft((previous: any) => ({
+                  ...previous,
+                  term: event.target.value,
+                }))
               }
             />
           </div>
@@ -226,7 +234,10 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               readOnly={isReadOnly}
               placeholder={t("common.pleaseInput") + t("admin.memoryContent")}
               onChange={(event) =>
-                setDraft((previous: any) => ({ ...previous, content: event.target.value }))
+                setDraft((previous: any) => ({
+                  ...previous,
+                  content: event.target.value,
+                }))
               }
             />
           </div>
@@ -255,7 +266,10 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               readOnly={isReadOnly}
               placeholder={t("common.pleaseInput") + t("admin.memoryName")}
               onChange={(event) =>
-                setDraft((previous: any) => ({ ...previous, name: event.target.value }))
+                setDraft((previous: any) => ({
+                  ...previous,
+                  name: event.target.value,
+                }))
               }
             />
           </div>
@@ -269,7 +283,9 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               }}
               value={draft.description}
               readOnly={isReadOnly}
-              placeholder={t("common.pleaseInput") + t("admin.memoryDescription")}
+              placeholder={
+                t("common.pleaseInput") + t("admin.memoryDescription")
+              }
               onChange={(event) =>
                 setDraft((previous: any) => ({
                   ...previous,
@@ -285,7 +301,10 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               readOnly={isReadOnly}
               placeholder={t("admin.memoryCategoryPlaceholder")}
               onChange={(event) =>
-                setDraft((previous: any) => ({ ...previous, category: event.target.value }))
+                setDraft((previous: any) => ({
+                  ...previous,
+                  category: event.target.value,
+                }))
               }
             />
           </div>
@@ -318,103 +337,77 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               options={tagOptions}
             />
             {!isSkillCreateModal ? (
-              <span className="memory-form-hint">{t("admin.memoryTagsHint")}</span>
+              <span className="memory-form-hint">
+                {t("admin.memoryTagsHint")}
+              </span>
             ) : null}
           </div>
           {isSkillCreateModal ? (
-            <div className="memory-form-field memory-form-field-full memory-skill-create-source">
-              <label>{t("admin.memorySkillCreateSourceTitle")}</label>
-              <Radio.Group
-                value={skillCreateSource}
-                disabled={isReadOnly}
-                onChange={(event) =>
-                  handleSkillCreateSourceChange(event.target.value as SkillCreateSource)
-                }
-              >
-                <Radio.Button value="zip">{t("admin.memorySkillCreateSourceZip")}</Radio.Button>
-                <Radio.Button value="url">{t("admin.memorySkillCreateSourceUrl")}</Radio.Button>
-                <Radio.Button value="manual">
-                  {t("admin.memorySkillCreateSourceManual")}
-                </Radio.Button>
-              </Radio.Group>
-              {skillCreateSource === "zip" ? (
-                <div className="memory-skill-import-file-row">
+            isExternalSkillImport ? (
+              <div className="memory-form-field memory-form-field-full">
+                {pendingSkillPackageFile ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message={t("admin.memorySkillUploadFileTitle")}
+                    description={t("admin.memorySkillUploadFileReady", {
+                      size: Math.max(
+                        1,
+                        Math.round(pendingSkillPackageFile.size / 1024),
+                      ),
+                    })}
+                  />
+                ) : (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message={t("admin.memorySkillCreateImportTitle")}
+                    description={pendingSkillSourceUrl}
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="memory-form-field memory-form-field-full memory-skill-content-field">
+                <div className="memory-skill-content-header">
+                  <label>{t("admin.memoryMarkdown")}</label>
                   <Upload
-                    accept=".zip"
+                    accept=".md,.markdown"
                     multiple={false}
                     disabled={isReadOnly}
                     showUploadList={false}
                     beforeUpload={(file) => {
-                      setSkillPackageFile(file);
                       handleImportSkillPackage(file);
                       return false;
                     }}
                   >
-                    <Button icon={<UploadOutlined />} disabled={isReadOnly}>
-                      {t("admin.memorySkillUploadFileTitle")}
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<UploadOutlined />}
+                      disabled={isReadOnly}
+                    >
+                      {t("admin.memorySkillImportMdFile")}
                     </Button>
                   </Upload>
-                  <span className="memory-form-hint">
-                    {skillPackageFile
-                      ? t("admin.memorySkillUploadFileReady", {
-                          size: Math.max(1, Math.round(skillPackageFile.size / 1024)),
-                        })
-                      : t("admin.memorySkillCreateZipHint")}
-                  </span>
                 </div>
-              ) : null}
-              {skillCreateSource === "url" ? (
-                <div className="memory-skill-import-link-row">
-                  <Input
-                    value={skillRepoUrl}
-                    readOnly={isReadOnly}
-                    prefix={<LinkOutlined className="memory-skill-import-input-icon" />}
-                    placeholder={t("admin.memorySkillUploadRepoPlaceholder")}
-                    onChange={(event) => setSkillRepoUrl(event.target.value)}
-                    onPressEnter={() => applySkillRepoImport(skillRepoUrl)}
-                  />
-                  <Button
-                    type="primary"
-                    disabled={isReadOnly || !skillRepoUrl.trim()}
-                    onClick={() => applySkillRepoImport(skillRepoUrl)}
-                  >
-                    {t("admin.memorySkillImportApply")}
-                  </Button>
-                </div>
-              ) : null}
-              {skillCreateSource === "manual" ? (
-                <div className="memory-form-field memory-form-field-full memory-skill-content-field">
-                  <div className="memory-skill-content-header">
-                    <label>{t("admin.memoryMarkdown")}</label>
-                    <Upload
-                      accept=".md,.markdown"
-                      multiple={false}
-                      disabled={isReadOnly}
-                      showUploadList={false}
-                      beforeUpload={(file) => {
-                        handleImportSkillPackage(file);
-                        return false;
-                      }}
-                    >
-                      <Button type="text" size="small" icon={<UploadOutlined />} disabled={isReadOnly}>
-                        {t("admin.memorySkillImportMdFile")}
-                      </Button>
-                    </Upload>
-                  </div>
-                  <Input.TextArea
-                    rows={6}
-                    autoSize={{ minRows: 6, maxRows: 12 }}
-                    value={draft.content}
-                    readOnly={isReadOnly}
-                    placeholder={t("admin.memorySkillCreateManualPlaceholder")}
-                    onChange={(event) =>
-                      setDraft((previous: any) => ({ ...previous, content: event.target.value }))
-                    }
-                  />
-                  <span className="memory-form-hint">{t("admin.memorySkillCreateManualHint")}</span>
-                </div>
-              ) : null}
-            </div>
+                <Input.TextArea
+                  rows={6}
+                  autoSize={{ minRows: 6, maxRows: 12 }}
+                  value={draft.content}
+                  readOnly={isReadOnly}
+                  placeholder={t("admin.memorySkillCreateManualPlaceholder")}
+                  onChange={(event) =>
+                    setDraft((previous: any) => ({
+                      ...previous,
+                      content: event.target.value,
+                    }))
+                  }
+                />
+                <span className="memory-form-hint">
+                  {t("admin.memorySkillCreateManualHint")}
+                </span>
+              </div>
+            )
           ) : null}
         </div>
       )}

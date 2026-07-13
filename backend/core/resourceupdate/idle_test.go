@@ -397,8 +397,13 @@ func newIdleTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&orm.ResourceUpdateTask{},
 		&orm.ConversationIdleEvent{},
-		&orm.SystemMemory{},
-		&orm.SystemUserPreference{},
+		&orm.PersonalResource{},
+		&orm.PersonalResourceBlob{},
+		&orm.PersonalResourceRevision{},
+		&orm.PersonalResourceDraft{},
+		&orm.PersonalResourceReviewSession{},
+		&orm.PersonalResourceReviewActionBatch{},
+		&orm.PersonalResourceReviewActionItem{},
 		&orm.MemoryReviewResult{},
 	); err != nil {
 		t.Fatalf("auto migrate idle models: %v", err)
@@ -408,7 +413,7 @@ func newIdleTestDB(t *testing.T) *gorm.DB {
 
 func insertIdleResources(t *testing.T, db *gorm.DB, userID string, now time.Time) {
 	t.Helper()
-	if err := db.Create(&orm.SystemMemory{
+	insertMemoryResource(t, db, orm.SystemMemory{
 		ID:          "memory-" + userID,
 		UserID:      userID,
 		Content:     "current memory",
@@ -417,10 +422,8 @@ func insertIdleResources(t *testing.T, db *gorm.DB, userID string, now time.Time
 		AutoEvo:     true,
 		CreatedAt:   now,
 		UpdatedAt:   now,
-	}).Error; err != nil {
-		t.Fatalf("insert memory: %v", err)
-	}
-	if err := db.Create(&orm.SystemUserPreference{
+	})
+	insertPreferenceResource(t, db, orm.SystemUserPreference{
 		ID:            "preference-" + userID,
 		UserID:        userID,
 		Content:       "current preference",
@@ -432,9 +435,7 @@ func insertIdleResources(t *testing.T, db *gorm.DB, userID string, now time.Time
 		AutoEvo:       true,
 		CreatedAt:     now,
 		UpdatedAt:     now,
-	}).Error; err != nil {
-		t.Fatalf("insert preference: %v", err)
-	}
+	})
 }
 
 func insertIdleEvent(t *testing.T, db *gorm.DB, eventID, sessionID, userID, messageID string, lastActivityAt, dueAt time.Time) {

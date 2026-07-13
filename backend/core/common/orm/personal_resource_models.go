@@ -1,15 +1,27 @@
 package orm
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type PersonalResource struct {
-	ID             string    `gorm:"column:id;type:varchar(36);primaryKey"`
-	UserID         string    `gorm:"column:user_id;type:varchar(255);not null;uniqueIndex:uk_personal_resources_user_type,priority:1"`
-	ResourceType   string    `gorm:"column:resource_type;type:varchar(64);not null;uniqueIndex:uk_personal_resources_user_type,priority:2"`
-	HeadRevisionID *string   `gorm:"column:head_revision_id;type:varchar(36)"`
-	Version        int64     `gorm:"column:version;not null;default:1"`
-	CreatedAt      time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
+	ID                 string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	UserID             string          `gorm:"column:user_id;type:varchar(255);not null;uniqueIndex:uk_personal_resources_user_type,priority:1"`
+	ResourceType       string          `gorm:"column:resource_type;type:varchar(64);not null;uniqueIndex:uk_personal_resources_user_type,priority:2"`
+	HeadRevisionID     *string         `gorm:"column:head_revision_id;type:varchar(36)"`
+	Version            int64           `gorm:"column:version;not null;default:1"`
+	AutoEvo            bool            `gorm:"column:auto_evo;not null;default:true"`
+	AutoEvoApplyStatus string          `gorm:"column:auto_evo_apply_status;type:varchar(32);not null;default:'idle'"`
+	AutoEvoGeneration  int64           `gorm:"column:auto_evo_generation;not null;default:0"`
+	AutoEvoStartedAt   *time.Time      `gorm:"column:auto_evo_started_at"`
+	AutoEvoFinishedAt  *time.Time      `gorm:"column:auto_evo_finished_at"`
+	AutoEvoError       string          `gorm:"column:auto_evo_error;type:text;not null;default:''"`
+	Ext                json.RawMessage `gorm:"column:ext;type:json"`
+	UpdatedBy          string          `gorm:"column:updated_by;type:varchar(255);not null;default:''"`
+	UpdatedByName      string          `gorm:"column:updated_by_name;type:varchar(255);not null;default:''"`
+	CreatedAt          time.Time       `gorm:"column:created_at;not null"`
+	UpdatedAt          time.Time       `gorm:"column:updated_at;not null"`
 }
 
 func (PersonalResource) TableName() string { return "personal_resources" }

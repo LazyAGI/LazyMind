@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button, Input, Modal, Upload, message } from "antd";
 import { InboxOutlined } from "@ant-design/icons";
 import { getLocalizedErrorMessage } from "@/components/request";
-import { createSkillAsset } from "../../skillApi";
+import { publishSkillToMarket } from "../../skillApi";
 import { uploadSkillTempFile } from "../../skillUpload";
 
 interface SkillAdminPublishModalProps {
@@ -47,21 +47,15 @@ export default function SkillAdminPublishModal({
 
       if (selectedFile) {
         const upload = await uploadSkillTempFile(selectedFile);
-        await createSkillAsset({
+        await publishSkillToMarket({
           name,
-          description: t("admin.memorySkillAdminPublishDefaultDesc"),
           category: "team",
-          tags: [],
-          isEnabled: true,
           source: { type: "uploaded_zip", uploadId: upload.uploadId },
         });
       } else {
-        await createSkillAsset({
+        await publishSkillToMarket({
           name,
-          description: t("admin.memorySkillAdminPublishDefaultDesc"),
           category: "team",
-          tags: [],
-          isEnabled: true,
           source: { type: "url", url: repoUrl.trim() },
         });
       }
