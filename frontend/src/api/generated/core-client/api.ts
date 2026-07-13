@@ -1266,10 +1266,6 @@ export interface PromptItem {
      */
     'id'?: string;
     /**
-     * 兼容旧版的收藏标记
-     */
-    'is_default'?: boolean;
-    /**
      * 是否已收藏
      */
     'is_favorite'?: boolean;
@@ -10068,40 +10064,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
-         * @summary Set as default prompt
-         * @param {string} name 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePromptsNameSetDefaultPost: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'name' is not null or undefined
-            assertParamExists('apiCorePromptsNameSetDefaultPost', 'name', name)
-            const localVarPath = `/api/core/prompts/{name}:setDefault`
-                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
          * @summary Unfavorite prompt
          * @param {string} name 
          * @param {*} [options] Override http request option.
@@ -10111,40 +10073,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCorePromptsNameUnfavoritePost', 'name', name)
             const localVarPath = `/api/core/prompts/{name}:unfavorite`
-                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @summary Unset default prompt
-         * @param {string} name 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePromptsNameUnsetDefaultPost: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'name' is not null or undefined
-            assertParamExists('apiCorePromptsNameUnsetDefaultPost', 'name', name)
-            const localVarPath = `/api/core/prompts/{name}:unsetDefault`
                 .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -12971,19 +12899,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
-         * @summary Set as default prompt
-         * @param {string} name 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePromptsNameSetDefaultPost(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptsNameSetDefaultPost(name, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptsNameSetDefaultPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * 
          * @summary Unfavorite prompt
          * @param {string} name 
          * @param {*} [options] Override http request option.
@@ -12993,19 +12908,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptsNameUnfavoritePost(name, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptsNameUnfavoritePost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * 
-         * @summary Unset default prompt
-         * @param {string} name 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePromptsNameUnsetDefaultPost(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptsNameUnsetDefaultPost(name, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptsNameUnsetDefaultPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -14612,16 +14514,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
-         * @summary Set as default prompt
-         * @param {DefaultApiApiCorePromptsNameSetDefaultPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePromptsNameSetDefaultPost(requestParameters: DefaultApiApiCorePromptsNameSetDefaultPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
-            return localVarFp.apiCorePromptsNameSetDefaultPost(requestParameters.name, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * 
          * @summary Unfavorite prompt
          * @param {DefaultApiApiCorePromptsNameUnfavoritePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -14629,16 +14521,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCorePromptsNameUnfavoritePost(requestParameters: DefaultApiApiCorePromptsNameUnfavoritePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PromptStateResponse> {
             return localVarFp.apiCorePromptsNameUnfavoritePost(requestParameters.name, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * 
-         * @summary Unset default prompt
-         * @param {DefaultApiApiCorePromptsNameUnsetDefaultPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePromptsNameUnsetDefaultPost(requestParameters: DefaultApiApiCorePromptsNameUnsetDefaultPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
-            return localVarFp.apiCorePromptsNameUnsetDefaultPost(requestParameters.name, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -15778,23 +15660,9 @@ export interface DefaultApiApiCorePromptsNamePatchRequest {
 }
 
 /**
- * Request parameters for apiCorePromptsNameSetDefaultPost operation in DefaultApi.
- */
-export interface DefaultApiApiCorePromptsNameSetDefaultPostRequest {
-    readonly name: string
-}
-
-/**
  * Request parameters for apiCorePromptsNameUnfavoritePost operation in DefaultApi.
  */
 export interface DefaultApiApiCorePromptsNameUnfavoritePostRequest {
-    readonly name: string
-}
-
-/**
- * Request parameters for apiCorePromptsNameUnsetDefaultPost operation in DefaultApi.
- */
-export interface DefaultApiApiCorePromptsNameUnsetDefaultPostRequest {
     readonly name: string
 }
 
@@ -17187,17 +17055,6 @@ export class DefaultApi extends BaseAPI {
 
     /**
      * 
-     * @summary Set as default prompt
-     * @param {DefaultApiApiCorePromptsNameSetDefaultPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePromptsNameSetDefaultPost(requestParameters: DefaultApiApiCorePromptsNameSetDefaultPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCorePromptsNameSetDefaultPost(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * 
      * @summary Unfavorite prompt
      * @param {DefaultApiApiCorePromptsNameUnfavoritePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -17205,17 +17062,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCorePromptsNameUnfavoritePost(requestParameters: DefaultApiApiCorePromptsNameUnfavoritePostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCorePromptsNameUnfavoritePost(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * 
-     * @summary Unset default prompt
-     * @param {DefaultApiApiCorePromptsNameUnsetDefaultPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePromptsNameUnsetDefaultPost(requestParameters: DefaultApiApiCorePromptsNameUnsetDefaultPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCorePromptsNameUnsetDefaultPost(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

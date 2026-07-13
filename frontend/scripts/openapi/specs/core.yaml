@@ -2341,9 +2341,6 @@ components:
                 id:
                     description: 话术唯一标识
                     type: string
-                is_default:
-                    description: 兼容旧版的收藏标记
-                    type: boolean
                 is_favorite:
                     description: 是否已收藏
                     type: boolean
@@ -10075,22 +10072,6 @@ paths:
                                 $ref: '#/components/schemas/PromptItem'
                     description: Updated prompt
             summary: Update prompt
-    /api/core/prompts/{name}:setDefault:
-        post:
-            parameters:
-                - in: path
-                  name: name
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/EmptyObject'
-                    description: Set successfully
-            summary: Set as default prompt
     /api/core/prompts/{name}:favorite:
         post:
             parameters:
@@ -10139,22 +10120,6 @@ paths:
                                 $ref: '#/components/schemas/PromptStateResponse'
                     description: Usage recorded
             summary: Record prompt usage
-    /api/core/prompts/{name}:unsetDefault:
-        post:
-            parameters:
-                - in: path
-                  name: name
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/EmptyObject'
-                    description: Unset successfully
-            summary: Unset default prompt
     /api/core/prompts:polish:
         post:
             requestBody:

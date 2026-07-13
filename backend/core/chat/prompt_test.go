@@ -188,7 +188,7 @@ func TestPromptLibraryFavoriteAndUsage(t *testing.T) {
 		t.Fatalf("list recent prompts failed: status=%d body=%s", listRec.Code, listRec.Body.String())
 	}
 	var listResp struct {
-		Prompts []promptItemResponse `json:"prompts"` // 最近使用的话术列表
+		Prompts []promptItemResponse `json:"prompts"`
 	}
 	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
 		t.Fatalf("decode recent prompts: %v", err)
@@ -202,7 +202,7 @@ func TestPromptLibraryFavoriteAndUsage(t *testing.T) {
 	otherRec := httptest.NewRecorder()
 	ListPrompts(otherRec, otherReq)
 	var otherResp struct {
-		Prompts []promptItemResponse `json:"prompts"` // 另一用户的收藏列表
+		Prompts []promptItemResponse `json:"prompts"`
 	}
 	if err := json.Unmarshal(otherRec.Body.Bytes(), &otherResp); err != nil {
 		t.Fatalf("decode other user prompts: %v", err)

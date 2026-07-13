@@ -487,6 +487,92 @@ type toolStateOpenAPIResponse struct {
 	Disabled bool   `json:"disabled"`
 }
 
+type promptPathParams struct {
+	Name string `path:"name"`
+}
+
+type promptListQueryParams struct {
+	PageSize  int32  `query:"page_size"`
+	PageToken string `query:"page_token"`
+	Keyword   string `query:"keyword"`
+	Category  string `query:"category"`
+	Scope     string `query:"scope"`
+	Sort      string `query:"sort"`
+	Locale    string `query:"locale"`
+}
+
+type promptGetQueryParams struct {
+	Locale string `query:"locale"`
+}
+
+type promptCategoryOpenAPIResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type promptCategoryListOpenAPIResponse struct {
+	Categories []promptCategoryOpenAPIResponse `json:"categories"`
+}
+
+type promptCategoryCreateOpenAPIRequest struct {
+	Name string `json:"name"`
+}
+
+type promptCreateOpenAPIRequest struct {
+	DisplayName string `json:"display_name"`
+	Content     string `json:"content"`
+	Category    string `json:"category"`
+}
+
+type promptPatchOpenAPIRequest struct {
+	DisplayName string `json:"display_name"`
+	Content     string `json:"content"`
+	Category    string `json:"category"`
+}
+
+type promptPolishOpenAPIRequest struct {
+	Content      string `json:"content"`
+	UserInstruct string `json:"user_instruct"`
+}
+
+type promptPolishOpenAPIResponse struct {
+	Content string `json:"content"`
+}
+
+type promptItemOpenAPIResponse struct {
+	Name        string `json:"name"`
+	ID          string `json:"id"`
+	Content     string `json:"content"`
+	DisplayName string `json:"display_name"`
+	Category    string `json:"category"`
+	Source      string `json:"source"`
+	IsFavorite  bool   `json:"is_favorite"`
+	UsageCount  int64  `json:"usage_count"`
+	LastUsedAt  string `json:"last_used_at,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
+}
+
+type promptFacetOpenAPIResponse struct {
+	Scopes     map[string]int64 `json:"scopes"`
+	Categories map[string]int64 `json:"categories"`
+}
+
+type promptListOpenAPIResponse struct {
+	Prompts          []promptItemOpenAPIResponse     `json:"prompts"`
+	CustomCategories []promptCategoryOpenAPIResponse `json:"custom_categories"`
+	NextPageToken    string                          `json:"next_page_token"`
+	Total            int64                           `json:"total"`
+	Facets           promptFacetOpenAPIResponse      `json:"facets"`
+}
+
+type promptStateOpenAPIResponse struct {
+	ID         string `json:"id"`
+	IsFavorite bool   `json:"is_favorite"`
+	UsageCount int64  `json:"usage_count"`
+	LastUsedAt string `json:"last_used_at,omitempty"`
+}
+
 type agentThreadPathParams struct {
 	ThreadID string `path:"thread_id"`
 }
@@ -3179,6 +3265,103 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  personalResourcePathParams{},
 			RequestBody: jsonBodyOf(personalResourceRollbackOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Personal resource rollback", resourcefs.RollbackResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/prompts",
+			Summary:     "Prompt list",
+			Tags:        []string{"prompts"},
+			QueryParams: promptListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Prompt list", promptListOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/prompts",
+			Summary:     "Create prompt",
+			Tags:        []string{"prompts"},
+			RequestBody: jsonBodyOf(promptCreateOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Created prompt", promptItemOpenAPIResponse{})},
+		},
+		{
+			Method:    "GET",
+			Path:      "/prompt_categories",
+			Summary:   "Prompt category list",
+			Tags:      []string{"prompts"},
+			Responses: map[int]openAPIResponse{200: resp("Prompt category list", promptCategoryListOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/prompt_categories",
+			Summary:     "Create prompt category",
+			Tags:        []string{"prompts"},
+			RequestBody: jsonBodyOf(promptCategoryCreateOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Created prompt category", promptCategoryOpenAPIResponse{})},
+		},
+		{
+			Method:     "DELETE",
+			Path:       "/prompt_categories/{name}",
+			Summary:    "Delete prompt category",
+			Tags:       []string{"prompts"},
+			PathParams: promptPathParams{},
+			Responses:  map[int]openAPIResponse{200: refResp("Deleted successfully", "EmptyObject")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/prompts:polish",
+			Summary:     "Polish prompt",
+			Tags:        []string{"prompts"},
+			RequestBody: jsonBodyOf(promptPolishOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Polished prompt", promptPolishOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/prompts/{name}",
+			Summary:     "Get prompt",
+			Tags:        []string{"prompts"},
+			PathParams:  promptPathParams{},
+			QueryParams: promptGetQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Prompt details", promptItemOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/prompts/{name}",
+			Summary:     "Update prompt",
+			Tags:        []string{"prompts"},
+			PathParams:  promptPathParams{},
+			RequestBody: jsonBodyOf(promptPatchOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated prompt", promptItemOpenAPIResponse{})},
+		},
+		{
+			Method:     "DELETE",
+			Path:       "/prompts/{name}",
+			Summary:    "Delete prompt",
+			Tags:       []string{"prompts"},
+			PathParams: promptPathParams{},
+			Responses:  map[int]openAPIResponse{200: refResp("Deleted successfully", "EmptyObject")},
+		},
+		{
+			Method:     "POST",
+			Path:       "/prompts/{name}:favorite",
+			Summary:    "Favorite prompt",
+			Tags:       []string{"prompts"},
+			PathParams: promptPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Favorited successfully", promptStateOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/prompts/{name}:unfavorite",
+			Summary:    "Unfavorite prompt",
+			Tags:       []string{"prompts"},
+			PathParams: promptPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Unfavorited successfully", promptStateOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/prompts/{name}:use",
+			Summary:    "Record prompt usage",
+			Tags:       []string{"prompts"},
+			PathParams: promptPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Usage recorded", promptStateOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",

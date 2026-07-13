@@ -36,12 +36,12 @@ var promptCategories = map[string]struct{}{
 }
 
 type presetPrompt struct {
-	ID        string // 预置话术稳定标识
-	Category  string // 固定分类编码
-	NameZH    string // 中文名称
-	ContentZH string // 中文正文
-	NameEN    string // 英文名称
-	ContentEN string // 英文正文
+	ID        string
+	Category  string
+	NameZH    string
+	ContentZH string
+	NameEN    string
+	ContentEN string
 }
 
 var presetPrompts = []presetPrompt{
@@ -72,38 +72,37 @@ var presetPrompts = []presetPrompt{
 }
 
 type promptItemResponse struct {
-	Name        string     `json:"name"`                   // 资源名称
-	ID          string     `json:"id"`                     // 话术唯一标识
-	Content     string     `json:"content"`                // 话术正文
-	DisplayName string     `json:"display_name"`           // 话术展示名称
-	Category    string     `json:"category"`               // 固定分类编码
-	Source      string     `json:"source"`                 // 来源：预置或自定义
-	IsFavorite  bool       `json:"is_favorite"`            // 是否已收藏
-	IsDefault   bool       `json:"is_default"`             // 兼容旧版的收藏标记
-	UsageCount  int64      `json:"usage_count"`            // 累计使用次数
-	LastUsedAt  *time.Time `json:"last_used_at,omitempty"` // 最近使用时间
-	CreatedAt   *time.Time `json:"created_at,omitempty"`   // 创建时间
-	UpdatedAt   *time.Time `json:"updated_at,omitempty"`   // 更新时间
+	Name        string     `json:"name"`
+	ID          string     `json:"id"`
+	Content     string     `json:"content"`
+	DisplayName string     `json:"display_name"`
+	Category    string     `json:"category"`
+	Source      string     `json:"source"`
+	IsFavorite  bool       `json:"is_favorite"`
+	UsageCount  int64      `json:"usage_count"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt   *time.Time `json:"created_at,omitempty"`
+	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
 }
 
 type promptFacetResponse struct {
-	Scopes     map[string]int64 `json:"scopes"`     // 各范围的匹配数量
-	Categories map[string]int64 `json:"categories"` // 各分类的匹配数量
+	Scopes     map[string]int64 `json:"scopes"`
+	Categories map[string]int64 `json:"categories"`
 }
 
 type promptListResponse struct {
-	Prompts          []promptItemResponse     `json:"prompts"`           // 当前页话术列表
-	CustomCategories []promptCategoryResponse `json:"custom_categories"` // 当前用户创建的分类
-	NextPageToken    string                   `json:"next_page_token"`   // 下一页游标
-	Total            int64                    `json:"total"`             // 当前筛选结果总数
-	Facets           promptFacetResponse      `json:"facets"`            // 筛选项计数
+	Prompts          []promptItemResponse     `json:"prompts"`
+	CustomCategories []promptCategoryResponse `json:"custom_categories"`
+	NextPageToken    string                   `json:"next_page_token"`
+	Total            int64                    `json:"total"`
+	Facets           promptFacetResponse      `json:"facets"`
 }
 
 type promptStateResponse struct {
-	ID         string     `json:"id"`                     // 话术唯一标识
-	IsFavorite bool       `json:"is_favorite"`            // 是否已收藏
-	UsageCount int64      `json:"usage_count"`            // 累计使用次数
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"` // 最近使用时间
+	ID         string     `json:"id"`
+	IsFavorite bool       `json:"is_favorite"`
+	UsageCount int64      `json:"usage_count"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
 func promptNameFromPath(r *http.Request) string {
@@ -170,7 +169,6 @@ func localizedPresetItem(prompt presetPrompt, locale string, state orm.PromptUse
 		Category:    prompt.Category,
 		Source:      "preset",
 		IsFavorite:  state.IsFavorite,
-		IsDefault:   state.IsFavorite,
 		UsageCount:  state.UsageCount,
 		LastUsedAt:  state.LastUsedAt,
 	}
@@ -187,7 +185,6 @@ func customPromptItem(prompt orm.Prompt, state orm.PromptUserState) promptItemRe
 		Category:    prompt.Category,
 		Source:      "custom",
 		IsFavorite:  state.IsFavorite,
-		IsDefault:   state.IsFavorite,
 		UsageCount:  state.UsageCount,
 		LastUsedAt:  state.LastUsedAt,
 		CreatedAt:   &createdAt,
@@ -253,12 +250,11 @@ func findPromptItem(userID, promptID, locale string) (promptItemResponse, error)
 	return customPromptItem(prompt, states[promptID]), nil
 }
 
-// CreatePrompt 创建一条用户自定义话术。
 func CreatePrompt(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		DisplayName string `json:"display_name"` // 话术展示名称
-		Content     string `json:"content"`      // 话术正文
-		Category    string `json:"category"`     // 固定分类编码
+		DisplayName string `json:"display_name"`
+		Content     string `json:"content"`
+		Category    string `json:"category"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
@@ -327,8 +323,8 @@ func CreatePrompt(w http.ResponseWriter, r *http.Request) {
 
 func PolishPrompt(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Content      string `json:"content"`       // 待优化内容
-		UserInstruct string `json:"user_instruct"` // 用户优化要求
+		Content      string `json:"content"`
+		UserInstruct string `json:"user_instruct"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
@@ -367,7 +363,6 @@ func PolishPrompt(w http.ResponseWriter, r *http.Request) {
 	writePromptJSON(w, http.StatusOK, map[string]any{"content": polished})
 }
 
-// UpdatePrompt 更新用户拥有的自定义话术，预置话术保持只读。
 func UpdatePrompt(w http.ResponseWriter, r *http.Request) {
 	promptID := promptNameFromPath(r)
 	if _, ok := presetPromptByID(promptID); ok {
@@ -375,9 +370,9 @@ func UpdatePrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		DisplayName string `json:"display_name"` // 话术展示名称
-		Content     string `json:"content"`      // 话术正文
-		Category    string `json:"category"`     // 固定分类编码
+		DisplayName string `json:"display_name"`
+		Content     string `json:"content"`
+		Category    string `json:"category"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
@@ -431,7 +426,6 @@ func UpdatePrompt(w http.ResponseWriter, r *http.Request) {
 	writePromptJSON(w, http.StatusOK, customPromptItem(prompt, states[promptID]))
 }
 
-// DeletePrompt 删除用户拥有的自定义话术及对应状态。
 func DeletePrompt(w http.ResponseWriter, r *http.Request) {
 	promptID := promptNameFromPath(r)
 	if _, ok := presetPromptByID(promptID); ok {
@@ -519,7 +513,6 @@ func sortPromptItems(items []promptItemResponse, sortBy string) {
 	})
 }
 
-// ListPrompts 返回预置与自定义话术，并提供分类和范围计数。
 func ListPrompts(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	if userID == "" {
@@ -675,17 +668,6 @@ func UnfavoritePrompt(w http.ResponseWriter, r *http.Request) {
 	setPromptFavorite(w, r, false)
 }
 
-// SetDefaultPrompt 兼容旧接口，语义等同于收藏话术。
-func SetDefaultPrompt(w http.ResponseWriter, r *http.Request) {
-	setPromptFavorite(w, r, true)
-}
-
-// UnsetDefaultPrompt 兼容旧接口，语义等同于取消收藏。
-func UnsetDefaultPrompt(w http.ResponseWriter, r *http.Request) {
-	setPromptFavorite(w, r, false)
-}
-
-// UsePrompt 原子记录一次话术使用，不影响前端填充输入框。
 func UsePrompt(w http.ResponseWriter, r *http.Request) {
 	promptID := promptNameFromPath(r)
 	userID := corestore.UserID(r)

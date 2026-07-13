@@ -19,12 +19,12 @@ import (
 const promptCategoryNameMaxLen = 30
 
 type promptCategoryResponse struct {
-	ID   string `json:"id"`   // 分类唯一标识
-	Name string `json:"name"` // 分类名称
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type promptCategoryRequest struct {
-	Name string `json:"name"` // 分类名称
+	Name string `json:"name"`
 }
 
 func promptCategoryFromPath(r *http.Request) string {
@@ -44,7 +44,6 @@ func listPromptCategories(userID string) ([]promptCategoryResponse, error) {
 	return result, nil
 }
 
-// ListPromptCategories returns only categories created by the current user.
 func ListPromptCategories(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	if userID == "" {
@@ -59,7 +58,6 @@ func ListPromptCategories(w http.ResponseWriter, r *http.Request) {
 	writePromptJSON(w, http.StatusOK, map[string]any{"categories": categories})
 }
 
-// CreatePromptCategory creates a category scoped to the current user.
 func CreatePromptCategory(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	if userID == "" {
@@ -109,7 +107,6 @@ func CreatePromptCategory(w http.ResponseWriter, r *http.Request) {
 	writePromptJSON(w, http.StatusOK, promptCategoryResponse{ID: category.ID, Name: category.Name})
 }
 
-// DeletePromptCategory deletes a user category and moves its prompts to the default custom category.
 func DeletePromptCategory(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	if userID == "" {

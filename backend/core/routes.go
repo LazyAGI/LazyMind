@@ -438,9 +438,6 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Prompttext -----
 	handleAPI(r, "POST", "/prompts", []string{"document.write"}, chat.CreatePrompt)
 	handleAPI(r, "POST", "/prompts:polish", []string{"qa.read"}, chat.PolishPrompt)
-	// :setDefault/:unsetDefault text {name} text，text :action text。
-	handleAPI(r, "POST", "/prompts/{name}:setDefault", []string{"document.write"}, chat.SetDefaultPrompt)
-	handleAPI(r, "POST", "/prompts/{name}:unsetDefault", []string{"document.write"}, chat.UnsetDefaultPrompt)
 	handleAPI(r, "POST", "/prompts/{name}:favorite", []string{"document.write"}, chat.FavoritePrompt)
 	handleAPI(r, "POST", "/prompts/{name}:unfavorite", []string{"document.write"}, chat.UnfavoritePrompt)
 	handleAPI(r, "POST", "/prompts/{name}:use", []string{"document.write"}, chat.UsePrompt)
