@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -144,4 +145,22 @@ func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "traces"))
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "subagent"))
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "evo"))
+}
+
+func TestAlgorithmServiceEnvHidesDesktopSubprocessWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific Desktop process policy")
+	}
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	cfg.Profile = "desktop"
+
+	env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+	assertEnvContains(t, env, "LAZYMIND_WINDOWS_HIDE_SUBPROCESS_WINDOWS=1")
+	assertEnvContains(t, env, "LAZYMIND_WINDOWS_PATCH_LAZYLLM_RELAY=1")
 }

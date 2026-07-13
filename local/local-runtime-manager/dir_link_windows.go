@@ -29,6 +29,7 @@ func directoryLinkTarget(path string) (string, bool) {
 
 func createDirectoryLink(target, link string) error {
 	cmd := exec.Command("cmd.exe", "/d", "/c", "mklink", "/J", link, target)
+	configureChildProcess(cmd, false)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mklink /J failed: %w (%s)", err, strings.TrimSpace(string(output)))
 	}

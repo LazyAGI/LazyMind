@@ -31,7 +31,13 @@ type processComposeConfig struct {
 	Version         string                           `yaml:"version"`
 	IsStrict        bool                             `yaml:"is_strict"`
 	OrderedShutdown bool                             `yaml:"ordered_shutdown"`
+	Shell           *processComposeShell             `yaml:"shell,omitempty"`
 	Processes       map[string]processComposeProcess `yaml:"processes"`
+}
+
+type processComposeShell struct {
+	Command  string `yaml:"shell_command"`
+	Argument string `yaml:"shell_argument"`
 }
 
 type processComposeProcess struct {
@@ -50,20 +56,28 @@ type processComposeShutdown struct {
 
 func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, paths RuntimePaths, cfg RuntimeConfig, tokenPath string, apiPort int) error {
 	commandEnv := runtimeCommandEnv(paths, cfg)
-	commandForLocalProxyRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-run")
-	commandForLocalProxyDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-down")
-	commandForAuthServiceRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-run")
-	commandForAuthServiceDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-down")
-	commandForCoreRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-run")
-	commandForCoreDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-down")
-	commandForScanControlPlaneRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-run")
-	commandForScanControlPlaneDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-down")
-	commandForFileWatcherRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-run")
-	commandForFileWatcherDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-down")
-	commandForFrontendRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-run")
-	commandForFrontendDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-down")
-	commandForMilvusLiteRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-run")
-	commandForMilvusLiteDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-down")
+	windowsDesktopShell := runtime.GOOS == "windows" && cfg.Profile == "desktop"
+	commandPrefix := quoteShellArg(m.execPath) + " "
+	if windowsDesktopShell {
+		// The custom shell already runs this executable. Omitting the absolute
+		// path also avoids nested Windows quoting when the ZIP is extracted into
+		// a directory containing spaces.
+		commandPrefix = ""
+	}
+	commandForLocalProxyRun := commandWithEnv(commandEnv, commandPrefix+"internal local-proxy-run")
+	commandForLocalProxyDown := commandWithEnv(commandEnv, commandPrefix+"internal local-proxy-down")
+	commandForAuthServiceRun := commandWithEnv(commandEnv, commandPrefix+"internal auth-service-run")
+	commandForAuthServiceDown := commandWithEnv(commandEnv, commandPrefix+"internal auth-service-down")
+	commandForCoreRun := commandWithEnv(commandEnv, commandPrefix+"internal core-run")
+	commandForCoreDown := commandWithEnv(commandEnv, commandPrefix+"internal core-down")
+	commandForScanControlPlaneRun := commandWithEnv(commandEnv, commandPrefix+"internal scan-control-plane-run")
+	commandForScanControlPlaneDown := commandWithEnv(commandEnv, commandPrefix+"internal scan-control-plane-down")
+	commandForFileWatcherRun := commandWithEnv(commandEnv, commandPrefix+"internal file-watcher-run")
+	commandForFileWatcherDown := commandWithEnv(commandEnv, commandPrefix+"internal file-watcher-down")
+	commandForFrontendRun := commandWithEnv(commandEnv, commandPrefix+"internal frontend-run")
+	commandForFrontendDown := commandWithEnv(commandEnv, commandPrefix+"internal frontend-down")
+	commandForMilvusLiteRun := commandWithEnv(commandEnv, commandPrefix+"internal milvus-lite-run")
+	commandForMilvusLiteDown := commandWithEnv(commandEnv, commandPrefix+"internal milvus-lite-down")
 
 	pcCfg := processComposeConfig{
 		Version:         "0.5",
@@ -132,6 +146,14 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 			},
 		},
 	}
+	if windowsDesktopShell {
+		// process-compose normally starts every command through cmd.exe. A GUI
+		// application has no inherited console, so those shells each allocate a
+		// visible terminal window. Route commands through our GUI-subsystem
+		// sidecar, which directly launches a restricted internal subcommand with
+		// CREATE_NO_WINDOW instead.
+		pcCfg.Shell = &processComposeShell{Command: m.execPath, Argument: "shell"}
+	}
 	if cfg.ModeProfile.VectorStore.ManagedProcess {
 		pcCfg.Processes[milvusLiteProcessName] = processComposeProcess{
 			WorkingDir: repoRoot,
@@ -145,8 +167,8 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 		}
 	}
 	for _, svc := range algorithmProcessSpecs(cfg.Algorithm) {
-		run := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-run --service "+svc.Name)
-		down := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-down --service "+svc.Name)
+		run := commandWithEnv(commandEnv, commandPrefix+"internal algorithm-run --service "+svc.Name)
+		down := commandWithEnv(commandEnv, commandPrefix+"internal algorithm-down --service "+svc.Name)
 		pcCfg.Processes[svc.Name] = processComposeProcess{
 			WorkingDir: repoRoot,
 			Command:    run,

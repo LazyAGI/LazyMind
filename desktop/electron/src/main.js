@@ -546,9 +546,6 @@ async function waitForRuntimeReady() {
         updateStartupState({ status: "ready", phase: "Ready", message: "Opening LazyMind..." });
         return status;
       }
-      if (["failed"].includes(status.overallStatus)) {
-        throw new Error(statusFailureMessage(status));
-      }
       if (runtimeProcessExit && belongsToDesktop && !status.ownerMatched && status.overallStatus === "stopped" && ownerReleaseRetries < 1) {
         ownerReleaseRetries += 1;
         runtimeProcessExit = null;

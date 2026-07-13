@@ -17,6 +17,9 @@ function runtimeExitFailureMessage(status, belongsToDesktop, runtimeProcessExit)
   if (["stopped", "stale", "unknown", ""].includes(status?.overallStatus || "")) {
     return statusFailureMessage(status);
   }
+  if (status?.overallStatus === "failed") {
+    return statusFailureMessage(status);
+  }
   return "";
 }
 

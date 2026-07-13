@@ -34,3 +34,23 @@ test("preserves the existing failure for an exited stopped runtime", () => {
 
   assert.equal(message, "Runtime status is stopped; services: core:stopped");
 });
+
+test("ignores a stale failed status while the new runtime sidecar is still starting", () => {
+  const message = runtimeExitFailureMessage(
+    { overallStatus: "failed", services: { core: { status: "failed" } } },
+    true,
+    null,
+  );
+
+  assert.equal(message, "");
+});
+
+test("reports a failed status after the runtime sidecar exits", () => {
+  const message = runtimeExitFailureMessage(
+    { overallStatus: "failed", services: { core: { status: "failed" } } },
+    true,
+    { code: 1 },
+  );
+
+  assert.equal(message, "Runtime status is failed; services: core:failed");
+});

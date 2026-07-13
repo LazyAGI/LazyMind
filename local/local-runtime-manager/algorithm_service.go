@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -567,6 +568,12 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_EVO_CHUNK_BASE_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.DocPort),
 		"LAZYMIND_EVO_ROUTER_CHAT_URL=" + fmt.Sprintf("http://127.0.0.1:%d/api/chat/stream", cfg.Algorithm.ChatPort),
 		"LAZYMIND_WORD_GROUP_APPLY_URL=" + envText("LAZYMIND_WORD_GROUP_APPLY_URL", ""),
+	}
+	if runtime.GOOS == "windows" && cfg.Profile == "desktop" {
+		env = append(env, "LAZYMIND_WINDOWS_HIDE_SUBPROCESS_WINDOWS=1")
+		if service != milvusLiteProcessName {
+			env = append(env, "LAZYMIND_WINDOWS_PATCH_LAZYLLM_RELAY=1")
+		}
 	}
 	if service == docServerProcessName {
 		env = append(env, "LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.DocPort)+"/v1/internal/callbacks/tasks")

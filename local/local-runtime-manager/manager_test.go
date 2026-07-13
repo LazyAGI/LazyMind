@@ -528,6 +528,41 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	}
 }
 
+func TestProcessComposeDesktopUsesHiddenWindowsShellWrapper(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific process-compose shell")
+	}
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	cfg.Profile = "desktop"
+	execPath := filepath.Join(repo, "local-runtime-manager.exe")
+	manager := NewRuntimeManager(&fakeRunner{t: t}, execPath)
+	var out strings.Builder
+	if err := manager.processCompose.WriteGeneratedConfig(&out, repo, paths, cfg, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
+		t.Fatalf("write generated config: %v", err)
+	}
+
+	var parsed processComposeConfig
+	if err := yaml.Unmarshal([]byte(out.String()), &parsed); err != nil {
+		t.Fatalf("generated config invalid yaml: %v", err)
+	}
+	if parsed.Shell == nil {
+		t.Fatal("Desktop config has no Windows shell wrapper")
+	}
+	if parsed.Shell.Command != execPath || parsed.Shell.Argument != "shell" {
+		t.Fatalf("shell = %#v, want command %q argument shell", parsed.Shell, execPath)
+	}
+	for name, process := range parsed.Processes {
+		if !strings.HasPrefix(process.Command, "internal ") {
+			t.Fatalf("Desktop process %s command = %q, want internal sidecar command", name, process.Command)
+		}
+	}
+}
+
 func TestProcessComposeGOBINIsUnderLocalBuildRoot(t *testing.T) {
 	repo := t.TempDir()
 	buildRoot := filepath.Join(t.TempDir(), "build")

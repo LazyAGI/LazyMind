@@ -49,6 +49,7 @@ func forceKillProcessTree(pid int) error {
 		return nil
 	}
 	cmd := exec.Command("taskkill.exe", "/PID", strconv.Itoa(pid), "/T", "/F")
+	configureChildProcess(cmd, false)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		if !processAlive(pid) {
 			return nil

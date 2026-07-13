@@ -29,7 +29,9 @@ func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error)
 	command := "$p=@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine); ConvertTo-Json -InputObject $p -Compress"
 	ctx, cancel := context.WithTimeout(context.Background(), windowsProcessScanTimeout)
 	defer cancel()
-	raw, err := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command).Output()
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command)
+	configureChildProcess(cmd, false)
+	raw, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("Windows process scan timed out after %s: %w", windowsProcessScanTimeout, ctx.Err())

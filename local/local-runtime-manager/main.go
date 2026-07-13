@@ -44,6 +44,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	manager.SetOutput(c.out, c.errOut)
 
 	switch args[0] {
+	case "shell":
+		return runProcessComposeShell(ctx, args[1:], c.out, c.errOut)
 	case "up":
 		opts, err := parseCommonArgs("up", args[1:], c.errOut)
 		if err != nil {
