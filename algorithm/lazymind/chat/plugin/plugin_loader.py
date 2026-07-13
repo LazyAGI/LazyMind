@@ -95,6 +95,50 @@ def _join_conditions(c1: str, c2: str) -> str:
     return f'{c1} AND {c2}'
 
 
+def _normalise_steps(raw_steps: Any) -> Dict[str, Dict[str, Any]]:
+    """Return state.yml steps keyed by id for both supported YAML shapes.
+
+    Older/built-in plugins use a mapping (``steps: {step_id: {...}}``), while
+    the visual editor serialises a list (``steps: [{id: step_id, ...}]``).
+    Runtime code consumes one canonical mapping so metadata such as ``mode`` is
+    never lost merely because the plugin was saved by the editor.
+    """
+    def _normalise_config(step_id: str, config: Dict[str, Any]) -> Dict[str, Any]:
+        normalised = {'id': step_id, **config}
+        for field in ('inputs', 'outputs'):
+            refs = normalised.get(field)
+            if not isinstance(refs, list):
+                continue
+            normalised_refs: List[Dict[str, Any]] = []
+            for ref in refs:
+                if isinstance(ref, str) and ref.strip():
+                    normalised_refs.append({'slot': ref.strip()})
+                elif isinstance(ref, dict):
+                    slot = str(ref.get('slot') or ref.get('artifact_id') or '').strip()
+                    if slot:
+                        normalised_refs.append({'slot': slot, **ref})
+            normalised[field] = normalised_refs
+        return normalised
+
+    if isinstance(raw_steps, dict):
+        result: Dict[str, Dict[str, Any]] = {}
+        for step_id, config in raw_steps.items():
+            if not isinstance(step_id, str) or not isinstance(config, dict):
+                continue
+            result[step_id] = _normalise_config(step_id, config)
+        return result
+    if isinstance(raw_steps, list):
+        result = {}
+        for config in raw_steps:
+            if not isinstance(config, dict):
+                continue
+            step_id = str(config.get('id') or '').strip()
+            if step_id:
+                result[step_id] = _normalise_config(step_id, config)
+        return result
+    return {}
+
+
 class StateMachine:
     """Minimal state machine parsed from state.yml transitions block.
 
@@ -299,15 +343,16 @@ class PluginSpec:
         self.state: Dict[str, Any] = yaml.safe_load(state_text) or {}
         self.driver_md: Optional[str] = self._read_text(scenario_dir / 'driver.md', optional=True)
 
+        # Normalise editor (list) and legacy (mapping) step shapes before any
+        # runtime consumer reads step metadata.
+        self._steps: Dict[str, Dict[str, Any]] = _normalise_steps(self.state.get('steps', {}))
+
         # Build state machine
         self.state_machine = StateMachine(
             initial=str(self.state.get('initial', '__start__')),
             transitions=self.state.get('transitions', {}),
-            steps=self.state.get('steps'),
+            steps=self._steps,
         )
-
-        # Extract step configs from state.yml
-        self._steps: Dict[str, Dict[str, Any]] = self.state.get('steps', {})
 
         # Load plugin-local script tools declared in plugin.yaml tool_scripts.
         self._script_tools: Dict[str, Callable] = self._load_script_tools()
@@ -420,6 +465,10 @@ class PluginSpec:
 
     def get_step_config(self, step_id: str) -> Dict[str, Any]:
         return dict(self._steps.get(step_id, {}))
+
+    def get_step_mode(self, step_id: str) -> str:
+        """Return the step's default approval mode; legacy omissions are human."""
+        return 'auto' if self._steps.get(step_id, {}).get('mode') == 'auto' else 'human'
 
     def get_slot_def(self, slot_id: str) -> Optional[Dict[str, Any]]:
         """Find a slot definition by slot_id from the top-level slots list."""
@@ -586,6 +635,12 @@ def get_state_machine(plugin_id: str) -> Optional[StateMachine]:
 def get_step_config(plugin_id: str, step_id: str) -> Dict[str, Any]:
     spec = get_plugin(plugin_id)
     return spec.get_step_config(step_id) if spec else {}
+
+
+def get_step_mode(plugin_id: str, step_id: str) -> str:
+    """Return ``auto`` or ``human`` for the step's default approval policy."""
+    spec = get_plugin(plugin_id)
+    return spec.get_step_mode(step_id) if spec else 'human'
 
 
 def get_scenario(plugin_id: str) -> str:

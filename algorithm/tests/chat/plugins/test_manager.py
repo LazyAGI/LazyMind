@@ -117,10 +117,43 @@ def test_cold_start_trigger_prepares_launch_without_creating_task(
     assert result['outcome'] == 'ready'
     assert result['must_advance'] is True
     assert result['launch_plan']['first_step_id'] == 'step_a'
-    assert result['launch_plan']['hand_off'] is True
+    assert 'hand_off' not in result['launch_plan']
+    assert 'advance_tool' not in result['launch_plan']
+    assert 'step_a(Step A)' in result['step_name_index']
+    assert 'step_d(Step D)' in result['step_name_index']
+    assert result['first_step_default_approval'] == 'required'
     assert mock_agentic_config['prepared_plugin']['advance_committed'] is False
     mock_write_agent_data.assert_called_once()
     assert mock_write_agent_data.call_args.args[0] == 'plugin_preflight_updated'
+
+
+def test_cold_start_trigger_hides_hand_off_choice_when_tool_is_static(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config['plugin_mode'] = 'auto'
+    trigger = next(
+        tool for tool in plugin_manager.build_cold_start_tools()
+        if tool.__name__ == 'trigger_test_plugin'
+    )
+    preflight = {
+        'decision': 'ready',
+        'reason': 'matches',
+        'missing_information': [],
+        'normalized_request': 'Draw a sunset',
+        'first_step_id': 'step_a',
+    }
+
+    with patch.object(plugin_manager, '_evaluate_plugin_preflight', return_value=preflight):
+        result = json.loads(trigger(
+            request_context='Draw a sunset',
+            explicit_plugin_request=False,
+        ))
+
+    assert result['launch_plan']['advance_tool'] == 'advance_step_and_hand_off'
+    assert 'hand_off' not in result['launch_plan']
+    internal_plan = mock_agentic_config['prepared_plugin']['launch_plan']
+    assert internal_plan['hand_off'] is True
+    assert internal_plan['advance_tool'] == 'advance_step_and_hand_off'
 
 
 def test_cold_start_trigger_rejects_empty_input(loaded_plugin, mock_write_agent_data, mock_agentic_config):
@@ -320,6 +353,31 @@ def test_cold_advance_commits_exact_prepared_plan(
     assert mock_agentic_config['prepared_plugin']['advance_committed'] is True
 
 
+def test_cold_advance_allows_chat_agent_choice_when_launch_has_no_hand_off(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config['prepared_plugin'] = {
+        'plugin_id': 'test-plugin',
+        'preflight_id': 'pf-choice',
+        'must_advance': True,
+        'advance_committed': False,
+        'fallback_hand_off': True,
+        'launch_plan': {
+            'first_step_id': 'step_a',
+            'normalized_request': 'Continue to Step D, then ask for confirmation',
+        },
+    }
+
+    result = plugin_manager._commit_prepared_plugin(
+        'step_a', hand_off=False, wait_for_result=False
+    )
+
+    assert 'acceptance is pending' in result
+    params = mock_write_agent_data.call_args.kwargs['params']
+    assert params['hand_off'] is False
+    assert mock_agentic_config['prepared_plugin']['advance_committed'] is True
+
+
 def test_cold_advance_rejects_tool_that_disagrees_with_launch_plan(
         loaded_plugin, mock_write_agent_data, mock_agentic_config):
     from lazymind.chat.plugin import plugin_manager
@@ -400,6 +458,42 @@ def test_preflight_model_uses_llm_role_json_mode_and_timeout():
     assert llm.call_args.kwargs['response_format'] == {'type': 'json_object'}
     assert llm.call_args.kwargs['stream_output'] is False
     assert llm.call_args.kwargs['timeout'] == plugin_manager._PREFLIGHT_TIMEOUT_SECONDS
+    assert 'hand_off' not in llm.call_args.args[0]
+    assert 'Default approval' not in llm.call_args.args[0]
+
+
+def test_preflight_without_approval_choice_hides_mode_and_hand_off_policy():
+    from lazymind.chat.plugin import plugin_manager
+    llm = MagicMock(return_value=json.dumps({
+        'decision': 'ready',
+        'reason': 'matches',
+        'missing_information': [],
+        'normalized_request': 'Draw a sunset',
+        'first_step_id': 'step_a',
+    }))
+    with (
+        patch.object(plugin_manager, 'is_model_role_available', return_value=True),
+        patch.object(plugin_manager.lazyllm, 'AutoModel', return_value=llm),
+    ):
+        result = plugin_manager._evaluate_plugin_preflight(
+            plugin_id='test-plugin',
+            plugin_name='Test Plugin',
+            description='Test',
+            when_to_use='Use for tests',
+            scenario='Scenario',
+            request_context='Draw a sunset',
+            previous=None,
+            first_steps=['step_a'],
+            plugin_mode='auto',
+        )
+
+    prompt = llm.call_args.args[0]
+    assert result['hand_off'] is True
+    assert 'hand_off' not in prompt
+    assert 'Default approval' not in prompt
+    assert 'Plugin mode' not in prompt
+    assert 'dynamic mode' not in prompt.lower()
+    assert 'auto mode' not in prompt.lower()
 
 
 def test_preflight_json_repair_is_also_hidden_from_user_stream():
@@ -436,7 +530,7 @@ def test_preflight_json_repair_is_also_hidden_from_user_stream():
     assert all(call.kwargs['stream_output'] is False for call in llm.call_args_list)
 
 
-def test_cold_injection_keeps_trigger_non_stop_and_registers_both_advance_tools(
+def test_cold_injection_without_approval_choice_registers_only_hand_off_tool(
         loaded_plugin, mock_agentic_config):
     from lazymind.chat.plugin import plugin_manager
     mock_agentic_config['enable_plugin'] = True
@@ -454,13 +548,84 @@ def test_cold_injection_keeps_trigger_non_stop_and_registers_both_advance_tools(
 
     names = {tool.__name__ for tool in tools}
     assert 'trigger_test_plugin' in names
-    assert 'advance_step' in names
+    assert 'advance_step' not in names
     assert 'advance_step_and_hand_off' in names
     assert stop_tools == ['advance_step_and_hand_off']
     assert 'trigger_test_plugin' not in stop_tools
     assert patch_config['plugin_mode'] == 'auto'
     assert patch_config['plugin_preflight_context']['preflight_id'] == 'pf-old'
     assert 'Original request ten turns ago' in context
+    assert 'Current Plugin Launch Policy' in context
+    assert 'approval or continuation decision' in context
+
+
+def test_compact_step_name_index_has_names_but_no_graph_details(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    index = plugin_manager._build_step_name_index('test-plugin')
+
+    assert 'step_a(Step A)' in index
+    assert 'step_b(Step B)' in index
+    assert 'step_c(Step C)' in index
+    assert 'step_d(Step D)' in index
+    assert 'default approval' not in index.lower()
+    assert 'condition' not in index.lower()
+    assert 'route:' not in index.lower()
+
+
+def test_active_injection_switches_tools_and_request_local_policy_per_turn(
+        loaded_plugin, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config['enable_plugin'] = True
+    plugin_context = {
+        'session_id': 'session-1',
+        'plugin_id': 'test-plugin',
+        'current_step': 'step_a',
+    }
+
+    with (
+        patch.object(plugin_manager, '_fetch_succeeded_steps', return_value=set()),
+        patch.object(plugin_manager, '_build_session_artifact_section', return_value='artifacts'),
+        patch.object(plugin_manager, '_build_intent_section', return_value=''),
+        patch.object(plugin_manager, '_build_step_status_section', return_value='step status'),
+    ):
+        auto_result = plugin_manager.resolve_plugin_injection({
+            **plugin_context,
+            'plugin_mode': 'auto',
+        })
+        dynamic_result = plugin_manager.resolve_plugin_injection({
+            **plugin_context,
+            'plugin_mode': 'dynamic',
+        })
+
+    auto_tools, auto_system_prompt, _, _, auto_context = auto_result
+    dynamic_tools, dynamic_system_prompt, _, _, dynamic_context = dynamic_result
+    auto_names = {tool.__name__ for tool in auto_tools}
+    dynamic_names = {tool.__name__ for tool in dynamic_tools}
+
+    assert 'advance_step_and_hand_off' in auto_names
+    assert 'advance_step' not in auto_names
+    assert {'advance_step', 'advance_step_and_hand_off'} <= dynamic_names
+    assert 'Current Plugin Execution Policy' not in auto_system_prompt
+    assert 'Current Plugin Execution Policy' not in dynamic_system_prompt
+    assert 'Current Plugin Execution Policy' in auto_context
+    assert 'Current Plugin Execution Policy' in dynamic_context
+    assert 'Plugin Step Name Index' in auto_context
+    assert 'step_a(Step A)' in auto_context
+    assert 'step_d(Step D)' in dynamic_context
+    assert 'default approval' not in auto_context.lower()
+    assert '[default approval: ...]' in dynamic_context
+    assert 'auto mode' not in auto_context.lower()
+    assert 'dynamic mode' not in dynamic_context.lower()
+
+    auto_advance = next(
+        tool for tool in auto_tools if tool.__name__ == 'advance_step_and_hand_off'
+    )
+    dynamic_advance = next(
+        tool for tool in dynamic_tools if tool.__name__ == 'advance_step_and_hand_off'
+    )
+    assert 'default approval' not in (auto_advance.__doc__ or '').lower()
+    assert 'default approval' in (dynamic_advance.__doc__ or '').lower()
 
 
 def test_plugin_stream_guard_is_noop_without_ready_preflight(mock_agentic_config):
@@ -1072,6 +1237,36 @@ def test_build_advance_step_tool_docstring_contains_forward_steps(loaded_plugin)
     assert 'step_b' in doc
     assert 'Forward' in doc
     assert 'Optimize' in doc
+    assert 'default approval: required' in doc
+
+
+def test_hand_off_tool_doc_is_mode_neutral(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    hand_off = plugin_manager.build_advance_step_and_hand_off_tool(
+        'test-plugin', 'step_a', rewind_steps=[]
+    )
+    doc = hand_off.__doc__ or ''
+
+    assert 'Start the next plugin step asynchronously' in doc
+    assert 'dynamic' not in doc
+    assert 'auto' not in doc
+
+
+def test_step_choice_doc_uses_configured_default_approval(loaded_plugin):
+    from lazymind.chat.plugin import plugin_loader, plugin_manager
+
+    spec = plugin_loader.get_plugin('test-plugin')
+    assert spec is not None
+    spec._steps['step_b']['mode'] = 'auto'
+    advance = plugin_manager.build_advance_step_tool(
+        'test-plugin', 'step_a',
+        rewind_steps=[],
+        step_labels={'step_b': 'Optimize'},
+    )
+
+    assert 'step_b' in (advance.__doc__ or '')
+    assert 'default approval: not required' in (advance.__doc__ or '')
 
 
 def test_build_advance_step_tool_docstring_contains_rewind_steps(loaded_plugin):
@@ -1108,12 +1303,31 @@ def test_dynamic_guidance_respects_explicit_target_boundary(loaded_plugin):
     )
 
     assert 'target boundary' in guidance
-    assert 'Match X against the current plugin' in guidance
-    assert 'Do not assume plugin-specific step' in guidance
+    assert 'Match X against the full compact' in guidance
+    assert 'Plugin Step Name Index' in guidance
+    assert 'name index does not imply reachability or execution order' in guidance
     assert 'higher priority than generic uninterrupted phrases' in guidance
+    assert 'Do NOT hand off an' in guidance
+    assert 'confirmation at the later' in guidance
     assert 'Execute the target boundary step with `advance_step_and_hand_off`' in guidance
     assert 'Do NOT wait for the boundary step with `advance_step`' in guidance
     assert 'Do NOT call downstream steps and do NOT call `__end__`' in guidance
+    assert 'persisted session intent wins' in guidance
+    assert "target step's" in guidance
+    assert '[default approval: ...]' in guidance
+    assert 'returns the next decision to the user' in guidance
+
+
+def test_guidance_without_approval_choice_assigns_continuation_to_backend(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    guidance = plugin_manager._build_mode_guidance('auto')
+
+    assert 'backend controller evaluates the result' in guidance
+    assert 'Only `advance_step_and_hand_off` is available' in guidance
+    assert 'default approval' not in guidance.lower()
+    assert 'auto mode' not in guidance.lower()
+    assert 'dynamic mode' not in guidance.lower()
 
 
 def test_build_advance_step_tool_rewind_step_is_accepted(

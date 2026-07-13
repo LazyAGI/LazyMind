@@ -118,6 +118,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
     await updatePluginDraftContent(infoModalRecord.id, {
       plugin_yaml_content: pluginYaml,
       scenario_content: scenarioContent,
+      version: infoModalRecord.version,
     });
     message.success(t('admin.memoryPluginSaveSuccess'));
     void loadList();

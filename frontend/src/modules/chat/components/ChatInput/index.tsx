@@ -1082,30 +1082,32 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   >
                     {t("chat.promptTemplate")}
                   </div>
-                  <Tooltip title={skillDepositTooltip}>
-                    <div
-                      className={`input-bottom-actions-left-item skill-deposit-action${
-                        isSkillDepositDisabled ? " is-disabled" : ""
-                      }`}
-                      aria-disabled={isSkillDepositDisabled}
-                      role="button"
-                      tabIndex={isSkillDepositDisabled ? -1 : 0}
-                      onClick={handleSkillDeposit}
-                      onKeyDown={(event) => {
-                        if (
-                          isSkillDepositDisabled ||
-                          (event.key !== "Enter" && event.key !== " ")
-                        ) {
-                          return;
-                        }
-                        event.preventDefault();
-                        handleSkillDeposit();
-                      }}
-                    >
-                      <BulbOutlined />
-                      {t("chat.skillDeposit")}
-                    </div>
-                  </Tooltip>
+                  {isChatContent && (
+                    <Tooltip title={skillDepositTooltip}>
+                      <div
+                        className={`input-bottom-actions-left-item skill-deposit-action${
+                          isSkillDepositDisabled ? " is-disabled" : ""
+                        }`}
+                        aria-disabled={isSkillDepositDisabled}
+                        role="button"
+                        tabIndex={isSkillDepositDisabled ? -1 : 0}
+                        onClick={handleSkillDeposit}
+                        onKeyDown={(event) => {
+                          if (
+                            isSkillDepositDisabled ||
+                            (event.key !== "Enter" && event.key !== " ")
+                          ) {
+                            return;
+                          }
+                          event.preventDefault();
+                          handleSkillDeposit();
+                        }}
+                      >
+                        <BulbOutlined />
+                        {t("chat.skillDeposit")}
+                      </div>
+                    </Tooltip>
+                  )}
                   <ChatConfigModal
                     key={
                       configResetKey != null
