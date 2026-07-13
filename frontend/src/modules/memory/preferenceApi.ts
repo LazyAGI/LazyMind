@@ -1,4 +1,5 @@
 import { axiosInstance, BASE_URL } from "@/components/request";
+import type { DiffEntryLine } from "@/api/generated/core-client";
 
 const coreBasePath = `${BASE_URL}/api/core`;
 const defaultManagedDraftUserInstruct: Record<ManagedPreferenceDraftKind, string> = {
@@ -39,6 +40,7 @@ export interface PreferenceAssetRecord {
   protect: boolean;
   autoEvo: boolean;
   agentPersona?: string;
+  draftStatus?: string;
   hasPendingReviewSuggestions?: boolean;
   responseStyle?: string;
   resourceType?: string;
@@ -58,11 +60,31 @@ export interface PreferenceSuggestionPayload {
 }
 
 export interface PreferenceDraftPreviewRecord {
+  acceptedCount?: number;
+  canUndo?: boolean;
   currentContent: string;
   diff: string;
   draftContent: string;
   draftSourceVersion: number;
   draftStatus: string;
+  draftVersion?: number;
+  fileDiff?: {
+    binary: boolean;
+    diffEntryLines: DiffEntryLine[];
+    editableText: boolean;
+    hunkCount: number;
+    path: string;
+    status: string;
+    supported: boolean;
+    tooLarge: boolean;
+    unsupportedReason: string;
+  };
+  path?: string;
+  pendingCount?: number;
+  rejectedCount?: number;
+  resourceType?: string;
+  reviewId?: string;
+  reviewVersion?: number;
 }
 
 export interface PreferenceDraftGeneratePayload {
@@ -79,10 +101,20 @@ export interface PreferenceDraftGenerateRecord {
 
 export interface PreferenceDraftConfirmRecord {
   content: string;
+  revisionId: string;
   version: number;
 }
 
 export type ManagedPreferenceDraftKind = "memory" | "user-preference";
+export type ManagedPreferenceDraftDecision = "accept" | "reject";
+
+export interface ManagedPreferenceDraftReviewMutationRecord {
+  canUndo: boolean;
+  draftContent: string;
+  draftVersion: number;
+  reviewId: string;
+  reviewVersion: number;
+}
 
 export interface PreferenceSuggestionRecord {
   id: string;
@@ -392,10 +424,51 @@ export const resolveManagedPreferenceDraftKind = (
 ): ManagedPreferenceDraftKind =>
   isMemoryResourceType(resourceType) ? "memory" : "user-preference";
 
+export type PersonalResourceApiType = "memory" | "user_preference";
+
+const getPersonalResourceType = (kind: ManagedPreferenceDraftKind): PersonalResourceApiType =>
+  kind === "user-preference" ? "user_preference" : kind;
+
+export const resolvePersonalResourceApiType = (
+  resourceType?: string,
+): PersonalResourceApiType => getPersonalResourceType(resolveManagedPreferenceDraftKind(resourceType));
+
+export interface PersonalResourceFileRecord {
+  content: string;
+  draftVersion: number;
+  draftStatus: string;
+  revisionId: string;
+  revisionNo: number;
+  binary: boolean;
+  agentPersona?: string;
+  preferredName?: string;
+  responseStyle?: string;
+}
+
+export const hasPersonalResourceDraftChanges = (options: {
+  draftStatus?: string;
+  headContent: string;
+  draftContent: string;
+}): boolean => {
+  const normalizedStatus = (options.draftStatus || "").trim().toLowerCase();
+  if (normalizedStatus && normalizedStatus !== "none") {
+    return true;
+  }
+  return options.draftContent.trim() !== options.headContent.trim();
+};
+
 const getManagedPreferenceDraftEndpoint = (
   kind: ManagedPreferenceDraftKind,
-  action: "generate" | "preview" | "confirm" | "discard",
-) => `${coreBasePath}/${kind}:${action === "preview" ? "draft-preview" : action}`;
+  action: "generate" | "preview" | "commit" | "discard",
+) => {
+  if (action === "generate") {
+    return `${coreBasePath}/${kind}:generate`;
+  }
+
+  return `${coreBasePath}/personal-resource/${getPersonalResourceType(kind)}:${
+    action === "preview" ? "draft-preview" : action
+  }`;
+};
 
 const resolveManagedDraftUserInstruct = (
   kind: ManagedPreferenceDraftKind,
@@ -518,30 +591,6 @@ const extractManagedPreferenceRecords = (payload: unknown): PreferenceAssetRecor
     });
 
   return Array.from(deduped.values());
-};
-
-const pickUpsertedPreferenceRecord = (
-  records: PreferenceAssetRecord[],
-  expected: { title: string; content: string },
-) => {
-  if (!records.length) {
-    return null;
-  }
-
-  const expectedTitle = sanitizeInlineValue(expected.title);
-  const expectedContent = expected.content.trim();
-
-  return [...records]
-    .sort((left, right) => {
-      const leftScore =
-        Number(left.title === expectedTitle) * 2 +
-        Number(left.content.trim() === expectedContent);
-      const rightScore =
-        Number(right.title === expectedTitle) * 2 +
-        Number(right.content.trim() === expectedContent);
-
-      return rightScore - leftScore;
-    })[0];
 };
 
 export async function listPreferenceAssets(): Promise<PreferenceAssetRecord[]> {
@@ -676,45 +725,44 @@ export async function updatePersonalizationSetting(enabled: boolean): Promise<bo
   return Boolean(payload?.enabled);
 }
 
-export async function upsertPreferenceAsset(item: {
-  title: string;
-  content: string;
-  protect?: boolean;
-  autoEvo?: boolean;
+export interface PersonalResourceMetadataPatch {
   agentPersona?: string;
-  responseStyle?: string;
-  resourceType?: string;
   preferredName?: string;
-}): Promise<PreferenceAssetRecord> {
-  const endpoint = isMemoryResourceType(item.resourceType) ? "memory" : "user-preference";
-  const requestPayload: RawObject = {
-    content: serializePreferenceContent(item),
-  };
-  if (item.autoEvo !== undefined) {
-    requestPayload.auto_evo = Boolean(item.autoEvo);
-  }
-  if (item.agentPersona !== undefined) {
-    requestPayload.agent_persona = item.agentPersona;
-  }
-  if (item.preferredName !== undefined) {
-    requestPayload.preferred_name = item.preferredName;
-  }
-  if (item.responseStyle !== undefined) {
-    requestPayload.response_style = item.responseStyle;
-  }
-  const response = await axiosInstance.put(`${coreBasePath}/${endpoint}`, requestPayload);
-  const records = extractManagedPreferenceRecords(response.data);
-  const payload = pickUpsertedPreferenceRecord(records, item);
+  responseStyle?: string;
+  autoEvo?: boolean;
+}
 
-  return (
-    payload ||
-    parsePreferenceContent(serializePreferenceContent(item), {
-      id: item.title,
-      title: item.title,
-      protect: Boolean(item.protect),
-      autoEvo: Boolean(item.autoEvo),
-      resourceType: item.resourceType,
-    })
+const buildPersonalResourcePatchPayload = (
+  patch: PersonalResourceMetadataPatch,
+): RawObject => {
+  const requestPayload: RawObject = {};
+  if (patch.agentPersona !== undefined) {
+    requestPayload.agent_persona = patch.agentPersona;
+  }
+  if (patch.preferredName !== undefined) {
+    requestPayload.preferred_name = patch.preferredName;
+  }
+  if (patch.responseStyle !== undefined) {
+    requestPayload.response_style = patch.responseStyle;
+  }
+  if (patch.autoEvo !== undefined) {
+    requestPayload.auto_evo = patch.autoEvo;
+  }
+  return requestPayload;
+};
+
+export async function patchPersonalResourceMetadata(
+  resourceType: PersonalResourceApiType,
+  patch: PersonalResourceMetadataPatch,
+): Promise<void> {
+  const requestPayload = buildPersonalResourcePatchPayload(patch);
+  if (!Object.keys(requestPayload).length) {
+    return;
+  }
+
+  await axiosInstance.patch(
+    `${coreBasePath}/personal-resource/${resourceType}`,
+    requestPayload,
   );
 }
 
@@ -755,21 +803,9 @@ export async function generateManagedPreferenceDraft(
   input: PreferenceDraftGeneratePayload,
 ): Promise<PreferenceDraftGenerateRecord> {
   const normalizedUserInstruct = input.userInstruct.trim();
-  const requestPayload: {
-    suggestion_ids?: string[];
-    user_instruct?: string;
-  } = {};
-
-  if (input.suggestionIds) {
-    requestPayload.suggestion_ids = input.suggestionIds;
-  }
-
-  if (normalizedUserInstruct || kind !== "memory") {
-    requestPayload.user_instruct = resolveManagedDraftUserInstruct(
-      kind,
-      normalizedUserInstruct,
-    );
-  }
+  const requestPayload = {
+    user_instruct: resolveManagedDraftUserInstruct(kind, normalizedUserInstruct),
+  };
 
   const response = await axiosInstance.post(
     getManagedPreferenceDraftEndpoint(kind, "generate"),
@@ -798,13 +834,39 @@ export async function previewManagedPreferenceDraft(
 ): Promise<PreferenceDraftPreviewRecord> {
   const response = await axiosInstance.get(getManagedPreferenceDraftEndpoint(kind, "preview"));
   const payload = unwrapEnvelope<RawObject>(response.data);
+  const rawFileDiff = toRawObject(payload?.file_diff);
+  const rawEntryLines = Array.isArray(rawFileDiff?.diff_entry_lines)
+    ? rawFileDiff.diff_entry_lines
+    : [];
 
   return {
-    currentContent: toStringValue(payload?.current_content, ""),
+    acceptedCount: toNumberValue(payload?.accepted_count, 0),
+    canUndo: toBoolean(payload?.can_undo, false),
+    currentContent: toStringValue(payload?.head_content, ""),
     diff: toStringValue(payload?.diff, ""),
     draftContent: toStringValue(payload?.draft_content, ""),
     draftSourceVersion: Number(payload?.draft_source_version || 0),
     draftStatus: toStringValue(payload?.draft_status, ""),
+    draftVersion: toNumberValue(payload?.draft_version, 0),
+    fileDiff: {
+      binary: toBoolean(rawFileDiff?.binary, false),
+      diffEntryLines: rawEntryLines
+        .map((line) => toRawObject(line))
+        .filter((line): line is RawObject => Boolean(line)) as unknown as DiffEntryLine[],
+      editableText: toBoolean(rawFileDiff?.editable_text, true),
+      hunkCount: toNumberValue(rawFileDiff?.hunk_count, 0),
+      path: toStringValue(rawFileDiff?.path, toStringValue(payload?.path, "")),
+      status: toStringValue(rawFileDiff?.status, ""),
+      supported: toBoolean(rawFileDiff?.supported, true),
+      tooLarge: toBoolean(rawFileDiff?.too_large, false),
+      unsupportedReason: toStringValue(rawFileDiff?.unsupported_reason, ""),
+    },
+    path: toStringValue(payload?.path, ""),
+    pendingCount: toNumberValue(payload?.pending_count, 0),
+    rejectedCount: toNumberValue(payload?.rejected_count, 0),
+    resourceType: toStringValue(payload?.resource_type, getPersonalResourceType(kind)),
+    reviewId: toStringValue(payload?.review_id, ""),
+    reviewVersion: toNumberValue(payload?.review_version, 0),
   };
 }
 
@@ -815,12 +877,75 @@ export async function confirmPreferenceDraft(): Promise<PreferenceDraftConfirmRe
 export async function confirmManagedPreferenceDraft(
   kind: ManagedPreferenceDraftKind,
 ): Promise<PreferenceDraftConfirmRecord> {
-  const response = await axiosInstance.post(getManagedPreferenceDraftEndpoint(kind, "confirm"));
+  const preview = await previewManagedPreferenceDraft(kind);
+  const response = await axiosInstance.post(getManagedPreferenceDraftEndpoint(kind, "commit"), {
+    expected_draft_version: preview.draftVersion,
+    message: "Confirm reviewed draft",
+    source_ref_type: "draft_review",
+    source_ref_id: preview.reviewId,
+  });
   const payload = unwrapEnvelope<RawObject>(response.data);
 
   return {
     content: toStringValue(payload?.content, ""),
-    version: Number(payload?.version || 0),
+    revisionId: toStringValue(payload?.revision_id, ""),
+    version: toNumberValue(payload?.revision_no, 0),
+  };
+}
+
+export async function reviewManagedPreferenceDraftHunks(
+  kind: ManagedPreferenceDraftKind,
+  options: {
+    reviewId: string;
+    expectedReviewVersion: number;
+    items: Array<{ hunkId: string; decision: ManagedPreferenceDraftDecision }>;
+  },
+): Promise<ManagedPreferenceDraftReviewMutationRecord> {
+  const resourceType = getPersonalResourceType(kind);
+  const response = await axiosInstance.post(
+    `${coreBasePath}/personal-resource/${resourceType}/draft-review/${encodeURIComponent(
+      options.reviewId,
+    )}/actions`,
+    {
+      expected_review_version: options.expectedReviewVersion,
+      items: options.items.map((item) => ({
+        hunk_id: item.hunkId,
+        decision: item.decision,
+      })),
+    },
+  );
+  const payload = unwrapEnvelope<RawObject>(response.data);
+
+  return {
+    canUndo: toBoolean(payload?.can_undo, false),
+    draftContent: toStringValue(payload?.draft_content, ""),
+    draftVersion: toNumberValue(payload?.draft_version, 0),
+    reviewId: toStringValue(payload?.review_id, options.reviewId),
+    reviewVersion: toNumberValue(payload?.review_version, options.expectedReviewVersion),
+  };
+}
+
+export async function undoManagedPreferenceDraftReview(
+  kind: ManagedPreferenceDraftKind,
+  options: { reviewId: string; expectedReviewVersion: number },
+): Promise<ManagedPreferenceDraftReviewMutationRecord> {
+  const resourceType = getPersonalResourceType(kind);
+  const response = await axiosInstance.post(
+    `${coreBasePath}/personal-resource/${resourceType}/draft-review/${encodeURIComponent(
+      options.reviewId,
+    )}:undo`,
+    {
+      expected_review_version: options.expectedReviewVersion,
+    },
+  );
+  const payload = unwrapEnvelope<RawObject>(response.data);
+
+  return {
+    canUndo: toBoolean(payload?.can_undo, false),
+    draftContent: toStringValue(payload?.draft_content, ""),
+    draftVersion: toNumberValue(payload?.draft_version, 0),
+    reviewId: toStringValue(payload?.review_id, options.reviewId),
+    reviewVersion: toNumberValue(payload?.review_version, options.expectedReviewVersion),
   };
 }
 
@@ -833,5 +958,108 @@ export async function discardManagedPreferenceDraft(
 ): Promise<boolean> {
   const response = await axiosInstance.post(getManagedPreferenceDraftEndpoint(kind, "discard"));
   const payload = unwrapEnvelope<RawObject>(response.data);
-  return toBoolean(payload?.discarded, false);
+  return toBoolean(payload?.discarded, true);
+}
+
+const normalizePersonalResourceFile = (payload: RawObject): PersonalResourceFileRecord => ({
+  content: toStringValue(payload.content, ""),
+  draftVersion: toNumberValue(payload.draft_version, 0),
+  draftStatus: toStringValue(payload.draft_status, ""),
+  revisionId: toStringValue(payload.revision_id, ""),
+  revisionNo: toNumberValue(payload.revision_no, 0),
+  binary: toBoolean(payload.binary, false),
+  agentPersona: toStringValue(payload.agent_persona, ""),
+  preferredName: toStringValue(payload.preferred_name, ""),
+  responseStyle: toStringValue(payload.response_style, ""),
+});
+
+export async function readPersonalResourceFile(
+  resourceType: PersonalResourceApiType,
+  options?: { ref?: "head" | "draft"; revisionId?: string },
+): Promise<PersonalResourceFileRecord> {
+  const params = new URLSearchParams();
+  if (options?.ref) {
+    params.set("ref", options.ref);
+  }
+  if (options?.revisionId) {
+    params.set("revision_id", options.revisionId);
+  }
+  const query = params.toString();
+  const response = await axiosInstance.get(
+    `${coreBasePath}/personal-resource/${resourceType}:file${query ? `?${query}` : ""}`,
+  );
+  const payload = unwrapEnvelope<RawObject>(response.data);
+  return normalizePersonalResourceFile(payload || {});
+}
+
+export async function writePersonalResourceDraft(
+  resourceType: PersonalResourceApiType,
+  options: { content: string; expectedDraftVersion?: number },
+): Promise<number> {
+  const requestPayload: RawObject = {
+    content: options.content,
+  };
+  if (options.expectedDraftVersion && options.expectedDraftVersion > 0) {
+    requestPayload.expected_draft_version = options.expectedDraftVersion;
+  }
+
+  const response = await axiosInstance.put(
+    `${coreBasePath}/personal-resource/${resourceType}:file`,
+    requestPayload,
+  );
+  const payload = unwrapEnvelope<RawObject>(response.data);
+  return toNumberValue(payload?.draft_version, options.expectedDraftVersion || 0);
+}
+
+export async function commitPersonalResourceDraft(
+  resourceType: PersonalResourceApiType,
+  expectedDraftVersion: number,
+  message = "update personal resource content",
+): Promise<{ revisionId: string; revisionNo: number }> {
+  const response = await axiosInstance.post(
+    `${coreBasePath}/personal-resource/${resourceType}:commit`,
+    {
+      expected_draft_version: expectedDraftVersion,
+      message,
+    },
+  );
+  const payload = unwrapEnvelope<RawObject>(response.data);
+  return {
+    revisionId: toStringValue(payload?.revision_id, ""),
+    revisionNo: toNumberValue(payload?.revision_no, 0),
+  };
+}
+
+export async function saveAndCommitPersonalResourceContent(
+  resourceType: PersonalResourceApiType,
+  content: string,
+  options?: {
+    expectedDraftVersion?: number;
+    message?: string;
+  },
+): Promise<{ revisionId: string; revisionNo: number; draftVersion: number }> {
+  const draftVersion = await writePersonalResourceDraft(resourceType, {
+    content,
+    expectedDraftVersion: options?.expectedDraftVersion,
+  });
+  const committed = await commitPersonalResourceDraft(
+    resourceType,
+    draftVersion,
+    options?.message || "update personal resource content",
+  );
+
+  return {
+    ...committed,
+    draftVersion,
+  };
+}
+
+export async function discardPersonalResourceDraft(
+  resourceType: PersonalResourceApiType,
+): Promise<boolean> {
+  const response = await axiosInstance.post(
+    `${coreBasePath}/personal-resource/${resourceType}:discard`,
+  );
+  const payload = unwrapEnvelope<RawObject>(response.data);
+  return toBoolean(payload?.discarded, true);
 }

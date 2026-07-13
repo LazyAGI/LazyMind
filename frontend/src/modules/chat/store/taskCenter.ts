@@ -367,7 +367,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           current_phase: t.current_phase,
           estimated_sec: t.estimated_sec,
           summary: t.summary,
-            output_slots: t.output_slots,
+          output_slots: t.output_slots,
           artifacts: t.artifacts ?? [],
           execution_log: stepsToExecutionLog(t.steps ?? []),
         });

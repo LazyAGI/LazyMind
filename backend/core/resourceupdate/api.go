@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,8 +98,29 @@ type skillReviewTaskListResponse struct {
 	Total    int64                           `json:"total"`
 }
 
-type skillReviewRunStatsRow struct {
-	Status string `gorm:"column:status"`
+type skillReviewStatsRow struct {
+	ID         string `gorm:"column:id"`
+	RequestID  string `gorm:"column:requestid"`
+	UserID     string `gorm:"column:userid"`
+	Status     string `gorm:"column:status"`
+	StartedAt  string `gorm:"column:started_at"`
+	DurationMS int    `gorm:"column:duration_ms"`
+	Summary    string `gorm:"column:summary"`
+}
+
+type skillReviewStatsResponse struct {
+	ID           string          `json:"id"`
+	RequestID    string          `json:"requestid"`
+	UserID       string          `json:"userid"`
+	Status       string          `json:"status"`
+	StartedAt    string          `json:"started_at"`
+	DurationMS   int             `json:"duration_ms"`
+	SkillCount   int64           `json:"skill_count"`
+	CreatedCount int64           `json:"created_count"`
+	UpdatedCount int64           `json:"updated_count"`
+	SkippedCount int64           `json:"skipped_count"`
+	FailedCount  int64           `json:"failed_count"`
+	Summary      json.RawMessage `json:"summary"`
 }
 
 type memoryReviewResultResponse struct {
@@ -173,46 +195,6 @@ func GetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, taskToResponse(row))
-}
-
-func ListSkillReviewResults(w http.ResponseWriter, r *http.Request) {
-	db, userID, ok := requestDBAndUser(w, r)
-	if !ok {
-		return
-	}
-	page := parsePositiveQueryInt(r.URL.Query().Get("page"), 1, 0)
-	pageSize := parsePositiveQueryInt(r.URL.Query().Get("page_size"), 20, 100)
-	query := skillResultSelect(db.WithContext(r.Context())).Where("userid = ?", userID)
-	if status := strings.TrimSpace(r.URL.Query().Get("review_status")); status != "" {
-		query = query.Where("review_status = ?", status)
-	}
-	if typ := strings.TrimSpace(r.URL.Query().Get("type")); typ != "" {
-		query = query.Where("type = ?", typ)
-	}
-	if skillName := strings.TrimSpace(r.URL.Query().Get("skill_name")); skillName != "" {
-		query = query.Where("skill_name = ?", skillName)
-	}
-	if requestID := strings.TrimSpace(r.URL.Query().Get("requestid")); requestID != "" {
-		query = query.Where("requestid = ?", requestID)
-	}
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		common.ReplyErr(w, "query skill review results failed", http.StatusInternalServerError)
-		return
-	}
-	var rows []SkillReviewResult
-	if err := query.Order("time DESC, id DESC").
-		Offset((page - 1) * pageSize).
-		Limit(pageSize).
-		Find(&rows).Error; err != nil {
-		common.ReplyErr(w, "query skill review results failed", http.StatusInternalServerError)
-		return
-	}
-	items := make([]skillReviewResultResponse, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, skillResultToResponse(row))
-	}
-	common.ReplyOK(w, map[string]any{"items": items, "page": page, "page_size": pageSize, "total": total})
 }
 
 func GetSkillReviewSummary(w http.ResponseWriter, r *http.Request) {
@@ -330,22 +312,13 @@ func buildSkillReviewTaskStatus(ctx context.Context, db *gorm.DB, userID string,
 		RequestID: requestID,
 		Status:    task.Status,
 	}
-	var resultCount int64
-	if err := db.WithContext(ctx).
-		Table("skill_review_results").
-		Where("userid = ? AND requestid = ?", strings.TrimSpace(userID), requestID).
-		Count(&resultCount).Error; err != nil {
-		return skillReviewTaskStatusResponse{}, err
-	}
-	resp.ResultCount = resultCount
-
-	var runStats skillReviewRunStatsRow
+	var stats skillReviewStatsRow
 	err := db.WithContext(ctx).
-		Table("skill_review_run_stats").
-		Select("status").
+		Table("skill_review_stats").
+		Select("id, requestid, userid, status, started_at, duration_ms, summary").
 		Where("userid = ? AND requestid = ?", strings.TrimSpace(userID), requestID).
 		Order("started_at DESC").
-		Take(&runStats).Error
+		Take(&stats).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		if task.Status == orm.ResourceUpdateTaskStatusDone {
 			resp.Status = orm.ResourceUpdateTaskStatusRunning
@@ -356,8 +329,9 @@ func buildSkillReviewTaskStatus(ctx context.Context, db *gorm.DB, userID string,
 		return skillReviewTaskStatusResponse{}, err
 	}
 
-	resp.RunStatus = runStats.Status
-	resp.Status = skillReviewTaskStatusFromRunStats(task.Status, runStats.Status)
+	resp.RunStatus = stats.Status
+	resp.Status = skillReviewTaskStatusFromRunStats(task.Status, stats.Status)
+	resp.ResultCount = skillReviewStatsToResponse(stats).SkillCount
 	return resp, nil
 }
 
@@ -381,28 +355,155 @@ func skillReviewTaskStatusFromRunStats(taskStatus, runStatus string) string {
 	}
 }
 
+type skillReviewStatsCounts struct {
+	SkillCount   int64
+	CreatedCount int64
+	UpdatedCount int64
+	SkippedCount int64
+	FailedCount  int64
+}
+
+func findSkillReviewStatsRow(ctx context.Context, db *gorm.DB, userID, idOrRequestID string) (skillReviewStatsRow, error) {
+	key := strings.TrimSpace(idOrRequestID)
+	if key == "" {
+		return skillReviewStatsRow{}, errReviewInvalid
+	}
+	var row skillReviewStatsRow
+	err := db.WithContext(ctx).
+		Table("skill_review_stats").
+		Select("id, requestid, userid, status, started_at, duration_ms, summary").
+		Where("userid = ? AND (id = ? OR requestid = ?)", strings.TrimSpace(userID), key, key).
+		Order("started_at DESC, id DESC").
+		Take(&row).Error
+	return row, err
+}
+
+func skillReviewStatsToResponse(row skillReviewStatsRow) skillReviewStatsResponse {
+	summary, counts := parseSkillReviewStatsSummary(row.Summary)
+	return skillReviewStatsResponse{
+		ID:           strings.TrimSpace(row.ID),
+		RequestID:    strings.TrimSpace(row.RequestID),
+		UserID:       strings.TrimSpace(row.UserID),
+		Status:       strings.TrimSpace(row.Status),
+		StartedAt:    strings.TrimSpace(row.StartedAt),
+		DurationMS:   row.DurationMS,
+		SkillCount:   counts.SkillCount,
+		CreatedCount: counts.CreatedCount,
+		UpdatedCount: counts.UpdatedCount,
+		SkippedCount: counts.SkippedCount,
+		FailedCount:  counts.FailedCount,
+		Summary:      summary,
+	}
+}
+
+func parseSkillReviewStatsSummary(raw string) (json.RawMessage, skillReviewStatsCounts) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return json.RawMessage(`{}`), skillReviewStatsCounts{}
+	}
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil || value == nil {
+		return json.RawMessage(`{}`), skillReviewStatsCounts{}
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		encoded = []byte(`{}`)
+	}
+	summary, _ := value.(map[string]any)
+	return json.RawMessage(encoded), skillReviewStatsCountsFromSummary(summary)
+}
+
+func skillReviewStatsCountsFromSummary(summary map[string]any) skillReviewStatsCounts {
+	counts := skillReviewStatsCounts{
+		SkillCount:   summaryInt64(summary, "skill_count", "skills_count", "result_count", "results_count", "total_count", "total"),
+		CreatedCount: summaryInt64(summary, "created_count", "create_count", "new_count", "new_skill_count"),
+		UpdatedCount: summaryInt64(summary, "updated_count", "update_count", "modified_count", "patch_count", "patched_count"),
+		SkippedCount: summaryInt64(summary, "skipped_count", "skip_count"),
+		FailedCount:  summaryInt64(summary, "failed_count", "fail_count", "error_count"),
+	}
+	if counts.CreatedCount == 0 {
+		counts.CreatedCount = summaryArrayLen(summary, "created_skills", "new_skills", "create_skills")
+	}
+	if counts.UpdatedCount == 0 {
+		counts.UpdatedCount = summaryArrayLen(summary, "updated_skills", "modified_skills", "patch_skills")
+	}
+	if counts.SkippedCount == 0 {
+		counts.SkippedCount = summaryArrayLen(summary, "skipped_skills")
+	}
+	if counts.FailedCount == 0 {
+		counts.FailedCount = summaryArrayLen(summary, "failed_skills")
+	}
+	if counts.SkillCount == 0 {
+		counts.SkillCount = counts.CreatedCount + counts.UpdatedCount + counts.SkippedCount + counts.FailedCount
+	}
+	if counts.SkillCount == 0 {
+		counts.SkillCount = summaryArrayLen(summary, "skills", "items", "results", "review_results", "skill_results")
+	}
+	return counts
+}
+
+func summaryInt64(summary map[string]any, keys ...string) int64 {
+	if summary == nil {
+		return 0
+	}
+	for _, key := range keys {
+		value, ok := summary[key]
+		if !ok || value == nil {
+			continue
+		}
+		switch typed := value.(type) {
+		case json.Number:
+			if n, err := typed.Int64(); err == nil {
+				return n
+			}
+		case float64:
+			return int64(typed)
+		case int:
+			return int64(typed)
+		case int64:
+			return typed
+		case string:
+			if n, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+func summaryArrayLen(summary map[string]any, keys ...string) int64 {
+	if summary == nil {
+		return 0
+	}
+	for _, key := range keys {
+		value, ok := summary[key]
+		if !ok || value == nil {
+			continue
+		}
+		switch typed := value.(type) {
+		case []any:
+			return int64(len(typed))
+		case []map[string]any:
+			return int64(len(typed))
+		}
+	}
+	return 0
+}
+
 func GetSkillReviewResult(w http.ResponseWriter, r *http.Request) {
 	db, userID, ok := requestDBAndUser(w, r)
 	if !ok {
 		return
 	}
-	resultID := common.PathVar(r, "review_result_id")
-	var row SkillReviewResult
-	err := skillResultSelect(db.WithContext(r.Context())).Where("id = ? AND userid = ?", resultID, userID).Take(&row).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			common.ReplyErr(w, "skill review result not found", http.StatusNotFound)
-			return
-		}
-		common.ReplyErr(w, "query skill review result failed", http.StatusInternalServerError)
-		return
-	}
-	resp, err := skillResultDetailResponse(r.Context(), db, row)
+	statsID := common.PathVar(r, "review_result_id")
+	row, err := findSkillReviewStatsRow(r.Context(), db, userID, statsID)
 	if err != nil {
 		mapReviewError(w, err, "query skill review result")
 		return
 	}
-	common.ReplyOK(w, resp)
+	common.ReplyOK(w, skillReviewStatsToResponse(row))
 }
 
 func AcceptSkillReviewResult(w http.ResponseWriter, r *http.Request) {
@@ -558,7 +659,6 @@ func RejectMemoryReviewResult(w http.ResponseWriter, r *http.Request) {
 }
 
 func acceptSkillReviewResult(ctx context.Context, db *gorm.DB, userID, userName, resultID string) (SkillReviewResult, error) {
-	now := time.Now().UTC()
 	var out SkillReviewResult
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		row, err := lockSkillReviewResultForUser(ctx, tx, resultID, userID)
@@ -580,34 +680,10 @@ func acceptSkillReviewResult(ctx context.Context, db *gorm.DB, userID, userName,
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
-			resource, err := mapSkillPatchResultToResource(withUpdateLock(tx).WithContext(ctx), row)
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return errReviewNotFound
-				}
-				return err
-			}
-			if err := applySkillPatchResult(ctx, tx, row, resource, now, resourcechange.Source{
-				ChangeSource:  resourcechange.ChangeSourceReviewAccept,
-				SourceRefType: resourcechange.SourceRefTypeSkillReviewResult,
-				SourceRefID:   row.ID,
-				ChangedAt:     now,
-			}); err != nil {
-				return err
-			}
+			return errReviewNotFound
 		case skillReviewTypeNew:
 			if _, err := createSkillV2FromNewResult(ctx, tx, row, userName); err != nil {
-				if !errors.Is(err, gorm.ErrRecordNotFound) {
-					return err
-				}
-				if _, err := createSkillFromNewResult(ctx, tx, row, userName, now, resourcechange.Source{
-					ChangeSource:  resourcechange.ChangeSourceReviewAccept,
-					SourceRefType: resourcechange.SourceRefTypeSkillReviewResult,
-					SourceRefID:   row.ID,
-					ChangedAt:     now,
-				}); err != nil {
-					return err
-				}
+				return err
 			}
 			if err := updateSkillReviewStatus(ctx, tx, row.ID, reviewStatusAccepted); err != nil {
 				return err
@@ -666,14 +742,14 @@ func acceptMemoryReviewResult(ctx context.Context, db *gorm.DB, userID, resultID
 		}
 		switch normalizeReviewTarget(row.Target) {
 		case orm.ResourceUpdateResourceTypeMemory:
-			resource, err := mapMemoryReviewResultToMemory(withUpdateLock(tx).WithContext(ctx), row)
+			resource, err := mapMemoryReviewResultToPersonalResource(withUpdateLock(tx).WithContext(ctx), orm.ResourceUpdateResourceTypeMemory, row)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return errReviewNotFound
 				}
 				return err
 			}
-			if err := applyMemoryReviewResult(ctx, tx, row, resource, now, false, resourcechange.Source{
+			if err := applyPersonalResourceReviewResult(ctx, tx, orm.ResourceUpdateResourceTypeMemory, row, resource, now, false, resourcechange.Source{
 				ChangeSource:  resourcechange.ChangeSourceReviewAccept,
 				SourceRefType: resourcechange.SourceRefTypeMemoryReview,
 				SourceRefID:   row.ID,
@@ -682,14 +758,14 @@ func acceptMemoryReviewResult(ctx context.Context, db *gorm.DB, userID, resultID
 				return err
 			}
 		case orm.ResourceUpdateResourceTypeUserPreference:
-			resource, err := mapMemoryReviewResultToPreference(withUpdateLock(tx).WithContext(ctx), row)
+			resource, err := mapMemoryReviewResultToPersonalResource(withUpdateLock(tx).WithContext(ctx), orm.ResourceUpdateResourceTypeUserPreference, row)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return errReviewNotFound
 				}
 				return err
 			}
-			if err := applyPreferenceReviewResult(ctx, tx, row, resource, now, false, resourcechange.Source{
+			if err := applyPersonalResourceReviewResult(ctx, tx, orm.ResourceUpdateResourceTypeUserPreference, row, resource, now, false, resourcechange.Source{
 				ChangeSource:  resourcechange.ChangeSourceReviewAccept,
 				SourceRefType: resourcechange.SourceRefTypeMemoryReview,
 				SourceRefID:   row.ID,
@@ -758,11 +834,6 @@ func LatestPendingSkillPatchReviewResult(ctx context.Context, db *gorm.DB, userI
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return SkillReviewResult{}, err
 		}
-		if _, err := mapSkillPatchResultToResource(db.WithContext(ctx), row); err == nil {
-			return row, nil
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return SkillReviewResult{}, err
-		}
 	}
 	return SkillReviewResult{}, errReviewNotFound
 }
@@ -789,9 +860,9 @@ func LatestPendingMemoryReviewResult(ctx context.Context, db *gorm.DB, userID, t
 		var err error
 		switch target {
 		case orm.ResourceUpdateResourceTypeMemory:
-			_, err = mapMemoryReviewResultToMemory(db.WithContext(ctx), row)
+			_, err = mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeMemory, row)
 		case orm.ResourceUpdateResourceTypeUserPreference:
-			_, err = mapMemoryReviewResultToPreference(db.WithContext(ctx), row)
+			_, err = mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeUserPreference, row)
 		default:
 			return MemoryReviewResult{}, errReviewInvalid
 		}
@@ -890,21 +961,7 @@ func skillResultDetailResponse(ctx context.Context, db *gorm.DB, row SkillReview
 		resp.DiffEntryLines = buildReviewDiffEntryLines(ctx, current, row.SkillContent)
 		return resp, nil
 	}
-	resource, err := mapSkillPatchResultToResource(db.WithContext(ctx), row)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return skillReviewResultResponse{}, errReviewNotFound
-		}
-		return skillReviewResultResponse{}, err
-	}
-	resp.CurrentContent = resource.Content
-	diff, err := evolution.BuildContentDiff(resource.Content, row.SkillContent)
-	if err != nil {
-		return skillReviewResultResponse{}, err
-	}
-	resp.Diff = diff
-	resp.DiffEntryLines = buildReviewDiffEntryLines(ctx, resource.Content, row.SkillContent)
-	return resp, nil
+	return skillReviewResultResponse{}, errReviewNotFound
 }
 
 func buildReviewDiffEntryLines(ctx context.Context, currentContent, draftContent string) []reviewDiffEntryLineResponse {
@@ -973,23 +1030,31 @@ func memoryResultDetailResponse(ctx context.Context, db *gorm.DB, row MemoryRevi
 	var currentContent string
 	switch normalizeReviewTarget(row.Target) {
 	case orm.ResourceUpdateResourceTypeMemory:
-		resource, err := mapMemoryReviewResultToMemory(db.WithContext(ctx), row)
+		resource, err := mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeMemory, row)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return memoryReviewResultResponse{}, errReviewNotFound
 			}
 			return memoryReviewResultResponse{}, err
 		}
-		currentContent = resource.Content
+		content, _, err := personalResourceHeadContent(ctx, db, resource)
+		if err != nil {
+			return memoryReviewResultResponse{}, err
+		}
+		currentContent = content
 	case orm.ResourceUpdateResourceTypeUserPreference:
-		resource, err := mapMemoryReviewResultToPreference(db.WithContext(ctx), row)
+		resource, err := mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeUserPreference, row)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return memoryReviewResultResponse{}, errReviewNotFound
 			}
 			return memoryReviewResultResponse{}, err
 		}
-		currentContent = evolution.FormatSystemUserPreferenceForChat(resource)
+		content, _, err := personalResourceHeadContent(ctx, db, resource)
+		if err != nil {
+			return memoryReviewResultResponse{}, err
+		}
+		currentContent = content
 	default:
 		return memoryReviewResultResponse{}, errReviewInvalid
 	}
@@ -1006,9 +1071,9 @@ func memoryReviewResultMapped(ctx context.Context, db *gorm.DB, row MemoryReview
 	var err error
 	switch normalizeReviewTarget(row.Target) {
 	case orm.ResourceUpdateResourceTypeMemory:
-		_, err = mapMemoryReviewResultToMemory(db.WithContext(ctx), row)
+		_, err = mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeMemory, row)
 	case orm.ResourceUpdateResourceTypeUserPreference:
-		_, err = mapMemoryReviewResultToPreference(db.WithContext(ctx), row)
+		_, err = mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeUserPreference, row)
 	default:
 		return false
 	}

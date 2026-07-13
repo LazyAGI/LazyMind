@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/resourcefs"
 )
 
 func newTestDB(t *testing.T) *orm.DB {
@@ -23,37 +24,105 @@ func newTestDB(t *testing.T) *orm.DB {
 	return db
 }
 
+func createPublishedV2Skill(t *testing.T, db *orm.DB, id, userID, userName, category, skillName, content string) {
+	t.Helper()
+	now := time.Now()
+	revisionID := id + "-rev-1"
+	hash := HashContent(content)
+	if err := db.Create(&orm.SkillV2Skill{
+		ID:                 id,
+		OwnerUserID:        userID,
+		OwnerUserName:      userName,
+		CreateUserID:       userID,
+		CreateUserName:     userName,
+		Category:           category,
+		SkillName:          skillName,
+		Tags:               []byte("[]"),
+		RelativeRoot:       filepath.ToSlash(filepath.Join(category, skillName)),
+		SkillMDPath:        "SKILL.md",
+		HeadRevisionID:     &revisionID,
+		Version:            1,
+		AutoEvoApplyStatus: "idle",
+		IsEnabled:          true,
+		UpdateStatus:       "up_to_date",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}).Error; err != nil {
+		t.Fatalf("create v2 skill: %v", err)
+	}
+	if err := db.Create(&orm.SkillV2Revision{
+		ID:           revisionID,
+		SkillID:      id,
+		RevisionNo:   1,
+		TreeHash:     hash,
+		ChangeSource: "create",
+		CreatedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("create v2 revision: %v", err)
+	}
+	if err := db.Create(&orm.SkillV2Blob{
+		Hash:           hash,
+		Size:           int64(len([]byte(content))),
+		Mime:           "text/markdown; charset=utf-8",
+		FileType:       "markdown",
+		Binary:         false,
+		StorageBackend: "postgres",
+		Content:        []byte(content),
+		CreatedAt:      now,
+	}).Error; err != nil {
+		t.Fatalf("create v2 blob: %v", err)
+	}
+	if err := db.Create(&orm.SkillV2RevisionEntry{
+		RevisionID: revisionID,
+		Path:       "SKILL.md",
+		EntryType:  "file",
+		BlobHash:   &hash,
+		Size:       int64(len([]byte(content))),
+		Mime:       "text/markdown; charset=utf-8",
+		FileType:   "markdown",
+		Mode:       420,
+	}).Error; err != nil {
+		t.Fatalf("create v2 revision entry: %v", err)
+	}
+}
+
+func commitTestPersonalResource(t *testing.T, db *orm.DB, userID string, resourceType resourcefs.ResourceType, content string) {
+	t.Helper()
+	ctx := context.Background()
+	service := resourcefs.NewService(resourcefs.ServiceDeps{DB: db.DB})
+	ref := resourcefs.ResourceRef{UserID: userID, ResourceType: resourceType}
+	if _, err := service.EnsureResource(ctx, ref, ""); err != nil {
+		t.Fatalf("ensure personal resource: %v", err)
+	}
+	draft, err := service.ReadFile(ctx, resourcefs.ReadFileRequest{Ref: ref, RefType: resourcefs.FileRefDraft})
+	if err != nil {
+		t.Fatalf("read personal resource draft: %v", err)
+	}
+	written, err := service.WriteDraft(ctx, resourcefs.WriteDraftRequest{
+		Ref:                  ref,
+		Content:              content,
+		ExpectedDraftVersion: draft.DraftVersion,
+		UpdatedBy:            userID,
+	})
+	if err != nil {
+		t.Fatalf("write personal resource draft: %v", err)
+	}
+	if _, err := service.CommitDraft(ctx, resourcefs.CommitDraftRequest{
+		Ref:                  ref,
+		Message:              "test commit",
+		ExpectedDraftVersion: written.DraftVersion,
+		CreatedBy:            userID,
+	}); err != nil {
+		t.Fatalf("commit personal resource draft: %v", err)
+	}
+}
+
 func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.T) {
 	db := newTestDB(t)
 
 	relativePath := ParentSkillRelativePath("coding", "git-workflow")
 	content := "---\nname: git-workflow\ndescription: git workflow\n---\nbody"
-
-	now := time.Now()
-	skill := orm.SkillResource{
-		ID:              "skill-1",
-		OwnerUserID:     "u1",
-		OwnerUserName:   "User 1",
-		Category:        "coding",
-		ParentSkillName: "git-workflow",
-		SkillName:       "git-workflow",
-		NodeType:        SkillNodeTypeParent,
-		FileExt:         "md",
-		RelativePath:    relativePath,
-		Content:         content,
-		ContentSize:     int64(len([]byte(content))),
-		MimeType:        "text/markdown; charset=utf-8",
-		ContentHash:     HashContent(content),
-		IsEnabled:       true,
-		UpdateStatus:    UpdateStatusUpToDate,
-		CreateUserID:    "u1",
-		CreateUserName:  "User 1",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := db.Create(&skill).Error; err != nil {
-		t.Fatalf("create skill: %v", err)
-	}
+	createPublishedV2Skill(t, db, "skill-1", "u1", "User 1", "coding", "git-workflow", content)
 
 	ctx, err := BuildChatResourceContext(context.Background(), db.DB, "u1", "User 1", "session-1")
 	if err != nil {
@@ -83,20 +152,12 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 		t.Fatalf("expected second user personalization enabled by default")
 	}
 
-	var memoryCount int64
-	if err := db.Model(&orm.SystemMemory{}).Count(&memoryCount).Error; err != nil {
-		t.Fatalf("count system_memories: %v", err)
+	var personalResourceCount int64
+	if err := db.Model(&orm.PersonalResource{}).Count(&personalResourceCount).Error; err != nil {
+		t.Fatalf("count personal resources: %v", err)
 	}
-	if memoryCount != 2 {
-		t.Fatalf("expected 2 system memory rows, got %d", memoryCount)
-	}
-
-	var preferenceCount int64
-	if err := db.Model(&orm.SystemUserPreference{}).Count(&preferenceCount).Error; err != nil {
-		t.Fatalf("count system_user_preferences: %v", err)
-	}
-	if preferenceCount != 2 {
-		t.Fatalf("expected 2 system user preference rows, got %d", preferenceCount)
+	if personalResourceCount != 4 {
+		t.Fatalf("expected 4 personal resource rows, got %d", personalResourceCount)
 	}
 
 	var snapshotCount int64
@@ -110,33 +171,19 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	if err := db.Where("session_id = ? AND resource_type = ?", "session-1", ResourceTypeSkill).Take(&skillSnapshot).Error; err != nil {
 		t.Fatalf("query skill snapshot: %v", err)
 	}
-	if skillSnapshot.ResourceKey != skill.ID {
-		t.Fatalf("expected skill snapshot resource_key to use skill id %q, got %q", skill.ID, skillSnapshot.ResourceKey)
+	if skillSnapshot.ResourceKey != "skill-1" {
+		t.Fatalf("expected skill snapshot resource_key to use skill id %q, got %q", "skill-1", skillSnapshot.ResourceKey)
 	}
 	if skillSnapshot.RelativePath != relativePath {
 		t.Fatalf("expected skill snapshot relative_path %q, got %q", relativePath, skillSnapshot.RelativePath)
 	}
 
-	var memories []orm.SystemMemory
-	if err := db.Order("user_id ASC").Find(&memories).Error; err != nil {
-		t.Fatalf("list system_memories: %v", err)
+	var resources []orm.PersonalResource
+	if err := db.Order("user_id ASC, resource_type ASC").Find(&resources).Error; err != nil {
+		t.Fatalf("list personal resources: %v", err)
 	}
-	if len(memories) != 2 || memories[0].UserID != "u1" || memories[1].UserID != "u2" {
-		t.Fatalf("expected per-user memory rows for u1/u2, got %#v", memories)
-	}
-	if ctx.Memory != FormatSystemMemoryForChat(memories[0]) {
-		t.Fatalf("expected formatted memory context, got %q", ctx.Memory)
-	}
-
-	var prefs []orm.SystemUserPreference
-	if err := db.Order("user_id ASC").Find(&prefs).Error; err != nil {
-		t.Fatalf("list system_user_preferences: %v", err)
-	}
-	if len(prefs) != 2 || prefs[0].UserID != "u1" || prefs[1].UserID != "u2" {
-		t.Fatalf("expected per-user preference rows for u1/u2, got %#v", prefs)
-	}
-	if ctx.UserPreference != FormatSystemUserPreferenceForChat(prefs[0]) {
-		t.Fatalf("expected formatted preference context, got %q", ctx.UserPreference)
+	if len(resources) != 4 || resources[0].UserID != "u1" || resources[2].UserID != "u2" {
+		t.Fatalf("expected per-user personal resource rows for u1/u2, got %#v", resources)
 	}
 }
 
@@ -255,45 +302,21 @@ func TestBuildChatResourceContextSkipsInvalidEnabledV2Skill(t *testing.T) {
 func TestBuildChatResourceContextFormatsUserPreferenceForChat(t *testing.T) {
 	db := newTestDB(t)
 
-	now := time.Now()
-	memory := orm.SystemMemory{
-		ID:            "memory-1",
-		UserID:        "u1",
-		Content:       "memory-content",
-		Version:       1,
-		UpdatedBy:     "u1",
-		UpdatedByName: "User 1",
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-	memory.ContentHash = HashSystemMemory(memory)
-	if err := db.Create(&memory).Error; err != nil {
-		t.Fatalf("create memory: %v", err)
-	}
 	preference := orm.SystemUserPreference{
-		ID:            "preference-1",
-		UserID:        "u1",
 		Content:       "记住用户偏好简洁回答",
 		AgentPersona:  "资深研究助理",
 		PreferredName: "老师",
 		ResponseStyle: "先结论后解释",
-		Version:       1,
-		UpdatedBy:     "u1",
-		UpdatedByName: "User 1",
-		CreatedAt:     now,
-		UpdatedAt:     now,
 	}
-	preference.ContentHash = HashSystemUserPreference(preference)
-	if err := db.Create(&preference).Error; err != nil {
-		t.Fatalf("create preference: %v", err)
-	}
+	want := FormatSystemUserPreferenceForChat(preference)
+	commitTestPersonalResource(t, db, "u1", resourcefs.ResourceTypeMemory, "memory-content")
+	commitTestPersonalResource(t, db, "u1", resourcefs.ResourceTypeUserPreference, want)
 
 	ctx, err := BuildChatResourceContext(context.Background(), db.DB, "u1", "User 1", "session-memory")
 	if err != nil {
 		t.Fatalf("build chat resource context: %v", err)
 	}
 
-	want := "---\nagent_persona: |-\n 资深研究助理\npreferred_name: |-\n 老师\nresponse_style: |-\n 先结论后解释\n---\n\n记住用户偏好简洁回答"
 	if ctx.Memory != "memory-content" {
 		t.Fatalf("unexpected memory context: %q", ctx.Memory)
 	}

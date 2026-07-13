@@ -1,6 +1,7 @@
 package filediff
 
 import (
+	"fmt"
 	"html"
 	"strings"
 	"unicode/utf8"
@@ -68,7 +69,7 @@ func CompareContent(old Content, next Content, opts Options) (FileDiff, error) {
 func buildTextDiff(oldText, newText string) []DiffEntryLine {
 	oldLines, oldHasFinalNewline := splitLines(oldText)
 	newLines, newHasFinalNewline := splitLines(newText)
-	lines := []DiffEntryLine{{Type: "HUNK", Text: "@@ -1 +1 @@", HTML: "@@ -1 +1 @@", HunkID: "hunk_1"}}
+	lines := []DiffEntryLine{}
 	oldLine, newLine := 1, 1
 	for len(oldLines) > 0 || len(newLines) > 0 {
 		switch {
@@ -98,7 +99,7 @@ func buildTextDiff(oldText, newText string) []DiffEntryLine {
 	if oldHasFinalNewline != newHasFinalNewline && len(lines) > 0 {
 		lines[len(lines)-1].DisplayNoNewLineWarning = true
 	}
-	return lines
+	return insertHunkHeaders(lines)
 }
 
 func splitLines(text string) ([]string, bool) {
@@ -217,6 +218,131 @@ func renderInlineDiffHTML(runes []rune, changed []bool, class string) string {
 
 func wrapDiffSpan(class, escapedText string) string {
 	return `<span class="` + class + `">` + escapedText + `</span>`
+}
+
+func insertHunkHeaders(lines []DiffEntryLine) []DiffEntryLine {
+	hasChange := false
+	for _, line := range lines {
+		if startsDiffHunk(line) {
+			hasChange = true
+			break
+		}
+	}
+	if !hasChange {
+		return nil
+	}
+
+	out := make([]DiffEntryLine, 0, len(lines)+1)
+	hunkIndex := 1
+	out = append(out, newHunkHeader(hunkIndex))
+	seenChange := false
+	contextSinceChange := false
+	for _, line := range lines {
+		if startsDiffHunk(line) {
+			if seenChange && contextSinceChange {
+				hunkIndex++
+				out = append(out, newHunkHeader(hunkIndex))
+			}
+			seenChange = true
+			contextSinceChange = false
+			out = append(out, line)
+			continue
+		}
+		if seenChange {
+			contextSinceChange = true
+		}
+		out = append(out, line)
+	}
+	updateHunkHeaders(out)
+	return out
+}
+
+func newHunkHeader(index int) DiffEntryLine {
+	return DiffEntryLine{Type: "HUNK", HunkID: fmt.Sprintf("hunk_%d", index)}
+}
+
+func isChangedDiffLine(line DiffEntryLine) bool {
+	return line.Type == "ADDITION" || line.Type == "DELETION"
+}
+
+func startsDiffHunk(line DiffEntryLine) bool {
+	return isChangedDiffLine(line) || line.DisplayNoNewLineWarning
+}
+
+func updateHunkHeaders(lines []DiffEntryLine) {
+	for i := range lines {
+		if lines[i].Type != "HUNK" {
+			continue
+		}
+		end := len(lines)
+		for j := i + 1; j < len(lines); j++ {
+			if lines[j].Type == "HUNK" {
+				end = j
+				break
+			}
+		}
+		oldStart, oldLines, newStart, newLines := hunkRange(lines[i+1 : end])
+		lines[i].OldStart = oldStart
+		lines[i].OldLines = oldLines
+		lines[i].NewStart = newStart
+		lines[i].NewLines = newLines
+		lines[i].Text = formatHunkHeader(oldStart, oldLines, newStart, newLines)
+		lines[i].HTML = html.EscapeString(lines[i].Text)
+	}
+}
+
+func hunkRange(lines []DiffEntryLine) (int, int, int, int) {
+	oldStart, newStart := 0, 0
+	oldLines, newLines := 0, 0
+	for _, line := range lines {
+		switch line.Type {
+		case "CONTEXT":
+			if line.OldLine > 0 {
+				if oldStart == 0 {
+					oldStart = line.OldLine
+				}
+				oldLines++
+			}
+			if line.NewLine > 0 {
+				if newStart == 0 {
+					newStart = line.NewLine
+				}
+				newLines++
+			}
+		case "DELETION":
+			if line.OldLine > 0 {
+				if oldStart == 0 {
+					oldStart = line.OldLine
+				}
+				oldLines++
+			}
+		case "ADDITION":
+			if line.NewLine > 0 {
+				if newStart == 0 {
+					newStart = line.NewLine
+				}
+				newLines++
+			}
+		}
+	}
+	if oldStart == 0 {
+		oldStart = 1
+	}
+	if newStart == 0 {
+		newStart = 1
+	}
+	return oldStart, oldLines, newStart, newLines
+}
+
+func formatHunkHeader(oldStart, oldLines, newStart, newLines int) string {
+	return fmt.Sprintf("@@ -%s +%s @@", formatHunkRange(oldStart, oldLines), formatHunkRange(newStart, newLines))
+}
+
+func formatHunkRange(start, lines int) string {
+	if lines == 1 {
+		return fmt.Sprintf("%d", start)
+	}
+	return fmt.Sprintf("%d,%d", start, lines)
 }
 
 func injectedContextText(text string, opts Options) string {

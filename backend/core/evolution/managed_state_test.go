@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/resourcefs"
 	"lazymind/core/store"
 )
 
@@ -35,109 +35,14 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
-	now := time.Now()
-	memory := orm.SystemMemory{
-		ID:            "memory-1",
-		UserID:        "u1",
-		Content:       "倾向于先结论后论证，遇到风险点时优先列出明确建议。",
-		Version:       1,
-		UpdatedBy:     "u1",
-		UpdatedByName: "User 1",
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-	memory.ContentHash = HashSystemMemory(memory)
-	if err := db.Create(&memory).Error; err != nil {
-		t.Fatalf("create memory: %v", err)
-	}
 	preference := orm.SystemUserPreference{
-		ID:            "preference-1",
-		UserID:        "u1",
 		Content:       "用户偏好简洁回答。",
 		AgentPersona:  "严谨助手",
 		PreferredName: "老师",
 		ResponseStyle: "先结论后论证",
-		Version:       1,
-		UpdatedBy:     "u1",
-		UpdatedByName: "User 1",
-		CreatedAt:     now,
-		UpdatedAt:     now,
 	}
-	preference.ContentHash = HashSystemUserPreference(preference)
-	if err := db.Create(&preference).Error; err != nil {
-		t.Fatalf("create preference: %v", err)
-	}
-	suggestions := []orm.ResourceSuggestion{
-		{
-			ID:           "memory-suggestion-1",
-			UserID:       "u1",
-			ResourceType: ResourceTypeMemory,
-			ResourceKey:  SystemResourceKey(ResourceTypeMemory),
-			Action:       "modify",
-			SessionID:    "session-memory-1",
-			Title:        "memory suggestion",
-			Content:      "补充新的记忆意见",
-			Status:       "pending_review",
-			CreatedAt:    now,
-			UpdatedAt:    now,
-		},
-		{
-			ID:           "preference-suggestion-1",
-			UserID:       "u1",
-			ResourceType: ResourceTypeUserPreference,
-			ResourceKey:  SystemResourceKey(ResourceTypeUserPreference),
-			Action:       "modify",
-			SessionID:    "session-preference-1",
-			Title:        "preference suggestion",
-			Content:      "补充新的偏好意见",
-			Status:       "accepted",
-			CreatedAt:    now,
-			UpdatedAt:    now,
-		},
-	}
-	if err := db.Create(&suggestions).Error; err != nil {
-		t.Fatalf("create suggestions: %v", err)
-	}
-	if err := db.Table("memory_review").Create([]map[string]any{
-		{
-			"id":             "memory-review-result-1",
-			"user_id":        "u1",
-			"target":         ResourceTypeMemory,
-			"session_id":     "",
-			"source_content": "",
-			"operations":     "[]",
-			"content":        "new memory",
-			"state":          "success",
-			"review_status":  "pending",
-			"time":           now,
-		},
-		{
-			"id":             "preference-review-result-1",
-			"user_id":        "u1",
-			"target":         ResourceTypeUserPreference,
-			"session_id":     "",
-			"source_content": "",
-			"operations":     "[]",
-			"content":        "---\nagent_persona: 严谨助手\npreferred_name: 老师\nresponse_style: 先结论后论证\n---\n用户偏好简洁回答。",
-			"state":          "success",
-			"review_status":  "pending",
-			"time":           now,
-		},
-		{
-			"id":             "memory-review-result-other-user",
-			"user_id":        "u2",
-			"target":         ResourceTypeMemory,
-			"session_id":     "",
-			"source_content": "",
-			"operations":     "[]",
-			"content":        "other user memory",
-			"state":          "success",
-			"review_status":  "pending",
-			"time":           now,
-		},
-	}).Error; err != nil {
-		t.Fatalf("create review results: %v", err)
-	}
+	commitTestPersonalResource(t, db, "u1", resourcefs.ResourceTypeMemory, "倾向于先结论后论证，遇到风险点时优先列出明确建议。")
+	commitTestPersonalResource(t, db, "u1", resourcefs.ResourceTypeUserPreference, FormatSystemUserPreferenceForChat(preference))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/personalization-items", nil)
 	req.Header.Set("X-User-Id", "u1")
@@ -173,11 +78,11 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 	if memoryItem.AgentPersona != nil || memoryItem.PreferredName != nil || memoryItem.ResponseStyle != nil {
 		t.Fatalf("expected memory metadata fields to be omitted, got %#v", memoryItem)
 	}
-	if !memoryItem.HasPendingReviewResult {
-		t.Fatalf("expected memory item to show pending review result")
+	if memoryItem.HasPendingReviewResult {
+		t.Fatalf("expected memory item to have no pending review result")
 	}
-	if memoryItem.ReviewStatus != ReviewStatusPending {
-		t.Fatalf("expected memory review_status pending, got %q", memoryItem.ReviewStatus)
+	if memoryItem.ReviewStatus != ReviewStatusNone {
+		t.Fatalf("expected memory review_status none, got %q", memoryItem.ReviewStatus)
 	}
 
 	preferenceItem := resp.Data.Items[1]
@@ -187,25 +92,25 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 	if preferenceItem.Title != ManagedPreferenceTitle {
 		t.Fatalf("expected preference title %q, got %q", ManagedPreferenceTitle, preferenceItem.Title)
 	}
-	if preferenceItem.ResourceID != "preference-1" || preferenceItem.Content != "用户偏好简洁回答。" || preferenceItem.ContentSummary == "" {
+	if preferenceItem.ResourceID == "" || preferenceItem.Content != "用户偏好简洁回答。" || preferenceItem.ContentSummary == "" {
 		t.Fatalf("unexpected preference item, got %#v", preferenceItem)
 	}
 	if stringValue(preferenceItem.AgentPersona) != "严谨助手" || stringValue(preferenceItem.PreferredName) != "老师" || stringValue(preferenceItem.ResponseStyle) != "先结论后论证" {
 		t.Fatalf("unexpected preference metadata: %#v", preferenceItem)
 	}
-	if !preferenceItem.HasPendingReviewResult {
-		t.Fatalf("expected preference item to show pending review result")
+	if preferenceItem.HasPendingReviewResult {
+		t.Fatalf("expected preference item to have no pending review result")
 	}
-	if preferenceItem.ReviewStatus != ReviewStatusPending {
-		t.Fatalf("expected preference review_status pending, got %q", preferenceItem.ReviewStatus)
+	if preferenceItem.ReviewStatus != ReviewStatusNone {
+		t.Fatalf("expected preference review_status none, got %q", preferenceItem.ReviewStatus)
 	}
 
-	var preferenceCount int64
-	if err := db.Model(&orm.SystemUserPreference{}).Count(&preferenceCount).Error; err != nil {
-		t.Fatalf("count preferences: %v", err)
+	var resourceCount int64
+	if err := db.Model(&orm.PersonalResource{}).Count(&resourceCount).Error; err != nil {
+		t.Fatalf("count personal resources: %v", err)
 	}
-	if preferenceCount != 1 {
-		t.Fatalf("expected list endpoint to preserve existing preference row, got %d", preferenceCount)
+	if resourceCount != 2 {
+		t.Fatalf("expected list endpoint to preserve personal resource rows, got %d", resourceCount)
 	}
 }
 
