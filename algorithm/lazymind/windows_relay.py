@@ -25,7 +25,11 @@ def enable_windows_relay_payload_files() -> None:
 
     def payload_root() -> Path:
         runtime_root = os.environ.get('LAZYMIND_RUNTIME_ROOT')
-        root = Path(runtime_root) / 'tmp' / 'relay-payloads' if runtime_root else Path(tempfile.gettempdir()) / 'lazymind-relay-payloads'
+        root = (
+            Path(runtime_root) / 'tmp' / 'relay-payloads'
+            if runtime_root
+            else Path(tempfile.gettempdir()) / 'lazymind-relay-payloads'
+        )
         root.mkdir(parents=True, exist_ok=True)
         return root
 

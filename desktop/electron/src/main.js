@@ -4,6 +4,7 @@ const { randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
+const { runtimeExitFailureMessage, statusFailureMessage } = require("./runtime-status");
 
 const isWindows = process.platform === "win32";
 const windowsDesktopPaths = isWindows
@@ -500,15 +501,6 @@ function beginFastQuit(reason = "quit") {
   app.quit();
 }
 
-function statusFailureMessage(status) {
-  const summary = status?.overallStatus ? `Runtime status is ${status.overallStatus}` : "Runtime did not become ready";
-  const failedServices = Object.entries(status?.services || {})
-    .filter(([, service]) => ["failed", "stale", "stopped"].includes(service?.status))
-    .map(([name, service]) => `${name}:${service.status}`)
-    .slice(0, 8);
-  return failedServices.length ? `${summary}; services: ${failedServices.join(", ")}` : summary;
-}
-
 function sameRuntimePath(left, right) {
   if (!left || !right) {
     return false;
@@ -564,8 +556,9 @@ async function waitForRuntimeReady() {
         startRuntime();
         continue;
       }
-      if (runtimeProcessExit && ["stopped", "stale", "unknown", ""].includes(status.overallStatus || "")) {
-        throw new Error(statusFailureMessage(status));
+      const exitFailure = runtimeExitFailureMessage(status, belongsToDesktop, runtimeProcessExit);
+      if (exitFailure) {
+        throw new Error(exitFailure);
       }
     } catch (error) {
       if (Date.now() >= nextStatusErrorLogAt) {
