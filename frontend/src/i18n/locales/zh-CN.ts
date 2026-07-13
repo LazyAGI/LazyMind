@@ -1134,6 +1134,7 @@ const zhCN = {
     history: "历史任务",
     artifacts: "产出",
     executionProcess: "执行过程",
+    estimatedSeconds: "约 {{seconds}} 秒",
     empty: "暂无任务",
     statusSucceeded: "已完成",
     statusCompleted: "已完成",

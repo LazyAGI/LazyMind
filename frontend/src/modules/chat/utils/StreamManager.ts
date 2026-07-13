@@ -1,6 +1,7 @@
 
 
 import { SSE } from "./sse";
+import i18n from "@/i18n";
 
 export interface StreamCallbacks {
   message?: (e: CustomEvent) => void;
@@ -301,7 +302,7 @@ class StreamManager {
         }
         stream.close();
       } catch (error) {
-        console.error("[StreamManager] 关闭流失败:", error);
+        console.error(i18n.t("chat.streamCloseFailedLog"), error);
       }
     }
 

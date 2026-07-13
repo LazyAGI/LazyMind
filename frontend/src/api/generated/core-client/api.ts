@@ -256,6 +256,19 @@ export interface BatchDeleteWordGroupsResponse {
 export interface BatchUploadTasksResponse {
     'tasks'?: Array<TaskResponse>;
 }
+export interface BuiltinSkillListOpenAPIResponse {
+    'items'?: Array<BuiltinSkillOpenAPIResponse>;
+    'total'?: number;
+}
+export interface BuiltinSkillOpenAPIResponse {
+    'builtin_skill_uid'?: string;
+    'category'?: string;
+    'content'?: string;
+    'description'?: string;
+    'installed'?: boolean;
+    'installed_skill_id'?: string;
+    'name'?: string;
+}
 export interface CanResult {
     'allowed'?: boolean;
 }
@@ -9779,9 +9792,9 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
+         * 
          * @summary Delete prompt category
-         * @param {string} name
+         * @param {string} name 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -9813,9 +9826,9 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
+         * 
          * @summary Create prompt category
-         * @param {PromptCategoryRequest} promptCategoryRequest
+         * @param {PromptCategoryRequest} promptCategoryRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -9848,15 +9861,15 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
+         * 
          * @summary Prompt list
          * @param {number} [pageSize] 
          * @param {string} [pageToken] 
          * @param {string} [keyword] 
-         * @param {string} [category]
-         * @param {string} [scope]
-         * @param {string} [sort]
-         * @param {string} [locale]
+         * @param {string} [category] 
+         * @param {string} [scope] 
+         * @param {string} [sort] 
+         * @param {string} [locale] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -9949,7 +9962,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Favorite prompt
-         * @param {string} name
+         * @param {string} name 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -9981,7 +9994,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
+         * 
          * @summary Get prompt
          * @param {string} name 
          * @param {*} [options] Override http request option.
@@ -10090,7 +10103,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Unfavorite prompt
-         * @param {string} name
+         * @param {string} name 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -10122,7 +10135,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
+         * 
          * @summary Unset default prompt
          * @param {string} name 
          * @param {*} [options] Override http request option.
@@ -10158,7 +10171,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Record prompt usage
-         * @param {string} name
+         * @param {string} name 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -10190,7 +10203,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         *
+         * 
          * @summary Polish prompt
          * @param {PromptPolishRequest} promptPolishRequest 
          * @param {*} [options] Override http request option.
@@ -12859,9 +12872,9 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
+         * 
          * @summary Delete prompt category
-         * @param {string} name
+         * @param {string} name 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -12872,9 +12885,9 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
+         * 
          * @summary Create prompt category
-         * @param {PromptCategoryRequest} promptCategoryRequest
+         * @param {PromptCategoryRequest} promptCategoryRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -12885,15 +12898,15 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
+         * 
          * @summary Prompt list
          * @param {number} [pageSize] 
          * @param {string} [pageToken] 
          * @param {string} [keyword] 
-         * @param {string} [category]
-         * @param {string} [scope]
-         * @param {string} [sort]
-         * @param {string} [locale]
+         * @param {string} [category] 
+         * @param {string} [scope] 
+         * @param {string} [sort] 
+         * @param {string} [locale] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -12919,7 +12932,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @summary Favorite prompt
-         * @param {string} name
+         * @param {string} name 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -12930,7 +12943,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
+         * 
          * @summary Get prompt
          * @param {string} name 
          * @param {*} [options] Override http request option.
@@ -12972,7 +12985,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @summary Unfavorite prompt
-         * @param {string} name
+         * @param {string} name 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -12983,7 +12996,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
+         * 
          * @summary Unset default prompt
          * @param {string} name 
          * @param {*} [options] Override http request option.
@@ -12998,7 +13011,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @summary Record prompt usage
-         * @param {string} name
+         * @param {string} name 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -13009,7 +13022,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
+         * 
          * @summary Polish prompt
          * @param {PromptPolishRequest} promptPolishRequest 
          * @param {*} [options] Override http request option.
@@ -14528,7 +14541,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCorePromptCategoriesGet(options).then((request) => request(axios, basePath));
         },
         /**
-         *
+         * 
          * @summary Delete prompt category
          * @param {DefaultApiApiCorePromptCategoriesNameDeleteRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -14538,7 +14551,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCorePromptCategoriesNameDelete(requestParameters.name, options).then((request) => request(axios, basePath));
         },
         /**
-         *
+         * 
          * @summary Create prompt category
          * @param {DefaultApiApiCorePromptCategoriesPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -14548,7 +14561,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCorePromptCategoriesPost(requestParameters.promptCategoryRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         *
+         * 
          * @summary Prompt list
          * @param {DefaultApiApiCorePromptsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -14578,7 +14591,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCorePromptsNameFavoritePost(requestParameters.name, options).then((request) => request(axios, basePath));
         },
         /**
-         *
+         * 
          * @summary Get prompt
          * @param {DefaultApiApiCorePromptsNameGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -14618,7 +14631,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCorePromptsNameUnfavoritePost(requestParameters.name, options).then((request) => request(axios, basePath));
         },
         /**
-         *
+         * 
          * @summary Unset default prompt
          * @param {DefaultApiApiCorePromptsNameUnsetDefaultPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -14638,7 +14651,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCorePromptsNameUsePost(requestParameters.name, options).then((request) => request(axios, basePath));
         },
         /**
-         *
+         * 
          * @summary Polish prompt
          * @param {DefaultApiApiCorePromptsPolishPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -17096,7 +17109,7 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
+     * 
      * @summary Delete prompt category
      * @param {DefaultApiApiCorePromptCategoriesNameDeleteRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -17107,7 +17120,7 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
+     * 
      * @summary Create prompt category
      * @param {DefaultApiApiCorePromptCategoriesPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -17118,7 +17131,7 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
+     * 
      * @summary Prompt list
      * @param {DefaultApiApiCorePromptsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -17151,7 +17164,7 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
+     * 
      * @summary Get prompt
      * @param {DefaultApiApiCorePromptsNameGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -17195,7 +17208,7 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
+     * 
      * @summary Unset default prompt
      * @param {DefaultApiApiCorePromptsNameUnsetDefaultPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -17217,7 +17230,7 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     *
+     * 
      * @summary Polish prompt
      * @param {DefaultApiApiCorePromptsPolishPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -28411,6 +28424,36 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             };
         },
         /**
+         * Lists immutable built-in templates and their installation state for the current user.
+         * @summary List builtin directory skills
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBuiltinSkillsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/builtin-skills`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Submits a skill organize task for current user\'s SkillV2 files. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillOrganizeOpenAPIRequest} skillOrganizeOpenAPIRequest 
@@ -28941,6 +28984,18 @@ export const SkillsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Lists immutable built-in templates and their installation state for the current user.
+         * @summary List builtin directory skills
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreBuiltinSkillsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<BuiltinSkillListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreBuiltinSkillsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreBuiltinSkillsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Submits a skill organize task for current user\'s SkillV2 files. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillOrganizeOpenAPIRequest} skillOrganizeOpenAPIRequest 
@@ -29145,6 +29200,15 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
          */
         apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(requestParameters: SkillsApiApiCoreBuiltinSkillsBuiltinSkillUidEnablePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillDetailOpenAPIResponse> {
             return localVarFp.apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(requestParameters.builtinSkillUid, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Lists immutable built-in templates and their installation state for the current user.
+         * @summary List builtin directory skills
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBuiltinSkillsGet(options?: RawAxiosRequestConfig): AxiosPromise<BuiltinSkillListOpenAPIResponse> {
+            return localVarFp.apiCoreBuiltinSkillsGet(options).then((request) => request(axios, basePath));
         },
         /**
          * Submits a skill organize task for current user\'s SkillV2 files. The task runs asynchronously in the algorithm service.
@@ -29405,6 +29469,16 @@ export class SkillsApi extends BaseAPI {
      */
     public apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(requestParameters: SkillsApiApiCoreBuiltinSkillsBuiltinSkillUidEnablePostRequest, options?: RawAxiosRequestConfig) {
         return SkillsApiFp(this.configuration).apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(requestParameters.builtinSkillUid, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Lists immutable built-in templates and their installation state for the current user.
+     * @summary List builtin directory skills
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreBuiltinSkillsGet(options?: RawAxiosRequestConfig) {
+        return SkillsApiFp(this.configuration).apiCoreBuiltinSkillsGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

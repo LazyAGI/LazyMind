@@ -120,11 +120,11 @@ export default function SkillManagementToolbar({
       >
         <span className="memory-skill-insight-card__icon">
           <ClockCircleOutlined />
+          <InsightCount count={manualSkillReviewCount} />
         </span>
         <span className="memory-skill-insight-card__body">
           <span className="memory-skill-insight-card__title">
             {t("admin.memorySkillReviewCardTitle")}
-            <InsightCount count={manualSkillReviewCount} />
           </span>
           <span className="memory-skill-insight-card__hint">
             {t("admin.memorySkillReviewCardHint")}
@@ -140,11 +140,11 @@ export default function SkillManagementToolbar({
         >
           <span className="memory-skill-insight-card__icon">
             <BellOutlined />
+            <InsightCount count={messageCenterCount} />
           </span>
           <span className="memory-skill-insight-card__body">
             <span className="memory-skill-insight-card__title">
               {t("admin.memorySkillMessageCenterTitle")}
-              <InsightCount count={messageCenterCount} />
             </span>
             <span className="memory-skill-insight-card__hint">
               {t("admin.memorySkillMessageCenterHint")}

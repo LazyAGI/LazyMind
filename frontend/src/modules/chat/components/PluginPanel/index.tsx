@@ -154,10 +154,11 @@ function AutoSlotGrid({
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
 }) {
+  const { t } = useTranslation();
   if (!session.slots || session.slots.length === 0) {
     return (
       <div className='plugin-panel__empty' role='status' aria-live='polite'>
-        <span>Waiting for results…</span>
+        <span>{t('chat.pluginWaitingForResults')}</span>
       </div>
     );
   }
@@ -993,7 +994,7 @@ export function PluginPanel({
       <div
         className='plugin-panel plugin-panel--loading'
         role='status'
-        aria-label='Loading plugin panel'
+        aria-label={t('chat.pluginPanelLoading')}
       />
     );
   }
@@ -1198,7 +1199,7 @@ export function PluginPanel({
 
       {/* Footer */}
       {!collapsed && showActions && (
-        <div className='plugin-panel__footer' role='group' aria-label='Session controls'>
+        <div className='plugin-panel__footer' role='group' aria-label={t('chat.pluginSessionControls')}>
           {displayStatus === 'active' && onStop && (
             <button
               type='button'

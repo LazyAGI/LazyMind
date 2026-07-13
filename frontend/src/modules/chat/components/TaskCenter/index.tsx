@@ -398,7 +398,9 @@ function TaskCard({ task }: { task: SubAgentTask }) {
                 <span>{task.current_phase}</span>
               </Tooltip>
               {task.estimated_sec ? (
-                <span className="task-card-eta">~{task.estimated_sec}s</span>
+                <span className="task-card-eta">
+                  {t("taskCenter.estimatedSeconds", { seconds: task.estimated_sec })}
+                </span>
               ) : null}
             </div>
           )}

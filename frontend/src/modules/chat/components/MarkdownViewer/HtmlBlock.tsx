@@ -218,6 +218,7 @@ const HtmlPreview = ({
   iframeRef: RefObject<HTMLIFrameElement>;
   inline?: boolean;
 }) => {
+  const { t } = useTranslation();
   const previewDocument = useMemo(() => buildPreviewDocument(code), [code]);
 
   useEffect(() => {
@@ -241,7 +242,7 @@ const HtmlPreview = ({
         className="md-html-preview-iframe"
         sandbox="allow-same-origin"
         srcDoc={previewDocument}
-        title="HTML preview"
+        title={t("chat.markdownHtmlPreview")}
       />
     </div>
   );

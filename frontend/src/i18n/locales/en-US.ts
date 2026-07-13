@@ -1162,6 +1162,7 @@ const enUS = {
     history: "History",
     artifacts: "Artifacts",
     executionProcess: "Execution Process",
+    estimatedSeconds: "~{{seconds}}s",
     empty: "No tasks",
     statusSucceeded: "Done",
     statusCompleted: "Done",
