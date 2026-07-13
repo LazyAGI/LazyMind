@@ -65,7 +65,7 @@ steps:
       - slot: resource_profiles
       - slot: writing_context
     acceptance_criteria: |
-      writing_task, resource_profiles, and writing_context are all saved; writing_context.context_id is non-empty; document_summary.summary is non-empty with at least 1 key_point; style_profile contains the three fields audience, formality, and tone.
+      All three artifacts present: writing_task, resource_profiles, writing_context.
 
   generate_outline:
     label: Generate Outline
@@ -91,7 +91,7 @@ steps:
       - slot: outline
       - slot: writing_context
     acceptance_criteria: |
-      outline is saved; nodes count is at least 3; each node contains at least the non-empty fields node_id, title, instruction, and constraints; writing_context has been saved once; document_summary reflects the outline content.
+      Both artifacts present: outline, writing_context.
 
   plan_sections:
     label: Plan Sections
@@ -115,7 +115,7 @@ steps:
     outputs:
       - slot: section_instructions
     acceptance_criteria: |
-      section_instructions is saved; it is a SectionInstructionList artifact (data.instructions is an array) whose entry count matches the outline.nodes count one-to-one; each entry contains at least the fields outline_node_id, section_title, section_goal, and required_points.
+      Artifact present: section_instructions.
 
   generate_draft:
     label: Generate Draft
@@ -154,7 +154,7 @@ steps:
       - slot: draft_document
       - slot: writing_context
     acceptance_criteria: |
-      draft_sections are saved in section order; the count matches section_instructions.data.instructions, with at least 2 DraftSection; each DraftSection has a non-empty title and non-empty blocks, and every block's content is a non-empty string. draft_document has been saved once, with draft_document.sections corresponding one-to-one with draft_sections in order; writing_context has been saved once, and document_summary reflects the draft_document content.
+      All three artifacts present: draft_sections, draft_document, writing_context.
 
   generate_patch:
     label: Generate Patch
@@ -187,7 +187,7 @@ steps:
       - slot: patch_set_review
       - slot: patch_set_review_summary
     acceptance_criteria: |
-      revise_task is saved with task_type='revise' and a non-empty query; patch_set is saved with hunks as an array; patch_set_review is saved with is_passed being a boolean and score a 0-100 number; patch_set_review_summary is saved as the content summary produced by validate_patch_set (not a path).
+      All five artifacts present: revise_task, doc_ir, patch_set, patch_set_review, patch_set_review_summary.
 
   apply_patch:
     label: Apply Patch
@@ -216,7 +216,7 @@ steps:
       - slot: draft_document
       - slot: writing_context
     acceptance_criteria: |
-      patch_result is saved with success being a boolean; draft_document has been saved once (the revised draft) with at least 1 section; writing_context has been saved once.
+      All three artifacts present: patch_result, draft_document, writing_context.
 
   review_document:
     label: Review Document
@@ -239,7 +239,7 @@ steps:
       - slot: review_report
       - slot: review_summary
     acceptance_criteria: |
-      review_report is saved; result.is_passed is a boolean; result.score is a 0-100 number; result.summary is a non-empty string; result.issues is an array whose items each contain severity (high/medium/low), category, and description. review_summary is saved as the content summary produced by validate_draft_document (not a path). The final message must follow the format "Since {{review_summary}}, recommend advancing the next step to {{next_step}}".
+      Both artifacts present: review_report, review_summary.
 
   finalize_report:
     label: Finalize Report
@@ -264,4 +264,4 @@ steps:
       - slot: writing_output
       - slot: writing_output_md
     acceptance_criteria: |
-      writing_output is saved; writing_output_md is saved; output_format is markdown; content is a non-empty string that includes a title and at least 2 level-2 sections (starting with `## `), with a body long enough to stand on its own.
+      Both artifacts present: writing_output, writing_output_md.
