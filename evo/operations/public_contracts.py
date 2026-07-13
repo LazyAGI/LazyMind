@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Mapping
 from statistics import fmean
 from typing import Any
@@ -93,27 +92,12 @@ class EvalBody(Contract):
     cases: list[EvalCase]
 
 
-class AnalysisCase(Contract):
-    case_id: StrictStr
-    trace_id: StrictStr
-    source: StrictStr
-    failure_type: StrictStr
-    reason: StrictStr
-
-
-class AnalysisSummary(Contract):
-    run_id: StrictStr
-    case_num: StrictInt
-    algo_id: StrictStr
-    type_count: dict[StrictStr, StrictInt]
-    cases: list[AnalysisCase]
-
-
 class RepairPatch(Contract):
     run_id: StrictStr
     algo_id: StrictStr
     candidate_algo_id: StrictStr
     status: StrictStr
+    workspace_ref: StrictStr
     diff: dict[StrictStr, StrictStr]
 
 
@@ -187,25 +171,6 @@ def build_eval_summary_root(
     return dump_contract(EvalSummary, payload)
 
 
-def build_analysis_summary_root(run_id: str, classifications: tuple[Mapping[str, Any], ...]) -> dict[str, Any]:
-    rows = sorted(classifications, key=lambda row: str(row.get('case_id') or ''))
-    cases = [{
-        'case_id': str(row.get('case_id') or ''),
-        'trace_id': str(row.get('trace_id') or ''),
-        'source': str(row.get('source') or ''),
-        'failure_type': str(row.get('issue_type') or ''),
-        'reason': str(row.get('root_cause_reason') or row.get('reason') or ''),
-    } for row in rows]
-    payload = {
-        'run_id': str(run_id),
-        'case_num': len(rows),
-        'algo_id': next((str(row.get('algo_id') or '') for row in rows if row.get('algo_id')), ''),
-        'type_count': dict(Counter(case['failure_type'] for case in cases)),
-        'cases': cases,
-    }
-    return dump_contract(AnalysisSummary, payload)
-
-
 def build_abtest_comparison_root(
     run_id: str,
     baseline: Mapping[str, Any],
@@ -216,18 +181,14 @@ def build_abtest_comparison_root(
     candidate = EvalSummary.model_validate(candidate).model_dump(mode='json')
     origin = _eval_body(baseline)
     after = _eval_body(candidate)
-    delta = {key: round(float(after.get(key) or 0.0) - float(origin.get(key) or 0.0), 4) for key in AGGREGATES}
     verdict = 'review_candidate'
     status = 'completed'
     reasons: list[str] = []
-    if service.get('status') == 'skipped':
-        verdict = 'skipped'
-        status = 'skipped'
-        reasons.append('candidate evaluation skipped because repair patch is not verified')
-    elif service.get('status') != 'ready':
+    if service.get('status') != 'ready':
         verdict = 'candidate_service_unavailable'
         status = 'failed'
         reasons.append('candidate service is not ready')
+    delta = {key: round(float(after.get(key) or 0.0) - float(origin.get(key) or 0.0), 4) for key in AGGREGATES}
     payload = {
         'run_id': str(run_id),
         'algo_id': str(baseline.get('algo_id') or ''),

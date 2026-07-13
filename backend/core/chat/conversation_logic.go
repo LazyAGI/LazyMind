@@ -19,7 +19,6 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/log"
 	"lazymind/core/plugin"
-	"lazymind/core/resourceupdate"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
@@ -53,22 +52,6 @@ func toolConfigFromBody(reqBody map[string]any) map[string]any {
 		return cfg
 	}
 	return nil
-}
-
-func recordConversationIdleAfterPersist(ctx context.Context, db *gorm.DB, stateStore state.Store, convID, userID, historyID string, at time.Time, query, answer string) {
-	if db == nil || stateStore == nil {
-		return
-	}
-	if err := resourceupdate.RecordConversationIdleMessage(ctx, db, stateStore, resourceupdate.ConversationIdleRecord{
-		SessionID:      convID,
-		UserID:         userID,
-		LastMessageID:  historyID,
-		LastActivityAt: at,
-		UserContent:    query,
-		AssistantText:  answer,
-	}); err != nil {
-		log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("record conversation idle event failed")
-	}
 }
 
 func marshalRetrievalResult(sources []any) json.RawMessage {
@@ -1008,7 +991,6 @@ func handleNonStreamChat(
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
-		recordConversationIdleAfterPersist(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, now, query, answer)
 	}
 	common.ReplyOK(w, map[string]any{
 		"conversation_id": convID,
@@ -1279,7 +1261,6 @@ func streamSingleAnswer(
 	}
 	if persisted && !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
-		recordConversationIdleAfterPersist(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, now, query, stripToolTags(fullText))
 	}
 	if reqCtx.Err() == nil {
 		// text：message text，finish_reason text STOP
@@ -1655,64 +1636,7 @@ func handlePluginStepCreated(
 	toolConfig map[string]any,
 	pluginMode string,
 ) *TaskCreatedNotice {
-	// Parse PluginStepParams from ev.Params.
-	var params plugin.PluginStepParams
-	if ev.Params != nil {
-		if pid, ok := ev.Params["plugin_id"].(string); ok {
-			params.PluginID = pid
-		}
-		if sid, ok := ev.Params["step_id"].(string); ok {
-			params.StepID = sid
-		}
-		if sessID, ok := ev.Params["session_id"].(string); ok {
-			params.SessionID = sessID
-		}
-		if ui, ok := ev.Params["user_input"].(string); ok {
-			params.UserInput = ui
-		}
-		if cold, ok := ev.Params["is_cold_start"].(bool); ok {
-			params.IsColdStart = cold
-		}
-		if rh, ok := ev.Params["retry_hint"].(string); ok {
-			params.RetryHint = rh
-		}
-		if pi, ok := ev.Params["partial_indices"].(map[string]any); ok {
-			parsed := make(map[string][]int, len(pi))
-			for k, v := range pi {
-				if arr, ok2 := v.([]any); ok2 {
-					ints := make([]int, 0, len(arr))
-					for _, elem := range arr {
-						if f, ok3 := elem.(float64); ok3 {
-							ints = append(ints, int(f))
-						}
-					}
-					parsed[k] = ints
-				}
-			}
-			params.PartialIndices = parsed
-		}
-		if hfpt, ok := ev.Params["history_files_per_turn"].(map[string]any); ok {
-			parsed := make(map[string][]string, len(hfpt))
-			for k, v := range hfpt {
-				if arr, ok2 := v.([]any); ok2 {
-					strs := make([]string, 0, len(arr))
-					for _, elem := range arr {
-						if s, ok3 := elem.(string); ok3 {
-							strs = append(strs, s)
-						}
-					}
-					parsed[k] = strs
-				}
-			}
-			params.HistoryFilesPerTurn = parsed
-		}
-		if flt, ok := ev.Params["filters"].(map[string]any); ok && len(flt) > 0 {
-			params.Filters = flt
-		}
-		if uid, ok := ev.Params["user_id"].(string); ok && uid != "" {
-			params.UserID = uid
-		}
-	}
+	params := pluginStepParamsFromEventParams(ev.Params)
 	// Carry the resolved plugin_mode into params so it is persisted with the task
 	// and available when OnSubAgentDone reconstructs PluginChatContext from DB.
 	if pluginMode == "auto" || pluginMode == "dynamic" {
@@ -1765,6 +1689,91 @@ func handlePluginStepCreated(
 		SeqInConversation: task.SeqInConversation,
 		PluginSessionID:   sessionID,
 	}
+}
+
+func pluginStepParamsFromEventParams(raw map[string]any) plugin.PluginStepParams {
+	var params plugin.PluginStepParams
+	if raw == nil {
+		return params
+	}
+	if pid, ok := raw["plugin_id"].(string); ok {
+		params.PluginID = pid
+	}
+	if v, ok := raw["plugin_ref"].(string); ok {
+		params.PluginRef = v
+	}
+	if v, ok := raw["revision_id"].(string); ok {
+		params.RevisionID = v
+	}
+	if v, ok := raw["tree_hash"].(string); ok {
+		params.TreeHash = v
+	}
+	if v, ok := raw["remote_root"].(string); ok {
+		params.RemoteRoot = v
+	}
+	switch v := raw["revision_no"].(type) {
+	case float64:
+		params.RevisionNo = int64(v)
+	case int64:
+		params.RevisionNo = v
+	case int:
+		params.RevisionNo = int64(v)
+	}
+	if sid, ok := raw["step_id"].(string); ok {
+		params.StepID = sid
+	}
+	if sessID, ok := raw["session_id"].(string); ok {
+		params.SessionID = sessID
+	}
+	if chatSID, ok := raw["chat_session_id"].(string); ok {
+		params.ChatSessionID = chatSID
+	}
+	if ui, ok := raw["user_input"].(string); ok {
+		params.UserInput = ui
+	}
+	if cold, ok := raw["is_cold_start"].(bool); ok {
+		params.IsColdStart = cold
+	}
+	if rh, ok := raw["retry_hint"].(string); ok {
+		params.RetryHint = rh
+	}
+	if pi, ok := raw["partial_indices"].(map[string]any); ok {
+		parsed := make(map[string][]int, len(pi))
+		for k, v := range pi {
+			if arr, ok2 := v.([]any); ok2 {
+				ints := make([]int, 0, len(arr))
+				for _, elem := range arr {
+					if f, ok3 := elem.(float64); ok3 {
+						ints = append(ints, int(f))
+					}
+				}
+				parsed[k] = ints
+			}
+		}
+		params.PartialIndices = parsed
+	}
+	if hfpt, ok := raw["history_files_per_turn"].(map[string]any); ok {
+		parsed := make(map[string][]string, len(hfpt))
+		for k, v := range hfpt {
+			if arr, ok2 := v.([]any); ok2 {
+				strs := make([]string, 0, len(arr))
+				for _, elem := range arr {
+					if s, ok3 := elem.(string); ok3 {
+						strs = append(strs, s)
+					}
+				}
+				parsed[k] = strs
+			}
+		}
+		params.HistoryFilesPerTurn = parsed
+	}
+	if flt, ok := raw["filters"].(map[string]any); ok && len(flt) > 0 {
+		params.Filters = flt
+	}
+	if uid, ok := raw["user_id"].(string); ok && uid != "" {
+		params.UserID = uid
+	}
+	return params
 }
 
 // mergeAskPendingIntoExt merges ask_pending data into the ext JSON field so that

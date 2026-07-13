@@ -1,11 +1,99 @@
 import type { ColumnsType } from "antd/es/table";
 import type { AbComparisonRow } from "../../shared";
+import { getStepStatusLabel } from "../../shared/runtimeState";
 import type {
   TFunction,
   DatasetCasePreviewRow,
+  DatasetStreamingRow,
+  EvalStreamingRow,
+  AbtestStreamingRow,
+  AnalysisStreamingRow,
   PxCaseDetailRow,
   AnalysisCasePreviewRow,
+  AnalysisActionableCaseRow,
 } from "./types";
+
+export function buildAnalysisStreamingColumns(
+  t: TFunction,
+): ColumnsType<AnalysisStreamingRow> {
+  return [
+    { title: "case", dataIndex: "caseId", key: "caseId", width: 116 },
+    {
+      title: t("selfEvolutionRun.analysisStreamingColTraceSummary"),
+      dataIndex: "traceSummaryStatus",
+      key: "traceSummaryStatus",
+      width: 120,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+    {
+      title: t("selfEvolutionRun.analysisStreamingColClassifyCase"),
+      dataIndex: "classifyCaseStatus",
+      key: "classifyCaseStatus",
+      width: 120,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+  ];
+}
+
+export function buildEvalStreamingColumns(t: TFunction): ColumnsType<EvalStreamingRow> {
+  return [
+    { title: "case", dataIndex: "caseId", key: "caseId", width: 116 },
+    {
+      title: t("selfEvolutionRun.evalStreamingColAnswer"),
+      dataIndex: "answerStatus",
+      key: "answerStatus",
+      width: 96,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+    {
+      title: t("selfEvolutionRun.evalStreamingColJudge"),
+      dataIndex: "judgeStatus",
+      key: "judgeStatus",
+      width: 96,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+  ];
+}
+
+export function buildAbtestStreamingColumns(t: TFunction): ColumnsType<AbtestStreamingRow> {
+  return [
+    { title: "case", dataIndex: "caseId", key: "caseId", width: 116 },
+    {
+      title: t("selfEvolutionRun.abtestStreamingColAnswer"),
+      dataIndex: "answerStatus",
+      key: "answerStatus",
+      width: 108,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+    {
+      title: t("selfEvolutionRun.abtestStreamingColJudge"),
+      dataIndex: "judgeStatus",
+      key: "judgeStatus",
+      width: 96,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+  ];
+}
+
+export function buildDatasetStreamingColumns(t: TFunction): ColumnsType<DatasetStreamingRow> {
+  return [
+    { title: "case", dataIndex: "caseId", key: "caseId", width: 116 },
+    {
+      title: t("selfEvolutionRun.datasetStreamingColPrepare"),
+      dataIndex: "prepareStatus",
+      key: "prepareStatus",
+      width: 96,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+    {
+      title: t("selfEvolutionRun.datasetStreamingColGenerate"),
+      dataIndex: "generateStatus",
+      key: "generateStatus",
+      width: 96,
+      render: (status) => (status ? getStepStatusLabel(status) : "-"),
+    },
+  ];
+}
 
 export function buildDatasetCaseColumns(t: TFunction): ColumnsType<DatasetCasePreviewRow> {
   return [
@@ -74,6 +162,76 @@ export function buildPxCaseDetailColumns(t: TFunction): ColumnsType<PxCaseDetail
       key: "traceId",
       width: 170,
       render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+    },
+  ];
+}
+
+export function buildAnalysisActionableCaseColumns(
+  t: TFunction,
+): ColumnsType<AnalysisActionableCaseRow> {
+  return [
+    { title: "case", dataIndex: "caseId", key: "caseId", width: 120 },
+    {
+      title: t("selfEvolutionRun.colIssueType"),
+      dataIndex: "issueType",
+      key: "issueType",
+      width: 200,
+      render: (value: string) => (
+        <span className="self-evolution-table-ellipsis" title={value}>
+          {value}
+        </span>
+      ),
+    },
+    {
+      title: t("selfEvolutionRun.colAffectedBlock"),
+      dataIndex: "affectedBlock",
+      key: "affectedBlock",
+      width: 160,
+      render: (value: string) => (
+        <span className="self-evolution-table-ellipsis" title={value}>
+          {value}
+        </span>
+      ),
+    },
+    {
+      title: t("selfEvolutionRun.colFailureMode"),
+      dataIndex: "failureMode",
+      key: "failureMode",
+      width: 180,
+      render: (value: string) => (
+        <span className="self-evolution-table-ellipsis" title={value}>
+          {value}
+        </span>
+      ),
+    },
+    {
+      title: t("selfEvolutionRun.colConfidence"),
+      dataIndex: "confidence",
+      key: "confidence",
+      width: 90,
+    },
+    {
+      title: t("selfEvolutionRun.colRootCauseReason"),
+      dataIndex: "reason",
+      key: "reason",
+      width: 260,
+      render: (value: string) => (
+        <span className="self-evolution-table-ellipsis" title={value}>
+          {value}
+        </span>
+      ),
+    },
+    {
+      title: t("selfEvolutionRun.colClusterId"),
+      dataIndex: "clusterId",
+      key: "clusterId",
+      width: 130,
+    },
+    {
+      title: t("selfEvolutionRun.colOutlierScore"),
+      dataIndex: "outlierScore",
+      key: "outlierScore",
+      width: 110,
     },
   ];
 }

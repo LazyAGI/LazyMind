@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Doc, Segment } from "@/api/generated/knowledge-client";
+import { Doc } from "@/api/generated/core-client";
+import { Segment } from "@/api/generated/knowledge-client";
 import { SegmentServiceApi } from "@/modules/knowledge/utils/request";
 import { Button, Modal, Tooltip } from "antd";
 import type { TablePaginationConfig } from "antd";

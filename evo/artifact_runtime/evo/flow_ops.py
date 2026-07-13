@@ -14,6 +14,10 @@ from . import catalog as C
 
 def default_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
     partitions = StaticPartitions(cases)
+    case_inputs = {
+        'config': ArtifactInput(C.RUN_CONFIG, partition_mapping=unpartitioned_to_all()),
+        'snapshot': ArtifactInput(C.CORPUS_SNAPSHOT, partition_mapping=unpartitioned_to_all()),
+    }
 
     class LoadCorpus(FixedOp):
         op_id = 'dataset.load_corpus'
@@ -28,16 +32,15 @@ def default_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
         }
         outputs = {'snapshot': ArtifactOutput(C.CORPUS_SNAPSHOT)}
 
+    class PrepareCase(FixedOp):
+        op_id = 'dataset.prepare_case'
+        inputs = case_inputs
+        outputs = {'preparation': ArtifactOutput(C.EVAL_CASE_PREPARATION, partitions)}
+
     class GenerateCase(FixedOp):
         op_id = 'dataset.generate_case'
-        inputs = {
-            'config': ArtifactInput(C.RUN_CONFIG, partition_mapping=unpartitioned_to_all()),
-            'snapshot': ArtifactInput(C.CORPUS_SNAPSHOT, partition_mapping=unpartitioned_to_all()),
-        }
-        outputs = {
-            'preparation': ArtifactOutput(C.EVAL_CASE_PREPARATION, partitions),
-            'case': ArtifactOutput(C.EVAL_CASE, partitions),
-        }
+        inputs = {**case_inputs, 'preparation': ArtifactInput(C.EVAL_CASE_PREPARATION, partition_spec=partitions)}
+        outputs = {'case': ArtifactOutput(C.EVAL_CASE, partitions)}
 
     class AssembleDataset(FixedOp):
         op_id = 'dataset.assemble'
@@ -54,6 +57,7 @@ def default_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
         op_id = 'eval.answer'
         inputs = {
             'case': ArtifactInput(C.EVAL_CASE, partition_spec=partitions),
+            'dataset': ArtifactInput(C.ROOTS['dataset'], partition_mapping=unpartitioned_to_all()),
             'target_config': ArtifactInput(C.EVAL_TARGET_CONFIG, partition_mapping=unpartitioned_to_all()),
         }
         outputs = {'answer': ArtifactOutput(C.EVAL_RAG_ANSWER, partitions)}
@@ -83,6 +87,7 @@ def default_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
         inputs = {
             'case': ArtifactInput(C.EVAL_CASE, partition_spec=partitions),
             'answer': ArtifactInput(C.EVAL_RAG_ANSWER, partition_spec=partitions),
+            'eval_summary': ArtifactInput(C.ROOTS['eval'], partition_mapping=unpartitioned_to_all()),
         }
         outputs = {'summary': ArtifactOutput(C.ANALYSIS_TRACE_SUMMARY, partitions)}
 
@@ -122,6 +127,7 @@ def default_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
     class BuildRepairPlan(FixedOp):
         op_id = 'repair.plan'
         inputs = {
+            'analysis_summary': ArtifactInput(C.ROOTS['analysis']),
             'classifications': ArtifactInput(
                 C.ANALYSIS_CASE_CLASSIFICATION,
                 partition_spec=partitions,
@@ -215,6 +221,7 @@ def default_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
     return (
         LoadCorpus,
         BuildCorpusSnapshot,
+        PrepareCase,
         GenerateCase,
         AssembleDataset,
         EvalAnswer,
@@ -237,22 +244,16 @@ def default_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
 
 
 def dataset_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
-    return default_evo_ops(cases)[:4]
+    return default_evo_ops(cases)[:5]
 
 
 def eval_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
-    return default_evo_ops(cases)[:7]
+    return default_evo_ops(cases)[:8]
 
 
 def analysis_evo_ops(cases: tuple[str, ...]) -> tuple[type[FixedOp], ...]:
     op_ids = (
-        'dataset.load_corpus',
-        'dataset.build_corpus_snapshot',
-        'dataset.generate_case',
-        'dataset.assemble',
-        'eval.answer',
-        'eval.judge',
-        'eval.summary',
+        *[op.op_id for op in eval_evo_ops(cases)],
         'analysis.trace_summary',
         'analysis.classify_case',
         'analysis.trace_clusters',

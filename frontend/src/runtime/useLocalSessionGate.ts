@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { AgentAppsAuth } from "@/components/auth";
 import { ensureLocalSession, isLocalSessionEnabled } from "./localSession";
 
 export interface LocalSessionGateState {
@@ -10,11 +9,10 @@ export interface LocalSessionGateState {
 }
 
 export function useLocalSessionGate(
-  isLoggedIn: boolean,
   refreshLayoutUser: () => Promise<void>,
 ): LocalSessionGateState {
   const enabled = isLocalSessionEnabled();
-  const [loading, setLoading] = useState(() => enabled && !AgentAppsAuth.isLoggedIn());
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState("");
 
   const restore = useCallback(
@@ -35,7 +33,7 @@ export function useLocalSessionGate(
   );
 
   useEffect(() => {
-    if (!enabled || isLoggedIn) {
+    if (!enabled) {
       setLoading(false);
       return;
     }
@@ -65,7 +63,7 @@ export function useLocalSessionGate(
     return () => {
       cancelled = true;
     };
-  }, [enabled, isLoggedIn, refreshLayoutUser]);
+  }, [enabled, refreshLayoutUser]);
 
   const retry = useCallback(() => restore(true), [restore]);
 

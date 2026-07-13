@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
-import { Alert, Breadcrumb, Button, Modal, Input, Spin, message } from 'antd';
+import { Alert, Breadcrumb, Button, Modal, Input, Spin, Select, Space, Tag, message } from 'antd';
 import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft } from '../../pluginDraftApi';
+import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft, publishPluginDraft, listPluginVersions, getPluginVersion, editPluginVersion } from '../../pluginDraftApi';
 import type { PluginDraftRecord } from '../../pluginDraftApi';
+import type { PluginVersionSummary, PluginVersionContent } from '../../pluginDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
 import type { SavePayload, RepairTarget } from '../../components/StateGraphEditor';
 import type { ValidationError } from '../../components/StateGraphEditor/core/validator';
@@ -78,6 +79,11 @@ export default function PluginDetailPage() {
   const [repairModalOpen, setRepairModalOpen] = useState(false);
   // True while the :ai-repair API call is in-flight (keeps Modal open with a spinner).
   const [repairSubmitting, setRepairSubmitting] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [versions, setVersions] = useState<PluginVersionSummary[]>([]);
+  const [selectedRevision, setSelectedRevision] = useState<string>('draft');
+  const [versionContent, setVersionContent] = useState<PluginVersionContent | null>(null);
+  const [switchingVersion, setSwitchingVersion] = useState(false);
   const [repairHint, setRepairHint] = useState('');
   const [repairTarget, setRepairTarget] = useState<RepairTarget>('statemachine');
   const [repairValidationErrors, setRepairValidationErrors] = useState<ValidationError[]>([]);
@@ -313,6 +319,49 @@ export default function PluginDetailPage() {
     [pluginId],
   );
 
+  const handlePublish = useCallback(async () => {
+    if (!draft) return;
+    setPublishing(true);
+    try {
+      const result = await publishPluginDraft(draft.id);
+      message.success(`Plugin 已发布为版本 ${result.revision_no}，默认关闭`);
+      setVersions(await listPluginVersions(result.plugin_ref));
+      setDraft(await getPluginDraft(draft.id));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Plugin 发布失败');
+    } finally {
+      setPublishing(false);
+    }
+  }, [draft]);
+
+  useEffect(() => {
+    if (!draft?.published_plugin_ref) { setVersions([]); return; }
+    void listPluginVersions(draft.published_plugin_ref).then(setVersions).catch(() => setVersions([]));
+  }, [draft?.published_plugin_ref]);
+
+  const handleVersionChange = useCallback(async (value: string) => {
+    if (value === 'draft') { setSelectedRevision('draft'); setVersionContent(null); return; }
+    if (!draft?.published_plugin_ref) return;
+    const loadVersion = async () => {
+      setSelectedRevision(value); setSwitchingVersion(true);
+      try { setVersionContent(await getPluginVersion(draft.published_plugin_ref, value)); }
+      catch { message.error('历史版本加载失败'); setSelectedRevision('draft'); }
+      finally { setSwitchingVersion(false); }
+    };
+    if (draft.draft_dirty) {
+      Modal.confirm({ title: '当前草稿有未发布的修改', content: '历史版本将以只读方式打开。若随后点击“编辑此版本”，当前草稿会被清空并替换为该历史版本。', okText: '继续查看', cancelText: '取消', onOk: loadVersion });
+      return;
+    }
+    await loadVersion();
+  }, [draft?.published_plugin_ref, draft?.draft_dirty]);
+
+  const handleEditHistoricalVersion = useCallback(async () => {
+    if (!draft?.published_plugin_ref || selectedRevision === 'draft') return;
+    Modal.confirm({ title: '用此版本替换当前草稿？', content: '当前草稿内容会被选定历史版本覆盖，此操作不会修改已发布版本。', okText: '替换并编辑', onOk: async () => {
+      const next = await editPluginVersion(draft.published_plugin_ref, selectedRevision); setDraft(next); setVersionContent(null); setSelectedRevision('draft'); message.success('草稿已替换为选定版本');
+    }});
+  }, [draft?.published_plugin_ref, selectedRevision]);
+
   if (loading) {
     return (
       <div className="plugin-editor-overlay">
@@ -341,13 +390,14 @@ export default function PluginDetailPage() {
   const editorReady = EDITOR_READY_STATUSES.has(draft.generate_status) || draft.generate_status === 'done';
   const isFailed = draft.generate_status === 'failed';
   const isPhase3Running = draft.generate_status === 'state_done';
+  const viewingHistory = selectedRevision !== 'draft' && versionContent !== null;
 
   // Determine which YAML content to use
   // state_layout_content stores x-layout JSON separately; merge it into stateYaml
   // so the editor initializes with correct node positions.
-  const rawStateYaml = draft.state_yaml_content || draft.content || undefined;
+  const rawStateYaml = viewingHistory ? versionContent.state_yaml_content : (draft.state_yaml_content || draft.content || undefined);
   let stateYaml = rawStateYaml;
-  if (rawStateYaml && draft.state_layout_content) {
+  if (!viewingHistory && rawStateYaml && draft.state_layout_content) {
     try {
       const layoutObj = JSON.parse(draft.state_layout_content) as Record<string, { x: number; y: number; w?: number; width?: number }>;
       if (Object.keys(layoutObj).length > 0) {
@@ -365,7 +415,7 @@ export default function PluginDetailPage() {
       // ignore malformed layout JSON
     }
   }
-  let pluginYaml = draft.plugin_yaml_content || undefined;
+  let pluginYaml = (viewingHistory ? versionContent.plugin_yaml_content : draft.plugin_yaml_content) || undefined;
   if (!pluginYaml && draft.name) {
     pluginYaml = `name: "${draft.name.replace(/"/g, '\\"')}"\n`;
   }
@@ -485,19 +535,19 @@ export default function PluginDetailPage() {
             </div>
           )}
           <StateGraphEditor
-            key={draft.version}
+            key={`${draft.version}:${selectedRevision}`}
             initialStateYaml={stateYaml}
             initialPluginYaml={pluginYaml}
-            initialScenarioContent={draft.scenario_content || undefined}
-            initialScriptsContent={draft.scripts_content || undefined}
+            initialScenarioContent={(viewingHistory ? versionContent.scenario_content : draft.scenario_content) || undefined}
+            initialScriptsContent={(viewingHistory ? versionContent.scripts_content : draft.scripts_content) || undefined}
             onRepair={handleOpenRepair}
-            readonly={isRepairing || repairModalOpen}
+            readonly={viewingHistory || isRepairing || repairModalOpen}
             defaultShowArtifacts={showArtifactsRef.current}
             onArtifactsChange={(show) => { showArtifactsRef.current = show; }}
             designBriefContent={draft.design_brief_content || undefined}
             pluginName={
-              <Breadcrumb
-                items={[
+              <Space size={8}>
+                <Breadcrumb items={[
                   { title: t('selfEvolutionRun.pluginDetailMyPlugins'), href: '/memory-management/plugins' },
                   {
                     title: editingName ? (
@@ -521,9 +571,27 @@ export default function PluginDetailPage() {
                       </button>
                     ),
                   },
-                ]}
-              />
+                ]} />
+                <span>/</span>
+                <Select
+                  variant="borderless"
+                  loading={switchingVersion}
+                  value={selectedRevision}
+                  style={{ minWidth: 110 }}
+                  onChange={(value) => void handleVersionChange(value)}
+                  options={[
+                    { value: 'draft', label: '草稿' },
+                    ...versions.map((item) => ({ value: item.revision_id, label: `v${item.revision_no}${item.current ? '（线上）' : ''}` })),
+                  ]}
+                />
+              </Space>
             }
+            topbarExtra={draft.published ? <Tag color="success" icon={<CheckCircleOutlined />}>线上：v{draft.current_revision_no}</Tag> : <Tag>未发布</Tag>}
+            topbarActions={viewingHistory ? (
+              <Button onClick={() => void handleEditHistoricalVersion()}>编辑此版本</Button>
+            ) : editorReady ? (
+              <Button type="primary" loading={publishing} disabled={(draft.published && !draft.draft_dirty) || isRepairing || isStillGenerating} title={draft.published && !draft.draft_dirty ? '草稿相对于基础版本没有变更' : undefined} onClick={handlePublish}>发布插件</Button>
+            ) : null}
             onSave={handleSave}
             onClose={() => navigate('/memory-management/plugins')}
             showEmptyHint={showEmptyHint}

@@ -12,6 +12,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/preferencefile"
 	"lazymind/core/store"
 )
 
@@ -144,10 +145,15 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 }
 
 func LoadUserPreferenceConfigured(ctx context.Context, db *gorm.DB, userID string) (bool, error) {
-	var row orm.SystemUserPreference
+	var row struct {
+		Content []byte
+	}
 	err := db.WithContext(ctx).
-		Where("user_id = ?", strings.TrimSpace(userID)).
-		Order("created_at ASC").
+		Table("personal_resources AS r").
+		Select("b.content").
+		Joins("JOIN personal_resource_revisions AS rev ON rev.id = r.head_revision_id AND rev.resource_id = r.id").
+		Joins("JOIN personal_resource_blobs AS b ON b.hash = rev.blob_hash").
+		Where("r.user_id = ? AND r.resource_type = ?", strings.TrimSpace(userID), "user_preference").
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
@@ -155,9 +161,14 @@ func LoadUserPreferenceConfigured(ctx context.Context, db *gorm.DB, userID strin
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(row.AgentPersona) != "" ||
-		strings.TrimSpace(row.PreferredName) != "" ||
-		strings.TrimSpace(row.ResponseStyle) != "", nil
+	file, err := preferencefile.ParseFileContent(string(row.Content))
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(file.AgentPersona) != "" ||
+		strings.TrimSpace(file.PreferredName) != "" ||
+		strings.TrimSpace(file.ResponseStyle) != "" ||
+		strings.TrimSpace(file.Content) != "", nil
 }
 
 func buildUIPreferencesResponse(row orm.UserUIPreferences, userPreferenceConfigured bool) uiPreferencesResponse {

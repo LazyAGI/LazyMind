@@ -338,6 +338,7 @@ export interface SourceBindingResponse {
     'binding_id': string;
     'connector_type': string;
     'core_parent_document_id': string;
+    'core_parent_document_name'?: string;
     'next_sync_at'?: string;
     'schedule_policy'?: SchedulePolicy;
     'source_id'?: string;
@@ -357,7 +358,6 @@ export interface SourceDocumentItem {
     'directory'?: string;
     'display_name'?: string;
     'document_id'?: string;
-    'effective_parse_status'?: string;
     'file_type'?: string;
     'has_update'?: boolean;
     'last_error'?: { [key: string]: any; };
@@ -424,8 +424,7 @@ export const SourceState = {
     New: 'NEW',
     Modified: 'MODIFIED',
     Deleted: 'DELETED',
-    Unchanged: 'UNCHANGED',
-    OutOfScope: 'OUT_OF_SCOPE'
+    Unchanged: 'UNCHANGED'
 } as const;
 
 export type SourceState = typeof SourceState[keyof typeof SourceState];
@@ -3056,4 +3055,6 @@ export class ScanApi extends BaseAPI {
         return ScanApiFp(this.configuration).validateBindingTarget(requestParameters.validateBindingTargetRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
+
+
 

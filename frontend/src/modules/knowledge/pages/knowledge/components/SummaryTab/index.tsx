@@ -1,4 +1,5 @@
-import { Doc, Segment } from '@/api/generated/knowledge-client';
+import { Doc } from '@/api/generated/core-client';
+import { Segment } from '@/api/generated/knowledge-client';
 
 import SegmentTab from '../SegmentTab';
 

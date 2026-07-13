@@ -70,6 +70,8 @@ interface Props {
   initialScriptsContent?: string;
   /** Plugin name shown in breadcrumb area (managed by parent) */
   pluginName?: React.ReactNode;
+  topbarExtra?: React.ReactNode;
+  topbarActions?: React.ReactNode;
   /** Called automatically when any file changes (auto-save). */
   onSave?: (payload: SavePayload) => Promise<void>;
   onClose?: () => void;
@@ -134,6 +136,8 @@ export default function StateGraphEditor({
   initialScenarioContent,
   initialScriptsContent,
   pluginName,
+  topbarExtra,
+  topbarActions,
   onSave,
   onClose,
   showEmptyHint = true,
@@ -476,9 +480,11 @@ export default function StateGraphEditor({
             </span>
           )}
           {readonly && <span className="sge-readonly-badge">{t('selfEvolutionRun.sgeReadonlyBadge')}</span>}
+          {topbarExtra}
           <Button size="small" icon={<SettingOutlined />} onClick={() => setPluginInfoOpen(true)}>
             {t('selfEvolutionRun.sgePluginConfigBtn')}
           </Button>
+          {topbarActions}
         </div>
       </div>
 

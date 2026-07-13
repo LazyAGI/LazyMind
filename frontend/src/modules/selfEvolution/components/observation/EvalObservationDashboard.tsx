@@ -3,14 +3,15 @@ import { Alert, Empty, Spin, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import {
-  EVO_API_BASE,
-  createCoreAgentGeneratedApiClient,
+  AGENT_API_BASE,
+  hasEmbeddedGateEvalCases,
   isCanceledRequest,
   isEmptyResultPayload,
 } from "../../shared";
+import { fetchAllEvalReportBadCases } from "../../hooks/controller/helpers";
 import { normalizeTraceObservation } from "../TraceObservationView";
 import type { EvalBadcaseListState } from "./types";
-import { EVAL_BADCASE_PAGE_SIZE, normalizeBadcaseRows, normalizeEvalReportSummary } from "./dataUtils";
+import { normalizeBadcaseRows, normalizeEvalReportSummary } from "./dataUtils";
 import { getPrimaryObservation } from "./traceUtils";
 import { ObservationHeaderControls } from "./ObservationHeaderControls";
 import { EvalReportPanel } from "./EvalReportPanel";
@@ -53,6 +54,16 @@ export function EvalObservationDashboard({
   const detail = getPrimaryObservation(selectedObservation);
 
   useEffect(() => {
+    if (hasEmbeddedGateEvalCases(data)) {
+      setBadcaseState({
+        reportId: summary.reportId,
+        loading: false,
+        loaded: true,
+        data,
+      });
+      return;
+    }
+
     if (!threadId || !summary.reportId || summary.reportId === "-") {
       setBadcaseState({ loading: false, loaded: false });
       return;
@@ -67,16 +78,10 @@ export function EvalObservationDashboard({
       error: undefined,
     }));
 
-    createCoreAgentGeneratedApiClient()
-      .apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet(
-        {
-          threadId,
-          reportId: summary.reportId,
-          pageSize: EVAL_BADCASE_PAGE_SIZE,
-        },
-        { signal: controller.signal },
-      )
-      .then((response) => {
+    fetchAllEvalReportBadCases(threadId, summary.reportId, {
+      signal: controller.signal,
+    })
+      .then(({ data }) => {
         if (controller.signal.aborted) {
           return;
         }
@@ -84,7 +89,7 @@ export function EvalObservationDashboard({
           reportId: summary.reportId,
           loading: false,
           loaded: true,
-          data: response.data,
+          data,
         });
       })
       .catch((error) => {
@@ -103,7 +108,7 @@ export function EvalObservationDashboard({
     return () => {
       controller.abort();
     };
-  }, [badcaseReloadToken, summary.reportId, threadId]);
+  }, [badcaseReloadToken, data, summary.reportId, t, threadId]);
 
   useEffect(() => {
     if (!rows.some((item) => item.caseId === selectedCaseId)) {
@@ -122,7 +127,7 @@ export function EvalObservationDashboard({
     setTraceState({ loading: true, data: undefined, error: undefined, traceId });
 
     axiosInstance
-      .get(`${EVO_API_BASE}/threads/${encodeURIComponent(threadId)}/results/traces/${encodeURIComponent(traceId)}`, {
+      .get(`${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/traces/${encodeURIComponent(traceId)}`, {
         signal: controller.signal,
       })
       .then((response) => {

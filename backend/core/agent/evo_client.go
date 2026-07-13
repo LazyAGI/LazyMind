@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,26 +29,6 @@ type evoThread struct {
 	Status      string `json:"status"`
 	CurrentStep string `json:"current_step,omitempty"`
 	LastError   any    `json:"last_error,omitempty"`
-}
-
-type evoGate struct {
-	Step             string `json:"step"`
-	ArtifactID       string `json:"artifact_id"`
-	Versions         []int  `json:"versions"`
-	EffectiveVersion *int   `json:"effective_version"`
-	LatestVersion    *int   `json:"latest_version"`
-}
-
-type evoGateList struct {
-	ThreadID string    `json:"thread_id"`
-	Gates    []evoGate `json:"gates"`
-}
-
-type evoGateContent struct {
-	ThreadID string `json:"thread_id"`
-	Step     string `json:"step"`
-	Version  int    `json:"version"`
-	Content  any    `json:"content"`
 }
 
 func newEvoClient(headers map[string]string) evoClient {
@@ -81,49 +62,55 @@ func (c evoClient) GetThread(ctx context.Context, threadID string) (*evoThread, 
 
 func (c evoClient) PostCommand(ctx context.Context, threadID, action string, payload map[string]any) (*upstreamProxyResponse, int, error) {
 	targetPath := "/threads/" + url.PathEscape(threadID) + "/" + strings.Trim(strings.TrimSpace(action), "/")
-	body, contentType, err := c.doRaw(ctx, http.MethodPost, targetPath, nil, payload)
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("marshal evo request: %w", err)
+	}
+	proxy, err := c.doProxyRaw(ctx, http.MethodPost, targetPath, nil, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, evoProxyStatusCode(err), err
 	}
-	return rawProxyResponse(body, contentType), http.StatusOK, nil
+	return proxy, proxyStatusCode(proxy), nil
 }
 
 func (c evoClient) DeleteThread(ctx context.Context, threadID string, out any) error {
 	return c.doJSON(ctx, http.MethodDelete, "/threads/"+url.PathEscape(threadID), nil, nil, out)
 }
 
-func (c evoClient) EventsStreamURL(threadID, stepID string) string {
-	query := url.Values{}
-	if strings.TrimSpace(stepID) != "" {
-		query.Set("step_id", strings.TrimSpace(stepID))
+func (c evoClient) ProxyRequest(ctx context.Context, method, path string, query url.Values, body io.Reader) (*http.Request, error) {
+	if body == nil {
+		body = http.NoBody
 	}
-	return c.url("/threads/"+url.PathEscape(threadID)+"/events:stream", query)
-}
-
-func (c evoClient) MessagesURL(threadID string) string {
-	return c.url("/threads/"+url.PathEscape(threadID)+"/messages", nil)
-}
-
-func (c evoClient) ListGates(ctx context.Context, threadID string) (*evoGateList, error) {
-	var result evoGateList
-	if err := c.doJSON(ctx, http.MethodGet, "/threads/"+url.PathEscape(threadID)+"/gates", nil, nil, &result); err != nil {
+	req, err := http.NewRequestWithContext(ctx, method, c.url(path, query), body)
+	if err != nil {
 		return nil, err
 	}
-	return &result, nil
+	for key, value := range c.headers {
+		req.Header.Set(key, value)
+	}
+	if body != http.NoBody && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
 }
 
-func (c evoClient) GetGateContent(ctx context.Context, threadID, step string, version int) (*evoGateContent, error) {
-	targetPath := fmt.Sprintf(
-		"/threads/%s/gates/%s/versions/%d",
-		url.PathEscape(threadID),
-		url.PathEscape(step),
-		version,
-	)
-	var result evoGateContent
-	if err := c.doJSON(ctx, http.MethodGet, targetPath, nil, nil, &result); err != nil {
+func (c evoClient) doProxyRaw(ctx context.Context, method, path string, query url.Values, body io.Reader) (*upstreamProxyResponse, error) {
+	req, err := c.ProxyRequest(ctx, method, path, query, body)
+	if err != nil {
 		return nil, err
 	}
-	return &result, nil
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return rawProxyResponse(resp.StatusCode, respBytes, resp.Header), nil
 }
 
 func (c evoClient) doJSON(ctx context.Context, method, path string, query url.Values, body any, out any) error {
@@ -187,12 +174,40 @@ func (c evoClient) url(path string, query url.Values) string {
 	return result
 }
 
-func rawProxyResponse(bodyBytes []byte, contentType string) *upstreamProxyResponse {
-	if strings.Contains(contentType, "application/json") {
+func rawProxyResponse(statusCode int, bodyBytes []byte, header http.Header) *upstreamProxyResponse {
+	contentType := header.Get("Content-Type")
+	proxy := &upstreamProxyResponse{
+		BodyBytes:   bodyBytes,
+		ContentType: contentType,
+		Header:      header.Clone(),
+		StatusCode:  statusCode,
+	}
+	trimmedBody := strings.TrimSpace(string(bodyBytes))
+	if strings.Contains(contentType, "application/json") ||
+		strings.HasPrefix(trimmedBody, "{") ||
+		strings.HasPrefix(trimmedBody, "[") {
 		var payload any
 		if err := json.Unmarshal(bodyBytes, &payload); err == nil {
-			return &upstreamProxyResponse{Body: payload, ContentType: "application/json"}
+			proxy.Body = payload
 		}
 	}
-	return &upstreamProxyResponse{Body: string(bodyBytes), ContentType: contentType}
+	return proxy
+}
+
+func proxyStatusCode(proxy *upstreamProxyResponse) int {
+	if proxy == nil || proxy.StatusCode == 0 {
+		return http.StatusOK
+	}
+	return proxy.StatusCode
+}
+
+func evoProxyStatusCode(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+	var httpErr *common.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode > 0 {
+		return httpErr.StatusCode
+	}
+	return http.StatusBadGateway
 }

@@ -72,6 +72,22 @@ export function getAnalysisVerdictLabels(): Record<string, string> {
   };
 }
 
+export function getCaseStepLabel(stepKey: string) {
+  const labels: Record<string, string> = {
+    load_corpus: "load_corpus",
+    build_snapshot: "build_snapshot",
+    generate: "generate",
+    assemble: "assemble",
+    rag: "RAG",
+    judge: "judge",
+    trace_summary: t("selfEvolutionRun.caseStepTraceSummary"),
+    classify_case: t("selfEvolutionRun.caseStepClassifyCase"),
+    coarse: t("selfEvolutionRun.caseStepTraceSummary"),
+    fine: t("selfEvolutionRun.caseStepClassifyCase"),
+  };
+  return labels[stepKey] || stepKey;
+}
+
 export function getWorkflowStepDefinitions(): Omit<WorkflowStep, "status" | "runtimeText">[] {
   return [
     {

@@ -8,14 +8,44 @@ import {
   formatDuration,
   getAbMaxScore,
   getAbReturnedDocs,
+  getDisplayText,
   getDetailRoundCount,
   getSearchNode,
   getShortTraceId,
   getStatusColor,
   getTraceMode,
+  isFiniteNumber,
 } from "./traceUtils";
 
 const { Text, Title } = Typography;
+
+function getRawDisplayText(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  const text = getDisplayText(value);
+  return text === "-" ? "" : text;
+}
+
+function EllipsisLine({
+  text,
+  className,
+}: {
+  text: string;
+  className?: string;
+}) {
+  if (!text) {
+    return null;
+  }
+  return (
+    <span
+      className={["self-evolution-table-ellipsis", className].filter(Boolean).join(" ")}
+      title={text}
+    >
+      {text}
+    </span>
+  );
+}
 
 function AbSummaryStrip({ observation }: { observation: AbCompareObservation }) {
   const { t } = useTranslation();
@@ -43,22 +73,18 @@ function AbSummaryStrip({ observation }: { observation: AbCompareObservation }) 
 }
 
 function AbTraceStep({ row }: { row: FlowRow }) {
-  const isSearch = row.node.name.includes("kb_search") || row.node.type === "retriever";
-  const tone = isSearch ? "warning" : row.tone;
   return (
-    <article className={`self-evolution-abtest-trace-step is-${tone}`}>
+    <article className={`self-evolution-abtest-trace-step is-${row.tone}`}>
       <div className="self-evolution-abtest-step-head">
         <strong>{row.title}</strong>
         <span>{row.duration}</span>
-        <Tag color={tone === "warning" ? "orange" : getStatusColor(row.node.status)}>{tone === "warning" ? "warning" : row.node.status}</Tag>
+        <Tag color={getStatusColor(row.node.status)}>{row.node.status || ""}</Tag>
       </div>
-      <p>{row.desc}</p>
-      {isSearch && (
-        <div className="self-evolution-abtest-step-fields">
-          <span>returned_docs: <strong>{getAbReturnedDocs(row.node)}</strong></span>
-          <span>max_score: <strong>{getAbMaxScore(row.node)?.toFixed(2) ?? "-"}</strong></span>
-        </div>
-      )}
+      <p title={row.desc}>{row.desc}</p>
+      <div className="self-evolution-abtest-step-fields">
+        <span>returned_docs: <strong>{getAbReturnedDocs(row.node)}</strong></span>
+        <span>max_score: <strong>{getAbMaxScore(row.node)?.toFixed(2) ?? ""}</strong></span>
+      </div>
     </article>
   );
 }
@@ -75,6 +101,7 @@ function AbTraceColumn({
   selectedCase: AbCaseRow;
 }) {
   const { t } = useTranslation();
+  const traceMetadata = detail.root.metadata || {};
   const rowsByRound = useMemo(() => {
     const grouped = new Map<number, FlowRow[]>();
     buildFlowRows(t, detail).forEach((row) => {
@@ -83,17 +110,23 @@ function AbTraceColumn({
     return Array.from(grouped.entries()).slice(0, 4);
   }, [detail, t]);
   const score = variant === "a" ? selectedCase.aScore : selectedCase.bScore;
+  const traceVersion = getRawDisplayText(
+    traceMetadata.algorithm_id ??
+      traceMetadata.algo_id ??
+      traceMetadata.model ??
+      traceMetadata.version,
+  );
 
   return (
     <section className={`self-evolution-abtest-trace-column is-${variant}`} aria-label={`${title} Trace`}>
       <div className="self-evolution-abtest-column-title">
         <Text strong>{title}</Text>
-        <span>{getTraceMode(detail)}</span>
+        <span>{getTraceMode(detail) || ""}</span>
       </div>
       <div className="self-evolution-abtest-algo-grid">
-        <span><em>{t("selfEvolutionRun.observation.algoVersion")}</em><strong>{variant === "a" ? "baseline-v1" : "candidate-v2"}</strong></span>
+        <span><em>{t("selfEvolutionRun.observation.algoVersion")}</em><strong>{traceVersion || ""}</strong></span>
         <span><em>Trace ID</em><strong>{getShortTraceId(detail.traceId)}</strong></span>
-        <span><em>Score</em><strong>{score.toFixed(2)}</strong></span>
+        <span><em>Score</em><strong>{isFiniteNumber(score) ? score.toFixed(2) : ""}</strong></span>
         <span><em>Latency</em><strong>{formatDuration(detail.summary.latencyMs)}</strong></span>
       </div>
       <div className="self-evolution-abtest-round-list">
@@ -110,9 +143,11 @@ function AbTraceColumn({
         ))}
       </div>
       <div className={`self-evolution-abtest-column-note is-${variant === "a" ? "danger" : "warning"}`}>
-        {variant === "a"
-          ? t("selfEvolutionRun.observation.abColumnNoteA")
-          : t("selfEvolutionRun.observation.abColumnNoteB")}
+        <EllipsisLine
+          text={getRawDisplayText(
+            detail.root.metadata?.error_message || detail.root.output?.summary || "",
+          )}
+        />
       </div>
     </section>
   );
@@ -128,6 +163,18 @@ function AbDiffPanel({
   const bNode = getSearchNode(observation.b);
   const aScore = getAbMaxScore(aNode);
   const bScore = getAbMaxScore(bNode);
+  const aJudge = getRawDisplayText(
+    aNode?.metadata?.error_message ??
+      aNode?.output?.summary ??
+      aNode?.input?.summary ??
+      "",
+  );
+  const bJudge = getRawDisplayText(
+    bNode?.metadata?.error_message ??
+      bNode?.output?.summary ??
+      bNode?.input?.summary ??
+      "",
+  );
   return (
     <section className="self-evolution-abtest-diff-panel" aria-label={t("selfEvolutionRun.observation.abDiffPanelAria")}>
       <Text strong>{t("selfEvolutionRun.observation.abDiffPanelTitle")}</Text>
@@ -136,16 +183,22 @@ function AbDiffPanel({
           <Text strong>{t("selfEvolutionRun.observation.abDiffOutputA")}</Text>
           <dl>
             <dt>returned_docs</dt><dd>{getAbReturnedDocs(aNode)}</dd>
-            <dt>max_score</dt><dd>{aScore?.toFixed(2) ?? "-"}</dd>
-            <dt>{t("selfEvolutionRun.observation.abDiffJudge")}</dt><dd className="is-bad">{t("selfEvolutionRun.observation.abDiffJudgeABad")}</dd>
+            <dt>max_score</dt><dd>{aScore?.toFixed(2) ?? ""}</dd>
+            <dt>{t("selfEvolutionRun.observation.abDiffJudge")}</dt>
+            <dd className="is-bad">
+              <EllipsisLine text={aJudge} />
+            </dd>
           </dl>
         </article>
         <article>
           <Text strong>{t("selfEvolutionRun.observation.abDiffOutputB")}</Text>
           <dl>
             <dt>returned_docs</dt><dd>{getAbReturnedDocs(bNode)}</dd>
-            <dt>max_score</dt><dd>{bScore?.toFixed(2) ?? "-"}</dd>
-            <dt>{t("selfEvolutionRun.observation.abDiffJudge")}</dt><dd className="is-warn">{t("selfEvolutionRun.observation.abDiffJudgeBWarn")}</dd>
+            <dt>max_score</dt><dd>{bScore?.toFixed(2) ?? ""}</dd>
+            <dt>{t("selfEvolutionRun.observation.abDiffJudge")}</dt>
+            <dd className="is-warn">
+              <EllipsisLine text={bJudge} />
+            </dd>
           </dl>
         </article>
       </div>
@@ -169,7 +222,14 @@ export function AbTraceComparePanel({
   onRetry?: () => void;
 }) {
   const { t } = useTranslation();
-  const reportIdLabel = abtestId && abtestId.length > 16 ? `${abtestId.slice(0, 8)}...${abtestId.slice(-4)}` : abtestId || "abtest";
+  const reportIdLabel = abtestId && abtestId.length > 16 ? `${abtestId.slice(0, 8)}...${abtestId.slice(-4)}` : abtestId || "";
+  const finalConclusion = getRawDisplayText(
+    observation?.b.root.metadata?.error_message ||
+      observation?.b.root.output?.summary ||
+      observation?.a.root.metadata?.error_message ||
+      observation?.a.root.output?.summary ||
+      "",
+  );
 
   if (loading) {
     return (
@@ -200,8 +260,7 @@ export function AbTraceComparePanel({
         <Title level={3}>{t("selfEvolutionRun.observation.abComparePanelTitle", { caseId: selectedCase.caseId })}</Title>
         <div>
           <Tag>{`Query: ${selectedCase.query}`}</Tag>
-          <Tag>{`Report ID: ${reportIdLabel}`}</Tag>
-          <Tag color="orange">{t("selfEvolutionRun.observation.abStatusNeedsAnalysis")}</Tag>
+          {reportIdLabel ? <Tag>{`Report ID: ${reportIdLabel}`}</Tag> : null}
         </div>
       </div>
       <AbSummaryStrip observation={observation} />
@@ -212,7 +271,7 @@ export function AbTraceComparePanel({
       <AbDiffPanel observation={observation} />
       <div className="self-evolution-abtest-conclusion">
         <Text strong>{t("selfEvolutionRun.observation.abConclusionLabel")}</Text>
-        <span>{t("selfEvolutionRun.observation.abConclusionText")}</span>
+        <EllipsisLine text={finalConclusion} />
       </div>
     </section>
   );

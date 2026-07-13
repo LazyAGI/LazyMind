@@ -181,6 +181,18 @@ export type AgentThreadCreateResponse = {
   };
 };
 
+export type AgentThreadCommandResponse = {
+  status?: string;
+  thread_id?: string;
+  command_id?: string;
+  data?: {
+    upstream?: {
+      thread_id?: string;
+      command_id?: string;
+    };
+  };
+};
+
 export type ThreadEventFrame = {
   id?: string;
   eventName: string;

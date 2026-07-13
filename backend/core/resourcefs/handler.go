@@ -6,17 +6,24 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 
+	"lazymind/core/algo"
 	"lazymind/core/common"
-	"lazymind/core/common/orm"
-	"lazymind/core/evolution"
+	appLog "lazymind/core/log"
+	"lazymind/core/modelconfig"
 	"lazymind/core/preferencefile"
 	"lazymind/core/store"
 )
+
+const maxManagedContentChars = 1500
+
+type AutoEvoEnabledScannerFunc func(context.Context, *gorm.DB, string, string, string) error
+
+var AutoEvoEnabledScanner AutoEvoEnabledScannerFunc
 
 func GetFile(w http.ResponseWriter, r *http.Request) {
 	service, ref, ok := requestServiceAndRef(w, r)
@@ -56,10 +63,7 @@ func WriteDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Content              string  `json:"content"`
-		AgentPersona         *string `json:"agent_persona"`
-		PreferredName        *string `json:"preferred_name"`
-		ResponseStyle        *string `json:"response_style"`
+		Content              *string `json:"content"`
 		ExpectedDraftVersion int64   `json:"expected_draft_version"`
 		ConversationID       string  `json:"conversation_id"`
 		TaskID               string  `json:"task_id"`
@@ -68,13 +72,20 @@ func WriteDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	content := req.Content
+	if req.Content == nil {
+		common.ReplyErr(w, "content required", http.StatusBadRequest)
+		return
+	}
+	content := stringFromPtr(req.Content)
+	if req.Content != nil {
+		if err := validateManagedContentLength(*req.Content); err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 	if ref.ResourceType == ResourceTypeUserPreference {
 		patched, err := patchUserPreferenceDraftContent(r.Context(), service, ref, preferencefile.PreferencePatch{
-			Content:       &req.Content,
-			AgentPersona:  req.AgentPersona,
-			PreferredName: req.PreferredName,
-			ResponseStyle: req.ResponseStyle,
+			Content: req.Content,
 		})
 		if err != nil {
 			replyError(w, err)
@@ -97,6 +108,138 @@ func WriteDraft(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, resp)
 }
 
+func PatchMetadata(w http.ResponseWriter, r *http.Request) {
+	service, ref, ok := requestServiceAndRef(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		AutoEvo       *bool   `json:"auto_evo"`
+		AgentPersona  *string `json:"agent_persona"`
+		PreferredName *string `json:"preferred_name"`
+		ResponseStyle *string `json:"response_style"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.AutoEvo == nil && req.AgentPersona == nil && req.PreferredName == nil && req.ResponseStyle == nil {
+		common.ReplyErr(w, "metadata field required", http.StatusBadRequest)
+		return
+	}
+	if ref.ResourceType != ResourceTypeUserPreference &&
+		(req.AgentPersona != nil || req.PreferredName != nil || req.ResponseStyle != nil) {
+		common.ReplyErr(w, "user_preference metadata is only supported for user_preference", http.StatusBadRequest)
+		return
+	}
+	for _, value := range []*string{req.AgentPersona, req.PreferredName, req.ResponseStyle} {
+		if value != nil {
+			if err := validateManagedContentLength(*value); err != nil {
+				common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+	if _, err := service.EnsureResource(r.Context(), ref, initialContent(ref.ResourceType)); err != nil {
+		replyError(w, err)
+		return
+	}
+	resp, err := service.UpdateMetadata(r.Context(), UpdateMetadataRequest{
+		Ref:           ref,
+		AutoEvo:       req.AutoEvo,
+		AgentPersona:  req.AgentPersona,
+		PreferredName: req.PreferredName,
+		ResponseStyle: req.ResponseStyle,
+		UpdatedBy:     ref.UserID,
+		UpdatedByName: strings.TrimSpace(store.UserName(r)),
+	})
+	if err != nil {
+		replyError(w, err)
+		return
+	}
+	if resp.EnabledFromOff && resp.AutoEvo && AutoEvoEnabledScanner != nil {
+		if scanErr := AutoEvoEnabledScanner(r.Context(), store.DB(), string(ref.ResourceType), ref.UserID, resp.ResourceID); scanErr != nil {
+			appLog.Logger.Warn().Err(scanErr).
+				Str("component", "resource_update").
+				Str("event", "resource_update.auto_evo_enabled.scan_failed").
+				Str("resource_type", string(ref.ResourceType)).
+				Str("resource_id", resp.ResourceID).
+				Str("route", "/personal-resource/{resource_type}").
+				Str("user_id", ref.UserID).
+				Msg("resource update scan on personal resource metadata patch failed")
+		}
+	}
+	common.ReplyOK(w, resp)
+}
+
+func Generate(w http.ResponseWriter, r *http.Request) {
+	service, ref, ok := requestServiceAndRef(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		UserInstruct string `json:"user_instruct"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	req.UserInstruct = strings.TrimSpace(req.UserInstruct)
+	if req.UserInstruct == "" {
+		common.ReplyErr(w, "user_instruct required", http.StatusBadRequest)
+		return
+	}
+	state, err := service.EnsureResource(r.Context(), ref, initialContent(ref.ResourceType))
+	if err != nil {
+		replyError(w, err)
+		return
+	}
+	base, err := currentWritableContent(r.Context(), service, ref)
+	if err != nil {
+		replyError(w, err)
+		return
+	}
+	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), ref.UserID)
+	if err != nil {
+		common.ReplyErr(w, "load llm config failed", http.StatusInternalServerError)
+		return
+	}
+	algoReq := algo.ManagedGenerateRequest{
+		Content:      base.Content,
+		UserInstruct: req.UserInstruct,
+		LLMConfig:    llmConfig,
+	}
+	var generated string
+	switch ref.ResourceType {
+	case ResourceTypeMemory:
+		generated, err = algo.GenerateMemory(r.Context(), algoReq)
+	case ResourceTypeUserPreference:
+		generated, err = algo.GenerateUserPreference(r.Context(), algoReq)
+	default:
+		err = ErrInvalidResourceType
+	}
+	if err != nil {
+		common.ReplyErr(w, "personal resource generate failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	draftResp, err := service.WriteDraft(r.Context(), WriteDraftRequest{
+		Ref:                  ref,
+		Content:              generated,
+		ExpectedDraftVersion: base.DraftVersion,
+		UpdatedBy:            ref.UserID,
+	})
+	if err != nil {
+		replyError(w, err)
+		return
+	}
+	common.ReplyOK(w, map[string]any{
+		"draft_status":         "pending_confirm",
+		"draft_source_version": state.Version,
+		"draft_content":        generated,
+		"draft_version":        draftResp.DraftVersion,
+	})
+}
+
 func patchUserPreferenceDraftContent(ctx context.Context, service *Service, ref ResourceRef, patch preferencefile.PreferencePatch) (string, error) {
 	base, err := service.ReadFile(ctx, ReadFileRequest{Ref: ref, RefType: FileRefDraft})
 	if err != nil {
@@ -110,6 +253,38 @@ func patchUserPreferenceDraftContent(ctx context.Context, service *Service, ref 
 	}
 	next, _, err := preferencefile.PatchFileContent(base.Content, patch)
 	return next, err
+}
+
+func initialContent(resourceType ResourceType) string {
+	if resourceType == ResourceTypeUserPreference {
+		return preferencefile.EmptyPreferenceFileContent()
+	}
+	return ""
+}
+
+func currentWritableContent(ctx context.Context, service *Service, ref ResourceRef) (FileResponse, error) {
+	draft, err := service.ReadFile(ctx, ReadFileRequest{Ref: ref, RefType: FileRefDraft})
+	if err == nil && strings.TrimSpace(draft.DraftStatus) == "pending_confirm" {
+		return draft, nil
+	}
+	if err != nil && !errors.Is(err, ErrDraftNotFound) {
+		return FileResponse{}, err
+	}
+	return service.ReadFile(ctx, ReadFileRequest{Ref: ref, RefType: FileRefHead})
+}
+
+func validateManagedContentLength(content string) error {
+	if utf8.RuneCountInString(strings.Join(strings.Fields(content), "")) > maxManagedContentChars {
+		return errors.New("content exceeds 1500 characters after removing whitespace")
+	}
+	return nil
+}
+
+func stringFromPtr(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func DraftPreview(w http.ResponseWriter, r *http.Request) {
@@ -218,12 +393,9 @@ func CommitDraft(w http.ResponseWriter, r *http.Request) {
 		ExpectedHeadRevisionID: req.ExpectedHeadRevisionID,
 		ExpectedDraftVersion:   req.ExpectedDraftVersion,
 		CreatedBy:              ref.UserID,
+		CreatedByName:          strings.TrimSpace(store.UserName(r)),
 	})
 	if err != nil {
-		replyError(w, err)
-		return
-	}
-	if err := syncBusinessColumns(r.Context(), store.DB(), ref, resp.Content, resp.RevisionNo); err != nil {
 		replyError(w, err)
 		return
 	}
@@ -293,12 +465,9 @@ func Rollback(w http.ResponseWriter, r *http.Request) {
 		Message:                req.Message,
 		ExpectedHeadRevisionID: req.ExpectedHeadRevisionID,
 		CreatedBy:              ref.UserID,
+		CreatedByName:          strings.TrimSpace(store.UserName(r)),
 	})
 	if err != nil {
-		replyError(w, err)
-		return
-	}
-	if err := syncBusinessColumns(r.Context(), store.DB(), ref, resp.Content, resp.RevisionNo); err != nil {
 		replyError(w, err)
 		return
 	}
@@ -327,60 +496,6 @@ func validateRevisionBeforeRollback(ctx context.Context, service *Service, ref R
 	}
 	_, err = preferencefile.ParseFileContent(revision.Content)
 	return err
-}
-
-func syncBusinessColumns(ctx context.Context, db *gorm.DB, ref ResourceRef, content string, revisionNo int64) error {
-	now := time.Now()
-	switch ref.ResourceType {
-	case ResourceTypeMemory:
-		row, err := evolution.EnsureSystemMemory(ctx, db, ref.UserID, "")
-		if err != nil {
-			return err
-		}
-		row.Content = content
-		row.Version = revisionNo
-		return db.WithContext(ctx).Model(&orm.SystemMemory{}).Where("id = ?", row.ID).Updates(map[string]any{
-			"content":              content,
-			"content_hash":         evolution.HashSystemMemory(*row),
-			"version":              revisionNo,
-			"draft_content":        "",
-			"draft_source_version": 0,
-			"draft_status":         "",
-			"draft_updated_at":     nil,
-			"updated_by":           ref.UserID,
-			"updated_at":           now,
-		}).Error
-	case ResourceTypeUserPreference:
-		parsed, err := preferencefile.ParseFileContent(content)
-		if err != nil {
-			return err
-		}
-		row, err := evolution.EnsureSystemUserPreference(ctx, db, ref.UserID, "")
-		if err != nil {
-			return err
-		}
-		row.Content = parsed.Content
-		row.AgentPersona = parsed.AgentPersona
-		row.PreferredName = parsed.PreferredName
-		row.ResponseStyle = parsed.ResponseStyle
-		row.Version = revisionNo
-		return db.WithContext(ctx).Model(&orm.SystemUserPreference{}).Where("id = ?", row.ID).Updates(map[string]any{
-			"content":              parsed.Content,
-			"agent_persona":        parsed.AgentPersona,
-			"preferred_name":       parsed.PreferredName,
-			"response_style":       parsed.ResponseStyle,
-			"content_hash":         evolution.HashSystemUserPreference(*row),
-			"version":              revisionNo,
-			"draft_content":        "",
-			"draft_source_version": 0,
-			"draft_status":         "",
-			"draft_updated_at":     nil,
-			"updated_by":           ref.UserID,
-			"updated_at":           now,
-		}).Error
-	default:
-		return ErrInvalidResourceType
-	}
 }
 
 func requestServiceAndRef(w http.ResponseWriter, r *http.Request) (*Service, ResourceRef, bool) {

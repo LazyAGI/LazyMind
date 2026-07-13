@@ -659,12 +659,10 @@ async def run_subagent_stream(
                 _auto_flush_drafts(ctx, db)
                 yield _sse({'type': 'done', 'task_id': task_id, 'status': 'succeeded',
                             'summary': eval_summary, 'cost': cost})
-                _emit_step_done(effective_agent_type, params, eval_summary, 'succeeded')
             else:
                 yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
                             'summary': eval_summary,
                             'message': f'缺少 artifact: {", ".join(missing)}。{eval_summary}'})
-                _emit_step_done(effective_agent_type, params, eval_summary, 'failed')
             yield 'data: [DONE]\n\n'
             return
 
@@ -674,8 +672,6 @@ async def run_subagent_stream(
         _auto_flush_drafts(ctx, db)
         yield _sse({'type': 'done', 'task_id': task_id, 'status': 'succeeded',
                     'summary': summary, 'cost': cost})
-        # Signal advance_step (dynamic mode) that this step finished.
-        _emit_step_done(effective_agent_type, params, summary, 'succeeded')
         yield 'data: [DONE]\n\n'
     except Exception as exc:  # noqa: BLE001
         LOG.exception('[SubAgent] run failed')
@@ -732,29 +728,6 @@ def _make_cancel_stop_condition():
             pass
         return False
     return _check
-
-
-def _emit_step_done(effective_agent_type: str, params: Dict[str, Any], summary: str, status: str) -> None:
-    """Write step_done signal to FileSystemQueue so advance_step (dynamic mode) can unblock.
-
-    The queue klass is 'step_done_<session_id>_<step_id>'.  The global request sid
-    (task_id) is already set by lazyllm.globals._init_sid at runner entry, so
-    FileSystemQueue picks up the right bucket automatically.
-    """
-    if effective_agent_type != 'plugin_step':
-        return
-    session_id = params.get('session_id', '')
-    step_id = params.get('step_id', '')
-    if not session_id or not step_id:
-        return
-    try:
-        import json as _json
-        from lazyllm.common.queue import FileSystemQueue
-        klass = f'step_done_{session_id}_{step_id}'
-        msg = _json.dumps({'status': status, 'summary': summary}, ensure_ascii=False)
-        FileSystemQueue(klass=klass).enqueue(msg)
-    except Exception:
-        pass
 
 
 def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:

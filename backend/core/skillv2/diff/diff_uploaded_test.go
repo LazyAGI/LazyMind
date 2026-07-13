@@ -46,6 +46,40 @@ func TestDiffUploadedVsRevision_ForImportPreview(t *testing.T) {
 	}
 }
 
+func TestDiffUploadedVsRevision_StripsSingleTopLevelDirectory(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	zipPath := filepath.Join(t.TempDir(), "wrapped.zip")
+	testutil.WriteSkillZip(t, zipPath, map[string][]byte{
+		"openclaw-openclaw-changelog-update/SKILL.md":        []byte("# 论文精读 v2\n"),
+		"openclaw-openclaw-changelog-update/references/b.md": []byte("# B\n"),
+	})
+	uploads := testutil.NewFakeUploadStore()
+	uploads.Put(testutil.UploadSession{UploadID: "upload_wrapped_zip", OwnerUserID: "user_001", State: "completed", StoredPath: zipPath, Filename: "wrapped.zip"})
+	resolver := NewRefResolver(RefResolverDeps{DB: db.DB, UploadStore: uploads})
+	service := NewService(ServiceDeps{})
+
+	oldFS, newFS, err := resolver.ResolvePair(context.Background(), ResolvePairRequest{
+		UserID: "user_001",
+		Old:    DiffRef{Type: "revision", SkillID: "skill1", RevisionID: "rev1"},
+		New:    DiffRef{Type: "uploaded", UploadID: "upload_wrapped_zip"},
+	})
+	if err != nil {
+		t.Fatalf("ResolvePair returned error: %v", err)
+	}
+	result, err := service.Compare(context.Background(), oldFS, newFS, DiffOptions{})
+	if err != nil {
+		t.Fatalf("Compare returned error: %v", err)
+	}
+	assertDiffStatus(t, result, "SKILL.md", "modified")
+	assertDiffStatus(t, result, "references/b.md", "added")
+	for _, file := range result.Files {
+		if file.Path == "openclaw-openclaw-changelog-update/SKILL.md" {
+			t.Fatalf("diff kept wrapper directory path: %#v", file)
+		}
+	}
+}
+
 func TestDiffUploadedRefMismatch_ReturnsError(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	uploads := testutil.NewFakeUploadStore()

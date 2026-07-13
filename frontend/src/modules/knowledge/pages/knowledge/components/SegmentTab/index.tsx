@@ -225,7 +225,9 @@ const SegmentTab = (props: SegmentTabProps) => {
     (segment: Segment) => {
       Modal.confirm({
         title: t("knowledge.deletePermissionTitle"),
-        content: t("knowledge.segmentDeleteConfirm", { number: segment.number }),
+        content: t("knowledge.segmentDeleteConfirm", {
+          number: segment.number,
+        }),
         centered: true,
         okType: "danger",
         okText: t("common.confirm"),
@@ -328,7 +330,10 @@ const SegmentTab = (props: SegmentTabProps) => {
   );
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden" style={{ height: '100%' }}>
+    <div
+      className="flex flex-1 flex-col overflow-hidden"
+      style={{ height: "100%" }}
+    >
       <div
         style={{
           display: "flex",
@@ -338,7 +343,14 @@ const SegmentTab = (props: SegmentTabProps) => {
           marginBottom: 8,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexShrink: 0,
+          }}
+        >
           <span style={{ color: "var(--color-text-description)" }}>
             {t("knowledge.sequence")}
           </span>

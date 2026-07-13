@@ -172,7 +172,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 
 	var checkData *CheckModelProviderData
 	if apiKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, apiKey)
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, apiKey, "")
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -328,7 +328,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		updates["is_verified"] = true
 	}
 	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -353,7 +353,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		if effectiveAPIKey == "" {
 			updates["is_verified"] = true
 		} else {
-			checkResult, checkErr := doCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
+			checkResult, checkErr := doCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
 			if checkErr != nil || !checkResult.Success {
 				msg := "verification failed"
 				if checkResult != nil {
@@ -521,8 +521,20 @@ func isAPIKeyRequiredForBaseURL(ctx context.Context, db *gorm.DB, defaultProvide
 	return !isCustomBaseURL(ctx, db, defaultProviderID, baseURL)
 }
 
+// sensenovaNewPlatformBaseURL is the alternative SenseNova base URL.
+const sensenovaNewPlatformBaseURL = "https://token.sensenova.cn/v1/chat/completions/"
+
+// sensenovaNewPlatformModelNames lists the model names (from default_models seeding) that are
+// specific to the new SenseNova platform URL. Model metadata comes from the catalog / DB.
+var sensenovaNewPlatformModelNames = map[string]bool{
+	"deepseek-v4-flash":        true,
+	"glm-5.2":                  true,
+	"sensenova-6.7-flash-lite": true,
+}
+
 // seedGroupModelsFromDefaults inserts user_model_provider_group_models from default_models when the group's
 // base_url matches the catalog DefaultModelProvider.base_url for parent.DefaultModelProviderID.
+// Also handles the special case of SenseNova's new platform URL.
 func seedGroupModelsFromDefaults(
 	tx *gorm.DB,
 	ctx context.Context,
@@ -536,6 +548,10 @@ func seedGroupModelsFromDefaults(
 		return nil
 	}
 
+	// Determine whether we use the new-platform subset or the full catalog.
+	useNewPlatform := strings.EqualFold(parent.Name, "SenseNova") &&
+		normalizeBaseURLForCompare(requestBaseURL) == normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL)
+
 	var catalog orm.DefaultModelProvider
 	err := tx.WithContext(ctx).
 		Where("id = ? AND deleted_at IS NULL", parent.DefaultModelProviderID).
@@ -546,9 +562,15 @@ func seedGroupModelsFromDefaults(
 		}
 		return err
 	}
-	if normalizeBaseURLForCompare(requestBaseURL) != normalizeBaseURLForCompare(catalog.BaseURL) {
+
+	// For the new SenseNova platform, seed only the 3 specific models (loaded from DB).
+	// For all other providers / URLs, match the base URL against the catalog default.
+	if useNewPlatform {
+		// seed only the new-platform-specific models from default_models
+	} else if normalizeBaseURLForCompare(requestBaseURL) != normalizeBaseURLForCompare(catalog.BaseURL) {
 		return nil
 	}
+
 	var defs []orm.DefaultModel
 	if err := tx.WithContext(ctx).
 		Where("default_model_provider_id = ? AND deleted_at IS NULL", parent.DefaultModelProviderID).
@@ -558,9 +580,13 @@ func seedGroupModelsFromDefaults(
 	if len(defs) == 0 {
 		return nil
 	}
-	batch := make([]orm.UserModelProviderGroupModel, len(defs))
-	for i, d := range defs {
-		batch[i] = orm.UserModelProviderGroupModel{
+
+	batch := make([]orm.UserModelProviderGroupModel, 0, len(defs))
+	for _, d := range defs {
+		if useNewPlatform && !sensenovaNewPlatformModelNames[d.Name] {
+			continue
+		}
+		batch = append(batch, orm.UserModelProviderGroupModel{
 			ID:                       common.GenerateID(),
 			UserModelProviderID:      parent.ID,
 			UserModelProviderGroupID: group.ID,
@@ -575,7 +601,10 @@ func seedGroupModelsFromDefaults(
 				UpdatedAt:      now,
 				DeletedAt:      nil,
 			},
-		}
+		})
+	}
+	if len(batch) == 0 {
+		return nil
 	}
 	return tx.WithContext(ctx).CreateInBatches(&batch, 100).Error
 }
@@ -671,7 +700,7 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify the key before storing.
-	checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, row.BaseURL, newKey)
+	checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, row.BaseURL, newKey, "")
 	if checkErr != nil || checkResult == nil || !checkResult.Success {
 		msg := "verification failed"
 		if checkResult != nil && strings.TrimSpace(checkResult.Message) != "" {

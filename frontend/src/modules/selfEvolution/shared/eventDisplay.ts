@@ -144,7 +144,7 @@ export function buildDatasetEventDisplayText(
   const _datasetOperationSegments = getDatasetOperationSegments();
   const operationSegment = _datasetOperationSegments[getEventFlowKind(payload) as keyof ReturnType<typeof getDatasetOperationSegments>];
   const current = getNumberField(eventData, ["current", "completed", "done", "processed"]);
-  const total = getNumberField(eventData, ["total", "num_cases", "cases", "count"]);
+  const total = getNumberField(eventData, ["total", "num_cases", "case_num", "count"]);
   const countText =
     typeof current === "number" && typeof total === "number" && total > 0
       ? t("selfEvolutionRun.progressCount", { current, total })
@@ -181,7 +181,7 @@ export function buildEvalEventDisplayText(
   const eventData = getEvalPhasePayloadData(payload, phase);
   const phaseLabel = getEvalPhaseLabel(phase);
   const current = getNumberField(eventData, ["current", "completed", "done", "processed"]);
-  const total = getNumberField(eventData, ["total", "num_cases", "cases", "count"]);
+  const total = getNumberField(eventData, ["total", "num_cases", "case_num", "count"]);
   const countText =
     typeof current === "number" && typeof total === "number" && total > 0
       ? t("selfEvolutionRun.progressCount", { current, total })

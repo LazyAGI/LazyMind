@@ -2,57 +2,339 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   min-height: 0;
 }
 
-.memory-skill-view-bar {
+.memory-skill-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 46px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.memory-skill-toolbar-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+  padding-bottom: 8px;
+}
+
+.memory-skill-create-split {
+  display: inline-flex;
+  align-items: stretch;
+  height: 32px;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: none;
+
+  &.is-single {
+    border: 0;
+  }
+
+  &__main {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid #1677ff;
+    border-right: 0;
+    border-radius: 6px 0 0 6px;
+    background: #1677ff;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+
+    &:hover {
+      background: #4096ff;
+      border-color: #4096ff;
+    }
+  }
+
+  &__trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid #1677ff;
+    border-left: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 0 6px 6px 0;
+    background: #1677ff;
+    color: #fff;
+    font-size: 10px;
+    cursor: pointer;
+
+    &:hover {
+      background: #4096ff;
+      border-color: #4096ff;
+    }
+  }
+
+  &.is-single &__main {
+    border-right: 1px solid #1677ff;
+    border-radius: 6px;
+  }
+}
+
+.memory-skill-market-publish {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 6px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+
+  &:hover {
+    background: #4096ff;
+  }
+}
+
+.memory-skill-create-dropdown {
+  .ant-dropdown-menu {
+    min-width: 280px;
+    padding: 6px;
+    border-radius: 8px;
+    box-shadow:
+      0 6px 16px rgba(0, 0, 0, 0.08),
+      0 3px 6px -4px rgba(0, 0, 0, 0.12);
+  }
+
+  .ant-dropdown-menu-item {
+    padding: 0;
+    border-radius: 6px;
+
+    &:hover {
+      background: #f5f5f5;
+    }
+  }
+}
+
+.memory-skill-create-option {
+  display: flex;
+  align-items: flex-start;
   gap: 12px;
-  border-bottom: 1px solid #edf1f5;
+  padding: 10px 12px;
+
+  &__icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 14px;
+
+    &.is-manual {
+      background: #e6f4ff;
+      color: #1677ff;
+    }
+
+    &.is-upload {
+      background: #f6ffed;
+      color: #52c41a;
+    }
+
+    &.is-import {
+      background: #f9f0ff;
+      color: #722ed1;
+    }
+  }
+
+  &__copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+
+    strong {
+      color: rgba(0, 0, 0, 0.88);
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+
+    span {
+      color: rgba(0, 0, 0, 0.45);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+  }
+}
+
+.memory-skill-insight-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 168px;
+  height: 56px;
+  padding: 8px 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+
+  &:hover:not(:disabled) {
+    border-color: #d9d9d9;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
+
+  &__icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: #e6f4ff;
+    color: #1677ff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 15px;
+  }
+
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  &__title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: rgba(0, 0, 0, 0.88);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+
+  &__count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: #ff4d4f;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  &__hint {
+    color: rgba(0, 0, 0, 0.45);
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
 }
 
 .memory-skill-view-tabs {
   display: inline-flex;
-  align-items: center;
-  gap: 24px;
+  align-items: flex-end;
+  gap: 28px;
+  min-width: 0;
 }
 
 .memory-skill-view-tab {
   position: relative;
-  height: 42px;
+  height: 46px;
   border: 0;
   background: transparent;
-  color: #667085;
+  color: rgba(0, 0, 0, 0.65);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 0 2px;
+  padding: 0 0 10px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
 
   &:hover {
-    color: #175cd3;
+    color: #1677ff;
   }
 
   &.is-active {
-    color: #175cd3;
+    color: #1677ff;
+    font-weight: 600;
 
     &::after {
       content: "";
       position: absolute;
       left: 0;
       right: 0;
-      bottom: -1px;
+      bottom: 0;
       height: 2px;
-      border-radius: 999px;
-      background: #2f6bff;
+      background: #1677ff;
     }
   }
+}
+
+.memory-skill-view-market-desc {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+
+  &__icon {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    margin-top: 1px;
+    border-radius: 999px;
+    background: #eef4ff;
+    color: #2f6bff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+  }
+
+  &__text {
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #667085;
+  }
+}
+
+.memory-skill-market-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
 }
 
 .memory-skill-bar-actions {
@@ -93,23 +375,39 @@
 .memory-skill-filter-controls,
 .memory-skill-installed-filters {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid #edf1f5;
-  border-radius: 12px;
-  background: #fbfcff;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-.memory-skill-market-search,
 .memory-skill-installed-search {
-  flex: 1 1 320px;
-  min-width: 220px;
+  flex: 1 1 auto;
+  min-width: 200px;
+
+  .ant-input-affix-wrapper,
+  .ant-input {
+    border-radius: 6px;
+  }
+}
+
+.memory-skill-market-search {
+  width: 100%;
 }
 
 .memory-skill-market-source,
 .memory-skill-installed-select {
-  min-width: 132px;
+  flex: 0 0 140px;
+  width: 140px;
+}
+
+.memory-skill-reset-button {
+  flex-shrink: 0;
+  height: 32px;
+  border-radius: 6px;
 }
 
 .memory-skill-filter-meta-row {
@@ -377,12 +675,33 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   min-height: 0;
 }
 
 .memory-skill-installed-table {
   flex: 1;
+
+  .ant-table {
+    border: 1px solid #f0f0f0;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .ant-table-thead > tr > th {
+    background: #fafafa !important;
+    color: rgba(0, 0, 0, 0.65);
+    font-weight: 500;
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  .ant-table-tbody > tr > td {
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  .ant-table-pagination.ant-pagination {
+    margin: 12px 0 0;
+  }
 }
 
 .memory-skill-upload-view {
@@ -454,6 +773,12 @@
 }
 
 .memory-list-page.is-skills-tab {
+  gap: 16px;
+
+  .memory-tab-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .memory-list-content.is-skill-management {
     flex: 1;
     min-height: 0;
@@ -461,6 +786,23 @@
 }
 
 @media (max-width: 1180px) {
+  .memory-skill-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .memory-skill-toolbar-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    padding-bottom: 0;
+  }
+
+  .memory-skill-view-tabs {
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+
   .memory-skill-filter-controls,
   .memory-skill-installed-filters {
     flex-wrap: wrap;
@@ -472,6 +814,21 @@
 }
 
 @media (max-width: 900px) {
+  .memory-skill-toolbar-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .memory-skill-create-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .memory-skill-insight-card {
+    max-width: none;
+    width: 100%;
+  }
+
   .memory-skill-tile {
     grid-template-columns: 44px minmax(0, 1fr);
     gap: 12px;

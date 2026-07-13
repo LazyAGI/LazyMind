@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -44,6 +45,13 @@ OLD_ALIASES = {
     'category_counts', 'fine_category_counts', 'llm_analysis_queue', 'answer_score', 'retrieval_score',
     'trace_missing', 'trace_available',
 }
+CHAT_CONTRACT_ERROR_TYPES = {
+    'chat_invalid_answer',
+    'chat_invalid_answer_retry_exhausted',
+    'chat_no_answer',
+    'chat_no_answer_retry_exhausted',
+}
+UUID_RE = re.compile(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
 
 
 class CaseModel(BaseModel):
@@ -144,74 +152,138 @@ def _decision(
     if judge.get('failure_type') == 'dataset_contract_error':
         return _row('contract', 'dataset_contract_error', 'eval_contract', 'dataset_contract_error', 'high',
                     False, ['failure_type=dataset_contract_error'], judge)
+    chat_contract = _chat_contract_failure(answer, judge, trace, case)
+    if chat_contract:
+        return chat_contract
     if answer.get('status') != 'ok' or answer.get('chat_error'):
         source = _infra_source(answer)
         return _row('runtime_infra', 'rag_or_judge_infra_failure', 'runtime_infra',
                     'rag_or_judge_infra_failure', 'high', False, [source], judge, answer=answer, trace=trace)
-    error = _stage_error(trace)
-    if error:
-        block, mode = error
-        return _row('execution', 'stage_error', block, mode, 'high', False, [f'error_stage={mode}'], judge,
-                    answer=answer, trace=trace)
+    if _trace_unavailable(trace):
+        return _row('tracing', 'trace_unavailable', 'tracing_observability', 'trace_unavailable', 'high', True,
+                    ['lazyllm_trace_unavailable'], judge, answer=answer, trace=trace, case=case)
     if judge.get('failure_type') == 'infra_failure':
+        if _answer_has_evidence(answer):
+            return _row('contract', 'judge_contract_inconsistent', 'eval_contract', 'judge_contract_inconsistent',
+                        'high', False, ['failure_type=infra_failure conflicts with usable rag_answer'], judge,
+                        answer=answer, trace=trace)
+        error = _stage_error(trace)
+        if error:
+            block, mode = error
+            return _row('execution', 'stage_error', block, mode, 'high', False, [f'error_stage={mode}'], judge,
+                        answer=answer, trace=trace)
         return _row('runtime_infra', 'rag_or_judge_infra_failure', 'runtime_infra',
                     'rag_or_judge_infra_failure', 'high', False, ['failure_type=infra_failure'], judge, trace=trace)
     if _correct(case, judge, trace):
         return _row('ok', 'correct', 'not_applicable', 'correct', 'high', False, ['quality_label=good'], judge,
                     trace=trace)
-    tracing = _tracing_defect(case, judge, trace)
+    orchestration = _tool_orchestration(case, answer, judge, trace)
+    if orchestration:
+        return _with_tracing_signal(orchestration, case, answer, judge, trace)
+    retrieval = _retrieval(case, answer, judge, trace)
+    if retrieval:
+        return _with_tracing_signal(retrieval, case, answer, judge, trace)
+    generation = _generation(case, answer, judge, trace)
+    if generation:
+        return _with_tracing_signal(generation, case, answer, judge, trace)
+    tracing = _tracing_defect(case, answer, judge, trace)
     if tracing:
         return _row('tracing', tracing, 'tracing_observability', tracing, 'medium', True, [tracing], judge,
                     trace=trace)
-    retrieval = _retrieval(case, judge, trace)
-    if retrieval:
-        return retrieval
-    generation = _generation(case, answer, judge, trace)
-    return generation or _row('undetermined', 'insufficient_evidence', 'undetermined', 'insufficient_evidence',
-                              'low', True, ['no deterministic rule reached threshold'], judge, answer=answer,
-                              trace=trace)
+    return _row('undetermined', 'insufficient_evidence', 'undetermined', 'insufficient_evidence',
+                'low', True, ['no deterministic rule reached threshold'], judge, answer=answer,
+                trace=trace)
 
 
-def _retrieval(case: Mapping[str, Any], judge: Mapping[str, Any], trace: Mapping[str, Any]) -> dict[str, Any] | None:
+def _retrieval(
+    case: Mapping[str, Any],
+    answer: Mapping[str, Any],
+    judge: Mapping[str, Any],
+    trace: Mapping[str, Any],
+) -> dict[str, Any] | None:
     if judge.get('retrieval_failure_type') in {'none', 'not_applicable'}:
         return None
-    retrieved_docs = set(trace.get('retrieved_doc_ids') or [])
-    retrieved_chunks = set(trace.get('retrieved_chunk_ids') or [])
-    final_docs = set(trace.get('final_context_doc_ids') or [])
-    final_chunks = set(trace.get('final_context_chunk_ids') or [])
+    retrieved_docs = _semantic_ids(trace, answer, 'retrieved_doc_ids', 'doc_ids')
+    retrieved_chunks = _semantic_ids(trace, answer, 'retrieved_chunk_ids', 'chunk_ids')
+    final_docs = _semantic_ids(trace, answer, 'final_context_doc_ids', 'doc_ids')
+    final_chunks = _semantic_ids(trace, answer, 'final_context_chunk_ids', 'chunk_ids')
     ref_docs, ref_chunks = _ids(case.get('reference_doc_ids')), _ids(case.get('reference_chunk_ids'))
-    doc_hit, chunk_hit = ref_docs & retrieved_docs, ref_chunks & retrieved_chunks
-    final_hit = bool(ref_docs & final_docs or ref_chunks & final_chunks)
+    doc_hit = _id_overlap(ref_docs, retrieved_docs)
+    chunk_hit = _id_overlap(ref_chunks, retrieved_chunks)
+    final_hit = bool(_id_overlap(ref_docs, final_docs) or _id_overlap(ref_chunks, final_chunks))
+    answer_doc_hit = _id_overlap(ref_docs, _ids(answer.get('doc_ids')))
+    answer_chunk_hit = _id_overlap(ref_chunks, _ids(answer.get('chunk_ids')))
+    answer_source_complete = (
+        (not ref_docs or bool(answer_doc_hit))
+        and (not ref_chunks or bool(answer_chunk_hit))
+    )
     features = [f'retrieval_failure_type={judge["retrieval_failure_type"]}',
                 f'doc_recall={judge["doc_recall"]}', f'chunk_recall={judge["chunk_recall"]}',
                 f'doc_precision={judge["doc_precision"]}', f'chunk_precision={judge["chunk_precision"]}']
+    if final_hit and not answer_source_complete:
+        return _row('generation', 'source_evidence_serialization_missing', 'postprocess_serialization',
+                    'source_evidence_serialization_missing', 'high', False,
+                    features + ['trace_final_context_has_reference', 'rag_answer_missing_reference_source_ids'],
+                    judge, answer=answer, trace=trace, case=case)
     if ref_docs and not doc_hit and not chunk_hit:
         return _row('retrieval', 'reference_document_missing', 'retrieval', 'reference_document_missing', 'high',
-                    False, features, judge, trace=trace, case=case)
+                    False, features, judge, answer=answer, trace=trace, case=case)
     if doc_hit and ref_chunks and not chunk_hit:
         return _row('retrieval', 'reference_chunk_missing', 'retrieval', 'reference_chunk_missing', 'high', False,
-                    features, judge, trace=trace, case=case)
-    if (doc_hit or chunk_hit) and ref_chunks and not (ref_chunks & final_chunks):
+                    features, judge, answer=answer, trace=trace, case=case)
+    if (doc_hit or chunk_hit) and ref_chunks and not _id_overlap(ref_chunks, final_chunks):
         return _row('retrieval', 'context_assembly_failure', 'context_assembly', 'context_reference_chunk_dropped',
-                    'high', False, features + ['final_context_missing_reference'], judge, trace=trace, case=case)
+                    'high', False, features + ['final_context_missing_reference'], judge,
+                    answer=answer, trace=trace, case=case)
     partial_seen = (
-        (ref_docs and not ref_docs <= retrieved_docs)
-        or (ref_chunks and (not ref_chunks <= retrieved_chunks or not ref_chunks <= final_chunks))
+        (ref_docs and not _all_refs_seen(ref_docs, retrieved_docs))
+        or (ref_chunks and (
+            not _all_refs_seen(ref_chunks, retrieved_chunks)
+            or not _all_refs_seen(ref_chunks, final_chunks)
+        ))
     )
     if (judge.get('retrieval_failure_type') == 'retrieval_partial' or _partial_recall(judge)) and partial_seen:
         return _row('retrieval', 'partial_reference_recall', 'retrieval', 'partial_reference_recall', 'medium',
-                    False, features, judge, trace=trace, case=case)
-    extra_context = (retrieved_docs - ref_docs) or (retrieved_chunks - ref_chunks)
+                    False, features, judge, answer=answer, trace=trace, case=case)
+    extra_context = _unmatched_ids(retrieved_docs, ref_docs) or _unmatched_ids(retrieved_chunks, ref_chunks)
     if (judge.get('retrieval_failure_type') == 'retrieval_noise' or _precision_low(judge)) and extra_context:
         block = 'rerank' if 'rerank' in trace.get('diagnostic_stage_sequence', []) else 'retrieval'
         mode = 'rerank_noise_promoted' if block == 'rerank' else 'retrieval_noise'
         issue = 'rerank_failure' if block == 'rerank' else 'retrieval_noise'
-        return _row('retrieval', issue, block, mode, 'medium', False, features, judge, trace=trace, case=case)
+        return _row('retrieval', issue, block, mode, 'medium', False, features, judge,
+                    answer=answer, trace=trace, case=case)
     if final_hit:
         return None
     return _row('undetermined', 'insufficient_trace_evidence', 'undetermined', 'insufficient_trace_evidence', 'low',
-                True, features + ['trace_retrieval_evidence_does_not_confirm_judge_signal'], judge, trace=trace,
-                case=case)
+                True, features + ['trace_retrieval_evidence_does_not_confirm_judge_signal'], judge,
+                answer=answer, trace=trace, case=case)
+
+
+def _tool_orchestration(
+    case: Mapping[str, Any],
+    answer: Mapping[str, Any],
+    judge: Mapping[str, Any],
+    trace: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if judge.get('retrieval_failure_type') in {'none', 'not_applicable'}:
+        return None
+    if not _kb_expected(case, answer):
+        return None
+    if _retrieval_observed(trace, answer):
+        return None
+    failure = _text(judge.get('failure_type'))
+    if failure not in {'question_not_answered', 'partial_answer', 'wrong_answer', 'format_error'}:
+        return None
+    features = [
+        f'retrieval_failure_type={judge["retrieval_failure_type"]}',
+        f'failure_type={failure}',
+        'kb_expected',
+        'retrieval_not_executed',
+    ]
+    if _asks_for_external_context(answer):
+        features.append('answer_asks_user_for_indexed_material')
+    return _row('execution', 'kb_tool_not_used', 'tool_orchestration', 'kb_tool_not_used', 'high', False,
+                features, judge, answer=answer, trace=trace, case=case)
 
 
 def _generation(case: Mapping[str, Any], answer: Mapping[str, Any], judge: Mapping[str, Any],
@@ -219,9 +291,12 @@ def _generation(case: Mapping[str, Any], answer: Mapping[str, Any], judge: Mappi
     failure = _text(judge.get('failure_type'))
     if failure not in {'format_error', 'question_not_answered', 'partial_answer', 'wrong_answer', 'hallucination'}:
         return None
-    healthy = _retrieval_healthy(case, judge, trace)
+    healthy = _retrieval_healthy(case, judge, trace, answer)
     refs_absent = judge.get('retrieval_failure_type') == 'not_applicable'
-    context_present = bool(trace.get('final_context_doc_ids') or trace.get('final_context_chunk_ids'))
+    context_present = bool(
+        _semantic_ids(trace, answer, 'final_context_doc_ids', 'doc_ids')
+        or _semantic_ids(trace, answer, 'final_context_chunk_ids', 'chunk_ids')
+    )
     pending = False
     llm_completed = _stage_completed(trace, 'llm_generate')
     if not (healthy or refs_absent) and failure != 'format_error':
@@ -250,7 +325,8 @@ def _generation(case: Mapping[str, Any], answer: Mapping[str, Any], judge: Mappi
 
 def _row(category: str, issue: str, block: str, mode: str, confidence: str, pending: bool, features: list[str],
          judge: Mapping[str, Any], *, answer: Mapping[str, Any] | None = None,
-         trace: Mapping[str, Any] | None = None, case: Mapping[str, Any] | None = None) -> dict[str, Any]:
+         trace: Mapping[str, Any] | None = None, case: Mapping[str, Any] | None = None,
+         secondary_signals: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     return {
         'issue_category': category,
         'issue_type': issue,
@@ -259,12 +335,35 @@ def _row(category: str, issue: str, block: str, mode: str, confidence: str, pend
         'pending_analysis': pending,
         'confidence': confidence,
         'features': _unique(features),
-        'secondary_signals': [],
+        'secondary_signals': list(secondary_signals or ()),
         'answer_evidence': _answer_evidence(answer or {}),
         'judge_evidence': _judge_evidence(judge),
-        'trace_evidence': _trace_evidence(trace or {}, case or {}),
+        'trace_evidence': _trace_evidence(trace or {}, case or {}, answer or {}),
         'investigation_note': _note(category, issue, block, case or {}),
     }
+
+
+def _with_tracing_signal(
+    row: dict[str, Any],
+    case: Mapping[str, Any],
+    answer: Mapping[str, Any],
+    judge: Mapping[str, Any],
+    trace: Mapping[str, Any],
+) -> dict[str, Any]:
+    tracing = _tracing_defect(case, answer, judge, trace)
+    if not tracing:
+        return row
+    row['secondary_signals'] = [
+        *list(row.get('secondary_signals') or ()),
+        {
+            'issue_category': 'tracing',
+            'issue_type': tracing,
+            'affected_block': 'tracing_observability',
+            'failure_mode': tracing,
+            'pending_analysis': True,
+        },
+    ]
+    return row
 
 
 def _validate(case: Mapping[str, Any], answer: Mapping[str, Any], judge: Mapping[str, Any],
@@ -278,14 +377,15 @@ def _validate(case: Mapping[str, Any], answer: Mapping[str, Any], judge: Mapping
     CaseModel.model_validate(case)
     AnswerModel.model_validate(answer)
     JudgeModel.model_validate(judge)
-    if not answer.get('trace_id'):
+    trace_missing = _trace_unavailable(trace)
+    if not answer.get('trace_id') and not trace_missing:
         raise ValueError('eval.rag_answer trace_id is required')
     for field in TRACE_FIELDS:
         if field not in trace:
             raise ValueError(f'analysis.trace_summary missing field: {field}')
-    if not trace.get('trace_id'):
+    if not trace.get('trace_id') and not trace_missing:
         raise ValueError('analysis.trace_summary trace_id is required')
-    if trace.get('trace_id') != answer.get('trace_id'):
+    if trace.get('trace_id') and answer.get('trace_id') and trace.get('trace_id') != answer.get('trace_id'):
         raise ValueError('analysis.trace_summary trace_id must match eval.rag_answer trace_id')
     if trace.get('trace_source') != 'lazyllm.get_single_trace':
         raise ValueError('analysis.trace_summary trace_source must be lazyllm.get_single_trace')
@@ -334,7 +434,43 @@ def _stage_error(trace: Mapping[str, Any]) -> tuple[str, str] | None:
     return None
 
 
-def _tracing_defect(case: Mapping[str, Any], judge: Mapping[str, Any], trace: Mapping[str, Any]) -> str:
+def _chat_contract_failure(
+    answer: Mapping[str, Any],
+    judge: Mapping[str, Any],
+    trace: Mapping[str, Any],
+    case: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    error = answer.get('chat_error') if isinstance(answer.get('chat_error'), Mapping) else {}
+    error_type = _text(error.get('type'))
+    if error_type not in CHAT_CONTRACT_ERROR_TYPES:
+        return None
+    if error_type.startswith('chat_no_answer'):
+        issue = mode = 'missing_final_answer'
+    else:
+        issue = mode = 'answer_contract_error'
+    return _row(
+        'generation',
+        issue,
+        'llm_generation',
+        mode,
+        'high',
+        False,
+        [f'chat_error={error_type}', f'failure_type={_text(judge.get("failure_type"))}'],
+        judge,
+        answer=answer,
+        trace=trace,
+        case=case,
+    )
+
+
+def _tracing_defect(
+    case: Mapping[str, Any],
+    answer: Mapping[str, Any],
+    judge: Mapping[str, Any],
+    trace: Mapping[str, Any],
+) -> str:
+    if _trace_unavailable(trace):
+        return 'trace_unavailable'
     unknown_value = trace.get('unknown_stage_count')
     if unknown_value is None:
         unknown_value = (trace.get('stage_counts') or {}).get('unknown') or 0
@@ -347,15 +483,46 @@ def _tracing_defect(case: Mapping[str, Any], judge: Mapping[str, Any], trace: Ma
     )
     refs_exist = bool(_ids(case.get('reference_doc_ids')) or _ids(case.get('reference_chunk_ids')))
     answer_failed = judge.get('failure_type') not in {'none', 'infra_failure'}
+    retrieved_trace_ids = bool(
+        _trace_semantic_ids(trace, 'retrieved_doc_ids')
+        or _trace_semantic_ids(trace, 'retrieved_chunk_ids')
+    )
+    final_trace_ids = bool(
+        _trace_semantic_ids(trace, 'final_context_doc_ids')
+        or _trace_semantic_ids(trace, 'final_context_chunk_ids')
+    )
+    retrieved_ids = bool(
+        retrieved_trace_ids
+        or _ids(answer.get('doc_ids'))
+        or _ids(answer.get('chunk_ids'))
+    )
+    final_ids = bool(
+        final_trace_ids
+        or _ids(answer.get('doc_ids'))
+        or _ids(answer.get('chunk_ids'))
+    )
     if refs_exist and judge.get('retrieval_failure_type') == 'not_applicable':
         return 'trace_metrics_missing'
-    if needs_ids and not (trace.get('retrieval_steps') and (trace.get('retrieved_doc_ids')
-                                                            or trace.get('retrieved_chunk_ids'))):
+    if needs_ids and not trace.get('retrieval_steps'):
         return 'trace_metrics_missing'
-    if answer_failed and refs_exist and not (trace.get('final_context_doc_ids')
-                                             or trace.get('final_context_chunk_ids')):
+    if needs_ids and trace.get('semantic_metric_keys') and not retrieved_trace_ids:
+        return 'trace_metrics_missing'
+    if answer_failed and refs_exist and trace.get('semantic_metric_keys') and not final_trace_ids:
+        return 'trace_metrics_missing'
+    if needs_ids and not trace.get('semantic_metric_keys') and not retrieved_ids:
+        return 'trace_metrics_missing'
+    if answer_failed and refs_exist and not trace.get('semantic_metric_keys') and not final_ids:
         return 'trace_metrics_missing'
     return ''
+
+
+def _trace_unavailable(trace: Mapping[str, Any]) -> bool:
+    features = trace.get('features') if isinstance(trace.get('features'), Mapping) else {}
+    return (
+        trace.get('route_signature') == 'trace_unavailable'
+        or trace.get('trace_status') == 'unavailable'
+        or bool(features.get('trace_unavailable'))
+    )
 
 
 def _correct(case: Mapping[str, Any], judge: Mapping[str, Any], trace: Mapping[str, Any]) -> bool:
@@ -368,15 +535,18 @@ def _correct(case: Mapping[str, Any], judge: Mapping[str, Any], trace: Mapping[s
         judge.get('quality_label') == 'good'
         and judge.get('failure_type') == 'none'
         and retrieval_ok
-        and not trace.get('error_stages')
     )
 
 
-def _retrieval_healthy(case: Mapping[str, Any], judge: Mapping[str, Any], trace: Mapping[str, Any]) -> bool:
+def _retrieval_healthy(case: Mapping[str, Any], judge: Mapping[str, Any], trace: Mapping[str, Any],
+                       answer: Mapping[str, Any] | None = None) -> bool:
     ref_docs, ref_chunks = _ids(case.get('reference_doc_ids')), _ids(case.get('reference_chunk_ids'))
-    final_docs = set(trace.get('final_context_doc_ids') or [])
-    final_chunks = set(trace.get('final_context_chunk_ids') or [])
-    overlap_ok = not (ref_docs or ref_chunks) or bool(ref_docs & final_docs or ref_chunks & final_chunks)
+    answer = answer or {}
+    final_docs = _semantic_ids(trace, answer, 'final_context_doc_ids', 'doc_ids')
+    final_chunks = _semantic_ids(trace, answer, 'final_context_chunk_ids', 'chunk_ids')
+    overlap_ok = not (ref_docs or ref_chunks) or bool(
+        _id_overlap(ref_docs, final_docs) or _id_overlap(ref_chunks, final_chunks)
+    )
     return (
         judge.get('retrieval_failure_type') == 'none'
         and _score(judge, 'retrieval_quality_score') >= 0.75
@@ -384,7 +554,6 @@ def _retrieval_healthy(case: Mapping[str, Any], judge: Mapping[str, Any], trace:
         and (not ref_docs or _score(judge, 'doc_recall') >= 0.75)
         and (not ref_chunks or _score(judge, 'chunk_recall') >= 0.75)
         and overlap_ok
-        and not trace.get('error_stages')
     )
 
 
@@ -415,12 +584,15 @@ def _judge_evidence(judge: Mapping[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def _trace_evidence(trace: Mapping[str, Any], case: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _trace_evidence(trace: Mapping[str, Any], case: Mapping[str, Any],
+                    answer: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     ref_docs, ref_chunks = _ids(case.get('reference_doc_ids')), _ids(case.get('reference_chunk_ids'))
-    retrieved_docs = set(trace.get('retrieved_doc_ids') or [])
-    retrieved_chunks = set(trace.get('retrieved_chunk_ids') or [])
-    final_docs = set(trace.get('final_context_doc_ids') or [])
-    final_chunks = set(trace.get('final_context_chunk_ids') or [])
+    answer = answer or {}
+    retrieved_docs = _semantic_ids(trace, answer, 'retrieved_doc_ids', 'doc_ids')
+    retrieved_chunks = _semantic_ids(trace, answer, 'retrieved_chunk_ids', 'chunk_ids')
+    final_docs = _semantic_ids(trace, answer, 'final_context_doc_ids', 'doc_ids')
+    final_chunks = _semantic_ids(trace, answer, 'final_context_chunk_ids', 'chunk_ids')
+    source = _semantic_id_source(trace, answer)
     return [
         _evidence('route_signature', 'analysis.trace_summary.route_signature', trace.get('route_signature')),
         _evidence('stage_sequence', 'analysis.trace_summary.diagnostic_stage_sequence',
@@ -428,12 +600,14 @@ def _trace_evidence(trace: Mapping[str, Any], case: Mapping[str, Any]) -> list[d
         _evidence('unknown_stage_count', 'analysis.trace_summary.unknown_stage_count',
                   trace.get('unknown_stage_count') or 0),
         _evidence('error_stage', 'analysis.trace_summary.error_stages', trace.get('error_stages') or []),
+        _evidence('semantic_id_source', 'analysis.trace_summary.semantic_metric_keys', source),
         _evidence('retrieved_doc_overlap', 'analysis.trace_summary.retrieved_doc_ids',
-                  sorted(ref_docs & retrieved_docs)),
+                  sorted(_id_overlap(ref_docs, retrieved_docs))),
         _evidence('retrieved_chunk_overlap', 'analysis.trace_summary.retrieved_chunk_ids',
-                  sorted(ref_chunks & retrieved_chunks)),
+                  sorted(_id_overlap(ref_chunks, retrieved_chunks))),
         _evidence('final_context_reference_overlap', 'analysis.trace_summary.final_context_ids',
-                  {'doc_ids': sorted(ref_docs & final_docs), 'chunk_ids': sorted(ref_chunks & final_chunks)}),
+                  {'doc_ids': sorted(_id_overlap(ref_docs, final_docs)),
+                   'chunk_ids': sorted(_id_overlap(ref_chunks, final_chunks))}),
     ]
 
 
@@ -458,12 +632,115 @@ def _infra_source(answer: Mapping[str, Any]) -> str:
     return 'rag_answer.status=' + _text(answer.get('status'))
 
 
+def _answer_has_evidence(answer: Mapping[str, Any]) -> bool:
+    return bool(
+        _text(answer.get('answer'))
+        and (_ids(answer.get('contexts')) or _ids(answer.get('doc_ids')) or _ids(answer.get('chunk_ids')))
+    )
+
+
+def _kb_expected(case: Mapping[str, Any], answer: Mapping[str, Any]) -> bool:
+    target = answer.get('target') if isinstance(answer.get('target'), Mapping) else {}
+    metadata = case.get('case_metadata') if isinstance(case.get('case_metadata'), Mapping) else {}
+    preparation = case.get('source_preparation') if isinstance(case.get('source_preparation'), Mapping) else {}
+    case_source = preparation.get('case_source') if isinstance(preparation.get('case_source'), Mapping) else {}
+    return bool(
+        _text(target.get('kb_id'))
+        or _text(metadata.get('kb_id'))
+        or _text(case_source.get('kb_id'))
+        or _ids(case.get('reference_doc_ids'))
+        or _ids(case.get('reference_chunk_ids'))
+    )
+
+
+def _retrieval_observed(trace: Mapping[str, Any], answer: Mapping[str, Any]) -> bool:
+    return bool(
+        trace.get('retrieval_steps')
+        or _ids(answer.get('doc_ids'))
+        or _ids(answer.get('chunk_ids'))
+        or _trace_semantic_ids(trace, 'retrieved_doc_ids')
+        or _trace_semantic_ids(trace, 'retrieved_chunk_ids')
+        or _trace_semantic_ids(trace, 'final_context_doc_ids')
+        or _trace_semantic_ids(trace, 'final_context_chunk_ids')
+    )
+
+
+def _asks_for_external_context(answer: Mapping[str, Any]) -> bool:
+    text = _text(answer.get('answer')).lower()
+    markers = (
+        '请提供', '请上传', '提供简历', '上传简历', '简历内容', '相关文件', '相关内容',
+        'provide the resume', 'provide resume', 'upload the resume', 'uploaded documents',
+        'please share', 'please provide', 'i don’t have access', "i don't have access",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _semantic_ids(
+    trace: Mapping[str, Any],
+    answer: Mapping[str, Any],
+    trace_key: str,
+    answer_key: str,
+) -> set[str]:
+    trace_ids = _trace_semantic_ids(trace, trace_key)
+    return trace_ids or _ids(answer.get(answer_key))
+
+
+def _trace_semantic_ids(trace: Mapping[str, Any], trace_key: str) -> set[str]:
+    return _ids(trace.get(trace_key))
+
+
+def _semantic_id_source(trace: Mapping[str, Any], answer: Mapping[str, Any]) -> str:
+    trace_ids = (
+        _trace_semantic_ids(trace, 'retrieved_doc_ids')
+        or _trace_semantic_ids(trace, 'retrieved_chunk_ids')
+        or _trace_semantic_ids(trace, 'final_context_doc_ids')
+        or _trace_semantic_ids(trace, 'final_context_chunk_ids')
+    )
+    if trace_ids:
+        return 'trace'
+    if _ids(answer.get('doc_ids')) or _ids(answer.get('chunk_ids')):
+        return 'rag_answer'
+    if trace.get('semantic_metric_keys'):
+        return 'trace_missing_ids'
+    return 'trace'
+
+
 def _ids(value: Any) -> set[str]:
     if isinstance(value, str):
         items = [value]
     else:
         items = list(value or [])
     return {str(item).strip() for item in items if str(item or '').strip()}
+
+
+def _id_overlap(expected: set[str], observed: set[str]) -> set[str]:
+    observed_tokens = _id_token_set(observed)
+    return {item for item in expected if _id_tokens(item) & observed_tokens}
+
+
+def _all_refs_seen(expected: set[str], observed: set[str]) -> bool:
+    if not expected:
+        return True
+    return len(_id_overlap(expected, observed)) == len(expected)
+
+
+def _unmatched_ids(observed: set[str], expected: set[str]) -> set[str]:
+    expected_tokens = _id_token_set(expected)
+    return {item for item in observed if not (_id_tokens(item) & expected_tokens)}
+
+
+def _id_token_set(values: set[str]) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        tokens.update(_id_tokens(value))
+    return tokens
+
+
+def _id_tokens(value: str) -> set[str]:
+    text = str(value or '').strip()
+    if not text:
+        return set()
+    return {text, text.lower(), *(match.group(0).lower() for match in UUID_RE.finditer(text))}
 
 
 def _score(judge: Mapping[str, Any], key: str) -> float:

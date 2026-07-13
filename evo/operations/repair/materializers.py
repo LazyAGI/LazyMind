@@ -47,8 +47,8 @@ def repair_materializers() -> dict[str, Callable[[Any, Mapping[str, object]], Ma
     def verified(ctx: Any, inputs: Mapping[str, object]) -> Mapping[str, object]:
         trace = _trace_sink(ctx)
         patch = build_verified_patch(ctx.run_id, _mapping(inputs['loop'], 'loop'))
-        trace.emit('repair.patch_verified', status='completed' if patch.get('status') == 'verified' else 'skipped',
-                   terminal=True, payload={'status': patch.get('status'), 'file_count': len(patch.get('diff') or {})})
+        trace.emit('repair.patch_verified', status='completed', terminal=True,
+                   payload={'status': patch.get('status'), 'file_count': len(patch.get('diff') or {})})
         return {'patch': patch}
 
     return {

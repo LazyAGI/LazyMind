@@ -278,3 +278,89 @@ export function normalizeThreadHistoryMessages(payload: ThreadRestorePayload): C
 
   return dedupeAndSortChatMessages([...normalizeHistoryEventMessages(payload), ...roundMessages]);
 }
+
+function normalizeThreadMessageItems(payload: ThreadRestorePayload): ChatMessage[] {
+  const records = getNestedArrayField(payload, ["items", "messages", "rounds"]);
+
+  return records
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .flatMap<ChatMessage>((item, index) => {
+      const directRole = getStringField(item, ["role"]);
+      if (directRole === "user" || directRole === "assistant") {
+        const content = getNestedStringField(item, [
+          "content",
+          "text",
+          "message",
+          "reply",
+          "assistant_text",
+          "assistantText",
+        ]);
+        if (!content) {
+          return [];
+        }
+        const messageId =
+          getStringField(item, ["message_id", "messageId", "id", "turn_id", "turnId"]) ||
+          `message-${index}`;
+        const timestamp =
+          item.created_at || item.create_time || item.timestamp || item.updated_at;
+        const sortTime = getThreadTimeSortValue(timestamp) ?? index;
+        return [
+          {
+            id: `thread-message-${messageId}-${directRole}`,
+            role: directRole,
+            content,
+            time: formatThreadTime(timestamp),
+            sortTime,
+          },
+        ];
+      }
+
+      const requestPayload = getNestedRecordField(item, ["request_payload", "requestPayload"]);
+      const userContent =
+        getStringField(item, ["user_text", "userText", "user_message", "userMessage"]) ||
+        getHistoryMessageContent(requestPayload);
+      const assistantContent =
+        getStringField(item, ["assistant_text", "assistantText", "assistant_message", "assistantMessage"]) ||
+        getHistoryAssistantDeltaContent(item.records) ||
+        getHistoryAssistantDeltaContent(item.assistant_message);
+      const roundId =
+        getStringField(item, ["turn_id", "turnId", "message_id", "messageId", "round_id", "id"]) ||
+        `round-${index + 1}`;
+      const createdAt = item.created_at || item.create_time || item.timestamp;
+      const updatedAt = item.updated_at || item.update_time || createdAt;
+      const baseSortTime =
+        getThreadTimeSortValue(createdAt) ||
+        getNumberField(item, ["sequence", "seq", "index"]) ||
+        index * 2;
+      const messages: ChatMessage[] = [];
+
+      if (userContent) {
+        messages.push({
+          id: `thread-message-${roundId}-user-${index}`,
+          role: "user",
+          content: userContent,
+          time: formatThreadTime(createdAt),
+          sortTime: baseSortTime,
+        });
+      }
+
+      if (assistantContent) {
+        messages.push({
+          id: `thread-message-${roundId}-assistant-${index}`,
+          role: "assistant",
+          content: assistantContent,
+          time: formatThreadTime(updatedAt),
+          sortTime: baseSortTime + 1,
+        });
+      }
+
+      return messages;
+    });
+}
+
+export function normalizeThreadMessagesPayload(payload: ThreadRestorePayload): ChatMessage[] {
+  return dedupeAndSortChatMessages([
+    ...normalizeHistoryEventMessages(payload),
+    ...normalizeThreadMessageItems(payload),
+  ]);
+}

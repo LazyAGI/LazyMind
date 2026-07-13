@@ -1,6 +1,7 @@
 import { type EvalQuestionTypeSummary, type PxCategoryMetricAverage, type PxMetricKey } from "./types";
 import { pxMetricFieldAliases } from "./constants";
 import { getAnalysisCategoryLabels, getAnalysisVerdictLabels, getPxMetricMeta, getQuestionTypeLabelMap, t } from "./i18n";
+import { buildPxCategoryMetricAveragesFromGateEval } from "./evalGateContent";
 import { getNestedRecordField, getNumberField, getStructuredArrayField, getStructuredRecordField, isRecord } from "./fields";
 
 export function getMetricFieldNumber(payload: Record<string, unknown> | undefined, key: PxMetricKey, fallback = 0) {
@@ -38,6 +39,11 @@ export const getQuestionTypeDisplayName = (item: EvalQuestionTypeSummary, index:
 };
 
 export const buildPxCategoryMetricAveragesFromReport = (payload: unknown): PxCategoryMetricAverage[] => {
+  const gateMetrics = buildPxCategoryMetricAveragesFromGateEval(payload);
+  if (gateMetrics.length > 0) {
+    return gateMetrics;
+  }
+
   const sourceRecord = Array.isArray(payload)
     ? (payload.find((item): item is Record<string, unknown> => isRecord(item)) ?? undefined)
     : isRecord(payload)

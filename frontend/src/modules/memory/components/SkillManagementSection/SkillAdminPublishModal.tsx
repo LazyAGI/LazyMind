@@ -2,12 +2,8 @@ import { useState } from "react";
 import { Button, Input, Modal, Upload, message } from "antd";
 import { InboxOutlined } from "@ant-design/icons";
 import { getLocalizedErrorMessage } from "@/components/request";
-import {
-  canUploadSkillFile,
-  getBaseName,
-  parseMarkdownFrontMatter,
-} from "../../shared";
-import { createSkillAsset } from "../../skillApi";
+import { publishSkillToMarket } from "../../skillApi";
+import { uploadSkillTempFile } from "../../skillUpload";
 
 interface SkillAdminPublishModalProps {
   open: boolean;
@@ -15,14 +11,6 @@ interface SkillAdminPublishModalProps {
   onClose: () => void;
   onPublished: () => Promise<void>;
 }
-
-const readFileAsText = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(file);
-  });
 
 export default function SkillAdminPublishModal({
   open,
@@ -52,36 +40,25 @@ export default function SkillAdminPublishModal({
 
     setSubmitting(true);
     try {
-      let name = "";
-      let description = "";
-      let content = "";
+      const name =
+        selectedFile?.name.replace(/\.(zip|tgz|tar|gz)$/i, "") ||
+        repoUrl.split("/").filter(Boolean).pop()?.replace(/[-_]/g, " ") ||
+        t("admin.memorySkillAdminPublishDefaultName");
 
       if (selectedFile) {
-        if (!canUploadSkillFile(selectedFile.name, true)) {
-          message.warning(t("admin.memoryUploadSkillTypeInvalidParent"));
-          return;
-        }
-        const rawContent = await readFileAsText(selectedFile);
-        const frontMatter = parseMarkdownFrontMatter(rawContent);
-        name = frontMatter?.name || getBaseName(selectedFile.name);
-        description = frontMatter?.description || t("admin.memorySkillAdminPublishDefaultDesc");
-        content = frontMatter?.content ?? rawContent;
+        const upload = await uploadSkillTempFile(selectedFile);
+        await publishSkillToMarket({
+          name,
+          category: "team",
+          source: { type: "uploaded_zip", uploadId: upload.uploadId },
+        });
       } else {
-        const rawName = repoUrl.split("/").filter(Boolean).pop() || "";
-        name = rawName.replace(/[-_]/g, " ") || t("admin.memorySkillAdminPublishDefaultName");
-        description = t("admin.memorySkillAdminPublishDefaultDesc");
-        content = `# ${name}\n\n${t("admin.memorySkillAdminPublishUrlPlaceholderContent")}\n\nSource: ${repoUrl.trim()}`;
+        await publishSkillToMarket({
+          name,
+          category: "team",
+          source: { type: "url", url: repoUrl.trim() },
+        });
       }
-
-      await createSkillAsset({
-        name,
-        description,
-        category: "team",
-        tags: [],
-        content,
-        file_ext: "md",
-        is_enabled: true,
-      });
 
       await onPublished();
       message.success(t("admin.memorySkillAdminPublishSuccess", { name }));
@@ -125,11 +102,12 @@ export default function SkillAdminPublishModal({
           />
         </div>
         <Upload.Dragger
-          accept=".md,.markdown,.zip,.tgz,.tar,.gz"
+          accept=".zip,.tgz,.tar,.gz"
           multiple={false}
           showUploadList={Boolean(selectedFile)}
           beforeUpload={(file) => {
             setSelectedFile(file);
+            setRepoUrl("");
             return false;
           }}
           onRemove={() => {

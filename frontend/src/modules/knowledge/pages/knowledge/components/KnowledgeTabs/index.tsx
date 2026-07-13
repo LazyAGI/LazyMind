@@ -4,8 +4,8 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 
 import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
+import { Doc } from "@/api/generated/core-client";
 import {
-  Doc,
   ParserConfigTypeEnum,
   Segment,
 } from "@/api/generated/knowledge-client";

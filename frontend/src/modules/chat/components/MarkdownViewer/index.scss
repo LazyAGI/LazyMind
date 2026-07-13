@@ -34,13 +34,22 @@
   }
 }
 
-.md-mermaid-block {
+.md-mermaid-block,
+.md-html-block {
   overflow: hidden;
   border: 1px solid var(--color-border-muted);
   border-radius: 6px;
   margin-bottom: 16px;
 
   background: var(--color-canvas-default);
+}
+
+.md-html-block--inline {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  margin: 8px 0;
+  background: transparent;
 }
 
 .md-mermaid-toolbar {
@@ -180,4 +189,57 @@
   max-height: 78vh;
   overflow: auto;
   padding: 16px;
+}
+
+.md-html-preview {
+  overflow: hidden;
+  padding: 0;
+  background: var(--color-canvas-default);
+}
+
+.md-html-preview--inline {
+  overflow: visible;
+  background: transparent;
+}
+
+.md-html-preview-iframe {
+  display: block;
+  width: 100%;
+  min-height: 160px;
+  border: 0;
+  background: #fff;
+}
+
+.md-html-preview--inline .md-html-preview-iframe {
+  min-height: 0;
+  background: transparent;
+}
+
+.md-html-generating {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--color-fg-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.md-html-generating-icon {
+  color: var(--color-primary);
+  font-size: 14px;
+}
+
+.md-html-generating--card {
+  justify-content: center;
+  min-height: 120px;
+  padding: 16px;
+  color: var(--color-fg-muted);
+  background: var(--color-canvas-default);
+}
+
+.md-html-modal-content {
+  max-height: 78vh;
+  overflow: auto;
+  padding: 0;
 }

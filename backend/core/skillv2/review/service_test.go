@@ -72,6 +72,98 @@ func TestActionAndUndo_UpdateReviewStateByBatch(t *testing.T) {
 	}
 }
 
+func TestPrepareFile_RendersResolvedHunksAsContextAfterDecisions(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	seedTwoHunkDraftReviewFixture(t, db)
+	svc := newTestService(t, db)
+	file := prepareSkillFile(t, svc, db)
+	if file.HunkCount != 2 {
+		t.Fatalf("hunk count = %d, want 2; lines = %#v", file.HunkCount, file.DiffEntryLines)
+	}
+	hunkIDs := collectHunkIDs(file.DiffEntryLines)
+	if len(hunkIDs) != 2 {
+		t.Fatalf("hunk IDs = %#v, want 2; lines = %#v", hunkIDs, file.DiffEntryLines)
+	}
+	firstHunkID := hunkIDs[0]
+	secondHunkID := hunkIDs[1]
+
+	action, err := svc.Action(context.Background(), ActionRequest{
+		SkillID:               "skill1",
+		UserID:                "user_001",
+		ReviewID:              file.ReviewID,
+		ExpectedReviewVersion: file.ReviewVersion,
+		Items: []ActionItem{{
+			Path:     "SKILL.md",
+			HunkID:   firstHunkID,
+			Decision: decisionAccepted,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Action returned error: %v", err)
+	}
+
+	remaining, err := svc.PrepareFile(context.Background(), PrepareFileRequest{
+		SkillID: "skill1",
+		UserID:  "user_001",
+		File:    file,
+	})
+	if err != nil {
+		t.Fatalf("PrepareFile returned error: %v", err)
+	}
+	if remaining.HunkCount != 2 || remaining.AcceptedCount != 1 || remaining.PendingCount != 1 || remaining.RejectedCount != 0 {
+		t.Fatalf("unexpected counts after accept: hunk=%d accepted=%d pending=%d rejected=%d", remaining.HunkCount, remaining.AcceptedCount, remaining.PendingCount, remaining.RejectedCount)
+	}
+	firstResolved := hunkBlock(remaining.DiffEntryLines, firstHunkID)
+	if len(firstResolved) == 0 {
+		t.Fatalf("accepted hunk %q should still be returned as resolved context: %#v", firstHunkID, remaining.DiffEntryLines)
+	}
+	if hasChangedLine(firstResolved) {
+		t.Fatalf("accepted hunk %q should not contain diff lines: %#v", firstHunkID, firstResolved)
+	}
+	secondPending := hunkBlock(remaining.DiffEntryLines, secondHunkID)
+	if len(secondPending) == 0 {
+		t.Fatalf("pending hunk %q missing from diff lines: %#v", secondHunkID, remaining.DiffEntryLines)
+	}
+	if !hasChangedLine(secondPending) {
+		t.Fatalf("pending hunk %q should keep diff lines: %#v", secondHunkID, secondPending)
+	}
+
+	action, err = svc.Action(context.Background(), ActionRequest{
+		SkillID:               "skill1",
+		UserID:                "user_001",
+		ReviewID:              file.ReviewID,
+		ExpectedReviewVersion: action.ReviewVersion,
+		Items: []ActionItem{{
+			Path:     "SKILL.md",
+			HunkID:   secondHunkID,
+			Decision: decisionRejected,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("second Action returned error: %v", err)
+	}
+
+	remaining, err = svc.PrepareFile(context.Background(), PrepareFileRequest{
+		SkillID: "skill1",
+		UserID:  "user_001",
+		File:    file,
+	})
+	if err != nil {
+		t.Fatalf("PrepareFile after reject returned error: %v", err)
+	}
+	if remaining.HunkCount != 2 || remaining.AcceptedCount != 1 || remaining.PendingCount != 0 || remaining.RejectedCount != 1 {
+		t.Fatalf("unexpected counts after resolving all: hunk=%d accepted=%d pending=%d rejected=%d", remaining.HunkCount, remaining.AcceptedCount, remaining.PendingCount, remaining.RejectedCount)
+	}
+	firstResolved = hunkBlock(remaining.DiffEntryLines, firstHunkID)
+	secondResolved := hunkBlock(remaining.DiffEntryLines, secondHunkID)
+	if len(firstResolved) == 0 || len(secondResolved) == 0 {
+		t.Fatalf("resolved hunks should remain visible as context, got %#v", remaining.DiffEntryLines)
+	}
+	if hasChangedLine(firstResolved) || hasChangedLine(secondResolved) {
+		t.Fatalf("resolved hunks should not contain diff lines, first=%#v second=%#v", firstResolved, secondResolved)
+	}
+}
+
 func TestCommit_RejectHunkCreatesFormalRevisionAndClearsDraft(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	seedDraftReviewFixture(t, db)
@@ -145,6 +237,21 @@ func seedDraftReviewFixture(t *testing.T, db *testutil.TestDB) {
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_skill_draft")
 }
 
+func seedTwoHunkDraftReviewFixture(t *testing.T, db *testutil.TestDB) {
+	t.Helper()
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	base := "title\nold one\nkeep\nold two\nend\n"
+	draft := "title\nnew one\nkeep\nnew two\nend\n"
+	testutil.SeedTextBlob(t, db, "h_skill_base_two_hunks", base)
+	testutil.SeedTextBlob(t, db, "h_skill_draft_two_hunks", draft)
+	if err := db.Model(&testutil.SkillRevisionEntryRow{}).
+		Where("revision_id = ? AND path = ?", "rev1", "SKILL.md").
+		Updates(map[string]any{"blob_hash": "h_skill_base_two_hunks", "size": int64(len([]byte(base)))}).Error; err != nil {
+		t.Fatalf("update base fixture: %v", err)
+	}
+	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_skill_draft_two_hunks")
+}
+
 func prepareSkillFile(t *testing.T, svc *Service, db *testutil.TestDB) skilldiff.DiffFile {
 	t.Helper()
 	session, err := svc.ensureSession(context.Background(), db.DB, "skill1", "user_001")
@@ -159,4 +266,40 @@ func prepareSkillFile(t *testing.T, svc *Service, db *testutil.TestDB) skilldiff
 		t.Fatalf("missing hunk metadata in %#v", file.DiffEntryLines)
 	}
 	return file
+}
+
+func hunkBlock(lines []skilldiff.DiffEntryLine, hunkID string) []skilldiff.DiffEntryLine {
+	for i, line := range lines {
+		if line.Type != "HUNK" || line.HunkID != hunkID {
+			continue
+		}
+		end := len(lines)
+		for j := i + 1; j < len(lines); j++ {
+			if lines[j].Type == "HUNK" {
+				end = j
+				break
+			}
+		}
+		return lines[i:end]
+	}
+	return nil
+}
+
+func hasChangedLine(lines []skilldiff.DiffEntryLine) bool {
+	for _, line := range lines {
+		if line.Type == "ADDITION" || line.Type == "DELETION" {
+			return true
+		}
+	}
+	return false
+}
+
+func collectHunkIDs(lines []skilldiff.DiffEntryLine) []string {
+	ids := []string{}
+	for _, line := range lines {
+		if line.Type == "HUNK" {
+			ids = append(ids, line.HunkID)
+		}
+	}
+	return ids
 }

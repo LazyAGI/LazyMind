@@ -632,16 +632,30 @@ model_providers:
       description: |
         商汤科技打造的国产重磅基座，深度推理与多模态理解能力出色，综合性能强悍。
 
-        获取 API Key：
-        https://console.sensecore.cn/cn-sh-01/aistudio/management/api-key
+        官网（注册 & 获取 API Key）：
+        - 经典模式官网：https://console.sensecore.cn/cn-sh-01/aistudio/management/api-key
+        - Token Plan模式官网：https://platform.sensenova.cn/
 
-        申请教程：
+        配置时提供两个 Base URL 可选：
+        - 经典模式：https://api.sensenova.cn/compatible-mode/v1/
+        - Token Plan 模式：https://token.sensenova.cn/v1/chat/completions/
 
-        1. 访问商汤大模型开放平台（SenseCore大装置），注册并完成企业或个人开发者认证。
+        申请教程1（经典）：
+
+        1. 访问商汤大模型开放平台（https://console.sensecore.cn/），注册并完成企业或个人开发者认证。
 
         2. 登录控制台，在左侧导航栏找到"API-Key管理"。
 
         3. 点击"创建API-Key"，自定义名称后即可生成，复制该 API Key 即可进行模型调用。
+
+        申请教程2（Token Plan）：
+        
+        1. 访问商汤日日新官网（https://platform.sensenova.cn/），手机号完成注册。
+
+        2. 登录控制台，在左侧导航栏找到"API-Keys"。
+
+        3. 点击"创建 API Key"，输入名称后生成，复制该 API Key 即可进行模型调用。
+
       base_url: "https://api.sensenova.cn/compatible-mode/v1/"
       models:
         - name: DeepSeek V4 Flash
@@ -694,6 +708,12 @@ model_providers:
           type: vlm
         - name: nova-embedding-stable
           type: embed
+        - name: deepseek-v4-flash
+          type: llm
+        - name: glm-5.2
+          type: llm
+        - name: sensenova-6.7-flash-lite
+          type: llm
 
     - name: SiliconFlow
       description: |

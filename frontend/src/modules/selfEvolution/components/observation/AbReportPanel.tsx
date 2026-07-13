@@ -2,49 +2,60 @@ import { useMemo } from "react";
 import { Alert, Button, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
-import type { AbSummaryReport } from "../../shared";
+import type { AbSummaryReport, AbtestComparisonArtifact } from "../../shared";
+import { getAbtestVerdictTagColor, type AbtestComparisonMetricRow } from "../../shared/abtestComparison";
+import { formatMetricDelta, formatPercent } from "../../shared/format";
 import type { AbCaseRow, AbMetricRow } from "./types";
-import { formatDeltaPercent, formatDeltaScore, formatPercent } from "./traceUtils";
-import { getAbtestVerdictColor, toAbMetricRows } from "./dataUtils";
+import { formatDeltaScore } from "./traceUtils";
+import { toAbMetricRows } from "./dataUtils";
 
 const { Text, Title } = Typography;
 
-function AbMetricChart({ metrics }: { metrics: AbMetricRow[] }) {
-  const { t } = useTranslation();
+function MetricBar({
+  value,
+  variant,
+}: {
+  value: number;
+  variant: "origin" | "candidate";
+}) {
+  const width = `${Math.max(4, Math.min(100, value * 100))}%`;
   return (
-    <div className="self-evolution-abtest-chart" aria-label={t("selfEvolutionRun.observation.abChartAria")}>
-      <div className="self-evolution-abtest-chart-axis">
-        <span>1.00</span>
-        <span>0.75</span>
-        <span>0.50</span>
-        <span>0.25</span>
-        <span>0.00</span>
-      </div>
-      <div className="self-evolution-abtest-chart-groups">
-        {metrics.map((metric) => {
-          const delta = metric.meanB - metric.meanA;
-          return (
-            <div key={metric.key} className="self-evolution-abtest-chart-group">
-              <strong className={delta >= 0 ? "is-up" : "is-down"}>{formatDeltaPercent(metric.meanA, metric.meanB)}</strong>
-              <div className="self-evolution-abtest-bars">
-                <span className="is-a" style={{ height: `${Math.max(6, metric.meanA * 100)}%` }} />
-                <span className="is-b" style={{ height: `${Math.max(6, metric.meanB * 100)}%` }} />
-              </div>
-              <em>{metric.label}</em>
-            </div>
-          );
-        })}
-      </div>
-      <div className="self-evolution-abtest-chart-legend">
-        <span><i className="is-a" />{t("selfEvolutionRun.observation.legendA")}</span>
-        <span><i className="is-b" />{t("selfEvolutionRun.observation.legendB")}</span>
-      </div>
-    </div>
+    <span className={`self-evolution-abtest-comparison-bar is-${variant}`}>
+      <span
+        className="self-evolution-abtest-comparison-bar-fill"
+        style={{ width }}
+      />
+    </span>
+  );
+}
+
+function buildMetricTableRows(
+  comparisonArtifact: AbtestComparisonArtifact | undefined,
+  summaryMetrics: AbMetricRow[],
+): AbtestComparisonMetricRow[] {
+  if (comparisonArtifact) {
+    return comparisonArtifact.metricRows;
+  }
+  return summaryMetrics.map((row) => ({
+    key: row.key,
+    label: row.key,
+    origin: row.meanA,
+    candidate: row.meanB,
+    delta: row.meanB - row.meanA,
+  }));
+}
+
+function pickHighlightMetric(rows: AbtestComparisonMetricRow[]) {
+  return (
+    rows.find((row) => row.key === "avg_overall" || row.label === "overall") ||
+    rows.find((row) => row.key === "avg_correctness" || row.label === "correctness") ||
+    rows[0]
   );
 }
 
 export function AbReportPanel({
   summary,
+  comparisonArtifact,
   rows,
   rowsError,
   rowsLoading,
@@ -54,6 +65,7 @@ export function AbReportPanel({
   onReloadRows,
 }: {
   summary?: AbSummaryReport;
+  comparisonArtifact?: AbtestComparisonArtifact;
   rows: AbCaseRow[];
   rowsError?: string;
   rowsLoading?: boolean;
@@ -63,117 +75,257 @@ export function AbReportPanel({
   onReloadRows: () => void;
 }) {
   const { t } = useTranslation();
-  const metrics = useMemo(() => toAbMetricRows(summary), [summary]);
-  const abtestId = summary?.id || "-";
-  const verdict = summary?.verdict || "inconclusive";
-  const columns: ColumnsType<AbCaseRow> = [
-    {
-      title: "Case",
-      dataIndex: "caseId",
-      key: "caseId",
-      width: 94,
-      render: (value: string) => <Text className="self-evolution-abtest-case-link">{value}</Text>,
-    },
-    {
-      title: "Query",
-      dataIndex: "query",
-      key: "query",
-      width: 230,
-      render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
-    },
-    {
-      title: "A Score",
-      dataIndex: "aScore",
-      key: "aScore",
-      width: 80,
-      render: (value: number) => value.toFixed(2),
-    },
-    {
-      title: "B Score",
-      dataIndex: "bScore",
-      key: "bScore",
-      width: 80,
-      render: (value: number) => value.toFixed(2),
-    },
-    {
-      title: t("selfEvolutionRun.observation.abChange"),
-      dataIndex: "delta",
-      key: "delta",
-      width: 76,
-      render: (value: number, row) => <span className={`self-evolution-abtest-delta is-${row.tone}`}>{formatDeltaScore(value)}</span>,
-    },
-    { title: t("selfEvolutionRun.observation.abConclusion"), dataIndex: "conclusion", key: "conclusion", width: 140 },
-    {
-      title: t("selfEvolutionRun.observation.abAction"),
-      key: "action",
-      width: 112,
-      render: (_, row) => (
-        <Button size="small" type={row.caseId === selectedCaseId ? "primary" : "default"} onClick={() => onSelectCase(row.caseId)}>
-          {t("selfEvolutionRun.observation.viewAbTrace")}
-        </Button>
-      ),
-    },
-  ];
+  const summaryMetrics = useMemo(() => toAbMetricRows(summary), [summary]);
+  const metricRows = useMemo(
+    () => buildMetricTableRows(comparisonArtifact, summaryMetrics),
+    [comparisonArtifact, summaryMetrics],
+  );
+  const highlightMetric = useMemo(() => pickHighlightMetric(metricRows), [metricRows]);
+  const metricLabel = (key: string) =>
+    t(`selfEvolutionRun.abtestComparisonMetric.${key}`, { defaultValue: key });
+  const verdict = comparisonArtifact?.verdict || summary?.verdict || "inconclusive";
+  const verdictLabel = t(`selfEvolutionRun.abtestVerdict.${verdict}`, {
+    defaultValue: verdict,
+  });
+  const status = comparisonArtifact?.status;
+  const statusLabel = status
+    ? t(`selfEvolutionRun.abtestStatus.${status}`, { defaultValue: status })
+    : undefined;
+  const caseCount = totalSize ?? rows.length;
+  const runId = comparisonArtifact?.runId || summary?.id || "-";
+  const algoId = comparisonArtifact?.algoId;
+  const candidateAlgoId = comparisonArtifact?.candidateAlgoId;
+  const reasons = comparisonArtifact?.reasons.length
+    ? comparisonArtifact.reasons
+    : summary?.reasons || [];
+
+  const metricColumns = useMemo<ColumnsType<AbtestComparisonMetricRow>>(
+    () => [
+      {
+        title: t("selfEvolutionRun.abtestComparisonColMetric"),
+        dataIndex: "label",
+        key: "label",
+        width: 120,
+        render: (value: string) => metricLabel(value),
+      },
+      {
+        title: t("selfEvolutionRun.abtestComparisonColOrigin"),
+        dataIndex: "origin",
+        key: "origin",
+        width: 132,
+        render: (value: number) => (
+          <div className="self-evolution-abtest-comparison-metric-cell">
+            <Text>{formatPercent(value)}</Text>
+            <MetricBar value={value} variant="origin" />
+          </div>
+        ),
+      },
+      {
+        title: t("selfEvolutionRun.abtestComparisonColCandidate"),
+        dataIndex: "candidate",
+        key: "candidate",
+        width: 132,
+        render: (value: number) => (
+          <div className="self-evolution-abtest-comparison-metric-cell">
+            <Text>{formatPercent(value)}</Text>
+            <MetricBar value={value} variant="candidate" />
+          </div>
+        ),
+      },
+      {
+        title: t("selfEvolutionRun.abtestComparisonColDelta"),
+        dataIndex: "delta",
+        key: "delta",
+        width: 88,
+        render: (value: number) => (
+          <span className={value >= 0 ? "is-up" : "is-down"}>
+            {formatMetricDelta(value)}
+          </span>
+        ),
+      },
+    ],
+    [t],
+  );
+
+  const caseColumns = useMemo<ColumnsType<AbCaseRow>>(
+    () => [
+      {
+        title: "Case",
+        dataIndex: "caseId",
+        key: "caseId",
+        width: 96,
+        render: (value: string) => (
+          <Text className="self-evolution-abtest-case-link">{value}</Text>
+        ),
+      },
+      {
+        title: t("selfEvolutionRun.abtestComparisonColOriginOverall"),
+        dataIndex: "aScore",
+        key: "aScore",
+        width: 92,
+        render: (value: number) => formatPercent(value),
+      },
+      {
+        title: t("selfEvolutionRun.abtestComparisonColCandidateOverall"),
+        dataIndex: "bScore",
+        key: "bScore",
+        width: 92,
+        render: (value: number) => formatPercent(value),
+      },
+      {
+        title: t("selfEvolutionRun.observation.abChange"),
+        dataIndex: "delta",
+        key: "delta",
+        width: 80,
+        render: (value: number, row) => (
+          <span className={`self-evolution-abtest-delta is-${row.tone}`}>
+            {formatDeltaScore(value)}
+          </span>
+        ),
+      },
+      {
+        title: t("selfEvolutionRun.observation.abConclusion"),
+        dataIndex: "conclusion",
+        key: "conclusion",
+        width: 88,
+      },
+      {
+        title: t("selfEvolutionRun.observation.abAction"),
+        key: "action",
+        width: 108,
+        fixed: "right",
+        render: (_, row) => (
+          <Button
+            size="small"
+            type={row.caseId === selectedCaseId ? "primary" : "default"}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelectCase(row.caseId);
+            }}
+          >
+            {t("selfEvolutionRun.observation.viewAbTrace")}
+          </Button>
+        ),
+      },
+    ],
+    [onSelectCase, selectedCaseId, t],
+  );
 
   return (
-    <section className="self-evolution-abtest-report-card" aria-label={t("selfEvolutionRun.observation.selfEvolutionOrchestrationAria")}>
-      <div className="self-evolution-abtest-report-head">
+    <section
+      className="self-evolution-abtest-report-card self-evolution-abtest-comparison"
+      aria-label={t("selfEvolutionRun.observation.selfEvolutionOrchestrationAria")}
+    >
+      <div className="self-evolution-abtest-comparison-head">
         <div>
-          <Title level={3}>{t("selfEvolutionRun.observation.selfEvolutionOrchestrationTitle")}</Title>
-          <Text>{t("selfEvolutionRun.observation.abStageTitle")}</Text>
-          <Text>{t("selfEvolutionRun.observation.abMetricDesc")}</Text>
+          <Title level={5}>{t("selfEvolutionRun.abtestComparisonTitle")}</Title>
+          <Text className="self-evolution-abtest-comparison-subtitle">
+            {t("selfEvolutionRun.abtestComparisonSubtitle", { count: caseCount })}
+          </Text>
         </div>
-        <Tag color={getAbtestVerdictColor(verdict)}>{verdict}</Tag>
-      </div>
-      <div className="self-evolution-abtest-report-id">
-        <strong>{abtestId}</strong>
-      </div>
-      <AbMetricChart metrics={metrics} />
-      <div className="self-evolution-abtest-metric-table" aria-label={t("selfEvolutionRun.observation.abMetricTableAria")}>
-        <div className="self-evolution-abtest-table-row is-head">
-          <span>{t("selfEvolutionRun.observation.abMetricColMetric")}</span>
-          <span>mean A</span>
-          <span>mean B</span>
-          <span>Δmean</span>
-          <span>{t("selfEvolutionRun.observation.abMetricColWinRate")}</span>
-          <span>sign p</span>
+        <div className="self-evolution-abtest-comparison-badges">
+          <Tag color={getAbtestVerdictTagColor(verdict)}>{verdictLabel}</Tag>
+          {statusLabel ? <Tag>{statusLabel}</Tag> : null}
         </div>
-        {metrics.map((metric) => (
-          <div key={metric.key} className="self-evolution-abtest-table-row">
-            <span>{metric.label}</span>
-            <span>{formatPercent(metric.meanA)}</span>
-            <span>{formatPercent(metric.meanB)}</span>
-            <strong className={metric.meanB >= metric.meanA ? "is-up" : "is-down"}>{formatDeltaPercent(metric.meanA, metric.meanB)}</strong>
-            <span>{formatPercent(metric.winRate)}</span>
-            <span>{metric.signP || "-"}</span>
+      </div>
+
+      <div className="self-evolution-abtest-comparison-meta">
+        <div>
+          <span>{t("selfEvolutionRun.abtestComparisonRunId")}</span>
+          <strong>{runId}</strong>
+        </div>
+        <div>
+          <span>{t("selfEvolutionRun.abtestComparisonAlgoId")}</span>
+          <strong>{algoId || "-"}</strong>
+        </div>
+        <div>
+          <span>{t("selfEvolutionRun.abtestComparisonCandidateAlgoId")}</span>
+          <strong>{candidateAlgoId || "-"}</strong>
+        </div>
+      </div>
+
+      {highlightMetric ? (
+        <div className="self-evolution-abtest-report-highlight" aria-label={t("selfEvolutionRun.observation.abMetricTableAria")}>
+          <div className="self-evolution-abtest-report-highlight-card is-origin">
+            <span>{t("selfEvolutionRun.abtestComparisonColOrigin")}</span>
+            <strong>{formatPercent(highlightMetric.origin)}</strong>
+            <em>{metricLabel(highlightMetric.label)}</em>
           </div>
-        ))}
-      </div>
-      <div className="self-evolution-abtest-case-panel">
-        <div className="self-evolution-eval-section-title">
-          <Text strong>{t("selfEvolutionRun.observation.changedCaseList")}</Text>
-          <span>
-            {t("selfEvolutionRun.observation.abCaseDetailSource", { abtestId, total: totalSize ?? rows.length })}
-          </span>
+          <div className="self-evolution-abtest-report-highlight-card is-candidate">
+            <span>{t("selfEvolutionRun.abtestComparisonColCandidate")}</span>
+            <strong>{formatPercent(highlightMetric.candidate)}</strong>
+            <em>{metricLabel(highlightMetric.label)}</em>
+          </div>
+          <div className={`self-evolution-abtest-report-highlight-card is-delta ${highlightMetric.delta >= 0 ? "is-up" : "is-down"}`}>
+            <span>{t("selfEvolutionRun.abtestComparisonColDelta")}</span>
+            <strong>{formatMetricDelta(highlightMetric.delta)}</strong>
+            <em>{metricLabel(highlightMetric.label)}</em>
+          </div>
         </div>
+      ) : null}
+
+      {reasons.length > 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          className="self-evolution-abtest-comparison-reasons"
+          message={t("selfEvolutionRun.abtestComparisonReasonsTitle")}
+          description={
+            <ul>
+              {reasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          }
+        />
+      ) : null}
+
+      <div className="self-evolution-abtest-comparison-section">
+        <Text className="self-evolution-abtest-comparison-section-title">
+          {t("selfEvolutionRun.abtestComparisonMetricsTitle")}
+        </Text>
+        <Table<AbtestComparisonMetricRow>
+          className="self-evolution-dataset-table self-evolution-abtest-comparison-table"
+          size="small"
+          rowKey="key"
+          columns={metricColumns}
+          dataSource={metricRows}
+          pagination={false}
+          scroll={{ x: 480 }}
+        />
+      </div>
+
+      <div className="self-evolution-abtest-comparison-section self-evolution-abtest-case-panel">
+        <Text className="self-evolution-abtest-comparison-section-title">
+          {t("selfEvolutionRun.abtestComparisonCasesTitle")}
+        </Text>
         {rowsError ? (
           <Alert
             type="error"
             showIcon
             message={rowsError}
-            action={<Button size="small" onClick={onReloadRows}>{t("selfEvolutionRun.observation.retry")}</Button>}
+            action={
+              <Button size="small" onClick={onReloadRows}>
+                {t("selfEvolutionRun.observation.retry")}
+              </Button>
+            }
           />
         ) : (
           <Table<AbCaseRow>
             className="self-evolution-abtest-case-table"
             size="small"
             rowKey="caseId"
-            columns={columns}
+            columns={caseColumns}
             dataSource={rows}
             loading={rowsLoading}
-            pagination={{ pageSize: 10, size: "small", showSizeChanger: false, total: totalSize ?? rows.length }}
-            rowClassName={(row) => row.caseId === selectedCaseId ? "is-selected" : ""}
-            scroll={{ x: 820 }}
+            pagination={{
+              pageSize: 10,
+              size: "small",
+              showSizeChanger: false,
+              total: caseCount,
+            }}
+            rowClassName={(row) => (row.caseId === selectedCaseId ? "is-selected" : "")}
+            scroll={{ x: 640 }}
             onRow={(row) => ({
               onClick: () => onSelectCase(row.caseId),
             })}

@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"lazymind/core/algo"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
-	"lazymind/core/skill"
 	"lazymind/core/store"
 )
 
@@ -66,6 +66,13 @@ type draftResponse struct {
 	SourceType         string `json:"source_type"`
 	SourceSkillID      string `json:"source_skill_id"`
 	SourceSkillName    string `json:"source_skill_name"`
+	Published          bool   `json:"published"`
+	PublishedPluginRef string `json:"published_plugin_ref"`
+	CurrentRevisionID  string `json:"current_revision_id"`
+	CurrentRevisionNo  int64  `json:"current_revision_no"`
+	PublishedStatus    string `json:"published_status"`
+	BaseRevisionID     string `json:"base_revision_id"`
+	DraftDirty         bool   `json:"draft_dirty"`
 }
 
 func toDraftResponse(d orm.PluginDraft) draftResponse {
@@ -89,7 +96,31 @@ func toDraftResponse(d orm.PluginDraft) draftResponse {
 		SourceType:         d.SourceType,
 		SourceSkillID:      d.SourceSkillID,
 		SourceSkillName:    d.SourceSkillName,
+		BaseRevisionID:     d.BaseRevisionID,
 	}
+}
+
+func toEnrichedDraftResponse(db *gorm.DB, d orm.PluginDraft) draftResponse {
+	resp := toDraftResponse(d)
+	if d.PluginID != "" {
+		var p orm.PluginResource
+		if db.Where("owner_user_id=? AND plugin_id=?", d.CreatedBy, d.PluginID).First(&p).Error == nil {
+			resp.Published, resp.PublishedPluginRef = true, p.PluginRef
+			resp.CurrentRevisionID, resp.CurrentRevisionNo, resp.PublishedStatus = p.HeadRevisionID, p.Version, p.Status
+			baseID := d.BaseRevisionID
+			if baseID == "" {
+				baseID = p.HeadRevisionID
+			}
+			resp.BaseRevisionID = baseID
+			var base orm.PluginRevision
+			if db.Where("id=? AND plugin_resource_id=?", baseID, p.ID).First(&base).Error == nil {
+				if files, err := pluginFiles(d); err == nil {
+					resp.DraftDirty = pluginTreeHash(files) != base.TreeHash
+				}
+			}
+		}
+	}
+	return resp
 }
 
 // ListPluginDrafts handles GET /plugin-drafts
@@ -132,7 +163,7 @@ func ListPluginDrafts(w http.ResponseWriter, r *http.Request) {
 
 	records := make([]draftResponse, 0, len(drafts))
 	for _, d := range drafts {
-		records = append(records, toDraftResponse(d))
+		records = append(records, toEnrichedDraftResponse(db, d))
 	}
 
 	common.ReplyOK(w, map[string]any{
@@ -185,7 +216,7 @@ func CreatePluginDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	common.ReplyOK(w, toDraftResponse(draft))
+	common.ReplyOK(w, toEnrichedDraftResponse(store.DB(), draft))
 }
 
 // GetPluginDraft handles GET /plugin-drafts/{draft_id}
@@ -203,7 +234,7 @@ func GetPluginDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	common.ReplyOK(w, toDraftResponse(draft))
+	common.ReplyOK(w, toEnrichedDraftResponse(store.DB(), draft))
 }
 
 // SavePluginDraft handles POST /plugin-drafts/{draft_id}:save
@@ -309,7 +340,7 @@ func SavePluginDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	common.ReplyOK(w, toDraftResponse(draft))
+	common.ReplyOK(w, toEnrichedDraftResponse(store.DB(), draft))
 }
 
 // DeletePluginDraft handles DELETE /plugin-drafts/{draft_id}
@@ -379,34 +410,17 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 	skillContent := ""
 	skillName := ""
 	if body.SkillID != "" {
-		if skill.IsBuiltinSkillID(body.SkillID) {
-			content, sname, ok, loadErr := skill.GetBuiltinSkillContent(body.SkillID)
-			if loadErr != nil {
-				common.ReplyErr(w, "skill not found", http.StatusInternalServerError)
-				return
-			}
-			if !ok || content == "" {
+		content, name, err := loadPluginSourceSkill(r.Context(), db, userID, body.SkillID)
+		if err != nil {
+			if isPluginSourceSkillNotFound(err) {
 				common.ReplyErr(w, "skill not found", http.StatusNotFound)
-				return
-			}
-			skillContent = content
-			skillName = sname
-		} else {
-			var skillRow struct {
-				Content   string
-				SkillName string
-			}
-			if err := db.Raw("SELECT content, skill_name FROM skill_resources WHERE id = ?", body.SkillID).Scan(&skillRow).Error; err != nil {
+			} else {
 				common.ReplyErr(w, "skill not found", http.StatusInternalServerError)
-				return
 			}
-			if skillRow.Content == "" {
-				common.ReplyErr(w, "skill not found", http.StatusNotFound)
-				return
-			}
-			skillContent = skillRow.Content
-			skillName = skillRow.SkillName
+			return
 		}
+		skillContent = content
+		skillName = name
 	}
 
 	sourceUpdates := map[string]any{
@@ -464,7 +478,7 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	common.ReplyOK(w, toDraftResponse(draft))
+	common.ReplyOK(w, toEnrichedDraftResponse(store.DB(), draft))
 }
 
 // PolishPluginDraftInfo handles POST /plugin-drafts:polish-info
@@ -597,5 +611,5 @@ func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[ai_repair] job enqueued draft_id=%s status=repairing", draftID)
 
 	draft.GenerateStatus = generateStatusRepairing
-	common.ReplyOK(w, toDraftResponse(draft))
+	common.ReplyOK(w, toEnrichedDraftResponse(store.DB(), draft))
 }

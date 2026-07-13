@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Typography } from "antd";
 import { useTranslation } from "react-i18next";
-import { CloseOutlined, DownOutlined, EyeOutlined } from "@ant-design/icons";
+import { CloseOutlined, DownOutlined, EyeOutlined, FileTextOutlined } from "@ant-design/icons";
 import {
   ChatComposer,
   ChatMessageStream,
@@ -11,7 +11,13 @@ import {
 import { FinalResultCard } from "./workbench/FinalResultCard";
 import { CutoverDecisionCard } from "./workbench/CutoverDecisionCard";
 import { ProcessActivitySection } from "./workbench/ProcessActivitySection";
+import { DatasetStreamingTable } from "./workbench/DatasetStreamingTable";
+import { EvalStreamingTable } from "./workbench/EvalStreamingTable";
+import { AbtestStreamingTable } from "./workbench/AbtestStreamingTable";
+import { AnalysisStreamingTable } from "./workbench/AnalysisStreamingTable";
+import { RepairTraceStreamPanel } from "./workbench/RepairTraceStreamPanel";
 import { WorkbenchSidebar } from "./workbench/WorkbenchSidebar";
+import { requiresManualCheckpointAction } from "../shared/checkpoint";
 import type { SelfEvolutionWorkbenchViewProps } from "./workbench/types";
 
 export type {
@@ -78,10 +84,21 @@ export function SelfEvolutionWorkbenchView({
   onOpenCaseArtifact,
   onWorkbenchTabChange,
   onCloseArtifactPanel,
+  canViewStageArtifact = false,
+  viewStageArtifactKind,
   onCloseHistorySessionModal,
   onRetryThreadHistoryList,
   onCancelCreateSession,
   onConfirmCreateSession,
+  streamingDatasetRows = [],
+  streamingDatasetProgress = { current: 0, total: 0 },
+  streamingEvalRows = [],
+  streamingEvalProgress = { current: 0, total: 0 },
+  streamingAbtestRows = [],
+  streamingAbtestProgress = { current: 0, total: 0 },
+  streamingAnalysisRows = [],
+  streamingAnalysisProgress = { current: 0, total: 0 },
+  repairTraceRows = [],
 }: SelfEvolutionWorkbenchViewProps) {
   const { t } = useTranslation();
   const [isEndedChatOpen, setIsEndedChatOpen] = useState(false);
@@ -116,13 +133,20 @@ export function SelfEvolutionWorkbenchView({
     title: item.title === "abtest · compare" ? t("selfEvolutionRun.cutoverThreshold") : item.title,
   }));
   const activeStageStatusKey = activeStageOverview?.step.status || processDashboard.activeStep?.status || "pending";
+  const displayStageStatusKey =
+    checkpointDecisionPrompt?.completedStage === displayStage && activeStageStatusKey === "paused"
+      ? "done"
+      : activeStageStatusKey;
   const activeStageStatus = displayStage === "abtest" && processDashboard.cutoverCompleted
     ? t("selfEvolutionRun.cutoverDone")
     : displayStage === "abtest" && isCutoverDecision
     ? t("selfEvolutionRun.cutoverPending")
-    : activeStageStatusKey === "running"
+    : displayStageStatusKey === "running"
     ? t("selfEvolutionRun.statusRunning")
-    : getStepStatusLabel(activeStageStatusKey);
+    : displayStageStatusKey === "done" && checkpointDecisionPrompt?.completedStage === displayStage
+    ? t("selfEvolutionRun.statusCompleted")
+    : getStepStatusLabel(displayStageStatusKey);
+  const shouldShowStageActionButtons = displayStageStatusKey !== "running";
   const hasThreadRestoreError = Boolean(threadRestoreError && routeThreadId);
   const normalizedThreadRestoreError = threadRestoreError.trim().toLowerCase();
   const isThreadRestoreNotFound =
@@ -230,26 +254,31 @@ export function SelfEvolutionWorkbenchView({
       </div>
     </div>
   );
+  const hasComposerCheckpoint = Boolean(
+    checkpointDecisionPrompt &&
+      !shouldShowCutoverCard &&
+      (!isAutoMode || requiresManualCheckpointAction(checkpointDecisionPrompt)),
+  );
   const renderMainComposer = () => (
     <div className="self-evolution-main-composer">
-      {checkpointDecisionPrompt && !shouldShowCutoverCard && (
+      {hasComposerCheckpoint && (
         <div className="self-evolution-composer-checkpoint">
           <span>{checkpointDecisionDesc}</span>
           <button
             type="button"
-            disabled={!checkpointDecisionPrompt.command || isSendingMessage}
+            disabled={!checkpointDecisionPrompt?.command || isSendingMessage}
             onClick={(event) => {
               event.stopPropagation();
-              if (checkpointDecisionPrompt.command) {
+              if (checkpointDecisionPrompt?.command) {
                 if (isIntentConfirmation) {
                   onConfirmIntentCheckpoint();
                 } else {
-                  onContinueCheckpoint(checkpointDecisionPrompt.command);
+                  onContinueCheckpoint();
                 }
               }
             }}
           >
-            {checkpointDecisionPrompt.command || t("selfEvolutionRun.continueExecution")}
+            {checkpointDecisionPrompt?.command || t("selfEvolutionRun.continueExecution")}
           </button>
         </div>
       )}
@@ -304,24 +333,40 @@ export function SelfEvolutionWorkbenchView({
                     <Text className="self-evolution-process-live-kicker">{selectedViewStage ? t("selfEvolutionRun.viewingStage") : t("selfEvolutionRun.currentStage")}</Text>
                     <div className="self-evolution-process-live-title">
                       <Title level={4}>{activeStageLabel}</Title>
-                      <span className={`self-evolution-process-live-status is-${activeStageStatusKey}`}>
+                      <span className={`self-evolution-process-live-status is-${displayStageStatusKey}`}>
                         {activeStageStatus}
                       </span>
                     </div>
                   </div>
-                  {(displayStage === "eval" || displayStage === "abtest") && (
+                  {shouldShowStageActionButtons &&
+                    (canViewStageArtifact || displayStage === "eval" || displayStage === "abtest") && (
                     <div className="self-evolution-process-observation-actions" aria-label={t("selfEvolutionRun.observationEntryAria")}>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenObservation(displayStage === "abtest" ? "abtest" : "eval");
-                        }}
-                        aria-label={displayStage === "abtest" ? t("selfEvolutionRun.enterStep5ABObservation") : t("selfEvolutionRun.enterStep2Observation")}
-                      >
-                        <EyeOutlined />
-                        {displayStage === "abtest" ? t("selfEvolutionRun.step5AB") : t("selfEvolutionRun.step2Observation")}
-                      </button>
+                      {canViewStageArtifact && viewStageArtifactKind ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenArtifact(viewStageArtifactKind);
+                          }}
+                          aria-label={t("selfEvolutionRun.viewStepArtifact")}
+                        >
+                          <FileTextOutlined />
+                          {t("selfEvolutionRun.viewStepArtifact")}
+                        </button>
+                      ) : null}
+                      {(displayStage === "eval" || displayStage === "abtest") ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenObservation(displayStage === "abtest" ? "abtest" : "eval");
+                          }}
+                          aria-label={displayStage === "abtest" ? t("selfEvolutionRun.enterStep5ABObservation") : t("selfEvolutionRun.enterStep2Observation")}
+                        >
+                          <EyeOutlined />
+                          {displayStage === "abtest" ? t("selfEvolutionRun.step5AB") : t("selfEvolutionRun.step2Observation")}
+                        </button>
+                      ) : null}
                     </div>
                   )}
                   {shouldShowCutoverCard && (
@@ -346,7 +391,33 @@ export function SelfEvolutionWorkbenchView({
                   <FinalResultCard finalResultSummary={finalResultSummary} onOpenArtifact={onOpenArtifact} />
                 )}
 
-                {shouldShowStageDetail && (
+                {shouldShowStageDetail && displayStage === "dataset" ? (
+                  <DatasetStreamingTable
+                    rows={streamingDatasetRows}
+                    current={streamingDatasetProgress.current}
+                    total={streamingDatasetProgress.total}
+                  />
+                ) : shouldShowStageDetail && displayStage === "eval" ? (
+                  <EvalStreamingTable
+                    rows={streamingEvalRows}
+                    current={streamingEvalProgress.current}
+                    total={streamingEvalProgress.total}
+                  />
+                ) : shouldShowStageDetail && displayStage === "analysis" ? (
+                  <AnalysisStreamingTable
+                    rows={streamingAnalysisRows}
+                    current={streamingAnalysisProgress.current}
+                    total={streamingAnalysisProgress.total}
+                  />
+                ) : shouldShowStageDetail && displayStage === "repair" ? (
+                  <RepairTraceStreamPanel rows={repairTraceRows} />
+                ) : shouldShowStageDetail && displayStage === "abtest" ? (
+                  <AbtestStreamingTable
+                    rows={streamingAbtestRows}
+                    current={streamingAbtestProgress.current}
+                    total={streamingAbtestProgress.total}
+                  />
+                ) : shouldShowStageDetail ? (
                   <ProcessActivitySection
                     processDashboard={processDashboard}
                     activeCaseProgressGroup={activeCaseProgressGroup}
@@ -357,7 +428,7 @@ export function SelfEvolutionWorkbenchView({
                     onOpenArtifact={onOpenArtifact}
                     onOpenCaseArtifact={onOpenCaseArtifact}
                   />
-                )}
+                ) : null}
 
               </div>
             )}

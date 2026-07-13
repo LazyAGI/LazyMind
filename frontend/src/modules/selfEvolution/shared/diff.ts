@@ -75,6 +75,84 @@ export function getDiffArtifactFiles(value: unknown): DiffArtifactFile[] {
   return [];
 }
 
+function isInlineDiffTextMap(value: unknown): value is Record<string, string> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const entries = Object.entries(value);
+  if (entries.length === 0) {
+    return false;
+  }
+  return entries.every(([, diffText]) => typeof diffText === "string" && diffText.trim().length > 0);
+}
+
+export function getInlineDiffMap(value: unknown): Record<string, string> | undefined {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nestedMap = getInlineDiffMap(item);
+      if (nestedMap) {
+        return nestedMap;
+      }
+    }
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  for (const key of ["diff", "diffs", "file_diffs", "patches"]) {
+    const candidate = value[key];
+    if (isInlineDiffTextMap(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const key of ["data", "result", "payload", "content"]) {
+    const nestedMap = getInlineDiffMap(value[key]);
+    if (nestedMap) {
+      return nestedMap;
+    }
+  }
+
+  return undefined;
+}
+
+export function buildUnifiedDiffFromInlineMap(diffMap: Record<string, string>): string {
+  return Object.values(diffMap)
+    .map((diffText) => diffText.trimEnd())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+export function getInlineDiffText(value: unknown): string | undefined {
+  const inlineDiffMap = getInlineDiffMap(value);
+  if (inlineDiffMap) {
+    const unifiedDiff = buildUnifiedDiffFromInlineMap(inlineDiffMap);
+    return unifiedDiff || undefined;
+  }
+
+  if (typeof value === "string" && value.includes("diff --git ")) {
+    return value.trim();
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const directDiff = getStringField(value, ["diff", "patch", "content", "text"]);
+  if (directDiff) {
+    return directDiff;
+  }
+
+  for (const key of ["data", "result", "payload", "content"]) {
+    const nestedDiff = getInlineDiffText(value[key]);
+    if (nestedDiff) {
+      return nestedDiff;
+    }
+  }
+
+  return undefined;
+}
+
 export function normalizeFetchedDiffArtifact(file: DiffArtifactFile, content: string) {
   const trimmedContent = content.trimEnd();
   if (!trimmedContent) {

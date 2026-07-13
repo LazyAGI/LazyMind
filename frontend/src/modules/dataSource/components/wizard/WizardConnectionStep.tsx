@@ -349,8 +349,10 @@ export default function WizardConnectionStep({
               onOpenChange={(open) => {
                 if (!open) {
                   setFeishuTargetSearchValue("");
-                  setFeishuTargetBrowseKey((key) => key + 1);
-                  onResetFeishuTargetBrowseOptions?.();
+                  if (!isEditMode) {
+                    setFeishuTargetBrowseKey((key) => key + 1);
+                    onResetFeishuTargetBrowseOptions?.();
+                  }
                   return;
                 }
                 if (!isEditMode) {

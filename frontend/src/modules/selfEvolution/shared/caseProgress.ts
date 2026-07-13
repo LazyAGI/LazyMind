@@ -1,6 +1,7 @@
 import { type EvoCaseProgressGroup, type EvoCaseProgressItem, type NormalizedThreadEvent, type StepStatus, type WorkflowResultKind } from "./types";
-import { t } from "./i18n";
+import { getCaseStepLabel, t } from "./i18n";
 import { getEventArtifactId, getEventCaseId, getEventFlowKind, getEventPayloadData, getEventRuntimeArtifactId, getNestedRecordField, getOperationRunId, getStringField } from "./fields";
+import { isTerminalThreadEvent, resolveTerminalStepStatusFromFlowStatus, getFlowStatusFromPayload } from "./threadEvents";
 
 export type CaseProgressState = {
   caseId: string;
@@ -11,7 +12,7 @@ export type CaseProgressState = {
 
 export const datasetCaseSteps = ["load_corpus", "build_snapshot", "generate", "assemble"] as const;
 export const evalCaseSteps = ["rag", "judge"] as const;
-export const analysisCaseSteps = ["coarse", "fine"] as const;
+export const analysisCaseSteps = ["trace_summary", "classify_case"] as const;
 export const caseStepLabels: Record<string, string> = {
   load_corpus: "load_corpus",
   build_snapshot: "build_snapshot",
@@ -19,15 +20,17 @@ export const caseStepLabels: Record<string, string> = {
   assemble: "assemble",
   rag: "RAG",
   judge: "judge",
-  coarse: "coarse",
-  fine: "fine",
+  trace_summary: "trace_summary",
+  classify_case: "classify_case",
+  coarse: "trace_summary",
+  fine: "classify_case",
 };
 
 export function getCaseProgressActionStatus(event: NormalizedThreadEvent): StepStatus | undefined {
   const eventData = getEventPayloadData(event.payload);
   const after = getNestedRecordField(eventData, ["after"]);
   const status = getStringField(eventData, ["status"]) || getStringField(after, ["status"]);
-  if (event.action === "finish" || status === "success" || status === "ended" || status === "skipped") {
+  if (event.action === "finish" || event.action === "completed" || status === "success" || status === "ended" || status === "skipped") {
     return "done";
   }
   if (event.action === "failed" || status === "failed") {
@@ -66,20 +69,27 @@ export function getOperationCaseId(payload: Record<string, unknown> | undefined)
   return getEventCaseId(payload) || getStringField(getEventPayloadData(payload), ["current_item"]);
 }
 
-export function resolveAnalysisCaseStep(flowKind: string | undefined, operationRunId: string | undefined): "coarse" | "fine" | undefined {
+export function resolveAnalysisCaseStep(
+  flowKind: string | undefined,
+  operationRunId: string | undefined,
+): (typeof analysisCaseSteps)[number] | undefined {
+  const operation = operationRunId || flowKind;
   if (
     flowKind === "analysis.trace_summary" ||
     flowKind === "analysis.coarse_classify" ||
-    operationRunId === "analysis.trace_summary"
+    operation === "analysis.trace_summary" ||
+    operation === "coarse"
   ) {
-    return "coarse";
+    return "trace_summary";
   }
   if (
+    flowKind === "analysis.classify_case" ||
     flowKind === "analysis.fine_classify" ||
     flowKind === "analysis.classification" ||
-    operationRunId === "analysis.classify_case"
+    operation === "analysis.classify_case" ||
+    operation === "fine"
   ) {
-    return "fine";
+    return "classify_case";
   }
   return undefined;
 }
@@ -89,7 +99,7 @@ export function applyGlobalDatasetStep(cases: Map<string, CaseProgressState>, st
 }
 
 export function buildCaseItem(item: CaseProgressState, steps: readonly string[], artifactKind: WorkflowResultKind, artifactId: string | undefined, artifactLabel: string): EvoCaseProgressItem {
-  const builtSteps = steps.map((key) => ({ key, label: caseStepLabels[key] || key, status: item.steps[key] || "pending" }));
+  const builtSteps = steps.map((key) => ({ key, label: getCaseStepLabel(key), status: item.steps[key] || "pending" }));
   const completed = builtSteps.filter((step) => step.status === "done").length;
   const status: StepStatus = completed === builtSteps.length ? "done" :
     builtSteps.some((step) => step.status === "failed") ? "failed" :
@@ -118,10 +128,17 @@ export function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCas
     const flowKind = getEventFlowKind(event.payload);
     const artifactId = getEventRuntimeArtifactId(event.payload) || getEventArtifactId(event.payload);
     const status = getCaseProgressActionStatus(event);
+    const caseId = getOperationCaseId(event.payload);
+    if (caseId && event.stage === "analysis") {
+      const analysisStep = resolveAnalysisCaseStep(flowKind, operationRunId || flowKind);
+      if (analysisStep && status) {
+        updateCaseStep(analysisCases, caseId, analysisStep, status, event.timestamp, artifactId);
+        return;
+      }
+    }
     if (!operationRunId || !status) {
       return;
     }
-    const caseId = getOperationCaseId(event.payload);
     if (flowKind === "dataset.load_corpus") {
       datasetGlobal.load_corpus = status;
       applyGlobalDatasetStep(datasetCases, "load_corpus", status, event.timestamp);
@@ -136,18 +153,56 @@ export function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCas
     } else if (caseId && flowKind === "dataset.generate_case") {
       Object.entries(datasetGlobal).forEach(([step, value]) => updateCaseStep(datasetCases, caseId, step, value, event.timestamp));
       updateCaseStep(datasetCases, caseId, "generate", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "eval" && flowKind === "eval.answer") {
+      updateCaseStep(evalCases, caseId, "rag", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "eval" && flowKind === "eval.judge") {
+      updateCaseStep(evalCases, caseId, "judge", status, event.timestamp, artifactId);
     } else if (caseId && event.stage === "eval" && flowKind === "eval.answer_and_judge") {
       updateCaseStep(evalCases, caseId, "rag", status, event.timestamp, artifactId);
       updateCaseStep(evalCases, caseId, "judge", status, event.timestamp, artifactId);
     } else if (caseId && flowKind === "abtest.candidate_rag_answer") {
       updateCaseStep(abtestCases, caseId, "rag", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "abtest" && flowKind === "abtest.candidate_answer") {
+      updateCaseStep(abtestCases, caseId, "rag", status, event.timestamp, artifactId);
     } else if (caseId && flowKind === "abtest.candidate_judge") {
       updateCaseStep(abtestCases, caseId, "judge", status, event.timestamp, artifactId);
-    } else if (caseId) {
-      const analysisStep = resolveAnalysisCaseStep(flowKind, operationRunId);
-      if (analysisStep) {
-        updateCaseStep(analysisCases, caseId, analysisStep, status, event.timestamp, artifactId);
-      }
+    }
+  });
+  const applyTerminalStageFailure = (
+    stage: EvoCaseProgressGroup["stage"],
+    cases: Map<string, CaseProgressState>,
+    steps: readonly string[],
+    terminalStatus: StepStatus,
+    updatedAt?: string,
+  ) => {
+    cases.forEach((item, caseId) => {
+      steps.forEach((step) => {
+        const current = item.steps[step];
+        if (current === "running" || current === "pending" || !current) {
+          updateCaseStep(cases, caseId, step, terminalStatus, updatedAt);
+        }
+      });
+    });
+  };
+  events.forEach((event) => {
+    if (!isTerminalThreadEvent(event.type)) {
+      return;
+    }
+    const terminalStatus = resolveTerminalStepStatusFromFlowStatus(
+      getFlowStatusFromPayload(event.payload),
+    );
+    if (terminalStatus !== "failed" && terminalStatus !== "canceled") {
+      return;
+    }
+    const stage = event.stage;
+    if (stage === "dataset") {
+      applyTerminalStageFailure("dataset", datasetCases, datasetCaseSteps, terminalStatus, event.timestamp);
+    } else if (stage === "eval") {
+      applyTerminalStageFailure("eval", evalCases, evalCaseSteps, terminalStatus, event.timestamp);
+    } else if (stage === "analysis") {
+      applyTerminalStageFailure("analysis", analysisCases, analysisCaseSteps, terminalStatus, event.timestamp);
+    } else if (stage === "abtest") {
+      applyTerminalStageFailure("abtest", abtestCases, evalCaseSteps, terminalStatus, event.timestamp);
     }
   });
   const groups: EvoCaseProgressGroup[] = [

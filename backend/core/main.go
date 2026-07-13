@@ -23,7 +23,6 @@ import (
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
 	"lazymind/core/plugin"
-	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -77,8 +76,8 @@ func exportOpenAPIArtifacts(openAPIJSON []byte) {
 
 // handleAPI textPermissiontext。perms text extract_api_permissions.py text api_permissions.json（Kong RBAC），
 // text core text（text Kong + auth-service Authorization）。text gorilla/mux，text path text，text ":action" text。
-func handleAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) {
-	r.HandleFunc(path, withMutationRequestAudit(method, path, h)).Methods(method)
+func handleAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) *mux.Route {
+	return r.HandleFunc(path, withMutationRequestAudit(method, path, h)).Methods(method)
 }
 
 func registerCoreRoutes(r *mux.Router) {
@@ -205,11 +204,6 @@ func main() {
 	})
 	importConfig := evalset.LoadImportRuntimeConfigFromEnv()
 	evalset.StartImportPreviewCleanup(context.Background(), store.DB(), importConfig.CleanupInterval)
-	resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
-	resourceupdate.LogStartup(resourceUpdateEnabled)
-	if resourceUpdateEnabled {
-		resourceupdate.Start(context.Background(), store.DB(), store.State(), resourceupdate.DefaultConfig())
-	}
 
 	// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
 	if n, err := subagent.MarkInterrupted(context.Background(), store.DB(), 5*time.Minute); err != nil {

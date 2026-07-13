@@ -1,13 +1,8 @@
 import type { StructuredAsset } from "../../shared";
 import type { SkillAssetRecord } from "../../skillApi";
-import {
-  getMarketSource,
-} from "./skillMarketMockData";
-import {
-  resolveSkillSourceType,
-  type SkillMarketSourceFilter,
-  type SkillSourceFilter,
-} from "../../shared";
+import type { SkillMarketSourceFilter, SkillSourceFilter } from "../../shared";
+import type { MarketSkillAsset } from "./skillMarketMockData";
+import { getMarketSource } from "./skillMarketMockData";
 
 export const mapSkillAssetRecordToStructuredAsset = (
   item: SkillAssetRecord,
@@ -18,27 +13,10 @@ export const mapSkillAssetRecordToStructuredAsset = (
   category: item.category,
   tags: item.tags,
   content: item.content,
-  parentId: item.parentId,
-  parentSkillName: item.parentSkillName,
-  protect: item.protect,
+  headRevisionId: item.headRevisionId,
+  draft: item.draft,
   autoEvo: item.autoEvo,
-  autoEvoApplyStatus: item.autoEvoApplyStatus,
-  autoEvoGeneration: item.autoEvoGeneration,
-  autoEvoError: item.autoEvoError,
-  fileExt: item.fileExt,
   isEnabled: item.isEnabled,
-  hasPendingReviewSuggestions: item.hasPendingReviewSuggestions,
-  hasPendingReviewResult: item.hasPendingReviewResult,
-  hasPendingRemoveSuggestion: item.hasPendingRemoveSuggestion,
-  reviewStatus: item.reviewStatus,
-  suggestionStatus: item.suggestionStatus,
-  nodeType: item.nodeType,
-  updateStatus: item.updateStatus,
-  builtinSkillUid: item.builtinSkillUid,
-  originBuiltinSkillUid: item.originBuiltinSkillUid,
-  isBuiltinTemplate: item.isBuiltinTemplate,
-  activationStatus: item.activationStatus,
-  readonly: item.readonly,
 });
 
 export const filterInstalledSkills = (
@@ -52,19 +30,11 @@ export const filterInstalledSkills = (
   const keyword = options.keyword.trim().toLowerCase();
 
   return items.filter((item) => {
-    if (item.isBuiltinTemplate) {
-      return false;
-    }
-    if (item.parentId) {
-      return false;
-    }
-
-    const sourceType = resolveSkillSourceType(item);
-    if (options.source !== "all" && sourceType !== options.source) {
-      return false;
-    }
-
     if (options.category && item.category !== options.category) {
+      return false;
+    }
+
+    if (options.source !== "all" && resolveSkillSourceType(item) !== options.source) {
       return false;
     }
 
@@ -90,25 +60,11 @@ export const filterMarketSkills = (
   const keyword = options.keyword.trim().toLowerCase();
 
   return items.filter((item) => {
-    if (item.parentId) {
-      return false;
-    }
-
-    const isMarketItem =
-      item.isBuiltinTemplate || getMarketSource(item) === "admin";
-    if (!isMarketItem) {
-      return false;
-    }
-
-    const marketSource = getMarketSource(item);
-    if (options.source === "admin" && marketSource !== "admin") {
-      return false;
-    }
-    if (options.source === "builtin" && marketSource !== "builtin") {
-      return false;
-    }
-
     if (options.category !== "all" && item.category !== options.category) {
+      return false;
+    }
+
+    if (options.source !== "all" && getMarketSource(item) !== options.source) {
       return false;
     }
 
@@ -123,21 +79,32 @@ export const filterMarketSkills = (
   });
 };
 
-export const buildInstalledSkillTree = (
-  items: StructuredAsset[],
-  allAssets: StructuredAsset[],
-) => {
-  const visibleParentIds = new Set(items.map((item) => item.id));
+export const isMarketSkillInstalled = (
+  installedSkills: StructuredAsset[],
+  marketItem: StructuredAsset,
+): boolean => {
+  const marketSkill = marketItem as MarketSkillAsset;
+  if (marketSkill.installed) {
+    return true;
+  }
 
-  return items.map((parent) => ({
-    ...parent,
-    children: allAssets.filter(
-      (item) => item.parentId === parent.id && visibleParentIds.has(parent.id),
-    ),
-  }));
+  const marketItemId = marketSkill.marketItemId?.trim() || marketItem.id.trim();
+  const normalizedName = marketItem.name.trim().toLowerCase();
+
+  return installedSkills.some((skill) => {
+    const installedMarketId = (skill as MarketSkillAsset).marketItemId?.trim();
+    if (installedMarketId && marketItemId && installedMarketId === marketItemId) {
+      return true;
+    }
+    return skill.name.trim().toLowerCase() === normalizedName;
+  });
 };
 
 export const collectMarketCategories = (items: StructuredAsset[]) =>
-  [...new Set(items.filter((item) => !item.parentId).map((item) => item.category).filter(Boolean))].sort(
-    (left, right) => left.localeCompare(right, "zh-CN"),
+  [...new Set(items.map((item) => item.category).filter(Boolean))].sort((left, right) =>
+    left.localeCompare(right, "zh-CN"),
   );
+
+const resolveSkillSourceType = (
+  _item: StructuredAsset,
+): "builtin" | "admin" | "personal" => "personal";

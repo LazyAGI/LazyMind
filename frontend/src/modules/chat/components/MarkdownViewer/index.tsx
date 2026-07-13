@@ -23,8 +23,13 @@ import {
   resolveCoreAssetUrl,
   resolveMarkdownImageUrlAsync,
 } from "@/modules/knowledge/utils/imageUrl";
+import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
-import { getLanguageFromClassName, highlightCode } from "./syntaxHighlight";
+import {
+  getLanguageFromClassName,
+  getRawLanguageFromClassName,
+  highlightCode,
+} from "./syntaxHighlight";
 
 const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
 const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
@@ -160,15 +165,16 @@ const PreComponent = (props: any) => {
       children?: unknown;
       className?: string;
     };
+    const rawLanguage = getRawLanguageFromClassName(childProps.className);
     const language = getLanguageFromClassName(childProps.className);
+    const code = String(childProps.children ?? "").replace(/\n$/, "");
+
+    if (rawLanguage === "html" || rawLanguage === "htm") {
+      return <HtmlBlock code={code} isStreaming={isStreaming} />;
+    }
 
     if (language === "mermaid") {
-      return (
-        <MermaidBlock
-          code={String(childProps.children ?? "").replace(/\n$/, "")}
-          isStreaming={isStreaming}
-        />
-      );
+      return <MermaidBlock code={code} isStreaming={isStreaming} />;
     }
   }
 

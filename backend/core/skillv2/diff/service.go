@@ -557,6 +557,8 @@ func newZipFS(zipPath string) (*zipFS, error) {
 		}
 	}
 
+	files, dirs = normalizeZipSkillRoot(files, dirs)
+
 	entries := make([]EntryInfo, 0, len(dirs)+len(files))
 	for dir := range dirs {
 		entries = append(entries, EntryInfo{Path: dir, Type: "dir", FileType: "directory"})
@@ -573,6 +575,66 @@ func newZipFS(zipPath string) (*zipFS, error) {
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	return &zipFS{entries: entries, files: files}, nil
+}
+
+func normalizeZipSkillRoot(files map[string][]byte, dirs map[string]bool) (map[string][]byte, map[string]bool) {
+	if _, ok := files["SKILL.md"]; ok {
+		return files, dirs
+	}
+	root := ""
+	for filePath := range files {
+		parts := strings.SplitN(filePath, "/", 2)
+		if len(parts) != 2 || parts[1] == "" {
+			return files, dirs
+		}
+		if root == "" {
+			root = parts[0]
+			continue
+		}
+		if root != parts[0] {
+			return files, dirs
+		}
+	}
+	if root == "" {
+		return files, dirs
+	}
+	normalized := make(map[string][]byte, len(files))
+	prefix := root + "/"
+	for filePath, data := range files {
+		relPath := strings.TrimPrefix(filePath, prefix)
+		normalized[relPath] = data
+	}
+	if _, ok := normalized["SKILL.md"]; !ok {
+		return files, dirs
+	}
+	normalizedDirs := map[string]bool{}
+	for dir := range dirs {
+		switch {
+		case dir == root:
+			continue
+		case strings.HasPrefix(dir, prefix):
+			relPath := strings.TrimPrefix(dir, prefix)
+			if relPath != "" {
+				normalizedDirs[relPath] = true
+			}
+		default:
+			normalizedDirs[dir] = true
+		}
+	}
+	for dir := range dirsForFiles(normalized) {
+		normalizedDirs[dir] = true
+	}
+	return normalized, normalizedDirs
+}
+
+func dirsForFiles(files map[string][]byte) map[string]bool {
+	dirs := map[string]bool{}
+	for filePath := range files {
+		for dir := path.Dir(filePath); dir != "."; dir = path.Dir(dir) {
+			dirs[dir] = true
+		}
+	}
+	return dirs
 }
 
 func (fs *zipFS) ListAll(ctx context.Context) ([]EntryInfo, error) {

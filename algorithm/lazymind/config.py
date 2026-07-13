@@ -217,3 +217,10 @@ config.add('evo_code_map', str, None, 'EVO_CODE_MAP', description='Evo code map 
 config.add('evo_chat_source', str, None, 'EVO_CHAT_SOURCE', description='Evo chat source directory.')
 
 os.environ.setdefault('LAZYLLM_READER_USE_CACHE', str(bool(config['reader_use_cache'])).lower())
+
+# MinerU online SSL: default verify (lazyllm mineru_ssl_verify=True).
+# Skip only when LAZYMIND_RUNTIME_MODE=local or LAZYLLM_MINERU_SSL_VERIFY=false.
+_runtime_mode = (config['runtime_mode'] or 'cloud').strip().lower()
+_ssl_verify_env = os.environ.get('LAZYLLM_MINERU_SSL_VERIFY', '').strip().lower()
+if _runtime_mode == 'local' or _ssl_verify_env in ('false', '0', 'no'):
+    os.environ['LAZYLLM_MINERU_SSL_VERIFY'] = 'false'

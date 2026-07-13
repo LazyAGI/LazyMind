@@ -10,13 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 
-	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
-	"lazymind/core/preference"
+	"lazymind/core/preferencefile"
 	"lazymind/core/resourcefs"
 	skillhttperr "lazymind/core/skillv2/httperr"
 	skillremotefs "lazymind/core/skillv2/remotefs"
@@ -78,6 +76,10 @@ func Trash(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	if isPluginPath(pathValue) {
+		h.pluginList(w, r, pathValue)
+		return
+	}
 	if isSkillPath(pathValue) {
 		h.skill.List(w, requestWithUserAndPath(r, pathValue))
 		return
@@ -111,6 +113,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Info(w http.ResponseWriter, r *http.Request) {
 	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	if isPluginPath(pathValue) {
+		h.pluginInfo(w, r, pathValue)
+		return
+	}
 	if isSkillPath(pathValue) {
 		h.skill.Info(w, requestWithUserAndPath(r, pathValue))
 		return
@@ -138,6 +144,11 @@ func (h *Handler) Info(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Exists(w http.ResponseWriter, r *http.Request) {
 	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	if isPluginPath(pathValue) {
+		_, _, _, err := h.pluginFiles(r, pathValue)
+		writeJSON(w, http.StatusOK, map[string]any{"exists": err == nil})
+		return
+	}
 	if isSkillPath(pathValue) {
 		h.skill.Exists(w, requestWithUserAndPath(r, pathValue))
 		return
@@ -156,6 +167,10 @@ func (h *Handler) Exists(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Content(w http.ResponseWriter, r *http.Request) {
 	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	if isPluginPath(pathValue) {
+		h.pluginContent(w, r, pathValue)
+		return
+	}
 	if isSkillPath(pathValue) {
 		h.skill.Content(w, requestWithUserAndPath(r, pathValue))
 		return
@@ -194,7 +209,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	clearContent := ""
 	if ref.ResourceType == resourcefs.ResourceTypeUserPreference {
-		clearContent = preference.EmptyPreferenceFileContent()
+		clearContent = preferencefile.EmptyPreferenceFileContent()
 	}
 	draft, err := h.fs.ReadFile(r.Context(), resourcefs.ReadFileRequest{Ref: ref, RefType: resourcefs.FileRefDraft})
 	if err != nil {
@@ -220,10 +235,6 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:            userID,
 	})
 	if err != nil {
-		replyError(w, err)
-		return
-	}
-	if err := h.syncPersonalColumns(r.Context(), ref, commit.Content); err != nil {
 		replyError(w, err)
 		return
 	}
@@ -342,74 +353,13 @@ func (h *Handler) ensurePersonal(ctx context.Context, userID, pathValue string) 
 		return resourcefs.ResourceRef{}, err
 	}
 	ref := resourcefs.ResourceRef{UserID: userID, ResourceType: resourceType}
-	switch resourceType {
-	case resourcefs.ResourceTypeMemory:
-		row, err := evolution.EnsureSystemMemory(ctx, h.db, userID, "")
-		if err != nil {
-			return resourcefs.ResourceRef{}, err
-		}
-		_, err = h.fs.EnsureResource(ctx, ref, row.Content)
-		return ref, err
-	case resourcefs.ResourceTypeUserPreference:
-		row, err := evolution.EnsureSystemUserPreference(ctx, h.db, userID, "")
-		if err != nil {
-			return resourcefs.ResourceRef{}, err
-		}
-		_, err = h.fs.EnsureResource(ctx, ref, preference.BuildInitialFileContent(*row))
-		return ref, err
-	default:
+	if resourceType != resourcefs.ResourceTypeMemory && resourceType != resourcefs.ResourceTypeUserPreference {
 		return resourcefs.ResourceRef{}, resourcefs.ErrInvalidResourceType
 	}
-}
-
-func (h *Handler) syncPersonalColumns(ctx context.Context, ref resourcefs.ResourceRef, content string) error {
-	now := time.Now()
-	switch ref.ResourceType {
-	case resourcefs.ResourceTypeMemory:
-		var row orm.SystemMemory
-		if err := h.db.WithContext(ctx).Where("user_id = ?", ref.UserID).Take(&row).Error; err != nil {
-			return err
-		}
-		row.Content = content
-		return h.db.WithContext(ctx).Model(&orm.SystemMemory{}).Where("id = ?", row.ID).Updates(map[string]any{
-			"content":              content,
-			"content_hash":         evolution.HashSystemMemory(row),
-			"version":              gorm.Expr("version + 1"),
-			"draft_content":        "",
-			"draft_source_version": 0,
-			"draft_status":         "",
-			"draft_updated_at":     nil,
-			"updated_at":           now,
-		}).Error
-	case resourcefs.ResourceTypeUserPreference:
-		parsed, err := preference.ParseFileContent(content)
-		if err != nil {
-			return err
-		}
-		var row orm.SystemUserPreference
-		if err := h.db.WithContext(ctx).Where("user_id = ?", ref.UserID).Take(&row).Error; err != nil {
-			return err
-		}
-		row.Content = parsed.Content
-		row.AgentPersona = parsed.AgentPersona
-		row.PreferredName = parsed.PreferredName
-		row.ResponseStyle = parsed.ResponseStyle
-		return h.db.WithContext(ctx).Model(&orm.SystemUserPreference{}).Where("id = ?", row.ID).Updates(map[string]any{
-			"content":              parsed.Content,
-			"agent_persona":        parsed.AgentPersona,
-			"preferred_name":       parsed.PreferredName,
-			"response_style":       parsed.ResponseStyle,
-			"content_hash":         evolution.HashSystemUserPreference(row),
-			"version":              gorm.Expr("version + 1"),
-			"draft_content":        "",
-			"draft_source_version": 0,
-			"draft_status":         "",
-			"draft_updated_at":     nil,
-			"updated_at":           now,
-		}).Error
-	default:
-		return resourcefs.ErrInvalidResourceType
+	if _, err := evolution.EnsurePersonalResourceContent(ctx, h.db, userID, string(resourceType)); err != nil {
+		return resourcefs.ResourceRef{}, err
 	}
+	return ref, nil
 }
 
 func (h *Handler) delegateBodyPath(w http.ResponseWriter, r *http.Request, delegate func()) bool {

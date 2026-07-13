@@ -4,8 +4,10 @@ import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { CopyOutlined, FileImageOutlined } from "@ant-design/icons";
 import moment from "moment";
-import { Doc, Segment } from "@/api/generated/knowledge-client";
+import { Doc } from "@/api/generated/core-client";
+import { Segment } from "@/api/generated/knowledge-client";
 
+import type { Dataset as KnowledgeDataset } from "@/api/generated/knowledge-client";
 import { TIME_FORMAT } from "@/modules/knowledge/constants/common";
 import FileUtils from "@/modules/knowledge/utils/file";
 import FileViewer, {
@@ -76,7 +78,7 @@ const Detail = () => {
     KnowledgeBaseServiceApi()
       .datasetServiceGetDataset({ dataset: knowledgeBaseId })
       .then((res) => {
-        setCurrentDataset(res.data);
+        setCurrentDataset(res.data as unknown as KnowledgeDataset);
       });
   }, [knowledgeBaseId, setCurrentDataset]);
 
@@ -95,18 +97,25 @@ const Detail = () => {
     };
 
     const handleDeveloperActiveChange = (event: Event) => {
-      const nextActive = (event as CustomEvent<{ active?: boolean }>).detail?.active;
+      const nextActive = (event as CustomEvent<{ active?: boolean }>).detail
+        ?.active;
       setDeveloperActive(
         typeof nextActive === "boolean" ? nextActive : isDeveloperModeActive(),
       );
     };
 
     window.addEventListener("storage", syncDeveloperActive);
-    window.addEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperActiveChange);
+    window.addEventListener(
+      DEVELOPER_ACTIVE_EVENT,
+      handleDeveloperActiveChange,
+    );
 
     return () => {
       window.removeEventListener("storage", syncDeveloperActive);
-      window.removeEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperActiveChange);
+      window.removeEventListener(
+        DEVELOPER_ACTIVE_EVENT,
+        handleDeveloperActiveChange,
+      );
     };
   }, []);
 
@@ -291,18 +300,24 @@ const Detail = () => {
       />
       <Row gutter={[12, 12]} className="mt-6 min-h-0 w-full flex-1">
         <Col span={15} className="min-h-0">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden">
-            <FileViewer
-              ref={fileViewerRef}
-              file={previewFile}
-              fileName={knowledgeDetail?.display_name || ""}
-              segment={segmentDetail}
-              onExportReadyChange={setCanExportImagePdf}
-            />
-          </div>
+          <FileViewer
+            ref={fileViewerRef}
+            file={previewFile}
+            fileName={knowledgeDetail?.display_name || ""}
+            segment={segmentDetail}
+            onExportReadyChange={setCanExportImagePdf}
+          />
         </Col>
         <Col span={9} className="min-h-0">
-          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', paddingBottom: '4px' }}>
+          <div
+            style={{
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              paddingBottom: "4px",
+            }}
+          >
             {knowledgeDetail && (
               <KnowledgeTabs
                 knowledgeDetail={knowledgeDetail}
