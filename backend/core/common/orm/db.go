@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
 	"lazymind/core/log"
