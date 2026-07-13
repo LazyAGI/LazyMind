@@ -327,8 +327,8 @@ func CreatePrompt(w http.ResponseWriter, r *http.Request) {
 
 func PolishPrompt(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Content      string `json:"content"`
-		UserInstruct string `json:"user_instruct"`
+		Content      string `json:"content"`       // 待优化内容
+		UserInstruct string `json:"user_instruct"` // 用户优化要求
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
