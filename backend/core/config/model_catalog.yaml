@@ -694,8 +694,6 @@ model_providers:
           type: vlm
         - name: SenseNova 6.7 Flash-Lite
           type: vlm
-        - name: SenseNova U1 Fast
-          type: vlm
         - name: SenseNova-V6-5-Pro
           type: vlm
         - name: SenseNova-V6-5-Turbo
@@ -714,6 +712,10 @@ model_providers:
           type: llm
         - name: sensenova-6.7-flash-lite
           type: llm
+        - name: sensenova-u1-fast
+          type: text2image
+        - name: sensenova-u1-fast
+          type: image_editing
 
     - name: SiliconFlow
       description: |
