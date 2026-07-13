@@ -3,13 +3,23 @@ const TRP_CLOSE_TAG = "</trp>";
 
 const TP_PAIR_RE = /<tp\b[^>]*>([\s\S]*?)<\/tp>/g;
 const TRP_PAIR_RE = /<trp\b[^>]*>([\s\S]*?)<\/trp>/g;
+const TOOL_PAYLOAD_PAIR_RE = /<(tool_call|tool_result)>[\s\S]*?<\/\1>/g;
+const UNFINISHED_TOOL_PAYLOAD_RE = /<(?:tool_call|tool_result)>[\s\S]*$/g;
 const ORPHAN_TAG_RE = /<\/?(?:tp|trp)\b[^>]*>/g;
+const ORPHAN_TOOL_PAYLOAD_TAG_RE = /<\/?(?:tool_call|tool_result)>/g;
 const MULTIPLE_BLANK_LINES_RE = /\n{3,}/g;
 const THINKING_BLOCK_BREAK_RE = /<\/(?:tp|trp)>\s*<(?:tp|trp)\b[^>]*>/g;
 
 export interface ThinkingSplitResult {
   content: string;
   reasoning_content: string;
+}
+
+function stripToolPayloads(rawText: string): string {
+  return rawText
+    .replace(TOOL_PAYLOAD_PAIR_RE, "")
+    .replace(UNFINISHED_TOOL_PAYLOAD_RE, "")
+    .replace(ORPHAN_TOOL_PAYLOAD_TAG_RE, "");
 }
 
 function lastBoundaryIndex(rawText: string): number {
@@ -35,7 +45,7 @@ export function splitThinkingContent(
   rawText?: string,
   fallbackReasoningContent?: string,
 ): ThinkingSplitResult {
-  const text = rawText || "";
+  const text = stripToolPayloads(rawText || "");
   const boundary = lastBoundaryIndex(text);
   if (boundary >= 0) {
     return {
@@ -66,6 +76,10 @@ export function formatThinkingForDisplay(rawText?: string): string {
   }
 
   let result = rawText;
+
+  // Structured tool payloads are machine-readable carriers paired with the
+  // human-readable tp/trp previews. Never expose their raw JSON in the UI.
+  result = stripToolPayloads(result);
 
   // Make adjacent thinking blocks explicit before stripping tags so
   // markdown does not merge "...content</tp><trp>Found..." into one line.

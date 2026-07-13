@@ -346,7 +346,9 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_step': 'Plugin launched.',
     'advance_step_and_hand_off': 'Step queued. Plugin launched.',
     'regex:get_(.+)_methods': 'The {match} tool group has been expanded.',
-    'regex:trigger_(.+)_plugin': 'Plugin preflight completed.',
+    'regex:trigger_(.+)_plugin': (
+        'Plugin preflight completed. Result: {result.outcome}. Reason: {result.reason}.'
+    ),
 }
 
 _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
@@ -411,7 +413,9 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_step': '插件已启动',
     'advance_step_and_hand_off': '步骤已排队，插件已启动',
     'regex:get_(.+)_methods': '已经展开{match}工具组。',
-    'regex:trigger_(.+)_plugin': '插件启动检查已完成',
+    'regex:trigger_(.+)_plugin': (
+        '插件启动检查已完成，结果是 {result.outcome}，原因是 {result.reason}。'
+    ),
 }
 
 _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
@@ -475,7 +479,9 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'advance_step': 'Step {value} could not be started.',
     'advance_step_and_hand_off': 'Step {value} could not be queued.',
     'regex:get_(.+)_methods': 'The {match} tool group could not be expanded.',
-    'regex:trigger_(.+)_plugin': 'Failed to load the {match} plugin.',
+    'regex:trigger_(.+)_plugin': (
+        'Plugin preflight completed. Result: {result.outcome}. Reason: {result.reason}.'
+    ),
 }
 
 _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
@@ -539,7 +545,9 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'advance_step': '步骤 {value} 启动失败',
     'advance_step_and_hand_off': '步骤 {value} 排队失败',
     'regex:get_(.+)_methods': '未能展开{match}工具组。',
-    'regex:trigger_(.+)_plugin': '{match} 插件加载失败',
+    'regex:trigger_(.+)_plugin': (
+        '插件启动检查已完成，结果是 {result.outcome}，原因是 {result.reason}。'
+    ),
 }
 
 _TOOL_RESULT_APPROVAL_TEMPLATES: dict[str, str] = {
@@ -1090,11 +1098,31 @@ class _SafeFormatContext(dict):
         return '{' + key + '}'
 
 
+class _TemplateResult:
+    """Attribute-access wrapper used by dotted result template paths."""
+
+    def __init__(self, value: dict[str, Any], path: str = 'result') -> None:
+        self._value = value
+        self._path = path
+
+    def __getattr__(self, key: str) -> Any:
+        if key not in self._value:
+            return f'{{{self._path}.{key}}}'
+        value = self._value[key]
+        if isinstance(value, dict):
+            return _TemplateResult(value, f'{self._path}.{key}')
+        text = _truncate_representative_result(
+            _friendly_preview_text(value)
+        ).replace('\n', ' ').strip()
+        return f'**{text}**' if text else f'{{{self._path}.{key}}}'
+
+
 def _render_preview_template(
     tool_name: str,
     value: str,
     template_map: dict[str, str],
     fallback_template: str,
+    result: Any = None,
 ) -> str:
     render_name, render_context = _render_tool_context(tool_name)
     template = _resolve_tool_key(render_name, template_map)
@@ -1109,6 +1137,9 @@ def _render_preview_template(
         key: f'**{item}**'
         for key, item in render_context.items()
     }
+    result_mapping = _tool_result_mapping(result)
+    if result_mapping is not None:
+        context['result'] = _TemplateResult(result_mapping)
     context['value'] = f'**{preview_value}**'
     context['tool_name'] = f'**{tool_name}**'
     context['match'] = f'**{match_group or render_name}**'
@@ -1136,6 +1167,26 @@ def _tool_result_preview_display_value(tool_name: str, result: Any, value: str =
     return value or _truncate_tool_result_preview(_representative_tool_result(tool_name, result))
 
 
+def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
+    """Normalize mapping, nested-result, and JSON-string tool results."""
+    if isinstance(value, dict):
+        nested = value.get('result')
+        if isinstance(nested, dict):
+            return nested
+        if isinstance(nested, str):
+            parsed = _tool_result_mapping(nested)
+            if parsed is not None:
+                return parsed
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+        return _tool_result_mapping(parsed) if isinstance(parsed, dict) else None
+    return None
+
+
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:
     status = _tool_result_status(result)
     display_value = _tool_result_preview_display_value(tool_name, result, value)
@@ -1158,6 +1209,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
                 _TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE,
                 _ZH_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE,
             ),
+            result,
         )
     if status == 'failed':
         return _render_preview_template(
@@ -1169,6 +1221,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
                 _TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE,
                 _ZH_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE,
             ),
+            result,
         )
     payload = result.get('result') if isinstance(result, dict) and isinstance(result.get('result'), dict) else result
     if isinstance(payload, dict) and payload.get('total') == 0 and _tool_name_starts(tool_name, 'kb_'):
@@ -1180,6 +1233,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
         display_value,
         _language_templates(language, _TOOL_RESULT_PREVIEW_TEMPLATES, _ZH_TOOL_RESULT_PREVIEW_TEMPLATES),
         _language_fallback(language, _TOOL_RESULT_FALLBACK_TEMPLATE, _ZH_TOOL_RESULT_FALLBACK_TEMPLATE),
+        result,
     )
 
 

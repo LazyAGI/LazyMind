@@ -78,7 +78,9 @@ _COLD_START_PLUGIN_PROMPT = (
     'response before any other action. Do NOT reply with text only, do NOT call '
     '`image_generator` / `image_editor` directly, and do NOT ask clarification '
     'questions first. Pass the complete user request as `request_context` (or repeat their '
-    'start phrase if they gave no further detail).\n'
+    'start phrase if they gave no further detail), and set `explicit_plugin_request=true`. '
+    'An explicit plugin request is authoritative: plugin suitability heuristics may not '
+    'downgrade it to not_applicable.\n'
     'For the AI image plugin (`image-plugin`), call `trigger_image_plugin`.\n\n'
 )
 
@@ -541,6 +543,7 @@ def _evaluate_plugin_preflight(
     previous: Optional[Dict[str, Any]],
     first_steps: List[str],
     plugin_mode: str,
+    explicit_plugin_request: bool = False,
 ) -> Dict[str, Any]:
     """Run the side-effect-free LLM suitability check for a cold plugin start."""
     if not is_model_role_available('llm'):
@@ -566,6 +569,12 @@ Persisted preflight from earlier clarification turns:
 Current consolidated request context:
 {request_context}
 
+Explicit plugin request: {json.dumps(bool(explicit_plugin_request))}
+
+If Explicit plugin request is true, the user has authoritatively selected this plugin.
+You MUST NOT return not_applicable. Return ready when safe defaults are available, or
+need_information only when information is genuinely required before the first step can run.
+
 Classify the request as exactly one of:
 - ready: applicable and all truly required information is available or has an explicit safe default.
 - need_information: applicable but required information is missing.
@@ -589,6 +598,7 @@ Required schema:
         raw = llm(
             prompt,
             response_format={'type': 'json_object'},
+            stream_output=False,
             timeout=_PREFLIGHT_TIMEOUT_SECONDS,
         )
         try:
@@ -608,6 +618,7 @@ Required schema:
             repaired = llm(
                 repair_prompt,
                 response_format={'type': 'json_object'},
+                stream_output=False,
                 timeout=_PREFLIGHT_TIMEOUT_SECONDS,
             )
             return _normalise_preflight_result(
@@ -703,17 +714,20 @@ def build_cold_start_tools(
             plugin_id: str,
             plugin_name: str,
             first: List[str],
-            desc: str,
-            when_to_use: str,
+            plugin_desc: str,
+            plugin_when_to_use: str,
             entry=None,
             tool_name='',
         ):
 
-            def _trigger(request_context: str) -> str:
+            def _trigger(request_context: str, explicit_plugin_request: bool) -> str:
                 request_context = str(request_context or '').strip()
+                explicit_plugin_request = bool(explicit_plugin_request)
                 if not request_context:
                     return json.dumps({
                         'status': 'preflight_failed',
+                        'outcome': 'preflight_failed',
+                        'reason': 'request_context must not be empty',
                         'error': 'request_context must not be empty',
                     }, ensure_ascii=False)
                 resolved_plugin_id = plugin_id
@@ -730,6 +744,8 @@ def build_cold_start_tools(
                 if resolved_spec is None or not resolved_first:
                     return json.dumps({
                         'status': 'preflight_failed',
+                        'outcome': 'preflight_failed',
+                        'reason': f'plugin {resolved_plugin_id!r} has no reachable first step',
                         'error': f'plugin {resolved_plugin_id!r} has no reachable first step',
                     }, ensure_ascii=False)
                 cfg = _agentic_config()
@@ -737,28 +753,54 @@ def build_cold_start_tools(
                 if cfg.get('plugin_session_id'):
                     return json.dumps({
                         'status': 'preflight_failed',
+                        'outcome': 'preflight_failed',
+                        'reason': 'an active plugin session already exists',
                         'error': 'an active plugin session already exists',
                     }, ensure_ascii=False)
                 previous = cfg.get('plugin_preflight_context')
                 if not isinstance(previous, dict) or previous.get('plugin_id') != resolved_plugin_id:
                     previous = None
+                # Once the user explicitly selects a plugin, retain that choice
+                # across any clarification turns whose text may no longer repeat
+                # the plugin name.
+                explicit_plugin_request = bool(
+                    explicit_plugin_request
+                    or (previous or {}).get('explicit_plugin_request')
+                )
                 try:
                     raw_result = _evaluate_plugin_preflight(
                         plugin_id=resolved_plugin_id,
                         plugin_name=plugin_name,
-                        description=desc,
-                        when_to_use=when_to_use,
+                        description=plugin_desc,
+                        when_to_use=plugin_when_to_use,
                         scenario=resolved_spec.scenario_md,
                         request_context=request_context,
                         previous=previous,
                         first_steps=resolved_first,
                         plugin_mode=str(cfg.get('plugin_mode') or 'dynamic'),
+                        explicit_plugin_request=explicit_plugin_request,
                     )
                     result = _normalise_preflight_result(
                         raw_result,
                         first_steps=resolved_first,
                         fallback_request=request_context,
                     )
+                    # Explicit user selection outranks the model's suitability
+                    # heuristic.  A preflight may still request genuinely required
+                    # information, but it may not veto the selected plugin.  Treat a
+                    # contradictory not_applicable result as ready so the launch
+                    # invariant below can deterministically start the first step.
+                    if explicit_plugin_request and result['decision'] == 'not_applicable':
+                        LOG.warning(
+                            '[plugin.preflight] overriding not_applicable for explicit request plugin=%s',
+                            resolved_plugin_id,
+                        )
+                        result.update({
+                            'decision': 'ready',
+                            'reason': 'The user explicitly requested this plugin.',
+                            'missing_information': [],
+                            'first_step_id': resolved_first[0],
+                        })
                 except Exception as exc:
                     LOG.warning('[plugin.preflight] failed plugin=%s error=%s', resolved_plugin_id, exc)
                     failure_snapshot = {
@@ -774,12 +816,15 @@ def build_cold_start_tools(
                             (previous or {}).get('normalized_request') or request_context
                         ).strip(),
                         'missing_information': (previous or {}).get('missing_information') or [],
+                        'explicit_plugin_request': explicit_plugin_request,
                         **runtime_meta,
                     }
                     cfg['plugin_preflight_context'] = failure_snapshot
                     _emit_preflight_snapshot(failure_snapshot)
                     return json.dumps({
                         'status': 'preflight_failed',
+                        'outcome': 'preflight_failed',
+                        'reason': str(exc),
                         'error': str(exc),
                     }, ensure_ascii=False)
 
@@ -793,6 +838,7 @@ def build_cold_start_tools(
                     _emit_preflight_snapshot(None)
                     return json.dumps({
                         'status': 'not_applicable',
+                        'outcome': 'not_applicable',
                         'reason': result['reason'],
                     }, ensure_ascii=False)
 
@@ -805,6 +851,7 @@ def build_cold_start_tools(
                     'confirmation_answers': confirmation_answers,
                     'normalized_request': result['normalized_request'],
                     'missing_information': result['missing_information'],
+                    'explicit_plugin_request': explicit_plugin_request,
                     **runtime_meta,
                 }
                 cfg['plugin_preflight_context'] = snapshot
@@ -813,6 +860,7 @@ def build_cold_start_tools(
                     cfg.pop('prepared_plugin', None)
                     return json.dumps({
                         'status': 'need_information',
+                        'outcome': 'need_information',
                         'reason': result['reason'],
                         'missing_information': result['missing_information'],
                     }, ensure_ascii=False)
@@ -833,6 +881,8 @@ def build_cold_start_tools(
                 cfg.update(runtime_meta)
                 return json.dumps({
                     'status': 'ready',
+                    'outcome': 'ready',
+                    'reason': result['reason'],
                     'must_advance': True,
                     'preflight_id': snapshot['preflight_id'],
                     'launch_plan': launch_plan,
@@ -844,15 +894,18 @@ def build_cold_start_tools(
 
             # Set __name__ so the framework guard and logging use the public tool name.
             _trigger.__name__ = tool_name
-            if when_to_use:
-                tool_desc = f'{when_to_use.rstrip(".")}.  ({desc.rstrip(".")})'
+            if plugin_when_to_use:
+                tool_desc = f'{plugin_when_to_use.rstrip(".")}.  ({plugin_desc.rstrip(".")})'
             else:
-                tool_desc = desc
+                tool_desc = plugin_desc
             _trigger.__doc__ = (
                 f'{tool_desc}\n\n'
                 'Args:\n'
                 '    request_context (str): The complete user goal. When clarification has\n'
                 '        occurred, consolidate the original request and all answers.\n\n'
+                '    explicit_plugin_request (bool): Always supply this flag. Set true when the user explicitly names,\n'
+                '        starts, enables, or asks to run this plugin. Explicit selection cannot\n'
+                '        be rejected as not_applicable.\n\n'
                 'Returns:\n'
                 '    A structured preflight result. This tool never starts the plugin.\n'
                 '    When status is ready, immediately call an advance tool in the same turn.'
