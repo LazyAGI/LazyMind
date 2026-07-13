@@ -118,7 +118,9 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         description='只读查询 LazyMind 知识库、文档、数据源和关联统计',
         instance=SystemQueryToolGroup(),
         label_en='System Data Query',
-        description_en='Read-only queries for LazyMind knowledge bases, documents, data sources, and related statistics.',
+        description_en=(
+            'Read-only queries for LazyMind knowledge bases, documents, data sources, and related statistics.'
+        ),
     ),
     ToolGroupConfig(
         name='external_db',
@@ -134,7 +136,9 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         description='构建写作任务、资料画像、写作上下文、大纲、章节草稿、审阅报告和最终成稿',
         instance=WriterToolGroup(),
         label_en='AI Writing',
-        description_en='Build writing tasks, source profiles, context, outlines, chapter drafts, review reports, and final drafts.',
+        description_en=(
+            'Build writing tasks, source profiles, context, outlines, chapter drafts, review reports, and final drafts.'
+        ),
     ),
     ToolGroupConfig(
         name='calculator',
