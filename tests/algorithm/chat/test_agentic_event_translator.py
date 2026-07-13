@@ -174,6 +174,26 @@ def test_searchbase_tool_rendering_supports_zh_and_content_methods():
     assert '已成功读取 **Sciverse** 搜索结果 **论文标题/https://example.test/paper** 的内容。' in result_text
 
 
+def test_skill_reference_rendering_does_not_treat_content_error_words_as_failure():
+    result_text = _tool_result_frame_text({
+        'id': 'call-reference',
+        'name': 'read_reference',
+        'result': 'Error handling for failed PDF operations is documented here.',
+    }, language='zh', preview_value='reference.md')
+
+    assert '已成功加载 **reference.md** 技能的参考资料。' in result_text
+
+
+def test_skill_reference_rendering_preserves_explicit_tool_failure():
+    result_text = _tool_result_frame_text({
+        'id': 'call-reference',
+        'name': 'read_reference',
+        'result': '[Tool Error] FileNotFoundError: reference.md',
+    }, language='zh', preview_value='reference.md')
+
+    assert '未能读取 **reference.md** 技能参考资料。' in result_text
+
+
 def test_github_skill_install_tool_rendering_uses_url_and_installed_key():
     github_url = 'https://github.com/owner/repo/tree/main/skills/example'
     call = {

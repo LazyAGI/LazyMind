@@ -798,6 +798,10 @@ _TOOL_NOT_AVAILABLE_RE = re.compile(
     r'Tool \[[^\]]+\] is not available\. Please choose from the available tools\.',
     re.IGNORECASE,
 )
+_TOOL_EXECUTION_ERROR_RE = re.compile(
+    r'^\s*(?:\[Tool Error\]|Tool \[[^\]]+\] (?:arguments format|parameters) error\b)',
+    re.IGNORECASE,
+)
 
 
 def _tool_name_suffixes(tool_name: str) -> list[str]:
@@ -1066,10 +1070,9 @@ def _tool_result_status(result: Any) -> str:
         if status in ('error', 'missing', 'failed', 'fail'):
             return 'failed'
     elif isinstance(result, str):
-        text = result.strip().lower()
         if _TOOL_NOT_AVAILABLE_RE.search(result):
             return 'inactive'
-        if any(marker in text for marker in ('error', 'failed', 'parameters error')):
+        if _TOOL_EXECUTION_ERROR_RE.search(result):
             return 'failed'
     return 'ok'
 
