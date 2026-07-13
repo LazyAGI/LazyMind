@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Popover, Radio, Switch, Tooltip, message } from 'antd';
+import { Popover, Switch, Tooltip, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { SettingOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import {
@@ -9,7 +9,6 @@ import {
   type ConversationPluginSettings,
 } from '../../utils/request';
 import './ChatConfigModal.scss';
-import { listUserPluginSettings, setUserPluginEnabled, type UserPluginSetting } from '@/modules/plugin/pluginDraftApi';
 
 interface ChatConfigPopoverProps {
   /** When provided, settings are saved to the server immediately on change. */
@@ -33,7 +32,6 @@ export default function ChatConfigPopover({
   const [settings, setSettings] = useState<ConversationPluginSettings | null>(
     initialSettings ?? null,
   );
-  const [pluginItems, setPluginItems] = useState<UserPluginSetting[]>([]);
   // Track whether we've already fetched defaults to avoid repeated requests.
   const fetchedRef = useRef(false);
 
@@ -57,7 +55,6 @@ export default function ChatConfigPopover({
     }
     fetchedRef.current = true;
     try {
-      const itemsPromise = listUserPluginSettings().catch(() => [] as UserPluginSetting[]);
       if (conversationId && !conversationId.startsWith('temp_')) {
         const detailRes =
           await ChatServiceApi().conversationServiceGetConversationDetail({
@@ -68,7 +65,6 @@ export default function ChatConfigPopover({
         );
         if (convSettings) {
           setSettings(convSettings);
-          setPluginItems(await itemsPromise);
           return;
         }
       }
@@ -76,7 +72,6 @@ export default function ChatConfigPopover({
       // Go wraps responses as {code, message, data: {...}}; extract the inner data.
       const payload = (res.data as any)?.data ?? res.data;
       setSettings((s) => ({ ...payload, ...s }));
-      setPluginItems(await itemsPromise);
     } catch {
       // Silently fall back to empty; individual fields will render as undefined.
     }
@@ -106,12 +101,6 @@ export default function ChatConfigPopover({
 
   const pluginEnabled = settings?.enable_plugin ?? true;
 
-  async function handlePluginToggle(item: UserPluginSetting, enabled: boolean) {
-    setPluginItems((items) => items.map((v) => v.plugin_ref === item.plugin_ref ? { ...v, enabled } : v));
-    try { await setUserPluginEnabled(item.plugin_ref, enabled); }
-    catch { setPluginItems((items) => items.map((v) => v.plugin_ref === item.plugin_ref ? { ...v, enabled: !enabled } : v)); message.error(t('chat.conversationConfigSaveFailed')); }
-  }
-
   const content = (
     <div className="chat-config-popover-content">
       {/* Allow Plugin toggle */}
@@ -131,30 +120,21 @@ export default function ChatConfigPopover({
         </div>
       </div>
 
-      {/* Plugin driver mode — only visible when plugin is allowed */}
+      {/* Approval preference — keep mapping to the existing plugin modes. */}
       {pluginEnabled && (
         <div className="chat-config-section">
-          <div className="chat-config-label">{t('chat.conversationConfigPluginMode')}</div>
-          <Radio.Group
-            value={settings?.plugin_mode ?? 'dynamic'}
-            onChange={(e) => handleChange({ plugin_mode: e.target.value })}
-            className="chat-config-radio-group"
-          >
-            <Radio value="dynamic">{t('chat.conversationConfigPluginModeDynamic')}</Radio>
-            <Radio value="auto">{t('chat.conversationConfigPluginModeAuto')}</Radio>
-          </Radio.Group>
-        </div>
-      )}
-
-      {pluginEnabled && pluginItems.length > 0 && (
-        <div className="chat-config-section">
-          <div className="chat-config-label">默认启用的 Plugins</div>
-          {pluginItems.map((item) => (
-            <div className="chat-config-row" key={item.plugin_ref}>
-              <span className="chat-config-row-label">{item.name || item.plugin_id}</span>
-              <Switch checked={item.enabled} onChange={(value) => void handlePluginToggle(item, value)} />
+          <div className="chat-config-row">
+            <div className="chat-config-row-label">
+              <span className="chat-config-label">{t('chat.conversationConfigPluginMode')}</span>
+              <Tooltip title={t('chat.conversationConfigPluginModeTooltip')} placement="top">
+                <QuestionCircleOutlined className="chat-config-help-icon" />
+              </Tooltip>
             </div>
-          ))}
+            <Switch
+              checked={(settings?.plugin_mode ?? 'dynamic') === 'dynamic'}
+              onChange={(checked) => handleChange({ plugin_mode: checked ? 'dynamic' : 'auto' })}
+            />
+          </div>
         </div>
       )}
 

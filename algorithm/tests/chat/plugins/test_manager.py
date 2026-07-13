@@ -397,6 +397,9 @@ def test_preflight_model_uses_llm_role_json_mode_and_timeout():
 
     assert result['decision'] == 'ready'
     auto_model.assert_called_once_with(model='llm')
+    preflight_prompt = llm.call_args.args[0]
+    assert 'Default approval for first steps' in preflight_prompt
+    assert "selected step's Default approval" in preflight_prompt
     assert llm.call_args.kwargs['response_format'] == {'type': 'json_object'}
     assert llm.call_args.kwargs['stream_output'] is False
     assert llm.call_args.kwargs['timeout'] == plugin_manager._PREFLIGHT_TIMEOUT_SECONDS
@@ -1072,6 +1075,36 @@ def test_build_advance_step_tool_docstring_contains_forward_steps(loaded_plugin)
     assert 'step_b' in doc
     assert 'Forward' in doc
     assert 'Optimize' in doc
+    assert 'default approval: required' in doc
+
+
+def test_hand_off_tool_doc_is_mode_neutral(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    hand_off = plugin_manager.build_advance_step_and_hand_off_tool(
+        'test-plugin', 'step_a', rewind_steps=[]
+    )
+    doc = hand_off.__doc__ or ''
+
+    assert 'Start the next plugin step asynchronously' in doc
+    assert 'dynamic' not in doc
+    assert 'auto' not in doc
+
+
+def test_step_choice_doc_uses_configured_default_approval(loaded_plugin):
+    from lazymind.chat.plugin import plugin_loader, plugin_manager
+
+    spec = plugin_loader.get_plugin('test-plugin')
+    assert spec is not None
+    spec._steps['step_b']['mode'] = 'auto'
+    advance = plugin_manager.build_advance_step_tool(
+        'test-plugin', 'step_a',
+        rewind_steps=[],
+        step_labels={'step_b': 'Optimize'},
+    )
+
+    assert 'step_b' in (advance.__doc__ or '')
+    assert 'default approval: not required' in (advance.__doc__ or '')
 
 
 def test_build_advance_step_tool_docstring_contains_rewind_steps(loaded_plugin):
@@ -1114,6 +1147,19 @@ def test_dynamic_guidance_respects_explicit_target_boundary(loaded_plugin):
     assert 'Execute the target boundary step with `advance_step_and_hand_off`' in guidance
     assert 'Do NOT wait for the boundary step with `advance_step`' in guidance
     assert 'Do NOT call downstream steps and do NOT call `__end__`' in guidance
+    assert 'persisted session intent wins' in guidance
+    assert "target step's" in guidance
+    assert '[default approval: ...]' in guidance
+    assert 'returns the next decision to the user' in guidance
+
+
+def test_auto_guidance_assigns_continuation_to_driver_agent(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    guidance = plugin_manager._build_mode_guidance('auto')
+
+    assert 'hands continuation to the DriverAgent' in guidance
+    assert 'Always use `advance_step_and_hand_off`' in guidance
 
 
 def test_build_advance_step_tool_rewind_step_is_accepted(

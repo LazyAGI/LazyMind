@@ -491,7 +491,14 @@ def _build_step_choices_doc(
             label_suffix = f'  ({label})' if label else ''
             cond = condition_map.get(s, '')
             cond_note = f'  [when: {cond}]' if cond else ''
-            lines.append(f'  - {s}{label_suffix}{cond_note}')
+            approval = (
+                'required'
+                if plugin_loader.get_step_mode(plugin_id, s) == 'human'
+                else 'not required'
+            )
+            lines.append(
+                f'  - {s}{label_suffix}{cond_note}  [default approval: {approval}]'
+            )
 
         if len(forward_steps) > 1 and sm:
             lines.append('')
@@ -549,6 +556,10 @@ def _evaluate_plugin_preflight(
     if not is_model_role_available('llm'):
         raise RuntimeError('the llm model role is not available for plugin preflight')
     previous_json = json.dumps(previous or {}, ensure_ascii=False)
+    step_modes = json.dumps(
+        {step: plugin_loader.get_step_mode(plugin_id, step) for step in first_steps},
+        ensure_ascii=False,
+    )
     prompt = f'''You are a plugin launch preflight evaluator. Return exactly one JSON object and no prose.
 
 Plugin id: {plugin_id}
@@ -557,6 +568,7 @@ Description: {description}
 When to use: {when_to_use}
 Plugin mode: {plugin_mode}
 Valid first steps: {json.dumps(first_steps, ensure_ascii=False)}
+Default approval for first steps: {step_modes}
 
 Full scenario:
 ---
@@ -580,8 +592,11 @@ Classify the request as exactly one of:
 - need_information: applicable but required information is missing.
 - not_applicable: this plugin should not be launched for the request.
 
-For ready, choose one valid first_step_id and choose hand_off=false only when the user explicitly asks
-for continuous/uninterrupted execution; otherwise choose hand_off=true.
+For ready, choose one valid first_step_id. Then choose hand_off using this priority:
+1. When Plugin mode is auto, choose true (the backend will continue automatically).
+2. When the user explicitly asks for continuous/uninterrupted/no-approval execution, choose false.
+3. When the user explicitly asks to review/approve/confirm the step, choose true.
+4. Otherwise use the selected step's Default approval: human => true, auto => false.
 
 Required schema:
 {{
@@ -1242,9 +1257,8 @@ def build_advance_step_and_hand_off_tool(
 ) -> Any:
     """Build the advance_step_and_hand_off tool (stop-tool).
 
-    Queues the step and immediately ends the current ReAct turn, handing off
-    control to the SubAgent (auto mode) or the user (dynamic mode). This is the
-    DEFAULT advancement tool registered for both auto and dynamic modes.
+    Queues the step asynchronously and immediately ends the current ReAct turn.
+    Mode-specific continuation behavior is defined by the system guidance.
     """
     sm = plugin_loader.get_state_machine(plugin_id)
     forward = sm.get_reachable_steps(current_step) if sm else []
@@ -1259,16 +1273,15 @@ def build_advance_step_and_hand_off_tool(
         runtime_instruction: Optional[str] = None,
         partial_indices: Optional[Dict[str, List[int]]] = None,
     ) -> str:
-        """Advance the active plugin to the next step and hand off control to user.
+        """Start the next step asynchronously and hand off subsequent control.
 
         After calling this tool, the current ReAct loop exits and the SSE stream closes.
-        The step runs in the background; when it completes, the next decision is made by
-        the DriverAgent (auto mode) or the user (dynamic mode).
+        The step runs in the background. Mode-specific system guidance determines
+        what happens after it completes.
 
-        This is the DEFAULT tool for advancing steps. Use it unless you explicitly need
-        to run multiple steps in sequence within a single turn (user said e.g. "re-run
-        steps 1 through 3").  In that case use `advance_step` (synchronous, dynamic
-        mode only) for intermediate steps and this tool for the final step.
+        In dynamic mode, use this when the user explicitly requests review/a boundary,
+        or when the target step is annotated with default approval required. Use
+        `advance_step` when approval is explicitly skipped or defaults to not required.
 
         Terminal plugin steps are normally completed by the plugin event loop after
         the terminal task succeeds. Use `step_id="__end__"` only as an explicit
@@ -1295,11 +1308,9 @@ def build_advance_step_and_hand_off_tool(
         )
 
     advance_step_and_hand_off.__doc__ = (
-        'Advance the active plugin to the next step and hand off control to SubAgent/user.\n\n'
-        'The step runs in the background. Use this as the DEFAULT tool in single-step mode.\n'
-        'In continuous/uninterrupted mode (Rule 4 in system prompt), use `advance_step`\n'
-        'for prerequisite steps before the requested target boundary, then call this tool\n'
-        'for the boundary step and stop. Terminal steps are also boundary steps; after a\n'
+        'Start the next plugin step asynchronously and end the current ReAct turn.\n\n'
+        'Use the current system guidance to decide when this asynchronous boundary is required.\n'
+        'Terminal steps are also boundaries; after a\n'
         'terminal task succeeds, the plugin event loop completes the session.\n\n'
         '## Intent-change rewind (MUST read before advancing)\n\n'
         'If the user expresses dissatisfaction with or changes to the result of a step that\n'
@@ -1352,8 +1363,8 @@ def build_advance_step_tool(
     """Build the synchronous advance_step tool (dynamic mode only).
 
     Blocks until the SubAgent completes, then returns the step result summary so
-    ChatAgent can continue reasoning.  Use only when running multiple steps in
-    sequence within a single turn.
+    ChatAgent can continue reasoning. Use for explicit continuous execution and
+    for steps whose default approval is not required.
     """
     sm = plugin_loader.get_state_machine(plugin_id)
     forward = sm.get_reachable_steps(current_step) if sm else []
@@ -1371,9 +1382,8 @@ def build_advance_step_tool(
         """Advance the active plugin to the next step and WAIT for completion.
 
         Blocks until the SubAgent finishes, then returns the step result summary.
-        Use ONLY when running multiple steps in sequence within a single turn
-        (e.g. user said "re-run steps 1 to 3"). For single-step advancement,
-        prefer `advance_step_and_hand_off` to let the user review results.
+        Use when the user explicitly requests continuous/no-approval execution, or
+        when the target step defaults to no approval and the user has not overridden it.
         """
         if step_id == '__end__':
             return _trigger_plugin_end(plugin_id)
@@ -1425,7 +1435,8 @@ def build_advance_step_tool(
 
     advance_step.__doc__ = (
         'Advance the active plugin step synchronously and return the result.\n\n'
-        'Use this tool in continuous/uninterrupted mode (Rule 4 in system prompt).\n'
+        'Use this tool in continuous/uninterrupted mode, or when the target step is\n'
+        'annotated `[default approval: not required]` and the user did not override it.\n'
         'Continuous mode is active when the user intent contains phrases like\n'
         '"一次性完成", "不要中断", "一次性写完", "run all steps", "no interruptions".\n'
         'In continuous mode with an explicit target boundary, use `advance_step` only\n'
@@ -1433,8 +1444,8 @@ def build_advance_step_tool(
         'with `advance_step_and_hand_off` and stop. If the user did not set a boundary,\n'
         'run prerequisite remaining steps with this tool, then execute the terminal step\n'
         'with `advance_step_and_hand_off` and stop.\n\n'
-        'In default single-step mode (no uninterrupted constraint), do NOT use this\n'
-        'tool — use `advance_step_and_hand_off` instead so the user can review each result.\n\n'
+        'If the target step defaults to approval, or the user asks to review/confirm it,\n'
+        'use `advance_step_and_hand_off` instead.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
         '    step_id (str): Step to advance to (see list above).\n'
@@ -2164,8 +2175,10 @@ def _build_mode_guidance(
         'before any step-advance tool call. Summarize 1-2 key constraints in concise Chinese.\n'
         'If the latest query has no explicit new constraints, do NOT call update_intent.\n\n'
         'ALSO: if the "User Intent & Constraints" section is empty (no session intent recorded yet)\n'
-        'AND the conversation history contains "一次性", "不要中断", "不要打断", "中间不要停",\n'
-        '"一次性写完", "run all steps", "do it all at once", or similar phrases,\n'
+        'AND the conversation history contains a persistent execution preference such as\n'
+        '"一次性", "不要中断", "不要打断", "中间不要停", "每步确认", "每一步审批",\n'
+        '"无需审批", "一次性写完", "run all steps", "approve every step",\n'
+        '"do it all at once", or similar phrases,\n'
         'call `update_intent(scope="session", content="<concise summary of the constraint>")`\n'
         'to persist the constraint before advancing any step.\n\n'
         '### Rule 1 — Intent-change detection\n'
@@ -2184,10 +2197,20 @@ def _build_mode_guidance(
         'step becomes available only AFTER `current_step` succeeds.\n'
         'Never skip steps — do not call a downstream step while an upstream step is\n'
         'still pending.\n\n'
-        '### Rule 3 — Workflow advancement requests\n'
+        '### Rule 3 — Approval precedence and workflow advancement\n'
+        'When plugin mode is dynamic, select the advancement tool with this priority:\n'
+        '  1. Explicit intent in the latest query or persisted session intent wins. If the\n'
+        '     user asks for review/confirmation or sets a\n'
+        '     target boundary, use `advance_step_and_hand_off`. If the user asks for continuous,\n'
+        '     uninterrupted, or no-approval execution, use `advance_step`.\n'
+        '  2. If the user expresses no approval preference, read the target step\'s\n'
+        '     `[default approval: ...]` annotation. Use `advance_step_and_hand_off` when\n'
+        '     approval is required; use `advance_step` when it is not required.\n'
+        'After an `advance_step` result, repeat this decision for the next target. This lets\n'
+        'automatic steps continue until the workflow reaches a step that requires approval.\n\n'
         'If the user clearly asks to proceed with the existing plugin workflow and\n'
         'does not add new requirements, corrections, or dissatisfaction signals:\n'
-        '  - If continuous mode is NOT active: call `advance_step_and_hand_off` and stop.\n'
+        '  - If continuous mode is NOT active: apply the target step\'s default approval.\n'
         '  - If continuous mode IS active (Rule 4) and the user set a target boundary:\n'
         '    use `advance_step` for prerequisite steps before that boundary, then use\n'
         '    `advance_step_and_hand_off` for the boundary step and stop.\n'
@@ -2205,8 +2228,7 @@ def _build_mode_guidance(
     common = (
         '\n\n## Plugin execution guidance\n\n'
         'Tools for step advancement:\n'
-        '- `advance_step_and_hand_off`: Queue a step and hand off control (DEFAULT). '
-        'Use for single-step advancement.\n'
+        '- `advance_step_and_hand_off`: Start a step asynchronously and end the current turn.\n'
     )
     if plugin_mode == 'dynamic':
         labels = step_labels or {}
@@ -2228,12 +2250,14 @@ def _build_mode_guidance(
                 'In default single-step mode, use `advance_step_and_hand_off` and stop.'
             )
         common += (
+            'In dynamic mode, an asynchronous boundary returns the next decision to the user.\n'
             '- `advance_step`: Queue a step and WAIT for its result (dynamic mode only). '
             'Use this in continuous/uninterrupted mode (see Rule 4 below). '
             'Use `advance_step` for prerequisite steps before a requested boundary, then '
             '`advance_step_and_hand_off` for the boundary step.\n'
-            'In default single-step mode (no uninterrupted constraint), use '
-            '`advance_step_and_hand_off` and stop.\n\n'
+            'When there is no explicit approval preference, use the target step annotation: '
+            '`advance_step_and_hand_off` for `[default approval: required]`, otherwise '
+            '`advance_step` and evaluate the next target after it completes.\n\n'
             '### Rule 4 — Continuous / uninterrupted execution mode (MUST check before every action)\n'
             'Activate continuous mode when ANY of the following is true:\n'
             '  a) The "User Intent & Constraints" section contains phrases such as:\n'
@@ -2263,8 +2287,9 @@ def _build_mode_guidance(
             '     it hands off control and breaks the continuous run.\n'
             '  6. If `advance_step` returns an error, stop the sequence immediately and '
             '     report the failure; do not skip or continue to a later step.\n\n'
-            'After each step in default (non-continuous) mode, use `advance_step_and_hand_off` '
-            'so the user can review the result and decide the next action.\n\n'
+            'Outside explicit continuous mode, step defaults still apply whenever the user has '
+            'not stated an approval preference. Never treat dynamic mode itself as a requirement '
+            'to pause after every step.\n\n'
             'When a step is interrupted and user says "继续": call advance_step_and_hand_off with '
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
             'and only produce missing outputs (resume from checkpoint)."\n'
@@ -2274,7 +2299,8 @@ def _build_mode_guidance(
         )
     else:  # auto
         common += (
-            '\nIn auto mode, always use `advance_step_and_hand_off`. '
+            '\nIn auto mode, an asynchronous boundary hands continuation to the DriverAgent. '
+            'Always use `advance_step_and_hand_off`. '
             'Do not use `advance_step` (not available in auto mode). '
             'After calling advance_step_and_hand_off, the DriverAgent will evaluate the result '
             'and decide the next action automatically.\n\n'
