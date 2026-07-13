@@ -328,6 +328,23 @@ func TestEnsureAllDirsCreatesRuntimeDataDirs(t *testing.T) {
 	}
 }
 
+func TestEnsureRuntimeDirsCreatesDocumentScanDirectory(t *testing.T) {
+	repo := t.TempDir()
+	watchDir := filepath.Join(t.TempDir(), "Documents", "LazyMind")
+	t.Setenv("LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR", watchDir)
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("desktop", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := ensureRuntimeDirs(cfg, paths); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	if info, err := os.Stat(watchDir); err != nil || !info.IsDir() {
+		t.Fatalf("expected document scan directory %s: info=%v err=%v", watchDir, info, err)
+	}
+}
+
 func TestEnsureAllDirsUsesOnlyApprovedTopLevelDirs(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

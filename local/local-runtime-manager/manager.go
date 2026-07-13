@@ -109,7 +109,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	freshCfg := cfg
-	if err := paths.EnsureAllDirs(); err != nil {
+	if err := ensureRuntimeDirs(cfg, paths); err != nil {
 		return err
 	}
 	if err := relocateDesktopPythonVenvs(cfg, paths); err != nil {
@@ -144,7 +144,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
-	if err := paths.EnsureAllDirs(); err != nil {
+	if err := ensureRuntimeDirs(freshCfg, paths); err != nil {
 		return err
 	}
 
@@ -183,7 +183,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
-	if err := paths.EnsureAllDirs(); err != nil {
+	if err := ensureRuntimeDirs(freshCfg, paths); err != nil {
 		return err
 	}
 	cfg = freshCfg
@@ -319,6 +319,16 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	m.printReadySummary(cfg)
 	if cfg.Profile == "desktop" {
 		return m.waitForDesktopRuntimeStop(ctx, paths)
+	}
+	return nil
+}
+
+func ensureRuntimeDirs(cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := paths.EnsureAllDirs(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(cfg.FileWatcher.WatchHostDir, 0o755); err != nil {
+		return fmt.Errorf("create local document scan directory: %w", err)
 	}
 	return nil
 }

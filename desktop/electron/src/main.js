@@ -3,9 +3,27 @@ const { spawn, execFile } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { resolveWindowsDesktopPaths } = require("./desktop-paths");
+
+const isWindows = process.platform === "win32";
+const windowsDesktopPaths = isWindows
+  ? resolveWindowsDesktopPaths(process.env, app.getPath("home"))
+  : null;
+if (windowsDesktopPaths) {
+  for (const dir of [
+    windowsDesktopPaths.profileDir,
+    windowsDesktopPaths.logsDir,
+    windowsDesktopPaths.crashDumpsDir,
+  ]) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  app.setPath("userData", windowsDesktopPaths.profileDir);
+  app.setPath("sessionData", windowsDesktopPaths.profileDir);
+  app.setPath("crashDumps", windowsDesktopPaths.crashDumpsDir);
+  app.setAppLogsPath(windowsDesktopPaths.logsDir);
+}
 
 const isPackaged = app.isPackaged;
-const isWindows = process.platform === "win32";
 const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
 const ownerToken = randomUUID();
 const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||

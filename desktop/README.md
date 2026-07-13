@@ -39,4 +39,15 @@ Desktop binds only to `127.0.0.1`. It retains the normal Local/Desktop auto-logi
 
 Local and Desktop share the platform LazyMind data directory so knowledge bases remain available when switching modes, but they cannot run concurrently. Stop Local before opening Desktop and close Desktop before starting Local. Electron also enforces a single Desktop instance.
 
+On Windows, all Desktop-generated files live under `%LOCALAPPDATA%\LazyMind`:
+
+```text
+%LOCALAPPDATA%\LazyMind\data             # SQLite, Milvus, uploads, and service data
+%LOCALAPPDATA%\LazyMind\Desktop          # Electron/Chromium profile and browser caches
+%LOCALAPPDATA%\LazyMind\Logs\desktop     # Electron startup and diagnostic logs
+%LOCALAPPDATA%\LazyMind\Logs\crash-dumps # Electron crash reports
+```
+
+Desktop does not read, migrate, or remove any legacy Electron profile outside this root. The Windows local document source is `%USERPROFILE%\Documents\LazyMind`; Desktop creates it at runtime startup and the file watcher scans it recursively.
+
 `desktop/build/<target>/runtime` and `desktop/dist` are generated outputs. Each build recreates its target runtime; dependency downloads continue to use the normal Go, uv/pip, pnpm, Electron, and electron-builder user caches.
