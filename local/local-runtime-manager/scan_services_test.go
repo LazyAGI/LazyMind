@@ -61,3 +61,15 @@ func TestScanControlPlaneEnvUsesSQLite(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_STATE_BACKEND=sqlite")
 	assertEnvContains(t, env, "LAZYMIND_STATE_SQLITE_PATH="+filepath.Join(paths.ScanControlPlaneStateDir, "scan_state.db"))
 }
+
+func TestFileWatcherEnvUsesNativeStagingRuntimeRoot(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	env := fileWatcherEnv(cfg, paths)
+
+	assertEnvContains(t, env, "LAZYMIND_FILE_WATCHER_STAGING_RUNTIME_ROOT="+filepath.Join(paths.FileWatcherBaseRoot, "staging"))
+}

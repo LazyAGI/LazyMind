@@ -1205,6 +1205,21 @@ type builtinSkillPathParams struct {
 	BuiltinSkillUID string `path:"builtin_skill_uid"`
 }
 
+type builtinSkillOpenAPIResponse struct {
+	BuiltinSkillUID  string `json:"builtin_skill_uid"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	Category         string `json:"category"`
+	Content          string `json:"content"`
+	Installed        bool   `json:"installed"`
+	InstalledSkillID string `json:"installed_skill_id,omitempty"`
+}
+
+type builtinSkillListOpenAPIResponse struct {
+	Items []builtinSkillOpenAPIResponse `json:"items"`
+	Total int                           `json:"total"`
+}
+
 type skillTreeNodeOpenAPIResponse struct {
 	Name     string                         `json:"name"`
 	Path     string                         `json:"path"`
@@ -1733,6 +1748,24 @@ type evalSetImportPreviewOpenAPIRequest struct {
 	FileType string `json:"file_type,omitempty"`
 }
 
+type pluginDraftPathParams struct {
+	DraftID string `path:"draft_id"`
+}
+type pluginRepairRunPathParams struct {
+	DraftID  string `path:"draft_id"`
+	RepairID string `path:"repair_id"`
+}
+type pluginWorkflowConfirmOpenAPIRequest struct {
+	AnalysisID            string `json:"analysis_id"`
+	CandidateID           string `json:"candidate_id"`
+	SourceSkillRevisionID string `json:"source_skill_revision_id"`
+	DraftVersion          int    `json:"draft_version"`
+}
+type pluginRepairPreviewOpenAPIRequest struct {
+	Target string `json:"target"`
+	Mode   string `json:"mode"`
+}
+
 func registeredCoreOperations() []openAPIOperation {
 	jsonBodyOf := func(v any, required bool) *openAPIBody {
 		return &openAPIBody{Required: required, ContentType: "application/json", Schema: schemaSource{Type: v}}
@@ -1783,6 +1816,10 @@ func registeredCoreOperations() []openAPIOperation {
 		}},
 	}
 	return []openAPIOperation{
+		{Method: "GET", Path: "/plugin-drafts/{draft_id}/generation-analysis", Summary: "Get Plugin generation analysis", Tags: []string{"plugin"}, PathParams: pluginDraftPathParams{}, Responses: map[int]openAPIResponse{200: evoJSONResp("Generation analysis")}},
+		{Method: "POST", Path: "/plugin-drafts/{draft_id}:confirm-workflow", Summary: "Confirm Skill workflow candidate", Tags: []string{"plugin"}, PathParams: pluginDraftPathParams{}, RequestBody: jsonBodyOf(pluginWorkflowConfirmOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{200: evoJSONResp("Confirmation result")}},
+		{Method: "POST", Path: "/plugin-drafts/{draft_id}:repair-preview", Summary: "Preview Plugin repair", Tags: []string{"plugin"}, PathParams: pluginDraftPathParams{}, RequestBody: jsonBodyOf(pluginRepairPreviewOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{200: evoJSONResp("Repair preview")}},
+		{Method: "GET", Path: "/plugin-drafts/{draft_id}/repair-runs/{repair_id}", Summary: "Get Plugin repair run", Tags: []string{"plugin"}, PathParams: pluginRepairRunPathParams{}, Responses: map[int]openAPIResponse{200: evoJSONResp("Repair run")}},
 		{
 			Method:      "GET",
 			Path:        "/datasets",
@@ -1897,6 +1934,14 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:       []string{"data-sources"},
 			PathParams: databaseConnectionPathParams{},
 			Responses:  map[int]openAPIResponse{200: resp("Deleted database connection", deleteDatabaseConnectionOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/builtin-skills",
+			Summary:     "List builtin directory skills",
+			Description: "Lists immutable built-in templates and their installation state for the current user.",
+			Tags:        []string{"skills"},
+			Responses:   map[int]openAPIResponse{200: resp("Builtin skill list", builtinSkillListOpenAPIResponse{})},
 		},
 		{
 			Method:     "POST",

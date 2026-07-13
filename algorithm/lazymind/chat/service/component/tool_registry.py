@@ -47,6 +47,13 @@ class ToolGroupConfig:
     model_role: str | None = None
     key_source: Callable[[], Any] | None = None
     pick_first_valid: bool = False
+    capability_id: str = ''
+    equivalence_scope: str = 'infrastructure'
+    provider_id: str = ''
+    product_id: str = ''
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+    required_config: list[str] | None = None
 
     def __post_init__(self) -> None:
         if self.pick_first_valid and not isinstance(self.instance, (list, tuple)):
@@ -87,6 +94,8 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='知识库检索',
         description='从知识库中搜索文档，支持语义检索、关键词检索、上下文窗口等',
         instance=KBToolGroup(),
+        capability_id='knowledge_base_search',
+        input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['knowledge_base'],
     ),
     ToolGroupConfig(
         name='temp_kb',
@@ -131,6 +140,9 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         description='使用搜索引擎检索互联网内容，自动选择可用的搜索服务',
         instance=_WEB_SEARCH_ENGINE_INSTANCES,
         pick_first_valid=True,
+        capability_id='web_search',
+        equivalence_scope='provider_bound',
+        input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['search_provider'],
     ),
     ToolGroupConfig(
         name='academic_search',
@@ -138,6 +150,9 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         description='搜索学术论文和科学文献，自动选择可用的学术搜索服务',
         instance=_ACADEMIC_SEARCH_ENGINE_INSTANCES,
         pick_first_valid=True,
+        capability_id='academic_search',
+        equivalence_scope='provider_bound',
+        input_schema={'query': 'string'}, output_schema={'papers': 'list'}, required_config=['academic_search_provider'],
     ),
     ToolGroupConfig(
         name='url_fetch',
@@ -158,6 +173,8 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         description='根据文字描述生成图片',
         instance=image_generator,
         model_role='image_generator',
+        capability_id='image_generation',
+        input_schema={'prompt': 'string'}, output_schema={'image': 'file'}, required_config=['image_generator_model'],
     ),
     ToolGroupConfig(
         name='image_editor',
@@ -165,6 +182,7 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         description='根据文字指令编辑参考图片',
         instance=image_editor,
         model_role='image_editor',
+        capability_id='image_editing',
     ),
     ToolGroupConfig(
         name='vocab_learn',
@@ -315,6 +333,13 @@ def get_all_tool_groups() -> list[dict]:
             'methods': methods,
             'can_disable': True,
             'active': group_is_active(cfg),
+            'capability_id': cfg.capability_id or cfg.name,
+            'equivalence_scope': cfg.equivalence_scope,
+            'provider_id': cfg.provider_id,
+            'product_id': cfg.product_id,
+            'input_schema': cfg.input_schema or {},
+            'output_schema': cfg.output_schema or {},
+            'required_config': cfg.required_config or [],
         })
     result.append({
         'name': SKILL_TOOL_GROUP.name,

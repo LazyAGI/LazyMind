@@ -16,6 +16,51 @@ import (
 	skillservice "lazymind/core/skillv2/service"
 )
 
+// ListBuiltinSkills returns the immutable skill templates shipped with LazyMind.
+// A template only becomes an editable user skill after EnableBuiltinSkill copies
+// its complete package into the user's skill store.
+func ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
+	db, ok := requireDB(w)
+	if !ok {
+		return
+	}
+	userID := strings.TrimSpace(common.UserID(r))
+	installed := map[string]string{}
+	if userID != "" {
+		var rows []orm.SkillV2Skill
+		if err := db.WithContext(r.Context()).
+			Where("owner_user_id = ? AND origin_builtin_skill_uid <> '' AND deleted_at IS NULL", userID).
+			Order("created_at ASC").Find(&rows).Error; err != nil {
+			replyServiceError(w, err)
+			return
+		}
+		for _, row := range rows {
+			if _, exists := installed[row.OriginBuiltinSkillUID]; !exists {
+				installed[row.OriginBuiltinSkillUID] = row.ID
+			}
+		}
+	}
+
+	items := make([]map[string]any, 0, len(skillbuiltin.Manifests))
+	for _, manifest := range skillbuiltin.Manifests {
+		pkg, err := skillbuiltin.LoadPackage(manifest)
+		if err != nil {
+			replyServiceError(w, err)
+			return
+		}
+		items = append(items, map[string]any{
+			"builtin_skill_uid":  pkg.UID,
+			"name":               pkg.Name,
+			"description":        pkg.Description,
+			"category":           pkg.Category,
+			"content":            string(pkg.Files["SKILL.md"]),
+			"installed":          installed[pkg.UID] != "",
+			"installed_skill_id": installed[pkg.UID],
+		})
+	}
+	common.ReplyOK(w, map[string]any{"items": items, "total": len(items)})
+}
+
 func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 	db, ok := requireDB(w)
 	if !ok {

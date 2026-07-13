@@ -380,6 +380,16 @@ export interface MarketSkillListResult {
   pageSize: number;
 }
 
+interface BuiltinSkillListItem {
+  builtin_skill_uid: string;
+  name: string;
+  description: string;
+  category: string;
+  content: string;
+  installed?: boolean;
+  installed_skill_id?: string;
+}
+
 const normalizeDraftSummary = (
   draft: SkillDetailOpenAPIResponse["draft"] | undefined,
 ): SkillDraftSummary => ({
@@ -1480,6 +1490,30 @@ export async function listSkillMarketPage(options?: {
     page: payload.page ?? 1,
     pageSize: payload.page_size ?? 20,
   };
+}
+
+export async function listBuiltinSkills(): Promise<MarketSkillRecord[]> {
+  const response = await axiosInstance.get(`${coreBasePath}/builtin-skills`);
+  const payload = unwrapEnvelope<{ items?: BuiltinSkillListItem[] }>(response.data);
+  return (payload.items || []).map((item) => ({
+    id: item.builtin_skill_uid,
+    skillId: item.builtin_skill_uid,
+    name: item.name,
+    skillName: item.name,
+    description: item.description,
+    category: item.category,
+    tags: [],
+    content: item.content,
+    headRevisionId: "",
+    draft: { hasUncommittedDraft: false, taskId: "", version: 0 },
+    autoEvo: false,
+    isEnabled: true,
+    marketItemId: item.builtin_skill_uid,
+    sourceSkillId: item.builtin_skill_uid,
+    marketSource: "builtin",
+    installed: Boolean(item.installed),
+    installedSkillId: item.installed_skill_id || "",
+  }));
 }
 
 export async function getSkillMarketItem(
