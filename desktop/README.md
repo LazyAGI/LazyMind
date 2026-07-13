@@ -26,7 +26,7 @@ Windows:
 
 ```text
 desktop/dist/win-unpacked/             # complete unpacked Electron application
-desktop/dist/LazyMind-windows-x64.zip  # portable distribution of the complete app
+desktop/dist/LazyMind-windows-x64-yyyyMMdd-HHmmss-<commit>.zip  # portable distribution with build time and short Git commit
 ```
 
 `LazyMind.exe` is the entry point inside `win-unpacked`; the directory also contains Electron DLLs/locales and `resources/runtime` with all LazyMind services and Python dependencies.

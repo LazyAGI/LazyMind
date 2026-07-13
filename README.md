@@ -189,7 +189,7 @@ make test-hermetic
 | macOS arm64 | `make local-up` / `make local-down` | `make desktop-darwin-arm64` |
 | Windows x64 | `make local-win-up` / `make local-win-down` | `make desktop-windows-x64` |
 
-Windows Desktop produces `desktop/dist/win-unpacked/` and the portable `desktop/dist/LazyMind-windows-x64.zip`. The package includes the compiled frontend and full Local/RAG runtime; it does not include raw frontend `node_modules` or model weights. See [`desktop/README.md`](desktop/README.md) for runtime ownership and platform details.
+Windows Desktop produces `desktop/dist/win-unpacked/` and a portable `desktop/dist/LazyMind-windows-x64-yyyyMMdd-HHmmss-<commit>.zip`, where the timestamp is the build host's local time and `<commit>` is the short Git commit. The package includes the compiled frontend and full Local/RAG runtime; it does not include raw frontend `node_modules` or model weights. See [`desktop/README.md`](desktop/README.md) for runtime ownership and platform details.
 
 ### Platform Path Examples
 

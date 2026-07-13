@@ -30,6 +30,21 @@ function Remove-GeneratedPath([string]$Path) {
     Remove-Item -LiteralPath $Path -Recurse -Force
 }
 
+function Remove-DistArtifacts([string]$Pattern) {
+    if (-not (Test-Path -LiteralPath $distRoot -PathType Container)) { return }
+    Get-ChildItem -LiteralPath $distRoot -File -Filter $Pattern -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-GeneratedPath $_.FullName }
+}
+
+function New-WindowsZipFileName {
+    $commit = (& git.exe -C $repoRoot rev-parse --short=8 HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-fA-F]{7,}$') {
+        throw 'Could not resolve the Git commit for the Windows Desktop artifact name.'
+    }
+    $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
+    return "LazyMind-windows-x64-$timestamp-$commit.zip"
+}
+
 function Import-EnvFile([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
     foreach ($line in Get-Content -LiteralPath $Path) {
@@ -185,6 +200,7 @@ function Copy-RuntimeApp {
 }
 
 function Finalize-Desktop {
+    $finalZipName = New-WindowsZipFileName
     Materialize-PythonAliases
     Prune-PythonTree (Join-Path $runtimeRoot 'runtimes\python')
     Prune-PythonTree (Join-Path $runtimeRoot 'deps\python')
@@ -209,7 +225,7 @@ function Finalize-Desktop {
     Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-windows-x64.zip')
     Invoke-Native 'pnpm.cmd' @('run', 'pack:win:x64') $electronRoot
     $builderZip = Join-Path $distRoot 'LazyMind-win-x64.zip'
-    $finalZip = Join-Path $distRoot 'LazyMind-windows-x64.zip'
+    $finalZip = Join-Path $distRoot $finalZipName
     if (-not (Test-Path -LiteralPath (Join-Path $distRoot 'win-unpacked\LazyMind.exe') -PathType Leaf)) {
         throw 'Electron Builder did not produce win-unpacked/LazyMind.exe'
     }
@@ -278,6 +294,7 @@ switch ($Action) {
         Remove-GeneratedPath (Join-Path $distRoot 'win-unpacked')
         Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-win-x64.zip')
         Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-windows-x64.zip')
+        Remove-DistArtifacts 'LazyMind-windows-x64-????????-??????-*.zip'
     }
     'clean-all' {
         Remove-GeneratedPath (Join-Path $repoRoot 'desktop\build')
