@@ -57,7 +57,13 @@ func PreviewPluginRepair(w http.ResponseWriter, r *http.Request) {
 	if body.Mode == "" {
 		body.Mode = "plugin_local"
 	}
-	diagnostics := diagnosePlugin(draft.PluginYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent)
+	diagnostics := diagnosticsForTarget(
+		diagnosePlugin(draft.PluginYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent),
+		body.Target,
+	)
+	if diagnostics == nil {
+		diagnostics = []repairDiagnostic{}
+	}
 	files := map[string][]string{"statemachine": {"plugin.yaml", "scenario/state.yml"}, "ui": {"plugin.yaml", "scenario/state.yml"}, "scenario": {"scenario/scenario.md"}, "scripts": {"plugin.yaml", "scenario/state.yml", "scripts/*"}, "full": {"plugin.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"}}
 	common.ReplyOK(w, map[string]any{"target": body.Target, "mode": body.Mode, "draft_version": draft.Version, "diagnostics": diagnostics, "planned_files": files[body.Target]})
 }

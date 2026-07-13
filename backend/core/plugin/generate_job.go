@@ -261,6 +261,32 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 	}
 	finalDiagnostics := diagnosePlugin(finalPluginYAML, stateResp.StateYAML, scenarioResp.ScenarioMD, scriptsJSON)
 	if hasDiagnosticErrors(finalDiagnostics) {
+		// Generation is not complete merely because every phase returned. Run one
+		// automatic repair pass for deterministic validation errors before asking
+		// the user to intervene manually.
+		var issues []string
+		for _, diagnostic := range finalDiagnostics {
+			if diagnostic.Severity == "error" {
+				issues = append(issues, diagnostic.Path+": "+diagnostic.Message)
+			}
+		}
+		repairResp, repairErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{
+			PluginYAML: finalPluginYAML,
+			StateYAML:  stateResp.StateYAML,
+			RepairHint: "Automatically fix all post-generation validation errors. Preserve intended behavior and return a complete valid result.",
+			Warnings:   issues,
+			Target:     "statemachine",
+			LLMConfig:  llmConfig,
+		})
+		if repairErr == nil && repairResp.StateYAML != "" {
+			stateResp.StateYAML = repairResp.StateYAML
+			if repairResp.PluginYAML != "" {
+				finalPluginYAML = repairResp.PluginYAML
+			}
+			finalDiagnostics = diagnosePlugin(finalPluginYAML, stateResp.StateYAML, scenarioResp.ScenarioMD, scriptsJSON)
+		}
+	}
+	if hasDiagnosticErrors(finalDiagnostics) {
 		message := "generation validation failed: " + diagnosticsJSON(finalDiagnostics)
 		_ = markGenerateFailed(db, payload.DraftID, message)
 		return asyncjob.Result{ErrorCode: "generation_coverage_incomplete"}, fmt.Errorf("%s", message)
@@ -273,13 +299,15 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 	}
 
 	if err := db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
-		"scenario_content": scenarioResp.ScenarioMD,
-		"scripts_content":  scriptsJSON,
-		"generate_status":  generateStatusDone,
-		"generate_error":   "",
-		"generate_warning": mergeWarnings(mergeWarnings(currentGenerateWarning(db, payload.DraftID), strings.Join(scenarioResp.Warnings, "; ")), strings.Join(diagnosticWarnings, "; ")),
-		"version":          gorm.Expr("version + 1"),
-		"updated_at":       time.Now().UTC(),
+		"plugin_yaml_content": finalPluginYAML,
+		"state_yaml_content":  stateResp.StateYAML,
+		"scenario_content":    scenarioResp.ScenarioMD,
+		"scripts_content":     scriptsJSON,
+		"generate_status":     generateStatusDone,
+		"generate_error":      "",
+		"generate_warning":    mergeWarnings(mergeWarnings(currentGenerateWarning(db, payload.DraftID), strings.Join(scenarioResp.Warnings, "; ")), strings.Join(diagnosticWarnings, "; ")),
+		"version":             gorm.Expr("version + 1"),
+		"updated_at":          time.Now().UTC(),
 	}).Error; err != nil {
 		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save scenario_scripts: %w", err)
 	}
@@ -401,7 +429,9 @@ func handlePluginDraftRepairJob(ctx context.Context, job asyncjob.Job, _ asyncjo
 			payload.DraftID, payload.PrevStatus, updates["generate_warning"])
 		_ = db.Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(updates)
 		if payload.RepairRunID != "" {
-			_ = db.Model(&orm.PluginRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "failed", "diagnostics_after_json": repairErr, "updated_at": time.Now().UTC()}).Error
+			// diagnostics_after_json is written by the validation path with the
+			// structured report. Do not replace it with a generic error string.
+			_ = db.Model(&orm.PluginRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "failed", "updated_at": time.Now().UTC()}).Error
 		}
 	}
 
@@ -452,7 +482,7 @@ func handlePluginDraftRepairJob(ctx context.Context, job asyncjob.Job, _ asyncjo
 		if payload.RepairRunID != "" {
 			_ = db.Model(&orm.PluginRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 		}
-		if hasDiagnosticErrors(afterDiagnostics) {
+		if hasDiagnosticErrorsForTarget(afterDiagnostics, "full") {
 			restoreStatus("repair validation failed")
 			return asyncjob.Result{ErrorCode: "repair_validation_failed"}, fmt.Errorf("repair validation failed")
 		}
@@ -496,7 +526,7 @@ func handlePluginDraftRepairJob(ctx context.Context, job asyncjob.Job, _ asyncjo
 		if payload.RepairRunID != "" {
 			_ = db.Model(&orm.PluginRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 		}
-		if hasDiagnosticErrors(afterDiagnostics) {
+		if hasDiagnosticErrorsForTarget(afterDiagnostics, "scenario") {
 			restoreStatus("repair validation failed")
 			return asyncjob.Result{ErrorCode: "repair_validation_failed"}, fmt.Errorf("repair validation failed")
 		}
@@ -550,7 +580,7 @@ func handlePluginDraftRepairJob(ctx context.Context, job asyncjob.Job, _ asyncjo
 	if payload.RepairRunID != "" {
 		_ = db.Model(&orm.PluginRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 	}
-	if hasDiagnosticErrors(afterDiagnostics) {
+	if hasDiagnosticErrorsForTarget(afterDiagnostics, payload.Target) {
 		restoreStatus("repair validation failed")
 		return asyncjob.Result{ErrorCode: "repair_validation_failed"}, fmt.Errorf("repair validation failed")
 	}

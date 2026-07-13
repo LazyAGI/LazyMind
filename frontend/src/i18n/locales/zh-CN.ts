@@ -2569,6 +2569,8 @@ const zhCN = {
     memoryVersionChangeSourceReviewAccept: "接受建议",
     memoryVersionChangeSourceAutoApply: "自动应用",
     memoryVersionChangeSourceInternalDirect: "初始化写入",
+    memoryVersionChangeSourceMetadataUpdate: "元数据修改",
+    memoryVersionTabMetadata: "元数据",
     memoryDiffReviewAction: "审阅变更",
     memorySkillUpdateReviewAction: "查看变更状态",
     memoryDiffPendingTag: "待确认",

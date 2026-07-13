@@ -369,13 +369,30 @@ func DeletePluginDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := store.DB().Where("id = ? AND created_by = ?", draftID, userID).Delete(&orm.PluginDraft{})
-	if result.Error != nil {
+	db := store.DB()
+	var draft orm.PluginDraft
+	if err := db.Select("id").Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			common.ReplyErr(w, "not found", http.StatusNotFound)
+			return
+		}
 		common.ReplyErr(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
-	if result.RowsAffected == 0 {
-		common.ReplyErr(w, "not found", http.StatusNotFound)
+
+	// Analyses and repair runs are draft-scoped cached generation state. Remove
+	// them atomically with the draft so a later import of the same Skill cannot
+	// reuse decisions made for a Plugin the user explicitly deleted.
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("draft_id = ? AND user_id = ?", draftID, userID).Delete(&orm.PluginRepairRun{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("draft_id = ? AND user_id = ?", draftID, userID).Delete(&orm.PluginGenerationAnalysis{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ? AND created_by = ?", draftID, userID).Delete(&orm.PluginDraft{}).Error
+	}); err != nil {
+		common.ReplyErr(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
 
@@ -495,7 +512,11 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 	reusableScripts := map[string]string(nil)
 	if body.SkillID != "" && !body.Reanalyze {
 		var cached orm.PluginGenerationAnalysis
-		cacheErr := db.Where("user_id=? AND source_skill_id=? AND source_skill_revision_id=? AND source_skill_tree_hash=? AND status IN ?", userID, body.SkillID, skillSnapshot.RevisionID, skillSnapshot.TreeHash, []string{"generatable", "needs_confirmation", "rejected"}).Order("created_at DESC").First(&cached).Error
+		// A rejection is evaluator-dependent rather than a reusable generated artifact.
+		// Re-run it so prompt/model improvements cannot leave a Skill permanently
+		// blocked by an old negative analysis. Positive and confirmation-required
+		// analyses remain reusable for an unchanged Skill revision.
+		cacheErr := db.Where("user_id=? AND source_skill_id=? AND source_skill_revision_id=? AND source_skill_tree_hash=? AND status IN ?", userID, body.SkillID, skillSnapshot.RevisionID, skillSnapshot.TreeHash, []string{"generatable", "needs_confirmation"}).Order("created_at DESC").First(&cached).Error
 		if cacheErr == nil {
 			now := time.Now().UTC()
 			clone := cached

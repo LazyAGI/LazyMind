@@ -98,6 +98,10 @@ _SKELETON_SYSTEM = (
     '  - steps list (each step: id, label) — list of step IDs only, NO execution details\n'
     '  - ui block — REQUIRED. Must contain:\n'
     '      tabs: list of tab objects. Each tab must have id, label, layout, and slots.\n'
+    '        Every tab MUST contain at least one slot; never emit `slots: []`.\n'
+    '        Every declared plugin slot MUST appear in exactly one tab.\n'
+    '        Put user-provided inputs in an Input tab and generated/intermediate results in result tabs.\n'
+    '        A syntactically valid but empty layout is invalid because the UI cannot display anything.\n'
     '      slots: map of slot_id → widget config, each with widgetType. Use these mappings:\n'
     '        text + single   → text-single\n'
     '        text + list     → text-list\n'
@@ -257,6 +261,26 @@ def _check_skeleton_missing(plugin_dict: Dict[str, Any]) -> List[str]:
     ui = plugin_dict.get('ui')
     if not isinstance(ui, dict) or not ui.get('tabs'):
         missing.append('plugin.ui.tabs (ui tabs block missing, frontend cannot render layout)')
+    elif isinstance(ui.get('tabs'), list):
+        placed: set[str] = set()
+        for i, tab in enumerate(ui['tabs']):
+            if not isinstance(tab, dict):
+                missing.append(f'plugin.ui.tabs[{i}] (must be a dict)')
+                continue
+            tab_slots = tab.get('slots')
+            if not isinstance(tab_slots, list) or not tab_slots:
+                missing.append(f'plugin.ui.tabs[{i}].slots (must contain at least one declared slot)')
+                continue
+            for raw_ref in tab_slots:
+                slot_id = raw_ref.get('id') if isinstance(raw_ref, dict) else raw_ref
+                if slot_id:
+                    placed.add(str(slot_id))
+        declared = {
+            str(slot.get('id')) for slot in (slots or [])
+            if isinstance(slot, dict) and slot.get('id')
+        }
+        for slot_id in sorted(declared - placed):
+            missing.append(f'plugin.ui.tabs slot coverage (declared slot {slot_id!r} is not placed in any tab)')
     return missing
 
 
@@ -617,9 +641,11 @@ def _repair_slots_only(
 class _LLMConfigMixin(BaseModel):
     llm_config: Dict[str, Any] = Field(default_factory=dict)
 
+
 class AnalyzeSkillRequest(_LLMConfigMixin):
     name: str
     skill_package: Dict[str, Any]
+
 
 class AnalyzeSkillResponse(BaseModel):
     verdict: str
@@ -695,7 +721,7 @@ def _skill_package_prompt(package: Optional[Dict[str, Any]], fallback: str) -> s
     header = (
         f"Skill revision: {package.get('revision_id', '')}\n"
         f"Tree hash: {package.get('tree_hash', '')}\n"
-        f"Files in manifest: {len(files)}\n"
+        f'Files in manifest: {len(files)}\n'
     )
     parts: List[str] = [header]
     omitted: List[str] = []
@@ -704,10 +730,10 @@ def _skill_package_prompt(package: Optional[Dict[str, Any]], fallback: str) -> s
     for item in files:
         path = str(item.get('path') or '')
         if item.get('binary'):
-            parts.append(f"\n=== {path} (binary metadata only, {item.get('size', 0)} bytes) ===\n")
+            parts.append(f'\n=== {path} (binary metadata only, {item.get("size", 0)} bytes) ===\n')
             continue
         content = str(item.get('content') or '')
-        block = f"\n=== FILE: {path} ===\n{content}\n=== END FILE ===\n"
+        block = f'\n=== FILE: {path} ===\n{content}\n=== END FILE ===\n'
         if used + len(block) > budget:
             omitted.append(path)
             continue
@@ -715,10 +741,11 @@ def _skill_package_prompt(package: Optional[Dict[str, Any]], fallback: str) -> s
         used += len(block)
     if omitted:
         parts.append(
-            "\n=== UNRESOLVED FILES (context budget; generation must not claim full coverage) ===\n"
-            + "\n".join(omitted)
+            '\n=== UNRESOLVED FILES (context budget; generation must not claim full coverage) ===\n'
+            + '\n'.join(omitted)
         )
     return ''.join(parts)
+
 
 def _script_inventory(package: Dict[str, Any]) -> Dict[str, Any]:
     report: Dict[str, Any] = {}
@@ -730,13 +757,25 @@ def _script_inventory(package: Dict[str, Any]) -> Dict[str, Any]:
         try:
             tree = ast.parse(source)
         except SyntaxError as exc:
-            report[path] = {'classification': 'unsupported', 'functions': [], 'reason': f'SyntaxError: {exc}', 'sha256': hashlib.sha256(source.encode()).hexdigest()}
+            report[path] = {
+                'classification': 'unsupported',
+                'functions': [],
+                'reason': f'SyntaxError: {exc}',
+                'sha256': hashlib.sha256(source.encode()).hexdigest(),
+            }
             continue
-        functions = [n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        functions = [
+            n.name for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
         violations = _scan_file(source)
         if violations:
-            report[path] = {'classification': 'unsupported', 'functions': functions,
-                            'reason': '; '.join(error for _, error in violations), 'sha256': hashlib.sha256(source.encode()).hexdigest()}
+            report[path] = {
+                'classification': 'unsupported',
+                'functions': functions,
+                'reason': '; '.join(error for _, error in violations),
+                'sha256': hashlib.sha256(source.encode()).hexdigest(),
+            }
             continue
         has_main = 'main' in functions or any(
             isinstance(n, ast.If) and isinstance(n.test, ast.Compare)
@@ -745,10 +784,17 @@ def _script_inventory(package: Dict[str, Any]) -> Dict[str, Any]:
         classification = 'wrappable_command' if has_main else ('importable_tool' if functions else 'supporting_script')
         transformed, wrapper = _wrap_command_source(path, source) if has_main else (source, '')
         exported = list(functions)
-        if wrapper: exported.append(wrapper)
-        report[path] = {'classification': classification, 'functions': exported, 'wrapper_function': wrapper,
-                        'reason': '', 'sha256': hashlib.sha256(transformed.encode()).hexdigest()}
+        if wrapper:
+            exported.append(wrapper)
+        report[path] = {
+            'classification': classification,
+            'functions': exported,
+            'wrapper_function': wrapper,
+            'reason': '',
+            'sha256': hashlib.sha256(transformed.encode()).hexdigest(),
+        }
     return report
+
 
 def _wrap_command_source(filename: str, source: str) -> Tuple[str, str]:
     """Append an import-safe explicit-signature wrapper around main without executing it."""
@@ -756,19 +802,37 @@ def _wrap_command_source(filename: str, source: str) -> Tuple[str, str]:
         tree = ast.parse(source)
     except SyntaxError:
         return source, ''
-    main = next((node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == 'main'), None)
+    main = next(
+        (node for node in tree.body
+         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == 'main'),
+        None,
+    )
     if main is None or main.args.vararg is not None or main.args.kwarg is not None:
         return source, ''
     stem = ''.join(ch if ch.isalnum() else '_' for ch in Path(filename).stem).strip('_') or 'script'
     wrapper_name = f'run_{stem}'
     positional = [*main.args.posonlyargs, *main.args.args]
-    call = ast.Call(func=ast.Name(id='main', ctx=ast.Load()), args=[ast.Name(id=arg.arg, ctx=ast.Load()) for arg in positional],
-                    keywords=[ast.keyword(arg=arg.arg, value=ast.Name(id=arg.arg, ctx=ast.Load())) for arg in main.args.kwonlyargs])
+    call = ast.Call(
+        func=ast.Name(id='main', ctx=ast.Load()),
+        args=[ast.Name(id=arg.arg, ctx=ast.Load()) for arg in positional],
+        keywords=[
+            ast.keyword(arg=arg.arg, value=ast.Name(id=arg.arg, ctx=ast.Load()))
+            for arg in main.args.kwonlyargs
+        ],
+    )
     value: ast.expr = ast.Await(value=call) if isinstance(main, ast.AsyncFunctionDef) else call
     wrapper_cls = ast.AsyncFunctionDef if isinstance(main, ast.AsyncFunctionDef) else ast.FunctionDef
-    wrapper = wrapper_cls(name=wrapper_name, args=copy.deepcopy(main.args), body=[ast.Return(value=value)], decorator_list=[], returns=copy.deepcopy(main.returns), type_comment=None)
+    wrapper = wrapper_cls(
+        name=wrapper_name,
+        args=copy.deepcopy(main.args),
+        body=[ast.Return(value=value)],
+        decorator_list=[],
+        returns=copy.deepcopy(main.returns),
+        type_comment=None,
+    )
     ast.fix_missing_locations(wrapper)
     return source.rstrip() + '\n\n' + ast.unparse(wrapper) + '\n', wrapper_name
+
 
 def _hierarchical_evidence(package: Dict[str, Any]) -> Tuple[str, List[str]]:
     """Extract workflow evidence in bounded batches; return unresolved paths explicitly."""
@@ -791,23 +855,32 @@ def _hierarchical_evidence(package: Dict[str, Any]) -> Tuple[str, List[str]]:
     size = 0
     for chunk in chunks:
         if current and size + len(chunk[1]) > 90_000:
-            batches.append(current); current = []; size = 0
-        current.append(chunk); size += len(chunk[1])
-    if current: batches.append(current)
+            batches.append(current)
+            current = []
+            size = 0
+        current.append(chunk)
+        size += len(chunk[1])
+    if current:
+        batches.append(current)
     summaries: List[str] = []
     unresolved = sorted({path for batch in batches[8:] for path, _ in batch})
-    for index, batch in enumerate(batches[:8]):
+    for batch in batches[:8]:
         material = '\n'.join(f'=== {path} ===\n{text}' for path, text in batch)
         raw = _call_llm(
-            'Extract only explicit workflow evidence from these versioned skill chunks. '
-            'Return compact raw JSON with paths, goals, ordered actions, branches, inputs, outputs, '
-            'constraints, tools and script roles. Do not invent missing steps.\n' + material
+            'Extract workflow evidence from these versioned skill chunks. A SKILL.md normally uses '
+            'natural-language guidance rather than a manifest, program, or formal state machine. '
+            'Capture both explicit actions and actions, ordering, inputs, outputs, branches, or '
+            'completion criteria that are directly and reliably implied by the text. You may '
+            'normalize those implications into workflow terms, but do not add behavior unsupported '
+            'by the source. Return compact raw JSON with paths, goals, ordered actions, branches, '
+            'inputs, outputs, constraints, tools and script roles.\n' + material
         )
         try:
             summaries.append(yaml.safe_dump(_extract_json(raw), allow_unicode=True, sort_keys=False))
         except ValueError:
             unresolved.extend(path for path, _ in batch)
     return '\n'.join(summaries), sorted(set(unresolved))
+
 
 def _replacement_mappings(workflow_analysis: Optional[str]) -> List[Tuple[str, str, str]]:
     try:
@@ -824,10 +897,19 @@ def _replacement_mappings(workflow_analysis: Optional[str]) -> List[Tuple[str, s
             replacement = str(value.get('replacement') or value.get('framework_tool') or '')
             if action not in {'replace', 'replaced', 'framework_replaced'} or not replacement:
                 continue
-            result.append((str(value.get('source_tool') or key), replacement, str(value.get('source_script') or '')))
+            result.append((
+                str(value.get('source_tool') or key),
+                replacement,
+                str(value.get('source_script') or ''),
+            ))
     return result
 
-def _apply_tool_replacements(plugin: Dict[str, Any], state: Optional[Dict[str, Any]], workflow_analysis: Optional[str]) -> None:
+
+def _apply_tool_replacements(
+    plugin: Dict[str, Any],
+    state: Optional[Dict[str, Any]],
+    workflow_analysis: Optional[str],
+) -> None:
     mappings = _replacement_mappings(workflow_analysis)
     if mappings:
         plugin['required_framework_tools'] = sorted({replacement for _, replacement, _ in mappings})
@@ -842,7 +924,10 @@ def _apply_tool_replacements(plugin: Dict[str, Any], state: Optional[Dict[str, A
     except (TypeError, ValueError):
         pass
     if skipped_paths and isinstance(plugin.get('tool_scripts'), list):
-        plugin['tool_scripts'] = [entry for entry in plugin['tool_scripts'] if not isinstance(entry, dict) or str(entry.get('path') or '') not in skipped_paths]
+        plugin['tool_scripts'] = [
+            entry for entry in plugin['tool_scripts']
+            if not isinstance(entry, dict) or str(entry.get('path') or '') not in skipped_paths
+        ]
     if state is None:
         return
     replacements = {source: target for source, target, _ in mappings}
@@ -852,6 +937,7 @@ def _apply_tool_replacements(plugin: Dict[str, Any], state: Optional[Dict[str, A
                 replacements.get(str(tool), str(tool)) for tool in config['tools']
                 if str(tool) not in ignored_functions
             ))
+
 
 @router.post('/api/chat/generate_plugin/analyze_skill', response_model=AnalyzeSkillResponse)
 async def analyze_skill(req: AnalyzeSkillRequest) -> AnalyzeSkillResponse:
@@ -863,15 +949,34 @@ async def analyze_skill(req: AnalyzeSkillRequest) -> AnalyzeSkillResponse:
     script_inventory = _script_inventory(req.skill_package)
     from lazymind.chat.service.component.tool_registry import get_all_tool_groups
     tool_catalog = get_all_tool_groups()
-    prompt = '''You are a conservative workflow suitability analyzer. Decide whether the versioned
-skill package contains a real executable workflow. Never invent steps merely to satisfy a schema.
-Pure rules, preferences, reference knowledge, or unordered tool collections are not workflows.
+    prompt = (
+        """You are a workflow suitability analyzer. Decide whether the versioned skill package
+contains enough semantic evidence to derive a useful executable workflow. Judge the behavior the
+Skill describes, not whether it already uses a workflow schema. SKILL.md files commonly omit a
+manifest entry point, formal step numbering, explicit input/output declarations, code-like control
+flow, tool-call syntax, and scripts. Absence of any of those is NOT a reason to reject the Skill.
+
+Treat a workflow as generatable when its goal and a coherent execution path can be reliably inferred
+from natural-language instructions. You may normalize prose phases, ordered guidance, decision
+guidance, and implied inputs/outputs into steps and transitions. This is inference rather than
+invention when a reasonable reader would derive substantially the same workflow. Prefer generatable
+when there is one clear primary workflow. Use needs_confirmation only for a material choice between
+independent workflows or for unresolved behavior indispensable to execution.
+
+Reject only when no stable execution path can be derived without adding substantive behavior; for
+example, the package is solely reference knowledge, style or safety rules, preferences, or an
+unordered collection of unrelated tools. Never invent steps merely to satisfy a schema, but do not
+demand that the source itself define the target schema. Do not cite missing manifests, scripts,
+formal I/O, explicit tool invocations, or code-like control flow as deficiencies unless the Skill's
+meaning is genuinely ambiguous without that information.
 Unsafe scripts must be classified as ignored with a user-visible reason; do not fail the whole
 analysis merely because such a script exists. Use needs_confirmation only when the ignored script
 is indispensable to the selected workflow and has no safe framework replacement.
 Return raw JSON with: verdict (generatable|needs_confirmation|rejected), verdict_code, message,
 candidates (id,name,goal,inputs,outputs,steps,evidence_paths), coverage (files map to disposition),
-tool_mappings, and scripts. Use needs_confirmation when one or more independent sub-workflows exist.
+tool_mappings, and scripts. Use needs_confirmation for a choice between TWO OR MORE independent
+candidate workflows, or when one candidate still has an indispensable unresolved behavior. A single
+coherent candidate with sufficient evidence is generatable and must not require a ceremonial choice.
 Each tool_mappings value must use {action, source_tool, replacement, source_script, reason}; action is
 replace only for a proven equivalent framework capability, otherwise preserve or confirmation_required.
 Use rejected when no genuine workflow exists. Every manifest path must appear in coverage.
@@ -881,21 +986,48 @@ only when provider_id/product_id match; a generic A/B-backed web_search must not
 explicitly requested XX Search. Report every replacement and skipped script to the user.
 
 Framework capability catalog:
-''' + yaml.safe_dump(tool_catalog, allow_unicode=True, sort_keys=False) + '''
-
+"""
+        + yaml.safe_dump(tool_catalog, allow_unicode=True, sort_keys=False)
+        + """
 Deterministic script inventory (authoritative):
-''' + yaml.safe_dump(script_inventory, allow_unicode=True, sort_keys=False) + '''
-
-''' + package_prompt
+"""
+        + yaml.safe_dump(script_inventory, allow_unicode=True, sort_keys=False)
+        + '\n'
+        + package_prompt
+    )
     raw = _call_llm(prompt)
     try:
         data = _extract_json(raw)
     except ValueError as exc:
-        raise HTTPException(status_code=500, detail=f'analysis JSON parse error: {exc}') from exc
+        raise HTTPException(
+            status_code=500,
+            detail=f'analysis JSON parse error: {exc}',
+        ) from exc
     verdict = str(data.get('verdict') or 'rejected')
     if verdict not in {'generatable', 'needs_confirmation', 'rejected'}:
         verdict = 'rejected'
     candidates = data.get('candidates') if isinstance(data.get('candidates'), list) else []
+    tool_mappings = data.get('tool_mappings') if isinstance(data.get('tool_mappings'), dict) else {}
+    confirmation_codes = {
+        'indispensable_behavior_unresolved',
+        'indispensable_script_unsupported',
+        'indispensable_tool_unavailable',
+    }
+    has_required_confirmation = any(
+        isinstance(mapping, dict) and mapping.get('action') == 'confirmation_required'
+        for mapping in tool_mappings.values()
+    )
+    # Do not stop the generation merely to make the user select the only option.
+    # A single candidate needs confirmation only when the analyzer identifies a
+    # concrete indispensable unresolved dependency.
+    if (
+        verdict == 'needs_confirmation'
+        and len(candidates) == 1
+        and str(data.get('verdict_code') or '') not in confirmation_codes
+        and not has_required_confirmation
+    ):
+        verdict = 'generatable'
+        data['verdict_code'] = 'single_candidate_auto_selected'
     if verdict == 'generatable' and not candidates:
         verdict = 'rejected'
         data['verdict_code'] = 'workflow_evidence_missing'
@@ -910,7 +1042,6 @@ Deterministic script inventory (authoritative):
     if any(v == 'unresolved' for v in covered.values()) and verdict == 'generatable':
         verdict = 'needs_confirmation'
         data['verdict_code'] = 'generation_coverage_incomplete'
-    tool_mappings = data.get('tool_mappings') if isinstance(data.get('tool_mappings'), dict) else {}
     catalog_by_name = {str(item.get('name') or ''): item for item in tool_catalog}
     for mapping in tool_mappings.values():
         if isinstance(mapping, dict) and mapping.get('action') == 'replace':
@@ -927,6 +1058,7 @@ Deterministic script inventory (authoritative):
         scripts=script_inventory,
     )
 
+
 @router.post(
     '/api/chat/generate_plugin/design_brief',
     response_model=DesignBriefResponse,
@@ -942,10 +1074,12 @@ async def generate_design_brief(req: DesignBriefRequest) -> DesignBriefResponse:
 
     package_prompt = _skill_package_prompt(req.skill_package, req.skill_content or '')
     if package_prompt.strip():
+        workflow = req.workflow_analysis or ''
         user_prompt = (
             f'Plugin name: {req.name}\n\n'
             f'Convert the following versioned skill package into a design brief. '
-            f'Do not invent behavior for unresolved files. Confirmed workflow:\n{req.workflow_analysis or ""}\n\n{package_prompt}'
+            f'Do not invent behavior for unresolved files. '
+            f'Confirmed workflow:\n{workflow}\n\n{package_prompt}'
         )
     else:
         user_prompt = (
@@ -983,10 +1117,12 @@ async def generate_skeleton(req: SkeletonRequest) -> SkeletonResponse:
     )
     package_prompt = _skill_package_prompt(req.skill_package, req.skill_content or '')
     if package_prompt.strip():
+        workflow = req.workflow_analysis or ''
         user_prompt = (
             f'Plugin name: {req.name}\n\n'
             f'Convert the following versioned skill package into a plugin skeleton. '
-            f'Do not invent behavior for unresolved files. Confirmed workflow:\n{req.workflow_analysis or ""}\n\n{package_prompt}'
+            f'Do not invent behavior for unresolved files. '
+            f'Confirmed workflow:\n{workflow}\n\n{package_prompt}'
         )
     else:
         user_prompt = (
@@ -1505,18 +1641,26 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
             report = inventory.get(path) or {}
             if report.get('classification') == 'unsupported':
                 warnings.append(f'已忽略不安全脚本 {path}: {report.get("reason") or "未通过安全检查"}')
-                ignored_paths.add(path); ignored_functions.update(str(name) for name in report.get('functions') or [])
+                ignored_paths.add(path)
+                ignored_functions.update(str(name) for name in report.get('functions') or [])
                 continue
             safe[path] = _wrap_command_source(path, source)[0]
         repaired_plugin, repaired_state = plugin_dict, state_dict
         if ignored_paths and isinstance(repaired_plugin.get('tool_scripts'), list):
-            repaired_plugin['tool_scripts'] = [entry for entry in repaired_plugin['tool_scripts'] if not isinstance(entry, dict) or str(entry.get('path') or '') not in ignored_paths]
+            repaired_plugin['tool_scripts'] = [
+                entry for entry in repaired_plugin['tool_scripts']
+                if not isinstance(entry, dict) or str(entry.get('path') or '') not in ignored_paths
+            ]
         for config in (repaired_state.get('steps') or {}).values():
             if isinstance(config, dict) and isinstance(config.get('tools'), list):
                 config['tools'] = [tool for tool in config['tools'] if str(tool) not in ignored_functions]
-        return RepairResponse(state_yaml=yaml.dump(repaired_state, allow_unicode=True, sort_keys=False), plugin_yaml=yaml.dump(repaired_plugin, allow_unicode=True, sort_keys=False),
-                              scenario_md=req.scenario_md, scripts=safe,
-                              remaining_warnings=warnings)
+        return RepairResponse(
+            state_yaml=yaml.dump(repaired_state, allow_unicode=True, sort_keys=False),
+            plugin_yaml=yaml.dump(repaired_plugin, allow_unicode=True, sort_keys=False),
+            scenario_md=req.scenario_md,
+            scripts=safe,
+            remaining_warnings=warnings,
+        )
 
     # ── Scenario / documentation repair ──────────────────────────────────────
     if req.target == 'scenario':
@@ -1560,6 +1704,55 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
             raise HTTPException(status_code=500, detail='Scenario repair: missing scenario_md in response')
         logger.info('[repair/scenario] SUCCESS scenario_md_len=%d', len(scenario_md))
         return RepairResponse(state_yaml=scenario_md, remaining_warnings=[])
+
+    # ── UI layout repair ─────────────────────────────────────────────────────
+    if req.target == 'ui':
+        ui_system = (
+            'You are repairing the UI layout in a LazyMind plugin.yaml.\n'
+            'Return the COMPLETE plugin.yaml, preserving all non-UI behavior and identifiers.\n'
+            'Repair only the ui block and any missing widget configuration required by it.\n\n'
+            'Hard requirements:\n'
+            '- ui.tabs must be a non-empty list.\n'
+            '- Every tab must have id, label, layout, and a non-empty slots list.\n'
+            '- Every declared plugin slot must appear in exactly one tab as {id: slot_id}.\n'
+            '- Put user-provided inputs in an Input tab and generated/intermediate artifacts in result tabs.\n'
+            '- ui.slots must define a compatible widgetType for every declared slot.\n'
+            '- Never return slots: [] and never invent slot ids.\n'
+            '- Preserve steps, tool_scripts, metadata, and all other non-UI fields exactly.\n\n'
+            'Return ONLY JSON: {"plugin_yaml": "<complete fixed plugin.yaml>"}.\n'
+        )
+        known_issues = '\n'.join(f'- {w}' for w in req.warnings)
+        ui_user = (
+            f'Known issues:\n{known_issues or "- Infer and fix all unusable UI layout issues."}\n\n'
+            f'User instruction:\n{req.repair_hint or "Repair the UI layout."}\n\n'
+            f'Current plugin.yaml:\n{req.plugin_yaml}\n\n'
+            f'Current state.yml (use step inputs/outputs to group slots):\n{req.state_yaml}'
+        )
+        raw = _call_llm(f'{ui_system}\n{ui_user}')
+        try:
+            data = _extract_json(raw)
+            fixed_plugin_yaml = str(data.get('plugin_yaml') or '')
+            fixed_plugin = yaml.safe_load(fixed_plugin_yaml) or {}
+        except (ValueError, yaml.YAMLError) as exc:
+            raise HTTPException(status_code=500, detail=f'UI repair parse error: {exc}') from exc
+        if not fixed_plugin_yaml or not isinstance(fixed_plugin, dict):
+            raise HTTPException(status_code=500, detail='UI repair: missing complete plugin_yaml')
+
+        remaining = [m for m in _check_skeleton_missing(fixed_plugin) if m.startswith('plugin.ui.')]
+        for _ in range(MAX_PATCH_RETRIES):
+            if not remaining:
+                break
+            fixed_plugin = _patch_skeleton(fixed_plugin, remaining, ui_system)
+            remaining = [m for m in _check_skeleton_missing(fixed_plugin) if m.startswith('plugin.ui.')]
+        fixed_plugin_yaml = yaml.dump(fixed_plugin, allow_unicode=True, sort_keys=False)
+        logger.info('[repair/ui] SUCCESS plugin_yaml_len=%d remaining=%s', len(fixed_plugin_yaml), remaining)
+        return RepairResponse(
+            state_yaml=req.state_yaml,
+            plugin_yaml=fixed_plugin_yaml,
+            scenario_md=req.scenario_md,
+            scripts=req.scripts,
+            remaining_warnings=remaining,
+        )
 
     # ── State machine / UI repair ─────────────────────────────────────────────
     system_prompt = _tmpl(

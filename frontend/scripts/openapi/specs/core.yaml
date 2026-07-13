@@ -1,5 +1,31 @@
 components:
     schemas:
+        builtinSkillListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/builtinSkillOpenAPIResponse'
+                    type: array
+                total:
+                    type: integer
+            type: object
+        builtinSkillOpenAPIResponse:
+            properties:
+                builtin_skill_uid:
+                    type: string
+                category:
+                    type: string
+                content:
+                    type: string
+                description:
+                    type: string
+                installed:
+                    type: boolean
+                installed_skill_id:
+                    type: string
+                name:
+                    type: string
+            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -5880,6 +5906,19 @@ paths:
             summary: List agent thread steps
             tags:
                 - agent
+    /api/core/builtin-skills:
+        get:
+            description: Lists immutable built-in templates and their installation state for the current user.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/builtinSkillListOpenAPIResponse'
+                    description: Builtin skill list
+            summary: List builtin directory skills
+            tags:
+                - skills
     /api/core/builtin-skills/{builtin_skill_uid}:enable:
         post:
             parameters:

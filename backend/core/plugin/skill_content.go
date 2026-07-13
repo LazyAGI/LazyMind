@@ -105,10 +105,10 @@ func loadPluginSourceSkillRevision(ctx context.Context, db *gorm.DB, userID, ski
 		BlobHash       *string
 		Size           int64
 		Mime, FileType string
-		Binary         bool `gorm:"column:is_binary"`
+		Binary         bool `gorm:"column:binary"`
 	}
 	if err := db.WithContext(ctx).Table("skill_revision_entries").
-		Select("path, blob_hash, size, mime, file_type, is_binary").
+		Select(`path, blob_hash, size, mime, file_type, "binary"`).
 		Where("revision_id = ? AND entry_type = ?", revision.ID, "file").Order("path ASC").Scan(&entries).Error; err != nil {
 		return pluginSourceSkillSnapshot{}, err
 	}

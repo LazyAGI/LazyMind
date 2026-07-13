@@ -12,6 +12,7 @@ import type { MarketSkillAsset } from "./skillMarketMockData";
 import {
   getSkillMarketItem,
   installSkillFromMarket,
+  listBuiltinSkills,
   listSkillMarketPage,
 } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
@@ -79,13 +80,16 @@ export default function SkillManagementSection() {
   const loadMarketCatalog = useCallback(async () => {
     setMarketCatalogLoading(true);
     try {
-      const firstResult = await listSkillMarketPage({
-        page: 1,
-        pageSize: 100,
-        category: marketCategory,
-      });
+      const [firstResult, builtinRecords] = await Promise.all([
+        listSkillMarketPage({
+          page: 1,
+          pageSize: 100,
+          category: marketCategory,
+        }),
+        listBuiltinSkills(),
+      ]);
 
-      const records = [...firstResult.records];
+      const records = [...builtinRecords, ...firstResult.records];
       const pageSize = Math.max(1, firstResult.pageSize || 100);
       const totalPages = Math.ceil(firstResult.total / pageSize);
 
@@ -209,6 +213,10 @@ export default function SkillManagementSection() {
   };
 
   const handleMarketInstall = (item: StructuredAsset) => {
+    if ((item as MarketSkillAsset).marketSource === "builtin") {
+      void _handleEnableBuiltinSkill(item);
+      return;
+    }
     const marketItemId = (item as MarketSkillAsset).marketItemId || item.id;
     if (!marketItemId) {
       message.warning(t("admin.memoryBuiltinSkillMissing"));
@@ -242,6 +250,10 @@ export default function SkillManagementSection() {
   };
 
   const handleMarketDetail = (item: StructuredAsset) => {
+    if ((item as MarketSkillAsset).marketSource === "builtin") {
+      openModal("view", item, { skipSkillDetailLoad: true });
+      return;
+    }
     const marketItemId = (item as MarketSkillAsset).marketItemId || item.id;
     void (async () => {
       try {

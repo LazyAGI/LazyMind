@@ -2691,6 +2691,8 @@ const enUS = {
     memoryVersionChangeSourceReviewAccept: "Suggestion Accepted",
     memoryVersionChangeSourceAutoApply: "Auto Applied",
     memoryVersionChangeSourceInternalDirect: "Initial Write",
+    memoryVersionChangeSourceMetadataUpdate: "Metadata Updated",
+    memoryVersionTabMetadata: "Metadata",
     memoryDiffReviewAction: "Review Diff",
     memorySkillUpdateReviewAction: "View Backend State",
     memoryDiffPendingTag: "Pending",

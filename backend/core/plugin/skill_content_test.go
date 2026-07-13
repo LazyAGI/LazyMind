@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gorm.io/driver/sqlite"
@@ -55,7 +56,7 @@ func TestLoadPluginSourceSkillPinsHeadAndLoadsWholePackage(t *testing.T) {
 	for _, sql := range []string{
 		`CREATE TABLE skills(id text primary key, owner_user_id text, skill_name text, head_revision_id text, deleted_at datetime)`,
 		`CREATE TABLE skill_revisions(id text primary key, skill_id text, revision_no integer, tree_hash text)`,
-		`CREATE TABLE skill_revision_entries(revision_id text, path text, entry_type text, blob_hash text, size integer, mime text, file_type text, is_binary boolean)`,
+		`CREATE TABLE skill_revision_entries(revision_id text, path text, entry_type text, blob_hash text, size integer, mime text, file_type text, binary boolean)`,
 		`CREATE TABLE skill_blobs(hash text primary key, content blob)`,
 		`INSERT INTO skills VALUES('s1','u1','Package Skill','r2',NULL)`,
 		`INSERT INTO skill_revisions VALUES('r1','s1',1,'old')`,
@@ -78,5 +79,23 @@ func TestLoadPluginSourceSkillPinsHeadAndLoadsWholePackage(t *testing.T) {
 	}
 	if len(snapshot.Files) != 2 || snapshot.Files[1].Path != "scripts/run.py" {
 		t.Fatalf("whole package not loaded: %#v", snapshot.Files)
+	}
+}
+
+func TestPluginSourceSkillEntryQueryQuotesBinaryColumn(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []struct {
+		Binary bool `gorm:"column:binary"`
+	}
+	stmt := db.Table("skill_revision_entries").
+		Select(`path, blob_hash, size, mime, file_type, "binary"`).
+		Where("revision_id = ? AND entry_type = ?", "r1", "file").
+		Order("path ASC").
+		Scan(&entries).Statement
+	if !strings.Contains(stmt.SQL.String(), `"binary"`) {
+		t.Fatalf("binary column is not quoted in SQL: %s", stmt.SQL.String())
 	}
 }

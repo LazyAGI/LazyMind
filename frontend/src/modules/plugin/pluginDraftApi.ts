@@ -238,7 +238,40 @@ export async function repairPluginDraft(
   return resp.data.data;
 }
 export interface RepairPreview { target:string;mode:string;draft_version:number;diagnostics:Array<{code:string;path:string;message:string;severity:string}>;planned_files:string[] }
-export async function previewPluginRepair(id:string,payload:{target:string;mode:string}):Promise<RepairPreview>{const r=await axiosInstance.post<CoreResponse<RepairPreview>>(`${coreBasePath}/plugin-drafts/${id}:repair-preview`,payload);return r.data.data}
+export interface PluginRepairRun { repair_id:string;status:string;target:string;diagnostics_after:Array<{code:string;path:string;message:string;severity:string}> }
+export async function getPluginRepairRun(draftId:string,repairId:string):Promise<PluginRepairRun>{const r=await axiosInstance.get<CoreResponse<PluginRepairRun>>(`${coreBasePath}/plugin-drafts/${draftId}/repair-runs/${repairId}`);return r.data.data}
+export async function previewPluginRepair(id:string,payload:{target:string;mode:string}):Promise<RepairPreview>{
+  const r=await axiosInstance.post<CoreResponse<RepairPreview>>(`${coreBasePath}/plugin-drafts/${id}:repair-preview`,payload);
+  const data = r.data.data;
+  const normalized = Array.isArray(data.diagnostics) ? data.diagnostics.map((raw) => {
+    // Compatibility with Core versions that serialized Go field names as
+    // Code/Path/Message/Severity instead of the lowercase API contract.
+    const item = raw as unknown as Record<string, unknown>;
+    return {
+      code: String(item.code ?? item.Code ?? 'unknown'),
+      path: String(item.path ?? item.Path ?? ''),
+      message: String(item.message ?? item.Message ?? ''),
+      severity: String(item.severity ?? item.Severity ?? 'error'),
+    };
+  }) : [];
+  const appliesToTarget = (code: string) => {
+    if (payload.target === 'full' || code === 'plugin_yaml_invalid') return true;
+    if (payload.target === 'statemachine') return code.startsWith('state_');
+    if (payload.target === 'ui') return code.startsWith('ui_');
+    if (payload.target === 'scenario') return code.startsWith('scenario_');
+    if (payload.target === 'scripts') return code.startsWith('scripts_') || code.startsWith('tool_script_');
+    return true;
+  };
+  const seen = new Set<string>();
+  const diagnostics = normalized.filter((item) => {
+    if (!appliesToTarget(item.code)) return false;
+    const key = `${item.code}\u0000${item.path}\u0000${item.message}\u0000${item.severity}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return { ...data, planned_files: data.planned_files ?? [], diagnostics };
+}
 
 // ─── Built-in plugin API ──────────────────────────────────────────────────────
 

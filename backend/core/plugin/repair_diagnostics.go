@@ -8,7 +8,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type repairDiagnostic struct{ Code, Path, Message, Severity string }
+type repairDiagnostic struct {
+	Code     string `json:"code"`
+	Path     string `json:"path"`
+	Message  string `json:"message"`
+	Severity string `json:"severity"`
+}
 
 func diagnosePlugin(pluginYAML, stateYAML, scenario, scriptsJSON string) []repairDiagnostic {
 	var pluginDoc, stateDoc map[string]any
@@ -20,6 +25,45 @@ func diagnosePlugin(pluginYAML, stateYAML, scenario, scriptsJSON string) []repai
 		return []repairDiagnostic{{"state_yaml_invalid", "scenario/state.yml", err.Error(), "error"}}
 	}
 	stepIDs := map[string]bool{}
+	slotIDs := map[string]bool{}
+	if slots, ok := pluginDoc["slots"].([]any); ok {
+		for _, raw := range slots {
+			if slot, ok := raw.(map[string]any); ok {
+				if id := fmt.Sprint(slot["id"]); id != "" && id != "<nil>" {
+					slotIDs[id] = true
+				}
+			}
+		}
+	}
+	placedSlots := map[string]bool{}
+	ui, _ := pluginDoc["ui"].(map[string]any)
+	tabs, tabsOK := ui["tabs"].([]any)
+	if !tabsOK || len(tabs) == 0 {
+		out = append(out, repairDiagnostic{"ui_tabs_missing", "plugin.yaml.ui.tabs", "UI has no tabs and cannot display plugin artifacts", "error"})
+	} else {
+		for i, raw := range tabs {
+			tab, _ := raw.(map[string]any)
+			refs, ok := tab["slots"].([]any)
+			if !ok || len(refs) == 0 {
+				out = append(out, repairDiagnostic{"ui_tab_empty", fmt.Sprintf("plugin.yaml.ui.tabs[%d].slots", i), "UI tab has no slots and renders an empty page", "error"})
+				continue
+			}
+			for _, rawRef := range refs {
+				if ref, ok := rawRef.(map[string]any); ok {
+					if id := fmt.Sprint(ref["id"]); id != "" && id != "<nil>" {
+						placedSlots[id] = true
+					}
+				} else if id := fmt.Sprint(rawRef); id != "" && id != "<nil>" {
+					placedSlots[id] = true
+				}
+			}
+		}
+	}
+	for id := range slotIDs {
+		if !placedSlots[id] {
+			out = append(out, repairDiagnostic{"ui_slot_unplaced", "plugin.yaml.ui.tabs", "Declared slot is not placed in any UI tab: " + id, "error"})
+		}
+	}
 	if steps, ok := pluginDoc["steps"].([]any); ok {
 		for _, raw := range steps {
 			if step, ok := raw.(map[string]any); ok {
@@ -71,4 +115,41 @@ func hasDiagnosticErrors(items []repairDiagnostic) bool {
 		}
 	}
 	return false
+}
+
+func hasDiagnosticErrorsForTarget(items []repairDiagnostic, target string) bool {
+	for _, item := range items {
+		if item.Severity == "error" && diagnosticAppliesToTarget(item, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func diagnosticAppliesToTarget(item repairDiagnostic, target string) bool {
+	if target == "full" || item.Code == "plugin_yaml_invalid" {
+		return true
+	}
+	switch target {
+	case "statemachine":
+		return strings.HasPrefix(item.Code, "state_")
+	case "ui":
+		return strings.HasPrefix(item.Code, "ui_")
+	case "scenario":
+		return strings.HasPrefix(item.Code, "scenario_")
+	case "scripts":
+		return strings.HasPrefix(item.Code, "scripts_") || strings.HasPrefix(item.Code, "tool_script_")
+	default:
+		return true
+	}
+}
+
+func diagnosticsForTarget(items []repairDiagnostic, target string) []repairDiagnostic {
+	filtered := make([]repairDiagnostic, 0, len(items))
+	for _, item := range items {
+		if diagnosticAppliesToTarget(item, target) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }

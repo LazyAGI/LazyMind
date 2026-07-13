@@ -1205,6 +1205,21 @@ type builtinSkillPathParams struct {
 	BuiltinSkillUID string `path:"builtin_skill_uid"`
 }
 
+type builtinSkillOpenAPIResponse struct {
+	BuiltinSkillUID  string `json:"builtin_skill_uid"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	Category         string `json:"category"`
+	Content          string `json:"content"`
+	Installed        bool   `json:"installed"`
+	InstalledSkillID string `json:"installed_skill_id,omitempty"`
+}
+
+type builtinSkillListOpenAPIResponse struct {
+	Items []builtinSkillOpenAPIResponse `json:"items"`
+	Total int                           `json:"total"`
+}
+
 type skillTreeNodeOpenAPIResponse struct {
 	Name     string                         `json:"name"`
 	Path     string                         `json:"path"`
@@ -1919,6 +1934,14 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:       []string{"data-sources"},
 			PathParams: databaseConnectionPathParams{},
 			Responses:  map[int]openAPIResponse{200: resp("Deleted database connection", deleteDatabaseConnectionOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/builtin-skills",
+			Summary:     "List builtin directory skills",
+			Description: "Lists immutable built-in templates and their installation state for the current user.",
+			Tags:        []string{"skills"},
+			Responses:   map[int]openAPIResponse{200: resp("Builtin skill list", builtinSkillListOpenAPIResponse{})},
 		},
 		{
 			Method:     "POST",

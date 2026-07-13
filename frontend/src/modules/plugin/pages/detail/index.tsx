@@ -3,7 +3,7 @@ import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { Alert, Breadcrumb, Button, Modal, Input, Spin, Select, Space, Tag, message } from 'antd';
 import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft, publishPluginDraft, listPluginVersions, getPluginVersion, editPluginVersion, getPluginGenerationAnalysis, confirmPluginWorkflow, previewPluginRepair } from '../../pluginDraftApi';
+import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft, publishPluginDraft, listPluginVersions, getPluginVersion, editPluginVersion, getPluginGenerationAnalysis, confirmPluginWorkflow, previewPluginRepair, getPluginRepairRun } from '../../pluginDraftApi';
 import type { PluginDraftRecord } from '../../pluginDraftApi';
 import type { PluginVersionSummary, PluginVersionContent, PluginGenerationAnalysis, RepairPreview } from '../../pluginDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
@@ -90,6 +90,8 @@ export default function PluginDetailPage() {
   const [generationAnalysis, setGenerationAnalysis] = useState<PluginGenerationAnalysis | null>(null);
   const [confirmingCandidate, setConfirmingCandidate] = useState('');
   const [repairPreview, setRepairPreview] = useState<RepairPreview | null>(null);
+  const [repairFailureDetails, setRepairFailureDetails] = useState<string[]>([]);
+  const repairPreviewRequestRef = useRef(0);
   const prevStatusRef = useRef<string>('');
   // Per-banner dismissed state. Each banner has a unique key; dismissed keys are stored
   // as a JSON array in localStorage so they survive page refresh.
@@ -182,6 +184,16 @@ export default function PluginDetailPage() {
             setRepairValidationErrors([]);
             setRepairSubmitting(false);
             if (repairFailed) {
+              if (data.last_repair_run_id) {
+                void getPluginRepairRun(pluginId, data.last_repair_run_id).then((run) => {
+                  const details = Array.isArray(run.diagnostics_after)
+                    ? run.diagnostics_after
+                      .filter((item) => item.severity === 'error')
+                      .map((item) => `${item.path}: ${item.message}`)
+                    : [];
+                  setRepairFailureDetails([...new Set(details)]);
+                }).catch(() => setRepairFailureDetails([]));
+              }
               // Clear only the generate_warning banner so it reappears with the new failure message.
               if (pluginId) {
                 const warningKey = `generate_warning:${contentKey(data.generate_warning ?? '')}`;
@@ -196,6 +208,7 @@ export default function PluginDetailPage() {
               }
               message.error(t('selfEvolutionRun.pluginDetailRepairValidationFailed'));
             } else {
+              setRepairFailureDetails([]);
               message.success(t('selfEvolutionRun.pluginDetailRepairSuccess'));
             }
           }
@@ -297,9 +310,25 @@ export default function PluginDetailPage() {
     finally { setConfirmingCandidate(''); }
   },[pluginId,draft,generationAnalysis,startPolling]);
 
-  useEffect(()=>{if(!pluginId||!repairModalOpen)return;previewPluginRepair(pluginId,{target:repairTarget,mode:draft?.source_analysis_id?'source_aware':'plugin_local'}).then(setRepairPreview).catch(()=>setRepairPreview(null));},[pluginId,repairModalOpen,repairTarget,draft?.source_analysis_id]);
+  useEffect(() => {
+    if (!pluginId || !repairModalOpen) return;
+    const requestId = ++repairPreviewRequestRef.current;
+    setRepairPreview(null);
+    previewPluginRepair(pluginId, {
+      target: repairTarget,
+      mode: draft?.source_analysis_id ? 'source_aware' : 'plugin_local',
+    }).then((preview) => {
+      if (repairPreviewRequestRef.current === requestId) setRepairPreview(preview);
+    }).catch(() => {
+      if (repairPreviewRequestRef.current === requestId) setRepairPreview(null);
+    });
+    return () => {
+      if (repairPreviewRequestRef.current === requestId) repairPreviewRequestRef.current += 1;
+    };
+  }, [pluginId, repairModalOpen, repairTarget, draft?.source_analysis_id]);
 
   const handleOpenRepair = useCallback((target: RepairTarget, validationErrors?: ValidationError[]) => {
+    setRepairPreview(null);
     setRepairTarget(target);
     setRepairValidationErrors(validationErrors ?? []);
     setRepairModalOpen(true);
@@ -511,7 +540,9 @@ export default function PluginDetailPage() {
           closable
           onClose={() => dismissBanner(`generate_warning:${contentKey(draft.generate_warning)}`)}
           message={draft.generate_warning.startsWith('[修复失败]') ? t('selfEvolutionRun.pluginDetailRepairFailedBanner') : t('selfEvolutionRun.pluginDetailPartialContentBanner')}
-          description={draft.generate_warning}
+          description={repairFailureDetails.length > 0
+            ? <><div>{draft.generate_warning}</div><ul>{repairFailureDetails.map((detail) => <li key={detail}>{detail}</li>)}</ul></>
+            : draft.generate_warning}
         />
       )}
 
@@ -636,6 +667,7 @@ export default function PluginDetailPage() {
         onCancel={() => {
           if (repairSubmitting || isRepairing) return;
           setRepairModalOpen(false);
+          setRepairPreview(null);
           setRepairHint('');
           setRepairValidationErrors([]);
         }}
@@ -660,7 +692,7 @@ export default function PluginDetailPage() {
         ) : (
           <>
             <Select value={repairTarget} onChange={(value)=>setRepairTarget(value)} style={{width:'100%',marginBottom:12}} options={[{value:'statemachine',label:t('selfEvolutionRun.pluginDetailRepairTargetStatemachine')},{value:'ui',label:t('selfEvolutionRun.pluginDetailRepairTargetUi')},{value:'scenario',label:t('selfEvolutionRun.pluginDetailRepairTargetScenario')},{value:'scripts',label:t('selfEvolutionRun.pluginDetailRepairTargetScripts')},{value:'full',label:t('selfEvolutionRun.pluginDetailRepairTargetFull')}]} />
-            {repairValidationErrors.length > 0 && (
+            {(repairTarget === 'statemachine' || repairTarget === 'full') && repairValidationErrors.length > 0 && (
               <>
                 <p style={{ marginBottom: 6 }}>{t('selfEvolutionRun.pluginDetailRepairValidationBasis')}</p>
                 <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, fontSize: 13, color: 'var(--color-text-secondary, #888)' }}>
@@ -670,7 +702,7 @@ export default function PluginDetailPage() {
                 </ul>
               </>
             )}
-            {repairPreview && <Alert type="info" showIcon message={t('selfEvolutionRun.pluginRepairPreview')} description={<><div>{repairPreview.planned_files.join(', ')}</div>{repairPreview.diagnostics.map(item=><div key={`${item.code}:${item.path}`}>{item.severity.toUpperCase()} {item.path}: {item.message}</div>)}</>} />}
+            {repairPreview && <Alert type="info" showIcon message={t('selfEvolutionRun.pluginRepairPreview')} description={<><div>{(repairPreview.planned_files ?? []).join(', ')}</div>{(repairPreview.diagnostics ?? []).map(item=><div key={`${item.code}:${item.path}`}>{(item.severity || 'error').toUpperCase()} {item.path}: {item.message}</div>)}</>} />}
             <p style={{ marginBottom: 8 }}>{t('selfEvolutionRun.pluginDetailRepairHintLabel')}</p>
             <Input.TextArea
               placeholder={repairTarget === 'scenario' ? t('selfEvolutionRun.pluginDetailRepairScenarioPlaceholder') : t('selfEvolutionRun.pluginDetailRepairStatePlaceholder')}
