@@ -23,6 +23,7 @@ interface SkillManagementToolbarProps {
   onSkillReviewClick: () => void;
   messageCenterCount: number;
   onMessageCenterClick: () => void;
+  showMessageCenter: boolean;
   isAdmin: boolean;
   onAdminPublish?: () => void;
   onNewPlugin?: () => void;
@@ -44,6 +45,7 @@ export default function SkillManagementToolbar({
   onSkillReviewClick,
   messageCenterCount,
   onMessageCenterClick,
+  showMessageCenter,
   isAdmin,
   onAdminPublish,
   onNewPlugin,
@@ -130,24 +132,26 @@ export default function SkillManagementToolbar({
         </span>
       </button>
 
-      <button
-        type="button"
-        className="memory-skill-insight-card is-message"
-        onClick={onMessageCenterClick}
-      >
-        <span className="memory-skill-insight-card__icon">
-          <BellOutlined />
-        </span>
-        <span className="memory-skill-insight-card__body">
-          <span className="memory-skill-insight-card__title">
-            {t("admin.memorySkillMessageCenterTitle")}
-            <InsightCount count={messageCenterCount} />
+      {showMessageCenter ? (
+        <button
+          type="button"
+          className="memory-skill-insight-card is-message"
+          onClick={onMessageCenterClick}
+        >
+          <span className="memory-skill-insight-card__icon">
+            <BellOutlined />
           </span>
-          <span className="memory-skill-insight-card__hint">
-            {t("admin.memorySkillMessageCenterHint")}
+          <span className="memory-skill-insight-card__body">
+            <span className="memory-skill-insight-card__title">
+              {t("admin.memorySkillMessageCenterTitle")}
+              <InsightCount count={messageCenterCount} />
+            </span>
+            <span className="memory-skill-insight-card__hint">
+              {t("admin.memorySkillMessageCenterHint")}
+            </span>
           </span>
-        </span>
-      </button>
+        </button>
+      ) : null}
     </>
   );
 

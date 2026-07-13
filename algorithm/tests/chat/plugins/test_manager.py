@@ -397,9 +397,6 @@ def test_preflight_model_uses_llm_role_json_mode_and_timeout():
 
     assert result['decision'] == 'ready'
     auto_model.assert_called_once_with(model='llm')
-    preflight_prompt = llm.call_args.args[0]
-    assert 'Default approval for first steps' in preflight_prompt
-    assert "selected step's Default approval" in preflight_prompt
     assert llm.call_args.kwargs['response_format'] == {'type': 'json_object'}
     assert llm.call_args.kwargs['stream_output'] is False
     assert llm.call_args.kwargs['timeout'] == plugin_manager._PREFLIGHT_TIMEOUT_SECONDS

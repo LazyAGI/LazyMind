@@ -23,6 +23,9 @@ from .skill_identity import (
 from .skill_remote_store import (
     SkillRemoteStore,
 )
+from .github_skill_installer import (
+    GitHubSkillInstaller,
+)
 from .memory_remote_store import (
     MEMORY_TARGET_PATHS,
     MemoryRemoteStore,
@@ -96,6 +99,7 @@ __all__ = [
     'fetch_vocab_groups_for_user_id',
     'get_core_api',
     'get_vocab_manager',
+    'GitHubSkillInstaller',
     'handle_tool_errors',
     'norm_vocab_text',
     'normalize_skill_category',
