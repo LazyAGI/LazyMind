@@ -23,6 +23,7 @@ import (
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
 	"lazymind/core/plugin"
+	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -204,6 +205,11 @@ func main() {
 	})
 	importConfig := evalset.LoadImportRuntimeConfigFromEnv()
 	evalset.StartImportPreviewCleanup(context.Background(), store.DB(), importConfig.CleanupInterval)
+	resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
+	resourceupdate.LogStartup(resourceUpdateEnabled)
+	if resourceUpdateEnabled {
+		resourceupdate.Start(context.Background(), store.DB(), store.State(), resourceupdate.DefaultConfig())
+	}
 
 	// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
 	if n, err := subagent.MarkInterrupted(context.Background(), store.DB(), 5*time.Minute); err != nil {

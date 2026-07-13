@@ -9,16 +9,15 @@ description: >
   document. Each step supports a full rerun via the state machine self-loop.
 
 when_to_use: >
-  Invoke this plugin when the user wants to write, draft, or generate a long
-  article, report, technical document, survey, expository piece, story, short
-  story, fiction piece, novel chapter, or any other structured long-form text.
-  Typical requests include "write a report on X", "help me draft a technical
-  article on Y", "write a survey", "generate an introduction to Z", "write a
-  short story", "write a novel chapter", or "写一篇小说". If the writing request
-  lacks details such as length, style, audience, or plot constraints, still
-  trigger this plugin with the user's exact original request so the workflow
-  can infer sensible defaults or collect context during the writing steps. Not
-  suitable for single-paragraph rewrites or translations.
+  Use this plugin only when the user explicitly requests it, or when the user
+  requests a complete, complex writing deliverable that depends materially on
+  existing knowledge or source materials and requires a multi-stage workflow
+  such as context building, outlining, section planning, drafting, and review.
+  Do not invoke it for everyday conversation, simple document generation,
+  short-form writing, rewriting, summarization, translation, brainstorming,
+  outlining alone, or tasks that can be answered directly. This is a fallback
+  writing plugin: if a more specific skill or plugin matches the task, such as
+  proposal, academic, or product-document writing, use that instead.
 
 tool_scripts:
   - path: scripts/tools.py

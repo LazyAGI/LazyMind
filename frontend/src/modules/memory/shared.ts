@@ -354,15 +354,27 @@ export const isMarkdownSkillFile = (filename: string) => {
   return lowerName.endsWith(".md") || lowerName.endsWith(".markdown");
 };
 
-export const parseMarkdownFrontMatter = (content: string) => {
+export const splitMarkdownFrontMatter = (content: string) => {
   const matched = content.match(markdownFrontMatterPattern);
   if (!matched) {
     return null;
   }
 
-  const rawFields = matched[1] || "";
+  return {
+    frontMatter: matched[0],
+    fields: matched[1] || "",
+    content: content.slice(matched[0].length),
+  };
+};
+
+export const parseMarkdownFrontMatter = (content: string) => {
+  const split = splitMarkdownFrontMatter(content);
+  if (!split) {
+    return null;
+  }
+
   const metadata: Record<string, string> = {};
-  rawFields.split(/\r?\n/).forEach((line) => {
+  split.fields.split(/\r?\n/).forEach((line) => {
     const trimmed = line.trim();
     if (!trimmed) {
       return;
@@ -382,7 +394,8 @@ export const parseMarkdownFrontMatter = (content: string) => {
   return {
     name: metadata.name || "",
     description: metadata.description || "",
-    content: content.slice(matched[0].length),
+    category: metadata.category || "",
+    content: split.content,
   };
 };
 

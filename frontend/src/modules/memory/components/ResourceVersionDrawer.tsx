@@ -22,7 +22,12 @@ import {
   listSkillRevisions,
   type SkillRevisionRecord,
 } from "../skillApi";
-import { buildDiffLinesWithInline, buildUnifiedDiffLines, formatDateTime } from "../shared";
+import {
+  buildDiffLinesWithInline,
+  buildUnifiedDiffLines,
+  formatDateTime,
+  parseMarkdownFrontMatter,
+} from "../shared";
 import { DiffLineContent } from "./DiffLineContent";
 
 interface ResourceVersionDrawerProps {
@@ -44,6 +49,7 @@ const changeSourceColorMap: Record<string, string> = {
   create: "cyan",
   internal_direct: "default",
   review_accept: "gold",
+  metadata_update: "geekblue",
 };
 
 const getChangeSourceLabel = (
@@ -59,6 +65,7 @@ const getChangeSourceLabel = (
     create: t("admin.memoryVersionChangeSourceCreate", { defaultValue: "Create" }),
     internal_direct: t("admin.memoryVersionChangeSourceInternalDirect"),
     review_accept: t("admin.memoryVersionChangeSourceReviewAccept"),
+    metadata_update: t("admin.memoryVersionChangeSourceMetadataUpdate"),
   };
 
   return labelMap[normalized] || normalized || "-";
@@ -254,9 +261,19 @@ function SkillRevisionDetail({
   t: ResourceVersionDrawerProps["t"];
   onRetry: () => void;
 }) {
+  const currentSkill = useMemo(
+    () => parseMarkdownFrontMatter(content),
+    [content],
+  );
+  const previousSkill = useMemo(
+    () => parseMarkdownFrontMatter(previousContent),
+    [previousContent],
+  );
+  const bodyContent = currentSkill?.content ?? content;
+  const previousBodyContent = previousSkill?.content ?? previousContent;
   const diffLines = useMemo(
-    () => buildDiffLinesWithInline(previousContent, content),
-    [content, previousContent],
+    () => buildDiffLinesWithInline(previousBodyContent, bodyContent),
+    [bodyContent, previousBodyContent],
   );
 
   if (loading) {
@@ -311,13 +328,15 @@ function SkillRevisionDetail({
       </div>
 
       <Tabs
+        key={revision.revisionId}
+        defaultActiveKey={revision.changeSource === "metadata_update" ? "metadata" : "content"}
         className="memory-version-detail-tabs"
         items={[
           {
             key: "content",
             label: t("admin.memoryVersionTabAfter"),
             children: (
-              <VersionContentPanel label={t("admin.memoryVersionTabAfter")} content={content} />
+              <VersionContentPanel label={t("admin.memoryVersionTabAfter")} content={bodyContent} />
             ),
           },
           {
@@ -343,6 +362,35 @@ function SkillRevisionDetail({
                     description={t("admin.memoryVersionDiffEmpty")}
                   />
                 )}
+              </div>
+            ),
+          },
+          {
+            key: "metadata",
+            label: t("admin.memoryVersionTabMetadata"),
+            children: (
+              <div className="memory-version-detail-summary">
+                <div>
+                  <span>{t("admin.memoryName")}</span>
+                  <strong>{currentSkill?.name || "-"}</strong>
+                  {previousSkill?.name && previousSkill.name !== currentSkill?.name ? (
+                    <small>{previousSkill.name} → {currentSkill?.name || "-"}</small>
+                  ) : null}
+                </div>
+                <div>
+                  <span>{t("admin.memoryDescription")}</span>
+                  <strong>{currentSkill?.description || "-"}</strong>
+                  {previousSkill?.description && previousSkill.description !== currentSkill?.description ? (
+                    <small>{previousSkill.description} → {currentSkill?.description || "-"}</small>
+                  ) : null}
+                </div>
+                <div>
+                  <span>{t("admin.memoryCategory")}</span>
+                  <strong>{currentSkill?.category || "-"}</strong>
+                  {previousSkill?.category && previousSkill.category !== currentSkill?.category ? (
+                    <small>{previousSkill.category} → {currentSkill?.category || "-"}</small>
+                  ) : null}
+                </div>
               </div>
             ),
           },

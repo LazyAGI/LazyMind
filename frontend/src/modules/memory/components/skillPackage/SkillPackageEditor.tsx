@@ -25,6 +25,7 @@ import {
 import type { DataNode } from "antd/es/tree";
 import MarkdownViewer from "@/modules/knowledge/components/MarkdownViewer";
 import { getLocalizedErrorMessage } from "@/components/request";
+import { splitMarkdownFrontMatter } from "../../shared";
 import {
   commitSkillDraft,
   commitSkillDraftReview,
@@ -111,6 +112,7 @@ export default function SkillPackageEditor({
   const [selectedPath, setSelectedPath] = useState("");
   const [fileContent, setFileContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
+  const [skillFrontMatter, setSkillFrontMatter] = useState("");
   const [fileBinary, setFileBinary] = useState<boolean | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileDiff, setFileDiff] = useState<SkillDiffFileRecord | null>(null);
@@ -304,10 +306,21 @@ export default function SkillPackageEditor({
           return;
         }
 
+        const toEditorContent = (content: string) => {
+          if (path !== SKILL_MD_PATH) {
+            setSkillFrontMatter("");
+            return content;
+          }
+          const split = splitMarkdownFrontMatter(content);
+          setSkillFrontMatter(split?.frontMatter || "");
+          return split ? split.content : content;
+        };
+
         const cachedFile = contentCacheRef.current.get(path);
         if (cachedFile && !reviewMode) {
-          setFileContent(cachedFile.content);
-          setOriginalContent(cachedFile.content);
+          const editorContent = toEditorContent(cachedFile.content);
+          setFileContent(editorContent);
+          setOriginalContent(editorContent);
           setFileBinary(cachedFile.binary);
           return;
         }
@@ -317,8 +330,9 @@ export default function SkillPackageEditor({
           content: file.content,
           binary: file.binary,
         });
-        setFileContent(file.content);
-        setOriginalContent(file.content);
+        const editorContent = toEditorContent(file.content);
+        setFileContent(editorContent);
+        setOriginalContent(editorContent);
         setFileBinary(file.binary);
       } catch (error) {
         console.error("Load skill file failed:", error);
@@ -368,9 +382,13 @@ export default function SkillPackageEditor({
     setSaving(true);
     try {
       const status = draftStatus || (await getSkillDraftStatus(skillId));
+      const persistedContent =
+        selectedPath === SKILL_MD_PATH && skillFrontMatter
+          ? `${skillFrontMatter}${fileContent}`
+          : fileContent;
       const nextVersion = await writeSkillDraftText(skillId, {
         path: selectedPath,
-        content: fileContent,
+        content: persistedContent,
         expectedDraftVersion: status.draftVersion,
       });
       setDraftStatus((previous) =>
@@ -379,7 +397,7 @@ export default function SkillPackageEditor({
       setOriginalContent(fileContent);
       setFileBinary(false);
       contentCacheRef.current.set(selectedPath, {
-        content: fileContent,
+        content: persistedContent,
         binary: false,
       });
       setIsEditing(false);
@@ -749,6 +767,7 @@ export default function SkillPackageEditor({
     return (
       <SkillDiffHunkPanel
         diffEntryLines={diffEntryLines}
+        stripFrontMatter={selectedPath === SKILL_MD_PATH}
         hunkReviewActive={Boolean(reviewMeta?.reviewId || fileDiff?.review?.reviewId)}
         hunkSubmitting={hunkSubmitting}
         onHunkDecision={(hunk, decision) => void handleHunkDecision(hunk.hunkId, decision)}

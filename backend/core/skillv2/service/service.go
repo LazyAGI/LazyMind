@@ -149,6 +149,44 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 				headRevisionID = *skill.HeadRevisionID
 			}
 			committedDraftRevisionID := ""
+			metadataChanged :=
+				(req.Name != nil && *req.Name != skill.SkillName) ||
+					(req.Category != nil && *req.Category != skill.Category) ||
+					(req.Description != nil && *req.Description != skill.Description)
+			if metadataChanged {
+				var draftEntries int64
+				if err := tx.Model(&skillDraftEntryRow{}).Where("skill_id = ?", req.SkillID).Count(&draftEntries).Error; err != nil {
+					return err
+				}
+				if draftEntries > 0 {
+					return fmt.Errorf("cannot update skill metadata while draft overlay exists")
+				}
+				if skill.HeadRevisionID == nil {
+					return fmt.Errorf("skill has no head revision")
+				}
+				files, err := s.filesForRevision(ctx, tx, *skill.HeadRevisionID)
+				if err != nil {
+					return err
+				}
+				content, ok := files["SKILL.md"]
+				if !ok {
+					return fmt.Errorf("skill package must contain SKILL.md")
+				}
+				nextName := valueOr(req.Name, skill.SkillName)
+				nextCategory := valueOr(req.Category, skill.Category)
+				nextDescription := valueOr(req.Description, skill.Description)
+				files = map[string][]byte{
+					"SKILL.md": []byte(rewriteSkillMDFrontmatter(string(content), nextName, nextCategory, nextDescription)),
+				}
+				revisionID, err := s.commitFilesAsNewHead(ctx, tx, req.SkillID, req.UserID, "metadata_update", files)
+				if err != nil {
+					return err
+				}
+				headRevisionID = revisionID
+				if err := s.resetDraft(tx, req.SkillID, revisionID); err != nil {
+					return err
+				}
+			}
 			if req.Name != nil {
 				updates["skill_name"] = *req.Name
 				updates["relative_root"] = path.Join(valueOr(req.Category, skill.Category), *req.Name)
@@ -1024,6 +1062,27 @@ func parseSkillMDMetadata(content string) (skillMDMetadata, bool, error) {
 		return skillMDMetadata{}, false, fmt.Errorf("invalid skill frontmatter: %w", err)
 	}
 	return meta, true, nil
+}
+
+func rewriteSkillMDFrontmatter(content, name, category, description string) string {
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	body := normalized
+	metadata := map[string]any{}
+	if strings.HasPrefix(normalized, "---\n") {
+		rest := strings.TrimPrefix(normalized, "---\n")
+		if idx := strings.Index(rest, "\n---"); idx >= 0 {
+			_ = yaml.Unmarshal([]byte(rest[:idx]), &metadata)
+			body = strings.TrimPrefix(rest[idx+len("\n---"):], "\n")
+		}
+	}
+	metadata["name"] = strings.TrimSpace(name)
+	metadata["category"] = strings.TrimSpace(category)
+	metadata["description"] = strings.TrimSpace(description)
+	frontmatter, err := yaml.Marshal(metadata)
+	if err != nil {
+		return content
+	}
+	return fmt.Sprintf("---\n%s---\n%s", string(frontmatter), body)
 }
 
 func (s *SkillService) nextRevisionNo(tx *gorm.DB, skillID string) (int64, error) {

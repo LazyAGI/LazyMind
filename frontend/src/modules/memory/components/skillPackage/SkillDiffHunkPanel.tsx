@@ -21,7 +21,27 @@ interface SkillDiffHunkPanelProps {
   hunkSubmitting: Partial<Record<string, SkillDraftReviewActionDecision>>;
   onHunkDecision?: (hunk: SkillDiffHunkBlock, decision: SkillDraftReviewActionDecision) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
+  stripFrontMatter?: boolean;
 }
+
+const stripLeadingFrontMatterLines = (lines: SkillDiffEntryLine[]) => {
+  const contentLines = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => line.type !== "hunk");
+  if (contentLines[0]?.line.text.trim() !== "---") {
+    return lines;
+  }
+  const closing = contentLines.slice(1).find(({ line }) => line.text.trim() === "---");
+  if (!closing) {
+    return lines;
+  }
+  const hiddenIndexes = new Set(
+    contentLines
+      .filter(({ index }) => index <= closing.index)
+      .map(({ index }) => index),
+  );
+  return lines.filter((_line, index) => !hiddenIndexes.has(index));
+};
 
 const renderContextLine = (line: SkillDiffEntryLine, key: string) => (
   <div key={key} className="memory-skill-diff-doc-line">
@@ -121,8 +141,12 @@ export default function SkillDiffHunkPanel({
   hunkSubmitting,
   onHunkDecision,
   t,
+  stripFrontMatter = false,
 }: SkillDiffHunkPanelProps) {
-  const entryLines = mapSkillDiffEntryLines(diffEntryLines);
+  const mappedEntryLines = mapSkillDiffEntryLines(diffEntryLines);
+  const entryLines = stripFrontMatter
+    ? stripLeadingFrontMatterLines(mappedEntryLines)
+    : mappedEntryLines;
   const hunks = buildDiffHunkBlocks(entryLines);
   const regions = buildInlineChangeRegions(hunks);
   const actionableHunks = hunks.filter((hunk) => isActionableHunkId(hunk.hunkId));

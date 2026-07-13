@@ -51,7 +51,7 @@ function codeFileForTab(tab: ContentTab): CodeFile {
 
 const AUTO_SAVE_DELAY_MS = 1500;
 
-export type RepairTarget = 'statemachine' | 'ui' | 'scenario';
+export type RepairTarget = 'statemachine' | 'ui' | 'scenario' | 'scripts' | 'full';
 
 export interface SavePayload {
   stateYaml: string;
