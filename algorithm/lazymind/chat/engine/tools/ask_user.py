@@ -74,34 +74,24 @@ def ask_user(
     title: Optional[str] = None,
     description: Optional[str] = None,
 ) -> str:
-    """MANDATORY: collect user input via a structured UI card instead of plain text.
+    """MANDATORY: ask the user through a structured UI card.
 
-    ══════════════════════════════════════════════════════════════════════
-    RULE — You MUST call ask_user whenever you need information from the
-    user.  Writing questions as plain text (numbered lists, bullet points,
-    inline questions) is STRICTLY FORBIDDEN.
+    Whenever you want the user to answer a question, call `ask_user` instead
+    of writing the question in plain assistant text. This includes
+    clarification, confirmation, follow-up, preference, quiz, test, exam,
+    interview, and knowledge-check questions.
 
-    WRONG — never do this:
-        "1. What is your role?
-         2. What time range should the report cover?"
+    Prefer `boolean`, `single`, or `multiple` when plausible answers are
+    known; use `text` only when they are not. Single- and multiple-choice
+    questions automatically allow a custom response through the appended
+    "Other" option.
 
-    RIGHT — always do this:
-        ask_user(questions=[
-            {"text": "What is your role?", "type": "single",
-             "choices": ["Engineering", "Product", "Marketing"]},
-            {"text": "What time range should the report cover?", "type": "text"},
-        ])
-    ══════════════════════════════════════════════════════════════════════
+    Ask related questions in one manageable batch. If there are many
+    questions, split them into multiple batches. After the user answers, call
+    `ask_user` again if the issue remains unresolved, new questions arise, or
+    another quiz or test batch is needed.
 
-    Suspends the current ReAct turn and renders an interactive card in the
-    UI.  The user's answers are delivered as plain text in the NEXT turn's
-    query — no special parameter is needed to receive them.
-
-    WHEN to call:
-    - You are missing ANY information required to complete the task.
-    - You need the user to choose between options or confirm a decision.
-    - Collect ALL missing inputs in ONE call — never split into multiple turns.
-    - After calling, do NOT continue reasoning; stop immediately and wait.
+    Calling this tool ends the current turn. Do not continue after calling it.
 
     Question types:
       "boolean"  — Yes / No toggle buttons. Omit choices (auto-set).

@@ -124,6 +124,10 @@ func PublishPluginDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if !frameworkToolsAvailableForPublish(store.DB(), d) {
+		common.ReplyErr(w, "framework tool unavailable", http.StatusConflict)
+		return
+	}
 	if len(files) > 3 && !scriptsApprovedForPublish(store.DB(), d) {
 		common.ReplyErr(w, "custom plugin scripts require the administrator publishing workflow", http.StatusForbidden)
 		return
@@ -247,6 +251,29 @@ func scriptsApprovedForPublish(db *gorm.DB, draft orm.PluginDraft) bool {
 		}
 	}
 	return len(scripts) > 0
+}
+
+func frameworkToolsAvailableForPublish(db *gorm.DB, draft orm.PluginDraft) bool {
+	if draft.SourceAnalysisID == "" {
+		return true
+	}
+	var analysis orm.PluginGenerationAnalysis
+	if db.Where("id=? AND draft_id=?", draft.SourceAnalysisID, draft.ID).First(&analysis).Error != nil {
+		return false
+	}
+	var mappings map[string]map[string]any
+	if json.Unmarshal([]byte(analysis.ToolMappingReportJSON), &mappings) != nil {
+		return false
+	}
+	for _, mapping := range mappings {
+		if mapping["action"] == "replace" {
+			available, ok := mapping["available"].(bool)
+			if !ok || !available {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func RollbackPlugin(w http.ResponseWriter, r *http.Request) {

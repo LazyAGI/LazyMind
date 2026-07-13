@@ -405,6 +405,73 @@ func handlePluginDraftRepairJob(ctx context.Context, job asyncjob.Job, _ asyncjo
 		}
 	}
 
+	if payload.Target == "scripts" || payload.Target == "full" {
+		var scripts map[string]string
+		if json.Unmarshal([]byte(draft.ScriptsContent), &scripts) != nil {
+			scripts = map[string]string{}
+		}
+		pluginYAML, stateYAML, scenarioMD := draft.PluginYAMLContent, draft.StateYAMLContent, draft.ScenarioContent
+		var allWarnings []string
+		if payload.Target == "full" {
+			stateResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{PluginYAML: pluginYAML, StateYAML: stateYAML, RepairHint: payload.RepairHint, Warnings: payload.Warnings, Target: "statemachine", LLMConfig: llmConfig})
+			if callErr != nil {
+				restoreStatus(callErr.Error())
+				return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
+			}
+			stateYAML = stateResp.StateYAML
+			if stateResp.PluginYAML != "" {
+				pluginYAML = stateResp.PluginYAML
+			}
+			allWarnings = append(allWarnings, stateResp.RemainingWarnings...)
+			scenarioResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{PluginYAML: pluginYAML, StateYAML: stateYAML, RepairHint: payload.RepairHint, Target: "scenario", LLMConfig: llmConfig})
+			if callErr != nil {
+				restoreStatus(callErr.Error())
+				return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
+			}
+			scenarioMD = scenarioResp.StateYAML
+		}
+		scriptResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{PluginYAML: pluginYAML, StateYAML: stateYAML, ScenarioMD: scenarioMD, Scripts: scripts, RepairHint: payload.RepairHint, Target: "scripts", LLMConfig: llmConfig})
+		if callErr != nil {
+			restoreStatus(callErr.Error())
+			return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
+		}
+		if scriptResp.PluginYAML != "" {
+			pluginYAML = scriptResp.PluginYAML
+		}
+		if scriptResp.StateYAML != "" {
+			stateYAML = scriptResp.StateYAML
+		}
+		if scriptResp.ScenarioMD != "" {
+			scenarioMD = scriptResp.ScenarioMD
+		}
+		scripts = scriptResp.Scripts
+		allWarnings = append(allWarnings, scriptResp.RemainingWarnings...)
+		scriptsBytes, _ := json.Marshal(scripts)
+		scriptsJSON := string(scriptsBytes)
+		afterDiagnostics := diagnosePlugin(pluginYAML, stateYAML, scenarioMD, scriptsJSON)
+		if payload.RepairRunID != "" {
+			_ = db.Model(&orm.PluginRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
+		}
+		if hasDiagnosticErrors(afterDiagnostics) {
+			restoreStatus("repair validation failed")
+			return asyncjob.Result{ErrorCode: "repair_validation_failed"}, fmt.Errorf("repair validation failed")
+		}
+		updates := map[string]any{"plugin_yaml_content": pluginYAML, "state_yaml_content": stateYAML, "scenario_content": scenarioMD, "scripts_content": scriptsJSON, "generate_status": payload.PrevStatus, "generate_warning": mergeWarnings(currentGenerateWarning(db, draft.ID), strings.Join(allWarnings, "; ")), "version": draft.Version + 1, "updated_at": time.Now().UTC()}
+		result := db.Model(&orm.PluginDraft{}).Where("id=? AND version=?", draft.ID, payload.DraftVersion).Updates(updates)
+		if result.Error != nil || result.RowsAffected != 1 {
+			if payload.RepairRunID != "" {
+				_ = db.Model(&orm.PluginRepairRun{}).Where("id=?", payload.RepairRunID).Update("status", "stale").Error
+			}
+			return asyncjob.Result{ErrorCode: "repair_stale_draft"}, fmt.Errorf("repair stale draft")
+		}
+		if payload.RepairRunID != "" {
+			files := []string{"plugin.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts"}
+			changes, _ := json.Marshal(map[string]any{"files": files})
+			_ = db.Model(&orm.PluginRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "succeeded", "changes_json": string(changes), "updated_at": time.Now().UTC()}).Error
+		}
+		return asyncjob.Result{}, nil
+	}
+
 	if payload.Target == "scenario" {
 		scenarioHint := payload.RepairHint
 		if scenarioHint == "" {

@@ -401,6 +401,7 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Description string `json:"description"`
 		SkillID     string `json:"skill_id"`
+		Reanalyze   bool   `json:"reanalyze"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
@@ -490,6 +491,36 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(b, &skillPackage)
 		}
 	}
+	selectedCandidateJSON := ""
+	reusableScripts := map[string]string(nil)
+	if body.SkillID != "" && !body.Reanalyze {
+		var cached orm.PluginGenerationAnalysis
+		cacheErr := db.Where("user_id=? AND source_skill_id=? AND source_skill_revision_id=? AND source_skill_tree_hash=? AND status IN ?", userID, body.SkillID, skillSnapshot.RevisionID, skillSnapshot.TreeHash, []string{"generatable", "needs_confirmation", "rejected"}).Order("created_at DESC").First(&cached).Error
+		if cacheErr == nil {
+			now := time.Now().UTC()
+			clone := cached
+			clone.ID = uuid.NewString()
+			clone.DraftID = draft.ID
+			clone.CreatedAt = now
+			clone.UpdatedAt = now
+			packageJSON, _ := json.Marshal(manifestOnlySkillPackage(skillPackage))
+			clone.SourcePackageJSON = string(packageJSON)
+			if err := db.Create(&clone).Error; err == nil {
+				draftStatus := clone.Status
+				if draftStatus == "generatable" {
+					draftStatus = generateStatusGenerating
+				}
+				_ = db.Model(&draft).Updates(map[string]any{"source_analysis_id": clone.ID, "generate_status": draftStatus, "generate_error": clone.VerdictMessage, "generate_warning": ignoredScriptWarningJSON(clone.ScriptReportJSON), "updated_at": now}).Error
+				if clone.Status == "needs_confirmation" || clone.Status == "rejected" {
+					_ = db.Where("id=?", draft.ID).First(&draft).Error
+					common.ReplyOK(w, toEnrichedDraftResponse(db, draft))
+					return
+				}
+				selectedCandidateJSON = cachedAnalysisContext(clone)
+				reusableScripts = reusableSkillScriptsJSON(skillPackage, clone.ScriptReportJSON)
+			}
+		}
+	}
 	_, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{
 		JobType:      pluginDraftGenerateJobType,
 		ResourceType: "plugin_draft",
@@ -501,6 +532,8 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 			SkillContent:          skillContent,
 			SkillPackage:          skillPackage,
 			SourceSkillRevisionID: skillSnapshot.RevisionID,
+			SelectedCandidateJSON: selectedCandidateJSON,
+			ReusableScripts:       reusableScripts,
 			UserID:                userID,
 		},
 		MaxAttempts:  1,
@@ -583,6 +616,13 @@ func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.Target == "" {
+		body.Target = "statemachine"
+	}
+	if body.Target != "statemachine" && body.Target != "ui" && body.Target != "scenario" && body.Target != "scripts" && body.Target != "full" {
+		common.ReplyErr(w, "invalid repair target", http.StatusBadRequest)
 		return
 	}
 

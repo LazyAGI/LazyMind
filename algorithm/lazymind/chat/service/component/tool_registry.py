@@ -51,6 +51,9 @@ class ToolGroupConfig:
     equivalence_scope: str = 'infrastructure'
     provider_id: str = ''
     product_id: str = ''
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+    required_config: list[str] | None = None
 
     def __post_init__(self) -> None:
         if self.pick_first_valid and not isinstance(self.instance, (list, tuple)):
@@ -92,6 +95,7 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         description='从知识库中搜索文档，支持语义检索、关键词检索、上下文窗口等',
         instance=KBToolGroup(),
         capability_id='knowledge_base_search',
+        input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['knowledge_base'],
     ),
     ToolGroupConfig(
         name='temp_kb',
@@ -138,6 +142,7 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         pick_first_valid=True,
         capability_id='web_search',
         equivalence_scope='provider_bound',
+        input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['search_provider'],
     ),
     ToolGroupConfig(
         name='academic_search',
@@ -147,6 +152,7 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         pick_first_valid=True,
         capability_id='academic_search',
         equivalence_scope='provider_bound',
+        input_schema={'query': 'string'}, output_schema={'papers': 'list'}, required_config=['academic_search_provider'],
     ),
     ToolGroupConfig(
         name='url_fetch',
@@ -168,6 +174,7 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         instance=image_generator,
         model_role='image_generator',
         capability_id='image_generation',
+        input_schema={'prompt': 'string'}, output_schema={'image': 'file'}, required_config=['image_generator_model'],
     ),
     ToolGroupConfig(
         name='image_editor',
@@ -330,6 +337,9 @@ def get_all_tool_groups() -> list[dict]:
             'equivalence_scope': cfg.equivalence_scope,
             'provider_id': cfg.provider_id,
             'product_id': cfg.product_id,
+            'input_schema': cfg.input_schema or {},
+            'output_schema': cfg.output_schema or {},
+            'required_config': cfg.required_config or [],
         })
     result.append({
         'name': SKILL_TOOL_GROUP.name,

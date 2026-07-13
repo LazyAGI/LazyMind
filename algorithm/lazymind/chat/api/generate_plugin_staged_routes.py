@@ -20,6 +20,7 @@ Three sequential endpoints for phased plugin generation:
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 import importlib.util
 import logging
@@ -742,8 +743,32 @@ def _script_inventory(package: Dict[str, Any]) -> Dict[str, Any]:
             for n in tree.body
         )
         classification = 'wrappable_command' if has_main else ('importable_tool' if functions else 'supporting_script')
-        report[path] = {'classification': classification, 'functions': functions, 'reason': '', 'sha256': hashlib.sha256(source.encode()).hexdigest()}
+        transformed, wrapper = _wrap_command_source(path, source) if has_main else (source, '')
+        exported = list(functions)
+        if wrapper: exported.append(wrapper)
+        report[path] = {'classification': classification, 'functions': exported, 'wrapper_function': wrapper,
+                        'reason': '', 'sha256': hashlib.sha256(transformed.encode()).hexdigest()}
     return report
+
+def _wrap_command_source(filename: str, source: str) -> Tuple[str, str]:
+    """Append an import-safe explicit-signature wrapper around main without executing it."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source, ''
+    main = next((node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == 'main'), None)
+    if main is None or main.args.vararg is not None or main.args.kwarg is not None:
+        return source, ''
+    stem = ''.join(ch if ch.isalnum() else '_' for ch in Path(filename).stem).strip('_') or 'script'
+    wrapper_name = f'run_{stem}'
+    positional = [*main.args.posonlyargs, *main.args.args]
+    call = ast.Call(func=ast.Name(id='main', ctx=ast.Load()), args=[ast.Name(id=arg.arg, ctx=ast.Load()) for arg in positional],
+                    keywords=[ast.keyword(arg=arg.arg, value=ast.Name(id=arg.arg, ctx=ast.Load())) for arg in main.args.kwonlyargs])
+    value: ast.expr = ast.Await(value=call) if isinstance(main, ast.AsyncFunctionDef) else call
+    wrapper_cls = ast.AsyncFunctionDef if isinstance(main, ast.AsyncFunctionDef) else ast.FunctionDef
+    wrapper = wrapper_cls(name=wrapper_name, args=copy.deepcopy(main.args), body=[ast.Return(value=value)], decorator_list=[], returns=copy.deepcopy(main.returns), type_comment=None)
+    ast.fix_missing_locations(wrapper)
+    return source.rstrip() + '\n\n' + ast.unparse(wrapper) + '\n', wrapper_name
 
 def _hierarchical_evidence(package: Dict[str, Any]) -> Tuple[str, List[str]]:
     """Extract workflow evidence in bounded batches; return unresolved paths explicitly."""
@@ -804,6 +829,8 @@ def _replacement_mappings(workflow_analysis: Optional[str]) -> List[Tuple[str, s
 
 def _apply_tool_replacements(plugin: Dict[str, Any], state: Optional[Dict[str, Any]], workflow_analysis: Optional[str]) -> None:
     mappings = _replacement_mappings(workflow_analysis)
+    if mappings:
+        plugin['required_framework_tools'] = sorted({replacement for _, replacement, _ in mappings})
     skipped_paths = {path for _, _, path in mappings if path}
     ignored_functions: set[str] = set()
     try:
@@ -883,11 +910,20 @@ Deterministic script inventory (authoritative):
     if any(v == 'unresolved' for v in covered.values()) and verdict == 'generatable':
         verdict = 'needs_confirmation'
         data['verdict_code'] = 'generation_coverage_incomplete'
+    tool_mappings = data.get('tool_mappings') if isinstance(data.get('tool_mappings'), dict) else {}
+    catalog_by_name = {str(item.get('name') or ''): item for item in tool_catalog}
+    for mapping in tool_mappings.values():
+        if isinstance(mapping, dict) and mapping.get('action') == 'replace':
+            target = catalog_by_name.get(str(mapping.get('replacement') or ''))
+            mapping['available'] = bool(target and target.get('active'))
+            if target:
+                mapping['capability_id'] = target.get('capability_id')
+                mapping['equivalence_scope'] = target.get('equivalence_scope')
     return AnalyzeSkillResponse(
         verdict=verdict, verdict_code=str(data.get('verdict_code') or ''),
         message=str(data.get('message') or ''), candidates=candidates,
         coverage=coverage,
-        tool_mappings=data.get('tool_mappings') if isinstance(data.get('tool_mappings'), dict) else {},
+        tool_mappings=tool_mappings,
         scripts=script_inventory,
     )
 
@@ -1192,7 +1228,7 @@ async def generate_scenario_scripts(req: ScenarioScriptsRequest) -> ScenarioScri
 
     scenario_md = data.get('scenario_md', '')
     scripts: Dict[str, str] = data.get('scripts') or {}
-    scripts.update(req.source_scripts)
+    scripts.update({path: _wrap_command_source(path, source)[0] for path, source in req.source_scripts.items()})
 
     if not scenario_md:
         logger.warning('[staged/scenario_scripts] scenario_md is empty, using fallback')
@@ -1411,12 +1447,16 @@ class RepairRequest(_LLMConfigMixin):
     repair_hint: str = ''
     warnings: List[str] = []
     target: str = 'statemachine'  # 'statemachine' | 'ui' | 'scenario'
+    scenario_md: str = ''
+    scripts: Dict[str, str] = Field(default_factory=dict)
 
 
 class RepairResponse(BaseModel):
     state_yaml: str
     plugin_yaml: str = ''  # populated when slot repair was applied
     remaining_warnings: List[str] = []
+    scenario_md: str = ''
+    scripts: Dict[str, str] = Field(default_factory=dict)
 
 
 @router.post(
@@ -1452,6 +1492,31 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
     except yaml.YAMLError as exc:
         logger.error('[repair] invalid state_yaml: %s', exc)
         raise HTTPException(status_code=400, detail=f'Invalid state_yaml: {exc}') from exc
+
+    # ── Script isolation / repair ─────────────────────────────────────────────
+    if req.target == 'scripts':
+        package = {'files': [{'path': path, 'content': source, 'binary': False} for path, source in req.scripts.items()]}
+        inventory = _script_inventory(package)
+        safe: Dict[str, str] = {}
+        warnings: List[str] = []
+        ignored_paths: set[str] = set()
+        ignored_functions: set[str] = set()
+        for path, source in req.scripts.items():
+            report = inventory.get(path) or {}
+            if report.get('classification') == 'unsupported':
+                warnings.append(f'已忽略不安全脚本 {path}: {report.get("reason") or "未通过安全检查"}')
+                ignored_paths.add(path); ignored_functions.update(str(name) for name in report.get('functions') or [])
+                continue
+            safe[path] = _wrap_command_source(path, source)[0]
+        repaired_plugin, repaired_state = plugin_dict, state_dict
+        if ignored_paths and isinstance(repaired_plugin.get('tool_scripts'), list):
+            repaired_plugin['tool_scripts'] = [entry for entry in repaired_plugin['tool_scripts'] if not isinstance(entry, dict) or str(entry.get('path') or '') not in ignored_paths]
+        for config in (repaired_state.get('steps') or {}).values():
+            if isinstance(config, dict) and isinstance(config.get('tools'), list):
+                config['tools'] = [tool for tool in config['tools'] if str(tool) not in ignored_functions]
+        return RepairResponse(state_yaml=yaml.dump(repaired_state, allow_unicode=True, sort_keys=False), plugin_yaml=yaml.dump(repaired_plugin, allow_unicode=True, sort_keys=False),
+                              scenario_md=req.scenario_md, scripts=safe,
+                              remaining_warnings=warnings)
 
     # ── Scenario / documentation repair ──────────────────────────────────────
     if req.target == 'scenario':

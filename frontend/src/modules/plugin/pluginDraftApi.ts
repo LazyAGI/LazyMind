@@ -237,6 +237,8 @@ export async function repairPluginDraft(
   );
   return resp.data.data;
 }
+export interface RepairPreview { target:string;mode:string;draft_version:number;diagnostics:Array<{code:string;path:string;message:string;severity:string}>;planned_files:string[] }
+export async function previewPluginRepair(id:string,payload:{target:string;mode:string}):Promise<RepairPreview>{const r=await axiosInstance.post<CoreResponse<RepairPreview>>(`${coreBasePath}/plugin-drafts/${id}:repair-preview`,payload);return r.data.data}
 
 // ─── Built-in plugin API ──────────────────────────────────────────────────────
 

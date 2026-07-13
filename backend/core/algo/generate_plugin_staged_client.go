@@ -251,19 +251,23 @@ const repairStateMachinePath = "/api/chat/generate_plugin/repair"
 
 // RepairStateMachineRequest is the request body for the repair endpoint.
 type RepairStateMachineRequest struct {
-	PluginYAML string         `json:"plugin_yaml"`
-	StateYAML  string         `json:"state_yaml"`
-	RepairHint string         `json:"repair_hint,omitempty"`
-	Warnings   []string       `json:"warnings,omitempty"`
-	Target     string         `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
-	LLMConfig  map[string]any `json:"llm_config"`
+	PluginYAML string            `json:"plugin_yaml"`
+	StateYAML  string            `json:"state_yaml"`
+	RepairHint string            `json:"repair_hint,omitempty"`
+	Warnings   []string          `json:"warnings,omitempty"`
+	Target     string            `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
+	ScenarioMD string            `json:"scenario_md,omitempty"`
+	Scripts    map[string]string `json:"scripts,omitempty"`
+	LLMConfig  map[string]any    `json:"llm_config"`
 }
 
 // RepairStateMachineResponse is the response body from the repair endpoint.
 type RepairStateMachineResponse struct {
-	StateYAML         string   `json:"state_yaml"`
-	PluginYAML        string   `json:"plugin_yaml"` // may be updated when slot repair was applied
-	RemainingWarnings []string `json:"remaining_warnings"`
+	StateYAML         string            `json:"state_yaml"`
+	PluginYAML        string            `json:"plugin_yaml"` // may be updated when slot repair was applied
+	RemainingWarnings []string          `json:"remaining_warnings"`
+	ScenarioMD        string            `json:"scenario_md"`
+	Scripts           map[string]string `json:"scripts"`
 }
 
 // RepairStateMachine calls the repair endpoint to fix an incomplete state.yml.
@@ -280,6 +284,8 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 	resp := &RepairStateMachineResponse{
 		StateYAML:  extractStringField(raw, "state_yaml"),
 		PluginYAML: extractStringField(raw, "plugin_yaml"),
+		ScenarioMD: extractStringField(raw, "scenario_md"),
+		Scripts:    extractScripts(raw),
 	}
 	if warnRaw, ok := raw["remaining_warnings"].([]any); ok {
 		for _, w := range warnRaw {

@@ -40,6 +40,28 @@ func GetPluginRepairRun(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"repair_id": row.ID, "status": row.Status, "target": row.Target, "mode": row.Mode, "draft_version_before": row.DraftVersionBefore, "source_skill_revision_id": row.SourceSkillRevisionID, "diagnostics_before": before, "diagnostics_after": after, "changes": changes, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt})
 }
 
+func PreviewPluginRepair(w http.ResponseWriter, r *http.Request) {
+	var draft orm.PluginDraft
+	if store.DB().Where("id=? AND created_by=?", common.PathVar(r, "draft_id"), common.UserID(r)).First(&draft).Error != nil {
+		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+	var body struct {
+		Target string `json:"target"`
+		Mode   string `json:"mode"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body.Target == "" {
+		body.Target = "statemachine"
+	}
+	if body.Mode == "" {
+		body.Mode = "plugin_local"
+	}
+	diagnostics := diagnosePlugin(draft.PluginYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent)
+	files := map[string][]string{"statemachine": {"plugin.yaml", "scenario/state.yml"}, "ui": {"plugin.yaml", "scenario/state.yml"}, "scenario": {"scenario/scenario.md"}, "scripts": {"plugin.yaml", "scenario/state.yml", "scripts/*"}, "full": {"plugin.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"}}
+	common.ReplyOK(w, map[string]any{"target": body.Target, "mode": body.Mode, "draft_version": draft.Version, "diagnostics": diagnostics, "planned_files": files[body.Target]})
+}
+
 func ConfirmPluginWorkflow(w http.ResponseWriter, r *http.Request) {
 	draftID, userID := common.PathVar(r, "draft_id"), common.UserID(r)
 	var body struct {
@@ -127,6 +149,32 @@ func reusableSkillScriptsJSON(pkg map[string]any, reportJSON string) map[string]
 	var report map[string]any
 	_ = json.Unmarshal([]byte(reportJSON), &report)
 	return reusableSkillScripts(pkg, report)
+}
+
+func cachedAnalysisContext(analysis orm.PluginGenerationAnalysis) string {
+	var candidates []map[string]any
+	var mappings, scripts any
+	_ = json.Unmarshal([]byte(analysis.CandidatesJSON), &candidates)
+	_ = json.Unmarshal([]byte(analysis.ToolMappingReportJSON), &mappings)
+	_ = json.Unmarshal([]byte(analysis.ScriptReportJSON), &scripts)
+	var selected map[string]any
+	for _, candidate := range candidates {
+		if id, _ := candidate["id"].(string); id == analysis.SelectedCandidateID {
+			selected = candidate
+			break
+		}
+	}
+	if selected == nil && len(candidates) > 0 {
+		selected = candidates[0]
+	}
+	b, _ := json.Marshal(map[string]any{"candidate": selected, "tool_mappings": mappings, "scripts": scripts})
+	return string(b)
+}
+
+func ignoredScriptWarningJSON(reportJSON string) string {
+	var report map[string]any
+	_ = json.Unmarshal([]byte(reportJSON), &report)
+	return ignoredScriptWarning(report)
 }
 
 func reusableSkillScripts(pkg map[string]any, report map[string]any) map[string]string {

@@ -231,6 +231,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/plugin-drafts/{draft_id}/generation-analysis", []string{"qa.read"}, plugin.GetPluginGenerationAnalysis)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:confirm-workflow", []string{"qa.write"}, plugin.ConfirmPluginWorkflow)
 	handleAPI(r, "GET", "/plugin-drafts/{draft_id}/repair-runs/{repair_id}", []string{"qa.read"}, plugin.GetPluginRepairRun)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:repair-preview", []string{"qa.read"}, plugin.PreviewPluginRepair)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:publish", []string{"qa.write"}, plugin.PublishPluginDraft)
 	handleAPI(r, "DELETE", "/plugin-drafts/{draft_id}", []string{"qa.write"}, plugin.DeletePluginDraft)
 	handleAPI(r, "GET", "/chat/settings/plugins", []string{"qa.read"}, plugin.ListUserPluginSettings)

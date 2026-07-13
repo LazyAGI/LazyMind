@@ -1,62 +1,67 @@
-# Skill → Plugin / Repair 实施状态
+# Skill → Plugin / Plugin Repair 实施状态
 
 更新日期：2026-07-10
 
-## 已实现
+## 已完成
 
-- 固定并记录 Skill head revision、revision number 和 tree hash。
-- 从固定 revision 读取完整文件 manifest、文本文件和脚本，而非只读 `SKILL.md`。
-- 普通 Skill 的候选确认会按固定 revision 重新读取，不在分析表长期复制完整大包。
-- 生成前 suitability 分析，支持 `generatable`、`needs_confirmation`、`rejected`。
-- 候选流程查询、用户确认、过期 version/revision 防护和前端确认入口。
-- 大 Skill 有界分批 evidence 提取；超过处理预算的文件明确标记 `unresolved`。
-- 全文件 coverage ledger；存在 unresolved 时不能宣称完整生成。
-- Python AST 脚本分类：`importable_tool`、`wrappable_command`、`supporting_script`、`unsupported`。
-- 安全 Skill 脚本在 Phase 3 原样复用，并再次经过现有安全扫描和 import dry-run。
-- 不安全脚本隔离：跳过脚本、移除声明/step tool 引用、继续其余生成并汇总 warning。
-- 工具 capability 元数据，以及基础设施/供应商绑定的分析规则。
-- 框架工具 replacement 会移除被替代脚本，并确定性替换 state tool 引用。
-- 只有 hash 与分析期安全报告一致的 Skill 脚本才允许普通用户发布。
-- Repair 支持 `plugin_local`、`source_aware`、固定来源 analysis/revision。
-- Repair draft version 乐观锁和 stale 防覆盖。
-- Repair 前后跨文件诊断、Repair run 记录和查询接口。
-- 前端自动携带 Repair draft version/source analysis。
+### 来源版本与完整包
 
-## 尚未完成
+- 生成始终固定当前生效的 Skill head revision，并记录 revision id、revision number、tree hash。
+- 从固定 revision 加载完整目录 manifest、文本、脚本及文件元数据，不再只读 `SKILL.md`。
+- 普通 Skill 在候选确认时重新读取同一不可变 revision，并校验 tree hash；内置 Skill 也生成并校验目录 snapshot tree hash。
+- Plugin 版本管理、来源分析和 Repair 均保留 Skill/Plugin revision 关联，避免 head 漂移。
 
-### P0：上线前必须完成
+### 可生成性判断与拒绝
 
-- 将分块/evidence 缓存持久化。目前一次分析内会分批处理，但任务重试仍会重新调用模型。
-- 为 suitability、coverage、供应商工具判定增加固定样例和算法单元测试，降低 LLM 输出漂移。
-- 给脚本“命令式 main → 薄函数包装”实现真正的转换器；当前只分类并复用，未自动重构 main。
-- 对 skipped unsafe script 的“是否为候选流程核心能力”增加确定性依赖检查；当前主要由 analysis verdict 判断。
-- 补数据库迁移的 PostgreSQL smoke test 和 rollback test。
+- 独立 suitability 阶段返回 `generatable`、`needs_confirmation`、`rejected`，并持久化 verdict、候选流程和证据。
+- 没有可执行步骤、只有规范/约束/偏好、或只是无流程关系的并列工具合集时，可明确拒绝，不进入状态机生成。
+- 多个合理流程必须由用户确认；确认接口会校验用户、analysis、固定 revision 和 tree hash。
+- 同一 Skill revision/tree 的最终分析结果可复用；`reanalyze=true` 可显式强制重分析。
 
-### P1：功能完整性
+### 大 Skill 与信息完整性
 
-- Repair `scripts` 和 `full` target；当前主要覆盖 state/UI/scenario，脚本只参与诊断。
-- Repair preview API 和文件级 patch/diff；当前记录修改文件，不保存逐行 patch。
-- 工具 capability catalog 为全部工具补齐输入输出 schema、provider/product 身份和用户可用状态。
-- 对 framework tool 不可用的情况增加发布/运行前阻塞，而不只是分析提示。
-- 二进制文档的可插拔文本提取器；当前只记录 binary metadata。
-- 内置 Skill snapshot 也改为不可变 revision/blob 来源；当前未安装模板仍从本地目录临时构建。
+- 对完整 manifest 做有界分批分析，建立逐文件 coverage ledger。
+- 文件状态区分 reviewed、supporting、binary、unresolved；超预算内容不会被静默遗漏。
+- 存在影响流程的 unresolved 内容时不能宣称完整生成，分析会要求确认或拒绝。
+- source package 只持久化 manifest/摘要，避免把超大包重复写入分析记录。
 
-### P2：工程收尾
+### 工具映射
 
-- OpenAPI registry 和 generated frontend client 更新。
-- 新状态、候选确认、脚本忽略和 Repair 诊断的完整 i18n。
-- 前端展示 coverage、tool mapping、script report 和 Repair diff，而不仅是候选按钮/错误提示。
-- 生成/拒绝/工具替换/脚本忽略/Repair stale 的指标与灰度开关。
-- 清理旧 `skill_content` 兼容字段；description 生成仍需保留。
+- 工具目录包含 capability、scope、provider/product、可用状态、输入/输出 schema 和 required config。
+- 基础设施类工具按同定位能力替换，即使底层选型不同；云服务/供应商绑定工具只有同一产品才视为等价。
+- 已有同定位框架工具会向用户报告“跳过原工具，使用框架工具”，并确定性替换状态机引用。
+- 分析期记录 replacement availability；发布时缺失/不可用会 fail closed，运行加载时也校验 `required_framework_tools`。
 
-## 粗略完成度
+### 脚本处理与安全
 
-- 来源版本与完整包：90%
-- Suitability/候选确认：80%
-- 超上下文：75%
-- 工具映射：70%
-- 脚本处理：75%
-- Repair：75%
-- 前端与工程收尾：45%
+- Python AST 分类为 `importable_tool`、`wrappable_command`、`supporting_script`、`unsupported`。
+- 工具函数保留显式函数签名并作为插件脚本复用；命令式 `main` 自动生成显式参数的薄包装函数。
+- `python scripts/xxx.py` 类型调用转换为插件可调用函数，状态机引用同步更新。
+- 安全脚本经过静态安全扫描、import dry-run 和内容 hash 审计；发布只接受与分析报告一致的脚本。
+- 不安全/不支持脚本被隔离并忽略，相关声明和 step tool 引用被移除；其余生成继续进行，最终统一返回 warning，而不是让整项任务失败。
+- Repair 的 `scripts` 与 `full` target 采用同样的隔离策略。
 
-整体约 75%。剩余工作主要是持久化 evidence 缓存、命令式脚本包装器、Repair scripts/full、完整 capability schema、前端报告可视化和 OpenAPI/i18n 收尾。
+### Plugin Repair
+
+- 支持 `plugin_local`、`source_aware`，并固定来源 analysis/Skill revision。
+- 支持 state machine、scenario、UI、scripts 和 full target；full 按跨文件顺序修复并统一诊断。
+- Repair 使用 draft version 乐观锁，防止过期结果覆盖用户新编辑。
+- 提供 repair preview、修改文件清单、前后诊断、warning，以及 repair run 查询记录。
+
+### API、前端与工程保障
+
+- OpenAPI registry 已登记 analysis 查询、候选确认、repair preview、repair run。
+- 前端展示候选确认、coverage、tool mapping、script report、脚本忽略提示和 repair preview。
+- 中英文 i18n 已覆盖新增状态和提示。
+- 数据库 migration 同时提供 up/down，并有 schema contract/rollback contract 测试。
+- 已有回归测试覆盖固定 revision 包读取、诊断、脚本 hash 发布门禁、框架工具可用性门禁和 OpenAPI 注册。
+
+## 尚需部署环境验收（不属于代码功能缺口）
+
+- 在实际 PostgreSQL 实例执行 migration up/down smoke test；仓库测试环境目前只做 SQL contract 校验。
+- 在完整 Python 运行环境执行端到端生成/Repair 样例。当前工作区的 `algorithm/lazyllm` 子模块存在用户已有的不兼容改动，直接 import 会在 `Config.add(alias=...)` 处失败；本次修改文件均已通过 `py_compile`。
+- 按上线平台接入业务指标面板和灰度配置中心；代码路径已有结构化状态、verdict、warning、repair run，可直接作为采集源。
+
+## 完成度
+
+计划内核心代码与产品流程已完成。剩余事项均为真实部署依赖的 smoke/灰度运营验收，不影响本次代码合入。
