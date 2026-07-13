@@ -2,7 +2,9 @@ package modelprovider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -21,11 +23,11 @@ type catalogModel struct {
 }
 
 type catalogSupplier struct {
-	Name         string         `yaml:"name"`
-	Description  string         `yaml:"description"`
-	BaseURL      string         `yaml:"base_url"`
-	Capabilities []string       `yaml:"capabilities"` // overrides section-level default when non-empty
-	Models       []catalogModel `yaml:"models"`
+	Name         string            `yaml:"name"`
+	Description  map[string]string `yaml:"description"`
+	BaseURL      string            `yaml:"base_url"`
+	Capabilities []string          `yaml:"capabilities"` // overrides section-level default when non-empty
+	Models       []catalogModel    `yaml:"models"`
 }
 
 type catalogSection struct {
@@ -68,6 +70,18 @@ func upsertDefaultProvider(tx *gorm.DB, now time.Time, category string, caps []s
 	if name == "" {
 		return "", errors.New("provider name is required")
 	}
+	descriptionZh := strings.TrimSpace(item.Description[common.LocaleZhCN])
+	descriptionEn := strings.TrimSpace(item.Description[common.LocaleEnUS])
+	if descriptionZh == "" || descriptionEn == "" {
+		return "", fmt.Errorf("provider %q requires non-empty %s and %s descriptions", name, common.LocaleZhCN, common.LocaleEnUS)
+	}
+	descriptionI18n, err := json.Marshal(map[string]string{
+		common.LocaleZhCN: descriptionZh,
+		common.LocaleEnUS: descriptionEn,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal provider %q descriptions: %w", name, err)
+	}
 
 	// Supplier-level capabilities override section-level when present.
 	effectiveCaps := caps
@@ -78,17 +92,18 @@ func upsertDefaultProvider(tx *gorm.DB, now time.Time, category string, caps []s
 
 	baseURL := normalizeBaseURL(item.BaseURL)
 	var row orm.DefaultModelProvider
-	err := tx.Where("name = ?", name).Take(&row).Error
+	err = tx.Where("name = ?", name).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = orm.DefaultModelProvider{
-			ID:           common.GenerateID(),
-			Name:         name,
-			Description:  item.Description,
-			BaseURL:      baseURL,
-			Category:     category,
-			Capabilities: capStr,
-			CreatedAt:    now,
-			UpdatedAt:    now,
+			ID:              common.GenerateID(),
+			Name:            name,
+			Description:     descriptionZh,
+			DescriptionI18n: orm.RawJSON(descriptionI18n),
+			BaseURL:         baseURL,
+			Category:        category,
+			Capabilities:    capStr,
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		}
 		return row.ID, tx.Create(&row).Error
 	}
@@ -99,12 +114,13 @@ func upsertDefaultProvider(tx *gorm.DB, now time.Time, category string, caps []s
 	return row.ID, tx.Model(&orm.DefaultModelProvider{}).
 		Where("id = ?", row.ID).
 		Updates(map[string]any{
-			"description":  item.Description,
-			"base_url":     baseURL,
-			"category":     category,
-			"capabilities": capStr,
-			"updated_at":   now,
-			"deleted_at":   nil,
+			"description":      descriptionZh,
+			"description_i18n": orm.RawJSON(descriptionI18n),
+			"base_url":         baseURL,
+			"category":         category,
+			"capabilities":     capStr,
+			"updated_at":       now,
+			"deleted_at":       nil,
 		}).Error
 }
 

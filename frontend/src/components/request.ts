@@ -28,6 +28,8 @@ function processQueue(newToken: string) {
 function applyOptionalAuthHeader(config: any) {
   const authHeaders = AgentAppsAuth.getAuthHeaders();
   config.headers = config.headers ?? {};
+  config.headers["Accept-Language"] =
+    i18n.resolvedLanguage || i18n.language || "zh-CN";
 
   if (authHeaders.authorization) {
     if (!config.headers.Authorization && !config.headers.authorization) {

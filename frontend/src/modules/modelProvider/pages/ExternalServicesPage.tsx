@@ -523,7 +523,8 @@ function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
 }
 
 export default function ExternalServicesPage({ section = "parsing" }: ExternalServicesPageProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
   const [activeService, setActiveService] = useState<ExternalServiceConfig | null>(null);
   const [services, setServices] = useState<ExternalServiceConfig[]>([]);
@@ -576,7 +577,7 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
       });
 
     return () => controller.abort();
-  }, [t]);
+  }, [currentLanguage, t]);
 
   useEffect(() => loadExternalServices(normalizedSearchValue), [loadExternalServices, normalizedSearchValue]);
 

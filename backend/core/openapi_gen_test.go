@@ -1033,6 +1033,48 @@ func TestOpenAPISpecIncludesToolOperations(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecIncludesLocaleHeaderForLocalizedCatalogs(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	paths := spec["paths"].(map[string]any)
+	for _, path := range []string{
+		"/api/core/tools",
+		"/api/core/model_providers",
+		"/api/core/model_providers:with_groups",
+	} {
+		pathItem, ok := paths[path].(map[string]any)
+		if !ok {
+			t.Fatalf("path missing from openapi spec: %s", path)
+		}
+		op, ok := pathItem["get"].(map[string]any)
+		if !ok {
+			t.Fatalf("GET operation missing from openapi spec: %s", path)
+		}
+		found := false
+		for _, raw := range op["parameters"].([]any) {
+			parameter, ok := raw.(map[string]any)
+			if ok && parameter["in"] == "header" && parameter["name"] == "Accept-Language" {
+				found = true
+				if parameter["required"] != false {
+					t.Fatalf("Accept-Language should be optional for %s", path)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("Accept-Language header missing for %s", path)
+		}
+	}
+}
+
 func TestOpenAPISpecIncludesMCPOperations(t *testing.T) {
 	r := mux.NewRouter()
 	registerAllRoutes(r)

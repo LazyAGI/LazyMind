@@ -391,8 +391,8 @@ function getLocalizedProviderDescription(
   const providerKey = normalizeProviderKey(name).replace(/-/g, "");
   const translatedDescription = fallbacks.providerDescriptions[providerKey];
   return (
-    translatedDescription ||
     fallbackDescription ||
+    translatedDescription ||
     fallbacks.providerDescription
   );
 }
@@ -546,6 +546,7 @@ function ProviderLogo({
 
 export default function DefaultModelConfigPanel() {
   const { t, i18n } = useTranslation();
+  const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [selectedModels, setSelectedModels] = useState<SelectedModels>({});
   const [selectedCloudServices, setSelectedCloudServices] =
@@ -593,7 +594,7 @@ export default function DefaultModelConfigPanel() {
   );
   const localizedFallbacks = useMemo(
     () => createModelProviderFallbacks(t),
-    [i18n.language, t],
+    [currentLanguage, t],
   );
 
   const loadDefaultModelState = useCallback(async () => {
@@ -761,7 +762,7 @@ export default function DefaultModelConfigPanel() {
         ),
       );
     }
-  }, [isAdmin, localizedFallbacks, t]);
+  }, [currentLanguage, isAdmin, localizedFallbacks, t]);
 
   useEffect(() => {
     void loadDefaultModelState();

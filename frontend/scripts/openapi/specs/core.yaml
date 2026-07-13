@@ -1,31 +1,5 @@
 components:
     schemas:
-        builtinSkillListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/builtinSkillOpenAPIResponse'
-                    type: array
-                total:
-                    type: integer
-            type: object
-        builtinSkillOpenAPIResponse:
-            properties:
-                builtin_skill_uid:
-                    type: string
-                category:
-                    type: string
-                content:
-                    type: string
-                description:
-                    type: string
-                installed:
-                    type: boolean
-                installed_skill_id:
-                    type: string
-                name:
-                    type: string
-            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -3314,6 +3288,41 @@ components:
                 - thread_id
                 - updated_at
             type: object
+        builtinSkillListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/builtinSkillOpenAPIResponse'
+                    type: array
+                total:
+                    type: integer
+            required:
+                - total
+            type: object
+        builtinSkillOpenAPIResponse:
+            properties:
+                builtin_skill_uid:
+                    type: string
+                category:
+                    type: string
+                content:
+                    type: string
+                description:
+                    type: string
+                installed:
+                    type: boolean
+                installed_skill_id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - builtin_skill_uid
+                - category
+                - content
+                - description
+                - installed
+                - name
+            type: object
         checkModelProviderOpenAPIRequest:
             properties:
                 api_key:
@@ -3878,6 +3887,32 @@ components:
                     type: boolean
             required:
                 - enabled
+            type: object
+        pluginRepairPreviewOpenAPIRequest:
+            properties:
+                mode:
+                    type: string
+                target:
+                    type: string
+            required:
+                - mode
+                - target
+            type: object
+        pluginWorkflowConfirmOpenAPIRequest:
+            properties:
+                analysis_id:
+                    type: string
+                candidate_id:
+                    type: string
+                draft_version:
+                    type: integer
+                source_skill_revision_id:
+                    type: string
+            required:
+                - analysis_id
+                - candidate_id
+                - draft_version
+                - source_skill_revision_id
             type: object
         remoteFSCopyOpenAPIRequest:
             properties:
@@ -8668,6 +8703,12 @@ paths:
                   required: false
                   schema:
                     type: string
+                - description: Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
+                  in: header
+                  name: Accept-Language
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
@@ -9085,6 +9126,13 @@ paths:
     /api/core/model_providers:with_groups:
         get:
             description: Returns user_model_providers for the current user that have at least one non-deleted row in user_model_provider_groups. The current user identity is injected by the auth gateway from the token. Same response shape as GET /model_providers.
+            parameters:
+                - description: Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
+                  in: header
+                  name: Accept-Language
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
@@ -9476,6 +9524,49 @@ paths:
                 "200":
                     description: OK
             summary: GET /plugin-drafts/{draft_id}
+    /api/core/plugin-drafts/{draft_id}/generation-analysis:
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Generation analysis
+            summary: Get Plugin generation analysis
+            tags:
+                - plugin
+    /api/core/plugin-drafts/{draft_id}/repair-runs/{repair_id}:
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: repair_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Repair run
+            summary: Get Plugin repair run
+            tags:
+                - plugin
     /api/core/plugin-drafts/{draft_id}:ai-generate:
         post:
             parameters:
@@ -9500,6 +9591,31 @@ paths:
                 "200":
                     description: OK
             summary: POST /plugin-drafts/{draft_id}:ai-repair
+    /api/core/plugin-drafts/{draft_id}:confirm-workflow:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/pluginWorkflowConfirmOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Confirmation result
+            summary: Confirm Skill workflow candidate
+            tags:
+                - plugin
     /api/core/plugin-drafts/{draft_id}:publish:
         post:
             parameters:
@@ -9512,6 +9628,31 @@ paths:
                 "200":
                     description: OK
             summary: POST /plugin-drafts/{draft_id}:publish
+    /api/core/plugin-drafts/{draft_id}:repair-preview:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/pluginRepairPreviewOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Repair preview
+            summary: Preview Plugin repair
+            tags:
+                - plugin
     /api/core/plugin-drafts/{draft_id}:save:
         post:
             parameters:
@@ -11965,6 +12106,12 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - description: Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
+                  in: header
+                  name: Accept-Language
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:

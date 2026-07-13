@@ -446,6 +446,10 @@ type toolListQueryParams struct {
 	PageSize int32  `query:"page_size"`
 }
 
+type localizedCatalogHeaders struct {
+	AcceptLanguage string `header:"Accept-Language" desc:"Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN."`
+}
+
 type mcpServerListQueryParams struct {
 	Keyword  string `query:"keyword"`
 	Page     int32  `query:"page"`
@@ -2910,6 +2914,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Description: "Per-user model provider list. Missing catalog rows are synced from default_model_providers on each request. Query parameter category filters by provider category (default model when category and exclude_category are both omitted). Query parameter exclude_category excludes a category (e.g. exclude_category=model returns ocr and search providers). Query parameter keyword filters by provider name case-insensitively.",
 			Tags:        []string{"model_providers"},
 			QueryParams: listUserModelProvidersQueryParams{},
+			Headers:     localizedCatalogHeaders{},
 			Responses:   map[int]openAPIResponse{200: resp("User model provider list", listUserModelProvidersOpenAPIResponse{})},
 		},
 		{
@@ -2918,6 +2923,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Summary:     "List user model providers that have groups",
 			Description: "Returns user_model_providers for the current user that have at least one non-deleted row in user_model_provider_groups. The current user identity is injected by the auth gateway from the token. Same response shape as GET /model_providers.",
 			Tags:        []string{"model_providers"},
+			Headers:     localizedCatalogHeaders{},
 			Responses:   map[int]openAPIResponse{200: resp("User model providers with groups", listUserModelProvidersOpenAPIResponse{})},
 		},
 		{
@@ -3186,6 +3192,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Summary:     "Tool list",
 			Tags:        []string{"tools"},
 			QueryParams: toolListQueryParams{},
+			Headers:     localizedCatalogHeaders{},
 			Responses:   map[int]openAPIResponse{200: resp("Tool list", toolListOpenAPIResponse{})},
 		},
 		{

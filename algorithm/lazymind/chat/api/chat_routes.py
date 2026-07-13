@@ -1,9 +1,9 @@
 from typing import Annotated, Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Header, Response
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.chat_service import handle_chat
-from lazymind.chat.service.component import get_all_tool_groups
+from lazymind.chat.service.component import get_all_tool_groups, normalize_tool_locale
 from lazymind.model_config import inject_model_config
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
@@ -12,6 +12,7 @@ router = APIRouter()
 
 @router.post('/api/chat/tools', summary='List all tool groups with their methods')
 async def list_chat_tools(
+    response: Response,
     llm_config: Annotated[
         Optional[Dict[str, Any]],
         Body(
@@ -31,10 +32,23 @@ async def list_chat_tools(
             )
         ),
     ] = None,
+    accept_language: Annotated[
+        Optional[str],
+        Header(
+            alias='Accept-Language',
+            description=(
+                'Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. '
+                'Missing or unsupported values default to zh-CN.'
+            ),
+        ),
+    ] = None,
 ):
     inject_model_config(llm_config)
     inject_tool_config(tool_config)
-    return {'tool_groups': get_all_tool_groups()}
+    locale = normalize_tool_locale(accept_language)
+    response.headers['Content-Language'] = locale
+    response.headers['Vary'] = 'Accept-Language'
+    return {'tool_groups': get_all_tool_groups(locale)}
 
 
 @router.post('/api/chat/stream', summary='Chat with the knowledge base (streaming)')

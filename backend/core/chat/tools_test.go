@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/mcp"
 	"lazymind/core/store"
@@ -136,6 +137,7 @@ func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 	}
 
 	var upstreamBody map[string]any
+	var upstreamLanguages []string
 	baseURL := startChatToolsTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/authservice/") {
 			w.Header().Set("Content-Type", "application/json")
@@ -151,10 +153,21 @@ func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
 			t.Fatalf("decode upstream body: %v", err)
 		}
+		language := r.Header.Get("Accept-Language")
+		upstreamLanguages = append(upstreamLanguages, language)
+		localizedLabel := "必应搜索"
+		localizedDescription := "使用必应搜索互联网内容"
+		if strings.HasPrefix(strings.ToLower(language), "en") {
+			localizedLabel = "Bing Search"
+			localizedDescription = "Search internet content with Bing."
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tool_groups": []map[string]any{
-				{"name": "bing", "label": "Bing", "can_disable": true, "active": true},
+				{
+					"name": "bing", "label": localizedLabel, "description": localizedDescription,
+					"can_disable": true, "active": true,
+				},
 				{"name": "skill", "label": "Skill", "can_disable": false, "active": true},
 			},
 		})
@@ -165,12 +178,22 @@ func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/core/tools", nil)
 	req.Header.Set("X-User-Id", "u1")
 	req.Header.Set("X-User-Name", "User 1")
+	req.Header.Set("Accept-Language", "en-US")
 	rec := httptest.NewRecorder()
 
 	ListTools(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(upstreamLanguages) != 1 || upstreamLanguages[0] != "en-US" {
+		t.Fatalf("expected Accept-Language forwarded upstream, got %#v", upstreamLanguages)
+	}
+	if got := rec.Header().Get("Content-Language"); got != "en-US" {
+		t.Fatalf("expected Content-Language en-US, got %q", got)
+	}
+	if got := rec.Header().Get("Vary"); !strings.Contains(got, "Accept-Language") {
+		t.Fatalf("expected Vary to include Accept-Language, got %q", got)
 	}
 	llmConfig, _ := upstreamBody["llm_config"].(map[string]any)
 	if llmConfig["llm"] == nil {
@@ -201,6 +224,34 @@ func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 	}
 	if resp.Data.ToolGroups[1]["name"] != "bing" || resp.Data.ToolGroups[1]["disabled"] != true {
 		t.Fatalf("expected disabled bing last, got %#v", resp.Data.ToolGroups[1])
+	}
+	if resp.Data.ToolGroups[1]["label"] != "Bing Search" ||
+		resp.Data.ToolGroups[1]["description"] != "Search internet content with Bing." {
+		t.Fatalf("expected localized English fields, got %#v", resp.Data.ToolGroups[1])
+	}
+
+	defaultReq := httptest.NewRequest(http.MethodGet, "/api/core/tools", nil)
+	defaultReq.Header.Set("X-User-Id", "u1")
+	defaultReq.Header.Set("X-User-Name", "User 1")
+	defaultRec := httptest.NewRecorder()
+	ListTools(defaultRec, defaultReq)
+	if defaultRec.Code != http.StatusOK {
+		t.Fatalf("expected default locale status 200, got %d body=%s", defaultRec.Code, defaultRec.Body.String())
+	}
+	if len(upstreamLanguages) != 2 || upstreamLanguages[1] != "" {
+		t.Fatalf("expected empty Accept-Language forwarded as empty, got %#v", upstreamLanguages)
+	}
+	if got := defaultRec.Header().Get("Content-Language"); got != common.LocaleZhCN {
+		t.Fatalf("expected default Content-Language zh-CN, got %q", got)
+	}
+	var defaultResp struct {
+		Data chatToolsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(defaultRec.Body.Bytes(), &defaultResp); err != nil {
+		t.Fatalf("decode default response: %v", err)
+	}
+	if len(defaultResp.Data.ToolGroups) != 2 || defaultResp.Data.ToolGroups[1]["label"] != "必应搜索" {
+		t.Fatalf("expected Chinese fallback fields, got %#v", defaultResp.Data.ToolGroups)
 	}
 }
 
@@ -316,6 +367,7 @@ func TestDisableToolRejectsNonDisableableTool(t *testing.T) {
 	db := newToolsTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	var upstreamLanguage string
 	baseURL := startChatToolsTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/authservice/") {
 			w.Header().Set("Content-Type", "application/json")
@@ -324,6 +376,7 @@ func TestDisableToolRejectsNonDisableableTool(t *testing.T) {
 			})
 			return
 		}
+		upstreamLanguage = r.Header.Get("Accept-Language")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tool_groups": []map[string]any{
@@ -336,6 +389,7 @@ func TestDisableToolRejectsNonDisableableTool(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/tools/skill:disable", nil)
 	req.Header.Set("X-User-Id", "u1")
+	req.Header.Set("Accept-Language", "en-GB")
 	req = mux.SetURLVars(req, map[string]string{"tool_name": "skill"})
 	rec := httptest.NewRecorder()
 
@@ -343,6 +397,9 @@ func TestDisableToolRejectsNonDisableableTool(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if upstreamLanguage != "en-GB" {
+		t.Fatalf("expected disable validation to forward raw Accept-Language, got %q", upstreamLanguage)
 	}
 	disabled, err := listDisabledToolNames(context.Background(), db.DB, "u1")
 	if err != nil {

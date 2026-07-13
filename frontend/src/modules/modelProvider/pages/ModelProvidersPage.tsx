@@ -300,7 +300,7 @@ function getLocalizedProviderDescription(
 ) {
   const providerKey = normalizeProviderKey(name).replace(/-/g, "");
   const translatedDescription = fallbacks.providerDescriptions[providerKey];
-  return translatedDescription || fallbackDescription || fallbacks.providerDescription;
+  return fallbackDescription || translatedDescription || fallbacks.providerDescription;
 }
 
 interface ApiProvider {
@@ -480,6 +480,7 @@ function isDefaultProviderBaseUrl(provider: Pick<ProviderOption, "baseUrl">, bas
 
 export default function ModelProviderPage() {
   const { t, i18n } = useTranslation();
+  const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [providerConfigForm] = Form.useForm<ProviderConfigFormValues>();
   const [customModelForm] = Form.useForm<CustomModelFormValues>();
   const [verifyGroupForm] = Form.useForm<VerifyGroupFormValues>();
@@ -548,7 +549,7 @@ export default function ModelProviderPage() {
     [fetchProviderOptions]
   );
 
-  const loadModelProviders = async () => {
+  const loadModelProviders = useCallback(async () => {
     setLoading(true);
     try {
       const providers = await fetchProviderOptions();
@@ -586,11 +587,11 @@ export default function ModelProviderPage() {
       initialProvidersLoadedRef.current = true;
       setLoading(false);
     }
-  };
+  }, [currentLanguage, fetchProviderOptions, t]);
 
   useEffect(() => {
     void loadModelProviders();
-  }, []);
+  }, [loadModelProviders]);
 
   useEffect(() => {
     if (!initialProvidersLoadedRef.current) {
