@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 )
@@ -147,7 +148,7 @@ func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "evo"))
 }
 
-func TestAlgorithmServiceEnvHidesDesktopSubprocessWindows(t *testing.T) {
+func TestAlgorithmServiceEnvUsesFileBackedRelayArgumentsOnWindowsDesktop(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows-specific Desktop process policy")
 	}
@@ -161,6 +162,20 @@ func TestAlgorithmServiceEnvHidesDesktopSubprocessWindows(t *testing.T) {
 
 	env := algorithmServiceEnv(cfg, paths, chatProcessName)
 
-	assertEnvContains(t, env, "LAZYMIND_WINDOWS_HIDE_SUBPROCESS_WINDOWS=1")
-	assertEnvContains(t, env, "LAZYMIND_WINDOWS_PATCH_LAZYLLM_RELAY=1")
+	assertEnvContains(t, env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
+}
+
+func TestAlgorithmServiceCommandArgsUsesWindowsDesktopBootstrap(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific Desktop process policy")
+	}
+	cfg := RuntimeConfig{Profile: "desktop"}
+	spec := AlgorithmServiceSpec{Module: []string{"-m", "lazymind.router.app", "--port", "8092"}}
+
+	args := algorithmServiceCommandArgs(cfg, spec)
+
+	want := []string{"-m", "lazymind.windows_runtime", "--", "-m", "lazymind.router.app", "--port", "8092"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("algorithm service args = %#v, want %#v", args, want)
+	}
 }

@@ -101,7 +101,8 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, paths.AlgorithmPython, spec.Module...)
+	serviceArgs := algorithmServiceCommandArgs(cfg, spec)
+	cmd := exec.CommandContext(ctx, paths.AlgorithmPython, serviceArgs...)
 	cmd.Dir = paths.RepoRoot
 	cmd.Env = append(os.Environ(), algorithmServiceEnv(cfg, paths, spec.Name)...)
 	configureChildProcess(cmd, false)
@@ -121,7 +122,7 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 		_ = killAlgorithmProcess(cmd.Process)
 		return err
 	}
-	registerLocalProcess(paths, service, cmd.Process.Pid, []int{spec.Port}, append([]string{paths.AlgorithmPython}, spec.Module...))
+	registerLocalProcess(paths, service, cmd.Process.Pid, []int{spec.Port}, append([]string{paths.AlgorithmPython}, serviceArgs...))
 
 	waitErr := make(chan error, 1)
 	go func() {
@@ -152,6 +153,14 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 		return fmt.Errorf("%s exited: %w", service, err)
 	}
 	return nil
+}
+
+func algorithmServiceCommandArgs(cfg RuntimeConfig, spec AlgorithmServiceSpec) []string {
+	args := append([]string(nil), spec.Module...)
+	if runtime.GOOS != "windows" || cfg.Profile != "desktop" {
+		return args
+	}
+	return append([]string{"-m", "lazymind.windows_runtime", "--"}, args...)
 }
 
 func (m *AlgorithmServiceManager) Down(ctx context.Context, paths RuntimePaths, service string) error {
@@ -570,10 +579,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_WORD_GROUP_APPLY_URL=" + envText("LAZYMIND_WORD_GROUP_APPLY_URL", ""),
 	}
 	if runtime.GOOS == "windows" && cfg.Profile == "desktop" {
-		env = append(env, "LAZYMIND_WINDOWS_HIDE_SUBPROCESS_WINDOWS=1")
-		if service != milvusLiteProcessName {
-			env = append(env, "LAZYMIND_WINDOWS_PATCH_LAZYLLM_RELAY=1")
-		}
+		env = append(env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
 	}
 	if service == docServerProcessName {
 		env = append(env, "LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.DocPort)+"/v1/internal/callbacks/tasks")

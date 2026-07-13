@@ -1,29 +1,13 @@
-"""Windows Desktop process policy loaded automatically by Python.
-
-The packaged algorithm services use several third-party launchers that create
-relay processes with ``shell=True``. Windows otherwise allocates a console for
-each of those descendants because Electron itself has no console to inherit.
-"""
+"""Explicit Windows Desktop bootstrap for LazyMind algorithm services."""
 
 from __future__ import annotations
 
 import copy
 import os
+import runpy
 import subprocess
-from typing import Any
-
-
-_ENABLE_ENV = 'LAZYMIND_WINDOWS_HIDE_SUBPROCESS_WINDOWS'
-_PATCH_RELAY_ENV = 'LAZYMIND_WINDOWS_PATCH_LAZYLLM_RELAY'
-
-
-def _enabled() -> bool:
-    return os.name == 'nt' and os.environ.get(_ENABLE_ENV, '').strip().lower() in {
-        '1',
-        'true',
-        'yes',
-        'on',
-    }
+import sys
+from typing import Any, Sequence
 
 
 def _hidden_popen_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -46,7 +30,10 @@ def _hidden_popen_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     return updated
 
 
-def _install() -> None:
+def install_hidden_subprocess_policy() -> None:
+    """Hide descendants without relying on Python's implicit site hooks."""
+    if os.name != 'nt':
+        return
     current = subprocess.Popen
     if getattr(current, '_lazymind_hides_windows', False):
         return
@@ -60,14 +47,31 @@ def _install() -> None:
     subprocess.Popen = HiddenPopen  # type: ignore[assignment]
 
 
-if _enabled():
-    _install()
-    if os.environ.get(_PATCH_RELAY_ENV, '').strip().lower() in {
-        '1',
-        'true',
-        'yes',
-        'on',
-    }:
-        from lazymind.windows_relay import enable_windows_relay_payload_files
+def dispatch(argv: Sequence[str]) -> None:
+    """Run an original ``python -m module`` or script command in this process."""
+    args = list(argv)
+    if args[:1] == ['--']:
+        args = args[1:]
+    if not args:
+        raise SystemExit('missing Python module or script')
 
-        enable_windows_relay_payload_files()
+    if args[0] == '-m':
+        if len(args) < 2:
+            raise SystemExit('missing module name after -m')
+        module, module_args = args[1], args[2:]
+        sys.argv = [module, *module_args]
+        runpy.run_module(module, run_name='__main__', alter_sys=True)
+        return
+
+    script, script_args = args[0], args[1:]
+    sys.argv = [script, *script_args]
+    runpy.run_path(script, run_name='__main__')
+
+
+def main() -> None:
+    install_hidden_subprocess_policy()
+    dispatch(sys.argv[1:])
+
+
+if __name__ == '__main__':
+    main()
