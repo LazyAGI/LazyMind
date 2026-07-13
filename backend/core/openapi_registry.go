@@ -1238,6 +1238,8 @@ type skillListItemOpenAPIResponse struct {
 	FileContent         string                              `json:"file_content,omitempty"`
 	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
 	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
+	DeletedAt           *string                             `json:"deleted_at,omitempty"`
+	DeletedBy           string                              `json:"deleted_by,omitempty"`
 }
 
 type skillListOpenAPIResponse struct {
@@ -1628,6 +1630,20 @@ type marketListOpenAPIResponse struct {
 
 type skillDeleteOpenAPIResponse struct {
 	Deleted bool `json:"deleted"`
+}
+
+type skillRestoreOpenAPIResponse struct {
+	Restored bool   `json:"restored"`
+	SkillID  string `json:"skill_id"`
+}
+
+type skillPurgeOpenAPIResponse struct {
+	Purged  bool   `json:"purged"`
+	SkillID string `json:"skill_id"`
+}
+
+type skillEmptyTrashOpenAPIResponse struct {
+	Purged int `json:"purged"`
 }
 
 type skillDiscardOpenAPIResponse struct {
@@ -2503,12 +2519,54 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Updated skill", skillWriteOpenAPIResponse{})},
 		},
 		{
-			Method:     "DELETE",
-			Path:       "/skills/{skill_id}",
-			Summary:    "Delete directory skill",
+			Method:      "DELETE",
+			Path:        "/skills/{skill_id}",
+			Summary:     "Move skill to trash",
+			Description: "Logically deletes a skill by moving it to the recycle bin.",
+			Tags:        []string{"skills"},
+			PathParams:  skillPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Moved skill to trash", skillDeleteOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skills:trash",
+			Summary:     "List trashed skills",
+			Description: "Lists skills in the current user's recycle bin.",
+			Tags:        []string{"skills"},
+			QueryParams: skillListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Trashed skill list", skillListOpenAPIResponse{})},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/skills:trash",
+			Summary:     "Empty skill trash",
+			Description: "Permanently deletes every skill in the current user's recycle bin.",
+			Tags:        []string{"skills"},
+			Responses:   map[int]openAPIResponse{200: resp("Emptied skill trash", skillEmptyTrashOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/skills/{skill_id}:trash",
+			Summary:    "Move skill to trash",
 			Tags:       []string{"skills"},
 			PathParams: skillPathParams{},
-			Responses:  map[int]openAPIResponse{200: resp("Deleted skill", skillDeleteOpenAPIResponse{})},
+			Responses:  map[int]openAPIResponse{200: resp("Moved skill to trash", skillDeleteOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/skills/{skill_id}:restore",
+			Summary:    "Restore skill from trash",
+			Tags:       []string{"skills"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Restored skill", skillRestoreOpenAPIResponse{})},
+		},
+		{
+			Method:     "DELETE",
+			Path:       "/skills/{skill_id}:purge",
+			Summary:    "Permanently delete trashed skill",
+			Tags:       []string{"skills"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Purged skill", skillPurgeOpenAPIResponse{})},
 		},
 		{
 			Method:     "GET",

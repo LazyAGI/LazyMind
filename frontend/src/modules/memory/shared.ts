@@ -41,9 +41,11 @@ export interface StructuredAsset extends BaseAsset {
   reviewStatus?: string;
   suggestionStatus?: string;
   updateStatus?: string;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
-export type SkillViewMode = "installed" | "market";
+export type SkillViewMode = "installed" | "market" | "trash";
 export type SkillSourceFilter = "all" | "builtin" | "admin" | "personal";
 export type SkillMarketSourceFilter = "all" | "builtin" | "admin";
 

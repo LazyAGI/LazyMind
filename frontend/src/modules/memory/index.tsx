@@ -403,10 +403,10 @@ export default function MemoryManagement() {
   );
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
   const [skillView, setSkillView] = useState<
-    "installed" | "market" | "plugins"
+    "installed" | "market" | "plugins" | "trash"
   >(() => {
     const sv = new URLSearchParams(window.location.search).get("skillView");
-    if (sv === "plugins" || sv === "market") return sv;
+    if (sv === "plugins" || sv === "market" || sv === "trash") return sv;
     return "installed";
   });
   const [installedSkillSource, setInstalledSkillSource] = useState<
@@ -4741,7 +4741,10 @@ export default function MemoryManagement() {
 
     Modal.confirm({
       title: t("common.delete"),
-      content: t("admin.memoryDeleteConfirm", { name: itemName }),
+      content:
+        activeTab === "skills"
+          ? t("admin.memorySkillDeleteConfirm", { name: itemName })
+          : t("admin.memoryDeleteConfirm", { name: itemName }),
       okText: t("common.confirm"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
