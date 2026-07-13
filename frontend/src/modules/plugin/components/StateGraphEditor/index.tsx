@@ -222,9 +222,11 @@ export default function StateGraphEditor({
     try {
       await fn(buildPayload(m, pm, sd, sc));
       setSaveStatus('saved');
-    } catch {
+    } catch (error: unknown) {
       setSaveStatus('error');
-      message.error(t('selfEvolutionRun.sgeSaveFailed'));
+      if (!(error as { isSaveConflict?: boolean })?.isSaveConflict) {
+        message.error(t('selfEvolutionRun.sgeSaveFailed'));
+      }
     }
   }, [buildPayload]);
 

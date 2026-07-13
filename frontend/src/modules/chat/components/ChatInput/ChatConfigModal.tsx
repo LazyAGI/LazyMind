@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Popover, Switch, Tooltip, message } from 'antd';
+import { Popover, Segmented, Switch, Tooltip, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { SettingOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import {
@@ -17,9 +17,11 @@ interface ChatConfigPopoverProps {
   initialSettings?: ConversationPluginSettings;
   /** Called with the new settings after a successful save. */
   onSave?: (settings: ConversationPluginSettings) => void;
-  /** When true, the allow-plugin toggle is locked (plugin session is active). */
+  /** When true, plugins cannot be disabled because a plugin session is active. */
   hasPluginSession?: boolean;
 }
+
+type PluginExecutionMode = 'auto' | 'dynamic' | 'disabled';
 
 export default function ChatConfigPopover({
   conversationId,
@@ -100,46 +102,50 @@ export default function ChatConfigPopover({
   }
 
   const pluginEnabled = settings?.enable_plugin ?? true;
+  const executionMode: PluginExecutionMode = pluginEnabled
+    ? (settings?.plugin_mode ?? 'dynamic')
+    : 'disabled';
+
+  function handleExecutionModeChange(mode: string | number) {
+    const nextMode = mode as PluginExecutionMode;
+    if (nextMode === 'disabled') {
+      void handleChange({ enable_plugin: false });
+      return;
+    }
+    void handleChange({ enable_plugin: true, plugin_mode: nextMode });
+  }
 
   const content = (
     <div className="chat-config-popover-content">
-      {/* Allow Plugin toggle */}
-      <div className="chat-config-section">
-        <div className="chat-config-row">
-          <div className="chat-config-row-label">
-            <span className="chat-config-label">{t('chat.conversationConfigAllowPlugin')}</span>
-            <Tooltip title={t('chat.conversationConfigAllowPluginTooltip')} placement="top">
-              <QuestionCircleOutlined className="chat-config-help-icon" />
-            </Tooltip>
-          </div>
-          <Switch
-            checked={pluginEnabled}
-            disabled={hasPluginSession}
-            onChange={(v) => handleChange({ enable_plugin: v })}
-          />
+      <div className="chat-config-section chat-config-plugin-section">
+        <div className="chat-config-row-label chat-config-section-title">
+          <span className="chat-config-label">{t('chat.conversationConfigPluginExecution')}</span>
+          <Tooltip title={t('chat.conversationConfigPluginExecutionTooltip')} placement="top">
+            <QuestionCircleOutlined className="chat-config-help-icon" />
+          </Tooltip>
         </div>
+        <Segmented
+          block
+          className="chat-config-plugin-mode"
+          value={executionMode}
+          onChange={handleExecutionModeChange}
+          options={[
+            { label: t('chat.conversationConfigPluginAuto'), value: 'auto' },
+            { label: t('chat.conversationConfigPluginApproval'), value: 'dynamic' },
+            {
+              label: t('chat.conversationConfigPluginDisabled'),
+              value: 'disabled',
+              disabled: hasPluginSession,
+            },
+          ]}
+        />
+        <p className="chat-config-plugin-description">
+          {t('chat.conversationConfigPluginExecutionDesc')}
+        </p>
       </div>
 
-      {/* Approval preference — keep mapping to the existing plugin modes. */}
-      {pluginEnabled && (
-        <div className="chat-config-section">
-          <div className="chat-config-row">
-            <div className="chat-config-row-label">
-              <span className="chat-config-label">{t('chat.conversationConfigPluginMode')}</span>
-              <Tooltip title={t('chat.conversationConfigPluginModeTooltip')} placement="top">
-                <QuestionCircleOutlined className="chat-config-help-icon" />
-              </Tooltip>
-            </div>
-            <Switch
-              checked={(settings?.plugin_mode ?? 'dynamic') === 'dynamic'}
-              onChange={(checked) => handleChange({ plugin_mode: checked ? 'dynamic' : 'auto' })}
-            />
-          </div>
-        </div>
-      )}
-
       {/* Allow subtask toggle */}
-      <div className="chat-config-section">
+      <div className="chat-config-section chat-config-subagent-section">
         <div className="chat-config-row">
           <div className="chat-config-row-label">
             <span className="chat-config-label">{t('chat.conversationConfigEnableSubagent')}</span>
