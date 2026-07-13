@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/preferencefile"
 	"lazymind/core/resourcechange"
 )
 
@@ -55,7 +57,7 @@ func (w *Worker) handleAutoApplyReview(ctx context.Context, task orm.ResourceUpd
 	return retryableOutcome("auto_apply_failed", err)
 }
 
-func autoApplySkillReviewResult(ctx context.Context, tx *gorm.DB, task orm.ResourceUpdateTask, now time.Time) error {
+func autoApplySkillReviewResult(ctx context.Context, tx *gorm.DB, task orm.ResourceUpdateTask, _ time.Time) error {
 	result, err := lockSkillReviewResult(ctx, tx, taskReviewResultID(task))
 	if err != nil {
 		return err
@@ -80,27 +82,7 @@ func autoApplySkillReviewResult(ctx context.Context, tx *gorm.DB, task orm.Resou
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	resource, err := mapSkillPatchResultToResource(withUpdateLock(tx).WithContext(ctx), result)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errReviewNotFound
-		}
-		return err
-	}
-	if strings.TrimSpace(task.ResourceType) != orm.ResourceUpdateResourceTypeSkill ||
-		strings.TrimSpace(task.UserID) != strings.TrimSpace(result.UserID) ||
-		strings.TrimSpace(task.ResourceID) != strings.TrimSpace(resource.ID) {
-		return fmt.Errorf("%w: skill auto apply task mapping mismatch", errReviewConflict)
-	}
-	if !resource.AutoEvo {
-		return fmt.Errorf("%w: skill auto_evo disabled", errReviewConflict)
-	}
-	return applySkillPatchResult(ctx, tx, result, resource, now, resourcechange.Source{
-		ChangeSource:  resourcechange.ChangeSourceAutoApply,
-		SourceRefType: resourcechange.SourceRefTypeSkillReviewResult,
-		SourceRefID:   result.ID,
-		ChangedAt:     now,
-	})
+	return errReviewNotFound
 }
 
 func autoApplyMemoryReviewResult(ctx context.Context, tx *gorm.DB, task orm.ResourceUpdateTask, now time.Time) error {
@@ -114,7 +96,7 @@ func autoApplyMemoryReviewResult(ctx context.Context, tx *gorm.DB, task orm.Reso
 	if normalizeReviewTarget(result.Target) != orm.ResourceUpdateResourceTypeMemory || strings.TrimSpace(result.State) != memoryReviewStateSuccess {
 		return fmt.Errorf("%w: memory review result target/state mismatch", errReviewInvalid)
 	}
-	resource, err := mapMemoryReviewResultToMemory(withUpdateLock(tx).WithContext(ctx), result)
+	resource, err := mapMemoryReviewResultToPersonalResource(withUpdateLock(tx).WithContext(ctx), orm.ResourceUpdateResourceTypeMemory, result)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errReviewNotFound
@@ -129,7 +111,7 @@ func autoApplyMemoryReviewResult(ctx context.Context, tx *gorm.DB, task orm.Reso
 	if !resource.AutoEvo {
 		return fmt.Errorf("%w: memory auto_evo disabled", errReviewConflict)
 	}
-	return applyMemoryReviewResult(ctx, tx, result, resource, now, true, resourcechange.Source{
+	return applyPersonalResourceReviewResult(ctx, tx, orm.ResourceUpdateResourceTypeMemory, result, resource, now, true, resourcechange.Source{
 		ChangeSource:  resourcechange.ChangeSourceAutoApply,
 		SourceRefType: resourcechange.SourceRefTypeMemoryReview,
 		SourceRefID:   result.ID,
@@ -148,7 +130,7 @@ func autoApplyPreferenceReviewResult(ctx context.Context, tx *gorm.DB, task orm.
 	if normalizeReviewTarget(result.Target) != orm.ResourceUpdateResourceTypeUserPreference || strings.TrimSpace(result.State) != memoryReviewStateSuccess {
 		return fmt.Errorf("%w: user_preference review result target/state mismatch", errReviewInvalid)
 	}
-	resource, err := mapMemoryReviewResultToPreference(withUpdateLock(tx).WithContext(ctx), result)
+	resource, err := mapMemoryReviewResultToPersonalResource(withUpdateLock(tx).WithContext(ctx), orm.ResourceUpdateResourceTypeUserPreference, result)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errReviewNotFound
@@ -163,7 +145,7 @@ func autoApplyPreferenceReviewResult(ctx context.Context, tx *gorm.DB, task orm.
 	if !resource.AutoEvo {
 		return fmt.Errorf("%w: user_preference auto_evo disabled", errReviewConflict)
 	}
-	return applyPreferenceReviewResult(ctx, tx, result, resource, now, true, resourcechange.Source{
+	return applyPersonalResourceReviewResult(ctx, tx, orm.ResourceUpdateResourceTypeUserPreference, result, resource, now, true, resourcechange.Source{
 		ChangeSource:  resourcechange.ChangeSourceAutoApply,
 		SourceRefType: resourcechange.SourceRefTypeMemoryReview,
 		SourceRefID:   result.ID,
@@ -197,218 +179,162 @@ func lockMemoryReviewResult(ctx context.Context, tx *gorm.DB, id string) (Memory
 	return result, err
 }
 
-func applySkillPatchResult(ctx context.Context, tx *gorm.DB, result SkillReviewResult, resource orm.SkillResource, now time.Time, source resourcechange.Source) error {
-	content := result.SkillContent
-	meta, err := validateSkillReviewContent(result.SkillName, content)
+func applyPersonalResourceReviewResult(ctx context.Context, tx *gorm.DB, target string, result MemoryReviewResult, resource orm.PersonalResource, now time.Time, requireAutoEvo bool, source resourcechange.Source) error {
+	content := result.Content
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("%w: personal resource content required", errReviewInvalid)
+	}
+	if target == orm.ResourceUpdateResourceTypeUserPreference {
+		if _, err := preferencefile.ParseFileContent(content); err != nil {
+			return fmt.Errorf("%w: %v", errReviewInvalid, err)
+		}
+	}
+	if strings.TrimSpace(resource.ResourceType) != strings.TrimSpace(target) {
+		return fmt.Errorf("%w: personal resource target mismatch", errReviewConflict)
+	}
+	if requireAutoEvo && !resource.AutoEvo {
+		return fmt.Errorf("%w: personal resource auto_evo disabled", errReviewConflict)
+	}
+	if resource.HeadRevisionID == nil || strings.TrimSpace(*resource.HeadRevisionID) == "" {
+		return errReviewNotFound
+	}
+	_, head, err := personalResourceHeadContent(ctx, tx, resource)
 	if err != nil {
+		return err
+	}
+	path := personalResourcePath(target)
+	hash := evolution.HashContent(content)
+	blob := orm.PersonalResourceBlob{
+		Hash:           hash,
+		Size:           int64(len([]byte(content))),
+		Mime:           "text/markdown; charset=utf-8",
+		FileType:       "markdown",
+		Binary:         false,
+		StorageBackend: "postgres",
+		Content:        []byte(content),
+		CreatedAt:      now,
+	}
+	if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&blob).Error; err != nil {
+		return err
+	}
+	revisionID := evolution.NewID()
+	parentID := head.ID
+	revision := orm.PersonalResourceRevision{
+		ID:               revisionID,
+		ResourceID:       resource.ID,
+		ParentRevisionID: &parentID,
+		RevisionNo:       head.RevisionNo + 1,
+		Path:             path,
+		BlobHash:         hash,
+		ContentHash:      hash,
+		Size:             blob.Size,
+		Mime:             blob.Mime,
+		FileType:         blob.FileType,
+		Binary:           false,
+		Message:          "auto apply memory review",
+		ChangeSource:     source.ChangeSource,
+		SourceRefType:    source.SourceRefType,
+		SourceRefID:      source.SourceRefID,
+		CreatedBy:        nullableString(result.UserID),
+		CreatedAt:        now,
+	}
+	if target == orm.ResourceUpdateResourceTypeUserPreference {
+		revision.Message = "auto apply user_preference review"
+	}
+	if err := tx.WithContext(ctx).Create(&revision).Error; err != nil {
 		return err
 	}
 	update := map[string]any{
-		"description":           meta.Description,
-		"content":               content,
-		"content_size":          skillContentSize(content),
-		"mime_type":             mimeTypeForExt(resource.FileExt),
-		"content_hash":          evolution.HashContent(content),
-		"version":               resource.Version + 1,
-		"draft_content":         "",
-		"draft_source_version":  0,
-		"draft_status":          "",
-		"draft_updated_at":      nil,
-		"update_status":         evolution.UpdateStatusUpToDate,
+		"head_revision_id":      revisionID,
+		"version":               gorm.Expr("version + 1"),
 		"auto_evo_apply_status": evolution.AutoEvoApplyStatusIdle,
 		"auto_evo_error":        "",
+		"auto_evo_finished_at":  now,
+		"updated_by":            strings.TrimSpace(result.UserID),
 		"updated_at":            now,
-		"ext":                   clearLegacyDraftSuggestionRefs(resource.Ext),
 	}
-	affected, err := resourcechange.UpdateModel(ctx, tx, &orm.SkillResource{}, func(query *gorm.DB) *gorm.DB {
-		return query.Where("id = ? AND version = ?", resource.ID, resource.Version)
-	}, update, resourcechange.ContentChange{
-		ResourceType:  orm.ResourceUpdateResourceTypeSkill,
-		ResourceID:    resource.ID,
-		UserID:        resource.OwnerUserID,
-		FromVersion:   resource.Version,
-		ToVersion:     resource.Version + 1,
-		BeforeContent: resource.Content,
-		AfterContent:  content,
-		Source:        source,
-	})
-	if err != nil {
+	affected := tx.WithContext(ctx).Model(&orm.PersonalResource{}).
+		Where("id = ? AND version = ? AND head_revision_id = ?", resource.ID, resource.Version, *resource.HeadRevisionID).
+		Updates(update)
+	if affected.Error != nil {
+		return affected.Error
+	}
+	if affected.RowsAffected == 0 {
+		return fmt.Errorf("%w: personal resource version changed", errReviewConflict)
+	}
+	if err := resetPersonalResourceDraftToRevision(ctx, tx, resource.ID, revision, result.UserID, now); err != nil {
 		return err
 	}
-	if affected == 0 {
-		return fmt.Errorf("%w: skill version changed", errReviewConflict)
+	if err := tx.WithContext(ctx).Model(&orm.PersonalResourceReviewSession{}).
+		Where("resource_id = ? AND status = ?", resource.ID, "active").
+		Updates(map[string]any{"status": "invalidated", "updated_at": now}).Error; err != nil {
+		return err
 	}
-	if childErr := tx.WithContext(ctx).Model(&orm.SkillResource{}).
-		Where("owner_user_id = ? AND node_type = ? AND category = ? AND parent_skill_name = ?",
-			resource.OwnerUserID, evolution.SkillNodeTypeChild, resource.Category, resource.SkillName).
-		Updates(map[string]any{"update_status": evolution.UpdateStatusUpToDate, "updated_at": now}).Error; childErr != nil {
-		return childErr
-	}
-	return updateSkillReviewStatus(ctx, tx, result.ID, reviewStatusAccepted)
+	return updateMemoryReviewStatus(ctx, tx, result.ID, reviewStatusAccepted)
 }
 
-func createSkillFromNewResult(ctx context.Context, tx *gorm.DB, result SkillReviewResult, userName string, now time.Time, source resourcechange.Source) (orm.SkillResource, error) {
-	content := result.SkillContent
-	meta, err := validateSkillReviewContent(result.SkillName, content)
-	if err != nil {
-		return orm.SkillResource{}, err
+func resetPersonalResourceDraftToRevision(ctx context.Context, tx *gorm.DB, resourceID string, revision orm.PersonalResourceRevision, userID string, now time.Time) error {
+	var draft orm.PersonalResourceDraft
+	err := tx.WithContext(ctx).Where("resource_id = ?", resourceID).Take(&draft).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
 	}
-	category := strings.TrimSpace(meta.Category)
-	if category == "" {
-		category = "system"
+	version := int64(1)
+	if err == nil {
+		version = draft.Version + 1
 	}
-	if err := validatePathSegment(category); err != nil {
-		return orm.SkillResource{}, err
-	}
-	if err := validatePathSegment(meta.Name); err != nil {
-		return orm.SkillResource{}, err
-	}
-	var count int64
-	if err := tx.WithContext(ctx).Model(&orm.SkillResource{}).
-		Where("owner_user_id = ? AND node_type = ? AND skill_name = ?", result.UserID, evolution.SkillNodeTypeParent, meta.Name).
-		Count(&count).Error; err != nil {
-		return orm.SkillResource{}, err
-	}
-	if count > 0 {
-		return orm.SkillResource{}, gorm.ErrDuplicatedKey
-	}
-	relPath := evolution.ParentSkillRelativePath(category, meta.Name)
-	if err := tx.WithContext(ctx).Model(&orm.SkillResource{}).
-		Where("owner_user_id = ? AND relative_path = ?", result.UserID, relPath).
-		Count(&count).Error; err != nil {
-		return orm.SkillResource{}, err
-	}
-	if count > 0 {
-		return orm.SkillResource{}, gorm.ErrDuplicatedKey
-	}
-	row := orm.SkillResource{
-		ID:             newSkillResourceID(),
-		OwnerUserID:    result.UserID,
-		OwnerUserName:  strings.TrimSpace(userName),
-		Category:       category,
-		SkillName:      meta.Name,
-		NodeType:       evolution.SkillNodeTypeParent,
-		Description:    meta.Description,
-		FileExt:        "md",
-		RelativePath:   relPath,
-		Content:        content,
-		ContentSize:    skillContentSize(content),
-		MimeType:       mimeTypeForExt("md"),
-		ContentHash:    evolution.HashContent(content),
-		Version:        1,
-		AutoEvo:        false,
-		IsEnabled:      true,
-		UpdateStatus:   evolution.UpdateStatusUpToDate,
-		CreateUserID:   result.UserID,
-		CreateUserName: strings.TrimSpace(userName),
+	row := orm.PersonalResourceDraft{
+		ResourceID:     resourceID,
+		BaseRevisionID: &revision.ID,
+		Path:           revision.Path,
+		BlobHash:       revision.BlobHash,
+		ContentHash:    revision.ContentHash,
+		Size:           revision.Size,
+		Mime:           revision.Mime,
+		FileType:       revision.FileType,
+		Binary:         revision.Binary,
+		DraftStatus:    "",
+		TaskID:         "",
+		UpdatedBy:      nullableString(userID),
+		Version:        version,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	if err := resourcechange.CreateModel(ctx, tx, &row, resourcechange.ContentChange{
-		ResourceType:  orm.ResourceUpdateResourceTypeSkill,
-		ResourceID:    row.ID,
-		UserID:        row.OwnerUserID,
-		FromVersion:   0,
-		ToVersion:     row.Version,
-		BeforeContent: "",
-		AfterContent:  row.Content,
-		Source:        source,
-	}); err != nil {
-		return orm.SkillResource{}, err
+	if err != nil {
+		return tx.WithContext(ctx).Create(&row).Error
 	}
-	return row, nil
+	return tx.WithContext(ctx).Model(&orm.PersonalResourceDraft{}).
+		Where("resource_id = ?", resourceID).
+		Updates(map[string]any{
+			"base_revision_id": revision.ID,
+			"path":             revision.Path,
+			"blob_hash":        revision.BlobHash,
+			"content_hash":     revision.ContentHash,
+			"size":             revision.Size,
+			"mime":             revision.Mime,
+			"file_type":        revision.FileType,
+			"binary":           revision.Binary,
+			"draft_status":     "",
+			"draft_updated_at": nil,
+			"task_id":          "",
+			"conversation_id":  nil,
+			"updated_by":       nullableString(userID),
+			"version":          version,
+			"updated_at":       now,
+		}).Error
 }
 
-func applyMemoryReviewResult(ctx context.Context, tx *gorm.DB, result MemoryReviewResult, resource orm.SystemMemory, now time.Time, requireAutoEvo bool, source resourcechange.Source) error {
-	content := result.Content
-	if strings.TrimSpace(content) == "" {
-		return fmt.Errorf("%w: memory content required", errReviewInvalid)
+func personalResourcePath(target string) string {
+	if strings.TrimSpace(target) == orm.ResourceUpdateResourceTypeUserPreference {
+		return "memory/user.md"
 	}
-	if requireAutoEvo && !resource.AutoEvo {
-		return fmt.Errorf("%w: memory auto_evo disabled", errReviewConflict)
-	}
-	update := map[string]any{
-		"content":               content,
-		"content_hash":          evolution.HashSystemMemory(orm.SystemMemory{Content: content}),
-		"version":               resource.Version + 1,
-		"draft_content":         "",
-		"draft_source_version":  0,
-		"draft_status":          "",
-		"draft_updated_at":      nil,
-		"auto_evo_apply_status": evolution.AutoEvoApplyStatusIdle,
-		"auto_evo_error":        "",
-		"updated_by":            result.UserID,
-		"updated_at":            now,
-		"ext":                   clearLegacyDraftSuggestionRefs(resource.Ext),
-	}
-	affected, err := resourcechange.UpdateModel(ctx, tx, &orm.SystemMemory{}, func(query *gorm.DB) *gorm.DB {
-		return query.Where("id = ? AND version = ?", resource.ID, resource.Version)
-	}, update, resourcechange.ContentChange{
-		ResourceType:  orm.ResourceUpdateResourceTypeMemory,
-		ResourceID:    resource.ID,
-		UserID:        resource.UserID,
-		FromVersion:   resource.Version,
-		ToVersion:     resource.Version + 1,
-		BeforeContent: resource.Content,
-		AfterContent:  content,
-		Source:        source,
-	})
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return fmt.Errorf("%w: memory version changed", errReviewConflict)
-	}
-	return updateMemoryReviewStatus(ctx, tx, result.ID, reviewStatusAccepted)
+	return "memory/memory.md"
 }
 
-func applyPreferenceReviewResult(ctx context.Context, tx *gorm.DB, result MemoryReviewResult, resource orm.SystemUserPreference, now time.Time, requireAutoEvo bool, source resourcechange.Source) error {
-	parsed, err := evolution.ParseSystemUserPreferenceContent(result.Content)
-	if err != nil {
-		return fmt.Errorf("%w: %v", errReviewInvalid, err)
+func nullableString(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
 	}
-	if requireAutoEvo && !resource.AutoEvo {
-		return fmt.Errorf("%w: user_preference auto_evo disabled", errReviewConflict)
-	}
-	hashRow := resource
-	hashRow.Content = parsed.Content
-	hashRow.AgentPersona = parsed.AgentPersona
-	hashRow.PreferredName = parsed.PreferredName
-	hashRow.ResponseStyle = parsed.ResponseStyle
-	update := map[string]any{
-		"content":               parsed.Content,
-		"agent_persona":         parsed.AgentPersona,
-		"preferred_name":        parsed.PreferredName,
-		"response_style":        parsed.ResponseStyle,
-		"content_hash":          evolution.HashSystemUserPreference(hashRow),
-		"version":               resource.Version + 1,
-		"draft_content":         "",
-		"draft_source_version":  0,
-		"draft_status":          "",
-		"draft_updated_at":      nil,
-		"auto_evo_apply_status": evolution.AutoEvoApplyStatusIdle,
-		"auto_evo_error":        "",
-		"updated_by":            result.UserID,
-		"updated_at":            now,
-		"ext":                   clearLegacyDraftSuggestionRefs(resource.Ext),
-	}
-	affected, err := resourcechange.UpdateModel(ctx, tx, &orm.SystemUserPreference{}, func(query *gorm.DB) *gorm.DB {
-		return query.Where("id = ? AND version = ?", resource.ID, resource.Version)
-	}, update, resourcechange.ContentChange{
-		ResourceType:  orm.ResourceUpdateResourceTypeUserPreference,
-		ResourceID:    resource.ID,
-		UserID:        resource.UserID,
-		FromVersion:   resource.Version,
-		ToVersion:     resource.Version + 1,
-		BeforeContent: evolution.FormatSystemUserPreferenceForChat(resource),
-		AfterContent:  evolution.FormatSystemUserPreferenceForChat(hashRow),
-		Source:        source,
-	})
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return fmt.Errorf("%w: user_preference version changed", errReviewConflict)
-	}
-	return updateMemoryReviewStatus(ctx, tx, result.ID, reviewStatusAccepted)
+	return &value
 }

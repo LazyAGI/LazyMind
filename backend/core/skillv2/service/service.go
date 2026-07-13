@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
 	skillsearch "lazymind/core/skillv2/search"
@@ -36,11 +37,20 @@ func NewSkillService(deps SkillServiceDeps) *SkillService {
 }
 
 func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) (CreateSkillResponse, error) {
+	req.Name = strings.TrimSpace(req.Name)
+	req.Category = strings.TrimSpace(req.Category)
+	req.Description = strings.TrimSpace(req.Description)
+	if err := validateSkillIdentity(req.Name, req.Category); err != nil {
+		return CreateSkillResponse{}, err
+	}
 	files, sourceRefType, sourceRefID, err := s.filesFromSource(ctx, req.OwnerUserID, req.Source)
 	if err != nil {
 		return CreateSkillResponse{}, err
 	}
 	if err := validateSkillFiles(files); err != nil {
+		return CreateSkillResponse{}, err
+	}
+	if err := validateSkillPackageMetadata(req.Name, req.Category, req.Description, files); err != nil {
 		return CreateSkillResponse{}, err
 	}
 
@@ -107,6 +117,24 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 }
 
 func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (PatchSkillResponse, error) {
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if err := validatePathSegment(name); err != nil {
+			return PatchSkillResponse{}, err
+		}
+		req.Name = &name
+	}
+	if req.Category != nil {
+		category := strings.TrimSpace(*req.Category)
+		if err := validatePathSegment(category); err != nil {
+			return PatchSkillResponse{}, err
+		}
+		req.Category = &category
+	}
+	if req.Description != nil {
+		description := strings.TrimSpace(*req.Description)
+		req.Description = &description
+	}
 	var out PatchSkillResponse
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var skill skillRow
@@ -121,6 +149,44 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 				headRevisionID = *skill.HeadRevisionID
 			}
 			committedDraftRevisionID := ""
+			metadataChanged :=
+				(req.Name != nil && *req.Name != skill.SkillName) ||
+					(req.Category != nil && *req.Category != skill.Category) ||
+					(req.Description != nil && *req.Description != skill.Description)
+			if metadataChanged {
+				var draftEntries int64
+				if err := tx.Model(&skillDraftEntryRow{}).Where("skill_id = ?", req.SkillID).Count(&draftEntries).Error; err != nil {
+					return err
+				}
+				if draftEntries > 0 {
+					return fmt.Errorf("cannot update skill metadata while draft overlay exists")
+				}
+				if skill.HeadRevisionID == nil {
+					return fmt.Errorf("skill has no head revision")
+				}
+				files, err := s.filesForRevision(ctx, tx, *skill.HeadRevisionID)
+				if err != nil {
+					return err
+				}
+				content, ok := files["SKILL.md"]
+				if !ok {
+					return fmt.Errorf("skill package must contain SKILL.md")
+				}
+				nextName := valueOr(req.Name, skill.SkillName)
+				nextCategory := valueOr(req.Category, skill.Category)
+				nextDescription := valueOr(req.Description, skill.Description)
+				files = map[string][]byte{
+					"SKILL.md": []byte(rewriteSkillMDFrontmatter(string(content), nextName, nextCategory, nextDescription)),
+				}
+				revisionID, err := s.commitFilesAsNewHead(ctx, tx, req.SkillID, req.UserID, "metadata_update", files)
+				if err != nil {
+					return err
+				}
+				headRevisionID = revisionID
+				if err := s.resetDraft(tx, req.SkillID, revisionID); err != nil {
+					return err
+				}
+			}
 			if req.Name != nil {
 				updates["skill_name"] = *req.Name
 				updates["relative_root"] = path.Join(valueOr(req.Category, skill.Category), *req.Name)
@@ -138,6 +204,15 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 			}
 			if req.AutoEvo != nil {
 				updates["auto_evo"] = *req.AutoEvo
+				updates["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
+				updates["auto_evo_apply_status"] = "idle"
+				updates["auto_evo_error"] = ""
+				if *req.AutoEvo {
+					updates["auto_evo_finished_at"] = nil
+				} else {
+					updates["auto_evo_started_at"] = nil
+					updates["auto_evo_finished_at"] = s.clock.Now()
+				}
 			}
 			if req.IsEnabled != nil {
 				if *req.IsEnabled {
@@ -191,6 +266,21 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if err := validateSkillFiles(files); err != nil {
 			return err
 		}
+		nextName := skill.SkillName
+		nextCategory := skill.Category
+		nextDescription := skill.Description
+		if req.Name != nil {
+			nextName = *req.Name
+		}
+		if req.Category != nil {
+			nextCategory = *req.Category
+		}
+		if req.Description != nil {
+			nextDescription = *req.Description
+		}
+		if err := validateSkillPackageMetadata(nextName, nextCategory, nextDescription, files); err != nil {
+			return err
+		}
 		parentID := ""
 		if skill.HeadRevisionID != nil {
 			parentID = *skill.HeadRevisionID
@@ -218,14 +308,10 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 			"version":          gorm.Expr("version + 1"),
 			"updated_at":       s.clock.Now(),
 		}
-		nextName := skill.SkillName
-		nextCategory := skill.Category
 		if req.Name != nil {
-			nextName = *req.Name
 			updates["skill_name"] = nextName
 		}
 		if req.Category != nil {
-			nextCategory = *req.Category
 			updates["category"] = nextCategory
 		}
 		if req.Name != nil || req.Category != nil {
@@ -240,6 +326,15 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		}
 		if req.AutoEvo != nil {
 			updates["auto_evo"] = *req.AutoEvo
+			updates["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
+			updates["auto_evo_apply_status"] = "idle"
+			updates["auto_evo_error"] = ""
+			if *req.AutoEvo {
+				updates["auto_evo_finished_at"] = nil
+			} else {
+				updates["auto_evo_started_at"] = nil
+				updates["auto_evo_finished_at"] = s.clock.Now()
+			}
 		}
 		if req.IsEnabled != nil {
 			updates["is_enabled"] = *req.IsEnabled
@@ -294,6 +389,9 @@ func (s *SkillService) TrashSkill(ctx context.Context, req DeleteSkillRequest) e
 			return err
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NULL", req.SkillID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := deleteMarketInstallTx(tx, req.SkillID, req.UserID); err != nil {
 			return err
 		}
 		if tx.Migrator().HasTable(&skillSearchIndexRow{}) {
@@ -396,10 +494,20 @@ func (s *SkillService) purgeSkillTx(ctx context.Context, tx *gorm.DB, req PurgeS
 			return err
 		}
 	}
+	if err := deleteMarketInstallTx(tx, req.SkillID, req.UserID); err != nil {
+		return err
+	}
 	if err := tx.Where("id = ?", req.SkillID).Delete(&skillRow{}).Error; err != nil {
 		return err
 	}
 	return s.cleanupUnreferencedBlobs(ctx, tx)
+}
+
+func deleteMarketInstallTx(tx *gorm.DB, skillID, userID string) error {
+	if !tx.Migrator().HasTable(&skillMarketInstallRow{}) {
+		return nil
+	}
+	return tx.Where("skill_id = ? AND user_id = ?", skillID, userID).Delete(&skillMarketInstallRow{}).Error
 }
 
 func (s *SkillService) cleanupUnreferencedBlobs(ctx context.Context, tx *gorm.DB) error {
@@ -825,7 +933,40 @@ func readZipFiles(zipPath string) (map[string][]byte, error) {
 		}
 		files[name] = data
 	}
-	return files, nil
+	return normalizeSkillPackageRoot(files), nil
+}
+
+func normalizeSkillPackageRoot(files map[string][]byte) map[string][]byte {
+	if _, ok := files["SKILL.md"]; ok {
+		return files
+	}
+	root := ""
+	for filePath := range files {
+		parts := strings.SplitN(filePath, "/", 2)
+		if len(parts) != 2 || parts[1] == "" {
+			return files
+		}
+		if root == "" {
+			root = parts[0]
+			continue
+		}
+		if root != parts[0] {
+			return files
+		}
+	}
+	if root == "" {
+		return files
+	}
+	normalized := make(map[string][]byte, len(files))
+	prefix := root + "/"
+	for filePath, data := range files {
+		relPath := strings.TrimPrefix(filePath, prefix)
+		normalized[relPath] = data
+	}
+	if _, ok := normalized["SKILL.md"]; ok {
+		return normalized
+	}
+	return files
 }
 
 func cleanSkillPath(name string) (string, error) {
@@ -844,6 +985,29 @@ func cleanSkillPath(name string) (string, error) {
 	return cleaned, nil
 }
 
+func validatePathSegment(segment string) error {
+	segment = strings.TrimSpace(segment)
+	switch {
+	case segment == "":
+		return fmt.Errorf("path segment required")
+	case segment == "." || segment == "..":
+		return fmt.Errorf("invalid path segment")
+	case strings.Contains(segment, "/") || strings.Contains(segment, `\`):
+		return fmt.Errorf("path segment cannot contain slash")
+	}
+	return nil
+}
+
+func validateSkillIdentity(name, category string) error {
+	if err := validatePathSegment(name); err != nil {
+		return fmt.Errorf("invalid skill name: %w", err)
+	}
+	if err := validatePathSegment(category); err != nil {
+		return fmt.Errorf("invalid category: %w", err)
+	}
+	return nil
+}
+
 func validateSkillFiles(files map[string][]byte) error {
 	if _, ok := files["SKILL.md"]; !ok {
 		return fmt.Errorf("skill package must contain SKILL.md")
@@ -854,6 +1018,71 @@ func validateSkillFiles(files map[string][]byte) error {
 		}
 	}
 	return nil
+}
+
+type skillMDMetadata struct {
+	Name        string `yaml:"name"`
+	Category    string `yaml:"category"`
+	Description string `yaml:"description"`
+}
+
+func validateSkillPackageMetadata(name, category, description string, files map[string][]byte) error {
+	content := string(files["SKILL.md"])
+	meta, ok, err := parseSkillMDMetadata(content)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	if metaName := strings.TrimSpace(meta.Name); metaName != "" && metaName != name {
+		return fmt.Errorf("request name and frontmatter name must match")
+	}
+	if metaCategory := strings.TrimSpace(meta.Category); metaCategory != "" && metaCategory != category {
+		return fmt.Errorf("request category and frontmatter category must match")
+	}
+	if metaDescription := strings.TrimSpace(meta.Description); strings.TrimSpace(description) != "" && metaDescription != "" && metaDescription != strings.TrimSpace(description) {
+		return fmt.Errorf("request description and frontmatter description must match")
+	}
+	return nil
+}
+
+func parseSkillMDMetadata(content string) (skillMDMetadata, bool, error) {
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	if !strings.HasPrefix(normalized, "---\n") {
+		return skillMDMetadata{}, false, nil
+	}
+	rest := strings.TrimPrefix(normalized, "---\n")
+	idx := strings.Index(rest, "\n---")
+	if idx < 0 {
+		return skillMDMetadata{}, false, fmt.Errorf("skill content must contain closing frontmatter separator")
+	}
+	var meta skillMDMetadata
+	if err := yaml.Unmarshal([]byte(rest[:idx]), &meta); err != nil {
+		return skillMDMetadata{}, false, fmt.Errorf("invalid skill frontmatter: %w", err)
+	}
+	return meta, true, nil
+}
+
+func rewriteSkillMDFrontmatter(content, name, category, description string) string {
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	body := normalized
+	metadata := map[string]any{}
+	if strings.HasPrefix(normalized, "---\n") {
+		rest := strings.TrimPrefix(normalized, "---\n")
+		if idx := strings.Index(rest, "\n---"); idx >= 0 {
+			_ = yaml.Unmarshal([]byte(rest[:idx]), &metadata)
+			body = strings.TrimPrefix(rest[idx+len("\n---"):], "\n")
+		}
+	}
+	metadata["name"] = strings.TrimSpace(name)
+	metadata["category"] = strings.TrimSpace(category)
+	metadata["description"] = strings.TrimSpace(description)
+	frontmatter, err := yaml.Marshal(metadata)
+	if err != nil {
+		return content
+	}
+	return fmt.Sprintf("---\n%s---\n%s", string(frontmatter), body)
 }
 
 func (s *SkillService) nextRevisionNo(tx *gorm.DB, skillID string) (int64, error) {

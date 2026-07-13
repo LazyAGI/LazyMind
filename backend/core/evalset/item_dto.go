@@ -87,6 +87,11 @@ type ListEvalSetItemsQuery struct {
 	OrderBy      string `query:"order_by"`
 }
 
+type ListEvalSetQuestionTypesQuery struct {
+	Keyword string `query:"keyword"`
+	Source  string `query:"source"`
+}
+
 type EvalSetItemPathParams struct {
 	EvalSetID string `path:"eval_set_id"`
 	ItemID    string `path:"item_id"`

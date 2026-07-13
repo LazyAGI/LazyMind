@@ -1,10 +1,10 @@
 package resourceupdate
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,7 +15,6 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/evolution"
 )
 
 const (
@@ -182,57 +181,6 @@ func validatePathSegment(segment string) error {
 	}
 }
 
-func skillContentSize(content string) int64 {
-	return int64(len([]byte(content)))
-}
-
-func mimeTypeForExt(ext string) string {
-	ext = strings.TrimSpace(ext)
-	if ext == "" {
-		return "text/plain; charset=utf-8"
-	}
-	if !strings.HasPrefix(ext, ".") {
-		ext = "." + ext
-	}
-	if mt := mime.TypeByExtension(strings.ToLower(ext)); mt != "" {
-		if strings.HasPrefix(mt, "text/") && !strings.Contains(strings.ToLower(mt), "charset=") {
-			return mt + "; charset=utf-8"
-		}
-		return mt
-	}
-	switch strings.ToLower(ext) {
-	case ".md", ".markdown":
-		return "text/markdown; charset=utf-8"
-	case ".py", ".sh", ".js", ".ts", ".json", ".yaml", ".yml", ".txt":
-		return "text/plain; charset=utf-8"
-	default:
-		return "application/octet-stream"
-	}
-}
-
-func newSkillResourceID() string {
-	return common.GenerateID()
-}
-
-func clearLegacyDraftSuggestionRefs(ext json.RawMessage) json.RawMessage {
-	if len(ext) == 0 {
-		return ext
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(ext, &payload); err != nil {
-		return ext
-	}
-	delete(payload, "draft_suggestion_ids")
-	if len(payload) == 0 {
-		return nil
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return ext
-	}
-	return body
-}
-
 func skillResultSelect(db *gorm.DB) *gorm.DB {
 	return db.Table("skill_review_results").
 		Select("id, skill_name, type, review_status, userid, requestid, skill_content, COALESCE(summary, '') AS summary, time")
@@ -243,26 +191,34 @@ func memoryResultSelect(db *gorm.DB) *gorm.DB {
 		Select("id, user_id, target, session_id, source_content, content, operations, state, review_status, time")
 }
 
-func mapSkillPatchResultToResource(db *gorm.DB, result SkillReviewResult) (orm.SkillResource, error) {
-	var row orm.SkillResource
+func mapMemoryReviewResultToPersonalResource(db *gorm.DB, target string, result MemoryReviewResult) (orm.PersonalResource, error) {
+	var row orm.PersonalResource
 	err := db.
-		Where("owner_user_id = ? AND skill_name = ? AND node_type = ? AND created_at <= ?",
-			strings.TrimSpace(result.UserID), strings.TrimSpace(result.SkillName), evolution.SkillNodeTypeParent, result.Time).
-		Order("created_at DESC").
+		Where("user_id = ? AND resource_type = ?",
+			strings.TrimSpace(result.UserID),
+			strings.TrimSpace(target)).
 		Take(&row).Error
 	return row, err
 }
 
-func mapMemoryReviewResultToMemory(db *gorm.DB, result MemoryReviewResult) (orm.SystemMemory, error) {
-	var row orm.SystemMemory
-	err := db.Where("user_id = ?", strings.TrimSpace(result.UserID)).Take(&row).Error
-	return row, err
-}
-
-func mapMemoryReviewResultToPreference(db *gorm.DB, result MemoryReviewResult) (orm.SystemUserPreference, error) {
-	var row orm.SystemUserPreference
-	err := db.Where("user_id = ?", strings.TrimSpace(result.UserID)).Take(&row).Error
-	return row, err
+func personalResourceHeadContent(ctx context.Context, db *gorm.DB, resource orm.PersonalResource) (string, orm.PersonalResourceRevision, error) {
+	if resource.HeadRevisionID == nil || strings.TrimSpace(*resource.HeadRevisionID) == "" {
+		return "", orm.PersonalResourceRevision{}, gorm.ErrRecordNotFound
+	}
+	var revision orm.PersonalResourceRevision
+	if err := db.WithContext(ctx).
+		Where("id = ? AND resource_id = ?", *resource.HeadRevisionID, resource.ID).
+		Take(&revision).Error; err != nil {
+		return "", orm.PersonalResourceRevision{}, err
+	}
+	var blob orm.PersonalResourceBlob
+	if err := db.WithContext(ctx).Where("hash = ?", revision.BlobHash).Take(&blob).Error; err != nil {
+		return "", orm.PersonalResourceRevision{}, err
+	}
+	if blob.Binary {
+		return "", orm.PersonalResourceRevision{}, fmt.Errorf("%w: personal resource head is binary", errReviewInvalid)
+	}
+	return string(blob.Content), revision, nil
 }
 
 func activeAutoApplyStatuses() []string {

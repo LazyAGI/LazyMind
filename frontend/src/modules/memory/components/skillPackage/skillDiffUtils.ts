@@ -1,5 +1,13 @@
-import type { DiffEntryLineOpenAPIResponse } from "@/api/generated/core-client";
+import type {
+  DiffEntryLine,
+  DiffEntryLineOpenAPIResponse,
+} from "@/api/generated/core-client";
 import type { DiffLine } from "../../shared";
+
+export type DraftDiffEntryLineInput =
+  | DiffEntryLine
+  | DiffEntryLineOpenAPIResponse
+  | Record<string, unknown>;
 
 export type SkillDiffEntryType = "HUNK" | "ADDITION" | "DELETION" | "CONTEXT" | string;
 
@@ -26,6 +34,19 @@ export interface SkillDiffHunkBlock {
   decision: SkillHunkDecision;
 }
 
+export interface SkillDiffChangeRegion {
+  regionId: string;
+  hunk: SkillDiffHunkBlock;
+  lines: SkillDiffEntryLine[];
+  isContextOnly: boolean;
+}
+
+const isChangeLine = (line: SkillDiffEntryLine) =>
+  line.type === "add" || line.type === "remove";
+
+export const isActionableHunkId = (hunkId?: string) =>
+  Boolean(hunkId) && !/^hunk-\d+$/.test(hunkId);
+
 const readRawField = (line: Record<string, unknown>, keys: string[]): string => {
   for (const key of keys) {
     const value = line[key];
@@ -39,7 +60,7 @@ const readRawField = (line: Record<string, unknown>, keys: string[]): string => 
   return "";
 };
 
-const normalizeEntryType = (line: DiffEntryLineOpenAPIResponse | Record<string, unknown>) =>
+const normalizeEntryType = (line: DraftDiffEntryLineInput) =>
   String(line.type || "").trim().toUpperCase();
 
 const mapEntryLineType = (normalizedType: string): SkillDiffEntryLine["type"] => {
@@ -56,7 +77,7 @@ const mapEntryLineType = (normalizedType: string): SkillDiffEntryLine["type"] =>
 };
 
 export const mapDiffEntryLine = (
-  line: DiffEntryLineOpenAPIResponse | Record<string, unknown>,
+  line: DraftDiffEntryLineInput,
 ): SkillDiffEntryLine => {
   const raw = line as Record<string, unknown>;
   const normalizedType = normalizeEntryType(line);
@@ -76,7 +97,7 @@ export const mapDiffEntryLine = (
 };
 
 export const mapDiffEntryLines = (
-  lines: DiffEntryLineOpenAPIResponse[] = [],
+  lines: DraftDiffEntryLineInput[] = [],
 ): DiffLine[] =>
   lines.map((line) => {
     const mapped = mapDiffEntryLine(line);
@@ -87,7 +108,7 @@ export const mapDiffEntryLines = (
   });
 
 export const mapSkillDiffEntryLines = (
-  lines: DiffEntryLineOpenAPIResponse[] = [],
+  lines: DraftDiffEntryLineInput[] = [],
 ): SkillDiffEntryLine[] => lines.map((line) => mapDiffEntryLine(line));
 
 export const isPendingHunkDecision = (decision?: SkillHunkDecision) => {
@@ -153,6 +174,51 @@ export const buildDiffHunkBlocks = (lines: SkillDiffEntryLine[]): SkillDiffHunkB
 
   pushCurrent();
   return blocks;
+};
+
+export const buildInlineChangeRegions = (
+  hunks: SkillDiffHunkBlock[],
+): SkillDiffChangeRegion[] => {
+  const regions: SkillDiffChangeRegion[] = [];
+
+  hunks.forEach((hunk, hunkIndex) => {
+    let buffer: SkillDiffEntryLine[] = [];
+    let regionIndex = 0;
+
+    const flush = () => {
+      if (!buffer.length) {
+        return;
+      }
+      const isContextOnly = !buffer.some(isChangeLine);
+      regions.push({
+        regionId: `${hunk.hunkId}-${hunkIndex}-${regionIndex}`,
+        hunk,
+        lines: buffer,
+        isContextOnly,
+      });
+      buffer = [];
+      regionIndex += 1;
+    };
+
+    hunk.lines.forEach((line) => {
+      if (isChangeLine(line)) {
+        if (buffer.length && !buffer.some(isChangeLine)) {
+          flush();
+        }
+        buffer.push(line);
+        return;
+      }
+
+      if (buffer.some(isChangeLine)) {
+        flush();
+      }
+      buffer.push(line);
+    });
+
+    flush();
+  });
+
+  return regions;
 };
 
 export const toDiffLine = (line: SkillDiffEntryLine): DiffLine => ({

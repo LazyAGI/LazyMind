@@ -22,6 +22,9 @@ func TestLoadResolvesRelativeBaseRootFromConfigDir(t *testing.T) {
 	if cfg.Staging.HostRoot != filepath.Join(want, "staging") {
 		t.Fatalf("Staging.HostRoot = %q", cfg.Staging.HostRoot)
 	}
+	if cfg.Staging.ContainerRoot != "/data/staging" {
+		t.Fatalf("Staging.ContainerRoot = %q, want cloud default", cfg.Staging.ContainerRoot)
+	}
 }
 
 func TestLoadAllowsEnvOverrideForBaseRoot(t *testing.T) {
@@ -37,6 +40,23 @@ func TestLoadAllowsEnvOverrideForBaseRoot(t *testing.T) {
 
 	if cfg.BaseRoot != override {
 		t.Fatalf("BaseRoot = %q, want %q", cfg.BaseRoot, override)
+	}
+}
+
+func TestLoadAllowsEnvOverrideForStagingRuntimeRoot(t *testing.T) {
+	root := t.TempDir()
+	runtimeRoot := root + string(filepath.Separator) + "native-staging" + string(filepath.Separator) + ".." + string(filepath.Separator) + "native-staging" + string(filepath.Separator)
+	t.Setenv("LAZYMIND_FILE_WATCHER_STAGING_RUNTIME_ROOT", runtimeRoot)
+	cfgPath := writeTestConfig(t, root, `${LAZYMIND_FILE_WATCHER_BASE_ROOT:-../../../data/scan}`)
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	want := filepath.Clean(runtimeRoot)
+	if cfg.Staging.ContainerRoot != want {
+		t.Fatalf("Staging.ContainerRoot = %q, want %q", cfg.Staging.ContainerRoot, want)
 	}
 }
 

@@ -1,7 +1,11 @@
-import { CheckOutlined, CopyOutlined, FullscreenOutlined } from "@ant-design/icons";
+import { CheckOutlined, CopyOutlined, FullscreenOutlined, LoadingOutlined } from "@ant-design/icons";
 import { Modal, Tooltip, message } from "antd";
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
+import {
+  DEVELOPER_ACTIVE_EVENT,
+  isDeveloperModeActive,
+} from "@/utils/developerMode";
 import { highlightCode } from "./syntaxHighlight";
 
 type HtmlView = "preview" | "source";
@@ -66,6 +70,113 @@ function getCopyAnnouncement(status: CopyStatus) {
   return "";
 }
 
+const VISIBLE_HTML_PATTERN =
+  /<(?:div|section|article|main|header|footer|h[1-6]|p|table|thead|tbody|tr|td|th|ul|ol|li|img|figure|blockquote|pre|button|form|canvas|svg)\b/i;
+
+function stripHtmlTags(value: string) {
+  return value.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+}
+
+function hasRenderableHtml(code: string) {
+  const trimmed = code.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  const bodyMatch = trimmed.match(/<body\b[^>]*>([\s\S]*?)(?:<\/body>|$)/i);
+  if (bodyMatch) {
+    const bodyContent = bodyMatch[1];
+    return (
+      VISIBLE_HTML_PATTERN.test(bodyContent) ||
+      stripHtmlTags(bodyContent).length > 0
+    );
+  }
+
+  if (/^<!doctype html|^<html\b/i.test(trimmed)) {
+    const afterHead = trimmed.split(/<\/head>/i)[1] ?? "";
+    const bodySection = afterHead.split(/<\/html>/i)[0] ?? afterHead;
+    return (
+      VISIBLE_HTML_PATTERN.test(bodySection) ||
+      stripHtmlTags(bodySection).length > 0
+    );
+  }
+
+  return (
+    VISIBLE_HTML_PATTERN.test(trimmed) || stripHtmlTags(trimmed).length > 0
+  );
+}
+
+function stripBodyBackgroundFromHtml(html: string) {
+  let result = html.replace(/<body\b([^>]*)>/gi, (_match, attrs: string) => {
+    const cleanedAttrs = attrs.replace(
+      /\sstyle\s*=\s*(["'])([\s\S]*?)\1/i,
+      (_styleAttr: string, quote: string, style: string) => {
+        const cleanedStyle = style
+          .replace(
+            /\bbackground(?:-image|-color|-size|-position|-repeat|-attachment)?\s*:[^;]+;?/gi,
+            "",
+          )
+          .trim()
+          .replace(/;\s*;/g, ";");
+        return cleanedStyle ? ` style=${quote}${cleanedStyle}${quote}` : "";
+      },
+    );
+    return `<body${cleanedAttrs}>`;
+  });
+
+  result = result.replace(
+    /<style\b([^>]*)>([\s\S]*?)<\/style>/gi,
+    (_match, attrs: string, css: string) => {
+      const cleanedCss = css.replace(
+        /body\s*\{([^}]*)\}/gi,
+        (_bodyRule: string, declarations: string) => {
+          const cleanedDeclarations = declarations
+            .replace(
+              /\bbackground(?:-image|-color|-size|-position|-repeat|-attachment)?\s*:[^;]+;?/gi,
+              "",
+            )
+            .trim()
+            .replace(/;\s*;/g, ";");
+          return cleanedDeclarations
+            ? `body { ${cleanedDeclarations} }`
+            : "body {}";
+        },
+      );
+      return `<style${attrs}>${cleanedCss}</style>`;
+    },
+  );
+
+  return result;
+}
+
+const PREVIEW_BODY_BG_RESET =
+  '<style data-lazymind-preview-reset>html,body{background:transparent!important;background-image:none!important;}</style>';
+
+function injectPreviewBodyBackgroundReset(html: string) {
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${PREVIEW_BODY_BG_RESET}</head>`);
+  }
+  if (/<body\b/i.test(html)) {
+    return html.replace(/<body\b/i, `${PREVIEW_BODY_BG_RESET}<body`);
+  }
+  return `${PREVIEW_BODY_BG_RESET}${html}`;
+}
+
+function buildPreviewDocument(code: string) {
+  const trimmed = code.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  let documentHtml = trimmed;
+  if (!/^<!doctype html/i.test(trimmed) && !/^<html\b/i.test(trimmed)) {
+    documentHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${trimmed}</body></html>`;
+  }
+
+  documentHtml = stripBodyBackgroundFromHtml(documentHtml);
+  return injectPreviewBodyBackgroundReset(documentHtml);
+}
+
 function resizeHtmlPreview(iframe: HTMLIFrameElement) {
   try {
     const doc = iframe.contentDocument;
@@ -104,10 +215,14 @@ const HtmlSource = ({ code }: { code: string }) => {
 const HtmlPreview = ({
   code,
   iframeRef,
+  inline = false,
 }: {
   code: string;
   iframeRef: RefObject<HTMLIFrameElement>;
+  inline?: boolean;
 }) => {
+  const previewDocument = useMemo(() => buildPreviewDocument(code), [code]);
+
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) {
@@ -120,15 +235,15 @@ const HtmlPreview = ({
 
     iframe.addEventListener("load", handleLoad);
     return () => iframe.removeEventListener("load", handleLoad);
-  }, [code, iframeRef]);
+  }, [previewDocument, iframeRef]);
 
   return (
-    <div className="md-html-preview">
+    <div className={`md-html-preview${inline ? " md-html-preview--inline" : ""}`}>
       <iframe
         ref={iframeRef}
         className="md-html-preview-iframe"
         sandbox="allow-same-origin"
-        srcDoc={code}
+        srcDoc={previewDocument}
         title="HTML preview"
       />
     </div>
@@ -145,12 +260,47 @@ const HtmlBlockComponent = ({
   const [activeView, setActiveView] = useState<HtmlView>("preview");
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const modalIframeRef = useRef<HTMLIFrameElement>(null);
   const copyResetTimerRef = useRef<number | null>(null);
 
-  const canShowPreview = Boolean(code.trim());
+  const canShowPreview = hasRenderableHtml(code);
+  const isGenerating =
+    !canShowPreview && (isStreaming || Boolean(code.trim()));
   const canCopySource = Boolean(code.trim());
+  const previewDocument = useMemo(() => buildPreviewDocument(code), [code]);
+
+  useEffect(() => {
+    const syncDeveloperActive = () => {
+      setDeveloperActive(isDeveloperModeActive());
+    };
+
+    const handleDeveloperActiveChange = (event: Event) => {
+      const nextActive = (event as CustomEvent<{ active?: boolean }>).detail
+        ?.active;
+      setDeveloperActive(
+        typeof nextActive === "boolean" ? nextActive : isDeveloperModeActive(),
+      );
+    };
+
+    window.addEventListener("storage", syncDeveloperActive);
+    window.addEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperActiveChange);
+
+    return () => {
+      window.removeEventListener("storage", syncDeveloperActive);
+      window.removeEventListener(
+        DEVELOPER_ACTIVE_EVENT,
+        handleDeveloperActiveChange,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!developerActive && activeView === "source") {
+      setActiveView("preview");
+    }
+  }, [activeView, developerActive]);
 
   useEffect(() => {
     setCopyStatus("idle");
@@ -192,75 +342,104 @@ const HtmlBlockComponent = ({
     }
   };
 
+  const renderContent = () => {
+    if (developerActive && activeView === "source") {
+      return <HtmlSource code={code} />;
+    }
+    if (canShowPreview) {
+      return (
+        <HtmlPreview
+          code={code}
+          iframeRef={previewIframeRef}
+          inline={!developerActive}
+        />
+      );
+    }
+    if (isGenerating) {
+      return (
+        <div
+          className={
+            developerActive
+              ? "md-html-generating md-html-generating--card"
+              : "md-html-generating"
+          }
+          aria-live="polite"
+        >
+          <LoadingOutlined spin className="md-html-generating-icon" />
+          <span>正在生成 HTML 页面，请稍候...</span>
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
-    <div className="md-html-block">
-      <div className="md-mermaid-toolbar">
-        <div className="md-mermaid-tabs" role="tablist" aria-label="HTML展示">
-          <button
-            aria-selected={activeView === "preview"}
-            className={activeView === "preview" ? "active" : ""}
-            disabled={!canShowPreview && !isStreaming}
-            role="tab"
-            type="button"
-            onClick={() => setActiveView("preview")}
-          >
-            渲染
-          </button>
-          <button
-            aria-selected={activeView === "source"}
-            className={activeView === "source" ? "active" : ""}
-            role="tab"
-            type="button"
-            onClick={() => setActiveView("source")}
-          >
-            源码
-          </button>
-        </div>
-        <div className="md-mermaid-actions">
-          {canShowPreview && activeView === "preview" && (
+    <div
+      className={`md-html-block${
+        developerActive ? "" : " md-html-block--inline"
+      }`}
+    >
+      {developerActive && (
+        <div className="md-mermaid-toolbar">
+          <div className="md-mermaid-tabs" role="tablist" aria-label="HTML展示">
             <button
-              aria-label="放大预览"
-              className="md-mermaid-icon-button"
+              aria-selected={activeView === "preview"}
+              className={activeView === "preview" ? "active" : ""}
+              disabled={!canShowPreview && !isStreaming}
+              role="tab"
               type="button"
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => setActiveView("preview")}
             >
-              <FullscreenOutlined />
+              渲染
             </button>
-          )}
-          {activeView === "source" && (
-            <Tooltip title={getCopyTooltip(copyStatus)}>
+            <button
+              aria-selected={activeView === "source"}
+              className={activeView === "source" ? "active" : ""}
+              role="tab"
+              type="button"
+              onClick={() => setActiveView("source")}
+            >
+              源码
+            </button>
+          </div>
+          <div className="md-mermaid-actions">
+            {canShowPreview && activeView === "preview" && (
               <button
-                aria-label="复制源码"
-                className={`md-mermaid-icon-button ${
-                  copyStatus === "copied" ? "copied" : ""
-                }`}
-                disabled={!canCopySource || copyStatus === "copying"}
+                aria-label="放大预览"
+                className="md-mermaid-icon-button"
                 type="button"
-                onClick={handleCopySource}
+                onClick={() => setIsModalOpen(true)}
               >
-                {copyStatus === "copied" ? <CheckOutlined /> : <CopyOutlined />}
+                <FullscreenOutlined />
               </button>
-            </Tooltip>
-          )}
-          <span className="md-mermaid-copy-status" aria-live="polite">
-            {getCopyAnnouncement(copyStatus)}
-          </span>
+            )}
+            {activeView === "source" && (
+              <Tooltip title={getCopyTooltip(copyStatus)}>
+                <button
+                  aria-label="复制源码"
+                  className={`md-mermaid-icon-button ${
+                    copyStatus === "copied" ? "copied" : ""
+                  }`}
+                  disabled={!canCopySource || copyStatus === "copying"}
+                  type="button"
+                  onClick={handleCopySource}
+                >
+                  {copyStatus === "copied" ? (
+                    <CheckOutlined />
+                  ) : (
+                    <CopyOutlined />
+                  )}
+                </button>
+              </Tooltip>
+            )}
+            <span className="md-mermaid-copy-status" aria-live="polite">
+              {getCopyAnnouncement(copyStatus)}
+            </span>
+          </div>
         </div>
-      </div>
-
-      {isStreaming && !canShowPreview && (
-        <div className="md-mermaid-status">HTML 生成中，等待完整内容...</div>
       )}
 
-      {activeView === "source" ? (
-        <HtmlSource code={code} />
-      ) : canShowPreview ? (
-        <HtmlPreview code={code} iframeRef={previewIframeRef} />
-      ) : (
-        <div className="md-mermaid-placeholder" aria-live="polite">
-          HTML 生成中...
-        </div>
-      )}
+      {renderContent()}
 
       <Modal
         centered
@@ -277,7 +456,7 @@ const HtmlBlockComponent = ({
               ref={modalIframeRef}
               className="md-html-preview-iframe"
               sandbox="allow-same-origin"
-              srcDoc={code}
+              srcDoc={previewDocument}
               title="HTML fullscreen preview"
               onLoad={() => {
                 if (modalIframeRef.current) {

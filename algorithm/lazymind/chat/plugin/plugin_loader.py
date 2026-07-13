@@ -399,6 +399,17 @@ class PluginSpec:
         if not self.yaml.get('steps'):
             raise ValueError(f'plugin.yaml missing steps in {self.plugin_dir}')
 
+        required_framework_tools = self.yaml.get('required_framework_tools') or []
+        if required_framework_tools:
+            from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, group_is_active
+            by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS}
+            unavailable = [
+                name for name in required_framework_tools
+                if name not in by_name or not group_is_active(by_name[name])
+            ]
+            if unavailable:
+                raise ValueError(f'plugin requires unavailable framework tools: {unavailable}')
+
         # If driver.md is missing, we emit a warning but don't hard-fail load.
         # auto mode will be silently degraded to manual at runtime if driver.md absent.
         if not self.driver_md:

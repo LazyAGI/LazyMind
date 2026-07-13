@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
-	"lazymind/core/evolution"
 )
 
 func newRemoteFSTestDB(t *testing.T) *orm.DB {
@@ -19,13 +18,17 @@ func newRemoteFSTestDB(t *testing.T) *orm.DB {
 		t.Fatalf("connect db: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&orm.SystemMemory{},
-		&orm.SystemUserPreference{},
 		&orm.PersonalResource{},
 		&orm.PersonalResourceBlob{},
 		&orm.PersonalResourceRevision{},
 		&orm.PersonalResourceDraft{},
-		&orm.PluginResource{}, &orm.PluginBlob{}, &orm.PluginRevision{}, &orm.PluginRevisionEntry{},
+		&orm.PersonalResourceReviewSession{},
+		&orm.PersonalResourceReviewActionBatch{},
+		&orm.PersonalResourceReviewActionItem{},
+		&orm.PluginResource{},
+		&orm.PluginBlob{},
+		&orm.PluginRevision{},
+		&orm.PluginRevisionEntry{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
@@ -68,22 +71,6 @@ func TestPluginRevisionViewReadsPinnedContent(t *testing.T) {
 
 func TestPersonalResourceTaskModes(t *testing.T) {
 	db := newRemoteFSTestDB(t)
-	now := time.Now()
-	row := orm.SystemMemory{
-		ID:            "memory-1",
-		UserID:        "u1",
-		Content:       "head memory",
-		ContentHash:   evolution.HashContent("head memory"),
-		Version:       1,
-		AutoEvo:       true,
-		UpdatedBy:     "u1",
-		UpdatedByName: "User 1",
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-	if err := db.Create(&row).Error; err != nil {
-		t.Fatalf("create memory: %v", err)
-	}
 	handler := NewHandler(db.DB)
 
 	writeReview := httptest.NewRequest(http.MethodPut, "/remote-fs/content?path=memory/memory.md&user_id=u1&task_id=review_1", strings.NewReader("review draft"))
@@ -103,7 +90,7 @@ func TestPersonalResourceTaskModes(t *testing.T) {
 	readEditor := httptest.NewRequest(http.MethodGet, "/remote-fs/content?path=memory/memory.md&user_id=u1&task_id=session_1", nil)
 	readEditorRec := httptest.NewRecorder()
 	handler.Content(readEditorRec, readEditor)
-	if readEditorRec.Code != http.StatusOK || readEditorRec.Body.String() != "head memory" {
+	if readEditorRec.Code != http.StatusOK || readEditorRec.Body.String() != "" {
 		t.Fatalf("expected editor read head, got status=%d body=%q", readEditorRec.Code, readEditorRec.Body.String())
 	}
 

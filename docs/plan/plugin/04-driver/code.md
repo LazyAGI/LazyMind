@@ -426,7 +426,8 @@ def ask_user(
     return f'已向用户提问 (ask_id={ask_id})，等待下轮回答'
 ```
 
-**注册**：仅 ChatAgent；`ask_user` 加入 `plugin_stop_tools`（调用后 ReAct 立即退出）。
+**注册**：仅 ChatAgent；`dynamic` 模式和未启用插件时注册，并加入 stop-tools。
+`auto` 插件模式在工具层不注册 `ask_user`，因此 synthetic DriverAgent 回合也无法调用。
 
 **Go** 转发 SSE `ask_pending`；**结束**当前 chat stream。
 

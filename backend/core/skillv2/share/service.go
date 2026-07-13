@@ -141,7 +141,7 @@ func copyHeadRevision(tx *gorm.DB, sourceSkillID, ownerUserID, ownerUserName, ch
 	copy.CreateUserID = createdBy
 	copy.CreateUserName = ownerUserName
 	copy.HeadRevisionID = &revisionID
-	copy.RelativeRoot = path.Join(ownerUserID, source.Category, source.SkillName)
+	copy.RelativeRoot = path.Join(source.Category, source.SkillName)
 	copy.Version = 1
 	copy.CreatedAt = now
 	copy.UpdatedAt = now

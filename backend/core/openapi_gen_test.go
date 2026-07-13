@@ -431,18 +431,23 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"put", "/api/core/personalization-setting", true, false, true},
 		{"get", "/api/core/user/ui-preferences", false, false, true},
 		{"patch", "/api/core/user/ui-preferences", true, false, true},
-		{"put", "/api/core/memory", true, false, true},
-		{"get", "/api/core/memory:draft-preview", false, false, true},
-		{"post", "/api/core/memory:generate", true, false, true},
-		{"post", "/api/core/memory:confirm", false, false, true},
-		{"post", "/api/core/memory:discard", false, false, true},
-		{"put", "/api/core/user-preference", true, false, true},
-		{"get", "/api/core/user-preference:draft-preview", false, false, true},
-		{"post", "/api/core/user-preference:generate", true, false, true},
-		{"post", "/api/core/user-preference:confirm", false, false, true},
-		{"post", "/api/core/user-preference:discard", false, false, true},
-		{"get", "/api/core/resource-versions", false, true, true},
-		{"get", "/api/core/resource-versions/{version_id}", false, true, true},
+		{"patch", "/api/core/personal-resource/{resource_type}", true, true, true},
+		{"get", "/api/core/personal-resource/{resource_type}:file", false, true, true},
+		{"put", "/api/core/personal-resource/{resource_type}:file", true, true, true},
+		{"put", "/api/core/personal-resource/{resource_type}:draft", true, true, true},
+		{"get", "/api/core/personal-resource/{resource_type}:draft-preview", false, true, true},
+		{"post", "/api/core/personal-resource/{resource_type}:generate", true, true, true},
+		{"post", "/api/core/personal-resource/{resource_type}/draft-review/{review_id}/actions", true, true, true},
+		{"post", "/api/core/personal-resource/{resource_type}/draft-review/{review_id}:undo", true, true, true},
+		{"post", "/api/core/personal-resource/{resource_type}:commit", true, true, true},
+		{"post", "/api/core/personal-resource/{resource_type}:discard", false, true, true},
+		{"get", "/api/core/personal-resource/{resource_type}/revisions", false, true, true},
+		{"get", "/api/core/personal-resource/{resource_type}/revisions/{revision_id}", false, true, true},
+		{"post", "/api/core/personal-resource/{resource_type}:rollback", true, true, true},
+		{"get", "/api/core/skill-review:summary", false, false, false},
+		{"post", "/api/core/skill-review:run", false, false, false},
+		{"get", "/api/core/skill-review/tasks", false, false, false},
+		{"get", "/api/core/skill-review-results/{review_result_id}", false, false, false},
 		{"get", "/api/core/agent/threads", false, true, true},
 		{"get", "/api/core/conversations/{name}:history", false, true, true},
 	}
@@ -495,6 +500,21 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		"/api/core/skill/remove",
 		"/api/core/memory/suggestion",
 		"/api/core/user_preference/suggestion",
+		"/api/core/memory",
+		"/api/core/memory:draft-preview",
+		"/api/core/memory:generate",
+		"/api/core/memory:confirm",
+		"/api/core/memory:discard",
+		"/api/core/user-preference",
+		"/api/core/user-preference:draft-preview",
+		"/api/core/user-preference:generate",
+		"/api/core/user-preference:confirm",
+		"/api/core/user-preference:discard",
+		"/api/core/skill-review-results",
+		"/api/core/skill-review-results/{review_result_id}:accept",
+		"/api/core/skill-review-results/{review_result_id}:reject",
+		"/api/core/memory-review-results",
+		"/api/core/resource-versions",
 	}
 	for _, path := range removedPaths {
 		if _, ok := paths[path]; ok {
@@ -533,7 +553,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 	}
 }
 
-func TestOpenAPISpecAssignsMetadataFieldsToUserPreference(t *testing.T) {
+func TestOpenAPISpecAssignsMetadataFieldsToPersonalResourcePatch(t *testing.T) {
 	r := mux.NewRouter()
 	registerAllRoutes(r)
 
@@ -569,22 +589,21 @@ func TestOpenAPISpecAssignsMetadataFieldsToUserPreference(t *testing.T) {
 		return properties
 	}
 
-	memoryRequestProps := schemaProperties("memoryUpsertOpenAPIRequest")
-	for _, name := range []string{"content", "auto_evo"} {
-		if _, ok := memoryRequestProps[name]; !ok {
-			t.Fatalf("memoryUpsertOpenAPIRequest expected property %q", name)
+	draftRequestProps := schemaProperties("personalResourceWriteDraftOpenAPIRequest")
+	for _, name := range []string{"content", "expected_draft_version"} {
+		if _, ok := draftRequestProps[name]; !ok {
+			t.Fatalf("personalResourceWriteDraftOpenAPIRequest expected property %q", name)
 		}
 	}
 	for _, name := range []string{"agent_persona", "preferred_name", "response_style"} {
-		if _, ok := memoryRequestProps[name]; ok {
-			t.Fatalf("memoryUpsertOpenAPIRequest has user_preference-only property %q", name)
+		if _, ok := draftRequestProps[name]; ok {
+			t.Fatalf("personalResourceWriteDraftOpenAPIRequest must not include property %q", name)
 		}
 	}
-
-	preferenceRequestProps := schemaProperties("managedStateUpsertOpenAPIRequest")
-	for _, name := range []string{"content", "agent_persona", "preferred_name", "response_style", "auto_evo"} {
-		if _, ok := preferenceRequestProps[name]; !ok {
-			t.Fatalf("managedStateUpsertOpenAPIRequest expected property %q", name)
+	patchRequestProps := schemaProperties("personalResourcePatchOpenAPIRequest")
+	for _, name := range []string{"auto_evo", "agent_persona", "preferred_name", "response_style"} {
+		if _, ok := patchRequestProps[name]; !ok {
+			t.Fatalf("personalResourcePatchOpenAPIRequest expected property %q", name)
 		}
 	}
 
@@ -630,8 +649,8 @@ func TestOpenAPISpecAssignsMetadataFieldsToUserPreference(t *testing.T) {
 		}
 	}
 
-	assertRequestSchemaRef("/api/core/memory", "put", "#/components/schemas/memoryUpsertOpenAPIRequest")
-	assertRequestSchemaRef("/api/core/user-preference", "put", "#/components/schemas/managedStateUpsertOpenAPIRequest")
+	assertRequestSchemaRef("/api/core/personal-resource/{resource_type}:file", "put", "#/components/schemas/personalResourceWriteDraftOpenAPIRequest")
+	assertRequestSchemaRef("/api/core/personal-resource/{resource_type}:draft", "put", "#/components/schemas/personalResourceWriteDraftOpenAPIRequest")
 }
 
 func TestOpenAPISpecMarksUIPreferencesPatchFieldsOptional(t *testing.T) {

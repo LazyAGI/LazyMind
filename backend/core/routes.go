@@ -13,12 +13,9 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/file"
 	"lazymind/core/mcp"
-	"lazymind/core/memory"
 	"lazymind/core/modelprovider"
 	"lazymind/core/plugin"
-	"lazymind/core/preference"
 	"lazymind/core/remotefs"
-	"lazymind/core/resourcechange"
 	"lazymind/core/resourcefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
@@ -46,6 +43,8 @@ func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h 
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
+	resourcefs.AutoEvoEnabledScanner = resourceupdate.ScanPendingResultsForResource
+
 	// ----- Datasettext -----
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, doc.ListAlgos)
 	handleAPI(r, "GET", "/dataset/tags", []string{"document.read"}, doc.AllDatasetTags)
@@ -228,6 +227,10 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:save", []string{"qa.write"}, plugin.SavePluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-generate", []string{"qa.write"}, plugin.AIGeneratePluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-repair", []string{"qa.write"}, plugin.AIRepairPluginDraft)
+	handleAPI(r, "GET", "/plugin-drafts/{draft_id}/generation-analysis", []string{"qa.read"}, plugin.GetPluginGenerationAnalysis)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:confirm-workflow", []string{"qa.write"}, plugin.ConfirmPluginWorkflow)
+	handleAPI(r, "GET", "/plugin-drafts/{draft_id}/repair-runs/{repair_id}", []string{"qa.read"}, plugin.GetPluginRepairRun)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:repair-preview", []string{"qa.read"}, plugin.PreviewPluginRepair)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:publish", []string{"qa.write"}, plugin.PublishPluginDraft)
 	handleAPI(r, "DELETE", "/plugin-drafts/{draft_id}", []string{"qa.write"}, plugin.DeletePluginDraft)
 	handleAPI(r, "GET", "/chat/settings/plugins", []string{"qa.read"}, plugin.ListUserPluginSettings)
@@ -289,21 +292,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/plugin-sessions/{session_id}:restore", []string{"qa.write"}, plugin.RestoreSessionHandler)
 	// List dismissed sessions for a conversation (used by restore UI).
 	handleAPI(r, "GET", "/conversations/{conversation_id}/dismissed-plugin-sessions", []string{"qa.read"}, plugin.ListDismissedSessionsHandler)
-	handleAPI(r, "GET", "/evolution/tasks", []string{"qa.read"}, resourceupdate.ListTasks)
-	handleAPI(r, "GET", "/evolution/tasks/{task_id}", []string{"qa.read"}, resourceupdate.GetTask)
-	handleAPI(r, "GET", "/skill-review:summary", []string{"qa.read"}, resourceupdate.GetSkillReviewSummary)
-	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)
-	handleAPI(r, "GET", "/skill-review/tasks", []string{"qa.read"}, resourceupdate.ListSkillReviewTasks)
-	handleAPI(r, "GET", "/skill-review-results", []string{"qa.read"}, resourceupdate.ListSkillReviewResults)
-	handleAPI(r, "GET", "/skill-review-results/{review_result_id}", []string{"qa.read"}, resourceupdate.GetSkillReviewResult)
-	handleAPI(r, "POST", "/skill-review-results/{review_result_id}:accept", []string{"qa.read"}, resourceupdate.AcceptSkillReviewResult)
-	handleAPI(r, "POST", "/skill-review-results/{review_result_id}:reject", []string{"qa.read"}, resourceupdate.RejectSkillReviewResult)
-	handleAPI(r, "GET", "/memory-review-results", []string{"qa.read"}, resourceupdate.ListMemoryReviewResults)
-	handleAPI(r, "GET", "/memory-review-results/{review_result_id}", []string{"qa.read"}, resourceupdate.GetMemoryReviewResult)
-	handleAPI(r, "POST", "/memory-review-results/{review_result_id}:accept", []string{"qa.read"}, resourceupdate.AcceptMemoryReviewResult)
-	handleAPI(r, "POST", "/memory-review-results/{review_result_id}:reject", []string{"qa.read"}, resourceupdate.RejectMemoryReviewResult)
-	handleAPI(r, "GET", "/resource-versions", []string{"qa.read"}, resourcechange.ListVersions)
-	handleAPI(r, "GET", "/resource-versions/{version_id}", []string{"qa.read"}, resourcechange.GetVersion)
 	handleAPI(r, "GET", "/personalization-items", []string{"qa.read"}, evolution.ListManagedStates)
 	handleAPI(r, "GET", "/personalization-setting", []string{"qa.read"}, evolution.GetPersonalizationSetting)
 	handleAPI(r, "PUT", "/personalization-setting", []string{"qa.write"}, evolution.SetPersonalizationSetting)
@@ -314,6 +302,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skillv2handler.ListTags)
 	handleAPI(r, "GET", "/skills/categories", []string{"qa.read"}, skillv2handler.ListCategories)
 	handleAPI(r, "POST", "/skills", []string{"qa.write"}, skillv2handler.Create)
+	handleAPI(r, "GET", "/builtin-skills", []string{"qa.read"}, skillv2handler.ListBuiltinSkills)
 	handleAPI(r, "POST", "/builtin-skills/{builtin_skill_uid}:enable", []string{"qa.write"}, skillv2handler.EnableBuiltinSkill)
 	handleAPI(r, "GET", "/skills/{skill_id}:shares", []string{"qa.read"}, skillv2handler.ListShareTargets)
 	handleAPI(r, "GET", "/skill-shares/incoming", []string{"qa.read"}, skillv2handler.IncomingShares)
@@ -369,20 +358,16 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/skill-market/admin/items", []string{"qa.write"}, skillv2handler.MarketPublish)
 	handleAPI(r, "PATCH", "/skill-market/admin/items/{market_item_id}", []string{"qa.write"}, skillv2handler.MarketEdit)
 	handleAPI(r, "POST", "/skill-market/admin/items/{market_item_id}:unpublish", []string{"qa.write"}, skillv2handler.MarketUnpublish)
-	handleAPI(r, "PUT", "/memory", []string{"qa.write"}, memory.Upsert)
-	handleAPI(r, "GET", "/memory:draft-preview", []string{"qa.read"}, memory.DraftPreview)
-	handleAPI(r, "POST", "/memory:generate", []string{"qa.write"}, memory.Generate)
-	handleAPI(r, "POST", "/memory:confirm", []string{"qa.write"}, memory.Confirm)
-	handleAPI(r, "POST", "/memory:discard", []string{"qa.write"}, memory.Discard)
-	handleAPI(r, "PUT", "/user-preference", []string{"qa.write"}, preference.Upsert)
-	handleAPI(r, "GET", "/user-preference:draft-preview", []string{"qa.read"}, preference.DraftPreview)
-	handleAPI(r, "POST", "/user-preference:generate", []string{"qa.write"}, preference.Generate)
-	handleAPI(r, "POST", "/user-preference:confirm", []string{"qa.write"}, preference.Confirm)
-	handleAPI(r, "POST", "/user-preference:discard", []string{"qa.write"}, preference.Discard)
+	handleAPI(r, "GET", "/skill-review:summary", []string{"qa.read"}, resourceupdate.GetSkillReviewSummary)
+	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)
+	handleAPI(r, "GET", "/skill-review/tasks", []string{"qa.read"}, resourceupdate.ListSkillReviewTasks)
+	handleAPI(r, "GET", "/skill-review-results/{review_result_id}", []string{"qa.read"}, resourceupdate.GetSkillReviewResult)
+	handleAPI(r, "PATCH", "/personal-resource/{resource_type}", []string{"qa.write"}, resourcefs.PatchMetadata)
 	handleAPI(r, "GET", "/personal-resource/{resource_type}:file", []string{"qa.read"}, resourcefs.GetFile)
 	handleAPI(r, "PUT", "/personal-resource/{resource_type}:file", []string{"qa.write"}, resourcefs.WriteDraft)
 	handleAPI(r, "PUT", "/personal-resource/{resource_type}:draft", []string{"qa.write"}, resourcefs.WriteDraft)
 	handleAPI(r, "GET", "/personal-resource/{resource_type}:draft-preview", []string{"qa.read"}, resourcefs.DraftPreview)
+	handleAPI(r, "POST", "/personal-resource/{resource_type}:generate", []string{"qa.write"}, resourcefs.Generate)
 	handleAPI(r, "POST", "/personal-resource/{resource_type}/draft-review/{review_id}/actions", []string{"qa.write"}, resourcefs.ReviewAction)
 	handleAPI(r, "POST", "/personal-resource/{resource_type}/draft-review/{review_id}:undo", []string{"qa.write"}, resourcefs.ReviewUndo)
 	handleAPI(r, "POST", "/personal-resource/{resource_type}:commit", []string{"qa.write"}, resourcefs.CommitDraft)

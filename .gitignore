@@ -33,6 +33,7 @@ wget-log
 .claude
 .cursor
 .codex
+.playwright-cli/
 .worktrees/
 .codex-gocache/
 .codex-gomodcache/

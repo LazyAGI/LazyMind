@@ -57,6 +57,7 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'vision_extractor': 'url',
     'skill_editor': 'category/name',
     'SkillEditorToolGroup_create_skill': 'category/name',
+    'SkillEditorToolGroup_install_skill': 'github_url',
     'SkillEditorToolGroup_edit_file': 'path',
     'SkillEditorToolGroup_patch_file': 'path',
     'SkillEditorToolGroup_create_file': 'path',
@@ -111,6 +112,7 @@ _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
     'vision_extractor': 'description',
     'skill_editor': 'reason',
     'SkillEditorToolGroup_create_skill': 'status',
+    'SkillEditorToolGroup_install_skill': 'skill_key',
     'SkillEditorToolGroup_edit_file': 'status',
     'SkillEditorToolGroup_patch_file': 'status',
     'SkillEditorToolGroup_create_file': 'status',
@@ -169,6 +171,7 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'vocab_learn': 'Updating vocabulary entries for {value} now.',
     'skill_editor': 'Updating reusable skill notes related to {value} now.',
     'SkillEditorToolGroup_create_skill': 'Creating reusable skill {value} now.',
+    'SkillEditorToolGroup_install_skill': 'Installing reusable skill from {value} now.',
     'SkillEditorToolGroup_edit_file': 'Editing reusable skill file {value} now.',
     'SkillEditorToolGroup_patch_file': 'Patching reusable skill file {value} now.',
     'SkillEditorToolGroup_create_file': 'Creating reusable skill file {value} now.',
@@ -211,7 +214,7 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_step': 'Switching to step {value}.',
     'advance_step_and_hand_off': 'Switching to step {value} and handing off.',
     'regex:get_(.+)_methods': 'Expanding the {match} tool group.',
-    'regex:trigger_(.+)_plugin': 'Loading the {match} plugin now.',
+    'regex:trigger_(.+)_plugin': 'Checking whether the {match} plugin fits this request.',
 }
 _TOOL_CALL_FALLBACK_TEMPLATE = 'Calling {tool_name} to handle the request.'
 _TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = 'Gathering questions for you, please wait…'
@@ -235,6 +238,7 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'vocab_learn': '正在更新与 {value} 相关的词汇表。',
     'skill_editor': '正在更新与 {value} 相关的技能。',
     'SkillEditorToolGroup_create_skill': '正在创建 {value} 技能。',
+    'SkillEditorToolGroup_install_skill': '正在从 {value} 安装技能。',
     'SkillEditorToolGroup_edit_file': '正在编辑技能文件 {value}。',
     'SkillEditorToolGroup_patch_file': '正在修补技能文件 {value}。',
     'SkillEditorToolGroup_create_file': '正在创建技能文件 {value}。',
@@ -277,7 +281,7 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_step': '正在切换到步骤 {value}...',
     'advance_step_and_hand_off': '正在切换到步骤 {value} 并交出控制权...',
     'regex:get_(.+)_methods': '正在展开{match}工具组。',
-    'regex:trigger_(.+)_plugin': '正在加载 {match} 插件...',
+    'regex:trigger_(.+)_plugin': '正在检查 {match} 插件是否适合当前需求...',
 }
 _ZH_TOOL_CALL_FALLBACK_TEMPLATE = '正在调用工具 {tool_name}...'
 _ZH_TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = '我正在组织问题，请稍后'
@@ -301,6 +305,7 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'vocab_learn': 'Vocabulary entries for {value} were updated successfully.',
     'skill_editor': 'Skill operation for {value} completed successfully.',
     'SkillEditorToolGroup_create_skill': 'Skill {value} was created successfully.',
+    'SkillEditorToolGroup_install_skill': 'Skill {value} was installed successfully.',
     'SkillEditorToolGroup_edit_file': 'Skill file {value} was edited successfully.',
     'SkillEditorToolGroup_patch_file': 'Skill file {value} was patched successfully.',
     'SkillEditorToolGroup_create_file': 'Skill file {value} was created successfully.',
@@ -346,7 +351,9 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_step': 'Plugin launched.',
     'advance_step_and_hand_off': 'Step queued. Plugin launched.',
     'regex:get_(.+)_methods': 'The {match} tool group has been expanded.',
-    'regex:trigger_(.+)_plugin': 'Plugin launched.',
+    'regex:trigger_(.+)_plugin': (
+        'Plugin preflight completed. Result: {result.outcome}. Reason: {result.reason}.'
+    ),
 }
 
 _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
@@ -368,6 +375,7 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'vocab_learn': '已成功更新 {value} 的词汇表。',
     'skill_editor': '{value} 技能操作已完成。',
     'SkillEditorToolGroup_create_skill': '已成功创建 {value} 技能。',
+    'SkillEditorToolGroup_install_skill': '已成功安装 {value} 技能。',
     'SkillEditorToolGroup_edit_file': '已成功编辑技能文件 {value}。',
     'SkillEditorToolGroup_patch_file': '已成功修补技能文件 {value}。',
     'SkillEditorToolGroup_create_file': '已成功创建技能文件 {value}。',
@@ -411,7 +419,9 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_step': '插件已启动',
     'advance_step_and_hand_off': '步骤已排队，插件已启动',
     'regex:get_(.+)_methods': '已经展开{match}工具组。',
-    'regex:trigger_(.+)_plugin': '插件已启动',
+    'regex:trigger_(.+)_plugin': (
+        '插件启动检查已完成，结果是 {result.outcome}，原因是 {result.reason}。'
+    ),
 }
 
 _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
@@ -433,6 +443,7 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'vocab_learn': 'Vocabulary entries for {value} could not be updated.',
     'skill_editor': 'Reusable skill notes for {value} could not be updated.',
     'SkillEditorToolGroup_create_skill': 'Skill {value} could not be created.',
+    'SkillEditorToolGroup_install_skill': 'Skill from {value} could not be installed.',
     'SkillEditorToolGroup_edit_file': 'Skill file {value} could not be edited.',
     'SkillEditorToolGroup_patch_file': 'Skill file {value} could not be patched.',
     'SkillEditorToolGroup_create_file': 'Skill file {value} could not be created.',
@@ -475,7 +486,9 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'advance_step': 'Step {value} could not be started.',
     'advance_step_and_hand_off': 'Step {value} could not be queued.',
     'regex:get_(.+)_methods': 'The {match} tool group could not be expanded.',
-    'regex:trigger_(.+)_plugin': 'Failed to load the {match} plugin.',
+    'regex:trigger_(.+)_plugin': (
+        'Plugin preflight completed. Result: {result.outcome}. Reason: {result.reason}.'
+    ),
 }
 
 _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
@@ -497,6 +510,7 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'vocab_learn': '未能更新 {value} 的词汇表。',
     'skill_editor': '未能更新 {value} 的技能。',
     'SkillEditorToolGroup_create_skill': '未能创建 {value} 技能。',
+    'SkillEditorToolGroup_install_skill': '未能从 {value} 安装技能。',
     'SkillEditorToolGroup_edit_file': '未能编辑技能文件 {value}。',
     'SkillEditorToolGroup_patch_file': '未能修补技能文件 {value}。',
     'SkillEditorToolGroup_create_file': '未能创建技能文件 {value}。',
@@ -539,7 +553,9 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'advance_step': '步骤 {value} 启动失败',
     'advance_step_and_hand_off': '步骤 {value} 排队失败',
     'regex:get_(.+)_methods': '未能展开{match}工具组。',
-    'regex:trigger_(.+)_plugin': '{match} 插件加载失败',
+    'regex:trigger_(.+)_plugin': (
+        '插件启动检查已完成，结果是 {result.outcome}，原因是 {result.reason}。'
+    ),
 }
 
 _TOOL_RESULT_APPROVAL_TEMPLATES: dict[str, str] = {
@@ -788,6 +804,10 @@ _MAX_TOOL_RESULT_PREVIEW_LENGTH = 50
 _ZH_PREVIEW_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
 _TOOL_NOT_AVAILABLE_RE = re.compile(
     r'Tool \[[^\]]+\] is not available\. Please choose from the available tools\.',
+    re.IGNORECASE,
+)
+_TOOL_EXECUTION_ERROR_RE = re.compile(
+    r'^\s*(?:\[Tool Error\]|Tool \[[^\]]+\] (?:arguments format|parameters) error\b)',
     re.IGNORECASE,
 )
 
@@ -1058,10 +1078,9 @@ def _tool_result_status(result: Any) -> str:
         if status in ('error', 'missing', 'failed', 'fail'):
             return 'failed'
     elif isinstance(result, str):
-        text = result.strip().lower()
         if _TOOL_NOT_AVAILABLE_RE.search(result):
             return 'inactive'
-        if any(marker in text for marker in ('error', 'failed', 'parameters error')):
+        if _TOOL_EXECUTION_ERROR_RE.search(result):
             return 'failed'
     return 'ok'
 
@@ -1090,11 +1109,31 @@ class _SafeFormatContext(dict):
         return '{' + key + '}'
 
 
+class _TemplateResult:
+    """Attribute-access wrapper used by dotted result template paths."""
+
+    def __init__(self, value: dict[str, Any], path: str = 'result') -> None:
+        self._value = value
+        self._path = path
+
+    def __getattr__(self, key: str) -> Any:
+        if key not in self._value:
+            return f'{{{self._path}.{key}}}'
+        value = self._value[key]
+        if isinstance(value, dict):
+            return _TemplateResult(value, f'{self._path}.{key}')
+        text = _truncate_representative_result(
+            _friendly_preview_text(value)
+        ).replace('\n', ' ').strip()
+        return f'**{text}**' if text else f'{{{self._path}.{key}}}'
+
+
 def _render_preview_template(
     tool_name: str,
     value: str,
     template_map: dict[str, str],
     fallback_template: str,
+    result: Any = None,
 ) -> str:
     render_name, render_context = _render_tool_context(tool_name)
     template = _resolve_tool_key(render_name, template_map)
@@ -1109,6 +1148,9 @@ def _render_preview_template(
         key: f'**{item}**'
         for key, item in render_context.items()
     }
+    result_mapping = _tool_result_mapping(result)
+    if result_mapping is not None:
+        context['result'] = _TemplateResult(result_mapping)
     context['value'] = f'**{preview_value}**'
     context['tool_name'] = f'**{tool_name}**'
     context['match'] = f'**{match_group or render_name}**'
@@ -1126,6 +1168,8 @@ def _tool_call_preview(tool_name: str, preview_value: str, language: str = 'en')
 
 def _tool_result_preview_display_value(tool_name: str, result: Any, value: str = '') -> str:
     status = _tool_result_status(result)
+    if _tool_name_is(tool_name, 'SkillEditorToolGroup_install_skill') and status == 'ok':
+        return _truncate_tool_result_preview(_representative_tool_result(tool_name, result))
     if (
         _tool_name_is(tool_name, 'calculator')
         and status == 'ok'
@@ -1134,6 +1178,26 @@ def _tool_result_preview_display_value(tool_name: str, result: Any, value: str =
     ):
         return _truncate_tool_result_preview(result.get('result'))
     return value or _truncate_tool_result_preview(_representative_tool_result(tool_name, result))
+
+
+def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
+    """Normalize mapping, nested-result, and JSON-string tool results."""
+    if isinstance(value, dict):
+        nested = value.get('result')
+        if isinstance(nested, dict):
+            return nested
+        if isinstance(nested, str):
+            parsed = _tool_result_mapping(nested)
+            if parsed is not None:
+                return parsed
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+        return _tool_result_mapping(parsed) if isinstance(parsed, dict) else None
+    return None
 
 
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:
@@ -1158,6 +1222,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
                 _TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE,
                 _ZH_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE,
             ),
+            result,
         )
     if status == 'failed':
         return _render_preview_template(
@@ -1169,6 +1234,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
                 _TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE,
                 _ZH_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE,
             ),
+            result,
         )
     payload = result.get('result') if isinstance(result, dict) and isinstance(result.get('result'), dict) else result
     if isinstance(payload, dict) and payload.get('total') == 0 and _tool_name_starts(tool_name, 'kb_'):
@@ -1180,6 +1246,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
         display_value,
         _language_templates(language, _TOOL_RESULT_PREVIEW_TEMPLATES, _ZH_TOOL_RESULT_PREVIEW_TEMPLATES),
         _language_fallback(language, _TOOL_RESULT_FALLBACK_TEMPLATE, _ZH_TOOL_RESULT_FALLBACK_TEMPLATE),
+        result,
     )
 
 

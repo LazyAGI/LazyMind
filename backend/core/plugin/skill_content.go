@@ -2,16 +2,17 @@ package plugin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
-
-	skillservice "lazymind/core/skillv2/service"
 )
 
 const builtinSkillIDPrefix = "builtin:"
@@ -22,6 +23,34 @@ type pluginBuiltinSkillManifest struct {
 	UID      string
 	Category string
 	DirName  string
+}
+
+type skillPackageFile struct {
+	Path     string `json:"path"`
+	BlobHash string `json:"blob_hash,omitempty"`
+	Size     int64  `json:"size"`
+	Mime     string `json:"mime,omitempty"`
+	FileType string `json:"file_type,omitempty"`
+	Binary   bool   `json:"binary"`
+	Content  string `json:"content,omitempty"`
+}
+
+type pluginSourceSkillSnapshot struct {
+	SkillID    string             `json:"skill_id"`
+	Name       string             `json:"name"`
+	RevisionID string             `json:"revision_id"`
+	RevisionNo int64              `json:"revision_no"`
+	TreeHash   string             `json:"tree_hash"`
+	Files      []skillPackageFile `json:"files"`
+}
+
+func (s pluginSourceSkillSnapshot) skillMD() string {
+	for _, file := range s.Files {
+		if file.Path == "SKILL.md" {
+			return file.Content
+		}
+	}
+	return ""
 }
 
 var pluginBuiltinSkillManifests = []pluginBuiltinSkillManifest{
@@ -39,24 +68,118 @@ func isPluginSourceSkillNotFound(err error) bool {
 // loadPluginSourceSkill reads normal skills from the v2 revision store. Legacy
 // builtin template IDs are resolved locally because skillv2 does not expose a
 // function-level reader for templates that have not been installed yet.
-func loadPluginSourceSkill(ctx context.Context, db *gorm.DB, userID, skillID string) (string, string, error) {
+func loadPluginSourceSkill(ctx context.Context, db *gorm.DB, userID, skillID string) (pluginSourceSkillSnapshot, error) {
 	if strings.HasPrefix(skillID, builtinSkillIDPrefix) {
-		return loadPluginBuiltinSkill(skillID)
+		return loadPluginBuiltinSkillPackage(skillID)
 	}
 
-	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{DB: db})
-	detail, err := svc.GetSkill(ctx, skillservice.GetSkillRequest{SkillID: skillID, UserID: userID})
+	var skill struct {
+		SkillName      string
+		HeadRevisionID *string
+	}
+	if err := db.WithContext(ctx).Table("skills").Select("skill_name, head_revision_id").Where("id=? AND owner_user_id=? AND deleted_at IS NULL", skillID, userID).Take(&skill).Error; err != nil {
+		return pluginSourceSkillSnapshot{}, err
+	}
+	if skill.HeadRevisionID == nil || *skill.HeadRevisionID == "" {
+		return pluginSourceSkillSnapshot{}, errPluginSourceSkillNotFound
+	}
+	return loadPluginSourceSkillRevision(ctx, db, userID, skillID, *skill.HeadRevisionID)
+}
+
+func loadPluginSourceSkillRevision(ctx context.Context, db *gorm.DB, userID, skillID, revisionID string) (pluginSourceSkillSnapshot, error) {
+	var skill struct{ SkillName string }
+	if err := db.WithContext(ctx).Table("skills").Select("skill_name").Where("id=? AND owner_user_id=? AND deleted_at IS NULL", skillID, userID).Take(&skill).Error; err != nil {
+		return pluginSourceSkillSnapshot{}, err
+	}
+	var revision struct {
+		ID         string
+		RevisionNo int64
+		TreeHash   string
+	}
+	if err := db.WithContext(ctx).Table("skill_revisions").Select("id, revision_no, tree_hash").
+		Where("id = ? AND skill_id = ?", revisionID, skillID).Take(&revision).Error; err != nil {
+		return pluginSourceSkillSnapshot{}, err
+	}
+	var entries []struct {
+		Path           string
+		BlobHash       *string
+		Size           int64
+		Mime, FileType string
+		Binary         bool `gorm:"column:binary"`
+	}
+	if err := db.WithContext(ctx).Table("skill_revision_entries").
+		Select(`path, blob_hash, size, mime, file_type, "binary"`).
+		Where("revision_id = ? AND entry_type = ?", revision.ID, "file").Order("path ASC").Scan(&entries).Error; err != nil {
+		return pluginSourceSkillSnapshot{}, err
+	}
+	snapshot := pluginSourceSkillSnapshot{SkillID: skillID, Name: skill.SkillName, RevisionID: revision.ID, RevisionNo: revision.RevisionNo, TreeHash: revision.TreeHash}
+	for _, entry := range entries {
+		file := skillPackageFile{Path: entry.Path, Size: entry.Size, Mime: entry.Mime, FileType: entry.FileType, Binary: entry.Binary}
+		if entry.BlobHash != nil {
+			file.BlobHash = *entry.BlobHash
+			if !entry.Binary {
+				var blob struct{ Content []byte }
+				if err := db.WithContext(ctx).Table("skill_blobs").Select("content").Where("hash = ?", *entry.BlobHash).Take(&blob).Error; err != nil {
+					return pluginSourceSkillSnapshot{}, err
+				}
+				file.Content = string(blob.Content)
+			}
+		}
+		snapshot.Files = append(snapshot.Files, file)
+	}
+	if strings.TrimSpace(snapshot.skillMD()) == "" {
+		return pluginSourceSkillSnapshot{}, errPluginSourceSkillNotFound
+	}
+	return snapshot, nil
+}
+
+func loadPluginBuiltinSkillPackage(templateID string) (pluginSourceSkillSnapshot, error) {
+	content, name, err := loadPluginBuiltinSkill(templateID)
 	if err != nil {
-		return "", "", err
+		return pluginSourceSkillSnapshot{}, err
 	}
-	file, err := svc.ReadFile(ctx, skillservice.FileRef{SkillID: skillID, RefType: "head", Path: "SKILL.md"})
+	id := strings.TrimPrefix(templateID, builtinSkillIDPrefix)
+	uid := strings.SplitN(id, ":", 2)[0]
+	manifest, ok := pluginBuiltinManifest(uid)
+	if !ok {
+		return pluginSourceSkillSnapshot{}, errPluginSourceSkillNotFound
+	}
+	base := filepath.Join(pluginBuiltinSkillsRoot(), manifest.Category, manifest.DirName)
+	snapshot := pluginSourceSkillSnapshot{SkillID: templateID, Name: name, RevisionID: "builtin:" + uid}
+	err = filepath.Walk(base, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(base, path)
+		if relErr != nil {
+			return relErr
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		snapshot.Files = append(snapshot.Files, skillPackageFile{Path: filepath.ToSlash(rel), Size: info.Size(), Content: string(data)})
+		return nil
+	})
 	if err != nil {
-		return "", "", err
+		return pluginSourceSkillSnapshot{}, err
 	}
-	if strings.TrimSpace(file.Content) == "" {
-		return "", "", errPluginSourceSkillNotFound
+	if len(snapshot.Files) == 0 {
+		snapshot.Files = []skillPackageFile{{Path: "SKILL.md", Content: content, Size: int64(len(content))}}
 	}
-	return file.Content, detail.SkillName, nil
+	sort.Slice(snapshot.Files, func(i, j int) bool { return snapshot.Files[i].Path < snapshot.Files[j].Path })
+	var treeLines []string
+	for i := range snapshot.Files {
+		sum := sha256.Sum256([]byte(snapshot.Files[i].Content))
+		snapshot.Files[i].BlobHash = hex.EncodeToString(sum[:])
+		treeLines = append(treeLines, snapshot.Files[i].Path+"\x00"+snapshot.Files[i].BlobHash)
+	}
+	tree := sha256.Sum256([]byte(strings.Join(treeLines, "\n")))
+	snapshot.TreeHash = hex.EncodeToString(tree[:])
+	return snapshot, nil
 }
 
 func loadPluginBuiltinSkill(templateID string) (string, string, error) {

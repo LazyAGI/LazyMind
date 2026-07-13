@@ -323,6 +323,16 @@ type skillDraftEntryRow struct {
 
 func (skillDraftEntryRow) TableName() string { return "skill_draft_entries" }
 
+type skillMarketInstallRow struct {
+	MarketItemID string    `gorm:"column:market_item_id;type:varchar(36);primaryKey"`
+	UserID       string    `gorm:"column:user_id;type:text;primaryKey"`
+	SkillID      string    `gorm:"column:skill_id;type:varchar(36);not null"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (skillMarketInstallRow) TableName() string { return "skill_market_installs" }
+
 type skillSearchIndexRow struct {
 	SkillID string `gorm:"column:skill_id;type:varchar(36);primaryKey"`
 }

@@ -5,6 +5,8 @@ so these tests run without a real LLM or algorithm service.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -94,19 +96,31 @@ def test_build_cold_start_tools_creates_one_trigger_per_plugin(loaded_plugin):
     assert 'trigger_test_plugin' in names
 
 
-def test_cold_start_trigger_calls_write_agent_data(loaded_plugin, mock_write_agent_data, mock_agentic_config):
+def test_cold_start_trigger_prepares_launch_without_creating_task(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
     from lazymind.chat.plugin import plugin_manager
     tools = plugin_manager.build_cold_start_tools()
     trigger = next(t for t in tools if t.__name__ == 'trigger_test_plugin')
 
-    result = trigger(user_input='Draw a sunset')
+    preflight = {
+        'decision': 'ready',
+        'reason': 'matches',
+        'missing_information': [],
+        'normalized_request': 'Draw a sunset',
+        'first_step_id': 'step_a',
+        'hand_off': True,
+    }
+    with patch.object(plugin_manager, '_evaluate_plugin_preflight', return_value=preflight):
+        result = json.loads(trigger(request_context='Draw a sunset', explicit_plugin_request=False))
 
-    assert mock_write_agent_data.called
-    call_kwargs = mock_write_agent_data.call_args
-    assert call_kwargs.kwargs.get('agent_type') == 'plugin_step'
-    assert call_kwargs.kwargs.get('params', {}).get('is_cold_start') is True
-    assert call_kwargs.kwargs.get('params', {}).get('step_id') == 'step_a'
-    assert 'triggered' in result.lower() or 'step' in result.lower()
+    assert result['status'] == 'ready'
+    assert result['outcome'] == 'ready'
+    assert result['must_advance'] is True
+    assert result['launch_plan']['first_step_id'] == 'step_a'
+    assert result['launch_plan']['hand_off'] is True
+    assert mock_agentic_config['prepared_plugin']['advance_committed'] is False
+    mock_write_agent_data.assert_called_once()
+    assert mock_write_agent_data.call_args.args[0] == 'plugin_preflight_updated'
 
 
 def test_cold_start_trigger_rejects_empty_input(loaded_plugin, mock_write_agent_data, mock_agentic_config):
@@ -114,9 +128,380 @@ def test_cold_start_trigger_rejects_empty_input(loaded_plugin, mock_write_agent_
     tools = plugin_manager.build_cold_start_tools()
     trigger = next(t for t in tools if t.__name__ == 'trigger_test_plugin')
 
-    result = trigger(user_input='   ')
-    assert 'error' in result.lower()
+    result = json.loads(trigger(request_context='   ', explicit_plugin_request=False))
+    assert result['status'] == 'preflight_failed'
     assert not mock_write_agent_data.called
+
+
+def test_cold_start_trigger_need_information_does_not_prepare_launch(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    trigger = next(
+        t for t in plugin_manager.build_cold_start_tools()
+        if t.__name__ == 'trigger_test_plugin'
+    )
+    preflight = {
+        'decision': 'need_information',
+        'reason': 'size is required',
+        'missing_information': [{'key': 'size', 'question': 'Which size?'}],
+        'normalized_request': 'Draw a sunset',
+        'first_step_id': '',
+        'hand_off': True,
+    }
+    with patch.object(plugin_manager, '_evaluate_plugin_preflight', return_value=preflight):
+        result = json.loads(trigger(request_context='Draw a sunset', explicit_plugin_request=False))
+
+    assert result['status'] == 'need_information'
+    assert 'prepared_plugin' not in mock_agentic_config
+    assert mock_agentic_config['plugin_preflight_context']['original_intent'] == 'Draw a sunset'
+    assert mock_write_agent_data.call_args.args[0] == 'plugin_preflight_updated'
+
+
+def test_explicit_plugin_request_cannot_be_rejected_as_not_applicable(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    trigger = next(
+        t for t in plugin_manager.build_cold_start_tools()
+        if t.__name__ == 'trigger_test_plugin'
+    )
+    preflight = {
+        'decision': 'not_applicable',
+        'reason': 'The task is simple enough to answer directly.',
+        'missing_information': [],
+        'normalized_request': 'Use the test plugin to draw a sunset',
+        'first_step_id': '',
+        'hand_off': True,
+    }
+
+    with patch.object(plugin_manager, '_evaluate_plugin_preflight', return_value=preflight):
+        result = json.loads(trigger(
+            request_context='Use the test plugin to draw a sunset',
+            explicit_plugin_request=True,
+        ))
+
+    assert result['status'] == 'ready'
+    assert result['launch_plan']['first_step_id'] == 'step_a'
+    assert mock_agentic_config['prepared_plugin']['must_advance'] is True
+
+
+def test_implicit_plugin_request_can_still_be_not_applicable(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    trigger = next(
+        t for t in plugin_manager.build_cold_start_tools()
+        if t.__name__ == 'trigger_test_plugin'
+    )
+    preflight = {
+        'decision': 'not_applicable',
+        'reason': 'The request does not need this plugin.',
+        'missing_information': [],
+        'normalized_request': 'Say hello',
+        'first_step_id': '',
+        'hand_off': True,
+    }
+
+    with patch.object(plugin_manager, '_evaluate_plugin_preflight', return_value=preflight):
+        result = json.loads(trigger(request_context='Say hello', explicit_plugin_request=False))
+
+    assert result['status'] == 'not_applicable'
+    assert result['outcome'] == 'not_applicable'
+    assert 'prepared_plugin' not in mock_agentic_config
+
+
+def test_explicit_plugin_choice_persists_across_clarification_turns(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    trigger = next(
+        t for t in plugin_manager.build_cold_start_tools()
+        if t.__name__ == 'trigger_test_plugin'
+    )
+    need_info = {
+        'decision': 'need_information',
+        'reason': 'A required value is missing.',
+        'missing_information': [{'key': 'value', 'question': 'Which value?'}],
+        'normalized_request': 'Use the test plugin',
+        'first_step_id': '',
+        'hand_off': True,
+    }
+    contradictory_follow_up = {
+        'decision': 'not_applicable',
+        'reason': 'This answer alone does not mention the plugin.',
+        'missing_information': [],
+        'normalized_request': 'Use the test plugin with value 42',
+        'first_step_id': '',
+        'hand_off': True,
+    }
+
+    with patch.object(
+        plugin_manager,
+        '_evaluate_plugin_preflight',
+        side_effect=[need_info, contradictory_follow_up],
+    ):
+        first = json.loads(trigger(
+            request_context='Use the test plugin',
+            explicit_plugin_request=True,
+        ))
+        second = json.loads(trigger(
+            request_context='Use value 42',
+            explicit_plugin_request=False,
+        ))
+
+    assert first['status'] == 'need_information'
+    assert second['status'] == 'ready'
+    assert mock_agentic_config['prepared_plugin']['explicit_plugin_request'] is True
+
+
+def test_retrigger_preserves_original_intent_and_accumulates_confirmations(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    trigger = next(
+        t for t in plugin_manager.build_cold_start_tools()
+        if t.__name__ == 'trigger_test_plugin'
+    )
+    need_info = {
+        'decision': 'need_information',
+        'reason': 'need style',
+        'missing_information': [{'key': 'style', 'question': 'Which style?'}],
+        'normalized_request': 'Draw a sunset',
+        'first_step_id': '',
+        'hand_off': True,
+    }
+    ready = {
+        'decision': 'ready',
+        'reason': 'complete',
+        'missing_information': [],
+        'normalized_request': 'Draw a watercolor sunset',
+        'first_step_id': 'step_a',
+        'hand_off': False,
+    }
+    with patch.object(
+        plugin_manager, '_evaluate_plugin_preflight', side_effect=[need_info, ready]
+    ):
+        trigger(request_context='Draw a sunset', explicit_plugin_request=False)
+        result = json.loads(trigger(
+            request_context='Use watercolor style',
+            explicit_plugin_request=False,
+        ))
+
+    prepared = mock_agentic_config['prepared_plugin']
+    assert result['status'] == 'ready'
+    assert prepared['original_intent'] == 'Draw a sunset'
+    assert prepared['confirmation_answers'] == ['Use watercolor style']
+    assert prepared['launch_plan']['normalized_request'] == 'Draw a watercolor sunset'
+
+
+def test_cold_advance_commits_exact_prepared_plan(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config['prepared_plugin'] = {
+        'plugin_id': 'test-plugin',
+        'preflight_id': 'pf-1',
+        'must_advance': True,
+        'advance_committed': False,
+        'launch_plan': {
+            'first_step_id': 'step_a',
+            'normalized_request': 'Draw a sunset after all confirmations',
+            'hand_off': True,
+        },
+    }
+    handoff = next(
+        t for t in plugin_manager.build_cold_advance_tools()
+        if t.__name__ == 'advance_step_and_hand_off'
+    )
+
+    result = handoff(step_id='step_a')
+
+    assert 'acceptance is pending' in result.lower()
+    params = mock_write_agent_data.call_args.kwargs['params']
+    assert params['is_cold_start'] is True
+    assert params['hand_off'] is True
+    assert params['preflight_id'] == 'pf-1'
+    assert params['user_input'] == 'Draw a sunset after all confirmations'
+    assert mock_agentic_config['prepared_plugin']['advance_committed'] is True
+
+
+def test_cold_advance_rejects_tool_that_disagrees_with_launch_plan(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config['prepared_plugin'] = {
+        'plugin_id': 'test-plugin',
+        'preflight_id': 'pf-1',
+        'must_advance': True,
+        'advance_committed': False,
+        'launch_plan': {
+            'first_step_id': 'step_a',
+            'normalized_request': 'Draw a sunset',
+            'hand_off': False,
+        },
+    }
+    handoff = next(
+        t for t in plugin_manager.build_cold_advance_tools()
+        if t.__name__ == 'advance_step_and_hand_off'
+    )
+
+    with pytest.raises(ValueError, match='requires advance_step'):
+        handoff(step_id='step_a')
+    assert not mock_write_agent_data.called
+
+
+def test_deterministic_fallback_executes_only_the_validated_plan(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config['prepared_plugin'] = {
+        'plugin_id': 'test-plugin',
+        'preflight_id': 'pf-fallback',
+        'must_advance': True,
+        'advance_committed': False,
+        'launch_plan': {
+            'first_step_id': 'step_a',
+            'normalized_request': 'Run continuously without interruption',
+            'hand_off': False,
+        },
+    }
+
+    result = plugin_manager.commit_prepared_plugin_fallback()
+
+    assert 'acceptance is pending' in result
+    params = mock_write_agent_data.call_args.kwargs['params']
+    assert params['step_id'] == 'step_a'
+    assert params['hand_off'] is False
+    assert params['preflight_id'] == 'pf-fallback'
+    assert mock_agentic_config['prepared_plugin']['advance_committed'] is True
+
+
+def test_preflight_model_uses_llm_role_json_mode_and_timeout():
+    from lazymind.chat.plugin import plugin_manager
+    llm = MagicMock(return_value=json.dumps({
+        'decision': 'ready',
+        'reason': 'matches',
+        'missing_information': [],
+        'normalized_request': 'Draw a sunset',
+        'first_step_id': 'step_a',
+        'hand_off': True,
+    }))
+    with (
+        patch.object(plugin_manager, 'is_model_role_available', return_value=True),
+        patch.object(plugin_manager.lazyllm, 'AutoModel', return_value=llm) as auto_model,
+    ):
+        result = plugin_manager._evaluate_plugin_preflight(
+            plugin_id='test-plugin',
+            plugin_name='Test Plugin',
+            description='Test',
+            when_to_use='Use for tests',
+            scenario='Scenario',
+            request_context='Draw a sunset',
+            previous=None,
+            first_steps=['step_a'],
+            plugin_mode='dynamic',
+        )
+
+    assert result['decision'] == 'ready'
+    auto_model.assert_called_once_with(model='llm')
+    assert llm.call_args.kwargs['response_format'] == {'type': 'json_object'}
+    assert llm.call_args.kwargs['stream_output'] is False
+    assert llm.call_args.kwargs['timeout'] == plugin_manager._PREFLIGHT_TIMEOUT_SECONDS
+
+
+def test_preflight_json_repair_is_also_hidden_from_user_stream():
+    from lazymind.chat.plugin import plugin_manager
+    llm = MagicMock(side_effect=[
+        'not valid json',
+        json.dumps({
+            'decision': 'ready',
+            'reason': 'matches',
+            'missing_information': [],
+            'normalized_request': 'Draw a sunset',
+            'first_step_id': 'step_a',
+            'hand_off': True,
+        }),
+    ])
+    with (
+        patch.object(plugin_manager, 'is_model_role_available', return_value=True),
+        patch.object(plugin_manager.lazyllm, 'AutoModel', return_value=llm),
+    ):
+        result = plugin_manager._evaluate_plugin_preflight(
+            plugin_id='test-plugin',
+            plugin_name='Test Plugin',
+            description='Test',
+            when_to_use='Use for tests',
+            scenario='Scenario',
+            request_context='Draw a sunset',
+            previous=None,
+            first_steps=['step_a'],
+            plugin_mode='dynamic',
+        )
+
+    assert result['decision'] == 'ready'
+    assert llm.call_count == 2
+    assert all(call.kwargs['stream_output'] is False for call in llm.call_args_list)
+
+
+def test_cold_injection_keeps_trigger_non_stop_and_registers_both_advance_tools(
+        loaded_plugin, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config['enable_plugin'] = True
+
+    tools, _, stop_tools, patch_config, context = plugin_manager.resolve_plugin_injection({
+        'plugin_mode': 'auto',
+        'plugin_preflight': {
+            'preflight_id': 'pf-old',
+            'plugin_id': 'test-plugin',
+            'status': 'collecting',
+            'original_intent': 'Original request ten turns ago',
+            'normalized_request': 'Original request plus answers',
+        },
+    })
+
+    names = {tool.__name__ for tool in tools}
+    assert 'trigger_test_plugin' in names
+    assert 'advance_step' in names
+    assert 'advance_step_and_hand_off' in names
+    assert stop_tools == ['advance_step_and_hand_off']
+    assert 'trigger_test_plugin' not in stop_tools
+    assert patch_config['plugin_mode'] == 'auto'
+    assert patch_config['plugin_preflight_context']['preflight_id'] == 'pf-old'
+    assert 'Original request ten turns ago' in context
+
+
+def test_plugin_stream_guard_is_noop_without_ready_preflight(mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+
+    async def initial_stream():
+        yield 'event', {'tag': 'text', 'delta': 'ordinary answer'}
+        yield 'final', 'ordinary answer'
+
+    async def collect():
+        return [item async for item in plugin_manager.guard_plugin_agent_stream(
+            initial_stream(),
+            all_tools=[],
+            query='hello',
+            runtime_prompt='prompt',
+            agent=MagicMock(),
+            runtime_config=MagicMock(),
+            fs=MagicMock(),
+            stop_tools=[],
+            history=[],
+        )]
+
+    assert asyncio.run(collect()) == [
+        ('event', {'tag': 'text', 'delta': 'ordinary answer'}),
+        ('final', 'ordinary answer'),
+    ]
+
+
+def test_plugin_stream_guard_suppresses_prose_while_advance_is_pending(mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config['prepared_plugin'] = {
+        'must_advance': True,
+        'advance_committed': False,
+    }
+
+    assert plugin_manager._should_suppress_prepared_plugin_text({
+        'tag': 'text', 'delta': 'I will explain instead',
+    }) is True
+    assert plugin_manager._should_suppress_prepared_plugin_text({
+        'tag': 'tool_calls', 'tool_calls': [],
+    }) is False
 
 
 # ---------------------------------------------------------------------------

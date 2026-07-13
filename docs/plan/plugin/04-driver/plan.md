@@ -460,19 +460,18 @@ Go 将 `ask_response` 透传 Python；`resolve_plugin_injection` 将回答注入
 
 ### 8.4 默认能力与阶段边界
 
-**`ask_user` 始终注册给 ChatAgent**（无论 `plugin_mode` 为 `dynamic` 还是 `auto`，只要 `enable_plugin=true` 进入插件流程，乃至纯问答场景均可用），SubAgent 永不注册。差异在于**何时应主动调用**，而非工具是否存在。
+`ask_user` 仅注册给允许交互的 ChatAgent，SubAgent 永不注册。`auto` 插件模式在工具层
+完全移除 `ask_user`，包括 synthetic DriverAgent 回合；`dynamic` 模式仍可使用。
 
 | 阶段 | 条件 | `dynamic` | `auto` |
 | --- | --- | --- | --- |
-| **插件前** | 尚无 `active plugin_session`（未 `trigger_*` / 未首步 `advance_step`） | 缺失关键意图时主动 ask | **同样允许 ask**；收集齐意图后再触发插件 |
-| **插件执行中** | 已有 `plugin_session`，步骤由 SubAgent +（auto 下）DriverAgent 推进 | 允许 ask；每步完成后默认 `step_waiting` | **不主动 ask**；基于已有 `intent_context` 合理推断；每步 `advance_step_and_hand_off` 后即退出，后续由 DriverAgent 裁决 |
-| **例外** | 任意阶段，用户显式说「先问我」「帮我确认一下」 | ask | ask |
+| **插件前** | 尚无 `active plugin_session`（trigger 仅做预检） | 缺失关键意图时主动 ask | trigger 返回 `need_information`，等待用户下一轮主动补充；不生成 ask 卡片 |
+| **插件执行中** | 已有 `plugin_session`，步骤由 SubAgent +（auto 下）DriverAgent 推进 | 允许 ask；每步完成后默认 `step_waiting` | 无 ask 工具；基于持久化 `intent_context` 合理推断 |
 
 要点：
 
-- **auto ≠ 禁用 ask**。auto 限制的是**已进入插件流水线之后** ChatAgent 在步骤推进过程中的主动问询，避免与 DriverAgent 自动裁决冲突。
-- **插件前**（选插件、定 cron、澄清全局约束等）两种模式行为一致，均可 ask。
-- 框架内置的意图管理提示词按上表写清阶段判断，**不要**写成「auto 模式禁止 ask_user」。
+- auto 模式机械禁用 `ask_user`：不注册、不加入 stop-tools、不产生 `ask_pending`。
+- 缺少必需信息时，preflight 持久化缺失项并阻塞启动，等待用户主动补充。
 
 ---
 

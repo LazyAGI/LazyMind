@@ -1,5 +1,31 @@
 components:
     schemas:
+        builtinSkillListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/builtinSkillOpenAPIResponse'
+                    type: array
+                total:
+                    type: integer
+            type: object
+        builtinSkillOpenAPIResponse:
+            properties:
+                builtin_skill_uid:
+                    type: string
+                category:
+                    type: string
+                content:
+                    type: string
+                description:
+                    type: string
+                installed:
+                    type: boolean
+                installed_skill_id:
+                    type: string
+                name:
+                    type: string
+            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -478,6 +504,26 @@ components:
                     items:
                         type: string
                     type: array
+            type: object
+        CommitResponse:
+            properties:
+                content:
+                    type: string
+                path:
+                    type: string
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+            required:
+                - content
+                - path
+                - ref
+                - revision_id
+                - revision_no
             type: object
         CompleteUploadRequest:
             properties:
@@ -1203,6 +1249,39 @@ components:
                 - deleted_rows
                 - group_id
             type: object
+        DiffEntryLine:
+            properties:
+                decision:
+                    type: string
+                display_no_new_line_warning:
+                    type: boolean
+                html:
+                    type: string
+                hunk_id:
+                    type: string
+                new_line:
+                    type: integer
+                new_lines:
+                    type: integer
+                new_start:
+                    type: integer
+                old_line:
+                    type: integer
+                old_lines:
+                    type: integer
+                old_start:
+                    type: integer
+                text:
+                    type: string
+                type:
+                    type: string
+            required:
+                - html
+                - new_line
+                - old_line
+                - text
+                - type
+            type: object
         DiscoverResponse:
             properties:
                 success:
@@ -1344,6 +1423,82 @@ components:
                     items:
                         type: string
                     type: array
+            type: object
+        DraftPreviewResponse:
+            properties:
+                accepted_count:
+                    type: integer
+                base_revision_id:
+                    type: string
+                can_undo:
+                    type: boolean
+                draft_content:
+                    type: string
+                draft_status:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                file_diff:
+                    $ref: '#/components/schemas/FileDiff'
+                head_content:
+                    type: string
+                path:
+                    type: string
+                pending_count:
+                    type: integer
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                rejected_count:
+                    type: integer
+                resource_type:
+                    type: string
+                review_id:
+                    type: string
+                review_version:
+                    format: int64
+                    type: integer
+            required:
+                - accepted_count
+                - can_undo
+                - draft_content
+                - draft_status
+                - draft_version
+                - file_diff
+                - head_content
+                - path
+                - pending_count
+                - ref
+                - rejected_count
+                - resource_type
+            type: object
+        DraftResponse:
+            properties:
+                base_revision_id:
+                    type: string
+                blob_hash:
+                    type: string
+                content_hash:
+                    type: string
+                draft_status:
+                    type: string
+                draft_updated_at:
+                    format: date-time
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                path:
+                    type: string
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+            required:
+                - blob_hash
+                - content_hash
+                - draft_status
+                - draft_version
+                - path
+                - ref
             type: object
         EmptyObject:
             properties: {}
@@ -1581,6 +1736,84 @@ components:
                     items:
                         type: string
                     type: array
+            type: object
+        FileDiff:
+            properties:
+                binary:
+                    type: boolean
+                diff_entry_lines:
+                    items:
+                        $ref: '#/components/schemas/DiffEntryLine'
+                    type: array
+                editable_text:
+                    type: boolean
+                hunk_count:
+                    type: integer
+                path:
+                    type: string
+                status:
+                    type: string
+                supported:
+                    type: boolean
+                too_large:
+                    type: boolean
+                unsupported_reason:
+                    type: string
+            required:
+                - binary
+                - editable_text
+                - hunk_count
+                - path
+                - status
+                - supported
+                - too_large
+            type: object
+        FileResponse:
+            properties:
+                agent_persona:
+                    type: string
+                binary:
+                    type: boolean
+                blob_hash:
+                    type: string
+                content:
+                    type: string
+                content_hash:
+                    type: string
+                draft_status:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                file_type:
+                    type: string
+                mime:
+                    type: string
+                path:
+                    type: string
+                preferred_name:
+                    type: string
+                resource_type:
+                    type: string
+                response_style:
+                    type: string
+                revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+                size:
+                    format: int64
+                    type: integer
+            required:
+                - binary
+                - blob_hash
+                - content_hash
+                - file_type
+                - mime
+                - path
+                - resource_type
+                - size
             type: object
         GetKBAuthorizationResponse:
             properties:
@@ -1998,6 +2231,46 @@ components:
                 - description
                 - term
             type: object
+        MetadataResponse:
+            properties:
+                agent_persona:
+                    type: string
+                auto_evo:
+                    type: boolean
+                auto_evo_apply_status:
+                    type: string
+                auto_evo_error:
+                    type: string
+                auto_evo_generation:
+                    format: int64
+                    type: integer
+                enabled_from_off:
+                    type: boolean
+                preferred_name:
+                    type: string
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                resource_id:
+                    type: string
+                response_style:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                updated_by:
+                    type: string
+                updated_by_name:
+                    type: string
+            required:
+                - auto_evo
+                - auto_evo_apply_status
+                - auto_evo_error
+                - auto_evo_generation
+                - enabled_from_off
+                - ref
+                - resource_id
+                - updated_at
+            type: object
         ModelFeaturesResponse:
             properties:
                 image_embed_enabled:
@@ -2125,10 +2398,187 @@ components:
                         $ref: '#/components/schemas/QuestionTypeOption'
                     type: array
             type: object
+        ResourceRef:
+            properties:
+                resource_type:
+                    type: string
+                user_id:
+                    type: string
+            required:
+                - resource_type
+                - user_id
+            type: object
         ResumeTaskRequest:
             properties:
                 task_id:
                     type: string
+            type: object
+        ReviewActionItem:
+            properties:
+                decision:
+                    type: string
+                hunk_id:
+                    type: string
+                path:
+                    type: string
+            required:
+                - decision
+                - hunk_id
+            type: object
+        ReviewActionResponse:
+            properties:
+                batch_id:
+                    type: string
+                can_undo:
+                    type: boolean
+                draft_content:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                items:
+                    items:
+                        $ref: '#/components/schemas/ReviewActionItem'
+                    type: array
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                review_id:
+                    type: string
+                review_version:
+                    format: int64
+                    type: integer
+            required:
+                - batch_id
+                - can_undo
+                - draft_content
+                - draft_version
+                - ref
+                - review_id
+                - review_version
+            type: object
+        ReviewUndoResponse:
+            properties:
+                can_undo:
+                    type: boolean
+                draft_content:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                items:
+                    items:
+                        $ref: '#/components/schemas/ReviewActionItem'
+                    type: array
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                review_id:
+                    type: string
+                review_version:
+                    format: int64
+                    type: integer
+                undone_batch_id:
+                    type: string
+            required:
+                - can_undo
+                - draft_content
+                - draft_version
+                - ref
+                - review_id
+                - review_version
+                - undone_batch_id
+            type: object
+        RevisionDetailResponse:
+            properties:
+                binary:
+                    type: boolean
+                blob_hash:
+                    type: string
+                content:
+                    type: string
+                file_type:
+                    type: string
+                mime:
+                    type: string
+                revisionSummary:
+                    $ref: '#/components/schemas/RevisionSummary'
+            required:
+                - binary
+                - blob_hash
+                - content
+                - file_type
+                - mime
+                - revisionSummary
+            type: object
+        RevisionListResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/RevisionSummary'
+                    type: array
+            type: object
+        RevisionSummary:
+            properties:
+                change_source:
+                    type: string
+                content_hash:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                created_by:
+                    type: string
+                id:
+                    type: string
+                message:
+                    type: string
+                parent_revision_id:
+                    type: string
+                path:
+                    type: string
+                revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+                size:
+                    format: int64
+                    type: integer
+                source_ref_id:
+                    type: string
+                source_ref_type:
+                    type: string
+            required:
+                - change_source
+                - content_hash
+                - created_at
+                - id
+                - message
+                - path
+                - revision_id
+                - revision_no
+                - size
+                - source_ref_id
+                - source_ref_type
+            type: object
+        RollbackResponse:
+            properties:
+                content:
+                    type: string
+                path:
+                    type: string
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+            required:
+                - content
+                - path
+                - ref
+                - revision_id
+                - revision_no
             type: object
         SearchDatasetMemberRequest:
             properties:
@@ -2958,7 +3408,7 @@ components:
                     type: boolean
                 cache_written:
                     type: boolean
-                diffEntryLines:
+                diff_entry_lines:
                     items:
                         $ref: '#/components/schemas/diffEntryLineOpenAPIResponse'
                     type: array
@@ -3077,11 +3527,6 @@ components:
                     type: string
                 is_default:
                     type: boolean
-                max_input_tokens:
-                    description: Maximum model input length in tokens; null when unknown
-                    format: int64
-                    nullable: true
-                    type: integer
                 model_type:
                     type: string
                 name:
@@ -3221,19 +3666,6 @@ components:
                 - title
                 - version
             type: object
-        managedStateUpsertOpenAPIRequest:
-            properties:
-                agent_persona:
-                    type: string
-                auto_evo:
-                    type: boolean
-                content:
-                    type: string
-                preferred_name:
-                    type: string
-                response_style:
-                    type: string
-            type: object
         marketEditOpenAPIRequest:
             properties:
                 category:
@@ -3266,6 +3698,10 @@ components:
                 icon:
                     type: string
                 id:
+                    type: string
+                installed:
+                    type: boolean
+                installed_skill_id:
                     type: string
                 market_item_id:
                     type: string
@@ -3333,77 +3769,101 @@ components:
             required:
                 - id
             type: object
-        memoryReviewResultListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/memoryReviewResultOpenAPIResponse'
-                    type: array
-                page:
-                    type: integer
-                page_size:
-                    type: integer
-                total:
-                    format: int64
-                    type: integer
-            required:
-                - page
-                - page_size
-                - total
-            type: object
-        memoryReviewResultOpenAPIResponse:
-            properties:
-                content:
-                    type: string
-                current_content:
-                    type: string
-                diff:
-                    type: string
-                id:
-                    type: string
-                operations:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                review_status:
-                    type: string
-                session_id:
-                    type: string
-                source_content:
-                    type: string
-                state:
-                    type: string
-                target:
-                    type: string
-                time:
-                    type: string
-                user_id:
-                    type: string
-            required:
-                - content
-                - id
-                - review_status
-                - session_id
-                - source_content
-                - state
-                - target
-                - time
-                - user_id
-            type: object
-        memoryUpsertOpenAPIRequest:
-            properties:
-                auto_evo:
-                    type: boolean
-                content:
-                    type: string
-            type: object
         okOpenAPIResponse:
             properties:
                 ok:
                     type: boolean
             required:
                 - ok
+            type: object
+        personalResourceCommitOpenAPIRequest:
+            properties:
+                expected_draft_version:
+                    format: int64
+                    type: integer
+                expected_head_revision_id:
+                    type: string
+                message:
+                    type: string
+                source_ref_id:
+                    type: string
+                source_ref_type:
+                    type: string
+            type: object
+        personalResourceGenerateOpenAPIRequest:
+            properties:
+                user_instruct:
+                    type: string
+            required:
+                - user_instruct
+            type: object
+        personalResourceGenerateOpenAPIResponse:
+            properties:
+                draft_content:
+                    type: string
+                draft_source_version:
+                    format: int64
+                    type: integer
+                draft_status:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+            required:
+                - draft_content
+                - draft_source_version
+                - draft_status
+                - draft_version
+            type: object
+        personalResourcePatchOpenAPIRequest:
+            properties:
+                agent_persona:
+                    type: string
+                auto_evo:
+                    type: boolean
+                preferred_name:
+                    type: string
+                response_style:
+                    type: string
+            type: object
+        personalResourceReviewActionOpenAPIRequest:
+            properties:
+                expected_review_version:
+                    format: int64
+                    type: integer
+                items:
+                    items:
+                        $ref: '#/components/schemas/ReviewActionItem'
+                    type: array
+            type: object
+        personalResourceReviewUndoOpenAPIRequest:
+            properties:
+                expected_review_version:
+                    format: int64
+                    type: integer
+            type: object
+        personalResourceRollbackOpenAPIRequest:
+            properties:
+                expected_head_revision_id:
+                    type: string
+                message:
+                    type: string
+                revision_id:
+                    type: string
+            required:
+                - revision_id
+            type: object
+        personalResourceWriteDraftOpenAPIRequest:
+            properties:
+                content:
+                    type: string
+                conversation_id:
+                    type: string
+                expected_draft_version:
+                    format: int64
+                    type: integer
+                task_id:
+                    type: string
             type: object
         personalizationSettingOpenAPIRequest:
             properties:
@@ -3513,139 +3973,6 @@ components:
                     type: string
             required:
                 - path
-            type: object
-        resourceUpdateTaskListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/resourceUpdateTaskOpenAPIResponse'
-                    type: array
-                page:
-                    type: integer
-                page_size:
-                    type: integer
-                total:
-                    format: int64
-                    type: integer
-            required:
-                - page
-                - page_size
-                - total
-            type: object
-        resourceUpdateTaskOpenAPIResponse:
-            properties:
-                attempt_count:
-                    type: integer
-                created_at:
-                    type: string
-                error_code:
-                    type: string
-                error_message:
-                    type: string
-                finished_at:
-                    type: string
-                id:
-                    type: string
-                next_run_at:
-                    type: string
-                resource_id:
-                    type: string
-                resource_type:
-                    type: string
-                result_id:
-                    type: string
-                review_result_id:
-                    type: string
-                started_at:
-                    type: string
-                status:
-                    type: string
-                task_type:
-                    type: string
-                trigger_id:
-                    type: string
-                trigger_type:
-                    type: string
-                updated_at:
-                    type: string
-                user_id:
-                    type: string
-            required:
-                - attempt_count
-                - created_at
-                - id
-                - next_run_at
-                - resource_id
-                - resource_type
-                - status
-                - task_type
-                - trigger_id
-                - trigger_type
-                - updated_at
-                - user_id
-            type: object
-        resourceVersionListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/resourceVersionOpenAPIResponse'
-                    type: array
-                page:
-                    type: integer
-                page_size:
-                    type: integer
-                total:
-                    format: int64
-                    type: integer
-            required:
-                - page
-                - page_size
-                - total
-            type: object
-        resourceVersionOpenAPIResponse:
-            properties:
-                after_content:
-                    type: string
-                before_content:
-                    type: string
-                change_source:
-                    type: string
-                created_at:
-                    type: string
-                diff:
-                    type: string
-                from_version:
-                    format: int64
-                    type: integer
-                id:
-                    type: string
-                resource_id:
-                    type: string
-                resource_type:
-                    type: string
-                source_ref_id:
-                    type: string
-                source_ref_type:
-                    type: string
-                to_version:
-                    format: int64
-                    type: integer
-                user_id:
-                    type: string
-            required:
-                - after_content
-                - before_content
-                - change_source
-                - created_at
-                - diff
-                - from_version
-                - id
-                - resource_id
-                - resource_type
-                - source_ref_id
-                - source_ref_type
-                - to_version
-                - user_id
             type: object
         selectedModelOpenAPIItem:
             properties:
@@ -4122,61 +4449,31 @@ components:
                 - page_size
                 - total
             type: object
-        skillReviewResultListOpenAPIResponse:
+        skillOrganizeOpenAPIRequest:
             properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/skillReviewResultOpenAPIResponse'
-                    type: array
-                page:
-                    type: integer
-                page_size:
-                    type: integer
-                total:
-                    format: int64
-                    type: integer
-            required:
-                - page
-                - page_size
-                - total
-            type: object
-        skillReviewResultOpenAPIResponse:
-            properties:
-                current_content:
-                    type: string
-                diff:
-                    type: string
-                diffEntryLines:
-                    items:
-                        $ref: '#/components/schemas/diffEntryLineOpenAPIResponse'
-                    type: array
-                id:
+                artifact_dir:
                     type: string
                 requestid:
                     type: string
-                review_status:
+                skills:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - requestid
+            type: object
+        skillOrganizeOpenAPIResponse:
+            properties:
+                requestid:
                     type: string
-                skill_content:
+                status:
                     type: string
-                skill_name:
-                    type: string
-                summary:
-                    type: string
-                time:
-                    type: string
-                type:
-                    type: string
-                userid:
+                taskid:
                     type: string
             required:
-                - id
                 - requestid
-                - review_status
-                - skill_name
-                - summary
-                - time
-                - type
-                - userid
+                - status
+                - taskid
             type: object
         skillRevisionListOpenAPIResponse:
             properties:
@@ -4583,64 +4880,6 @@ components:
                     type: string
             required:
                 - skill_id
-            type: object
-        systemConfirmOpenAPIResponse:
-            properties:
-                content:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - content
-                - version
-            type: object
-        systemDiscardOpenAPIResponse:
-            properties:
-                discarded:
-                    type: boolean
-            required:
-                - discarded
-            type: object
-        systemDraftPreviewOpenAPIResponse:
-            properties:
-                current_content:
-                    type: string
-                diff:
-                    type: string
-                draft_content:
-                    type: string
-                draft_source_version:
-                    format: int64
-                    type: integer
-                draft_status:
-                    type: string
-                review_result_id:
-                    type: string
-                review_status:
-                    type: string
-            required:
-                - current_content
-                - diff
-                - draft_content
-                - draft_source_version
-                - draft_status
-                - review_result_id
-                - review_status
-            type: object
-        systemGenerateOpenAPIResponse:
-            properties:
-                draft_content:
-                    type: string
-                draft_source_version:
-                    format: int64
-                    type: integer
-                draft_status:
-                    type: string
-            required:
-                - draft_content
-                - draft_source_version
-                - draft_status
             type: object
         toolGroupOpenAPIResponse:
             properties:
@@ -5563,6 +5802,36 @@ paths:
             summary: Get agent trace detail
             tags:
                 - agent
+    /api/core/agent/threads/{thread_id}/results/traces:compare:
+        get:
+            description: Proxies Evo GET /threads/{thread_id}/results/traces:compare.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: a
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: b
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo trace comparison
+            summary: Compare agent traces
+            tags:
+                - agent
     /api/core/agent/threads/{thread_id}/retry:
         post:
             description: Proxies Evo retry and updates Core's local thread status and active-thread lock.
@@ -5637,6 +5906,19 @@ paths:
             summary: List agent thread steps
             tags:
                 - agent
+    /api/core/builtin-skills:
+        get:
+            description: Lists immutable built-in templates and their installation state for the current user.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/builtinSkillListOpenAPIResponse'
+                    description: Builtin skill list
+            summary: List builtin directory skills
+            tags:
+                - skills
     /api/core/builtin-skills/{builtin_skill_uid}:enable:
         post:
             parameters:
@@ -5661,6 +5943,24 @@ paths:
                 "200":
                     description: OK
             summary: POST /chat
+    /api/core/chat/settings/plugins:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /chat/settings/plugins
+    /api/core/chat/settings/plugins/{plugin_ref:.+}:
+        patch:
+            parameters:
+                - in: path
+                  name: plugin_ref:.+
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /chat/settings/plugins/{plugin_ref:.+}
     /api/core/conversation:export:
         post:
             requestBody:
@@ -7730,6 +8030,16 @@ paths:
                   required: true
                   schema:
                     type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: source
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
@@ -7800,64 +8110,6 @@ paths:
             summary: Create eval set by import
             tags:
                 - eval-set-imports
-    /api/core/evolution/tasks:
-        get:
-            description: Lists background resource update tasks for the current user.
-            parameters:
-                - in: query
-                  name: page
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: page_size
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: status
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: resource_type
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: task_type
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/resourceUpdateTaskListOpenAPIResponse'
-                    description: Resource update task list
-            summary: List resource update tasks
-            tags:
-                - evolution
-    /api/core/evolution/tasks/{task_id}:
-        get:
-            description: Gets one background resource update task for the current user.
-            parameters:
-                - in: path
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/resourceUpdateTaskOpenAPIResponse'
-                    description: Resource update task
-            summary: Get resource update task
-            tags:
-                - evolution
     /api/core/health:
         get:
             responses:
@@ -8397,169 +8649,6 @@ paths:
             summary: Discover MCP server tools
             tags:
                 - mcp_servers
-    /api/core/memory:
-        put:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/memoryUpsertOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/managedStateOpenAPIResponse'
-                    description: Managed memory item
-            summary: Upsert managed memory
-            tags:
-                - memory
-    /api/core/memory-review-results:
-        get:
-            description: Lists memory and user preference draft review results for the current user.
-            parameters:
-                - in: query
-                  name: page
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: page_size
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: review_status
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: target
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/memoryReviewResultListOpenAPIResponse'
-                    description: Memory review result list
-            summary: List memory review results
-            tags:
-                - memory-review-results
-    /api/core/memory-review-results/{review_result_id}:
-        get:
-            description: Gets one memory or user preference draft review result for the current user.
-            parameters:
-                - in: path
-                  name: review_result_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/memoryReviewResultOpenAPIResponse'
-                    description: Memory review result
-            summary: Get memory review result
-            tags:
-                - memory-review-results
-    /api/core/memory-review-results/{review_result_id}:accept:
-        post:
-            description: Synchronously accepts a pending memory or user preference draft review result.
-            parameters:
-                - in: path
-                  name: review_result_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/memoryReviewResultOpenAPIResponse'
-                    description: Accepted memory review result
-            summary: Accept memory review result
-            tags:
-                - memory-review-results
-    /api/core/memory-review-results/{review_result_id}:reject:
-        post:
-            description: Synchronously rejects a pending memory or user preference draft review result.
-            parameters:
-                - in: path
-                  name: review_result_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/memoryReviewResultOpenAPIResponse'
-                    description: Rejected memory review result
-            summary: Reject memory review result
-            tags:
-                - memory-review-results
-    /api/core/memory:confirm:
-        post:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/systemConfirmOpenAPIResponse'
-                    description: Confirmed memory draft
-            summary: Confirm memory draft
-            tags:
-                - memory
-    /api/core/memory:discard:
-        post:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/systemDiscardOpenAPIResponse'
-                    description: Discarded memory draft
-            summary: Discard memory draft
-            tags:
-                - memory
-    /api/core/memory:draft-preview:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/systemDraftPreviewOpenAPIResponse'
-                    description: Memory draft preview
-            summary: Preview memory draft diff
-            tags:
-                - memory
-    /api/core/memory:generate:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/skillGenerateOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/systemGenerateOpenAPIResponse'
-                    description: Generated memory draft
-            summary: Generate memory draft
-            tags:
-                - memory
     /api/core/model_providers:
         get:
             description: Per-user model provider list. Missing catalog rows are synced from default_model_providers on each request. Query parameter category filters by provider category (default model when category and exclude_category are both omitted). Query parameter exclude_category excludes a category (e.g. exclude_category=model returns ocr and search providers). Query parameter keyword filters by provider name case-insensitively.
@@ -8720,7 +8809,7 @@ paths:
             summary: POST /model_providers/{model_provider_id}/groups/{group_id}/keys
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models:
         get:
-            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input length in tokens. Custom or unknown models return null.
+            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models).
             parameters:
                 - in: path
                   name: model_provider_id
@@ -8845,7 +8934,7 @@ paths:
                 - model_providers
     /api/core/model_providers/models:
         get:
-            description: Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model's maximum input length in tokens; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+            description: Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
             parameters:
                 - in: query
                   name: model_type
@@ -9006,6 +9095,312 @@ paths:
             summary: List user model providers that have groups
             tags:
                 - model_providers
+    /api/core/personal-resource/{resource_type}:
+        patch:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/personalResourcePatchOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/MetadataResponse'
+                    description: Personal resource metadata
+            summary: Update personal resource metadata
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}/draft-review/{review_id}/actions:
+        post:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: review_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/personalResourceReviewActionOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReviewActionResponse'
+                    description: Personal resource review action
+            summary: Apply personal resource review actions
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}/draft-review/{review_id}:undo:
+        post:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: review_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/personalResourceReviewUndoOpenAPIRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReviewUndoResponse'
+                    description: Personal resource review undo
+            summary: Undo personal resource review action batch
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}/revisions:
+        get:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RevisionListResponse'
+                    description: Personal resource revisions
+            summary: List personal resource revisions
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}/revisions/{revision_id}:
+        get:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: revision_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RevisionDetailResponse'
+                    description: Personal resource revision
+            summary: Get personal resource revision
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}:commit:
+        post:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/personalResourceCommitOpenAPIRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CommitResponse'
+                    description: Personal resource commit
+            summary: Commit personal resource draft
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}:discard:
+        post:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DraftResponse'
+                    description: Personal resource draft
+            summary: Discard personal resource draft
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}:draft:
+        put:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/personalResourceWriteDraftOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DraftResponse'
+                    description: Personal resource draft
+            summary: Write personal resource draft
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}:draft-preview:
+        get:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DraftPreviewResponse'
+                    description: Personal resource draft preview
+            summary: Preview personal resource draft diff
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}:file:
+        get:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: ref
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: revision_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/FileResponse'
+                    description: Personal resource file
+            summary: Read personal resource file
+            tags:
+                - personal-resource
+        put:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/personalResourceWriteDraftOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DraftResponse'
+                    description: Personal resource draft
+            summary: Write personal resource draft file
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}:generate:
+        post:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/personalResourceGenerateOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/personalResourceGenerateOpenAPIResponse'
+                    description: Generated personal resource draft
+            summary: Generate personal resource draft
+            tags:
+                - personal-resource
+    /api/core/personal-resource/{resource_type}:rollback:
+        post:
+            parameters:
+                - in: path
+                  name: resource_type
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/personalResourceRollbackOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RollbackResponse'
+                    description: Personal resource rollback
+            summary: Rollback personal resource
+            tags:
+                - personal-resource
     /api/core/personalization-items:
         get:
             responses:
@@ -9081,6 +9476,42 @@ paths:
                 "200":
                     description: OK
             summary: GET /plugin-drafts/{draft_id}
+    /api/core/plugin-drafts/{draft_id}:ai-generate:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-drafts/{draft_id}:ai-generate
+    /api/core/plugin-drafts/{draft_id}:ai-repair:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-drafts/{draft_id}:ai-repair
+    /api/core/plugin-drafts/{draft_id}:publish:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-drafts/{draft_id}:publish
     /api/core/plugin-drafts/{draft_id}:save:
         post:
             parameters:
@@ -9093,6 +9524,12 @@ paths:
                 "200":
                     description: OK
             summary: POST /plugin-drafts/{draft_id}:save
+    /api/core/plugin-drafts:polish-info:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-drafts:polish-info
     /api/core/plugin-sessions/{session_id}:
         get:
             parameters:
@@ -9524,6 +9961,76 @@ paths:
                                 $ref: '#/components/schemas/PromptPolishResponse'
                     description: Polished prompt
             summary: Polish prompt
+    /api/core/published-plugins/{plugin_ref:.+}/versions:
+        get:
+            parameters:
+                - in: path
+                  name: plugin_ref:.+
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /published-plugins/{plugin_ref:.+}/versions
+    /api/core/published-plugins/{plugin_ref:.+}/versions/{revision_id}:
+        get:
+            parameters:
+                - in: path
+                  name: plugin_ref:.+
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: revision_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /published-plugins/{plugin_ref:.+}/versions/{revision_id}
+    /api/core/published-plugins/{plugin_ref:.+}/versions/{revision_id}:edit:
+        post:
+            parameters:
+                - in: path
+                  name: plugin_ref:.+
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: revision_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /published-plugins/{plugin_ref:.+}/versions/{revision_id}:edit
+    /api/core/published-plugins/{plugin_ref:.+}:archive:
+        post:
+            parameters:
+                - in: path
+                  name: plugin_ref:.+
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /published-plugins/{plugin_ref:.+}:archive
+    /api/core/published-plugins/{plugin_ref:.+}:rollback:
+        post:
+            parameters:
+                - in: path
+                  name: plugin_ref:.+
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /published-plugins/{plugin_ref:.+}:rollback
     /api/core/remote-fs/content:
         get:
             description: 'Reads package content using task_id semantics: review_ sees existing draft, org_ and editor session ids see publish unless they own the current draft.'
@@ -9888,59 +10395,6 @@ paths:
             summary: Trash remote skill package
             tags:
                 - remote-fs
-    /api/core/resource-versions:
-        get:
-            description: Lists content version history for skills, memory, and user preferences for the current user.
-            parameters:
-                - in: query
-                  name: page
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: page_size
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: resource_type
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: resource_id
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/resourceVersionListOpenAPIResponse'
-                    description: Resource version list
-            summary: List resource versions
-            tags:
-                - resource-versions
-    /api/core/resource-versions/{version_id}:
-        get:
-            description: Gets one content version history entry for the current user.
-            parameters:
-                - in: path
-                  name: version_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/resourceVersionOpenAPIResponse'
-                    description: Resource version
-            summary: Get resource version
-            tags:
-                - resource-versions
     /api/core/schedules:
         get:
             responses:
@@ -10190,43 +10644,8 @@ paths:
             summary: Install skill from market
             tags:
                 - skill-market
-    /api/core/skill-review-results:
-        get:
-            description: Lists skill draft review results for the current user.
-            parameters:
-                - in: query
-                  name: page
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: page_size
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: review_status
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: type
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/skillReviewResultListOpenAPIResponse'
-                    description: Skill review result list
-            summary: List skill review results
-            tags:
-                - skill-review-results
     /api/core/skill-review-results/{review_result_id}:
         get:
-            description: Gets one skill draft review result for the current user.
             parameters:
                 - in: path
                   name: review_result_id
@@ -10235,52 +10654,26 @@ paths:
                     type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/skillReviewResultOpenAPIResponse'
-                    description: Skill review result
-            summary: Get skill review result
-            tags:
-                - skill-review-results
-    /api/core/skill-review-results/{review_result_id}:accept:
+                    description: OK
+            summary: GET /skill-review-results/{review_result_id}
+    /api/core/skill-review/tasks:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /skill-review/tasks
+    /api/core/skill-review:run:
         post:
-            description: Synchronously accepts a pending skill draft review result.
-            parameters:
-                - in: path
-                  name: review_result_id
-                  required: true
-                  schema:
-                    type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/skillReviewResultOpenAPIResponse'
-                    description: Accepted skill review result
-            summary: Accept skill review result
-            tags:
-                - skill-review-results
-    /api/core/skill-review-results/{review_result_id}:reject:
-        post:
-            description: Synchronously rejects a pending skill draft review result.
-            parameters:
-                - in: path
-                  name: review_result_id
-                  required: true
-                  schema:
-                    type: string
+                    description: OK
+            summary: POST /skill-review:run
+    /api/core/skill-review:summary:
+        get:
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/skillReviewResultOpenAPIResponse'
-                    description: Rejected skill review result
-            summary: Reject skill review result
-            tags:
-                - skill-review-results
+                    description: OK
+            summary: GET /skill-review:summary
     /api/core/skill-shares/{share_item_id}:
         get:
             parameters:
@@ -10409,6 +10802,25 @@ paths:
             summary: Create skill directly from internal request
             tags:
                 - skill-evolution
+    /api/core/skill_organize:
+        post:
+            description: Submits a skill organize task for current user's SkillV2 files. The task runs asynchronously in the algorithm service.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillOrganizeOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillOrganizeOpenAPIResponse'
+                    description: Skill organize task accepted
+            summary: Submit skill organize task
+            tags:
+                - skills
     /api/core/skills:
         get:
             parameters:
@@ -11158,6 +11570,30 @@ paths:
             summary: Generate skill draft
             tags:
                 - skills
+    /api/core/skills/{skill_id}:purge:
+        delete:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /skills/{skill_id}:purge
+    /api/core/skills/{skill_id}:restore:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /skills/{skill_id}:restore
     /api/core/skills/{skill_id}:share:
         post:
             parameters:
@@ -11215,6 +11651,18 @@ paths:
             summary: List latest skill share status by target user
             tags:
                 - skill-shares
+    /api/core/skills/{skill_id}:trash:
+        post:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /skills/{skill_id}:trash
     /api/core/skills/categories:
         get:
             responses:
@@ -11239,6 +11687,17 @@ paths:
             summary: List skill tags
             tags:
                 - skills
+    /api/core/skills:trash:
+        delete:
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /skills:trash
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /skills:trash
     /api/core/static-files/{path:.*}:
         get:
             parameters:
@@ -11558,78 +12017,6 @@ paths:
                 "200":
                     description: OK
             summary: POST /upload_files
-    /api/core/user-preference:
-        put:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/managedStateUpsertOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/managedStateOpenAPIResponse'
-                    description: Managed user preference item
-            summary: Upsert managed user preference
-            tags:
-                - preferences
-    /api/core/user-preference:confirm:
-        post:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/systemConfirmOpenAPIResponse'
-                    description: Confirmed user preference draft
-            summary: Confirm user preference draft
-            tags:
-                - preferences
-    /api/core/user-preference:discard:
-        post:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/systemDiscardOpenAPIResponse'
-                    description: Discarded user preference draft
-            summary: Discard user preference draft
-            tags:
-                - preferences
-    /api/core/user-preference:draft-preview:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/systemDraftPreviewOpenAPIResponse'
-                    description: User preference draft preview
-            summary: Preview user preference draft diff
-            tags:
-                - preferences
-    /api/core/user-preference:generate:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/skillGenerateOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/systemGenerateOpenAPIResponse'
-                    description: Generated user preference draft
-            summary: Generate user preference draft
-            tags:
-                - preferences
     /api/core/user/chat-settings:
         get:
             responses:

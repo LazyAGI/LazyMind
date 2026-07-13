@@ -11,11 +11,13 @@ import {
   Steps,
   Tooltip,
 } from "antd";
+import { UndoOutlined } from "@ant-design/icons";
 import SendIcon from "@/modules/chat/assets/icons/send_icon.svg?react";
 import RouteLoading from "../../components/RouteLoading";
 import { useMemoryManagementOutletContext } from "../../context";
 import { getSkillBodyContentForDisplay } from "../../shared";
 import { DiffLineContent } from "../../components/DiffLineContent";
+import SkillDiffHunkPanel from "../../components/skillPackage/SkillDiffHunkPanel";
 
 export default function MemoryReviewPage() {
   const {
@@ -28,6 +30,7 @@ export default function MemoryReviewPage() {
     goToReviewPreview,
     closeChangeReview,
     backendDraftSubmitting,
+    discardBackendDraftAndReturn,
     backendDraftLoading,
     approvedBackendSuggestionIds,
     isAnyBackendSuggestionMutating,
@@ -53,6 +56,11 @@ export default function MemoryReviewPage() {
     setBackendSuggestionSelected,
     submitBackendSuggestionDecision,
     backendDraftDiffLines,
+    backendDraftPreview,
+    backendDraftHunkSubmitting,
+    backendDraftReviewUndoing,
+    submitBackendDraftHunkDecision,
+    undoBackendDraftReview,
     backendDraftReady,
     qaQuestionDraft,
     setQaQuestionDraft,
@@ -271,11 +279,43 @@ export default function MemoryReviewPage() {
               ) : null}
               {canPreviewBackendDraft && effectiveReviewStep === 1 ? (
                 <Button
+                  danger
+                  loading={backendDraftSubmitting === "discard"}
+                  disabled={
+                    backendDraftSubmitting === "confirm" ||
+                    backendDraftLoading ||
+                    backendDraftReviewUndoing ||
+                    Object.keys(backendDraftHunkSubmitting).length > 0
+                  }
+                  onClick={discardBackendDraftAndReturn}
+                >
+                  {t("admin.memoryPreferenceDraftDiscard")}
+                </Button>
+              ) : null}
+              {canPreviewBackendDraft && effectiveReviewStep === 1 ? (
+                <Button
+                  icon={<UndoOutlined />}
+                  loading={backendDraftReviewUndoing}
+                  disabled={
+                    activeProposal.tab === "skills" ||
+                    !backendDraftPreview?.canUndo ||
+                    backendDraftSubmitting !== "" ||
+                    Object.keys(backendDraftHunkSubmitting).length > 0
+                  }
+                  onClick={() => void undoBackendDraftReview()}
+                >
+                  {t("admin.memoryDraftReviewUndo")}
+                </Button>
+              ) : null}
+              {canPreviewBackendDraft && effectiveReviewStep === 1 ? (
+                <Button
                   type="primary"
                   loading={backendDraftSubmitting === "confirm"}
                   disabled={
                     backendDraftSubmitting === "discard" ||
                     backendDraftLoading ||
+                    backendDraftReviewUndoing ||
+                    Object.keys(backendDraftHunkSubmitting).length > 0 ||
                     !backendDraftReady
                   }
                   onClick={() => void confirmBackendDraft()}
@@ -498,6 +538,17 @@ export default function MemoryReviewPage() {
                         <Spin />
                         <span>{t("admin.memoryDiffPreviewGenerating")}</span>
                       </div>
+                    ) : activeProposal.tab !== "skills" &&
+                      backendDraftPreview?.fileDiff?.diffEntryLines.length ? (
+                      <SkillDiffHunkPanel
+                        diffEntryLines={backendDraftPreview.fileDiff.diffEntryLines}
+                        hunkReviewActive={Boolean(backendDraftPreview.reviewId)}
+                        hunkSubmitting={backendDraftHunkSubmitting}
+                        onHunkDecision={(hunk, decision) =>
+                          void submitBackendDraftHunkDecision(hunk.hunkId, decision)
+                        }
+                        t={t}
+                      />
                     ) : backendDraftDiffLines.length ? (
                       backendDraftDiffLines.map((line: any, index: number) => (
                         <div

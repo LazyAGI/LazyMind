@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import mimetypes
 from typing import Dict, Mapping, Optional
 
 from lazymind.chat.integrations.remote_fs import RemoteFS
@@ -18,6 +19,31 @@ class SkillRemoteStore:
 
     def package_dir(self, category: str, name: str) -> str:
         return f'{self.root}/{category}/{name}'
+
+    def package_exists(self, category: str, name: str) -> bool:
+        return bool(self.fs.exists(self.package_dir(category, name)))
+
+    def list_packages(self) -> list[Dict[str, str]]:
+        packages: list[Dict[str, str]] = []
+        for category_entry in self.fs.ls(self.root, detail=True):
+            if str((category_entry or {}).get('type') or 'file').strip() not in ('directory', 'dir'):
+                continue
+            category_path = str((category_entry or {}).get('name') or '').strip()
+            category = _last_path_part(category_path)
+            if not category:
+                continue
+            for package_entry in self.fs.ls(category_path, detail=True):
+                if str((package_entry or {}).get('type') or 'file').strip() not in ('directory', 'dir'):
+                    continue
+                package_name = _last_path_part(str((package_entry or {}).get('name') or '').strip())
+                if package_name:
+                    packages.append({'category': category, 'name': package_name})
+        return sorted(packages, key=lambda item: (item['category'], item['name']))
+
+    def read_skill_md(self, category: str, name: str) -> str:
+        path = f'{self.package_dir(category, name)}/SKILL.md'
+        with self.fs.open(path, 'r', encoding='utf-8', errors='replace') as fh:
+            return fh.read()
 
     def resolve_existing_identity(self, name: str, category: Optional[str] = None) -> Dict[str, str]:
         raw_name = str(name or '').strip()
@@ -121,6 +147,47 @@ class SkillRemoteStore:
             'action': 'create',
         }
 
+    def install_package(self, category: str, name: str, files: Mapping[str, bytes]) -> dict:
+        package_dir = self.package_dir(category, name)
+        skill_md = files.get('SKILL.md')
+        if skill_md is None:
+            raise ValueError('Skill package must contain SKILL.md.')
+        try:
+            skill_content = skill_md.decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise ValueError('SKILL.md must be valid UTF-8.') from exc
+
+        self.fs.mkdir(package_dir, create_parents=True)
+        try:
+            for rel_path in sorted(path for path in files if path != 'SKILL.md'):
+                normalized_path = normalize_skill_package_path(rel_path)
+                content_type = mimetypes.guess_type(normalized_path)[0] or 'application/octet-stream'
+                self.fs.write_file(
+                    f'{package_dir}/{normalized_path}',
+                    files[rel_path],
+                    content_type=content_type,
+                )
+            self.fs.write(
+                f'{package_dir}/SKILL.md',
+                skill_content,
+                content_type='text/markdown; charset=utf-8',
+            )
+        except Exception as exc:
+            try:
+                self.fs.trash(package_dir)
+            except Exception as cleanup_exc:
+                raise RuntimeError(
+                    f'Failed to install skill package: {exc}; cleanup also failed: {cleanup_exc}'
+                ) from exc
+            raise
+        return {
+            'persisted': 'remote_fs',
+            'path': package_dir,
+            'name': name,
+            'category': category,
+            'action': 'install',
+        }
+
     def rename(
         self,
         old_category: str,
@@ -157,22 +224,7 @@ class SkillRemoteStore:
         }
 
     def _find_packages_by_name(self, name: str) -> list[Dict[str, str]]:
-        matches: list[Dict[str, str]] = []
-        for category_entry in self.fs.ls(self.root, detail=True):
-            if str((category_entry or {}).get('type') or 'file').strip() not in ('directory', 'dir'):
-                continue
-            category_path = str((category_entry or {}).get('name') or '').strip()
-            category = _last_path_part(category_path)
-            if not category:
-                continue
-            for package_entry in self.fs.ls(category_path, detail=True):
-                if str((package_entry or {}).get('type') or 'file').strip() not in ('directory', 'dir'):
-                    continue
-                package_path = str((package_entry or {}).get('name') or '').strip()
-                package_name = _last_path_part(package_path)
-                if package_name == name:
-                    matches.append({'category': category, 'name': package_name})
-        return sorted(matches, key=lambda item: (item['category'], item['name']))
+        return [package for package in self.list_packages() if package['name'] == name]
 
 
 def _last_path_part(path: str) -> str:

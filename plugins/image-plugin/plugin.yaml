@@ -11,15 +11,19 @@ description: >
   for FIND_AND_EDIT / EDIT_UPLOAD editing workflows.
 
 when_to_use: >
-  Call this tool whenever the user wants to generate, draw, create, paint,
-  edit, or find-and-modify an image as the PRIMARY and DIRECT intent of their
-  request — including "画一张图", "帮我生成图片", "启动绘图插件", "打开图片生成插件",
-  "找一张XX的照片然后加上YY", "在这张图上加水印", "根据知识库中的风格画图", or "draw a cat".
-  When the user explicitly says to start/launch the image or drawing plugin, you MUST
-  call trigger_image_plugin immediately — do not reply with text only or call
-  image_generator/image_editor before the plugin is started.
-  When the user has selected a knowledge base, use KB_STYLE workflow;
-  the analyze_subject step calls kb_search inside the plugin SubAgent.
+  Trigger this plugin ONLY when the user's image request is COMPLEX and needs
+  multi-step workflow support — e.g. knowledge-base style (kb_search), web/image
+  search first then generate or edit, find-and-modify ("找一张XX再改成YY"),
+  reference-based generation, uploaded-image editing with detailed instructions,
+  or a rich multi-constraint description that benefits from analyze → collect →
+  optimize → generate/enhance.
+  Examples that SHOULD trigger: "根据知识库中的风格画一张产品图",
+  "先搜几张赛博朋克参考图再画一张类似的", "找哈兰德照片然后加上王老吉字样",
+  "启动绘图插件", "打开图片生成插件".
+  Do NOT trigger for SIMPLE one-shot image requests. If the user uses casual
+  short phrasing such as "直接", "给我", "随便画", "画个猫", "帮我生成一张图"
+  without KB/search/edit/complex constraints, prefer the built-in
+  image_generator / image_editor tools instead of this plugin.
   Do NOT trigger if image generation is merely one sub-step within a larger
   multi-step task (e.g. "write a report and add an image"). Do NOT trigger
   for text content, quizzes, reports, summaries, or any non-visual task.
