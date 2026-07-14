@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,6 +24,37 @@ func TestLocalAppDataTargetIsFixedChild(t *testing.T) {
 func TestProcessAliveDetectsCurrentProcess(t *testing.T) {
 	if !processAlive(uint32(os.Getpid())) {
 		t.Fatal("current process was not detected as alive")
+	}
+}
+
+func TestCheckStoppedValidatesRegistryProcessStartIdentity(t *testing.T) {
+	root := t.TempDir()
+	startID := processStartIdentity(uint32(os.Getpid()))
+	if startID == 0 {
+		t.Fatal("could not read current process start identity")
+	}
+	writeRegistry := func(id uint64) {
+		t.Helper()
+		registry := processRegistry{Processes: []processRecord{{PID: os.Getpid(), StartID: id}}}
+		raw, err := json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "run"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "run", "processes.json"), raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeRegistry(startID + 1)
+	if err := checkStopped(root); err != nil {
+		t.Fatalf("stale reused PID blocked setup: %v", err)
+	}
+	writeRegistry(startID)
+	if err := checkStopped(root); err == nil {
+		t.Fatal("matching live runtime process did not block setup")
 	}
 }
 

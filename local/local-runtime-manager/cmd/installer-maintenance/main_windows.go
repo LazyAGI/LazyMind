@@ -18,9 +18,12 @@ import (
 const appDataLeaf = "LazyMind"
 
 type processRegistry struct {
-	Processes []struct {
-		PID int `json:"pid"`
-	} `json:"processes"`
+	Processes []processRecord `json:"processes"`
+}
+
+type processRecord struct {
+	PID     int    `json:"pid"`
+	StartID uint64 `json:"startId,omitempty"`
 }
 
 func main() {
@@ -86,7 +89,7 @@ func checkStopped(root string) error {
 		return fmt.Errorf("read runtime process registry: %w", err)
 	}
 	for _, process := range registry.Processes {
-		if process.PID > 0 && processAlive(uint32(process.PID)) {
+		if process.PID > 0 && processMatchesStartIdentity(uint32(process.PID), process.StartID) {
 			return fmt.Errorf("LazyMind runtime process %d is still running", process.PID)
 		}
 	}
@@ -127,6 +130,23 @@ func processAlive(pid uint32) bool {
 	defer windows.CloseHandle(handle)
 	state, err := windows.WaitForSingleObject(handle, 0)
 	return err == nil && state == uint32(windows.WAIT_TIMEOUT)
+}
+
+func processStartIdentity(pid uint32) uint64 {
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return 0
+	}
+	defer windows.CloseHandle(handle)
+	var created, exited, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(handle, &created, &exited, &kernel, &user); err != nil {
+		return 0
+	}
+	return uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime)
+}
+
+func processMatchesStartIdentity(pid uint32, expected uint64) bool {
+	return expected != 0 && processAlive(pid) && processStartIdentity(pid) == expected
 }
 
 func purgeLocalData(target string) error {
