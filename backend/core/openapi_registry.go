@@ -291,6 +291,15 @@ func (b *schemaBuilder) inlineSchemaForType(t reflect.Type) map[string]any {
 			if description := strings.TrimSpace(field.Tag.Get("desc")); description != "" {
 				propertySchema["description"] = description
 			}
+			if values := openAPIEnumValues(field.Tag.Get("enum")); len(values) > 0 {
+				propertySchema["enum"] = values
+			}
+			if field.Tag.Get("nullable") == "true" {
+				propertySchema["nullable"] = true
+			}
+			if field.Tag.Get("freeform") == "true" {
+				propertySchema["additionalProperties"] = true
+			}
 			properties[name] = propertySchema
 			if field.Tag.Get("required") == "true" || (!omitEmpty && !isOptionalField(field.Type)) {
 				required = append(required, name)
@@ -552,6 +561,172 @@ type agentCandidatePathParams struct {
 
 type agentRouterAlgorithmPathParams struct {
 	AlgorithmID string `path:"algorithm_id"`
+}
+
+type agentRouterQueryParams struct {
+	RouterAdminURL string `query:"router_admin_url" desc:"Optional Router admin origin override."`
+	RouterChatURL  string `query:"router_chat_url" desc:"Optional Router chat stream URL override."`
+}
+
+type agentRouterAlgorithmQueryParams struct {
+	ThreadID       string `query:"thread_id" desc:"Filter by owning Evo thread."`
+	AlgorithmID    string `query:"algorithm_id" desc:"Filter by exact algorithm id."`
+	Status         string `query:"status" enum:"starting,active,disabled,missing" desc:"Filter by live Router status."`
+	RouterAdminURL string `query:"router_admin_url" desc:"Optional Router admin origin override."`
+	RouterChatURL  string `query:"router_chat_url" desc:"Optional Router chat stream URL override."`
+}
+
+type agentRouterOwnerInput struct {
+	ThreadID     string `json:"thread_id" required:"true" desc:"Owning Evo thread id."`
+	RunID        string `json:"run_id,omitempty" desc:"Optional artifact run id; when set it must equal thread_id."`
+	CandidateRef string `json:"candidate_ref,omitempty" desc:"Candidate artifact reference used for audit."`
+}
+
+type agentRouterOwner struct {
+	ThreadID     string `json:"thread_id"`
+	RunID        string `json:"run_id"`
+	CandidateRef string `json:"candidate_ref"`
+}
+
+type agentRouterRegisterRequest struct {
+	AlgorithmID      string                `json:"algorithm_id" required:"true" desc:"Evo-owned algorithm id; must start with evo_."`
+	Name             string                `json:"name,omitempty" desc:"Display name; defaults to algorithm_id."`
+	CodePath         string                `json:"code_path" required:"true" desc:"Candidate lazymind/chat source path visible to Router."`
+	InstanceCount    int32                 `json:"instance_count,omitempty" desc:"Instance count from 1 to 4; default 1."`
+	Config           map[string]any        `json:"config,omitempty" freeform:"true" desc:"Configuration passed to Router child processes."`
+	Owner            agentRouterOwnerInput `json:"owner" required:"true"`
+	WaitReadySeconds float64               `json:"wait_ready_seconds,omitempty" desc:"Readiness timeout in seconds; default 180, maximum 900."`
+	CleanupPolicy    string                `json:"cleanup_policy,omitempty" enum:"thread_delete,manual" desc:"Workspace cleanup policy; default thread_delete."`
+	RouterAdminURL   string                `json:"router_admin_url,omitempty" desc:"Optional Router admin origin override."`
+	RouterChatURL    string                `json:"router_chat_url,omitempty" desc:"Optional Router chat stream URL override."`
+}
+
+type agentRouterActionRequest struct {
+	Action           string  `json:"action" required:"true" enum:"healthcheck,restart,stop"`
+	WaitReadySeconds float64 `json:"wait_ready_seconds,omitempty" desc:"Restart readiness timeout in seconds; default 180, maximum 900."`
+}
+
+type agentRouterABStrategyRequest struct {
+	Weights        map[string]int         `json:"weights,omitempty" nullable:"true" desc:"Algorithm weights. Omit or set null to clear the strategy and return to default routing."`
+	Reason         string                 `json:"reason,omitempty" desc:"Audit reason for the strategy change."`
+	Owner          *agentRouterOwnerInput `json:"owner,omitempty" desc:"Optional Evo owner recorded in the AB audit."`
+	RouterAdminURL string                 `json:"router_admin_url,omitempty" desc:"Optional Router admin origin override."`
+	RouterChatURL  string                 `json:"router_chat_url,omitempty" desc:"Optional Router chat stream URL override."`
+}
+
+type agentRouterInstance struct {
+	Host       string `json:"host"`
+	Port       int32  `json:"port"`
+	Status     string `json:"status"`
+	Failures   int32  `json:"failures"`
+	InstanceID string `json:"instance_id"`
+}
+
+type agentRouterHealth struct {
+	Status           string                `json:"status" enum:"passed,failed,stopped"`
+	AlgorithmStatus  string                `json:"algorithm_status,omitempty" enum:"starting,active,disabled,missing"`
+	HealthyInstances int32                 `json:"healthy_instances"`
+	Instances        []agentRouterInstance `json:"instances" required:"true"`
+}
+
+type agentRouterStrategyView struct {
+	Active  bool           `json:"active"`
+	ID      *int64         `json:"id" required:"true" nullable:"true" desc:"Router strategy id; null when inactive."`
+	Weights map[string]int `json:"weights" required:"true"`
+}
+
+type agentRouterStatusCounts struct {
+	EvoOwned int32 `json:"evo_owned"`
+	Active   int32 `json:"active"`
+	Healthy  int32 `json:"healthy"`
+}
+
+type agentRouterStatusResponse struct {
+	Status         string                  `json:"status" enum:"ok"`
+	RouterAdminURL string                  `json:"router_admin_url"`
+	Algorithms     agentRouterStatusCounts `json:"algorithms"`
+	ABStrategy     agentRouterStrategyView `json:"ab_strategy"`
+}
+
+type agentRouterAlgorithm struct {
+	AlgorithmID      string           `json:"algorithm_id"`
+	Status           string           `json:"status" enum:"starting,active,disabled,missing"`
+	ExpectedState    string           `json:"expected_state" enum:"active,stopped,orphaned,claiming,deleting,managing"`
+	HealthyInstances int32            `json:"healthy_instances"`
+	InstanceCount    int32            `json:"instance_count"`
+	Owner            agentRouterOwner `json:"owner"`
+	RouterChatURL    string           `json:"router_chat_url"`
+	RouterAdminURL   string           `json:"router_admin_url"`
+}
+
+type agentRouterAlgorithmListResponse struct {
+	Items []agentRouterAlgorithm `json:"items" required:"true"`
+}
+
+type agentRouterRegisterResult struct {
+	AlgorithmID string `json:"algorithm_id,omitempty"`
+	Created     bool   `json:"created,omitempty"`
+	Reused      bool   `json:"reused,omitempty"`
+	Restarted   bool   `json:"restarted,omitempty"`
+	Reactivated bool   `json:"reactivated,omitempty"`
+}
+
+type agentRouterRegisterResponse struct {
+	Status           string                    `json:"status" enum:"ready"`
+	AlgorithmID      string                    `json:"algorithm_id"`
+	RouterChatURL    string                    `json:"router_chat_url"`
+	RouterAdminURL   string                    `json:"router_admin_url"`
+	RegisterResponse agentRouterRegisterResult `json:"register_response"`
+	Healthcheck      agentRouterHealth         `json:"healthcheck"`
+}
+
+type agentRouterActionResponse struct {
+	Status      string            `json:"status" enum:"passed,failed,stopped"`
+	AlgorithmID string            `json:"algorithm_id"`
+	Action      string            `json:"action" enum:"healthcheck,restart,stop"`
+	Healthcheck agentRouterHealth `json:"healthcheck"`
+}
+
+type agentRouterDeleteResponse struct {
+	Status               string   `json:"status" enum:"deleted"`
+	AlgorithmID          string   `json:"algorithm_id"`
+	RouterStatus         string   `json:"router_status" enum:"missing,disabled"`
+	RouterRecordRetained bool     `json:"router_record_retained"`
+	LedgerDeleted        bool     `json:"ledger_deleted"`
+	ArtifactsDeleted     int32    `json:"artifacts_deleted"`
+	Workspace            string   `json:"workspace" enum:"deleted,missing,retained_external,retained_shared"`
+	RetainedHistory      []string `json:"retained_history" required:"true"`
+}
+
+type agentRouterABAudit struct {
+	ThreadID     string `json:"thread_id,omitempty"`
+	CandidateRef string `json:"candidate_ref,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type agentRouterMutationResponse struct {
+	ID         *int64         `json:"id,omitempty"`
+	Status     string         `json:"status,omitempty" enum:"cleared"`
+	Weights    map[string]int `json:"weights,omitempty"`
+	IsActive   *bool          `json:"is_active,omitempty"`
+	Normalized *bool          `json:"normalized,omitempty"`
+}
+
+type agentRouterABStrategyResponse struct {
+	Active         bool                         `json:"active"`
+	ID             *int64                       `json:"id" required:"true" nullable:"true" desc:"Router strategy id; null when inactive."`
+	Weights        map[string]int               `json:"weights" required:"true"`
+	UpdatedBy      agentRouterABAudit           `json:"updated_by"`
+	RouterResponse *agentRouterMutationResponse `json:"router_response,omitempty" desc:"Present after PUT; contains the Router mutation result."`
+}
+
+type agentRouterErrorDetail struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+type agentRouterErrorResponse struct {
+	Detail agentRouterErrorDetail `json:"detail"`
 }
 
 type agentThreadOpenAPIResponse struct {
@@ -1776,6 +1951,7 @@ func registeredCoreOperations() []openAPIOperation {
 	resp := func(description string, v any) openAPIResponse {
 		return openAPIResponse{Description: description, ContentType: "application/json", Schema: schemaSource{Type: v}}
 	}
+	routerErrorResp := resp("Router management error", agentRouterErrorResponse{})
 	rawResp := func(description string) openAPIResponse {
 		return openAPIResponse{Description: description, ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}}
 	}
@@ -3515,64 +3691,85 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/agent/router/status",
 			Summary:     "Get Evo router status",
-			Description: "Proxies Evo GET /router/status.",
+			Description: "Returns Router availability, Evo-owned algorithm counts, and the current AB strategy. Evo error status and body are passed through unchanged.",
 			Tags:        []string{"agent"},
-			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router status")},
+			QueryParams: agentRouterQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Router status", agentRouterStatusResponse{})},
 		},
 		{
 			Method:      "GET",
 			Path:        "/agent/router/algorithms",
 			Summary:     "List Evo router algorithms",
-			Description: "Proxies Evo GET /router/algorithms.",
+			Description: "Lists only algorithms owned by Evo, enriched with live Router state and owner metadata.",
 			Tags:        []string{"agent"},
-			QueryParams: struct {
-				ThreadID       string `query:"thread_id"`
-				AlgorithmID    string `query:"algorithm_id"`
-				Status         string `query:"status"`
-				RouterAdminURL string `query:"router_admin_url"`
-				RouterChatURL  string `query:"router_chat_url"`
-			}{},
-			Responses: map[int]openAPIResponse{200: evoJSONResp("Evo router algorithms")},
+			QueryParams: agentRouterAlgorithmQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Evo-owned Router algorithms", agentRouterAlgorithmListResponse{})},
 		},
 		{
 			Method:      "POST",
 			Path:        "/agent/router/algorithms",
 			Summary:     "Register Evo router algorithm",
-			Description: "Proxies Evo POST /router/algorithms.",
+			Description: "Registers or reactivates an Evo-owned candidate in Router and waits for the requested instances to become healthy.",
 			Tags:        []string{"agent"},
-			RequestBody: evoJSONBody(true),
-			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router algorithm")},
+			RequestBody: jsonBodyOf(agentRouterRegisterRequest{}, true),
+			Responses: map[int]openAPIResponse{
+				200: resp("Registered Router algorithm", agentRouterRegisterResponse{}),
+				409: routerErrorResp,
+				422: evoJSONResp("Invalid Router algorithm registration"),
+			},
 		},
 		{
 			Method:      "POST",
-			Path:        "/agent/router/algorithms/{algorithm_id}:action",
+			Path:        "/agent/router/algorithms/{algorithm_id}/action",
 			Summary:     "Run Evo router algorithm action",
-			Description: "Proxies Evo POST /router/algorithms/{algorithm_id}:action.",
+			Description: "Runs healthcheck, restart, or stop for an Evo-owned algorithm. Restart requires the algorithm to be expected active; stop keeps its Evo ledger record.",
 			Tags:        []string{"agent"},
 			PathParams:  agentRouterAlgorithmPathParams{},
-			RequestBody: evoJSONBody(true),
-			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router algorithm action")},
+			QueryParams: agentRouterQueryParams{},
+			RequestBody: jsonBodyOf(agentRouterActionRequest{}, true),
+			Responses: map[int]openAPIResponse{
+				200: resp("Router algorithm action result", agentRouterActionResponse{}),
+				404: routerErrorResp,
+				409: routerErrorResp,
+				422: evoJSONResp("Invalid Router algorithm action"),
+			},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/agent/router/algorithms/{algorithm_id}",
+			Summary:     "Delete Evo router algorithm",
+			Description: "Stops the algorithm and deletes its Evo ledger entry, candidate artifacts, and managed workspace. Returns 409 while the algorithm is referenced by the active AB strategy. Router metadata is retained as disabled when Router already knew the algorithm.",
+			Tags:        []string{"agent"},
+			PathParams:  agentRouterAlgorithmPathParams{},
+			QueryParams: agentRouterQueryParams{},
+			Responses: map[int]openAPIResponse{
+				200: resp("Deleted Evo router algorithm", agentRouterDeleteResponse{}),
+				404: routerErrorResp,
+				409: routerErrorResp,
+			},
 		},
 		{
 			Method:      "GET",
 			Path:        "/agent/router/ab-strategy",
 			Summary:     "Get Evo router AB strategy",
-			Description: "Proxies Evo GET /router/ab-strategy.",
+			Description: "Returns the active Router weights and the latest Evo AB audit metadata.",
 			Tags:        []string{"agent"},
-			QueryParams: struct {
-				RouterAdminURL string `query:"router_admin_url"`
-				RouterChatURL  string `query:"router_chat_url"`
-			}{},
-			Responses: map[int]openAPIResponse{200: evoJSONResp("Evo router AB strategy")},
+			QueryParams: agentRouterQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Router AB strategy", agentRouterABStrategyResponse{})},
 		},
 		{
 			Method:      "PUT",
 			Path:        "/agent/router/ab-strategy",
 			Summary:     "Update Evo router AB strategy",
-			Description: "Proxies Evo PUT /router/ab-strategy.",
+			Description: "Activates the supplied positive integer weights after ownership and health validation. Omit weights or set it to null to clear AB routing and return to the default algorithm.",
 			Tags:        []string{"agent"},
-			RequestBody: evoJSONBody(true),
-			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router AB strategy")},
+			RequestBody: jsonBodyOf(agentRouterABStrategyRequest{}, true),
+			Responses: map[int]openAPIResponse{
+				200: resp("Updated Router AB strategy", agentRouterABStrategyResponse{}),
+				404: routerErrorResp,
+				409: routerErrorResp,
+				422: evoJSONResp("Invalid Router AB strategy"),
+			},
 		},
 		{
 			Method:  "POST",

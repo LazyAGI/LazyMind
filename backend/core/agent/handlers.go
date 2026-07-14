@@ -395,7 +395,16 @@ func PostRouterAlgorithmAction(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "algorithm_id required", http.StatusBadRequest)
 		return
 	}
-	proxyEvoResponse(w, r, http.MethodPost, "/router/algorithms/"+url.PathEscape(algorithmID)+":action", cloneURLValues(r.URL.Query()), r.Body, "application/json")
+	proxyEvoResponse(w, r, http.MethodPost, "/router/algorithms/"+url.PathEscape(algorithmID)+"/action", cloneURLValues(r.URL.Query()), r.Body, "application/json")
+}
+
+func DeleteRouterAlgorithm(w http.ResponseWriter, r *http.Request) {
+	algorithmID := strings.TrimSpace(mux.Vars(r)["algorithm_id"])
+	if algorithmID == "" {
+		common.ReplyErr(w, "algorithm_id required", http.StatusBadRequest)
+		return
+	}
+	proxyEvoResponse(w, r, http.MethodDelete, "/router/algorithms/"+url.PathEscape(algorithmID), cloneURLValues(r.URL.Query()), nil, "application/json")
 }
 
 func GetRouterABStrategy(w http.ResponseWriter, r *http.Request) {

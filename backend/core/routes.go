@@ -194,7 +194,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/agent/router/status", []string{"qa.read"}, agent.GetRouterStatus)
 	handleAPI(r, "GET", "/agent/router/algorithms", []string{"qa.read"}, agent.ListRouterAlgorithms)
 	handleAPI(r, "POST", "/agent/router/algorithms", []string{"qa.write"}, agent.RegisterRouterAlgorithm)
-	handleAPI(r, "POST", "/agent/router/algorithms/{algorithm_id}:action", []string{"qa.write"}, agent.PostRouterAlgorithmAction)
+	handleAPI(r, "POST", "/agent/router/algorithms/{algorithm_id}/action", []string{"qa.write"}, agent.PostRouterAlgorithmAction)
+	handleAPI(r, "DELETE", "/agent/router/algorithms/{algorithm_id}", []string{"qa.write"}, agent.DeleteRouterAlgorithm)
 	handleAPI(r, "GET", "/agent/router/ab-strategy", []string{"qa.read"}, agent.GetRouterABStrategy)
 	handleAPI(r, "PUT", "/agent/router/ab-strategy", []string{"qa.write"}, agent.PutRouterABStrategy)
 
