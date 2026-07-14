@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useRef, useState } from 'react';
 import { EdgeLabelRenderer, getBezierPath } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
 
@@ -20,6 +20,8 @@ function TransitionEdgeComponent({  id,
 }: EdgeProps) {
   const edgeData = data as unknown as TransitionEdgeData | undefined;
   const [hovered, setHovered] = useState(false);
+  const pathRef = useRef<SVGPathElement>(null);
+  const [arrow, setArrow] = useState<{ x: number; y: number; angle: number } | null>(null);
 
   // Debounce leave so moving between path ↔ popover doesn't flicker
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -43,6 +45,25 @@ function TransitionEdgeComponent({  id,
     targetY,
     targetPosition,
   });
+
+  // SVG markers use the mathematical tangent exactly at the endpoint. React
+  // Flow's bezier path forces that final tangent to match the handle direction,
+  // while the visible curve a few pixels before the node can be much steeper.
+  // Sample the rendered path around the actual arrow position instead, so the
+  // arrow follows the line users see rather than the node edge normal.
+  useLayoutEffect(() => {
+    const path = pathRef.current;
+    if (!path) return;
+    const length = path.getTotalLength();
+    const tipLength = Math.max(0, length - 4);
+    const from = path.getPointAtLength(Math.max(0, tipLength - 12));
+    const tip = path.getPointAtLength(tipLength);
+    setArrow({
+      x: tip.x,
+      y: tip.y,
+      angle: Math.atan2(tip.y - from.y, tip.x - from.x) * 180 / Math.PI,
+    });
+  }, [edgePath]);
 
   const isParallel = edgeData?.isParallel ?? false;
   const hasError = edgeData?.hasError ?? false;
@@ -69,6 +90,7 @@ function TransitionEdgeComponent({  id,
         style={{ cursor: 'pointer' }}
       />
       <path
+        ref={pathRef}
         id={id}
         className="react-flow__edge-path"
         d={edgePath}
@@ -76,9 +98,16 @@ function TransitionEdgeComponent({  id,
         strokeWidth={strokeWidth}
         strokeDasharray={strokeDash}
         fill="none"
-        markerEnd="url(#arrow)"
         style={{ transition: 'stroke-width 0.1s, stroke 0.1s', pointerEvents: 'none' }}
       />
+      {arrow && (
+        <path
+          d="M 0 0 L -10 -5 L -10 5 Z"
+          fill={strokeColor}
+          transform={`translate(${arrow.x} ${arrow.y}) rotate(${arrow.angle})`}
+          style={{ pointerEvents: 'none', transition: 'fill 0.1s' }}
+        />
+      )}
 
       {/* Popover label — floats above the edge midpoint */}
       <EdgeLabelRenderer>

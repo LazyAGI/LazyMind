@@ -833,6 +833,7 @@ const zhCN = {
       "请润色下面这段消息，去掉冗余表达，提升可读性和准确性：\n\n{{prompt}}",
     promptPolishing: "正在优化...",
     autoAdvanceRunning: "自动推进中，请稍候…",
+    pluginDefinitionChanged: "插件代码已发生变化，当前任务不能继续；请新建一个对话任务。",
     upload: "上传文件",
     modelProviderChecking: "正在确认模型配置",
     modelProviderCheckingDesc: "检查完成后即可开始问答。",

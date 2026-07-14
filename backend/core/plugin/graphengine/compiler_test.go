@@ -464,6 +464,44 @@ steps:
 	}
 }
 
+func TestCompileGraphHashIsStableAcrossMapIteration(t *testing.T) {
+	plugin := `
+id: stable-hash-test
+slots:
+  - {id: context}
+  - {id: outline}
+steps:
+  - {id: build}
+  - {id: outline}
+  - {id: finish}
+`
+	state := `
+transitions:
+  __start__: [{to: build}]
+  build: [{to: outline}]
+  outline: [{to: finish}]
+  finish: [{to: __end__}]
+steps:
+  build:
+    outputs: [{material: context}]
+  outline:
+    inputs: [{material: context, required: true}]
+    outputs: [{material: outline}]
+  finish:
+    inputs: [{material: outline, required: true}]
+`
+	first := Compile(plugin, state, "", ProfileRuntimeLoad)
+	if !first.Valid || first.GraphHash == "" {
+		t.Fatalf("initial compile failed: %#v", first.Diagnostics)
+	}
+	for i := 0; i < 100; i++ {
+		next := Compile(plugin, state, "", ProfileRuntimeLoad)
+		if next.GraphHash != first.GraphHash {
+			t.Fatalf("compile %d hash=%q, want stable %q", i+1, next.GraphHash, first.GraphHash)
+		}
+	}
+}
+
 func TestChoiceWhenHintsExposeAllCandidatesAsReachable(t *testing.T) {
 	graph := &CompiledStateGraph{
 		SchemaVersion: SchemaVersion,

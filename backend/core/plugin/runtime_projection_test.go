@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -50,5 +51,21 @@ func TestLoadSessionGraphRejectsSessionHashMismatch(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "session graph hash mismatch") {
 		t.Fatalf("session hash mismatch must be rejected, got %v", err)
+	}
+}
+
+func TestLegacySessionRejectsChangedPluginDefinition(t *testing.T) {
+	session := &orm.PluginSession{GraphHash: "hash-at-task-start"}
+	graph := &graphengine.CompiledStateGraph{GraphHash: "hash-after-code-change"}
+	err := ensureLegacySessionGraphUnchanged(session, graph)
+	var changed *pluginDefinitionChangedError
+	if !errors.As(err, &changed) {
+		t.Fatalf("changed builtin graph must return typed error, got %v", err)
+	}
+	if changed.expected != session.GraphHash || changed.actual != graph.GraphHash {
+		t.Fatalf("unexpected hash details: %#v", changed)
+	}
+	if !strings.Contains(changed.Error(), "请新建一个对话任务") {
+		t.Fatalf("user guidance missing from error: %v", changed)
 	}
 }

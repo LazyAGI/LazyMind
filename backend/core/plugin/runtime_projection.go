@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -13,6 +14,24 @@ import (
 	"lazymind/core/plugin/graphengine"
 	"lazymind/core/store"
 )
+
+const pluginDefinitionChangedCode = "PLUGIN_DEFINITION_CHANGED"
+
+type pluginDefinitionChangedError struct {
+	expected string
+	actual   string
+}
+
+func (e *pluginDefinitionChangedError) Error() string {
+	return "插件代码在此任务启动后发生了变化，当前任务不能继续；请新建一个对话任务以使用更新后的插件"
+}
+
+func ensureLegacySessionGraphUnchanged(session *orm.PluginSession, graph *graphengine.CompiledStateGraph) error {
+	if session.GraphHash != "" && graph.GraphHash != "" && session.GraphHash != graph.GraphHash {
+		return &pluginDefinitionChangedError{expected: session.GraphHash, actual: graph.GraphHash}
+	}
+	return nil
+}
 
 func loadSessionGraph(ctx context.Context, db *gorm.DB, session *orm.PluginSession) (*graphengine.CompiledStateGraph, error) {
 	if session.PluginRevisionID != "" {
@@ -64,6 +83,9 @@ func loadSessionGraph(ctx context.Context, db *gorm.DB, session *orm.PluginSessi
 	compiled := graphengine.Compile(body.PluginYAML, body.StateYAML, body.Scenario, graphengine.ProfileRuntimeLoad)
 	if !compiled.Valid || compiled.Graph == nil {
 		return nil, fmt.Errorf("legacy plugin cannot be compiled: %v", compiled.Diagnostics)
+	}
+	if err := ensureLegacySessionGraphUnchanged(session, compiled.Graph); err != nil {
+		return nil, err
 	}
 	return compiled.Graph, nil
 }
@@ -183,6 +205,14 @@ func GetSessionProjection(w http.ResponseWriter, r *http.Request) {
 	}
 	projection, err := projectSession(r.Context(), store.DB(), &session)
 	if err != nil {
+		var changed *pluginDefinitionChangedError
+		if errors.As(err, &changed) {
+			common.ReplyErrWithData(w, changed.Error(), map[string]any{
+				"code":    pluginDefinitionChangedCode,
+				"details": map[string]any{"expected": changed.expected, "actual": changed.actual},
+			}, http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "project session failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
 	}

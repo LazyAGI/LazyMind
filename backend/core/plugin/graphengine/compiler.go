@@ -308,12 +308,46 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 		}
 	}
 
-	canonical, _ := json.Marshal(graph)
+	canonical, _ := canonicalGraphJSON(graph)
 	sum := sha256.Sum256(canonical)
 	graph.GraphHash = hex.EncodeToString(sum[:])
 	result.GraphHash, result.Graph = graph.GraphHash, graph
 	result.Valid = !hasErrors(result.Diagnostics)
 	return result
+}
+
+// canonicalGraphJSON produces stable hash input without changing runtime edge
+// ordering. YAML mappings are decoded into Go maps, so iterating transition
+// sources and skip nodes can otherwise reorder slices between compilations.
+func canonicalGraphJSON(graph *CompiledStateGraph) ([]byte, error) {
+	canonical := *graph
+	canonical.GraphHash = ""
+	edgesBySource := make(map[string][]CompiledEdge)
+	for _, edge := range graph.ControlEdges {
+		edgesBySource[edge.From] = append(edgesBySource[edge.From], edge)
+	}
+	sources := make([]string, 0, len(edgesBySource))
+	for source := range edgesBySource {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+	canonical.ControlEdges = nil
+	for _, source := range sources {
+		// Preserve declared order among exits from the same source because it is
+		// semantically significant for machine-decided choice routes.
+		canonical.ControlEdges = append(canonical.ControlEdges, edgesBySource[source]...)
+	}
+	canonical.SkipExpansions = append([]CompiledBypass(nil), graph.SkipExpansions...)
+	for i := range canonical.SkipExpansions {
+		canonical.SkipExpansions[i].From = append([]string(nil), canonical.SkipExpansions[i].From...)
+		canonical.SkipExpansions[i].To = append([]string(nil), canonical.SkipExpansions[i].To...)
+		sort.Strings(canonical.SkipExpansions[i].From)
+		sort.Strings(canonical.SkipExpansions[i].To)
+	}
+	sort.Slice(canonical.SkipExpansions, func(i, j int) bool {
+		return canonical.SkipExpansions[i].NodeID < canonical.SkipExpansions[j].NodeID
+	})
+	return json.Marshal(&canonical)
 }
 
 func expressionGuaranteed(expr *Expression, decisionNode string, producers map[string]ProducerRef, guaranteedMaterials map[string]bool, dominators map[string]map[string]bool, allowSelf bool) bool {

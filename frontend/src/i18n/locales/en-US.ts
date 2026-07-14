@@ -870,6 +870,7 @@ const enUS = {
       "Please polish the following message by removing redundant wording and improving readability and accuracy:\n\n{{prompt}}",
     promptPolishing: "Optimizing...",
     autoAdvanceRunning: "Auto mode is running, please wait…",
+    pluginDefinitionChanged: "The plugin code changed, so this task cannot continue. Please start a new chat.",
     upload: "Upload file",
     modelProviderChecking: "Checking model configuration",
     modelProviderCheckingDesc: "Q&A will be available once the check finishes.",

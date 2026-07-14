@@ -157,6 +157,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const hasPluginSession = usePluginStore((s) =>
     sessionId ? (s.sessionByConversation[sessionId] ?? null) !== null : false,
   );
+  const pluginDefinitionChanged = usePluginStore((s) =>
+    sessionId
+      ? s.sessionByConversation[sessionId]?.runtime_error_code ===
+        "PLUGIN_DEFINITION_CHANGED"
+      : false,
+  );
+  const chatEnabled = canChat && !pluginDefinitionChanged;
 
   // When the user changes KB selection during an active plugin session, persist it on the
   // conversation so analyze_subject KB prefetch inherits filters.kb_id.
@@ -680,7 +687,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       )}
       <ChatContainerComponent
         ref={chatRef}
-        canChat={canChat}
+        canChat={chatEnabled}
         initialCard={isRestoringConversation ? null : <InitialCard />}
         sessionId={sessionId}
         onOpenSSE={onOpenSSE}
@@ -705,9 +712,19 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         embeddingReady={embeddingReady}
         multimodalEmbeddingReady={multimodalEmbeddingReady}
         rerankReady={rerankReady}
-        disabledReason={autoRunning ? t("chat.autoAdvanceRunning") : chatDisabledReason}
-        disabledDescription={autoRunning ? undefined : chatDisabledDescription}
-        disabledAction={autoRunning ? undefined : chatDisabledAction}
+        disabledReason={
+          pluginDefinitionChanged
+            ? t("chat.pluginDefinitionChanged")
+            : autoRunning
+              ? t("chat.autoAdvanceRunning")
+              : chatDisabledReason
+        }
+        disabledDescription={
+          autoRunning || pluginDefinitionChanged ? undefined : chatDisabledDescription
+        }
+        disabledAction={
+          autoRunning || pluginDefinitionChanged ? undefined : chatDisabledAction
+        }
       />
       {tasks.length > 0 && isTaskPanelCollapsed && (
         <button

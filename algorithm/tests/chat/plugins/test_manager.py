@@ -739,6 +739,20 @@ def test_trigger_plugin_step_rejects_missing_step_config(mock_agentic_config):
             )
 
 
+def test_trigger_plugin_step_uses_unified_advance_operation(
+        loaded_plugin, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+
+    mock_agentic_config.update({
+        'plugin_step': 'step_a', 'plugin_session_id': 'session-advance',
+    })
+    accepted = plugin_manager._TransitionSubmission(True, 'accepted', task_id='task-b')
+    with patch.object(plugin_manager, '_submit_transition_to_core', return_value=accepted) as submit:
+        plugin_manager._trigger_plugin_step('test-plugin', 'step_b', 'continue')
+
+    assert submit.call_args.kwargs['operation'] == 'advance'
+
+
 def test_trigger_plugin_steps_submits_one_atomic_batch(
         loaded_plugin, mock_agentic_config):
     from lazymind.chat.plugin import plugin_manager
@@ -1007,7 +1021,7 @@ def test_step_choice_doc_uses_configured_default_approval(loaded_plugin):
     assert 'default approval: not required' in (advance.__doc__ or '')
 
 
-def test_build_advance_step_tool_docstring_contains_rewind_steps(loaded_plugin):
+def test_build_advance_step_tool_docstring_contains_rerunnable_steps(loaded_plugin):
     from lazymind.chat.plugin import plugin_manager
     advance = plugin_manager.build_advance_step_tool(
         'test-plugin', 'step_b',
@@ -1016,19 +1030,41 @@ def test_build_advance_step_tool_docstring_contains_rewind_steps(loaded_plugin):
     )
     doc = advance.__doc__ or ''
     assert 'step_a' in doc
-    assert 'Rewind' in doc
+    assert 'Previously attempted steps that may be run again' in doc
     assert 'Analyze Subject' in doc
     assert 'previously completed' in doc
 
 
-def test_build_advance_step_tool_docstring_no_rewind_when_empty(loaded_plugin):
+def test_build_advance_step_tool_docstring_no_rerun_when_empty(loaded_plugin):
     from lazymind.chat.plugin import plugin_manager
     advance = plugin_manager.build_advance_step_tool(
         'test-plugin', 'step_a',
         rewind_steps=[],
     )
     doc = advance.__doc__ or ''
-    assert 'Rewind' not in doc
+    assert 'Previously attempted steps that may be run again' not in doc
+
+
+def test_live_projection_does_not_offer_succeeded_current_step_as_retry(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    config = {'plugin_session_id': 'writer-session', 'plugin_step': 'step_a'}
+    projection = {
+        'past': ['step_a'],
+        'ready': ['step_b'],
+        'nodes': {'step_a': {'execution': 'succeeded'}},
+    }
+    with (
+        patch.object(plugin_manager, '_agentic_config', return_value=config),
+        patch.object(plugin_manager, '_fetch_go_projection', return_value=projection),
+    ):
+        advance = plugin_manager.build_advance_step_tool('test-plugin', 'step_a')
+
+    doc = advance.__doc__ or ''
+    assert 'Retry (re-run current step):' not in doc
+    assert 'step_b' in doc
+    assert 'step_a' in doc
+    assert 'Previously attempted steps that may be run again' in doc
 
 
 def test_dynamic_guidance_respects_explicit_target_boundary(loaded_plugin):
@@ -1075,7 +1111,7 @@ def test_batch_guidance_requires_one_atomic_call_for_ready_frontier(loaded_plugi
 
     assert 'ONE batch call' in guidance
     assert 'Do not issue repeated' in guidance
-    assert 'Retry and rewind remain single-step' in guidance
+    assert 'Running an attempted step again remains single-step' in guidance
     assert 'valid parallel choices' in guidance
 
 

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { PluginInfoApi, PluginSessionApi, TempUploadServiceApi } from "@/modules/chat/utils/request";
 import i18n from "@/i18n";
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
+import { extractErrorCode, getLocalizedErrorMessage } from "@/components/request";
 
 export function buildPluginSearchConfig(
   chatConfig?: Pick<ChatConfig, "knowledgeBaseId" | "creators" | "tags">,
@@ -185,6 +186,9 @@ export interface PluginSession {
   steps?: PluginSessionStep[];
   /** Go-authoritative runtime projection. Never derive Ready/Past from steps locally. */
   projection?: PluginRuntimeProjection;
+  /** Fatal runtime error that makes this conversation's pinned plugin graph unusable. */
+  runtime_error_code?: string;
+  runtime_error_message?: string;
   /** UI focus state mirrored onto the session for legacy readers; the source of
    *  truth lives in `focusedTabByConversation` / `focusedSortOrderByConversation`
    *  so it survives `setSession()` refreshes. */
@@ -430,14 +434,22 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
         try {
           const [stepsRes, projectionRes] = await Promise.all([
             PluginSessionApi().getSteps(session.session_id),
-            PluginSessionApi().getProjection(session.session_id),
+            PluginSessionApi().getProjection(
+              session.session_id,
+              { silentError: true } as never,
+            ),
           ]);
           const rawSteps = stepsRes?.data?.data?.steps ?? [];
           session.steps = rawSteps.filter((s: PluginSessionStep) => s.step_id !== '__end__');
           session.projection = projectionRes?.data?.data?.projection ?? {};
-        } catch {
+        } catch (error) {
           session.steps = [];
           session.projection = {};
+          const errorCode = extractErrorCode(error);
+          if (errorCode === "PLUGIN_DEFINITION_CHANGED") {
+            session.runtime_error_code = errorCode;
+            session.runtime_error_message = getLocalizedErrorMessage(error);
+          }
         }
       }
       get().setSession(conversationId, session);

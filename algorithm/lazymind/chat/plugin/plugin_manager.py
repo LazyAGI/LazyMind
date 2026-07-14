@@ -47,6 +47,7 @@ class _ReachabilitySnapshot:
     session_id: str
     forward_steps: List[str]
     rewind_steps: List[str]
+    retry_steps: List[str]
     reachable_steps: List[str]
 
 
@@ -106,7 +107,7 @@ def _submit_transition_to_core(
         *, plugin_id: str, step_id: str, session_id: str, task_id: str,
         objective: str, user_input: str, hand_off: bool,
         runtime_instruction: str, partial_indices: Dict[str, List[int]],
-        operation: str = 'execute', is_start: bool = False,
+        operation: str = 'advance', is_start: bool = False,
         preflight_id: str = '',
         targets: Optional[List[Dict[str, Any]]] = None) -> _TransitionSubmission:
     import httpx
@@ -188,8 +189,39 @@ def _submit_transition_to_core(
             f'Transition result unknown [TRANSITION_RESULT_UNKNOWN].\nCommand id: {command_id}\nReason: {exc}',
             command_id=command_id,
         )
+    error = data.get('error') if isinstance(data.get('error'), dict) else {}
+    if response.status_code == 409 and error.get('code') == 'STATE_VERSION_CONFLICT':
+        details = error.get('details') if isinstance(error.get('details'), dict) else {}
+        latest_version = int(details.get('actual') or data.get('state_version') or 0)
+        if latest_version > expected_version:
+            # Step completion and route freezing are separate writes. The task waiter can
+            # observe "succeeded" just before route reconciliation increments the session
+            # version. Retry this explicitly retryable admission conflict once against the
+            # authoritative version returned by Go.
+            command_id = str(uuid.uuid4())
+            payload['command_id'] = command_id
+            payload['expected_state_version'] = latest_version
+            try:
+                response = httpx.post(endpoint, json=payload, timeout=15.0)
+                data = _core_response_data(response)
+                expected_version = latest_version
+            except Exception as exc:
+                return _TransitionSubmission(
+                    False,
+                    f'Transition result unknown [TRANSITION_RESULT_UNKNOWN].\n'
+                    f'Command id: {command_id}\nReason: {exc}',
+                    command_id=command_id,
+                )
     accepted = bool(data.get('accepted')) and response.status_code < 300
     if not accepted:
+        rejection = data.get('error') if isinstance(data.get('error'), dict) else {}
+        LOG.warning(
+            '[plugin.transition] rejected plugin=%s step=%s session=%s command=%s operation=%s '
+            'http_status=%s code=%s reason=%s details=%s',
+            plugin_id, step_id, session_id, command_id, operation,
+            response.status_code, rejection.get('code', ''), rejection.get('message', ''),
+            rejection.get('details') if isinstance(rejection.get('details'), dict) else {},
+        )
         return _TransitionSubmission(
             False, _format_transition_rejection(step_id, data), command_id=command_id,
             state_version=int(data.get('state_version') or expected_version),
@@ -413,7 +445,7 @@ def _trigger_plugin_step(
         preflight_id: str = '',
         runtime_instruction: str = '',
         partial_indices: Optional[Dict[str, List[int]]] = None,
-        operation: str = 'execute') -> str:
+        operation: str = 'advance') -> str:
     """Shared implementation for trigger_<plugin_id> and advance_step.
 
     Performs local request-shape validation, then submits a synchronous Go
@@ -508,8 +540,8 @@ def _trigger_plugin_steps(
     """Atomically submit multiple currently-Ready steps to Go.
 
     Go validates every target against one projection and either persists every
-    attempt or rejects the whole command. Retry/rewind deliberately remain on
-    the single-step compatibility path.
+    attempt or rejects the whole command. Previously attempted targets deliberately
+    remain on the single-step path.
     """
     if not isinstance(steps, list) or len(steps) < 2:
         raise ValueError('steps must contain at least two step commands; use advance_step for one target.')
@@ -586,7 +618,7 @@ def _build_step_choices_doc(
 ) -> str:
     """Return a formatted string listing available step choices for the LLM.
 
-    Forward and rewind candidates come exclusively from Go's projection.
+    Forward and previously attempted candidates come exclusively from Go's projection.
     """
     lines = [
         '## Available steps at this moment (authoritative — state machine computed)',
@@ -608,19 +640,16 @@ def _build_step_choices_doc(
                 )
                 approval_note = f'  [default approval: {approval}]'
             lines.append(f'  - {s}{label_suffix}{approval_note}')
-    # Self-retry: current_step is injected into all_reachable without a graph self-loop.
-    # Document it here so ChatAgent knows it can pass step_id=current_step to re-run.
+    rerun_steps: List[str] = []
     if current_step and current_step not in {'__start__', '__end__'}:
-        label = step_labels.get(current_step, '')
-        suffix = f'  ({label})' if label else ''
-        lines.append('Retry (re-run current step):')
-        lines.append(f'  - {current_step}{suffix}  <- full or partial retry of this step')
-    if rewind_steps:
-        lines.append('Rewind (re-run a past step):')
-        for s in rewind_steps:
+        rerun_steps.append(current_step)
+    rerun_steps.extend(step for step in rewind_steps if step not in rerun_steps)
+    if rerun_steps:
+        lines.append('Previously attempted steps that may be run again:')
+        for s in rerun_steps:
             label = step_labels.get(s, '')
             suffix = f'  ({label})' if label else ''
-            lines.append(f'  - {s}{suffix}  <- previously completed, can re-trigger')
+            lines.append(f'  - {s}{suffix}  <- select this ID to run it again')
     lines.append('')
     lines.append('Pass one of the above IDs as step_id. Any other value will be rejected.')
     return '\n'.join(lines)
@@ -1410,29 +1439,26 @@ def _live_reachability_snapshot(
     session_id = cfg.get('plugin_session_id', '')
     forward_steps: List[str] = []
     rewind = list(rewind_steps or [])
+    projection: Dict[str, Any] = {}
     if session_id:
         projection = _fetch_go_projection(session_id)
         forward_steps = list(projection.get('ready') or [])
-        if not rewind_steps:
-            rewind = list(projection.get('past') or [])
-    reachable = list(dict.fromkeys(forward_steps + rewind))
-    if current_step and current_step not in reachable:
-        reachable = [current_step] + reachable
+        rewind = list(projection.get('past') or [])
+    nodes = projection.get('nodes') if isinstance(projection.get('nodes'), dict) else {}
+    current_execution = (
+        str(nodes.get(current_step, {}).get('execution') or '')
+        if isinstance(nodes.get(current_step), dict) else ''
+    )
+    retry = [current_step] if current_execution in {'failed', 'interrupted'} else []
+    reachable = list(dict.fromkeys(forward_steps + retry + rewind))
     return _ReachabilitySnapshot(
         current_step=current_step,
         session_id=session_id,
         forward_steps=forward_steps,
         rewind_steps=rewind,
+        retry_steps=retry,
         reachable_steps=reachable,
     )
-
-
-def _transition_operation(step_id: str, current_step: str, rewind_steps: Optional[List[str]]) -> str:
-    if step_id in set(rewind_steps or []):
-        return 'rewind'
-    if step_id == current_step:
-        return 'retry'
-    return 'execute'
 
 
 def build_advance_step_and_hand_off_tool(
@@ -1447,8 +1473,9 @@ def build_advance_step_and_hand_off_tool(
     Queues the step asynchronously and immediately ends the current ReAct turn.
     Mode-specific continuation behavior is defined by the system guidance.
     """
-    forward = _live_reachability_snapshot(plugin_id, current_step, rewind_steps).forward_steps
-    rewind = list(rewind_steps or [])
+    snapshot = _live_reachability_snapshot(plugin_id, current_step, rewind_steps)
+    forward = snapshot.forward_steps
+    rewind = snapshot.rewind_steps
     labels = step_labels or {}
 
     choices_doc = _build_step_choices_doc(
@@ -1456,7 +1483,7 @@ def build_advance_step_and_hand_off_tool(
         rewind,
         labels,
         plugin_id=plugin_id,
-        current_step=current_step,
+        current_step=current_step if current_step in snapshot.retry_steps else '',
         include_default_approval=include_approval_guidance,
     )
 
@@ -1487,7 +1514,7 @@ def build_advance_step_and_hand_off_tool(
             hand_off=True,
             runtime_instruction=runtime_instruction or '',
             partial_indices=partial_indices or {},
-            operation=_transition_operation(step_id, current_step, rewind_steps),
+            operation='advance',
         )
         # advance_step_and_hand_off remains a static stop-tool for compatibility.
         # Raising turns a Go rejection into an ok=false tool observation, so the
@@ -1507,16 +1534,16 @@ def build_advance_step_and_hand_off_tool(
         + selection_guidance
         + 'Terminal steps are also boundaries; after a\n'
         'terminal task succeeds, the plugin event loop completes the session.\n\n'
-        '## Intent-change rewind (MUST read before advancing)\n\n'
+        '## Running an earlier step again\n\n'
         'If the user expresses dissatisfaction with or changes to the result of a step that\n'
-        'has ALREADY SUCCEEDED, you MUST rewind to the earliest affected step instead of\n'
-        'advancing the next forward step.\n\n'
+        'has ALREADY run, select the earliest affected step_id. The backend automatically\n'
+        'decides whether the target is a normal advance, retry, or rewind.\n\n'
         'Examples:\n'
         '  User: "我不喜欢日系风格，改成北欧简约风" → the style was set in an earlier step\n'
-        '    → advance_step_and_hand_off(step_id=<that_step>, rewind=True,\n'
+        '    → advance_step_and_hand_off(step_id=<that_step>,\n'
         '        user_input="北欧简约风格，...")\n'
         '  User: "不要树，改成蓝天白云" → subject was defined in analyze_subject\n'
-        '    → advance_step_and_hand_off(step_id="analyze_subject", rewind=True,\n'
+        '    → advance_step_and_hand_off(step_id="analyze_subject",\n'
         '        user_input="主体：蓝天白云...")\n\n'
         '## Checkpoint-Resume (interrupted steps)\n\n'
         'When the user says "继续" and the step was interrupted (not "重试"):\n'
@@ -1524,14 +1551,13 @@ def build_advance_step_and_hand_off_tool(
         '    "Previous attempt was interrupted. Check existing artifacts for this step "\n'
         '    "and only produce missing outputs (resume from checkpoint). "\n'
         '    "Do not regenerate already-saved artifacts."))\n'
-        'When the user says "重试": advance_step_and_hand_off(step_id=..., rewind=True)\n'
-        '  (rewind=True discards previous partial artifacts and restarts the step from scratch)\n\n'
+        'When the user says "重试", select that same step_id and describe the requested\n'
+        'restart behavior in runtime_instruction.\n\n'
         '## Completing the plugin\n\n'
         'Hand off the terminal pipeline step itself. Go automatically marks the session\n'
         'complete when all effective branches finish; never submit `__end__`.\n\n'
-        '## Rewind guidance\n\n'
-        'If the DriverAgent or user indicates a prior step produced bad output, rewind by\n'
-        'passing its step_id. Rewind-eligible steps are listed in the "Rewind" section below.\n\n'
+        'If the DriverAgent or user indicates a prior step produced bad output, simply pass\n'
+        'that step_id again. Do not reason about backend lifecycle operation names.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
         '    step_id (str): Step to advance to (see list above).\n'
@@ -1559,11 +1585,15 @@ def build_advance_step_tool(
     ChatAgent can continue reasoning. Use for explicit continuous execution and
     for steps whose default approval is not required.
     """
-    forward = _live_reachability_snapshot(plugin_id, current_step, rewind_steps).forward_steps
-    rewind = list(rewind_steps or [])
+    snapshot = _live_reachability_snapshot(plugin_id, current_step, rewind_steps)
+    forward = snapshot.forward_steps
+    rewind = snapshot.rewind_steps
     labels = step_labels or {}
 
-    choices_doc = _build_step_choices_doc(forward, rewind, labels, plugin_id=plugin_id, current_step=current_step)
+    choices_doc = _build_step_choices_doc(
+        forward, rewind, labels, plugin_id=plugin_id,
+        current_step=current_step if current_step in snapshot.retry_steps else '',
+    )
 
     def advance_step(
         step_id: str,
@@ -1584,7 +1614,7 @@ def build_advance_step_tool(
             is_cold_start=False,
             runtime_instruction=runtime_instruction or '',
             partial_indices=partial_indices or {},
-            operation=_transition_operation(step_id, current_step, rewind_steps),
+            operation='advance',
         )
         if not _agentic_config().get('_last_plugin_transition_accepted', False):
             return result
@@ -1662,7 +1692,7 @@ def build_advance_steps_and_hand_off_tool(
         'Use one call when Go reports multiple Ready steps that should start now. Go evaluates all\n'
         'items against the same projection and either queues every item or rejects the entire batch.\n'
         'Never include a downstream step that needs an output from another item in this batch.\n'
-        'Retry and rewind are not supported in batches; use advance_step_and_hand_off for those.\n\n'
+        'Previously attempted targets are not supported in batches; use a single-step tool.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
         '    steps: At least two objects. Each object must contain step_id and user_input, and may\n'
@@ -1713,7 +1743,7 @@ def build_advance_steps_tool(
         'Atomically start two or more independent Ready plugin steps and wait for all results.\n\n'
         'Prefer this over repeated advance_step calls whenever the authoritative Ready list contains\n'
         'multiple steps that should run now. The batch is all-or-rejected and increments state_version\n'
-        'once. Never batch a downstream dependency, retry, or rewind.\n\n'
+        'once. Never batch a downstream dependency or a previously attempted target.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
         '    steps: At least two objects. Each object contains step_id, user_input, and optional\n'
@@ -1732,13 +1762,17 @@ def _append_step_transition_hint(
     step_labels: Dict[str, str],
 ) -> str:
     """Append live transition guidance to advance_step's tool result."""
-    forward = _live_reachability_snapshot(plugin_id, current_step, rewind_steps).forward_steps
+    snapshot = _live_reachability_snapshot(plugin_id, current_step, rewind_steps)
+    # Only expose retry option when Go's projection confirms the step is retryable
+    # (i.e. its last execution was failed or interrupted). A just-succeeded step
+    # must NOT appear as a Retry candidate — the LLM should advance forward instead.
+    retryable_step = current_step if current_step in snapshot.retry_steps else ''
     choices_doc = _build_step_choices_doc(
-        forward,
-        rewind_steps,
+        snapshot.forward_steps,
+        snapshot.rewind_steps,
         step_labels,
         plugin_id=plugin_id,
-        current_step=current_step,
+        current_step=retryable_step,
     )
     return (
         f'{summary}\n\n'
@@ -2368,7 +2402,7 @@ def _build_step_status_section(
             lines.append('Succeeded steps: none yet')
 
         if rewind_steps:
-            lines.append('Rewind-eligible steps (already succeeded, can be re-run): '
+            lines.append('Previously completed steps that can be run again: '
                          + ', '.join(_label(s) for s in rewind_steps))
 
         if ready:
@@ -2430,9 +2464,9 @@ def _build_mode_guidance(
         '  - Implicit correction: user describes a different style/subject/content\n'
         '    than what the current artifacts reflect.\n'
         'If intent has changed, identify the EARLIEST step whose output is now\n'
-        'invalidated and rewind to that step using `advance_step_and_hand_off` with\n'
-        '`step_id=<affected_step>` (a succeeded target is recognized as a rewind and clears artifacts\n'
-        'and re-runs from scratch). Do NOT continue to the next forward step.\n\n'
+        'invalidated and select that step again using `advance_step_and_hand_off` with\n'
+        '`step_id=<affected_step>`. The backend clears affected artifacts and determines\n'
+        'the lifecycle operation automatically. Do NOT continue to the next forward step.\n\n'
         '### Rule 2 — DAG frontier and atomic batching\n'
         'The authoritative Ready list is the only forward execution frontier. Never infer\n'
         'serial order from `current_step`, conversation history, or visual position.\n'
@@ -2440,7 +2474,7 @@ def _build_mode_guidance(
         'independent Ready steps should start now, issue ONE batch call containing all of them,\n'
         'with a separate user_input/runtime_instruction for every step. Do not issue repeated\n'
         'single-step calls for the same frontier. Never include a Blocked node or a downstream\n'
-        'node that needs another batch item\'s future output. Retry and rewind remain single-step.\n\n'
+        'node that needs another batch item\'s future output. Running an attempted step again remains single-step.\n\n'
         '### Rule 3 — Approval precedence and workflow advancement\n'
         'Select the advancement tool with this priority:\n'
         '  1. Explicit intent in the latest query or persisted session intent wins. Match a\n'
@@ -2473,7 +2507,7 @@ def _build_mode_guidance(
         'the requested workflow in one plural-tool call.\n'
         'Do NOT reply only with prose such as "正在生成..." without calling a tool.\n'
         'Do NOT pass the current plugin step state unless it is explicitly listed\n'
-        'as a valid forward or rewind target.\n'
+        'as a valid forward or previously-attempted target.\n'
     )
     common = (
         '\n\n## Plugin execution guidance\n\n'
@@ -2528,7 +2562,7 @@ def _build_mode_guidance(
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
             'and only produce missing outputs (resume from checkpoint)."\n'
             'When user says "重试": call the single-step advance_step_and_hand_off for that '
-            'failed/interrupted step; never place retry or rewind in a batch.'
+            'failed/interrupted step; never place a previously attempted step in a batch.'
         )
     )
     return global_rules + common

@@ -16,6 +16,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/plugin/graphengine"
 	"lazymind/core/store"
+	"lazymind/core/subagent"
 )
 
 type transitionCommandRequest struct {
@@ -58,6 +59,12 @@ type transitionTarget struct {
 	UserInput          string           `json:"user_input"`
 	RuntimeInstruction string           `json:"runtime_instruction"`
 	PartialIndices     map[string][]int `json:"partial_indices"`
+}
+
+// plugin_attempt_input_bindings.id is varchar(36). Keep the semantic prefix,
+// but unlike the historical "paib_" prefix, fit the 32-character generated ID.
+func newAttemptInputBindingID() string {
+	return "pib_" + common.GenerateID()
 }
 
 type transitionTaskResponse struct {
@@ -336,7 +343,7 @@ func StartPluginSession(w http.ResponseWriter, r *http.Request) {
 			if revisionID == "" {
 				continue
 			}
-			if err := tx.Create(&orm.PluginAttemptInputBinding{ID: "paib_" + common.GenerateID(), SessionID: sessionID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: revisionID, BindAs: witness.BindAs, CreatedAt: now}).Error; err != nil {
+			if err := tx.Create(&orm.PluginAttemptInputBinding{ID: newAttemptInputBindingID(), SessionID: sessionID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: revisionID, BindAs: witness.BindAs, CreatedAt: now}).Error; err != nil {
 				return err
 			}
 		}
@@ -358,6 +365,7 @@ func StartPluginSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dispatchPluginAttemptRunner(store.DB(), store.State(), taskID)
+	emitTaskCreatedConvEvent(r.Context(), taskID, sessionID, req.ConversationID)
 	writeTransitionResponse(w, response, http.StatusOK)
 }
 
@@ -403,7 +411,7 @@ func persistTransitionCommand(db *gorm.DB, req transitionCommandRequest, respons
 	body, _ := json.Marshal(response)
 	now := time.Now().UTC()
 	row := orm.PluginTransitionCommand{CommandID: req.CommandID, SessionID: response.SessionID, Operation: req.Operation, TargetStepID: commandTargetID(req), Status: status, TaskID: response.TaskID, ExpectedStateVersion: req.ExpectedStateVersion, ResultingStateVersion: response.StateVersion, ResponseJSON: body, CreatedAt: now, UpdatedAt: now}
-	return db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "command_id"}}, DoUpdates: clause.AssignmentColumns([]string{"session_id", "status", "task_id", "resulting_state_version", "response_json", "updated_at"})}).Create(&row).Error
+	return db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "command_id"}}, DoUpdates: clause.AssignmentColumns([]string{"session_id", "operation", "status", "task_id", "resulting_state_version", "response_json", "updated_at"})}).Create(&row).Error
 }
 
 func reserveTransitionCommand(db *gorm.DB, req transitionCommandRequest) (bool, error) {
@@ -461,12 +469,12 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			req.Operation = "execute"
 		}
 	}
-	if req.Operation != "execute" && req.Operation != "execute_batch" && req.Operation != "retry" && req.Operation != "rewind" {
-		common.ReplyErr(w, "operation must be execute, execute_batch, retry, or rewind", http.StatusUnprocessableEntity)
+	if req.Operation != "advance" && req.Operation != "execute" && req.Operation != "execute_batch" && req.Operation != "retry" && req.Operation != "rewind" {
+		common.ReplyErr(w, "operation must be advance, execute, execute_batch, retry, or rewind", http.StatusUnprocessableEntity)
 		return
 	}
-	if (req.Operation == "retry" || req.Operation == "rewind") && len(targets) != 1 {
-		common.ReplyErr(w, "retry and rewind require exactly one target", http.StatusUnprocessableEntity)
+	if (req.Operation == "advance" || req.Operation == "retry" || req.Operation == "rewind") && len(targets) != 1 {
+		common.ReplyErr(w, "advance, retry, and rewind require exactly one target", http.StatusUnprocessableEntity)
 		return
 	}
 	reserved, reserveErr := reserveTransitionCommand(store.DB(), req)
@@ -496,6 +504,14 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 		graphErr := error(nil)
 		graph, graphErr = loadSessionGraph(r.Context(), tx, &session)
 		if graphErr != nil {
+			var changed *pluginDefinitionChangedError
+			if errors.As(graphErr, &changed) {
+				fmt.Printf("[plugin.transition] rejected code=%s command=%s session=%s target=%s expected_hash=%s actual_hash=%s\n",
+					pluginDefinitionChangedCode, req.CommandID, session.ID, req.TargetStepID, changed.expected, changed.actual)
+				return rejectTransition(req.CommandID, &session, graphengine.Projection{}, http.StatusConflict,
+					pluginDefinitionChangedCode, changed.Error(), false,
+					map[string]any{"expected": changed.expected, "actual": changed.actual})
+			}
 			return graphErr
 		}
 		snapshot, snapshotErr := loadRuntimeSnapshot(r.Context(), tx, session.ID)
@@ -503,14 +519,23 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			return snapshotErr
 		}
 		projection := graphengine.Project(graph, snapshot)
-		if session.Status == SessionStatusCompleted {
-			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "SESSION_TERMINAL", "plugin session is already completed", false, nil)
-		}
 		if req.ExpectedStateVersion != session.StateVersion {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STATE_VERSION_CONFLICT", "plugin session state changed; use the returned projection", true, map[string]any{"expected": req.ExpectedStateVersion, "actual": session.StateVersion})
 		}
 		if req.GraphHash != "" && graph.GraphHash != "" && req.GraphHash != graph.GraphHash {
+			fmt.Printf("[plugin.transition] rejected code=GRAPH_REVISION_MISMATCH command=%s session=%s target=%s operation=%s expected_hash=%s actual_hash=%s state_version=%d\n",
+				req.CommandID, session.ID, req.TargetStepID, req.Operation, req.GraphHash, graph.GraphHash, session.StateVersion)
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "GRAPH_REVISION_MISMATCH", "session graph revision does not match the command", false, map[string]any{"expected": req.GraphHash, "actual": graph.GraphHash})
+		}
+		if req.Operation == "advance" {
+			resolved, resolveErr := resolveAdvanceOperation(r.Context(), tx, session.ID, targets[0].TargetStepID)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			req.Operation = resolved
+		}
+		if session.Status == SessionStatusCompleted && req.Operation != "retry" && req.Operation != "rewind" {
+			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "SESSION_TERMINAL", "plugin session is already completed", false, nil)
 		}
 		if req.Operation == "retry" || req.Operation == "rewind" {
 			if invalidErr := invalidateForOperation(r.Context(), tx, &session, graph, req.CommandID, req.Operation, targets[0].TargetStepID); invalidErr != nil {
@@ -595,7 +620,7 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			for _, witness := range evaluations[target.TargetStepID].Witnesses {
-				if err := tx.Create(&orm.PluginAttemptInputBinding{ID: "paib_" + common.GenerateID(), SessionID: session.ID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: witness.RevisionID, BindAs: witness.BindAs, CreatedAt: now}).Error; err != nil {
+				if err := tx.Create(&orm.PluginAttemptInputBinding{ID: newAttemptInputBindingID(), SessionID: session.ID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: witness.RevisionID, BindAs: witness.BindAs, CreatedAt: now}).Error; err != nil {
 					return err
 				}
 			}
@@ -623,8 +648,31 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, taskID := range taskIDs {
 		dispatchPluginAttemptRunner(store.DB(), store.State(), taskID)
+		emitTaskCreatedConvEvent(r.Context(), taskID, session.ID, session.ConversationID)
 	}
 	writeTransitionResponse(w, response, http.StatusOK)
+}
+
+// resolveAdvanceOperation keeps lifecycle vocabulary out of the model-facing
+// tool. Selecting a target is sufficient; the authoritative effective attempt
+// determines whether this is a forward execution, retry, or rewind.
+func resolveAdvanceOperation(ctx context.Context, tx *gorm.DB, sessionID, target string) (string, error) {
+	var attempt orm.PluginSessionStep
+	err := tx.WithContext(ctx).Where("session_id = ? AND step_id = ? AND validity = ?", sessionID, target, "effective").Order("attempt DESC").First(&attempt).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "execute", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	switch attempt.Status {
+	case "succeeded":
+		return "rewind", nil
+	case "failed", "interrupted":
+		return "retry", nil
+	default:
+		return "execute", nil
+	}
 }
 
 func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.PluginSession, graph *graphengine.CompiledStateGraph, commandID, operation, target string) error {
@@ -758,4 +806,28 @@ func GetTransitionCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyErr(w, "transition command not found", http.StatusNotFound)
+}
+
+// emitTaskCreatedConvEvent pushes a task_created event to the conversation-level
+// events channel so that the frontend TaskCenter panel receives the notification
+// and subscribes to the task's SSE stream for real-time status updates.
+// This is the graph-engine equivalent of the legacy handlePluginStepCreated path.
+func emitTaskCreatedConvEvent(ctx context.Context, taskID, sessionID, conversationID string) {
+	if subagent.EventHooks == nil || conversationID == "" || taskID == "" {
+		return
+	}
+	task, err := subagent.GetTask(ctx, store.DB(), taskID)
+	if err != nil || task == nil {
+		fmt.Printf("[plugin] emitTaskCreatedConvEvent: task lookup failed taskID=%s err=%v\n", taskID, err)
+		return
+	}
+	subagent.EventHooks.CallConversationEvent(ctx, store.State(), conversationID, "", "task_created", map[string]any{
+		"task_id":             task.ID,
+		"title":               task.Title,
+		"agent_type":          task.AgentType,
+		"mode":                task.Mode,
+		"status":              task.Status,
+		"seq_in_conversation": task.SeqInConversation,
+		"plugin_session_id":   sessionID,
+	})
 }

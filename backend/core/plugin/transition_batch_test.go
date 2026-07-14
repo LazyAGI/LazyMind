@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,16 @@ import (
 	"lazymind/core/plugin/graphengine"
 	"lazymind/core/store"
 )
+
+func TestAttemptInputBindingIDFitsSchema(t *testing.T) {
+	id := newAttemptInputBindingID()
+	if len(id) > 36 {
+		t.Fatalf("input binding ID length = %d, exceeds varchar(36): %q", len(id), id)
+	}
+	if !strings.HasPrefix(id, "pib_") {
+		t.Fatalf("input binding ID has unexpected prefix: %q", id)
+	}
+}
 
 func setupBatchTransitionSession(t *testing.T) (*orm.DB, string) {
 	t.Helper()
@@ -186,5 +197,47 @@ func TestNormalizedTransitionTargetsRejectsDuplicates(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("duplicate target must be rejected")
+	}
+}
+
+func TestResolveAdvanceOperationFromEffectiveAttempt(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "advance-operation-session", ConversationID: "advance-operation-conversation",
+		PluginID: "writer-plugin",
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	statuses := map[string]string{
+		"ready_step":       "",
+		"succeeded_step":   StepStatusSucceeded,
+		"failed_step":      StepStatusFailed,
+		"interrupted_step": StepStatusInterrupted,
+	}
+	for stepID, status := range statuses {
+		if status == "" {
+			continue
+		}
+		step, err := CreateSessionStep(ctx, db.DB, "advance-operation-session", stepID, "task-"+stepID, 1)
+		if err != nil {
+			t.Fatalf("create %s: %v", stepID, err)
+		}
+		if err := db.Model(&orm.PluginSessionStep{}).Where("id = ?", step.ID).Update("status", status).Error; err != nil {
+			t.Fatalf("set %s status: %v", stepID, err)
+		}
+	}
+	wants := map[string]string{
+		"ready_step": "execute", "succeeded_step": "rewind",
+		"failed_step": "retry", "interrupted_step": "retry",
+	}
+	for stepID, want := range wants {
+		got, err := resolveAdvanceOperation(ctx, db.DB, "advance-operation-session", stepID)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", stepID, err)
+		}
+		if got != want {
+			t.Errorf("resolve %s=%q, want %q", stepID, got, want)
+		}
 	}
 }
