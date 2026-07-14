@@ -1,7 +1,11 @@
 import { Button, Empty, Form, Modal, Space, Steps } from "antd";
 import type { FormInstance, TreeSelectProps } from "antd";
 import type { DataNode } from "antd/es/tree";
-import type { SourceFormValues, SourceType, SyncMode } from "../constants/types";
+import type {
+  SourceFormValues,
+  SourceType,
+  SyncMode,
+} from "../constants/types";
 import WizardTypeStep from "./wizard/WizardTypeStep";
 import WizardConnectionStep from "./wizard/WizardConnectionStep";
 import type { LocalPathSelectOption } from "./wizard/treeSelectUtils";
@@ -39,7 +43,6 @@ interface DataSourceWizardModalProps {
   onLoadFeishuTargetOptions?: () => void;
   onSearchFeishuTargetOptions?: (keyword: string) => void;
   onLoadFeishuTargetChildren?: TreeSelectProps["loadData"];
-  onResetFeishuTargetBrowseOptions?: () => void;
 }
 
 export default function DataSourceWizardModal({
@@ -73,13 +76,16 @@ export default function DataSourceWizardModal({
   onLoadFeishuTargetOptions,
   onSearchFeishuTargetOptions,
   onLoadFeishuTargetChildren,
-  onResetFeishuTargetBrowseOptions,
 }: DataSourceWizardModalProps) {
   const isEditMode = wizardMode === "edit";
 
   return (
     <Modal
-      title={wizardMode === "edit" ? t("admin.dataSourceEdit") : t("admin.dataSourceCreate")}
+      title={
+        wizardMode === "edit"
+          ? t("admin.dataSourceEdit")
+          : t("admin.dataSourceCreate")
+      }
       open={wizardOpen}
       width={980}
       onCancel={() => {
@@ -91,10 +97,14 @@ export default function DataSourceWizardModal({
       maskClosable={false}
       footer={
         <div className="data-source-wizard-footer">
-          <Button disabled={saving} onClick={onClose}>{t("common.cancel")}</Button>
+          <Button disabled={saving} onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
           <Space wrap>
             {allowTypeSelection && wizardStep > 0 && !isEditMode ? (
-              <Button disabled={saving} onClick={onPrev}>{t("admin.dataSourceWizardPrev")}</Button>
+              <Button disabled={saving} onClick={onPrev}>
+                {t("admin.dataSourceWizardPrev")}
+              </Button>
             ) : null}
             {wizardStep < 1 ? (
               <Button type="primary" disabled={saving} onClick={onNext}>
@@ -171,7 +181,6 @@ export default function DataSourceWizardModal({
               onLoadFeishuTargetOptions={onLoadFeishuTargetOptions}
               onSearchFeishuTargetOptions={onSearchFeishuTargetOptions}
               onLoadFeishuTargetChildren={onLoadFeishuTargetChildren}
-              onResetFeishuTargetBrowseOptions={onResetFeishuTargetBrowseOptions}
             />
           ) : (
             <Empty

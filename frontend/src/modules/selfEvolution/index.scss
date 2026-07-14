@@ -9368,6 +9368,149 @@
   }
 }
 
+.self-evolution-algorithm-page {
+  min-height: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 20px 24px 28px;
+  background: #f5f7fb;
+  color: #142033;
+}
+
+.self-evolution-algorithm-shell {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.self-evolution-algorithm-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.self-evolution-algorithm-title-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+
+  .ant-typography {
+    margin: 0;
+  }
+
+  h3.ant-typography {
+    margin-bottom: 4px;
+    color: #111827;
+  }
+}
+
+.self-evolution-algorithm-panel {
+  padding: 16px;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(15, 33, 59, 0.05);
+}
+
+.self-evolution-algorithm-filterbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.self-evolution-algorithm-filter-input {
+  width: 220px;
+}
+
+.self-evolution-algorithm-filter-select {
+  width: 160px;
+}
+
+.self-evolution-algorithm-filter-size {
+  width: 120px;
+}
+
+.self-evolution-algorithm-filter-actions {
+  flex-wrap: wrap;
+}
+
+.self-evolution-algorithm-table {
+  .ant-table {
+    border-radius: 8px;
+  }
+
+  .ant-table-thead > tr > th {
+    background: #f8fafc;
+    color: #344054;
+    font-weight: 600;
+  }
+
+  .ant-table-tbody > tr {
+    cursor: pointer;
+  }
+}
+
+.self-evolution-algorithm-mono.ant-typography,
+.self-evolution-algorithm-mono {
+  margin: 0;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: #23344f;
+}
+
+.self-evolution-algorithm-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.self-evolution-algorithm-loading {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.self-evolution-algorithm-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  .ant-descriptions-item-content .ant-typography {
+    margin-bottom: 0;
+  }
+}
+
+.self-evolution-algorithm-json {
+  max-height: 320px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 12px;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #24324a;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.self-evolution-algorithm-file-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 @media (max-width: 1280px) {
   .self-evolution-eval-dashboard {
     overflow: auto;
@@ -9407,6 +9550,42 @@
 }
 
 @media (max-width: 760px) {
+  .self-evolution-algorithm-page {
+    padding: 14px;
+  }
+
+  .self-evolution-algorithm-header,
+  .self-evolution-algorithm-title-group,
+  .self-evolution-algorithm-pager {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .self-evolution-algorithm-panel {
+    padding: 12px;
+  }
+
+  .self-evolution-algorithm-filter-input,
+  .self-evolution-algorithm-filter-select,
+  .self-evolution-algorithm-filter-size {
+    width: 100%;
+  }
+
+  .self-evolution-algorithm-filter-actions {
+    width: 100%;
+
+    .ant-space-item {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+
+    .ant-btn {
+      width: 100%;
+      min-width: 0;
+      padding-inline: 8px;
+    }
+  }
+
   .self-evolution-eval-metric-grid,
   .self-evolution-eval-trace-meta-grid,
   .self-evolution-eval-trace-summary,

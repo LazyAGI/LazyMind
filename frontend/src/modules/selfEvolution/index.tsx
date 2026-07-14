@@ -1,5 +1,6 @@
 import { type SelfEvolutionPageView } from "./shared";
 import { HistorySessionModal } from "./components/HistorySessions";
+import { AlgorithmVersionManagementPage as AlgorithmManagementPage } from "./components/AlgorithmVersionManagementPage";
 import { SelfEvolutionHomeView } from "./components/LaunchViews";
 import { SelfEvolutionObservationPage as ObservationPage } from "./components/ObservationPage";
 import { SelfEvolutionPageController } from "./components/SelfEvolutionPage";
@@ -39,6 +40,10 @@ export function SelfEvolutionDetailPage() {
 
 export function SelfEvolutionObservationPage() {
   return <ObservationPage />;
+}
+
+export function SelfEvolutionAlgorithmManagementPage() {
+  return <AlgorithmManagementPage />;
 }
 
 export default SelfEvolutionHomePage;

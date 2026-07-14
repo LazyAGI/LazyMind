@@ -25,6 +25,8 @@ import type { ScenarioData } from '@/modules/plugin/components/StateGraphEditor/
 interface PluginInstalledViewProps {
   t: (key: string, options?: Record<string, unknown>) => string;
   onNewPlugin: () => void;
+  tableScroll?: { x?: number; y?: number };
+  listContentRef?: React.RefObject<HTMLDivElement>;
 }
 
 // Unified row type for the combined table.
@@ -36,7 +38,12 @@ type TypeFilter = 'all' | 'builtin' | 'draft';
 
 const PAGE_SIZE = 10;
 
-export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledViewProps) {
+export default function PluginInstalledView({
+  t,
+  onNewPlugin,
+  tableScroll,
+  listContentRef,
+}: PluginInstalledViewProps) {
   const navigate = useNavigate();
   const [draftRecords, setDraftRecords] = useState<PluginDraftRecord[]>([]);
   const [builtinPlugins, setBuiltinPlugins] = useState<BuiltinPlugin[]>([]);
@@ -338,7 +345,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
         <Button onClick={handleReset}>{t('admin.memoryReset')}</Button>
       </div>
 
-      <div className="memory-list-content">
+      <div className="memory-list-content" ref={listContentRef}>
         {filteredRows.length === 0 && !loading ? (
           <Empty
             description={t('admin.memoryPluginEmptyDesc')}
@@ -357,6 +364,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
             columns={columns}
             pagination={pagination}
             tableLayout="fixed"
+            scroll={tableScroll}
             locale={{
               emptyText: (
                 <Empty

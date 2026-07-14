@@ -2208,7 +2208,7 @@ export interface WordGroupConflictResponse {
 export const AgentApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.
+         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix is known to Core.
          * @summary Get Evo candidate
          * @param {string} candidateId 
          * @param {*} [options] Override http request option.
@@ -2242,18 +2242,16 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             };
         },
         /**
-         * Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
+         * Proxies Evo GET /candidates. When thread_id is provided, Core validates that the thread belongs to the current user before proxying.
          * @summary List Evo candidates
-         * @param {string} threadId 
+         * @param {string} [threadId]
          * @param {string} [status] 
          * @param {number} [pageSize] 
          * @param {string} [pageToken] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAgentCandidatesGet: async (threadId: string, status?: string, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'threadId' is not null or undefined
-            assertParamExists('apiCoreAgentCandidatesGet', 'threadId', threadId)
+        apiCoreAgentCandidatesGet: async (threadId?: string, status?: string, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/agent/candidates`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -2410,7 +2408,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
         /**
          * Proxies Evo GET /router/algorithms.
          * @summary List Evo router algorithms
-         * @param {string} [threadId] 
+         * @param {string} [threadId]
          * @param {string} [algorithmId] 
          * @param {string} [status] 
          * @param {string} [routerAdminUrl] 
@@ -3387,7 +3385,7 @@ export const AgentApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = AgentApiAxiosParamCreator(configuration)
     return {
         /**
-         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.
+         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix is known to Core.
          * @summary Get Evo candidate
          * @param {string} candidateId 
          * @param {*} [options] Override http request option.
@@ -3400,16 +3398,16 @@ export const AgentApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
+         * Proxies Evo GET /candidates. When thread_id is provided, Core validates that the thread belongs to the current user before proxying.
          * @summary List Evo candidates
-         * @param {string} threadId 
+         * @param {string} [threadId]
          * @param {string} [status] 
          * @param {number} [pageSize] 
          * @param {string} [pageToken] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAgentCandidatesGet(threadId: string, status?: string, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+        async apiCoreAgentCandidatesGet(threadId?: string, status?: string, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentCandidatesGet(threadId, status, pageSize, pageToken, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AgentApi.apiCoreAgentCandidatesGet']?.[localVarOperationServerIndex]?.url;
@@ -3810,7 +3808,7 @@ export const AgentApiFactory = function (configuration?: Configuration, basePath
     const localVarFp = AgentApiFp(configuration)
     return {
         /**
-         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.
+         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix is known to Core.
          * @summary Get Evo candidate
          * @param {AgentApiApiCoreAgentCandidatesCandidateIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -3820,13 +3818,13 @@ export const AgentApiFactory = function (configuration?: Configuration, basePath
             return localVarFp.apiCoreAgentCandidatesCandidateIdGet(requestParameters.candidateId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
+         * Proxies Evo GET /candidates. When thread_id is provided, Core validates that the thread belongs to the current user before proxying.
          * @summary List Evo candidates
          * @param {AgentApiApiCoreAgentCandidatesGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAgentCandidatesGet(requestParameters: AgentApiApiCoreAgentCandidatesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+        apiCoreAgentCandidatesGet(requestParameters: AgentApiApiCoreAgentCandidatesGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
             return localVarFp.apiCoreAgentCandidatesGet(requestParameters.threadId, requestParameters.status, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
         },
         /**
@@ -4112,7 +4110,7 @@ export interface AgentApiApiCoreAgentCandidatesCandidateIdGetRequest {
  * Request parameters for apiCoreAgentCandidatesGet operation in AgentApi.
  */
 export interface AgentApiApiCoreAgentCandidatesGetRequest {
-    readonly threadId: string
+    readonly threadId?: string
 
     readonly status?: string
 
@@ -4378,7 +4376,7 @@ export interface AgentApiApiCoreAgentThreadsThreadIdStepsGetRequest {
  */
 export class AgentApi extends BaseAPI {
     /**
-     * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.
+     * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix is known to Core.
      * @summary Get Evo candidate
      * @param {AgentApiApiCoreAgentCandidatesCandidateIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -4389,13 +4387,13 @@ export class AgentApi extends BaseAPI {
     }
 
     /**
-     * Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
+     * Proxies Evo GET /candidates. When thread_id is provided, Core validates that the thread belongs to the current user before proxying.
      * @summary List Evo candidates
      * @param {AgentApiApiCoreAgentCandidatesGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreAgentCandidatesGet(requestParameters: AgentApiApiCoreAgentCandidatesGetRequest, options?: RawAxiosRequestConfig) {
+    public apiCoreAgentCandidatesGet(requestParameters: AgentApiApiCoreAgentCandidatesGetRequest = {}, options?: RawAxiosRequestConfig) {
         return AgentApiFp(this.configuration).apiCoreAgentCandidatesGet(requestParameters.threadId, requestParameters.status, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
     }
 
@@ -33052,6 +33050,4 @@ export class WordGroupApi extends BaseAPI {
         return WordGroupApiFp(this.configuration).apiCoreWordGroupUpdatePost(requestParameters.updateWordGroupRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
-
-
 

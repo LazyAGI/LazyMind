@@ -64,6 +64,26 @@ function getTreeNodeTitleText(node: CollapsibleTreeNode) {
   return `${node.value || node.key || ""}`.trim();
 }
 
+export function buildTreeValueTitleMap(treeData: CollapsibleTreeNode[]) {
+  const titleMap = new Map<string, string>();
+
+  const visit = (nodes: CollapsibleTreeNode[]) => {
+    nodes.forEach((node) => {
+      const nodeValue = `${node.value || node.key || ""}`.trim();
+      const title = getTreeNodeTitleText(node);
+      if (nodeValue && title) {
+        titleMap.set(nodeValue, title);
+      }
+      if (node.children) {
+        visit(node.children);
+      }
+    });
+  };
+
+  visit(treeData);
+  return titleMap;
+}
+
 export function buildTreeValuePathMap(treeData: CollapsibleTreeNode[]) {
   const pathMap = new Map<string, string>();
 

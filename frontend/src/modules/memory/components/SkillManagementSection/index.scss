@@ -305,6 +305,7 @@
 
 .memory-skill-view-market-desc {
   display: flex;
+  flex-shrink: 0;
   align-items: flex-start;
   gap: 10px;
   padding: 10px 12px;
@@ -374,6 +375,7 @@
 
 .memory-skill-filter-strip {
   display: flex;
+  flex-shrink: 0;
   flex-direction: column;
   gap: 12px;
 }
@@ -381,6 +383,7 @@
 .memory-skill-filter-controls,
 .memory-skill-installed-filters {
   display: flex;
+  flex-shrink: 0;
   flex-direction: row;
   align-items: center;
   gap: 8px;
@@ -495,6 +498,21 @@
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+}
+
+.memory-skill-market-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.memory-skill-market-pagination {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: flex-end;
+  padding-top: 4px;
 }
 
 .memory-skill-section {
@@ -683,6 +701,12 @@
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+
+  > .memory-list-content {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
 }
 
 .memory-skill-installed-table {
@@ -758,6 +782,33 @@
     border-color: #b8c4d4;
     border-radius: 12px;
     background: #fbfcff;
+  }
+}
+
+.memory-skill-selected-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #edf1f5;
+  border-radius: 8px;
+  background: #f8fafc;
+  min-width: 0;
+}
+
+.memory-skill-selected-file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #344054;
+  font-size: 13px;
+
+  > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

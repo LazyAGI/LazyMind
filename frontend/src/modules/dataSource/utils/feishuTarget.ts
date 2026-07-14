@@ -70,6 +70,20 @@ export function toUiFeishuTargetType(targetType?: string): FeishuTargetType | un
   return normalizeFeishuTargetType(targetType);
 }
 
+export function normalizeFeishuTargetRef(targetRef: string) {
+  const normalizedRef = targetRef.trim();
+  const parts = normalizedRef.split(":");
+  if (
+    parts.length === 4 &&
+    parts[0] === "feishu" &&
+    parts[1] === "wiki" &&
+    parts[2] !== "space"
+  ) {
+    return `wiki:${parts[2]}:${parts[3]}`;
+  }
+  return normalizedRef;
+}
+
 export function parseManualFeishuTargetValue(value: string) {
   const normalizedValue = value.trim();
   if (!normalizedValue.startsWith(`${FEISHU_MANUAL_TARGET_VALUE_PREFIX}:`)) {
@@ -151,7 +165,9 @@ export function collectFeishuTargetRefs(
 ) {
   nodes.forEach((node) => {
     const value = `${node.value || ""}`.trim();
-    const targetRef = `${node.targetRef || node.value || ""}`.trim();
+    const targetRef = normalizeFeishuTargetRef(
+      `${node.targetRef || node.value || ""}`,
+    );
     const nodeRef = `${node.nodeRef || ""}`.trim();
 
     if (targetRef) {
@@ -173,7 +189,9 @@ export function normalizeFeishuTargetRefs(value?: SourceFormValues["target"]) {
   return values
     .map((item) => {
       const normalizedValue = `${item || ""}`.trim();
-      return parseManualFeishuTargetValue(normalizedValue)?.targetRef || normalizedValue;
+      const targetRef =
+        parseManualFeishuTargetValue(normalizedValue)?.targetRef || normalizedValue;
+      return normalizeFeishuTargetRef(targetRef);
     })
     .filter(Boolean);
 }

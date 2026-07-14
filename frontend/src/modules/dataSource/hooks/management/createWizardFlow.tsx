@@ -45,6 +45,7 @@ export function createWizardFlow(ctx: ManagementContext) {
     setWizardStep,
     setWizardOpen,
     setOauthConnection,
+    setNotionOauthConnection,
     setOauthState,
     setConnectionVerified,
     setManualOauthModalOpen,
@@ -135,7 +136,8 @@ export function createWizardFlow(ctx: ManagementContext) {
     }
     const reusableConnection =
       type === "feishu" || type === "notion"
-        ? options?.connection || (type === "notion" ? ctx.notionOauthConnection : ctx.oauthConnection)
+        ? options?.connection ||
+          (type === "notion" ? ctx.notionOauthConnection : ctx.oauthConnection)
         : null;
     ctx.resetWizard();
     setWizardMode("create");
@@ -149,12 +151,15 @@ export function createWizardFlow(ctx: ManagementContext) {
 
     if (
       (type === "feishu" || type === "notion") &&
-      reusableConnection?.connectionId &&
-      getOAuthStateFromConnection(reusableConnection) === "connected"
+      reusableConnection?.connectionId
     ) {
       setOauthConnection(reusableConnection);
-      setOauthState("connected");
-      setConnectionVerified(true);
+      if (type === "notion") {
+        setNotionOauthConnection(reusableConnection);
+      }
+      const nextState = getOAuthStateFromConnection(reusableConnection);
+      setOauthState(nextState);
+      setConnectionVerified(nextState === "connected");
     }
   };
 
@@ -250,7 +255,10 @@ export function createWizardFlow(ctx: ManagementContext) {
 
     try {
       setManualOauthSubmitting(true);
-      const connection = await finishFeishuDataSourceOAuth(parsed.code, parsed.state);
+      const connection = await finishFeishuDataSourceOAuth(
+        parsed.code,
+        parsed.state,
+      );
       ctx.applyOauthResult({
         channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
         source: "feishu-data-source",
@@ -328,9 +336,8 @@ export function createWizardFlow(ctx: ManagementContext) {
     });
   };
 
-  const getDatabaseConnectionId = (record: DataSourceItem) => (
-    record.databaseConnectionId || record.id.replace(/^database:/, "")
-  );
+  const getDatabaseConnectionId = (record: DataSourceItem) =>
+    record.databaseConnectionId || record.id.replace(/^database:/, "");
 
   const openDatabaseConnectionConfig = (record: DataSourceItem) => {
     if (!record.databaseConnection) {
@@ -361,8 +368,10 @@ export function createWizardFlow(ctx: ManagementContext) {
       await ctx.refreshSources(false, { page: ctx.sourceListPage });
     } catch (error) {
       message.error(
-        getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseSaveFailed")) ||
+        getLocalizedErrorMessage(
+          error,
           t("admin.dataSourceDatabaseSaveFailed"),
+        ) || t("admin.dataSourceDatabaseSaveFailed"),
       );
     } finally {
       ctx.setDatabaseEditSaving(false);
@@ -376,8 +385,10 @@ export function createWizardFlow(ctx: ManagementContext) {
       await ctx.refreshSources(false, { page: ctx.sourceListPage });
     } catch (error) {
       message.error(
-        getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseDeleteFailed")) ||
+        getLocalizedErrorMessage(
+          error,
           t("admin.dataSourceDatabaseDeleteFailed"),
+        ) || t("admin.dataSourceDatabaseDeleteFailed"),
       );
       throw error;
     }
@@ -409,9 +420,16 @@ export function createWizardFlow(ctx: ManagementContext) {
       }
       if (
         ctx.selectedType === "feishu" &&
-        !(ctx.oauthConnection?.provider === "feishu" && ctx.oauthConnection.connectionId)
+        !(
+          ctx.oauthConnection?.provider === "feishu" &&
+          ctx.oauthConnection.connectionId
+        )
       ) {
-        if (ctx.isFeishuSetupReady && ctx.feishuAppSetup && ctx.oauthState !== "waiting") {
+        if (
+          ctx.isFeishuSetupReady &&
+          ctx.feishuAppSetup &&
+          ctx.oauthState !== "waiting"
+        ) {
           void ctx.startCloudOAuth("feishu", {
             setup: ctx.feishuAppSetup,
             draftSelectedType: "feishu",
@@ -426,9 +444,16 @@ export function createWizardFlow(ctx: ManagementContext) {
       }
       if (
         ctx.selectedType === "notion" &&
-        !(ctx.oauthConnection?.provider === "notion" && ctx.oauthConnection.connectionId)
+        !(
+          ctx.oauthConnection?.provider === "notion" &&
+          ctx.oauthConnection.connectionId
+        )
       ) {
-        if (ctx.isNotionSetupReady && ctx.notionAppSetup && ctx.oauthState !== "waiting") {
+        if (
+          ctx.isNotionSetupReady &&
+          ctx.notionAppSetup &&
+          ctx.oauthState !== "waiting"
+        ) {
           void ctx.startCloudOAuth("notion", {
             setup: ctx.notionAppSetup,
             draftSelectedType: "notion",

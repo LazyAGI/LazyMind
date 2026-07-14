@@ -42,7 +42,6 @@ const SyncKnowledgeBaseCreationFlowInner: FC<{
     loadFeishuTargetOptions,
     handleSearchFeishuTargetOptions,
     handleLoadFeishuTargetChildren,
-    resetFeishuTargetBrowseOptions,
     handleCloseWizard,
     handleNextStep,
     requestSaveWithSyncConfirm,
@@ -97,7 +96,6 @@ const SyncKnowledgeBaseCreationFlowInner: FC<{
         }}
         onSearchFeishuTargetOptions={handleSearchFeishuTargetOptions}
         onLoadFeishuTargetChildren={handleLoadFeishuTargetChildren}
-        onResetFeishuTargetBrowseOptions={resetFeishuTargetBrowseOptions}
       />
     </>
   );

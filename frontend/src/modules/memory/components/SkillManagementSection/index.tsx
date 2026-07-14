@@ -24,21 +24,33 @@ import SkillInstalledView from "./SkillInstalledView";
 import SkillManagementToolbar from "./SkillManagementToolbar";
 import SkillMarketView from "./SkillMarketView";
 import SkillTrashedView from "./SkillTrashedView";
-import { collectMarketCategories, mapSkillAssetRecordToStructuredAsset } from "./skillHelpers";
+import {
+  collectMarketCategories,
+  filterMarketSkills,
+  mapSkillAssetRecordToStructuredAsset,
+} from "./skillHelpers";
 import { mapMarketSkillRecordToAsset } from "./skillMarketMockData";
 import NewPluginModal from "@/modules/plugin/components/NewPluginModal";
 import { shouldShowSkillMessageCenter } from "./collaborationVisibility";
 import "./index.scss";
 
+const DEFAULT_MARKET_PAGE_SIZE = 8;
+
 export default function SkillManagementSection() {
   const listContentRef = useRef<HTMLDivElement>(null);
+  const marketRequestIdRef = useRef(0);
   const navigate = useNavigate();
   const [newPluginOpen, setNewPluginOpen] = useState(false);
   const [memoryTableBodyHeight, setMemoryTableBodyHeight] = useState<number>();
   const [marketKeyword, setMarketKeyword] = useState("");
+  const [debouncedMarketKeyword, setDebouncedMarketKeyword] = useState("");
   const [adminPublishOpen, setAdminPublishOpen] = useState(false);
   const [marketCatalogAssets, setMarketCatalogAssets] = useState<MarketSkillAsset[]>([]);
+  const [marketBuiltinAssets, setMarketBuiltinAssets] = useState<MarketSkillAsset[]>([]);
   const [marketCatalogLoading, setMarketCatalogLoading] = useState(false);
+  const [marketListPage, setMarketListPage] = useState(1);
+  const [marketListPageSize, setMarketListPageSize] = useState(DEFAULT_MARKET_PAGE_SIZE);
+  const [marketListTotal, setMarketListTotal] = useState(0);
   const [marketInstallingId, setMarketInstallingId] = useState<string>();
   const [trashAssets, setTrashAssets] = useState<StructuredAsset[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
@@ -94,47 +106,136 @@ export default function SkillManagementSection() {
 
   const isAdmin = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedMarketKeyword(marketKeyword.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [marketKeyword]);
+
+  useEffect(() => {
+    setMarketListPage(1);
+  }, [debouncedMarketKeyword, marketCategory, marketSkillSource, marketListPageSize]);
+
+  const ensureMarketBuiltins = useCallback(async () => {
+    if (marketBuiltinAssets.length) {
+      return marketBuiltinAssets;
+    }
+    const records = await listBuiltinSkills();
+    const assets = records.map(mapMarketSkillRecordToAsset);
+    setMarketBuiltinAssets(assets);
+    return assets;
+  }, [marketBuiltinAssets]);
+
   const loadMarketCatalog = useCallback(async () => {
+    const requestId = ++marketRequestIdRef.current;
     setMarketCatalogLoading(true);
     try {
-      const [firstResult, builtinRecords] = await Promise.all([
-        listSkillMarketPage({
-          page: 1,
-          pageSize: 100,
-          category: marketCategory,
-        }),
-        listBuiltinSkills(),
-      ]);
-
-      const records = [...builtinRecords, ...firstResult.records];
-      const pageSize = Math.max(1, firstResult.pageSize || 100);
-      const totalPages = Math.ceil(firstResult.total / pageSize);
-
-      for (let page = 2; page <= totalPages; page += 1) {
-        const pageResult = await listSkillMarketPage({
-          page,
-          pageSize,
-          category: marketCategory,
-        });
-        records.push(...pageResult.records);
+      const builtins = await ensureMarketBuiltins();
+      if (requestId !== marketRequestIdRef.current) {
+        return;
       }
 
-      const deduped = new Map<string, MarketSkillAsset>();
-      records.forEach((item) => {
-        deduped.set(item.marketItemId, mapMarketSkillRecordToAsset(item));
+      const filteredBuiltins =
+        marketSkillSource === "admin"
+          ? []
+          : filterMarketSkills(builtins, {
+              keyword: debouncedMarketKeyword,
+              category: marketCategory,
+              source: "builtin",
+            });
+
+      if (marketSkillSource === "builtin") {
+        const start = (marketListPage - 1) * marketListPageSize;
+        setMarketCatalogAssets(
+          filteredBuiltins.slice(start, start + marketListPageSize) as MarketSkillAsset[],
+        );
+        setMarketListTotal(filteredBuiltins.length);
+        return;
+      }
+
+      const builtinCount = marketSkillSource === "all" ? filteredBuiltins.length : 0;
+      const start = (marketListPage - 1) * marketListPageSize;
+      const end = start + marketListPageSize;
+      const pageItems: MarketSkillAsset[] = [];
+
+      if (builtinCount > 0 && start < builtinCount) {
+        pageItems.push(
+          ...(filteredBuiltins.slice(start, Math.min(end, builtinCount)) as MarketSkillAsset[]),
+        );
+      }
+
+      const marketStart = Math.max(0, start - builtinCount);
+      const marketEnd = Math.max(0, end - builtinCount);
+      const needMarketItems = marketEnd > marketStart;
+      const apiPage = needMarketItems
+        ? Math.floor(marketStart / marketListPageSize) + 1
+        : 1;
+
+      const firstPage = await listSkillMarketPage({
+        page: apiPage,
+        pageSize: marketListPageSize,
+        keyword: debouncedMarketKeyword,
+        category: marketCategory,
       });
-      setMarketCatalogAssets(Array.from(deduped.values()));
+      if (requestId !== marketRequestIdRef.current) {
+        return;
+      }
+
+      if (needMarketItems) {
+        const offsetInPage = marketStart % marketListPageSize;
+        const needed = marketEnd - marketStart;
+        let records = firstPage.records.slice(offsetInPage, offsetInPage + needed);
+
+        if (
+          records.length < needed &&
+          firstPage.total > apiPage * marketListPageSize
+        ) {
+          const secondPage = await listSkillMarketPage({
+            page: apiPage + 1,
+            pageSize: marketListPageSize,
+            keyword: debouncedMarketKeyword,
+            category: marketCategory,
+          });
+          if (requestId !== marketRequestIdRef.current) {
+            return;
+          }
+          records = [
+            ...records,
+            ...secondPage.records.slice(0, needed - records.length),
+          ];
+        }
+
+        pageItems.push(...records.map(mapMarketSkillRecordToAsset));
+      }
+
+      setMarketCatalogAssets(pageItems);
+      setMarketListTotal(builtinCount + firstPage.total);
     } catch (error) {
+      if (requestId !== marketRequestIdRef.current) {
+        return;
+      }
       console.error("Load skill plaza catalog failed:", error);
       setMarketCatalogAssets([]);
+      setMarketListTotal(0);
       message.error(
         getLocalizedErrorMessage(error, t("admin.memorySkillMarketLoadFailed")) ||
           t("admin.memorySkillMarketLoadFailed"),
       );
     } finally {
-      setMarketCatalogLoading(false);
+      if (requestId === marketRequestIdRef.current) {
+        setMarketCatalogLoading(false);
+      }
     }
-  }, [marketCategory, t]);
+  }, [
+    debouncedMarketKeyword,
+    ensureMarketBuiltins,
+    marketCategory,
+    marketListPage,
+    marketListPageSize,
+    marketSkillSource,
+    t,
+  ]);
 
   const loadTrashAssets = useCallback(async () => {
     setTrashLoading(true);
@@ -193,7 +294,11 @@ export default function SkillManagementSection() {
   }, [skillAssets.length, skillListTotal]);
 
   useEffect(() => {
-    if (skillView !== "installed") {
+    if (
+      skillView !== "installed" &&
+      skillView !== "plugins" &&
+      skillView !== "trash"
+    ) {
       return undefined;
     }
 
@@ -223,10 +328,13 @@ export default function SkillManagementSection() {
     updateTableHeight();
     const resizeObserver = new ResizeObserver(updateTableHeight);
     resizeObserver.observe(contentElement);
+    const mutationObserver = new MutationObserver(updateTableHeight);
+    mutationObserver.observe(contentElement, { childList: true, subtree: true });
     window.addEventListener("resize", updateTableHeight);
 
     return () => {
       resizeObserver.disconnect();
+      mutationObserver.disconnect();
       window.removeEventListener("resize", updateTableHeight);
     };
   }, [
@@ -235,16 +343,24 @@ export default function SkillManagementSection() {
     skillListPageSize,
     skillAssets.length,
     filteredInstalledSkillTree.length,
+    trashListPage,
+    trashListPageSize,
+    trashAssets.length,
   ]);
 
   const marketSkillAssets = marketCatalogAssets;
 
   const installedTableData = filteredInstalledSkillTree;
 
-  const marketCategories = useMemo(
-    () => collectMarketCategories(marketSkillAssets),
-    [marketSkillAssets],
-  );
+  const marketCategories = useMemo(() => {
+    const fromCatalog = collectMarketCategories([
+      ...marketBuiltinAssets,
+      ...marketSkillAssets,
+    ]);
+    return [
+      ...new Set([...fromCatalog, ...availableCategories].filter(Boolean)),
+    ].sort((left, right) => left.localeCompare(right, "zh-CN"));
+  }, [availableCategories, marketBuiltinAssets, marketSkillAssets]);
 
   const messageCenterCount = incomingPendingCount;
   const manualSkillReviewCount = manualSkillReviewSummary?.qualifiedSessionCount ?? 0;
@@ -360,8 +476,10 @@ export default function SkillManagementSection() {
 
   const handleMarketReset = () => {
     setMarketKeyword("");
+    setDebouncedMarketKeyword("");
     setMarketSkillSource("all");
     setMarketCategory("all");
+    setMarketListPage(1);
   };
 
   const handleSkillMessageCenter = () => {
@@ -500,14 +618,27 @@ export default function SkillManagementSection() {
             keyword={marketKeyword}
             onKeywordChange={setMarketKeyword}
             source={marketSkillSource}
-            onSourceChange={setMarketSkillSource}
+            onSourceChange={(value) => {
+              setMarketSkillSource(value);
+              setMarketListPage(1);
+            }}
             category={marketCategory}
-            onCategoryChange={setMarketCategory}
+            onCategoryChange={(value) => {
+              setMarketCategory(value);
+              setMarketListPage(1);
+            }}
             categories={marketCategories}
             onReset={handleMarketReset}
             onInstall={handleMarketInstall}
             onDetail={handleMarketDetail}
             installingUid={installingUid}
+            page={marketListPage}
+            pageSize={marketListPageSize}
+            total={marketListTotal}
+            onPageChange={(nextPage, nextPageSize) => {
+              setMarketListPage(nextPage);
+              setMarketListPageSize(nextPageSize);
+            }}
           />
         </div>
       ) : null}
@@ -559,7 +690,12 @@ export default function SkillManagementSection() {
       />
 
       {skillView === "plugins" ? (
-        <PluginInstalledView t={t} onNewPlugin={() => setNewPluginOpen(true)} />
+        <PluginInstalledView
+          t={t}
+          onNewPlugin={() => setNewPluginOpen(true)}
+          tableScroll={tableScroll}
+          listContentRef={listContentRef}
+        />
       ) : null}
 
       <NewPluginModal

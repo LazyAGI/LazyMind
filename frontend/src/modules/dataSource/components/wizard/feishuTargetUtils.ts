@@ -7,13 +7,26 @@ export function getFeishuTargetDisplayText(
   value: unknown,
   label: ReactNode,
   _t: TFunction,
+  titleMap?: Map<string, string>,
 ) {
+  const normalizedValue = `${value || ""}`.trim();
+  const cachedTitle = `${titleMap?.get(normalizedValue) || ""}`.trim();
+  if (cachedTitle && cachedTitle !== normalizedValue) {
+    return cachedTitle;
+  }
+
   const labelText = getTreeSelectLabelText(label);
-  if (labelText) {
+  // TreeSelect falls back to value as label once the matching tree node is gone.
+  if (labelText && labelText !== normalizedValue) {
     return labelText;
   }
-  const parsed = parseManualFeishuTargetValue(`${value || ""}`);
-  return parsed?.targetRef || `${value || ""}`.trim();
+
+  if (cachedTitle) {
+    return cachedTitle;
+  }
+
+  const parsed = parseManualFeishuTargetValue(normalizedValue);
+  return parsed?.targetRef || labelText || normalizedValue;
 }
 
 export function getFeishuTargetValuePath(
@@ -21,11 +34,16 @@ export function getFeishuTargetValuePath(
   label: ReactNode,
   pathMap: Map<string, string>,
   t: TFunction,
+  titleMap?: Map<string, string>,
 ) {
   const normalizedValue = `${value || ""}`.trim();
+  const cachedPath = `${pathMap.get(normalizedValue) || ""}`.trim();
+  if (cachedPath && cachedPath !== normalizedValue) {
+    return cachedPath;
+  }
   return (
-    pathMap.get(normalizedValue) ||
-    getFeishuTargetDisplayText(value, label, t) ||
+    getFeishuTargetDisplayText(value, label, t, titleMap) ||
+    cachedPath ||
     normalizedValue
   );
 }

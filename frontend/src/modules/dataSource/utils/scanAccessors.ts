@@ -29,11 +29,11 @@ export interface ScanV2AgentHint {
 export function getScanTenantId() {
   const userInfo = AgentAppsAuth.getUserInfo() as
     | (ReturnType<typeof AgentAppsAuth.getUserInfo> & {
-        tenantId?: string;
-        tenant_id?: string;
-        tenantKey?: string;
-        tenant_key?: string;
-      })
+      tenantId?: string;
+      tenant_id?: string;
+      tenantKey?: string;
+      tenant_key?: string;
+    })
     | null;
 
   return (

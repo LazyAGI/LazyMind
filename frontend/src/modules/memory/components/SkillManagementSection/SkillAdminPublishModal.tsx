@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Input, Modal, Upload, message } from "antd";
-import { InboxOutlined } from "@ant-design/icons";
+import { DeleteOutlined, InboxOutlined, PaperClipOutlined } from "@ant-design/icons";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { publishSkillToMarket } from "../../skillApi";
 import { uploadSkillTempFile } from "../../skillUpload";
@@ -30,6 +30,10 @@ export default function SkillAdminPublishModal({
   const handleClose = () => {
     resetForm();
     onClose();
+  };
+
+  const handleClearFile = () => {
+    setSelectedFile(null);
   };
 
   const handleSubmit = async () => {
@@ -104,14 +108,11 @@ export default function SkillAdminPublishModal({
         <Upload.Dragger
           accept=".zip,.tgz,.tar,.gz"
           multiple={false}
-          showUploadList={Boolean(selectedFile)}
+          showUploadList={false}
           beforeUpload={(file) => {
             setSelectedFile(file);
             setRepoUrl("");
             return false;
-          }}
-          onRemove={() => {
-            setSelectedFile(null);
           }}
           className="memory-skill-file-drop"
         >
@@ -123,6 +124,22 @@ export default function SkillAdminPublishModal({
           </p>
           <p className="ant-upload-hint">{t("admin.memorySkillUploadFileHint")}</p>
         </Upload.Dragger>
+        {selectedFile ? (
+          <div className="memory-skill-selected-file">
+            <span className="memory-skill-selected-file-name">
+              <PaperClipOutlined />
+              <span title={selectedFile.name}>{selectedFile.name}</span>
+            </span>
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={t("common.delete")}
+              onClick={handleClearFile}
+            />
+          </div>
+        ) : null}
       </div>
     </Modal>
   );

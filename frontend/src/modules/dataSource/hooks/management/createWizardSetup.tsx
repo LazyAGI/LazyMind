@@ -1,12 +1,17 @@
 import { Modal, message } from "antd";
 import { WarningFilled } from "@ant-design/icons";
+import { getLocalizedErrorMessage } from "@/components/request";
+import { dataSourceScanApi } from "../../api/clients";
 import {
   clearFeishuAppSetup,
   getOAuthStateFromConnection,
   persistFeishuAppSetup,
   type FeishuAuthAccount,
 } from "../../common/feishuAccounts";
-import { clearFeishuDataSourceWizardDraft, peekFeishuDataSourceWizardDraft } from "@/modules/dataSource/common/feishuOAuth";
+import {
+  clearFeishuDataSourceWizardDraft,
+  peekFeishuDataSourceWizardDraft,
+} from "@/modules/dataSource/common/feishuOAuth";
 import { DEFAULT_DATA_SOURCE_FILE_TYPES } from "../../constants/options";
 import type {
   DataSourceItem,
@@ -26,7 +31,17 @@ import {
   normalizeFeishuTargetRefs,
   normalizeLocalPathRefs,
 } from "../../utils/feishuTarget";
-import { clearNotionAppSetup, persistNotionAppSetup } from "../../utils/notionSetup";
+import {
+  clearNotionAppSetup,
+  persistNotionAppSetup,
+} from "../../utils/notionSetup";
+import { resolveCloudAuthConnection } from "../../utils/feishuAccount";
+import {
+  getFirstScanBinding,
+  type ScanV2Binding,
+  type ScanV2Source,
+} from "../../utils/scanAccessors";
+import { mapScanSourceToDataSource } from "../../mappers/scanSourceToDataSource";
 import type {
   CloudSetupIntent,
   FeishuSetupIntent,
@@ -87,17 +102,36 @@ export function createWizardSetup(ctx: ManagementContext) {
     resetFeishuTargetBrowseOptions();
   };
 
-  const openEditWizard = (record: DataSourceItem) => {
+  const applyEditRecord = (record: DataSourceItem) => {
     resetWizard();
     setWizardMode("edit");
     setWizardOpen(true);
     setWizardStep(1);
     setSelectedType(record.type);
     setEditingId(record.id);
-    setOauthConnection(record.oauthConnection || null);
+    const resolvedOauthConnection =
+      record.type === "feishu"
+        ? resolveCloudAuthConnection(
+            record.oauthConnection,
+            record.authConnectionId,
+            ctx.feishuAuthAccounts,
+            "feishu",
+          )
+        : record.type === "notion"
+          ? resolveCloudAuthConnection(
+              record.oauthConnection,
+              record.authConnectionId,
+              ctx.notionAuthAccounts,
+              "notion",
+            )
+          : record.oauthConnection || null;
+    setOauthConnection(resolvedOauthConnection);
+    if (record.type === "notion") {
+      setNotionOauthConnection(resolvedOauthConnection);
+    }
     setOauthState(
-      record.oauthConnection
-        ? getOAuthStateFromConnection(record.oauthConnection)
+      resolvedOauthConnection
+        ? getOAuthStateFromConnection(resolvedOauthConnection)
         : record.connectionState === "connected"
           ? "connected"
           : record.connectionState === "expired"
@@ -106,7 +140,12 @@ export function createWizardSetup(ctx: ManagementContext) {
               ? "error"
               : "pending",
     );
-    setConnectionVerified(record.connectionState === "connected");
+    setConnectionVerified(
+      Boolean(
+        resolvedOauthConnection &&
+          getOAuthStateFromConnection(resolvedOauthConnection) === "connected",
+      ) || record.connectionState === "connected",
+    );
     setValidatedAgentId(record.agentId || null);
     form.setFieldsValue({
       knowledgeBase: record.knowledgeBase,
@@ -118,14 +157,20 @@ export function createWizardSetup(ctx: ManagementContext) {
       conflictPolicy: record.conflictPolicy,
       path:
         record.type === "local"
-          ? normalizeLocalPathRefs(record.targetRefs || record.targetRef || record.target)
+          ? normalizeLocalPathRefs(
+              record.targetRefs || record.targetRef || record.target,
+            )
           : undefined,
       target:
         record.type === "feishu"
-          ? normalizeFeishuTargetRefs(record.targetRefs || record.targetRef || record.target)
+          ? normalizeFeishuTargetRefs(
+              record.targetRefs || record.targetRef || record.target,
+            )
           : record.type === "notion"
-            ? normalizeCloudTargetRefs(record.targetRefs || record.targetRef || record.target)
-          : undefined,
+            ? normalizeCloudTargetRefs(
+                record.targetRefs || record.targetRef || record.target,
+              )
+            : undefined,
       targetType:
         record.type === "feishu"
           ? record.targetType || "wiki_space"
@@ -148,6 +193,39 @@ export function createWizardSetup(ctx: ManagementContext) {
         record.targetRefs || record.targetRef || record.target,
       );
       seedFeishuTargetTree(buildFeishuTargetSeedNodes(selectedTargets, record));
+    }
+  };
+
+  const openEditWizard = async (record: DataSourceItem) => {
+    try {
+      const response = await dataSourceScanApi.getSource({
+        sourceId: record.id,
+      });
+      const source = {
+        ...response.data.source,
+        source_id: response.data.source.source_id || record.id,
+        name: response.data.source.name || record.name,
+      } as ScanV2Source;
+      const bindings = (response.data.bindings || []) as ScanV2Binding[];
+      const latestRecord = {
+        ...mapScanSourceToDataSource(
+          source,
+          t,
+          record,
+          getFirstScanBinding(bindings),
+          bindings,
+        ),
+        id: record.id,
+      };
+      ctx.setSources((current) =>
+        current.map((item) => (item.id === record.id ? latestRecord : item)),
+      );
+      applyEditRecord(latestRecord);
+    } catch (error) {
+      message.error(
+        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+          t("common.requestFailed"),
+      );
     }
   };
 
@@ -186,7 +264,8 @@ export function createWizardSetup(ctx: ManagementContext) {
     provider: CloudDataSourceProvider,
     account?: FeishuAuthAccount | null,
   ) => {
-    const activeSetup = provider === "feishu" ? ctx.feishuAppSetup : ctx.notionAppSetup;
+    const activeSetup =
+      provider === "feishu" ? ctx.feishuAppSetup : ctx.notionAppSetup;
     return {
       name: account?.name || "",
       appId: account?.appId || activeSetup?.appId || "",
@@ -270,7 +349,8 @@ export function createWizardSetup(ctx: ManagementContext) {
         appSecret: values.appSecret.trim(),
       };
       const cloudSetupProvider = ctx.cloudSetupProvider;
-      const shouldStartOAuth = ctx.feishuSetupIntent === "create" || ctx.feishuSetupIntent === "auth";
+      const shouldStartOAuth =
+        ctx.feishuSetupIntent === "create" || ctx.feishuSetupIntent === "auth";
       const nextAccount =
         cloudSetupProvider === "feishu"
           ? ctx.upsertFeishuAuthAccount(values, "waiting")

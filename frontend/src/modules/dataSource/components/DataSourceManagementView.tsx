@@ -1,6 +1,6 @@
 import { Alert, Typography } from "antd";
 import { Link } from "react-router-dom";
-import TypedConfirmModal from '@/components/ui/TypedConfirmModal';
+import TypedConfirmModal from "@/components/ui/TypedConfirmModal";
 import DataSourceWizardModal from "./DataSourceWizardModal";
 import DataSourceAssetTable from "./management/DataSourceAssetTable";
 import DatabaseConnectionModal from "../database/DatabaseConnectionModal";
@@ -9,7 +9,11 @@ import { CLOUD_DOCUMENTS_PATH } from "@/modules/modelProvider/utils/cloudDocumen
 
 const { Paragraph } = Typography;
 
-export default function DataSourceManagementView({ vm }: { vm: DataSourceManagementVm }) {
+export default function DataSourceManagementView({
+  vm,
+}: {
+  vm: DataSourceManagementVm;
+}) {
   const {
     t,
     form,
@@ -34,7 +38,6 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
     loadFeishuTargetOptions,
     handleSearchFeishuTargetOptions,
     handleLoadFeishuTargetChildren,
-    resetFeishuTargetBrowseOptions,
     handleCloseWizard,
     handleNextStep,
     requestSaveWithSyncConfirm,
@@ -54,7 +57,9 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
       <div className="admin-page-toolbar data-source-page-toolbar">
         <div className="admin-page-toolbar-left data-source-page-toolbar-left">
           <div>
-            <h2 className="admin-page-title">{t("admin.dataSourceManagement")}</h2>
+            <h2 className="admin-page-title">
+              {t("admin.dataSourceManagement")}
+            </h2>
             <Paragraph className="data-source-page-subtitle">
               {t("admin.dataSourceSubtitle")}
             </Paragraph>
@@ -69,7 +74,9 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
         message={
           <>
             {t("modelProvider.cloudDocuments.linkFromDataSource")}{" "}
-            <Link to={CLOUD_DOCUMENTS_PATH}>{t("modelProvider.tabs.cloudDocuments")}</Link>
+            <Link to={CLOUD_DOCUMENTS_PATH}>
+              {t("modelProvider.tabs.cloudDocuments")}
+            </Link>
           </>
         }
       />
@@ -123,7 +130,6 @@ export default function DataSourceManagementView({ vm }: { vm: DataSourceManagem
         }}
         onSearchFeishuTargetOptions={handleSearchFeishuTargetOptions}
         onLoadFeishuTargetChildren={handleLoadFeishuTargetChildren}
-        onResetFeishuTargetBrowseOptions={resetFeishuTargetBrowseOptions}
       />
 
       <TypedConfirmModal ref={confirmRef} onClick={handleTypedConfirm} />
