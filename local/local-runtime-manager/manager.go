@@ -135,11 +135,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
-		Profile:       cfg.Profile,
-		OwnerToken:    cfg.OwnerToken,
-		RepoRoot:      paths.RepoRoot,
-		RuntimeRoot:   cfg.RuntimeRoot,
-		ResourcesRoot: cfg.ResourcesRoot,
+		Profile:         cfg.Profile,
+		MaintenanceMode: cfg.MaintenanceMode,
+		OwnerToken:      cfg.OwnerToken,
+		RepoRoot:        paths.RepoRoot,
+		RuntimeRoot:     cfg.RuntimeRoot,
+		ResourcesRoot:   cfg.ResourcesRoot,
 	})
 	if err != nil {
 		return err
@@ -174,11 +175,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
-		Profile:       cfg.Profile,
-		OwnerToken:    cfg.OwnerToken,
-		RepoRoot:      paths.RepoRoot,
-		RuntimeRoot:   cfg.RuntimeRoot,
-		ResourcesRoot: cfg.ResourcesRoot,
+		Profile:         cfg.Profile,
+		MaintenanceMode: cfg.MaintenanceMode,
+		OwnerToken:      cfg.OwnerToken,
+		RepoRoot:        paths.RepoRoot,
+		RuntimeRoot:     cfg.RuntimeRoot,
+		ResourcesRoot:   cfg.ResourcesRoot,
 	})
 	if err != nil {
 		return err
@@ -317,10 +319,26 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	m.printReadySummary(cfg)
+	if cfg.MaintenanceMode == installerWarmupMaintenanceMode {
+		return nil
+	}
 	if cfg.Profile == "desktop" {
 		return m.waitForDesktopRuntimeStop(ctx, paths)
 	}
 	return nil
+}
+
+func (m *RuntimeManager) Warmup(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (err error) {
+	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
+		return fmt.Errorf("warmup requires maintenance mode %q", installerWarmupMaintenanceMode)
+	}
+	defer func() {
+		downErr := m.Down(context.Background(), cfg, paths)
+		if err == nil && downErr != nil {
+			err = downErr
+		}
+	}()
+	return m.Up(ctx, cfg, paths)
 }
 
 func ensureRuntimeDirs(cfg RuntimeConfig, paths RuntimePaths) error {

@@ -244,12 +244,14 @@ def _handle_validation_error(_, exc: RequestValidationError):
 
 @app.on_event('startup')
 async def _start_cloud_oauth_health_check():
-    cloud_oauth_health.start()
+    if os.getenv('LAZYMIND_MAINTENANCE_MODE') != 'installer-warmup':
+        cloud_oauth_health.start()
 
 
 @app.on_event('shutdown')
 async def _stop_cloud_oauth_health_check():
-    await cloud_oauth_health.stop()
+    if os.getenv('LAZYMIND_MAINTENANCE_MODE') != 'installer-warmup':
+        await cloud_oauth_health.stop()
 
 
 def _export_openapi_artifacts() -> None:

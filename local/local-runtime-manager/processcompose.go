@@ -232,6 +232,16 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		routerPortPoolEndEnvVar+"="+strconv.Itoa(routerPoolEnd),
 		routerPortsPerInstanceEnvVar+"="+strconv.Itoa(defaultRouterPortsPerInstance),
 	)
+	if cfg.MaintenanceMode == installerWarmupMaintenanceMode {
+		env = append(env,
+			maintenanceModeEnvVar+"="+installerWarmupMaintenanceMode,
+			"LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR="+cfg.FileWatcher.WatchHostDir,
+			"HF_HUB_OFFLINE=1",
+			"TRANSFORMERS_OFFLINE=1",
+			"PIP_NO_INDEX=1",
+			"PYTHONDONTWRITEBYTECODE=0",
+		)
+	}
 	return env
 }
 

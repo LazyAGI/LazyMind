@@ -89,23 +89,29 @@ func (a *App) Run(ctx context.Context) error {
 		zap.String("log_dir", a.cfg.LogDir),
 	)
 
-	// Register the Agent with control-plane.
-	if err := a.cpClient.RegisterAgent(ctx, internal.RegisterAgentRequest{
-		AgentID:    a.cfg.AgentID,
-		TenantID:   a.cfg.TenantID,
-		Hostname:   hostname,
-		Version:    "0.1.0",
-		ListenAddr: advertiseAddr,
-	}); err != nil {
-		a.log.Warn("register agent failed, will retry via heartbeat", zap.Error(err))
-	} else {
+	maintenance := os.Getenv("LAZYMIND_MAINTENANCE_MODE") == "installer-warmup"
+	if maintenance {
+		a.log.Info("installer warmup maintenance mode: agent registration, command pulls, and file watching are disabled")
 		a.setStatus(internal.AgentStatusOnline)
-	}
+	} else {
+		// Register the Agent with control-plane.
+		if err := a.cpClient.RegisterAgent(ctx, internal.RegisterAgentRequest{
+			AgentID:    a.cfg.AgentID,
+			TenantID:   a.cfg.TenantID,
+			Hostname:   hostname,
+			Version:    "0.1.0",
+			ListenAddr: advertiseAddr,
+		}); err != nil {
+			a.log.Warn("register agent failed, will retry via heartbeat", zap.Error(err))
+		} else {
+			a.setStatus(internal.AgentStatusOnline)
+		}
 
-	// Start the heartbeat goroutine.
-	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
-	defer cancelHeartbeat()
-	go a.heartbeat.Run(heartbeatCtx)
+		// Start the heartbeat goroutine.
+		heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
+		defer cancelHeartbeat()
+		go a.heartbeat.Run(heartbeatCtx)
+	}
 
 	// Start the HTTP server.
 	serverErr := make(chan error, 1)
@@ -117,7 +123,9 @@ func (a *App) Run(ctx context.Context) error {
 	}()
 
 	// Start the health check loop.
-	go a.healthLoop(ctx)
+	if !maintenance {
+		go a.healthLoop(ctx)
+	}
 
 	// Wait for an exit signal.
 	quit := make(chan os.Signal, 1)

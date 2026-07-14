@@ -13,6 +13,7 @@ import (
 const (
 	runtimeProfileEnvVar             = "LAZYMIND_RUNTIME_PROFILE"
 	runtimeRootEnvVar                = "LAZYMIND_RUNTIME_ROOT"
+	maintenanceModeEnvVar            = "LAZYMIND_MAINTENANCE_MODE"
 	localBuildRootEnvVar             = "LAZYMIND_LOCAL_BUILD_ROOT"
 	runtimeResourcesRootEnvVar       = "LAZYMIND_RUNTIME_RESOURCES_ROOT"
 	runtimeOwnerTokenEnvVar          = "LAZYMIND_RUNTIME_OWNER_TOKEN"
@@ -117,6 +118,8 @@ const (
 	milvusLiteProcessName            = "milvus-lite"
 )
 
+const installerWarmupMaintenanceMode = "installer-warmup"
+
 type RuntimePaths struct {
 	RepoRoot                 string
 	ResourcesRoot            string
@@ -204,6 +207,7 @@ type RuntimePaths struct {
 
 type RuntimeConfig struct {
 	Profile            string
+	MaintenanceMode    string
 	OwnerToken         string
 	RepoRoot           string
 	BuildRoot          string
@@ -222,12 +226,13 @@ type RuntimeConfig struct {
 }
 
 type RuntimeConfigOptions struct {
-	Profile       string
-	OwnerToken    string
-	RepoRoot      string
-	RuntimeRoot   string
-	BuildRoot     string
-	ResourcesRoot string
+	Profile         string
+	MaintenanceMode string
+	OwnerToken      string
+	RepoRoot        string
+	RuntimeRoot     string
+	BuildRoot       string
+	ResourcesRoot   string
 }
 
 type RuntimePathLayout struct {
@@ -675,6 +680,10 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	if err != nil {
 		return RuntimeConfig{}, RuntimePaths{}, err
 	}
+	maintenanceMode := strings.TrimSpace(firstNonEmpty(opts.MaintenanceMode, os.Getenv(maintenanceModeEnvVar)))
+	if maintenanceMode != "" && maintenanceMode != installerWarmupMaintenanceMode {
+		return RuntimeConfig{}, RuntimePaths{}, fmt.Errorf("unsupported maintenance mode %q", maintenanceMode)
+	}
 	resolved, err := resolveRepoRoot(opts.RepoRoot)
 	if err != nil {
 		return RuntimeConfig{}, RuntimePaths{}, err
@@ -844,8 +853,13 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		milvusDataDir = envText(localMilvusLiteDBPathEnvVar, p.MilvusLiteDBPath)
 	}
 	milvusLiteDBPath := filepath.Clean(milvusDataDir)
+	watchHostDir := defaultFileWatcherWatchHostDir(pathLayout.LocalImportRoot)
+	if maintenanceMode == installerWarmupMaintenanceMode {
+		watchHostDir = filepath.Join(runtimeRoot, "maintenance", "empty-import-root")
+	}
 	return RuntimeConfig{
 		Profile:            profile,
+		MaintenanceMode:    maintenanceMode,
 		OwnerToken:         strings.TrimSpace(firstNonEmpty(opts.OwnerToken, os.Getenv(runtimeOwnerTokenEnvVar))),
 		RepoRoot:           p.RepoRoot,
 		BuildRoot:          p.BuildRoot,
@@ -888,7 +902,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 			Port:          fileWatcherPort,
 			AgentID:       envText("LAZYMIND_FILE_WATCHER_AGENT_ID", envText("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID", "file-watcher-local-001")),
 			AgentToken:    envText("LAZYMIND_FILE_WATCHER_AGENT_TOKEN", envText("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN", "my-secret-token")),
-			WatchHostDir:  defaultFileWatcherWatchHostDir(pathLayout.LocalImportRoot),
+			WatchHostDir:  watchHostDir,
 			HostPathStyle: envText("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE", defaultFileWatcherHostPathStyle()),
 		},
 		PortResolutions: ports.resolutions,

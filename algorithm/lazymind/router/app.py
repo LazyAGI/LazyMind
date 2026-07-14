@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -69,6 +70,10 @@ async def _startup(get_engine, Base, get_process_manager, get_global_registry, H
         await conn.run_sync(Base.metadata.create_all)
     logger.info('router_* tables ensured')
 
+    if os.getenv('LAZYMIND_MAINTENANCE_MODE') == 'installer-warmup':
+        logger.info('installer warmup maintenance mode: router child recovery and background cleanup are disabled')
+        return
+
     pm = get_process_manager()
     await pm.claim_port_range()
     await pm.ensure_default_algorithm()
@@ -101,6 +106,9 @@ async def _startup(get_engine, Base, get_process_manager, get_global_registry, H
 
 
 async def _shutdown(get_process_manager):
+    if os.getenv('LAZYMIND_MAINTENANCE_MODE') == 'installer-warmup':
+        logger.info('installer warmup maintenance mode: router shutdown has no child processes to stop')
+        return
     pm = get_process_manager()
     await pm.shutdown()
     from lazymind.router.core.stream_proxy import get_stream_proxy
