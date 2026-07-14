@@ -79,43 +79,6 @@ function buildPredecessorMap(model: GraphModel): Map<string, string[]> {
   return map;
 }
 
-/**
- * V11 guard: returns a rejection message if adding the edge src→tgt would
- * violate the "parallel sub-steps must not have multiple exits" rule, or null
- * if the connection is allowed.
- *
- * Rule: a node that is a direct child of a parallel fork (route:all, >1 exits)
- * must not itself have more than one outgoing transition.
- */
-function v11RejectReason(model: GraphModel, srcId: string, tgtId: string): string | null {
-  // After the new edge is added, src will have (current + 1) outgoing transitions.
-  const srcNode = model.nodes.find((n) => n.id === srcId);
-  if (!srcNode) return null;
-
-  const srcExitsAfter = srcNode.transitions.length + 1; // after adding the new edge
-
-  // Check 1: src's parent is a parallel fork → src must stay at ≤1 exit.
-  if (srcExitsAfter > 1) {
-    for (const n of model.nodes) {
-      const isParallelFork = (n.route === 'all' || !n.route) && n.transitions.length > 1;
-      if (isParallelFork && n.transitions.some((t) => t.to === srcId)) {
-        return `step "${srcId}" is a parallel fork child and cannot have multiple exits`;
-      }
-    }
-  }
-
-  // Check 2: src is itself a parallel fork → tgt must not already have >0 exits.
-  const srcIsParallelForkAfter = (srcNode.route === 'all' || !srcNode.route) && srcExitsAfter > 1;
-  if (srcIsParallelForkAfter) {
-    const tgtNode = model.nodes.find((n) => n.id === tgtId);
-    if (tgtNode && tgtNode.transitions.length > 0) {
-      return `step "${tgtId}" already has exits and cannot be a parallel fork child`;
-    }
-  }
-
-  return null;
-}
-
 function modelToFlowNodes(
   model: GraphModel,
   nodeErrorMap: Map<string, string[]>,
@@ -455,13 +418,6 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       const sourceNode = m.nodes.find((n) => n.id === connection.source);
       if (!sourceNode) return;
 
-      // V11 guard: reject if this connection would violate the no-re-fork rule.
-      const reject = v11RejectReason(m, connection.source, connection.target);
-      if (reject) {
-        // Silent rejection — the invalid edge simply doesn't get drawn.
-        return;
-      }
-
       const newTransition = { to: connection.target, condition: '' };
       const updatedNodes = m.nodes.map((n) =>
         n.id === connection.source
@@ -789,17 +745,6 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     return model.nodes.find((n) => n.id === selectedNode.id) ?? null;
   })();
 
-  // Whether the selected node is a direct child of a parallel fork.
-  // If true, "添加分支" must be disabled to prevent V11 violations.
-  const selectedIsParallelChild = selectedNodeId
-    ? model.nodes.some(
-        (n) =>
-          (n.route === 'all' || !n.route) &&
-          n.transitions.length > 1 &&
-          n.transitions.some((t) => t.to === selectedNodeId),
-      )
-    : false;
-
   const handleNodePropertyChange = useCallback((updated: StepNode): boolean => {
     const m = modelRef.current;
 
@@ -980,7 +925,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           onClose={() => setSelectedNodeId(null)}
           onChange={handleNodePropertyChange}
           onDelete={handleNodeDelete}
-          disableAddTransition={selectedIsParallelChild}
+          disableAddTransition={false}
           readonly={readonly}
         />
       )}

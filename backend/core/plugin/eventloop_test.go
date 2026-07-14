@@ -301,8 +301,8 @@ func TestCallDriverAgent_DefaultsToFallbackOnEmptyMessage(t *testing.T) {
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
 
 	msg, fallback := callDriverAgent("image-plugin", "analyze_subject", "output", "ps-1", nil, nil, "")
-	if fallback {
-		t.Fatal("empty message should not trigger fallback; got fallback=true")
+	if !fallback {
+		t.Fatal("empty DriverAgent message must trigger the explicit fallback path")
 	}
 	if !strings.Contains(msg, "analyze_subject") {
 		t.Fatalf("fallback message should contain step ID, got %q", msg)

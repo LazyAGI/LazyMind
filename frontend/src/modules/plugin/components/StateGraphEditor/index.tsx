@@ -74,6 +74,8 @@ interface Props {
   topbarActions?: React.ReactNode;
   /** Called automatically when any file changes (auto-save). */
   onSave?: (payload: SavePayload) => Promise<void>;
+  /** Runs Go's authoritative editor-profile validation after a successful save. */
+  onValidate?: () => Promise<ValidationError[]>;
   onClose?: () => void;
   /** When false, the empty-canvas hint is suppressed (user already has experience). */
   showEmptyHint?: boolean;
@@ -139,6 +141,7 @@ export default function StateGraphEditor({
   topbarExtra,
   topbarActions,
   onSave,
+  onValidate,
   onClose,
   showEmptyHint = true,
   readonly = false,
@@ -183,6 +186,11 @@ export default function StateGraphEditor({
   const modelRef = useRef<GraphModel>(initGraphModel(initialStateYaml, initialPluginYaml));
   const [model, setModelState] = useState<GraphModel>(modelRef.current);
   const [errors, setErrors] = useState<ValidationError[]>(() => validateStateGraph(modelRef.current));
+  const [authoritativeErrors, setAuthoritativeErrors] = useState<ValidationError[]>([]);
+  const displayErrors = [
+    ...errors.filter((local) => !authoritativeErrors.some((server) => server.code === local.code)),
+    ...authoritativeErrors,
+  ];
 
   // scenario data
   const [scenarioData, setScenarioData] = useState<ScenarioData>(() =>
@@ -202,6 +210,8 @@ export default function StateGraphEditor({
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
+  const onValidateRef = useRef(onValidate);
+  useEffect(() => { onValidateRef.current = onValidate; }, [onValidate]);
 
   const buildPayload = useCallback((m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string): SavePayload => ({
     stateYaml: serializeModel(m, false),
@@ -221,6 +231,9 @@ export default function StateGraphEditor({
     setSaveStatus('saving');
     try {
       await fn(buildPayload(m, pm, sd, sc));
+      if (onValidateRef.current) {
+        setAuthoritativeErrors(await onValidateRef.current());
+      }
       setSaveStatus('saved');
     } catch (error: unknown) {
       setSaveStatus('error');
@@ -542,7 +555,7 @@ export default function StateGraphEditor({
           {!readonly && contentTab === 'statemachine' && viewMode === 'preview' && (
             <>
               {onRepair && (
-                <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('statemachine', errors)}>
+                <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('statemachine', displayErrors)}>
                   {t('selfEvolutionRun.sgeAiRepairBtn')}
                 </Button>
               )}
@@ -589,7 +602,7 @@ export default function StateGraphEditor({
             <div className="sge-content">
               <GraphCanvas
                 model={model}
-                errors={errors}
+                errors={displayErrors}
                 onModelChange={readonly ? () => {} : updateModel}
                 pluginModel={pluginModel}
                 scenarioData={scenarioData}
@@ -619,7 +632,7 @@ export default function StateGraphEditor({
                 />
               )}
             </div>
-            <ValidationPanel errors={errors} onSelectNode={handleSelectNode} />
+            <ValidationPanel errors={displayErrors} onSelectNode={handleSelectNode} />
           </div>
         )}
 
@@ -708,7 +721,7 @@ export default function StateGraphEditor({
                     handleScriptsChange(activeCodeFile, text);
                   }
                 }}
-                errors={activeCodeFile === 'state.yml' ? errors : []}
+                errors={activeCodeFile === 'state.yml' ? displayErrors : []}
                 readOnly={readonly || activeCodeFile === 'layout.json'}
                 language={
                   activeCodeFile.endsWith('.md')

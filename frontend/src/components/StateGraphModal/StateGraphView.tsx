@@ -39,7 +39,7 @@ export interface SGEdge {
   to: string;
   condition: string;
   // server-computed
-  edge_type: 'executed' | 'current_direct' | 'current_reachable' | 'skipped';
+  edge_type: 'executed' | 'current_direct' | 'current_reachable' | 'skipped' | 'pruned' | 'stale' | 'inactive';
   // legacy — ignored
   is_active_path?: boolean;
 }
@@ -48,7 +48,6 @@ export interface StateGraphData {
   nodes: SGNode[];
   edges: SGEdge[];
   initial: string;
-  current_step_id: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -68,6 +67,11 @@ const S: Record<string, { color: string; dot: string; label: string }> = {
   failed:      { color: '#cf1322', dot: '#ff4d4f', label: '失败' },
   interrupted: { color: '#cf1322', dot: '#ff4d4f', label: '中断' },
   pending:     { color: '#8c8c8c', dot: '#bfbfbf', label: '未执行' },
+  ready:       { color: '#0958d9', dot: '#1677ff', label: '可执行' },
+  blocked:     { color: '#d46b08', dot: '#fa8c16', label: '素材未满足' },
+  stale:       { color: '#722ed1', dot: '#9254de', label: '已失效' },
+  pruned:      { color: '#8c8c8c', dot: '#d9d9d9', label: '未选分支' },
+  bypassed:    { color: '#8c8c8c', dot: '#d9d9d9', label: '已绕过' },
 };
 function sc(status: string) { return S[status] ?? S.pending; }
 
@@ -96,34 +100,25 @@ const EDGE_STYLE: Record<string, { stroke: string; dash?: string; width: number 
   current_direct:    { stroke: '#1677ff', width: 1.5 },
   current_reachable: { stroke: '#1677ff', dash: '6 3', width: 1.2 },
   skipped:           { stroke: '#bfbfbf', dash: '5 3', width: 1.2 },
+  pruned:            { stroke: '#bfbfbf', dash: '2 3', width: 1.2 },
+  stale:             { stroke: '#9254de', dash: '5 3', width: 1.2 },
+  inactive:          { stroke: '#d9d9d9', dash: '5 3', width: 1.0 },
 };
 const ARROW_IDS: Record<string, string> = {
   executed: 'arr-green',
   current_direct: 'arr-blue',
   current_reachable: 'arr-blue',
   skipped: 'arr-gray',
+  pruned: 'arr-gray',
+  stale: 'arr-gray',
+  inactive: 'arr-gray',
 };
 
-// ─── DAG: remove back-edges via DFS ──────────────────────────────────────────
+// Go rejects cyclic graphs before runtime. The renderer only drops malformed
+// dangling/self edges and never hides a server-provided control edge.
 function toDAGEdges(nodes: SGNode[], edges: SGEdge[]): SGEdge[] {
   const ids = new Set(nodes.map((n) => n.id));
-  const adj = new Map<string, string[]>();
-  for (const e of edges) {
-    if (e.from === e.to || !ids.has(e.from) || !ids.has(e.to)) continue;
-    if (!adj.has(e.from)) adj.set(e.from, []);
-    adj.get(e.from)!.push(e.to);
-  }
-  const visited = new Set<string>(), inStack = new Set<string>(), back = new Set<string>();
-  function dfs(id: string) {
-    visited.add(id); inStack.add(id);
-    for (const nb of adj.get(id) ?? []) {
-      if (inStack.has(nb)) back.add(`${id}→${nb}`);
-      else if (!visited.has(nb)) dfs(nb);
-    }
-    inStack.delete(id);
-  }
-  for (const n of nodes) if (!visited.has(n.id)) dfs(n.id);
-  return edges.filter((e) => e.from !== e.to && !back.has(`${e.from}→${e.to}`));
+  return edges.filter((edge) => edge.from !== edge.to && ids.has(edge.from) && ids.has(edge.to));
 }
 
 // ─── Dagre layout ─────────────────────────────────────────────────────────────

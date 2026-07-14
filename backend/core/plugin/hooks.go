@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
 	"gorm.io/gorm"
@@ -98,14 +97,9 @@ func loadPluginChatContextFromDB(ctx context.Context, db *gorm.DB, taskID string
 	}
 }
 
-// StopActivePluginSession interrupts any running plugin step for the given conversation.
-// It marks the active session as waiting, marks running steps as interrupted, and cancels
-// the corresponding sub_agent_tasks so the subagent runner (Python side) terminates.
-// A step_waiting SSE event with user_stopped=true is pushed to the conversation channel.
 // StopActivePluginSession marks all running steps as interrupted and puts the session
-// into waiting status so the user can resume later.
-// It also notifies the Python chat service to unblock any advance_step polling via
-// the /api/plugin/step-cancel endpoint.
+// into waiting status. Python task cancellation and UI notification use the generic
+// task lifecycle paths; no plugin-specific step completion queue is involved.
 func StopActivePluginSession(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string) {
 	session, err := GetActiveSession(ctx, db, convID)
 	if err != nil || session == nil {
@@ -125,8 +119,6 @@ func StopActivePluginSession(ctx context.Context, db *gorm.DB, stateStore state.
 		_ = subagent.UpdateFinalStatus(ctx, db, step.TaskID, subagent.StatusInterrupted, "stopped by user")
 		// Mirror into plugin_session_steps.
 		_ = UpdateStepStatus(ctx, db, step.TaskID, StepStatusInterrupted)
-		// Notify Python to unblock _wait_for_step_done for this step.
-		go notifyStepCancel(step.StepID, session.ID)
 		// Notify Python to cancel the ReAct loop for this task.
 		go notifyTaskCancel(step.TaskID)
 	}
@@ -144,80 +136,6 @@ func StopActivePluginSession(ctx context.Context, db *gorm.DB, stateStore state.
 			"reason":       "user_stopped",
 		})
 	}
-}
-
-// notifyStepDone posts a step-done signal to the Python chat service so that
-// _wait_for_step_done in dynamic-mode advance_step unblocks after SubAgent completes.
-// Called in a goroutine; errors are logged and suppressed.
-func notifyStepDone(convID, sessionID, stepID, status, summary, chatSessionID string) {
-	body, _ := json.Marshal(map[string]string{
-		"conversation_id": convID,
-		"session_id":      sessionID,
-		"step_id":         stepID,
-		"status":          status,
-		"summary":         summary,
-		"chat_session_id": chatSessionID,
-	})
-	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/plugin/step-done")
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx
-	if err != nil {
-		fmt.Printf("[plugin] notifyStepDone: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !bytes.Contains(respBody, []byte(`"ok":true`)) {
-		fmt.Printf("[plugin] notifyStepDone: unexpected response status=%d body=%s conv=%s session=%s step=%s\n",
-			resp.StatusCode, string(respBody), convID, sessionID, stepID)
-	} else {
-		fmt.Printf("[plugin] notifyStepDone: delivered conv=%s session=%s chat_sid=%s step=%s status=%s summary_len=%d\n",
-			convID, sessionID, chatSessionID, stepID, status, len(summary))
-	}
-}
-
-// notifyStepStarted posts a step-started ack to the Python chat service so that
-// dynamic-mode advance_step knows Core consumed task_created and launched the step.
-// Called in a goroutine; errors are logged and suppressed.
-func notifyStepStarted(convID, sessionID, stepID, taskID, chatSessionID string) {
-	body, _ := json.Marshal(map[string]string{
-		"conversation_id": convID,
-		"session_id":      sessionID,
-		"step_id":         stepID,
-		"task_id":         taskID,
-		"chat_session_id": chatSessionID,
-	})
-	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/plugin/step-started")
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx
-	if err != nil {
-		fmt.Printf("[plugin] notifyStepStarted: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !bytes.Contains(respBody, []byte(`"ok":true`)) {
-		fmt.Printf("[plugin] notifyStepStarted: unexpected response status=%d body=%s conv=%s session=%s step=%s task=%s\n",
-			resp.StatusCode, string(respBody), convID, sessionID, stepID, taskID)
-	} else {
-		fmt.Printf("[plugin] notifyStepStarted: delivered conv=%s session=%s chat_sid=%s step=%s task=%s\n",
-			convID, sessionID, chatSessionID, stepID, taskID)
-	}
-}
-
-// notifyStepCancel posts a cancel signal to the Python chat service so that
-// _wait_for_step_done unblocks immediately for dynamic-mode steps.
-// Called in a goroutine; errors are logged and suppressed.
-func notifyStepCancel(stepID, sessionID string) {
-	body, _ := json.Marshal(map[string]string{
-		"session_id": sessionID,
-		"step_id":    stepID,
-	})
-	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/plugin/step-cancel")
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx
-	if err != nil {
-		fmt.Printf("[plugin] notifyStepCancel: %v\n", err)
-		return
-	}
-	_ = resp.Body.Close()
 }
 
 // notifyTaskCancel posts a cancel signal to the Python chat service so that

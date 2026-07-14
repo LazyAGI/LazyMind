@@ -159,6 +159,34 @@ export async function publishPluginDraft(id: string): Promise<PublishedPluginVer
   return resp.data.data;
 }
 
+export interface PluginDiagnostic {
+  code: string;
+  severity: 'error' | 'warning' | string;
+  path?: string;
+  node_id?: string;
+  edge_id?: string;
+  material_id?: string;
+  message: string;
+  details?: Record<string, unknown>;
+  fixable: boolean;
+}
+
+export interface PluginValidationResult {
+  valid: boolean;
+  profile: string;
+  schema_version: string;
+  graph_hash?: string;
+  diagnostics: PluginDiagnostic[];
+}
+
+export async function validatePluginDraft(id: string): Promise<PluginValidationResult> {
+  const resp = await axiosInstance.post<CoreResponse<PluginValidationResult>>(
+    `${coreBasePath}/plugin-drafts/${id}:validate`,
+    { profile: 'editor' },
+  );
+  return resp.data.data;
+}
+
 export interface PluginVersionSummary { revision_id: string; revision_no: number; tree_hash: string; message: string; created_by: string; created_at: string; current: boolean }
 export interface PluginVersionContent { plugin_ref: string; revision_id: string; revision_no: number; tree_hash: string; plugin_yaml_content: string; state_yaml_content: string; scenario_content: string; scripts_content: string; readonly: true }
 export async function listPluginVersions(pluginRef: string): Promise<PluginVersionSummary[]> { const r=await axiosInstance.get<CoreResponse<{versions:PluginVersionSummary[]}>>(`${coreBasePath}/published-plugins/${encodeURIComponent(pluginRef)}/versions`);return r.data.data.versions }

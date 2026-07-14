@@ -38,17 +38,19 @@ const (
 
 // CreateSessionInput holds fields required to insert a new plugin_sessions row.
 type CreateSessionInput struct {
-	SessionID        string
-	ConversationID   string
-	PluginID         string
-	PluginRef        string
-	PluginRevisionID string
-	PluginRevisionNo int64
-	PluginTreeHash   string
-	PluginRemoteRoot string
-	TriggerHistoryID string
-	CurrentStepID    string
-	CreateUserID     string
+	SessionID          string
+	ConversationID     string
+	PluginID           string
+	PluginRef          string
+	PluginRevisionID   string
+	PluginRevisionNo   int64
+	PluginTreeHash     string
+	PluginRemoteRoot   string
+	GraphHash          string
+	GraphSchemaVersion string
+	TriggerHistoryID   string
+	CurrentStepID      string
+	CreateUserID       string
 }
 
 // CreateSession inserts a new plugin_sessions record.
@@ -71,6 +73,7 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 		ConversationID: in.ConversationID,
 		PluginID:       in.PluginID,
 		PluginRef:      in.PluginRef, PluginRevisionID: in.PluginRevisionID, PluginRevisionNo: in.PluginRevisionNo, PluginTreeHash: in.PluginTreeHash, PluginRemoteRoot: in.PluginRemoteRoot,
+		GraphHash: in.GraphHash, GraphSchemaVersion: in.GraphSchemaVersion,
 		TriggerHistoryID: in.TriggerHistoryID,
 		Status:           SessionStatusActive,
 		CurrentStepID:    in.CurrentStepID,
@@ -304,6 +307,7 @@ func CreateSessionStep(ctx context.Context, db *gorm.DB, sessionID, stepID, task
 		Attempt:   attempt,
 		TaskID:    taskID,
 		Status:    StepStatusPending,
+		Validity:  "effective",
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -385,22 +389,6 @@ func ListStepIntents(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.
 		return nil, err
 	}
 	return rows, nil
-}
-
-// IsEndStepLatest reports whether the most recently created step in the session has
-// step_id == "__end__". This is the canonical way to decide whether a session should be
-// considered completed vs. waiting: if the user rolls back by triggering a new step after
-// __end__, the __end__ record remains but is no longer the latest, so this returns false.
-func IsEndStepLatest(ctx context.Context, db *gorm.DB, sessionID string) (bool, error) {
-	var step orm.PluginSessionStep
-	err := db.WithContext(ctx).
-		Where("session_id = ?", sessionID).
-		Order("created_at DESC").
-		First(&step).Error
-	if err != nil {
-		return false, err
-	}
-	return step.StepID == "__end__", nil
 }
 
 // WriteSlotRevision inserts a new AI slot revision and manages the selected flag.

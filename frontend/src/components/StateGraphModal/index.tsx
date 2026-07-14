@@ -1,12 +1,12 @@
 /**
  * StateGraphModal — Modal container for the plugin workflow StateGraph.
  *
- * - Fetches GET /plugin-sessions/{sessionId}/state-graph on open.
+ * - Fetches Go's authoritative session projection on open.
  * - When liveRefresh=true, listens for plugin state-change events dispatched
  *   by the task-center SSE handler and re-fetches on each relevant event.
  * - Dagre layout is cached; only node statuses are replaced on refresh.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Spin } from 'antd';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import StateGraphView, { type StateGraphData } from './StateGraphView';
@@ -32,6 +32,57 @@ export interface StateGraphModalProps {
 
 const coreApiBase = `${BASE_URL}/api/core`;
 
+type ProjectionEnvelope = {
+  projection: {
+    past?: string[]; current?: string[]; ready?: string[]; blocked?: string[];
+    stale?: string[]; pruned?: string[]; bypassed?: string[];
+    nodes?: Record<string, { execution: string; readiness: string; branch: string }>;
+    edges?: { from: string; to: string; state: string }[];
+    completed?: boolean;
+  };
+  graph: {
+    static_order?: string[];
+    nodes?: Record<string, { id: string; label?: string }>;
+  };
+};
+
+function projectionToGraph(raw: ProjectionEnvelope): StateGraphData {
+  const projection = raw.projection ?? {};
+  const graphNodes = raw.graph?.nodes ?? {};
+  const order = raw.graph?.static_order ?? Object.keys(graphNodes);
+  const nodes = [
+    { id: '__start__', label: '__start__', step_index: 0, status: 'succeeded', is_current: false },
+    ...order.filter((id) => id !== '__start__' && id !== '__end__').map((id, index) => {
+      const state = projection.nodes?.[id];
+      let status = state?.execution && state.execution !== 'none' ? state.execution : 'pending';
+      if (state?.readiness === 'ready') status = 'ready';
+      else if (state?.readiness === 'blocked') status = 'blocked';
+      else if (state?.branch === 'pruned') status = 'pruned';
+      else if (state?.branch === 'bypassed') status = 'bypassed';
+      if ((projection.stale ?? []).includes(id) && status === 'pending') status = 'stale';
+      return {
+        id,
+        label: graphNodes[id]?.label || id,
+        step_index: index + 1,
+        status,
+        is_current: (projection.current ?? []).includes(id),
+      };
+    }),
+    { id: '__end__', label: '__end__', step_index: order.length + 1, status: projection.completed ? 'succeeded' : 'pending', is_current: false },
+  ];
+  const edges = (projection.edges ?? []).map((edge) => ({
+    from: edge.from,
+    to: edge.to,
+    condition: '',
+    edge_type: edge.state === 'active'
+      ? ((projection.past ?? []).includes(edge.to) || edge.to === '__end__' ? 'executed' : 'current_direct')
+      : edge.state === 'pruned' ? 'pruned'
+      : edge.state === 'stale' ? 'stale'
+      : 'inactive',
+  } as const));
+  return { nodes, edges, initial: '__start__' };
+}
+
 export default function StateGraphModal({
   open,
   onClose,
@@ -50,10 +101,10 @@ export default function StateGraphModal({
     setLoading((prev) => !prev ? true : prev);
     try {
       const resp = await axiosInstance.get(
-        `${coreApiBase}/plugin-sessions/${encodeURIComponent(sessionId)}/state-graph`,
+        `${coreApiBase}/plugin-sessions/${encodeURIComponent(sessionId)}/projection`,
       );
       // ReplyOK wraps the payload as { code, message, data: {...} }.
-      const incoming: StateGraphData = resp.data?.data ?? resp.data;
+      const incoming = projectionToGraph(resp.data?.data ?? resp.data);
       // Merge: preserve topology reference if node/edge IDs haven't changed,
       // so StateGraphView's useMemo layout cache stays valid.
       if (cachedDataRef.current) {

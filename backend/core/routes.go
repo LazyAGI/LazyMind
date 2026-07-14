@@ -225,6 +225,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/plugin-drafts:polish-info", []string{"qa.write"}, plugin.PolishPluginDraftInfo)
 	handleAPI(r, "GET", "/plugin-drafts/{draft_id}", []string{"qa.read"}, plugin.GetPluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:save", []string{"qa.write"}, plugin.SavePluginDraft)
+	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:validate", []string{"qa.read"}, plugin.ValidatePluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-generate", []string{"qa.write"}, plugin.AIGeneratePluginDraft)
 	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-repair", []string{"qa.write"}, plugin.AIRepairPluginDraft)
 	handleAPI(r, "GET", "/plugin-drafts/{draft_id}/generation-analysis", []string{"qa.read"}, plugin.GetPluginGenerationAnalysis)
@@ -271,7 +272,15 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}", []string{"qa.read"}, plugin.GetSessionDetail)
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots", []string{"qa.read"}, plugin.GetSessionSlots)
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/steps", []string{"qa.read"}, plugin.GetSessionSteps)
-	handleAPI(r, "GET", "/plugin-sessions/{session_id}/state-graph", []string{"qa.read"}, plugin.GetStateGraph)
+	// Compatibility alias: old clients receive the same authoritative projection;
+	// no independent BFS state calculation remains on an active route.
+	handleAPI(r, "GET", "/plugin-sessions/{session_id}/state-graph", []string{"qa.read"}, plugin.GetSessionProjection)
+	handleAPI(r, "GET", "/plugin-sessions/{session_id}/projection", []string{"qa.read"}, plugin.GetSessionProjection)
+	handleAPI(r, "GET", "/internal/plugin-sessions/{session_id}/projection", nil, plugin.GetSessionProjection)
+	handleAPI(r, "POST", "/internal/plugin-sessions:plan-start", nil, plugin.PlanPluginSessionStart)
+	handleAPI(r, "POST", "/internal/plugin-sessions:start", nil, plugin.StartPluginSession)
+	handleAPI(r, "POST", "/internal/plugin-sessions/{session_id}:transition", nil, plugin.TransitionPluginSession)
+	handleAPI(r, "GET", "/internal/plugin-transition-commands/{command_id}", nil, plugin.GetTransitionCommand)
 	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, plugin.PatchSessionSlot)
 	handleAPI(r, "POST", "/plugin-sessions/{session_id}:sync-search-config", []string{"qa.write"}, plugin.SyncSessionSearchConfig)
 	// Phase 3: slot item management.

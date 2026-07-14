@@ -164,7 +164,6 @@ def test_pluginspec_normalises_editor_step_list_and_preserves_mode(tmp_path):
     assert spec.get_step_config('step_a')['outputs'] == [{'slot': 'draft'}]
     assert spec.get_step_mode('step_a') == 'auto'
     assert spec.get_step_mode('step_b') == 'human'
-    assert spec.state_machine.get_reachable_steps('__start__') == ['step_a']
 
 
 def test_pluginspec_missing_plugin_yaml_raises(tmp_path):
@@ -264,124 +263,6 @@ def test_get_slot_for_artifact_no_slot(tmp_path):
     assert spec.get_slot_for_artifact('unknown_artifact') is None
 
 
-# ---------------------------------------------------------------------------
-# StateMachine
-# ---------------------------------------------------------------------------
-
-def test_state_machine_get_reachable_from_start(tmp_path):
-    from lazymind.chat.plugin.plugin_loader import PluginSpec
-    plugins_dir = make_plugin_dir(tmp_path)
-    spec = PluginSpec('test-plugin', plugins_dir / 'test-plugin')
-    sm = spec.state_machine
-    reachable = sm.get_reachable_steps('__start__')
-    assert reachable == ['step_a']
-
-
-def test_state_machine_get_reachable_mid_flow(tmp_path):
-    from lazymind.chat.plugin.plugin_loader import PluginSpec
-    plugins_dir = make_plugin_dir(tmp_path)
-    spec = PluginSpec('test-plugin', plugins_dir / 'test-plugin')
-    sm = spec.state_machine
-
-    # From step_c user can go to step_d or retry step_b.
-    reachable = sm.get_reachable_steps('step_c')
-    assert 'step_d' in reachable
-    assert 'step_b' in reachable
-    assert '__end__' not in reachable
-
-
-def test_state_machine_get_reachable_excludes_reserved(tmp_path):
-    from lazymind.chat.plugin.plugin_loader import PluginSpec
-    plugins_dir = make_plugin_dir(tmp_path)
-    spec = PluginSpec('test-plugin', plugins_dir / 'test-plugin')
-    sm = spec.state_machine
-
-    # step_d can reach __end__ but it must be excluded from reachable steps.
-    reachable = sm.get_reachable_steps('step_d')
-    assert '__end__' not in reachable
-    assert '__start__' not in reachable
-
-
-def test_state_machine_is_reachable(tmp_path):
-    from lazymind.chat.plugin.plugin_loader import PluginSpec
-    plugins_dir = make_plugin_dir(tmp_path)
-    spec = PluginSpec('test-plugin', plugins_dir / 'test-plugin')
-    sm = spec.state_machine
-
-    assert sm.is_reachable('step_a', 'step_b') is True
-    assert sm.is_reachable('step_a', 'step_a') is True  # retry path
-    assert sm.is_reachable('step_a', 'step_c') is False
-    assert sm.is_reachable('step_d', 'step_a') is False  # no backward edge
-
-
-def test_state_machine_empty_current_defaults_to_start(tmp_path):
-    from lazymind.chat.plugin.plugin_loader import PluginSpec
-    plugins_dir = make_plugin_dir(tmp_path)
-    spec = PluginSpec('test-plugin', plugins_dir / 'test-plugin')
-    sm = spec.state_machine
-
-    # Empty string should behave the same as '__start__'.
-    reachable = sm.get_reachable_steps('')
-    assert 'step_a' in reachable
-
-
-# ---------------------------------------------------------------------------
-# StateMachine — get_ancestors
-# ---------------------------------------------------------------------------
-
-def test_state_machine_get_ancestors_of_step_d(tmp_path):
-    from lazymind.chat.plugin.plugin_loader import PluginSpec
-    plugins_dir = make_plugin_dir(tmp_path)
-    sm = PluginSpec('test-plugin', plugins_dir / 'test-plugin').state_machine
-
-    # step_d is reachable from step_a -> step_b -> step_c -> step_d,
-    # so all of step_a, step_b, step_c are ancestors.
-    ancestors = sm.get_ancestors('step_d')
-    assert 'step_a' in ancestors
-    assert 'step_b' in ancestors
-    assert 'step_c' in ancestors
-    # step_d self-loops; it must not appear as its own ancestor.
-    assert 'step_d' not in ancestors
-    # Reserved nodes must be excluded.
-    assert '__start__' not in ancestors
-    assert '__end__' not in ancestors
-
-
-def test_state_machine_get_ancestors_of_step_a(tmp_path):
-    from lazymind.chat.plugin.plugin_loader import PluginSpec
-    plugins_dir = make_plugin_dir(tmp_path)
-    sm = PluginSpec('test-plugin', plugins_dir / 'test-plugin').state_machine
-
-    # step_a has no non-reserved, non-self ancestors.
-    ancestors = sm.get_ancestors('step_a')
-    assert len(ancestors) == 0
-
-
-def test_state_machine_get_ancestors_of_step_c(tmp_path):
-    from lazymind.chat.plugin.plugin_loader import PluginSpec
-    plugins_dir = make_plugin_dir(tmp_path)
-    sm = PluginSpec('test-plugin', plugins_dir / 'test-plugin').state_machine
-
-    # step_c is reachable from step_a -> step_b -> step_c.
-    # step_c -> step_b creates a cycle; BFS must not loop.
-    ancestors = sm.get_ancestors('step_c')
-    assert 'step_a' in ancestors
-    assert 'step_b' in ancestors
-    assert 'step_c' not in ancestors
-
-
-def test_state_machine_get_ancestors_excludes_reserved(tmp_path):
-    from lazymind.chat.plugin.plugin_loader import PluginSpec
-    plugins_dir = make_plugin_dir(tmp_path)
-    sm = PluginSpec('test-plugin', plugins_dir / 'test-plugin').state_machine
-
-    for step in ('step_a', 'step_b', 'step_c', 'step_d'):
-        ancestors = sm.get_ancestors(step)
-        assert '__start__' not in ancestors
-        assert '__end__' not in ancestors
-
-
-# ---------------------------------------------------------------------------
 # load_all registry
 # ---------------------------------------------------------------------------
 
@@ -423,48 +304,5 @@ def test_list_plugins_returns_summary(tmp_path):
         p = next(x for x in plugins if x['id'] == 'test-plugin')
         assert len(p['steps']) == 4
         assert p['steps'][0]['id'] == 'step_a'
-    finally:
-        plugin_loader.load_all()
-
-
-# ---------------------------------------------------------------------------
-# find_producer_step
-# ---------------------------------------------------------------------------
-
-def test_find_producer_step(tmp_path):
-    from lazymind.chat.plugin import plugin_loader
-    plugins_dir = make_plugin_dir(tmp_path)
-    with patch.object(plugin_loader, '_PLUGINS_DIR', plugins_dir):
-        plugin_loader.load_all()
-    try:
-        assert plugin_loader.find_producer_step('test-plugin', 'image_url') == 'step_c'
-        assert plugin_loader.find_producer_step('test-plugin', 'enhanced_url') == 'step_d'
-        assert plugin_loader.find_producer_step('test-plugin', 'nonexistent') is None
-    finally:
-        plugin_loader.load_all()
-
-
-def test_find_producer_steps_allows_duplicate_artifact_outputs(tmp_path):
-    from lazymind.chat.plugin import plugin_loader
-    plugins_dir = make_plugin_dir(tmp_path)
-    state_path = plugins_dir / 'test-plugin' / 'scenario' / 'state.yml'
-    state_text = state_path.read_text()
-    state_text = state_text.replace(
-        '          - artifact_id: analysis\n'
-        '            content_type: text\n'
-        '            slot_id: text_result\n',
-        '          - artifact_id: analysis\n'
-        '            content_type: text\n'
-        '            slot_id: text_result\n'
-        '          - artifact_id: optimized\n'
-        '            content_type: text\n'
-        '            slot_id: text_result\n',
-    )
-    state_path.write_text(state_text)
-    with patch.object(plugin_loader, '_PLUGINS_DIR', plugins_dir):
-        plugin_loader.load_all()
-    try:
-        assert plugin_loader.find_producer_steps('test-plugin', 'optimized') == ['step_a', 'step_b']
-        assert plugin_loader.find_producer_step('test-plugin', 'optimized') == 'step_a'
     finally:
         plugin_loader.load_all()

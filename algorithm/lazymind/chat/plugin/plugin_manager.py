@@ -48,6 +48,186 @@ class _ReachabilitySnapshot:
     reachable_steps: List[str]
 
 
+@dataclass(frozen=True)
+class _TransitionSubmission:
+    accepted: bool
+    message: str
+    command_id: str = ''
+    task_id: str = ''
+    session_id: str = ''
+    state_version: int = 0
+    projection: Optional[Dict[str, Any]] = None
+
+
+def _core_response_data(response: Any) -> Dict[str, Any]:
+    try:
+        body = response.json()
+    except Exception:
+        return {}
+    if isinstance(body, dict) and isinstance(body.get('data'), dict):
+        return body['data']
+    return body if isinstance(body, dict) else {}
+
+
+def _format_transition_rejection(step_id: str, data: Dict[str, Any]) -> str:
+    error = data.get('error') if isinstance(data.get('error'), dict) else {}
+    code = str(error.get('code') or 'TRANSITION_REJECTED')
+    reason = str(error.get('message') or 'Go rejected the plugin state transition.')
+    details = error.get('details') if isinstance(error.get('details'), dict) else {}
+    projection = data.get('projection') if isinstance(data.get('projection'), dict) else {}
+    ready = projection.get('ready') or details.get('ready') or []
+    blocked = projection.get('blocked') or []
+    missing = details.get('missing_groups') or []
+    lines = [
+        f'Transition rejected [{code}].',
+        f'Target: {step_id}',
+        f'Reason: {reason}',
+    ]
+    if missing:
+        lines.append(f'Missing material groups: {missing}')
+    if ready:
+        lines.append(f'Currently ready: {ready}')
+    if blocked:
+        lines.append(f'Currently blocked: {blocked}')
+    lines.append(
+        'Do not wait for this step. Use the returned live projection to choose '
+        'another action or explain the blocker.'
+    )
+    return '\n'.join(lines)
+
+
+def _submit_transition_to_core(
+        *, plugin_id: str, step_id: str, session_id: str, task_id: str,
+        objective: str, user_input: str, hand_off: bool,
+        runtime_instruction: str, partial_indices: Dict[str, List[int]],
+        operation: str = 'execute', is_start: bool = False,
+        preflight_id: str = '') -> _TransitionSubmission:
+    import httpx
+    from lazymind.config import config as _cfg
+
+    cfg = _agentic_config()
+    core_url = str(_cfg['core_api_url']).rstrip('/')
+    projection_data: Dict[str, Any] = {}
+    if not is_start:
+        try:
+            projection_resp = httpx.get(
+                f'{core_url}/internal/plugin-sessions/{session_id}/projection', timeout=5.0,
+            )
+            if projection_resp.status_code == 200:
+                projection_data = _core_response_data(projection_resp)
+        except Exception as exc:
+            LOG.warning('[plugin.transition] projection prefetch failed session=%s error=%s', session_id, exc)
+    command_id = str(uuid.uuid4())
+    expected_version = int(projection_data.get('state_version') or cfg.get('_plugin_state_version') or 0)
+    graph_hash = str(projection_data.get('graph_hash') or '')
+    payload = {
+        'command_id': command_id,
+        'operation': operation,
+        'target_step_id': step_id,
+        'expected_state_version': expected_version,
+        'graph_hash': graph_hash,
+        'task_id': task_id,
+        'objective': objective,
+        'user_input': user_input,
+        'runtime_instruction': runtime_instruction,
+        'partial_indices': partial_indices,
+        'hand_off': hand_off,
+        'plugin_mode': str(cfg.get('plugin_mode') or 'dynamic'),
+        'chat_session_id': str(cfg.get('session_id') or ''),
+        'history_files_per_turn': cfg.get('history_files_per_turn') or {},
+        'filters': cfg.get('filters') or {},
+        'llm_config': cfg.get('llm_config') or {},
+        'tool_config': cfg.get('tool_config') or {},
+        'plugin_id': plugin_id,
+        'plugin_ref': str(cfg.get('plugin_ref') or ''),
+        'plugin_revision_id': str(cfg.get('revision_id') or ''),
+        'plugin_revision_no': int(cfg.get('revision_no') or 0),
+        'plugin_tree_hash': str(cfg.get('tree_hash') or ''),
+        'plugin_remote_root': str(cfg.get('remote_root') or ''),
+        'conversation_id': str(cfg.get('conversation_id') or ''),
+        'trigger_history_id': str(cfg.get('history_id') or ''),
+        'user_id': str(cfg.get('user_id') or ''),
+        'preflight_id': preflight_id,
+        'external_materials': cfg.get('plugin_external_materials') or {},
+    }
+    endpoint = (
+        f'{core_url}/internal/plugin-sessions:start'
+        if is_start else f'{core_url}/internal/plugin-sessions/{session_id}:transition'
+    )
+    try:
+        response = httpx.post(endpoint, json=payload, timeout=15.0)
+        data = _core_response_data(response)
+    except httpx.TimeoutException:
+        # The command id makes an ambiguous network timeout reconcilable without
+        # submitting a second transition.
+        try:
+            status_resp = httpx.get(
+                f'{core_url}/internal/plugin-transition-commands/{command_id}', timeout=5.0,
+            )
+            data = _core_response_data(status_resp)
+            response = status_resp
+        except Exception:
+            message = (
+                'Transition result unknown [TRANSITION_RESULT_UNKNOWN].\n'
+                f'Command id: {command_id}\nDo not resubmit with a new command id.'
+            )
+            return _TransitionSubmission(False, message, command_id=command_id)
+    except Exception as exc:
+        return _TransitionSubmission(
+            False,
+            f'Transition result unknown [TRANSITION_RESULT_UNKNOWN].\nCommand id: {command_id}\nReason: {exc}',
+            command_id=command_id,
+        )
+    accepted = bool(data.get('accepted')) and response.status_code < 300
+    if not accepted:
+        return _TransitionSubmission(
+            False, _format_transition_rejection(step_id, data), command_id=command_id,
+            state_version=int(data.get('state_version') or expected_version),
+            projection=data.get('projection') if isinstance(data.get('projection'), dict) else {},
+        )
+    state_version = int(data.get('state_version') or expected_version)
+    cfg['_plugin_state_version'] = state_version
+    cfg['_last_plugin_task_id'] = str(data.get('task_id') or task_id)
+    if is_start:
+        cfg['plugin_session_id'] = str(data.get('session_id') or '')
+        cfg['plugin_id'] = plugin_id
+        cfg['plugin_step'] = step_id
+    return _TransitionSubmission(
+        True,
+        f'Advance for step {step_id!r} accepted by Go and durably queued.',
+        command_id=command_id,
+        task_id=str(data.get('task_id') or task_id),
+        session_id=str(data.get('session_id') or session_id),
+        state_version=state_version,
+        projection=data.get('projection') if isinstance(data.get('projection'), dict) else {},
+    )
+
+
+def _fetch_go_start_candidates(plugin_id: str) -> List[str]:
+    """Return Go's authoritative Ready set for a not-yet-started session."""
+    import httpx
+    from lazymind.config import config as _cfg
+
+    cfg = _agentic_config()
+    core_url = str(_cfg['core_api_url']).rstrip('/')
+    payload = {
+        'plugin_id': plugin_id,
+        'plugin_revision_id': str(cfg.get('revision_id') or ''),
+        'external_materials': cfg.get('plugin_external_materials') or {},
+    }
+    response = httpx.post(
+        f'{core_url}/internal/plugin-sessions:plan-start', json=payload, timeout=10.0,
+    )
+    data = _core_response_data(response)
+    if response.status_code >= 300:
+        raise RuntimeError(str(data.get('error') or data.get('message') or 'Go start planning failed'))
+    projection = data.get('projection') or {}
+    ready = projection.get('ready') or []
+    if not isinstance(ready, list):
+        raise RuntimeError('Go start planning returned an invalid Ready set')
+    return [str(step_id) for step_id in ready if step_id]
+
+
 def is_plugin_driver_turn(plugin_context: Any) -> bool:
     """Return whether this request is a synthetic turn initiated by DriverAgent."""
     return bool(
@@ -119,25 +299,27 @@ def _merge_tools(declared: List[str]) -> List[str]:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_succeeded_steps(session_id: str) -> set:
-    """Return the set of step_ids that have ever succeeded in this session.
-
-    Queries the Go core REST API.  Returns an empty set on any error so that
-    the caller degrades gracefully (ancestor rewind is simply not offered).
-    """
+def _fetch_go_projection(session_id: str) -> Dict[str, Any]:
+    """Return Go's authoritative runtime projection for a session."""
     if not session_id:
-        return set()
+        return {}
     try:
         import httpx
         from lazymind.config import config as _cfg
         core_url = str(_cfg['core_api_url']).rstrip('/')
-        resp = httpx.get(f'{core_url}/plugin-sessions/{session_id}', timeout=3.0)
+        resp = httpx.get(
+            f'{core_url}/internal/plugin-sessions/{session_id}/projection', timeout=5.0,
+        )
         if resp.status_code != 200:
-            return set()
-        steps = resp.json().get('data', {}).get('session', {}).get('steps', [])
-        return {s['step_id'] for s in steps if isinstance(s, dict) and s.get('status') == 'succeeded'}
+            return {}
+        data = _core_response_data(resp)
+        projection = data.get('projection') or {}
+        if isinstance(projection, dict):
+            _agentic_config()['_plugin_state_version'] = int(data.get('state_version') or 0)
+            return projection
     except Exception:
-        return set()
+        pass
+    return {}
 
 
 def _agentic_config() -> Dict[str, Any]:
@@ -187,11 +369,12 @@ def _trigger_plugin_step(
         hand_off: bool = False,
         preflight_id: str = '',
         runtime_instruction: str = '',
-        partial_indices: Optional[Dict[str, List[int]]] = None) -> str:
+        partial_indices: Optional[Dict[str, List[int]]] = None,
+        operation: str = 'execute') -> str:
     """Shared implementation for trigger_<plugin_id> and advance_step.
 
-    Performs two-layer validation then emits a task_created signal.
-    Returns a short status string (the tool return value seen by the LLM).
+    Performs local request-shape validation, then submits a synchronous Go
+    transition command. Go is the sole authority for Reachable/Ready admission.
 
     Args:
         plugin_id: The plugin identifier.
@@ -221,172 +404,20 @@ def _trigger_plugin_step(
     if not user_input:
         raise ValueError('user_input must not be empty.')
 
-    sm = plugin_loader.get_state_machine(plugin_id)
-    if sm is None:
+    if plugin_loader.get_plugin(plugin_id) is None:
         raise ValueError(f'plugin {plugin_id!r} not found.')
 
-    if not sm.is_reachable(current_step, step_id):
-        # Condition B: allow rewind to an ancestor that has previously succeeded.
-        ancestors = sm.get_ancestors(current_step)
-        if step_id in ancestors:
-            succeeded = _fetch_succeeded_steps(session_id)
-            if step_id not in succeeded:
-                raise ValueError(
-                    f'step {step_id!r} is an ancestor of {current_step!r} '
-                    f'but has not succeeded in this session yet. '
-                    f'Run it first before rewinding.'
-                )
-            # Ancestor rewind allowed — fall through to Layer 2.
-        else:
-            reachable = sm.get_reachable_steps(current_step)
-            current_label = repr(current_step) if current_step else "'__start__'"
-            raise ValueError(
-                f'step {step_id!r} is not reachable from '
-                f'{current_label}. '
-                f'Reachable steps: {reachable}.'
-            )
-    LOG.info(
-        '[plugin.advance] state_machine accepted plugin=%s step=%s session=%s current=%s cold=%s',
-        plugin_id, step_id, session_id, current_step or '__start__', is_cold_start,
-    )
-
-    # --- Layer 2: dependency validation (via Go core REST API) ---
+    # Step existence and prompt rendering remain local metadata concerns. Never
+    # reject a transition from the Python graph: Go evaluates the compiled graph
+    # and returns a structured rejection with the authoritative projection.
     step_config = plugin_loader.get_step_config(plugin_id, step_id)
     if not step_config:
         raise ValueError(f'step {step_id!r} is not defined in plugin {plugin_id!r}.')
-    inputs: List[Dict[str, Any]] = step_config.get('inputs', [])
-    if inputs and not is_cold_start and session_id:
-        import httpx
-        from lazymind.config import config as _cfg
-        core_url = str(_cfg['core_api_url']).rstrip('/')
-        try:
-            resp = httpx.get(
-                f'{core_url}/plugin-sessions/{session_id}',
-                timeout=3.0,
-            )
-            if resp.status_code == 200:
-                steps_data = {
-                    s['step_id']: s['status']
-                    for s in resp.json().get('data', {}).get('session', {}).get('steps', [])
-                    if isinstance(s, dict)
-                }
-                for inp in inputs:
-                    slot = inp.get('slot')
-                    if not slot:
-                        continue
-                    required = inp.get('required', True)
-                    producer_steps = plugin_loader.find_producer_steps(plugin_id, slot)
-                    if not producer_steps:
-                        continue
-                    producer_statuses = {
-                        producer_step: steps_data.get(producer_step)
-                        for producer_step in producer_steps
-                    }
-                    if any(status == 'succeeded' for status in producer_statuses.values()):
-                        continue
-
-                    preferred_producer = (
-                        current_step if current_step in producer_steps else producer_steps[0]
-                    )
-                    step_status = producer_statuses.get(preferred_producer)
-                    if step_status is None:
-                        if required:
-                            LOG.warning(
-                                '[plugin.advance] dependency missing plugin=%s step=%s session=%s slot=%s producer=%s',
-                                plugin_id, step_id, session_id, slot, preferred_producer,
-                            )
-                            return (
-                                f'Error: required artifact {slot!r} not available. '
-                                f'Please trigger {preferred_producer!r} first.'
-                            )
-                        continue
-                    if step_status in ('running', 'interrupted'):
-                        LOG.warning(
-                            '[plugin.advance] dependency not ready '
-                            'plugin=%s step=%s session=%s slot=%s producer=%s status=%s',
-                            plugin_id, step_id, session_id, slot, preferred_producer, step_status,
-                        )
-                        return (
-                            f'Error: artifact {slot!r} not ready '
-                            f'(producer step {preferred_producer!r} status: {step_status!r}).'
-                        )
-                    if step_status == 'failed':
-                        if not required:
-                            continue
-                        LOG.warning(
-                            '[plugin.advance] dependency failed plugin=%s step=%s session=%s slot=%s producer=%s',
-                            plugin_id, step_id, session_id, slot, preferred_producer,
-                        )
-                        return (
-                            f'Error: artifact {slot!r} not ready '
-                            f'(producer step {preferred_producer!r} status: {step_status!r}).'
-                        )
-        except Exception as exc:
-            LOG.warning(
-                '[plugin.advance] dependency check skipped plugin=%s step=%s session=%s error=%s',
-                plugin_id, step_id, session_id, exc,
-            )
-            pass  # Defensive: skip DB check on error; Go will re-validate
-
-    # --- Emit task_created signal ---
+    # --- Submit transition command ---
     task_id = str(uuid.uuid4())
-    output_defs = step_config.get('outputs', [])
-    output_keys = [o['slot'] for o in output_defs if o.get('slot')]
-    required_output_keys = [
-        o['slot']
-        for o in output_defs
-        if o.get('slot') and o.get('required', True)
-    ]
-    input_keys = [i['slot'] for i in inputs if i.get('slot')]
-
-    # Framework tools are always present regardless of plugin declaration.
-    # Domain tools (e.g. kb) come only from state.yml — Go does not forward this
-    # list to the SubAgent runner; runner re-resolves tools from plugin_loader.
-    declared_tools: List[str] = step_config.get('tools', [])
-    merged_tools = _merge_tools(declared_tools)
-
-    params: Dict[str, Any] = {
-        'plugin_id': plugin_id,
-        'step_id': step_id,
-        'session_id': session_id,
-        'user_input': user_input,
-        'is_cold_start': is_cold_start,
-        'hand_off': bool(hand_off),
-    }
-    if preflight_id:
-        params['preflight_id'] = preflight_id
-    for runtime_key in ('plugin_ref', 'revision_id', 'revision_no', 'tree_hash', 'remote_root'):
-        if cfg.get(runtime_key) not in (None, ''):
-            params[runtime_key] = cfg[runtime_key]
-    chat_session_id = str(cfg.get('session_id') or '').strip()
-    if chat_session_id:
-        params['chat_session_id'] = chat_session_id
-    parent_agentic_config = _export_parent_agentic_config(cfg)
-    if parent_agentic_config:
-        params['parent_agentic_config'] = parent_agentic_config
-    # Map Python-side runtime_instruction to Go-side retry_hint field name.
-    if runtime_instruction:
-        params['retry_hint'] = runtime_instruction
-    if partial_indices:
-        params['partial_indices'] = partial_indices
-    params['required_output_artifact_keys'] = required_output_keys
-    # Propagate full per-turn attachment index so SubAgent can access user files.
-    history_files_per_turn: dict = cfg.get('history_files_per_turn') or {}
-    if history_files_per_turn:
-        params['history_files_per_turn'] = history_files_per_turn
-
-    # Propagate KB filters and user_id so plugin SubAgents can call kb_search.
-    filters: dict = dict(cfg.get('filters') or {})
-    if filters:
-        params['filters'] = filters
-    user_id: str = str(cfg.get('user_id') or '').strip()
-    if user_id:
-        params['user_id'] = user_id
     LOG.info(
-        '[plugin.advance] emitting task_created plugin=%s step=%s session=%s '
-        'chat_sid=%s task=%s cold=%s inputs=%s outputs=%s required_outputs=%s',
-        plugin_id, step_id, session_id, chat_session_id, task_id, is_cold_start,
-        input_keys, output_keys, required_output_keys,
+        '[plugin.advance] submitting command plugin=%s step=%s session=%s task=%s cold=%s',
+        plugin_id, step_id, session_id, task_id, is_cold_start,
     )
 
     # Inject focused_tab (UI context hint) into the objective.
@@ -400,59 +431,30 @@ def _trigger_plugin_step(
         sep = ' ' if enriched_instruction else ''
         enriched_instruction = enriched_instruction + sep + f'User is currently viewing tab: {focused_tab}.'
 
-    _write_agent_data(
-        'task_created',
+    objective = _render_step_objective(step_config, user_input, enriched_instruction)
+    submission = _submit_transition_to_core(
+        plugin_id=plugin_id,
+        step_id=step_id,
+        session_id=session_id,
         task_id=task_id,
-        title=f'{plugin_id}:{step_id}',
-        agent_type='plugin_step',
-        mode='manual',          # Plugin steps always async; Go controls auto-advance
-        objective=_render_step_objective(step_config, user_input, enriched_instruction),
-        params=params,
-        input_slots=input_keys,
-        output_slots=output_keys,
-        tools=merged_tools,
-        resume=False,
+        objective=objective,
+        user_input=user_input,
+        hand_off=hand_off,
+        runtime_instruction=runtime_instruction,
+        partial_indices=partial_indices or {},
+        operation=operation,
+        is_start=is_cold_start,
+        preflight_id=preflight_id,
     )
+    cfg['_last_plugin_transition_accepted'] = submission.accepted
+    if submission.accepted:
+        cfg['_last_plugin_task_id'] = submission.task_id
     LOG.info(
-        '[plugin.advance] task_created emitted plugin=%s step=%s session=%s task=%s',
-        plugin_id, step_id, session_id, task_id,
+        '[plugin.transition] core result plugin=%s step=%s session=%s command=%s accepted=%s',
+        plugin_id, step_id, submission.session_id or session_id,
+        submission.command_id, submission.accepted,
     )
-    cfg['_last_plugin_task_id'] = task_id
-    step_label = step_config.get('label', '')
-    display_name = f'{step_id} ({step_label})' if step_label else step_id
-    return f'Advance for step {display_name!r} submitted; backend acceptance is pending.'
-
-
-def _trigger_plugin_end(plugin_id: str) -> str:
-    """Emit a task_created event with step_id='__end__' to signal plugin session completion.
-
-    Go's HandlePluginStepCreated intercepts this sentinel and marks the session as completed.
-    """
-    cfg = _agentic_config()
-    session_id: str = cfg.get('plugin_session_id', '')
-    if not session_id:
-        raise ValueError('no active plugin session to complete.')
-    task_id = str(uuid.uuid4())
-    _write_agent_data(
-        'task_created',
-        task_id=task_id,
-        title=f'{plugin_id}:__end__',
-        agent_type='plugin_step',
-        mode='manual',
-        objective='',
-        params={
-            'plugin_id': plugin_id,
-            'step_id': '__end__',
-            'session_id': session_id,
-            'user_input': '',
-            'is_cold_start': False,
-        },
-        input_slots=[],
-        output_slots=[],
-        tools=[],
-        resume=False,
-    )
-    return 'Plugin session completed. Stop here.'
+    return submission.message
 
 
 def _build_step_choices_doc(
@@ -465,11 +467,8 @@ def _build_step_choices_doc(
 ) -> str:
     """Return a formatted string listing available step choices for the LLM.
 
-    When plugin_id and current_step are supplied, each forward step is annotated
-    with the condition (if any) under which it should be taken, derived from the
-    expanded transitions (skipif bypass conditions are already inlined).
+    Forward and rewind candidates come exclusively from Go's projection.
     """
-    sm = plugin_loader.get_state_machine(plugin_id) if plugin_id else None
     lines = [
         '## Available steps at this moment (authoritative — state machine computed)',
         '--------------------------------------------------------------------------',
@@ -477,22 +476,10 @@ def _build_step_choices_doc(
         'Do NOT infer step names from scenario descriptions or chat history.',
     ]
     if forward_steps:
-        # Build a condition map from the expanded transitions so each step shows
-        # the condition (if any) under which it should be taken.
-        condition_map: Dict[str, str] = {}
-        if sm and current_step is not None:
-            for edge in sm.get_expanded_transitions(current_step):
-                tgt = edge['to']
-                cond = edge.get('condition', '').strip()
-                if tgt not in condition_map and cond:
-                    condition_map[tgt] = cond
-
-        lines.append('Forward (next steps):')
+        lines.append('Ready steps reported by Go:')
         for s in forward_steps:
             label = step_labels.get(s, '')
             label_suffix = f'  ({label})' if label else ''
-            cond = condition_map.get(s, '')
-            cond_note = f'  [when: {cond}]' if cond else ''
             approval_note = ''
             if include_default_approval:
                 approval = (
@@ -501,16 +488,7 @@ def _build_step_choices_doc(
                     else 'not required'
                 )
                 approval_note = f'  [default approval: {approval}]'
-            lines.append(f'  - {s}{label_suffix}{cond_note}{approval_note}')
-
-        if len(forward_steps) > 1 and sm:
-            lines.append('')
-            lines.append(
-                '  NOTE: If these exits belong to a parallel node (route:all), you MUST trigger\n'
-                '  ALL of them by calling advance_step_and_hand_off once per step_id.\n'
-                '  If they belong to a choice node (route:choice), pick exactly ONE based on conditions.\n'
-                '  For steps annotated with [when: ...], only advance to that step if the condition holds.'
-            )
+            lines.append(f'  - {s}{label_suffix}{approval_note}')
     # Self-retry: current_step is injected into all_reachable without a graph self-loop.
     # Document it here so ChatAgent knows it can pass step_id=current_step to re-run.
     if current_step and current_step not in {'__start__', '__end__'}:
@@ -760,7 +738,10 @@ def build_cold_start_tools(
             name = spec.yaml.get('name', pid)
             desc = spec.yaml.get('description', f'Trigger the {name} plugin.')
             when_to_use = spec.yaml.get('when_to_use', '').strip()
-            first_steps = spec.state_machine.get_reachable_steps('__start__')
+            # Entry candidates are resolved by Go when the trigger runs. Keeping
+            # them out of the static tool definition prevents stale local graph
+            # semantics from being presented as runtime Ready state.
+            first_steps = []
             public_tool_name = f'trigger_{pid.replace("-", "_")}'
 
         def _make_trigger(
@@ -787,21 +768,37 @@ def build_cold_start_tools(
                 resolved_first = first
                 runtime_meta: Dict[str, Any] = {}
                 if entry is not None:
-                    resolved_plugin_id, runtime_spec = plugin_loader.resolve_remote_plugin(entry)
-                    resolved_first = runtime_spec.state_machine.get_reachable_steps('__start__')
+                    resolved_plugin_id, _runtime_spec = plugin_loader.resolve_remote_plugin(entry)
                     runtime_meta = {
                         key: entry.get(key)
                         for key in ('plugin_ref', 'revision_id', 'revision_no', 'tree_hash', 'remote_root')
                     }
                 resolved_spec = plugin_loader.get_plugin(resolved_plugin_id)
-                if resolved_spec is None or not resolved_first:
+                if resolved_spec is None:
                     return json.dumps({
                         'status': 'preflight_failed',
                         'outcome': 'preflight_failed',
-                        'reason': f'plugin {resolved_plugin_id!r} has no reachable first step',
-                        'error': f'plugin {resolved_plugin_id!r} has no reachable first step',
+                        'reason': f'plugin {resolved_plugin_id!r} is not loaded',
+                        'error': f'plugin {resolved_plugin_id!r} is not loaded',
                     }, ensure_ascii=False)
                 cfg = _agentic_config()
+                cfg.update(runtime_meta)
+                try:
+                    resolved_first = _fetch_go_start_candidates(resolved_plugin_id)
+                except Exception as exc:
+                    return json.dumps({
+                        'status': 'preflight_failed',
+                        'outcome': 'preflight_failed',
+                        'reason': f'Go could not plan the plugin start: {exc}',
+                        'error': str(exc),
+                    }, ensure_ascii=False)
+                if not resolved_first:
+                    return json.dumps({
+                        'status': 'preflight_failed',
+                        'outcome': 'preflight_failed',
+                        'reason': 'Go reports no Ready entry step for the current materials',
+                        'error': 'no Ready entry step',
+                    }, ensure_ascii=False)
                 cfg.pop('prepared_plugin', None)
                 if cfg.get('plugin_session_id'):
                     return json.dumps({
@@ -1031,6 +1028,10 @@ def _commit_prepared_plugin(
         hand_off=hand_off,
         preflight_id=preflight_id,
     )
+    if not cfg.get('_last_plugin_transition_accepted', False):
+        if hand_off:
+            raise RuntimeError(result)
+        return result
     prepared['advance_committed'] = True
     cfg['prepared_plugin'] = prepared
     if hand_off or not wait_for_result:
@@ -1039,15 +1040,15 @@ def _commit_prepared_plugin(
     task_id = str(cfg.get('_last_plugin_task_id') or '')
     if not task_id:
         raise RuntimeError('Cold-start task id was not recorded.')
-    _, session_id = _wait_for_task_started(task_id)
+    session_id = str(cfg.get('plugin_session_id') or '')
     if not session_id:
-        raise RuntimeError('Core acknowledged cold start without a plugin session id.')
+        raise RuntimeError('Go accepted cold start without a plugin session id.')
     cfg.update({
         'plugin_id': plugin_id,
         'plugin_session_id': session_id,
         'plugin_step': step_id,
     })
-    summary = _wait_for_step_done(step_id, result)
+    summary = _wait_for_go_task(step_id, result)
     spec = plugin_loader.get_plugin(plugin_id)
     if spec is None:
         raise RuntimeError(f'Plugin {plugin_id!r} disappeared after launch was prepared.')
@@ -1276,14 +1277,18 @@ def _live_reachability_snapshot(
     fallback_current_step: str,
     rewind_steps: Optional[List[str]] = None,
 ) -> _ReachabilitySnapshot:
-    """Compute live step reachability from current ChatAgent state."""
+    """Read Ready/Past from Go without a local graph fallback."""
     cfg = _agentic_config()
     current_step = cfg.get('plugin_step', '') or fallback_current_step
     session_id = cfg.get('plugin_session_id', '')
-    sm = plugin_loader.get_state_machine(plugin_id)
-    forward_steps = sm.get_reachable_steps(current_step) if sm else []
+    forward_steps: List[str] = []
     rewind = list(rewind_steps or [])
-    reachable = list(forward_steps) + rewind
+    if session_id:
+        projection = _fetch_go_projection(session_id)
+        forward_steps = list(projection.get('ready') or [])
+        if not rewind_steps:
+            rewind = list(projection.get('past') or [])
+    reachable = list(dict.fromkeys(forward_steps + rewind))
     if current_step and current_step not in reachable:
         reachable = [current_step] + reachable
     return _ReachabilitySnapshot(
@@ -1295,52 +1300,12 @@ def _live_reachability_snapshot(
     )
 
 
-def _validate_live_step_reachable(
-    *,
-    tool_name: str,
-    plugin_id: str,
-    step_id: str,
-    fallback_current_step: str,
-    rewind_steps: Optional[List[str]],
-    runtime_instruction: Optional[str],
-    partial_indices: Optional[Dict[str, List[int]]],
-    input_len: Optional[int] = None,
-) -> _ReachabilitySnapshot:
-    """Validate a step tool call against live reachability and log consistently."""
-    snapshot = _live_reachability_snapshot(plugin_id, fallback_current_step, rewind_steps)
-    if input_len is None:
-        LOG.info(
-            '[plugin.advance] %s called plugin=%s target=%s session=%s current=%s '
-            'reachable=%s runtime_instruction=%s partial=%s',
-            tool_name, plugin_id, step_id, snapshot.session_id,
-            snapshot.current_step or '__start__', snapshot.reachable_steps,
-            bool(runtime_instruction), bool(partial_indices),
-        )
-    else:
-        LOG.info(
-            '[plugin.advance] %s called plugin=%s target=%s session=%s current=%s '
-            'input_len=%d reachable=%s runtime_instruction=%s partial=%s',
-            tool_name, plugin_id, step_id, snapshot.session_id,
-            snapshot.current_step or '__start__', input_len, snapshot.reachable_steps,
-            bool(runtime_instruction), bool(partial_indices),
-        )
-    if step_id not in snapshot.reachable_steps:
-        LOG.warning(
-            '[plugin.advance] %s rejected unreachable plugin=%s target=%s '
-            'session=%s current=%s reachable=%s',
-            tool_name, plugin_id, step_id, snapshot.session_id,
-            snapshot.current_step or '__start__', snapshot.reachable_steps,
-        )
-        raise ValueError(
-            f'step {step_id!r} is not reachable from '
-            f'{snapshot.current_step!r}. Reachable: {snapshot.reachable_steps}.'
-        )
-    LOG.info(
-        '[plugin.advance] %s reachable plugin=%s target=%s session=%s current=%s reachable=%s',
-        tool_name, plugin_id, step_id, snapshot.session_id,
-        snapshot.current_step or '__start__', snapshot.reachable_steps,
-    )
-    return snapshot
+def _transition_operation(step_id: str, current_step: str, rewind_steps: Optional[List[str]]) -> str:
+    if step_id in set(rewind_steps or []):
+        return 'rewind'
+    if step_id == current_step:
+        return 'retry'
+    return 'execute'
 
 
 def build_advance_step_and_hand_off_tool(
@@ -1355,8 +1320,7 @@ def build_advance_step_and_hand_off_tool(
     Queues the step asynchronously and immediately ends the current ReAct turn.
     Mode-specific continuation behavior is defined by the system guidance.
     """
-    sm = plugin_loader.get_state_machine(plugin_id)
-    forward = sm.get_reachable_steps(current_step) if sm else []
+    forward = _live_reachability_snapshot(plugin_id, current_step, rewind_steps).forward_steps
     rewind = list(rewind_steps or [])
     labels = step_labels or {}
 
@@ -1385,29 +1349,26 @@ def build_advance_step_and_hand_off_tool(
         target step is annotated with default approval required. Use
         `advance_step` when approval is explicitly skipped or defaults to not required.
 
-        Terminal plugin steps are normally completed by the plugin event loop after
-        the terminal task succeeds. Use `step_id="__end__"` only as an explicit
-        close signal when the final step has already succeeded and the session is
-        still open.
+        Session completion is computed automatically by Go after all effective
+        branches reach the graph end.
         """
         if step_id == '__end__':
-            return _trigger_plugin_end(plugin_id)
-        _validate_live_step_reachable(
-            tool_name='advance_step_and_hand_off',
-            plugin_id=plugin_id,
-            step_id=step_id,
-            fallback_current_step=current_step,
-            rewind_steps=rewind_steps,
-            runtime_instruction=runtime_instruction,
-            partial_indices=partial_indices,
-        )
-        return _trigger_plugin_step(
+            raise ValueError('Manual __end__ transitions are disabled; Go computes session completion.')
+        result = _trigger_plugin_step(
             plugin_id, step_id, user_input,
             is_cold_start=False,
             hand_off=True,
             runtime_instruction=runtime_instruction or '',
             partial_indices=partial_indices or {},
+            operation=_transition_operation(step_id, current_step, rewind_steps),
         )
+        # advance_step_and_hand_off remains a static stop-tool for compatibility.
+        # Raising turns a Go rejection into an ok=false tool observation, so the
+        # ReAct loop continues and the model sees the exact structured reason.
+        if not _agentic_config().get('_last_plugin_transition_accepted', False):
+            raise RuntimeError(result)
+        _set_local_plugin_step(step_id)
+        return result
 
     selection_guidance = (
         'Use the current request policy to decide when this asynchronous boundary is required.\n'
@@ -1439,16 +1400,14 @@ def build_advance_step_and_hand_off_tool(
         'When the user says "重试": advance_step_and_hand_off(step_id=..., rewind=True)\n'
         '  (rewind=True discards previous partial artifacts and restarts the step from scratch)\n\n'
         '## Completing the plugin\n\n'
-        'Prefer handing off the terminal pipeline step itself. The plugin event loop will\n'
-        'mark the session completed after that terminal task succeeds. Call with\n'
-        'step_id="__end__" only if the final step has already succeeded but the session\n'
-        'still needs an explicit close signal.\n\n'
+        'Hand off the terminal pipeline step itself. Go automatically marks the session\n'
+        'complete when all effective branches finish; never submit `__end__`.\n\n'
         '## Rewind guidance\n\n'
         'If the DriverAgent or user indicates a prior step produced bad output, rewind by\n'
         'passing its step_id. Rewind-eligible steps are listed in the "Rewind" section below.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
-        '    step_id (str): Step to advance to (see list above) or "__end__".\n'
+        '    step_id (str): Step to advance to (see list above).\n'
         '    user_input (str): Concise goal statement for the SubAgent based on the latest\n'
         '        user query only. Do NOT pass vague phrases like "继续" or "continue", and\n'
         '        do NOT include prior-turn context unless the user explicitly repeats it.\n'
@@ -1473,8 +1432,7 @@ def build_advance_step_tool(
     ChatAgent can continue reasoning. Use for explicit continuous execution and
     for steps whose default approval is not required.
     """
-    sm = plugin_loader.get_state_machine(plugin_id)
-    forward = sm.get_reachable_steps(current_step) if sm else []
+    forward = _live_reachability_snapshot(plugin_id, current_step, rewind_steps).forward_steps
     rewind = list(rewind_steps or [])
     labels = step_labels or {}
 
@@ -1493,44 +1451,32 @@ def build_advance_step_tool(
         when the target step defaults to no approval and the user has not overridden it.
         """
         if step_id == '__end__':
-            return _trigger_plugin_end(plugin_id)
-        reachability = _validate_live_step_reachable(
-            tool_name='advance_step',
-            plugin_id=plugin_id,
-            step_id=step_id,
-            fallback_current_step=current_step,
-            rewind_steps=rewind_steps,
-            runtime_instruction=runtime_instruction,
-            partial_indices=partial_indices,
-            input_len=len(user_input or ''),
-        )
-        _clear_step_signal_queues(step_id)
+            raise ValueError('Manual __end__ transitions are disabled; Go computes session completion.')
         result = _trigger_plugin_step(
             plugin_id, step_id, user_input,
             is_cold_start=False,
             runtime_instruction=runtime_instruction or '',
             partial_indices=partial_indices or {},
+            operation=_transition_operation(step_id, current_step, rewind_steps),
         )
-        # First wait for Go/Core to acknowledge that it consumed the streaming
-        # task_created event and launched the plugin_step. Without this ack, a
-        # lost task_created event would look like a long-running step.
-        task_id = _wait_for_step_started(step_id)
-        # Core updates plugin_sessions.current_step_id when it accepts
-        # task_created. Keep ChatAgent's local state on the same boundary.
+        if not _agentic_config().get('_last_plugin_transition_accepted', False):
+            return result
+        task_id = str(_agentic_config().get('_last_plugin_task_id') or '')
+        # Keep only a conversational focus hint. It is not a runtime state fact;
+        # parallel Current/Ready sets always come from Go's projection.
         _set_local_plugin_step(step_id)
         LOG.info(
             '[plugin.advance] local current_step updated plugin=%s step=%s session=%s task=%s',
-            plugin_id, step_id, reachability.session_id, task_id,
+            plugin_id, step_id, _agentic_config().get('plugin_session_id', ''), task_id,
         )
-        # Poll for completion via FileSystemQueue.
         LOG.info(
-            '[plugin.advance] waiting for step_done plugin=%s step=%s session=%s task=%s',
-            plugin_id, step_id, reachability.session_id, task_id,
+            '[plugin.advance] polling Go task plugin=%s step=%s session=%s task=%s',
+            plugin_id, step_id, _agentic_config().get('plugin_session_id', ''), task_id,
         )
-        summary = _wait_for_step_done(step_id, result)
+        summary = _wait_for_go_task(step_id, result)
         LOG.info(
             '[plugin.advance] advance_step completed plugin=%s step=%s session=%s task=%s summary_len=%d',
-            plugin_id, step_id, reachability.session_id, task_id, len(summary or ''),
+            plugin_id, step_id, _agentic_config().get('plugin_session_id', ''), task_id, len(summary or ''),
         )
         return _append_step_transition_hint(
             summary,
@@ -1573,8 +1519,7 @@ def _append_step_transition_hint(
     step_labels: Dict[str, str],
 ) -> str:
     """Append live transition guidance to advance_step's tool result."""
-    sm = plugin_loader.get_state_machine(plugin_id)
-    forward = sm.get_reachable_steps(current_step) if sm else []
+    forward = _live_reachability_snapshot(plugin_id, current_step, rewind_steps).forward_steps
     choices_doc = _build_step_choices_doc(
         forward,
         rewind_steps,
@@ -1594,144 +1539,47 @@ def _append_step_transition_hint(
         '(for example "执行到 X", "到 X 为止", "until X", "up to X"), match X against '
         'the available step ids, labels, and transition descriptions. Execute that '
         'target boundary step with `advance_step_and_hand_off`, then stop. Do not '
-        'advance to downstream steps or manually close `__end__` after the boundary hand-off.'
+        'advance to downstream steps or submit a completion command after the boundary hand-off.'
     )
 
 
 def _set_local_plugin_step(step_id: str) -> None:
-    """Update ChatAgent's in-process current step after Core accepts the task."""
+    """Update the ChatAgent display focus after Go accepts a transition."""
     try:
         lazyllm.globals['agentic_config']['plugin_step'] = step_id
     except Exception as exc:
         LOG.warning('[plugin.advance] failed to update local plugin_step step=%s error=%s', step_id, exc)
 
 
-def _clear_step_signal_queues(step_id: str) -> None:
-    """Drop stale started/done signals before launching a fresh dynamic step."""
-    try:
-        from lazyllm.common.queue import FileSystemQueue
-        cfg = _agentic_config()
-        session_id = cfg.get('plugin_session_id', '')
-        for prefix in ('step_started', 'step_done'):
-            FileSystemQueue(klass=f'{prefix}_{session_id}_{step_id}').clear()
-        LOG.info('[plugin.advance] cleared step signal queues step=%s session=%s', step_id, session_id)
-    except Exception as exc:
-        LOG.warning('[plugin.advance] failed to clear step signal queues step=%s error=%s', step_id, exc)
-
-
-def _wait_for_step_started(step_id: str, timeout: float = 15.0) -> str:
-    """Poll FileSystemQueue for a step_started ack from Go/Core.
-
-    Raises TimeoutError when the streaming task_created event was not consumed
-    by Core in time. This is a launch failure, not a step execution timeout.
-    """
-    import time
-    from lazyllm.common.queue import FileSystemQueue
-
-    cfg = _agentic_config()
-    session_id = cfg.get('plugin_session_id', '')
-    queue_key = f'step_started_{session_id}_{step_id}'
-    fsq = FileSystemQueue(klass=queue_key)
-    deadline = time.monotonic() + timeout
-    LOG.info('[plugin.advance] waiting for step_started step=%s session=%s timeout=%.0fs', step_id, session_id, timeout)
-    while time.monotonic() < deadline:
-        for raw in fsq.dequeue():
-            try:
-                msg = json.loads(raw)
-            except Exception as exc:
-                LOG.warning(
-                    '[plugin.advance] ignored malformed step_started signal '
-                    'step=%s session=%s error=%s',
-                    step_id, session_id, exc,
-                )
-                continue
-            if msg.get('tag') == 'step_started':
-                task_id = str(msg.get('task_id') or '')
-                LOG.info(
-                    '[plugin.advance] received step_started step=%s session=%s task=%s',
-                    step_id, session_id, task_id,
-                )
-                return task_id
-            if msg.get('tag') == 'cancel':
-                LOG.warning(
-                    '[plugin.advance] received cancel before step_started step=%s session=%s',
-                    step_id, session_id,
-                )
-                raise RuntimeError(f'Step {step_id!r} was stopped before launch completed.')
-        time.sleep(0.2)
-    LOG.error('[plugin.advance] step_started timeout step=%s session=%s timeout=%.0fs', step_id, session_id, timeout)
-    raise TimeoutError(
-        f'Step {step_id!r} was not acknowledged by Core within {timeout:.0f}s. '
-        'The task_created stream event may not have been consumed.'
-    )
-
-
-def _wait_for_task_started(task_id: str, timeout: float = 15.0) -> tuple[str, str]:
-    """Wait for the cold-start ACK keyed by task id and return task/session ids."""
-    import time
-    from lazyllm.common.queue import FileSystemQueue
-
-    queue_key = f'step_started_task_{task_id}'
-    fsq = FileSystemQueue(klass=queue_key)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        for raw in fsq.dequeue():
-            msg = json.loads(raw)
-            if msg.get('tag') == 'step_started':
-                return str(msg.get('task_id') or task_id), str(msg.get('session_id') or '')
-            if msg.get('tag') == 'cancel':
-                raise RuntimeError(f'Plugin task {task_id!r} was stopped before launch completed.')
-        time.sleep(0.2)
-    raise TimeoutError(
-        f'Plugin task {task_id!r} was not acknowledged by Core within {timeout:.0f}s.'
-    )
-
-
-def _wait_for_step_done(step_id: str, trigger_result: str, timeout: float = 600.0) -> str:
-    """Poll FileSystemQueue for a step_done signal; return result summary or timeout message.
-
-    The step_done signal is enqueued by the subagent runner at step completion.
-    Polls every 2 seconds up to `timeout` seconds.  Exits early if a 'cancel' control
-    message arrives on the step_done queue.
-    """
+def _wait_for_go_task(step_id: str, trigger_result: str, timeout: float = 600.0) -> str:
+    """Poll Go's persisted task status after transition acceptance."""
     import time
     try:
-        from lazyllm.common.queue import FileSystemQueue
+        import httpx
+        from lazymind.config import config as _cfg
         cfg = _agentic_config()
         session_id = cfg.get('plugin_session_id', '')
-        queue_key = f'step_done_{session_id}_{step_id}'
-        fsq = FileSystemQueue(klass=queue_key)
+        task_id = str(cfg.get('_last_plugin_task_id') or '')
+        if not task_id:
+            return trigger_result
+        core_url = str(_cfg['core_api_url']).rstrip('/')
         deadline = time.monotonic() + timeout
-        LOG.info('[plugin.advance] polling step_done step=%s session=%s timeout=%.0fs', step_id, session_id, timeout)
+        LOG.info(
+            '[plugin.advance] polling Go task step=%s session=%s task=%s timeout=%.0fs',
+            step_id, session_id, task_id, timeout,
+        )
         while time.monotonic() < deadline:
-            for raw in fsq.dequeue():
-                try:
-                    msg = json.loads(raw)
-                    # Support both old tag='step_done' format and new {status, summary} format.
-                    if msg.get('tag') == 'step_done' or 'status' in msg:
-                        LOG.info(
-                            '[plugin.advance] received step_done step=%s session=%s status=%s summary_len=%d',
-                            step_id, session_id, msg.get('status', ''), len(msg.get('summary', '') or ''),
-                        )
-                        return msg.get('summary', f"Step '{step_id}' completed.")
-                    if msg.get('tag') == 'cancel':
-                        LOG.warning(
-                            '[plugin.advance] received cancel while waiting step_done '
-                            'step=%s session=%s',
-                            step_id, session_id,
-                        )
-                        return f"Step '{step_id}' was stopped by the user."
-                except Exception as exc:
-                    LOG.warning(
-                        '[plugin.advance] ignored malformed step_done signal '
-                        'step=%s session=%s error=%s',
-                        step_id, session_id, exc,
-                    )
+            response = httpx.get(f'{core_url}/internal/subagent/tasks/{task_id}', timeout=5.0)
+            if response.status_code == 200:
+                data = _core_response_data(response)
+                status = str(data.get('status') or '')
+                if status in {'succeeded', 'failed', 'interrupted', 'canceled'}:
+                    summary = str(data.get('summary') or '')
+                    return summary or f"Step '{step_id}' finished with status {status}."
             time.sleep(2.0)
-        LOG.error('[plugin.advance] step_done timeout step=%s session=%s timeout=%.0fs', step_id, session_id, timeout)
-        return f"Step '{step_id}' timed out waiting for completion (partial result may be available)."
+        return f"Step '{step_id}' was accepted and is still running after {timeout:.0f}s. Task id: {task_id}."
     except Exception as exc:
-        LOG.warning('[plugin.advance] step_done wait failed step=%s error=%s; returning trigger result', step_id, exc)
+        LOG.warning('[plugin.advance] Go task polling failed step=%s error=%s', step_id, exc)
         return trigger_result
 
 
@@ -2078,17 +1926,12 @@ def resolve_plugin_injection(
                 'focused_tab': plugin_context.get('focused_tab'),
                 'focused_sort_order': plugin_context.get('focused_sort_order'),
             })
-            sm = plugin_loader.get_state_machine(p_plugin_id)
-
-            rewind_steps: List[str] = []
-            if sm and p_session_id and p_current_step:
-                ancestors = sm.get_ancestors(p_current_step)
-                succeeded = _fetch_succeeded_steps(p_session_id)
-                # Only ancestors (not current_step itself) are rewind candidates.
-                # current_step is the "pending" step for this turn and is shown
-                # separately in the step-status context; including it in rewind
-                # would mislead the LLM into thinking it has already succeeded.
-                rewind_steps = sorted(ancestors & succeeded)
+            projection = _fetch_go_projection(p_session_id)
+            projected_current = list(projection.get('current') or [])
+            if p_current_step not in projected_current:
+                p_current_step = projected_current[0] if projected_current else ''
+                agentic_config_patch['plugin_step'] = p_current_step
+            rewind_steps = list(projection.get('past') or [])
 
             step_labels: Dict[str, str] = {}
             spec = plugin_loader.get_plugin(p_plugin_id)
@@ -2153,12 +1996,7 @@ def resolve_plugin_injection(
             # Inject the current execution policy into this request only. Keeping
             # it in plugin_artifact_context (rather than the system prompt/history)
             # makes configuration changes take effect on the next chat turn.
-            sm_for_mode = plugin_loader.get_state_machine(p_plugin_id)
-            terminal_steps = (
-                sm_for_mode.get_terminal_steps(from_step=p_current_step)
-                if sm_for_mode else []
-            )
-            mode_guidance = _build_mode_guidance(plugin_mode, terminal_steps, step_labels)
+            mode_guidance = _build_mode_guidance(plugin_mode)
             if mode_guidance:
                 plugin_artifact_context = (
                     plugin_artifact_context + '\n\n' + mode_guidance
@@ -2272,8 +2110,8 @@ def _build_step_status_section(
             lbl = labels.get(sid, '')
             return f'{sid} ({lbl})' if lbl else sid
 
-        sm = plugin_loader.get_state_machine(plugin_id)
-        succeeded = _fetch_succeeded_steps(session_id) if session_id else set()
+        projection = _fetch_go_projection(session_id)
+        succeeded = list(projection.get('past') or [])
 
         lines = ['## Plugin Step Status [AUTHORITATIVE — queried at request time]']
         lines.append('> Any step-status information in the conversation history is OUTDATED. Use only this section.')
@@ -2289,11 +2127,7 @@ def _build_step_status_section(
             lines.append('\nCurrent step: pipeline not yet started')
 
         if succeeded:
-            sm_steps = list(sm._transitions.keys()) if sm else []
-            ordered = [s for s in sm_steps if s not in sm._RESERVED and s in succeeded]
-            unordered = sorted(succeeded - set(ordered))
-            all_succeeded = ordered + unordered
-            lines.append('Succeeded steps (in execution order): ' + ', '.join(_label(s) for s in all_succeeded))
+            lines.append('Effective succeeded steps: ' + ', '.join(_label(s) for s in succeeded))
         else:
             lines.append('Succeeded steps: none yet')
 
@@ -2301,10 +2135,12 @@ def _build_step_status_section(
             lines.append('Rewind-eligible steps (already succeeded, can be re-run): '
                          + ', '.join(_label(s) for s in rewind_steps))
 
-        if sm and current_step:
-            forward = [s for s in sm.get_reachable_steps(current_step) if s not in sm._RESERVED]
+        if current_step:
+            forward = _live_reachability_snapshot(
+                plugin_id, current_step, rewind_steps,
+            ).forward_steps
             if forward:
-                lines.append('Next forward steps (valid targets for continuing): '
+                lines.append('Ready steps reported by Go (valid targets now): '
                              + ', '.join(_label(s) for s in forward))
 
         return '\n'.join(lines)
@@ -2313,9 +2149,7 @@ def _build_step_status_section(
 
 
 def _build_mode_guidance(
-        plugin_mode: str,
-        terminal_steps: Optional[List[str]] = None,
-        step_labels: Optional[Dict[str, str]] = None) -> str:
+        plugin_mode: str) -> str:
     """Return the request-local execution policy selected by application code."""
     if plugin_mode == 'auto':
         return (
@@ -2396,24 +2230,6 @@ def _build_mode_guidance(
         'Tools for step advancement:\n'
         '- `advance_step_and_hand_off`: Start a step asynchronously and end the current turn.\n'
     )
-    labels = step_labels or {}
-    terminal_hint = ''
-    if terminal_steps:
-        names = ', '.join(
-            f'`{s}`' + (f' ({labels[s]})' if s in labels else '')
-            for s in terminal_steps
-        )
-        terminal_hint = (
-            f'\n\n## Terminal steps (last steps before pipeline completion)\n\n'
-            f'The following steps lead directly to the end of the pipeline: {names}.\n'
-            'If the user explicitly targets one of these terminal steps as the boundary,\n'
-            'execute it with `advance_step_and_hand_off` and stop. If the user asks to\n'
-            'complete the whole pipeline and no narrower boundary is specified, run\n'
-            'prerequisite steps with `advance_step`, execute the terminal step with\n'
-            '`advance_step_and_hand_off`, and let the plugin event loop complete the\n'
-            'session after that terminal task finishes.\n'
-            'In default single-step mode, use `advance_step_and_hand_off` and stop.'
-        )
     common += (
         (
             'An asynchronous boundary returns the next decision to the user.\n'
@@ -2460,7 +2276,6 @@ def _build_mode_guidance(
             'and only produce missing outputs (resume from checkpoint)."\n'
             'When user says "重试": call advance_step_and_hand_off with rewind=True '
             '(restarts the interrupted step from scratch, ignoring previous partial artifacts).'
-            + terminal_hint
         )
     )
     return global_rules + common

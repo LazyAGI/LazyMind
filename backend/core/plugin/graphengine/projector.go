@@ -1,0 +1,160 @@
+package graphengine
+
+import "sort"
+
+func DecideRoute(graph *CompiledStateGraph, from string, materials []MaterialValue) RouteDecision {
+	decision := RouteDecision{}
+	var decideFrom func(string)
+	decideFrom = func(source string) {
+		route := graph.StartRoute
+		if node, ok := graph.Nodes[source]; ok {
+			route = node.Route
+		}
+		matched := false
+		for _, edge := range graph.ControlEdges {
+			if edge.From != source {
+				continue
+			}
+			evaluation := Evaluate(edge.Condition, materials)
+			if !evaluation.Satisfied || (route == "choice" && matched) {
+				decision.Pruned = append(decision.Pruned, edge.To)
+				continue
+			}
+			matched = true
+			decision.Witnesses = append(decision.Witnesses, evaluation.Witnesses...)
+			node, isNode := graph.Nodes[edge.To]
+			if isNode && node.SkipIf != nil {
+				skip := Evaluate(node.SkipIf, materials)
+				if skip.Satisfied {
+					decision.Bypassed = append(decision.Bypassed, edge.To)
+					decision.Witnesses = append(decision.Witnesses, skip.Witnesses...)
+					decideFrom(edge.To)
+					continue
+				}
+			}
+			decision.Activated = append(decision.Activated, edge.To)
+		}
+	}
+	decideFrom(from)
+	return decision
+}
+
+// Project calculates the full live state from immutable graph and persisted facts.
+// It performs no writes and is safe to call both inside a transition transaction
+// and from read-only projection handlers.
+func Project(graph *CompiledStateGraph, snapshot RuntimeSnapshot) Projection {
+	projection := Projection{Nodes: map[string]NodeProjection{}}
+	latest := map[string]AttemptFact{}
+	stale := map[string]bool{}
+	for _, attempt := range snapshot.Attempts {
+		if attempt.Validity == "stale" {
+			stale[attempt.StepID] = true
+			continue
+		}
+		latest[attempt.StepID] = attempt
+	}
+	materials := snapshot.Materials
+	routes := map[string]RouteFact{}
+	for _, route := range snapshot.Routes {
+		if route.Validity != "stale" {
+			routes[route.From] = route
+		}
+	}
+	edgesByFrom := map[string][]CompiledEdge{}
+	for _, edge := range graph.ControlEdges {
+		edgesByFrom[edge.From] = append(edgesByFrom[edge.From], edge)
+	}
+	activeTargets, prunedTargets, bypassed := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	edgeStates := map[string]string{}
+
+	var activateFrom func(string)
+	activateFrom = func(from string) {
+		edges := edgesByFrom[from]
+		if len(edges) == 0 {
+			return
+		}
+		var activated, pruned, frozenBypassed []string
+		if fact, ok := routes[from]; ok {
+			activated, pruned, frozenBypassed = fact.Activated, fact.Pruned, fact.Bypassed
+		} else {
+			decision := DecideRoute(graph, from, materials)
+			activated, pruned, frozenBypassed = decision.Activated, decision.Pruned, decision.Bypassed
+		}
+		for _, id := range frozenBypassed {
+			bypassed[id] = true
+		}
+		for _, to := range pruned {
+			prunedTargets[to] = true
+			edgeStates[from+"->"+to] = "pruned"
+		}
+		for _, to := range activated {
+			edgeStates[from+"->"+to] = "active"
+			if to == "__end__" {
+				projection.EndReached = true
+				continue
+			}
+			activeTargets[to] = true
+		}
+	}
+	activateFrom("__start__")
+	for id, attempt := range latest {
+		if attempt.Status == "succeeded" {
+			activateFrom(id)
+		}
+	}
+
+	for id := range graph.Nodes {
+		attempt, hasAttempt := latest[id]
+		node := NodeProjection{ID: id, Execution: "none", Validity: "effective", Reachability: "unreachable", Readiness: "not_applicable", Branch: "active", Evaluation: Evaluation{Satisfied: true}}
+		if stale[id] {
+			projection.Stale = append(projection.Stale, id)
+		}
+		if hasAttempt {
+			node.Execution = attempt.Status
+			switch attempt.Status {
+			case "succeeded":
+				projection.Past = append(projection.Past, id)
+			case "pending", "running", "waiting", "failed", "interrupted":
+				projection.Current = append(projection.Current, id)
+			}
+		}
+		if bypassed[id] {
+			node.Branch = "bypassed"
+			projection.Bypassed = append(projection.Bypassed, id)
+		}
+		if prunedTargets[id] && !activeTargets[id] {
+			node.Branch = "pruned"
+			projection.Pruned = append(projection.Pruned, id)
+		}
+		terminalAttempt := hasAttempt && (attempt.Status == "succeeded" || attempt.Status == "pending" || attempt.Status == "running" || attempt.Status == "waiting" || attempt.Status == "failed" || attempt.Status == "interrupted")
+		if activeTargets[id] && !terminalAttempt && !bypassed[id] {
+			node.Reachability = "reachable"
+			node.Evaluation = Evaluate(graph.Nodes[id].Input, materials)
+			projection.Reachable = append(projection.Reachable, id)
+			if node.Evaluation.Satisfied {
+				node.Readiness = "ready"
+				projection.Ready = append(projection.Ready, id)
+			} else {
+				node.Readiness = "blocked"
+				projection.Blocked = append(projection.Blocked, id)
+			}
+		}
+		projection.Nodes[id] = node
+	}
+	for _, edge := range graph.ControlEdges {
+		state := edgeStates[edge.ID]
+		if state == "" {
+			state = "inactive"
+		}
+		projection.Edges = append(projection.Edges, ProjectedEdge{From: edge.From, To: edge.To, State: state})
+	}
+	projection.Completed = projection.EndReached && len(projection.Current) == 0 && len(projection.Ready) == 0 && len(projection.Blocked) == 0
+	sortProjection(&projection)
+	return projection
+}
+
+func sortProjection(p *Projection) {
+	for _, values := range []*[]string{&p.Past, &p.Current, &p.Reachable, &p.Ready, &p.Blocked, &p.Stale, &p.Pruned, &p.Bypassed} {
+		sort.Strings(*values)
+	}
+}
