@@ -64,6 +64,7 @@ export interface WizardConnectionStepProps {
 export default function WizardConnectionStep({
   t,
   form,
+  isEditMode,
   selectedType,
   syncMode,
   localPathOptions,
@@ -325,6 +326,7 @@ export default function WizardConnectionStep({
           >
             <TreeSelect
               key={`local-path-browse-${localPathBrowseKey}`}
+              disabled={isEditMode}
               multiple
               allowClear
               filterTreeNode={false}
