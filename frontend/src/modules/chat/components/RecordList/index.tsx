@@ -481,7 +481,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                   deleteHistory(item);
                 }}
               />
-              <Tooltip title={taskConvIds.has(item.conversation_id ?? '') ? "已在任务中心" : "加入任务中心"}>
+              <Tooltip title={taskConvIds.has(item.conversation_id ?? '') ? t("chat.taskCenterAdded") : t("chat.addToTaskCenter")}>
                 <PlusCircleOutlined
                   className="add-to-task"
                   style={{
@@ -498,9 +498,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                     try {
                       await addTask(convId, item.display_name ?? '');
                       setTaskConvIds((prev) => new Set([...prev, convId]));
-                      message.success('已加入任务中心');
+                      message.success(t("chat.addToTaskCenterSuccess"));
                     } catch {
-                      message.error('加入任务中心失败');
+                      message.error(t("chat.addToTaskCenterFailed"));
                     }
                   }}
                 />

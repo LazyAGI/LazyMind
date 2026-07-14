@@ -16,6 +16,7 @@ interface SkillManagementToolbarProps {
   skillView: SkillViewMode | "plugins";
   onSkillViewChange: (view: SkillViewMode | "plugins") => void;
   installedCount: number;
+  trashCount?: number;
   onCreateSkill: (source: SkillCreateSource) => void;
   manualSkillReviewCount: number;
   manualSkillReviewLoading: boolean;
@@ -38,6 +39,7 @@ export default function SkillManagementToolbar({
   skillView,
   onSkillViewChange,
   installedCount,
+  trashCount = 0,
   onCreateSkill,
   manualSkillReviewCount,
   manualSkillReviewLoading,
@@ -120,11 +122,11 @@ export default function SkillManagementToolbar({
       >
         <span className="memory-skill-insight-card__icon">
           <ClockCircleOutlined />
+          <InsightCount count={manualSkillReviewCount} />
         </span>
         <span className="memory-skill-insight-card__body">
           <span className="memory-skill-insight-card__title">
             {t("admin.memorySkillReviewCardTitle")}
-            <InsightCount count={manualSkillReviewCount} />
           </span>
           <span className="memory-skill-insight-card__hint">
             {t("admin.memorySkillReviewCardHint")}
@@ -140,11 +142,11 @@ export default function SkillManagementToolbar({
         >
           <span className="memory-skill-insight-card__icon">
             <BellOutlined />
+            <InsightCount count={messageCenterCount} />
           </span>
           <span className="memory-skill-insight-card__body">
             <span className="memory-skill-insight-card__title">
               {t("admin.memorySkillMessageCenterTitle")}
-              <InsightCount count={messageCenterCount} />
             </span>
             <span className="memory-skill-insight-card__hint">
               {t("admin.memorySkillMessageCenterHint")}
@@ -206,6 +208,15 @@ export default function SkillManagementToolbar({
           onClick={() => onSkillViewChange("market")}
         >
           {t("admin.memorySkillViewMarket")}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={`memory-skill-view-tab ${skillView === "trash" ? "is-active" : ""}`}
+          aria-selected={skillView === "trash"}
+          onClick={() => onSkillViewChange("trash")}
+        >
+          {t("admin.memorySkillViewTrashWithCount", { count: trashCount })}
         </button>
         <button
           type="button"

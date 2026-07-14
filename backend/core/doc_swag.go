@@ -437,16 +437,6 @@ func _swagGetPrompt() {}
 // @Router    /prompts [get]
 func _swagListPrompts() {}
 
-// @Summary  Set as default prompt
-// @Tags      prompts
-// @Router    /prompts/{name}:setDefault [post]
-func _swagSetDefaultPrompt() {}
-
-// @Summary  Unset default prompt
-// @Tags      prompts
-// @Router    /prompts/{name}:unsetDefault [post]
-func _swagUnsetDefaultPrompt() {}
-
 // --- rag databases ---
 // @Summary  RAG text
 // @Tags      rag

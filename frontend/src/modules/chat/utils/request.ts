@@ -19,16 +19,7 @@ import {
   type GetChatStatusResponse,
   type GetMultiAnswersSwitchStatusResponse,
   type ListConversationsResponse,
-  type ListPromptsResponse,
   type PresignAttachmentResponse,
-  type Prompt,
-  type PromptServiceApiPromptServiceCreatePromptRequest,
-  type PromptServiceApiPromptServiceDeletePromptRequest,
-  type PromptServiceApiPromptServiceGetPromptRequest,
-  type PromptServiceApiPromptServiceListPromptsRequest,
-  type PromptServiceApiPromptServiceSetDefaultPromptRequest,
-  type PromptServiceApiPromptServiceUnsetDefaultPromptRequest,
-  type PromptServiceApiPromptServiceUpdatePromptRequest,
   type SetMultiAnswersSwitchStatusResponse,
 } from "@/api/generated/chatbot-client";
 import {
@@ -37,7 +28,15 @@ import {
   type ConversationHistoryListResponse,
   type DefaultApiApiCoreConversationsNameHistoryGetRequest,
   type DefaultApiApiCorePromptsPolishPostRequest,
+  type PromptItem,
+  type PromptCategory,
+  type PromptCategoryListResponse,
+  type PromptCategoryRequest,
+  type PromptListResponse,
+  type PromptPatchRequest,
   type PromptPolishResponse,
+  type PromptRequest,
+  type PromptStateResponse,
 } from "@/api/generated/core-client";
 import {
   type AllDocumentCreatorsResponse,
@@ -62,10 +61,15 @@ const coreDefaultClient = CoreDefaultApiFactory(
   axiosInstance,
 );
 
-type PromptListRequestWithKeyword =
-  PromptServiceApiPromptServiceListPromptsRequest & {
-    keyword?: string;
-  };
+export interface PromptLibraryListParams {
+  pageSize?: number; // 每页数量
+  pageToken?: string; // 下一页游标
+  keyword?: string; // 搜索关键词
+  category?: string; // 固定分类或用户自定义分类编码
+  scope?: string; // 展示范围
+  sort?: string; // 排序方式
+  locale?: string; // 界面语言
+}
 
 export const CHAT_STREAM_URL = `${coreApiBaseUrl}/conversations:chat`;
 export const CHAT_RESUME_STREAM_URL = `${coreApiBaseUrl}/conversations:resumeChat`;
@@ -404,76 +408,106 @@ export function ChatServiceApi() {
 
 export function PromptServiceApi() {
   return {
-    promptServiceListPrompts(
-      requestParameters: PromptListRequestWithKeyword = {},
+    listPromptCategories(options?: RawAxiosRequestConfig) {
+      return axiosInstance.get<PromptCategoryListResponse>(
+        `${coreApiBaseUrl}/prompt_categories`,
+        options,
+      );
+    },
+    createPromptCategory(
+      category: PromptCategoryRequest,
       options?: RawAxiosRequestConfig,
     ) {
-      return axiosInstance.get<ListPromptsResponse>(`${coreApiBaseUrl}/prompts`, {
+      return axiosInstance.post<PromptCategory>(
+        `${coreApiBaseUrl}/prompt_categories`,
+        category,
+        withJsonOptions(options),
+      );
+    },
+    deletePromptCategory(categoryID: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.delete<void>(
+        `${coreApiBaseUrl}/prompt_categories/${encodeURIComponent(categoryID)}`,
+        options,
+      );
+    },
+    listPrompts(
+      requestParameters: PromptLibraryListParams = {},
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.get<PromptListResponse>(`${coreApiBaseUrl}/prompts`, {
         ...options,
         params: {
           ...(options?.params ?? {}),
           page_size: requestParameters.pageSize,
           page_token: requestParameters.pageToken,
           keyword: requestParameters.keyword,
+          category: requestParameters.category,
+          scope: requestParameters.scope,
+          sort: requestParameters.sort,
+          locale: requestParameters.locale,
         },
       });
     },
-    promptServiceGetPrompt(
-      requestParameters: PromptServiceApiPromptServiceGetPromptRequest,
+    getPrompt(
+      promptID: string,
+      locale?: string,
       options?: RawAxiosRequestConfig,
     ) {
-      return axiosInstance.get<Prompt>(
-        `${coreApiBaseUrl}/prompts/${encodeURIComponent(requestParameters.prompt)}`,
-        options,
+      return axiosInstance.get<PromptItem>(
+        `${coreApiBaseUrl}/prompts/${encodeURIComponent(promptID)}`,
+        { ...options, params: { ...(options?.params ?? {}), locale } },
       );
     },
-    promptServiceCreatePrompt(
-      requestParameters: PromptServiceApiPromptServiceCreatePromptRequest,
+    createPrompt(
+      prompt: PromptRequest,
       options?: RawAxiosRequestConfig,
     ) {
-      return axiosInstance.post<Prompt>(
+      return axiosInstance.post<PromptItem>(
         `${coreApiBaseUrl}/prompts`,
-        requestParameters.prompt,
+        prompt,
         withJsonOptions(options),
       );
     },
-    promptServiceUpdatePrompt(
-      requestParameters: PromptServiceApiPromptServiceUpdatePromptRequest,
+    updatePrompt(
+      promptID: string,
+      prompt: PromptPatchRequest,
       options?: RawAxiosRequestConfig,
     ) {
-      return axiosInstance.patch<Prompt>(
-        `${coreApiBaseUrl}/prompts/${encodeURIComponent(requestParameters.prompt)}`,
-        requestParameters.prompt2,
+      return axiosInstance.patch<PromptItem>(
+        `${coreApiBaseUrl}/prompts/${encodeURIComponent(promptID)}`,
+        prompt,
         withJsonOptions(options),
       );
     },
-    promptServiceDeletePrompt(
-      requestParameters: PromptServiceApiPromptServiceDeletePromptRequest,
-      options?: RawAxiosRequestConfig,
-    ) {
+    deletePrompt(promptID: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.delete<void>(
-        `${coreApiBaseUrl}/prompts/${encodeURIComponent(requestParameters.prompt)}`,
+        `${coreApiBaseUrl}/prompts/${encodeURIComponent(promptID)}`,
         options,
       );
     },
-    promptServiceSetDefaultPrompt(
-      requestParameters: PromptServiceApiPromptServiceSetDefaultPromptRequest,
-      options?: RawAxiosRequestConfig,
-    ) {
-      return axiosInstance.post(
-        `${coreApiBaseUrl}/prompts/${encodeURIComponent(requestParameters.prompt)}:setDefault`,
-        requestParameters.setDefaultPromptRequest,
-        withJsonOptions(options),
+    favoritePrompt(promptID: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post<PromptStateResponse>(
+        `${coreApiBaseUrl}/prompts/${encodeURIComponent(promptID)}:favorite`,
+        undefined,
+        options,
       );
     },
-    promptServiceUnsetDefaultPrompt(
-      requestParameters: PromptServiceApiPromptServiceUnsetDefaultPromptRequest,
-      options?: RawAxiosRequestConfig,
-    ) {
-      return axiosInstance.post(
-        `${coreApiBaseUrl}/prompts/${encodeURIComponent(requestParameters.prompt)}:unsetDefault`,
-        requestParameters.unsetDefaultPromptRequest,
-        withJsonOptions(options),
+    unfavoritePrompt(promptID: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post<PromptStateResponse>(
+        `${coreApiBaseUrl}/prompts/${encodeURIComponent(promptID)}:unfavorite`,
+        undefined,
+        options,
+      );
+    },
+    usePrompt(promptID: string, options?: RawAxiosRequestConfig) {
+      const silentOptions = {
+        ...options,
+        silentError: true, // 使用统计失败不触发全局错误提示
+      } as RawAxiosRequestConfig;
+      return axiosInstance.post<PromptStateResponse>(
+        `${coreApiBaseUrl}/prompts/${encodeURIComponent(promptID)}:use`,
+        undefined,
+        silentOptions,
       );
     },
     promptServicePolishPrompt(

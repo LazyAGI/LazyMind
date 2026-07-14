@@ -32,7 +32,7 @@ func (m *RuntimeManager) Reset(ctx context.Context, cfg RuntimeConfig, paths Run
 	}
 	m.progressf("stopping Local Runtime before %s reset", scope)
 	if err := m.Down(ctx, cfg, paths); err != nil {
-		m.progressf("Local Runtime down failed during reset; continuing cleanup: %v", err)
+		return fmt.Errorf("runtime must stop before %s reset: %w", scope, err)
 	}
 	if err := m.resetKBLocalState(ctx, paths); err != nil {
 		return err
@@ -97,7 +97,7 @@ func localKBResetPaths(paths RuntimePaths) []string {
 		paths.ScanControlPlaneTempDir,
 		filepath.Join(paths.FileWatcherBaseRoot, "staging"),
 		filepath.Join(paths.FileWatcherBaseRoot, "snapshots"),
-		filepath.Dir(paths.MilvusLiteDBPath),
+		paths.MilvusLiteDBPath,
 	}
 }
 

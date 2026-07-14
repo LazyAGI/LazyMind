@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -19,6 +18,7 @@ type LocalProcessRecord struct {
 	Ports       []int    `json:"ports,omitempty"`
 	Command     []string `json:"command,omitempty"`
 	StartedAt   string   `json:"startedAt"`
+	StartID     uint64   `json:"startId,omitempty"`
 }
 
 type localProcessRegistry struct {
@@ -44,6 +44,7 @@ func registerLocalProcess(paths RuntimePaths, service string, pid int, ports []i
 			Ports:       compactPorts(ports),
 			Command:     command,
 			StartedAt:   time.Now().UTC().Format(time.RFC3339),
+			StartID:     processStartIdentity(pid),
 		}
 		replaced := false
 		for i := range registry.Processes {
@@ -108,11 +109,7 @@ func writeLocalProcessRegistry(paths RuntimePaths, registry localProcessRegistry
 }
 
 func processGroupID(pid int) int {
-	pgid, err := syscall.Getpgid(pid)
-	if err != nil {
-		return 0
-	}
-	return pgid
+	return nativeProcessGroupID(pid)
 }
 
 func compactPorts(ports []int) []int {
@@ -165,6 +162,7 @@ func pidFileRecords(paths RuntimePaths, cfg RuntimeConfig) []LocalProcessRecord 
 			RepoRoot:    paths.RepoRoot,
 			RuntimeRoot: paths.RuntimeRoot,
 			Ports:       compactPorts(file.ports),
+			StartID:     processStartIdentity(pid),
 		})
 	}
 	return records

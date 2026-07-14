@@ -438,13 +438,16 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Prompttext -----
 	handleAPI(r, "POST", "/prompts", []string{"document.write"}, chat.CreatePrompt)
 	handleAPI(r, "POST", "/prompts:polish", []string{"qa.read"}, chat.PolishPrompt)
-	// :setDefault/:unsetDefault text {name} text，text :action text。
-	handleAPI(r, "POST", "/prompts/{name}:setDefault", []string{"document.write"}, chat.SetDefaultPrompt)
-	handleAPI(r, "POST", "/prompts/{name}:unsetDefault", []string{"document.write"}, chat.UnsetDefaultPrompt)
+	handleAPI(r, "POST", "/prompts/{name}:favorite", []string{"document.write"}, chat.FavoritePrompt)
+	handleAPI(r, "POST", "/prompts/{name}:unfavorite", []string{"document.write"}, chat.UnfavoritePrompt)
+	handleAPI(r, "POST", "/prompts/{name}:use", []string{"document.write"}, chat.UsePrompt)
 	handleAPI(r, "PATCH", "/prompts/{name}", []string{"document.write"}, chat.UpdatePrompt)
 	handleAPI(r, "DELETE", "/prompts/{name}", []string{"document.write"}, chat.DeletePrompt)
 	handleAPI(r, "GET", "/prompts/{name}", []string{"document.read"}, chat.GetPrompt)
 	handleAPI(r, "GET", "/prompts", []string{"document.read"}, chat.ListPrompts)
+	handleAPI(r, "GET", "/prompt_categories", []string{"document.read"}, chat.ListPromptCategories)
+	handleAPI(r, "POST", "/prompt_categories", []string{"document.write"}, chat.CreatePromptCategory)
+	handleAPI(r, "DELETE", "/prompt_categories/{name}", []string{"document.write"}, chat.DeletePromptCategory)
 
 	// Algorithm service callbacks: no request-level RBAC, protected by internal service token at infra level.
 	handleAPI(r, "POST", "/skill/create", nil, skillv2handler.InternalCreate)

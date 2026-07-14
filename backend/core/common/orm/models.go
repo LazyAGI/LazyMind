@@ -63,24 +63,39 @@ func (UserGroupModel) TableName() string { return "acl_user_groups" }
 // ----- Chat / Prompt text -----
 
 type Prompt struct {
-	ID      string `gorm:"column:id;type:varchar(64);primaryKey"`
-	Name    string `gorm:"column:name;type:varchar(255);not null"`
-	Content string `gorm:"column:content;type:text;not null"`
+	ID       string `gorm:"column:id;type:varchar(64);primaryKey"`
+	Name     string `gorm:"column:name;type:varchar(255);not null"`
+	Content  string `gorm:"column:content;type:text;not null"`
+	Category string `gorm:"column:category;type:varchar(64);not null;default:custom"`
 
 	BaseModel
 }
 
 func (Prompt) TableName() string { return "prompts" }
 
-type DefaultPrompt struct {
-	ID         int    `gorm:"column:id;primaryKey;autoIncrement"`
-	PromptID   string `gorm:"column:prompt_id;type:varchar(64);not null"`
-	PromptName string `gorm:"column:prompt_name;type:varchar(255);not null"`
+type PromptCategory struct {
+	ID   string `gorm:"column:id;type:varchar(64);primaryKey"`
+	Name string `gorm:"column:name;type:varchar(64);not null"`
 
 	BaseModel
 }
 
-func (DefaultPrompt) TableName() string { return "default_prompts" }
+func (PromptCategory) TableName() string { return "prompt_categories" }
+
+type PromptUserState struct {
+	ID             string     `gorm:"column:id;type:varchar(64);primaryKey"`
+	PromptID       string     `gorm:"column:prompt_id;type:varchar(64);not null;uniqueIndex:uk_prompt_user_states_user_prompt,priority:2"`
+	IsFavorite     bool       `gorm:"column:is_favorite;type:boolean;not null;default:false"`
+	UsageCount     int64      `gorm:"column:usage_count;type:bigint;not null;default:0"`
+	LastUsedAt     *time.Time `gorm:"column:last_used_at"`
+	CreateUserID   string     `gorm:"column:create_user_id;type:varchar(255);not null;uniqueIndex:uk_prompt_user_states_user_prompt,priority:1"`
+	CreateUserName string     `gorm:"column:create_user_name;type:varchar(255);not null"`
+	CreatedAt      time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;not null"`
+	DeletedAt      *time.Time `gorm:"column:deleted_at"`
+}
+
+func (PromptUserState) TableName() string { return "prompt_user_states" }
 
 type UserDisabledTool struct {
 	ID             int64      `gorm:"column:id;primaryKey;autoIncrement"`

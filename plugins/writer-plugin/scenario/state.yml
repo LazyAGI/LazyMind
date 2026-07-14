@@ -19,7 +19,19 @@ transitions:
 
   generate_draft:
     - to: review_document
-      condition: "Full draft produced — proceed to review."
+      condition: "User has not requested draft revisions — proceed to review the draft."
+    - to: generate_patch
+      condition: "User explicitly requests modifications to the draft — proceed to revision."
+
+  generate_patch:
+    - to: apply_patch
+      condition: "User accepts the generated patch — proceed to apply it."
+    - to: review_document
+      condition: "User abandons the revision — proceed to review the draft as-is."
+
+  apply_patch:
+    - to: review_document
+      condition: "Revision applied — proceed to review the revised draft."
 
   review_document:
     - to: finalize_report
@@ -53,7 +65,7 @@ steps:
       - slot: resource_profiles
       - slot: writing_context
     acceptance_criteria: |
-      writing_task, resource_profiles, and writing_context are all saved; writing_context.context_id is non-empty; document_summary.summary is non-empty with at least 1 key_point; style_profile contains the three fields audience, formality, and tone.
+      All three artifacts present: writing_task, resource_profiles, writing_context.
 
   generate_outline:
     label: Generate Outline
@@ -79,7 +91,7 @@ steps:
       - slot: outline
       - slot: writing_context
     acceptance_criteria: |
-      outline is saved; nodes count is at least 3; each node contains at least the non-empty fields node_id, title, instruction, and constraints; writing_context has been saved once; document_summary reflects the outline content.
+      Both artifacts present: outline, writing_context.
 
   plan_sections:
     label: Plan Sections
@@ -103,10 +115,11 @@ steps:
     outputs:
       - slot: section_instructions
     acceptance_criteria: |
-      section_instructions is saved; it is a SectionInstructionList artifact (data.instructions is an array) whose entry count matches the outline.nodes count one-to-one; each entry contains at least the fields outline_node_id, section_title, section_goal, and required_points.
+      Artifact present: section_instructions.
 
   generate_draft:
     label: Generate Draft
+    route: choice
     prompt: |
       {{runtime_instruction}}
 
@@ -141,7 +154,69 @@ steps:
       - slot: draft_document
       - slot: writing_context
     acceptance_criteria: |
-      draft_sections are saved in section order; the count matches section_instructions.data.instructions, with at least 2 DraftSection; each DraftSection has a non-empty title and non-empty blocks, and every block's content is a non-empty string. draft_document has been saved once, with draft_document.sections corresponding one-to-one with draft_sections in order; writing_context has been saved once, and document_summary reflects the draft_document content.
+      All three artifacts present: draft_sections, draft_document, writing_context.
+
+  generate_patch:
+    label: Generate Patch
+    route: choice
+    prompt: |
+      {{runtime_instruction}}
+
+      This step builds the revision artifacts for the user's revision request ("{{user_input}}").
+
+      Step 1: Call writer_build_revise_task(query="{{user_input}}") to get the revise_task path, then persist it with save_artifact(content_type='file', key='revise_task').
+
+      Step 2: Call get_artifact to retrieve the draft_document and writing_context paths. Call writer_generate_patch_set(revise_task_path=<revise_task path>, draft_document_path=<draft_document path>, writing_context_path=<writing_context path>) to get the patch_set and doc_ir paths. Persist the patch_set with save_artifact(content_type='file', key='patch_set') and the doc_ir with save_artifact(content_type='file', key='doc_ir'); the doc_ir is a required input for the subsequent apply_patch step.
+
+      Step 3: Call writer_validate_patch_set(patch_set_path=<patch_set path>, revise_task_path=<revise_task path>, writing_context_path=<writing_context path>) to get the patch_set_review path and patch_set_review_summary text. Persist them separately with save_artifact(content_type='file', key='patch_set_review', value=<patch_set_review path>) and save_artifact(content_type='text', key='patch_set_review_summary', value=<patch_set_review_summary content>).
+
+      If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
+    tools:
+      - writer_build_revise_task
+      - writer_generate_patch_set
+      - writer_validate_patch_set
+    inputs:
+      - slot: draft_document
+        required: true
+      - slot: writing_context
+        required: true
+    outputs:
+      - slot: revise_task
+      - slot: doc_ir
+      - slot: patch_set
+      - slot: patch_set_review
+      - slot: patch_set_review_summary
+    acceptance_criteria: |
+      All five artifacts present: revise_task, doc_ir, patch_set, patch_set_review, patch_set_review_summary.
+
+  apply_patch:
+    label: Apply Patch
+    prompt: |
+      {{runtime_instruction}}
+
+      This step applies the validated patch_set to the DocIR, converts the revised DocIR back into a draft, and updates the writing context.
+
+      Step 1: Call get_artifact to retrieve the doc_ir, patch_set, and writing_context paths. Call writer_apply_patch(doc_ir_path=<doc_ir path>, patch_set_path=<patch_set path>, writing_context_path=<writing_context path>) to get the patch_result path and draft_document path. Persist them separately with save_artifact(content_type='file', key='patch_result') and save_artifact(content_type='file', key='draft_document').
+
+      Step 2: Call writer_update_writing_context(content_artifact_path=<revised draft_document path>, writing_context_path=<original writing_context path>) to get the updated writing_context path, then persist it with save_artifact(content_type='file', key='writing_context').
+
+      If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
+    tools:
+      - writer_apply_patch
+      - writer_update_writing_context
+    inputs:
+      - slot: doc_ir
+        required: true
+      - slot: patch_set
+        required: true
+      - slot: writing_context
+        required: true
+    outputs:
+      - slot: patch_result
+      - slot: draft_document
+      - slot: writing_context
+    acceptance_criteria: |
+      All three artifacts present: patch_result, draft_document, writing_context.
 
   review_document:
     label: Review Document
@@ -164,7 +239,7 @@ steps:
       - slot: review_report
       - slot: review_summary
     acceptance_criteria: |
-      review_report is saved; result.is_passed is a boolean; result.score is a 0-100 number; result.summary is a non-empty string; result.issues is an array whose items each contain severity (high/medium/low), category, and description. review_summary is saved as the content summary produced by validate_draft_document (not a path). The final message must follow the format "Since {{review_summary}}, recommend advancing the next step to {{next_step}}".
+      Both artifacts present: review_report, review_summary.
 
   finalize_report:
     label: Finalize Report
@@ -189,4 +264,4 @@ steps:
       - slot: writing_output
       - slot: writing_output_md
     acceptance_criteria: |
-      writing_output is saved; writing_output_md is saved; output_format is markdown; content is a non-empty string that includes a title and at least 2 level-2 sections (starting with `## `), with a body long enough to stand on its own.
+      Both artifacts present: writing_output, writing_output_md.

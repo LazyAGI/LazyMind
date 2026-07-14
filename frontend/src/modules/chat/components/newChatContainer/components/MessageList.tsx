@@ -11,6 +11,7 @@ import AssistantMessage from "../../AssistantMessage";
 import type { PreferenceType } from "../../MultiAnswerDisplay";
 import "../index.scss";
 import dayjs from "dayjs";
+import { useTranslation } from "react-i18next";
 
 interface MessageListProps {
   messageList: any[];
@@ -184,6 +185,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onCiteMessage,
   footer,
 }) => {
+  const { t } = useTranslation();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const editComposeRef = useRef(false);
 
@@ -285,7 +287,7 @@ const MessageList: React.FC<MessageListProps> = ({
                     className="chat-user-edit-btn cancel-btn"
                     onClick={onCancelEditUserMessage}
                   >
-                    取消
+                    {t("common.cancel")}
                   </Button>
                   <Button
                     className="chat-user-edit-btn send-btn"
@@ -296,7 +298,7 @@ const MessageList: React.FC<MessageListProps> = ({
                       )
                     }
                   >
-                    发送
+                    {t("chat.send")}
                   </Button>
                 </Space>
               </div>
@@ -306,7 +308,7 @@ const MessageList: React.FC<MessageListProps> = ({
           </div>
           {!isEditing ? (
             <div className="chat-user-toolbar">
-              <Tooltip title="复制">
+              <Tooltip title={t("chat.copy")}>
                 <Button
                   type="text"
                   size="small"
@@ -315,7 +317,7 @@ const MessageList: React.FC<MessageListProps> = ({
                 />
               </Tooltip>
               {isLastUserMessage ? (
-                <Tooltip title="编辑并重发">
+                <Tooltip title={t("chat.editAndResend")}>
                   <Button
                     type="text"
                     size="small"
