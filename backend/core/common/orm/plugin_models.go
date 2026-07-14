@@ -134,6 +134,19 @@ type PluginTransitionCommand struct {
 
 func (PluginTransitionCommand) TableName() string { return "plugin_transition_commands" }
 
+// PluginRunOutbox makes an accepted Plugin transition durably dispatchable.
+// Payload contains the exact SubAgent RunRequest needed after a process restart.
+type PluginRunOutbox struct {
+	TaskID    string          `gorm:"column:task_id;type:varchar(36);primaryKey"`
+	Payload   json.RawMessage `gorm:"column:payload;type:jsonb;not null"`
+	Status    string          `gorm:"column:status;type:varchar(16);not null;index"`
+	LastError string          `gorm:"column:last_error;type:text;not null;default:''"`
+	CreatedAt time.Time       `gorm:"column:created_at;not null"`
+	UpdatedAt time.Time       `gorm:"column:updated_at;not null"`
+}
+
+func (PluginRunOutbox) TableName() string { return "plugin_run_outbox" }
+
 // PluginSlotOrder tracks the display ordering of list-cardinality slot items.
 // order_list is a JSONB array of list_index values in display order (visible items only).
 // order_version is an optimistic-lock counter incremented on every reorder or delete.

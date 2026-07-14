@@ -78,17 +78,26 @@ func Evaluate(expr *Expression, materials []MaterialValue) Evaluation {
 	if expr == nil {
 		return Evaluation{Satisfied: true}
 	}
-	available := map[string]MaterialValue{}
+	available := map[string][]MaterialValue{}
 	for _, value := range materials {
 		if value.Valid {
-			available[value.MaterialID] = value
+			available[value.MaterialID] = append(available[value.MaterialID], value)
 		}
+	}
+	for materialID := range available {
+		sort.SliceStable(available[materialID], func(i, j int) bool {
+			return available[materialID][i].RevisionID < available[materialID][j].RevisionID
+		})
 	}
 	var eval func(Expression) Evaluation
 	eval = func(e Expression) Evaluation {
 		if e.Material != "" {
-			if value, ok := available[e.Material]; ok {
-				return Evaluation{Satisfied: true, Witnesses: []Witness{{MaterialID: e.Material, RevisionID: value.RevisionID, BindAs: e.BindAs}}}
+			if values := available[e.Material]; len(values) > 0 {
+				witnesses := make([]Witness, 0, len(values))
+				for _, value := range values {
+					witnesses = append(witnesses, Witness{MaterialID: e.Material, RevisionID: value.RevisionID, BindAs: e.BindAs})
+				}
+				return Evaluation{Satisfied: true, Witnesses: witnesses}
 			}
 			return Evaluation{MissingGroups: [][]string{{e.Material}}}
 		}
@@ -107,8 +116,10 @@ func Evaluate(expr *Expression, materials []MaterialValue) Evaluation {
 		for _, child := range e.Any {
 			part := eval(child)
 			if part.Satisfied {
-				if e.BindAs != "" && len(part.Witnesses) == 1 {
-					part.Witnesses[0].BindAs = e.BindAs
+				if e.BindAs != "" {
+					for i := range part.Witnesses {
+						part.Witnesses[i].BindAs = e.BindAs
+					}
 				}
 				return part
 			}
@@ -118,4 +129,19 @@ func Evaluate(expr *Expression, materials []MaterialValue) Evaluation {
 		return Evaluation{MissingGroups: [][]string{group}}
 	}
 	return eval(*expr)
+}
+
+// EvaluateOptional returns provenance for every currently available optional
+// material. Optional inputs never affect readiness, but an attempt that actually
+// consumes one must persist the same revision witnesses so rewind propagation is
+// precise.
+func EvaluateOptional(refs []MaterialRef, materials []MaterialValue) Evaluation {
+	result := Evaluation{Satisfied: true}
+	for _, ref := range refs {
+		part := Evaluate(&Expression{Material: ref.Material, BindAs: ref.BindAs}, materials)
+		if part.Satisfied {
+			result.Witnesses = append(result.Witnesses, part.Witnesses...)
+		}
+	}
+	return result
 }

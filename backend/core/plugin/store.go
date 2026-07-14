@@ -135,10 +135,10 @@ func DismissSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 			}
 			return err
 		}
-		// If active, mark running steps interrupted before dismissing.
+		// If active, mark queued/running steps interrupted before dismissing.
 		if s.Status == SessionStatusActive {
 			if err := tx.Model(&orm.PluginSessionStep{}).
-				Where("session_id = ? AND status = ?", sessionID, StepStatusRunning).
+				Where("session_id = ? AND status IN ?", sessionID, []string{StepStatusPending, StepStatusRunning}).
 				Updates(map[string]any{"status": StepStatusInterrupted, "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
@@ -318,14 +318,15 @@ func CreateSessionStep(ctx context.Context, db *gorm.DB, sessionID, stepID, task
 }
 
 // UpdateStepStatus mirrors sub_agent_tasks.status changes into plugin_session_steps.
-// Terminal states (succeeded, interrupted) are never downgraded: once a step has been
-// interrupted by the user, a late EOF from the SubAgent stream must not reset it to failed.
+// Terminal states are first-writer-wins: once a step has been interrupted by the
+// user, delayed start/done/error frames from the SubAgent stream cannot revive it.
 func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) error {
 	q := db.WithContext(ctx).Model(&orm.PluginSessionStep{}).
 		Where("task_id = ?", taskID)
-	if status == StepStatusFailed {
-		// Only write failed if the step is not already in a terminal state.
-		q = q.Where("status NOT IN ?", []string{StepStatusSucceeded, StepStatusInterrupted})
+	terminal := []string{StepStatusSucceeded, StepStatusFailed, StepStatusInterrupted}
+	if status == StepStatusRunning || status == StepStatusSucceeded ||
+		status == StepStatusFailed || status == StepStatusInterrupted {
+		q = q.Where("status NOT IN ? OR status = ?", terminal, status)
 	}
 	return q.Updates(map[string]any{
 		"status":     status,
@@ -483,18 +484,19 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 		}
 
 		row := &orm.PluginSlotRevision{
-			ID:           "psr_" + common.GenerateID(),
-			SessionID:    sessionID,
-			SlotID:       slotID,
-			Revision:     revision,
-			ListIndex:    finalListIndex,
-			Selected:     true,
-			ChangeSource: "ai",
-			ArtifactSeq:  artifactSeq,
-			Slot:         artifactKey,
-			StepID:       stepID,
-			Attempt:      attempt,
-			CreatedAt:    now,
+			ID:                "psr_" + common.GenerateID(),
+			SessionID:         sessionID,
+			SlotID:            slotID,
+			Revision:          revision,
+			ListIndex:         finalListIndex,
+			Selected:          true,
+			ChangeSource:      "ai",
+			ArtifactSeq:       artifactSeq,
+			Slot:              artifactKey,
+			StepID:            stepID,
+			Attempt:           attempt,
+			ProducerAttemptID: step.ID,
+			CreatedAt:         now,
 		}
 		if err := tx.Create(row).Error; err != nil {
 			return err

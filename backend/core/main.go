@@ -238,6 +238,7 @@ func main() {
 			})
 		},
 	)
+	plugin.RecoverPendingPluginRuns()
 	log.Logger.Info().Msg("plugin subagent hooks registered")
 
 	// Start the schedule ticker.

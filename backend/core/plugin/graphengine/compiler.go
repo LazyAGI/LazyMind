@@ -116,7 +116,7 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_ROUTE_INVALID", "error", "scenario/state.yml.steps."+id+".route", id, "route must be all or choice"))
 			node.Route = "all"
 		}
-		node.Outputs = parseMaterialList(step.Outputs)
+		node.Outputs, node.RequiredOutputs = parseOutputs(step.Outputs)
 		node.OptionalInputs = parseMaterialRefs(step.OptionalInputs)
 		if step.InputExpression != nil {
 			expr, err := parseExpression(step.InputExpression)
@@ -236,6 +236,12 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 
 	adj, reverse := adjacency(graph.ControlEdges, allNodes)
 	dominators := computeDominators("__start__", allNodes, reverse)
+	guaranteedMaterials := map[string]bool{}
+	for _, node := range graph.Nodes {
+		for _, material := range node.RequiredOutputs {
+			guaranteedMaterials[material] = true
+		}
+	}
 	cycle := cycleNodes(adj)
 	for _, id := range cycle {
 		result.Diagnostics = append(result.Diagnostics, nodeDiag("E_GRAPH_CYCLE", "error", "scenario/state.yml.transitions", id, "node participates in a directed cycle"))
@@ -256,11 +262,9 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 		if node, ok := graph.Nodes[from]; ok {
 			route = node.Route
 		}
-		if route != "choice" {
-			continue
-		}
 		seenConditions := map[string]bool{}
 		unconditional := false
+		guaranteedMatch := false
 		for index, rawEdge := range targets {
 			path := fmt.Sprintf("scenario/state.yml.transitions.%s[%d].condition", from, index)
 			conditionBytes, _ := json.Marshal(rawEdge.Condition)
@@ -270,16 +274,29 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 				isUnconditional = true
 			}
 			if isUnconditional {
-				if unconditional {
+				if route == "choice" && unconditional {
 					result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "E_CHOICE_BRANCH_SHADOWED", Severity: "error", Path: path, EdgeID: from + "->" + rawEdge.To, Message: "choice branch is shadowed by an earlier unconditional branch", Fixable: true})
 				}
 				unconditional = true
+				guaranteedMatch = true
 				continue
 			}
-			if unconditional || seenConditions[conditionKey] {
+			if condition, err := parseExpression(rawEdge.Condition); err == nil && expressionGuaranteed(condition, from, graph.MaterialProducers, guaranteedMaterials, dominators, true) {
+				guaranteedMatch = true
+			}
+			if route == "choice" && (unconditional || seenConditions[conditionKey]) {
 				result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "E_CHOICE_BRANCH_SHADOWED", Severity: "error", Path: path, EdgeID: from + "->" + rawEdge.To, Message: "choice branch is completely shadowed by an earlier branch", Fixable: true})
 			}
 			seenConditions[conditionKey] = true
+		}
+		if !guaranteedMatch {
+			code := "E_ROUTE_NO_FALLBACK"
+			message := "route can finish without activating an edge; add an unconditional fallback"
+			if route == "choice" {
+				code = "E_CHOICE_NO_FALLBACK"
+				message = "choice route can finish without selecting an edge; add an unconditional fallback"
+			}
+			result.Diagnostics = append(result.Diagnostics, nodeDiag(code, "error", "scenario/state.yml.transitions."+from, from, message))
 		}
 	}
 
@@ -303,9 +320,12 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 			}
 		}
 		if node.SkipIf != nil {
+			if expressionGuaranteed(node.SkipIf, id, graph.MaterialProducers, guaranteedMaterials, dominators, false) {
+				result.Diagnostics = append(result.Diagnostics, nodeDiag("E_SKIP_ALWAYS_TRUE", "error", "scenario/state.yml.steps."+id+".skip_if", id, "skip_if is always true because its materials are guaranteed by control-dominating producers"))
+			}
 			for _, material := range expressionMaterials(node.SkipIf) {
 				producer := graph.MaterialProducers[material]
-				if producer.Kind == "step" && !dominators[id][producer.StepID] {
+				if producer.Kind == "step" && (producer.StepID == id || !dominators[id][producer.StepID]) {
 					result.Diagnostics = append(result.Diagnostics, materialNodeDiag("E_SKIP_RACY_MATERIAL", "error", "scenario/state.yml.steps."+id+".skip_if", id, material, "skip_if depends on a material not guaranteed to be upstream"))
 				}
 			}
@@ -316,7 +336,11 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 		result.Diagnostics = append(result.Diagnostics, validateExpression(edge.Condition, "scenario/state.yml.transitions."+edge.From, edge.From, knownMaterials)...)
 		for _, material := range expressionMaterials(edge.Condition) {
 			producer := graph.MaterialProducers[material]
-			if producer.Kind == "step" && !dominators[edge.From][producer.StepID] {
+			if producer.Kind == "step" && producer.StepID == edge.From {
+				if node := graph.Nodes[edge.From]; node.SkipIf != nil {
+					result.Diagnostics = append(result.Diagnostics, materialNodeDiag("E_ROUTE_SKIPPED_OUTPUT", "error", "scenario/state.yml.transitions."+edge.From, edge.From, material, "route condition cannot depend on an output of a node that may be bypassed"))
+				}
+			} else if producer.Kind == "step" && !dominators[edge.From][producer.StepID] {
 				result.Diagnostics = append(result.Diagnostics, materialNodeDiag("E_ROUTE_RACY_MATERIAL", "error", "scenario/state.yml.transitions."+edge.From, edge.From, material, "route condition depends on a material not guaranteed at decision time"))
 			}
 		}
@@ -336,6 +360,32 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 	result.GraphHash, result.Graph = graph.GraphHash, graph
 	result.Valid = !hasErrors(result.Diagnostics)
 	return result
+}
+
+func expressionGuaranteed(expr *Expression, decisionNode string, producers map[string]ProducerRef, guaranteedMaterials map[string]bool, dominators map[string]map[string]bool, allowSelf bool) bool {
+	if expr == nil {
+		return true
+	}
+	if expr.Material != "" {
+		producer, ok := producers[expr.Material]
+		return ok && guaranteedMaterials[expr.Material] && producer.Kind == "step" && (allowSelf || producer.StepID != decisionNode) && dominators[decisionNode][producer.StepID]
+	}
+	if len(expr.All) > 0 {
+		for i := range expr.All {
+			if !expressionGuaranteed(&expr.All[i], decisionNode, producers, guaranteedMaterials, dominators, allowSelf) {
+				return false
+			}
+		}
+		return true
+	}
+	if len(expr.Any) > 0 {
+		for i := range expr.Any {
+			if expressionGuaranteed(&expr.Any[i], decisionNode, producers, guaranteedMaterials, dominators, allowSelf) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func normalizeSteps(value any) (map[string]rawStep, []Diagnostic) {
@@ -438,6 +488,38 @@ func parseMaterialList(value any) []string {
 		}
 	}
 	return out
+}
+
+func parseOutputs(value any) (all []string, required []string) {
+	if value == nil {
+		return nil, nil
+	}
+	b, _ := yaml.Marshal(value)
+	var items []any
+	if yaml.Unmarshal(b, &items) != nil {
+		return nil, nil
+	}
+	for _, item := range items {
+		isRequired := true
+		var id string
+		switch output := item.(type) {
+		case string:
+			id = strings.TrimSpace(output)
+		case map[string]any:
+			id = scalar(firstNonNil(output["material"], output["slot"], output["id"]))
+			if raw, exists := output["required"]; exists {
+				isRequired = boolValue(raw)
+			}
+		}
+		if id == "" {
+			continue
+		}
+		all = append(all, id)
+		if isRequired {
+			required = append(required, id)
+		}
+	}
+	return all, required
 }
 func parseMaterialRefs(value any) []MaterialRef {
 	if value == nil {
@@ -634,7 +716,7 @@ func validateUI(ui map[string]any, known, exposed map[string]bool, profile Profi
 		if exposed[id] && placed[id] == 0 {
 			out = append(out, materialDiag("E_UI_EXPOSED_MATERIAL_UNPLACED", "error", "plugin.yaml.ui.tabs", id, "exposed material is not placed in the UI"))
 		}
-		if placed[id] > 1 {
+		if exposed[id] && placed[id] > 1 {
 			out = append(out, materialDiag("E_UI_MATERIAL_DUPLICATE", "error", "plugin.yaml.ui.tabs", id, "material is placed more than once in the UI"))
 		}
 	}

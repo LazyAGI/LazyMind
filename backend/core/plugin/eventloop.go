@@ -72,6 +72,10 @@ type PluginStepParams struct {
 
 	// UserID is the chat user id for KB ACL and signed static-file URLs.
 	UserID string `json:"user_id,omitempty"`
+
+	// RequiredOutputs is compiled by Go. Outputs not listed here are valid
+	// conditional products but do not gate attempt success.
+	RequiredOutputs []string `json:"required_outputs,omitempty"`
 }
 
 // asMap serialises the params into the generic map expected by subagent.RunRequest.Params.
@@ -202,7 +206,7 @@ func HandlePluginStepCreated(
 	}
 	return launchPluginAttempt(
 		ctx, db, stateStore, convID, historyID, userID, taskID, title, objective,
-		params, inputKeys, outputKeys, llmConfig, toolConfig, true,
+		params, inputKeys, outputKeys, llmConfig, toolConfig, true, true,
 	)
 }
 
@@ -220,6 +224,7 @@ func launchPluginAttempt(
 	llmConfig map[string]any,
 	toolConfig map[string]any,
 	legacyEvent bool,
+	launchNow bool,
 ) (sessionID string, returnedTaskID string, pluginCompleted bool, err error) {
 	pluginID := params.PluginID
 	stepID := params.StepID
@@ -317,7 +322,7 @@ func launchPluginAttempt(
 		}
 		if legacyEvent {
 			if uErr := UpdateSessionCurrentStep(ctx, db, sessionID, stepID); uErr != nil {
-				fmt.Printf("[Plugin] failed to update current_step: %v\n", uErr)
+				return sessionID, taskID, false, fmt.Errorf("plugin: update legacy current step: %w", uErr)
 			} else {
 				fmt.Printf("[plugin] legacy session current_step updated conv=%s session=%s step=%s\n",
 					convID, sessionID, stepID)
@@ -325,7 +330,7 @@ func launchPluginAttempt(
 		}
 		// Ensure session is marked active when a new step starts (e.g. auto-advance via ChatAgent).
 		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive); uErr != nil {
-			fmt.Printf("[Plugin] failed to reset session status to active: %v\n", uErr)
+			return sessionID, taskID, false, fmt.Errorf("plugin: activate session: %w", uErr)
 		} else {
 			fmt.Printf("[plugin] session status active conv=%s session=%s step=%s\n",
 				convID, sessionID, stepID)
@@ -345,6 +350,11 @@ func launchPluginAttempt(
 		"session_id":    sessionID,
 		"user_input":    params.UserInput,
 		"is_cold_start": isCold,
+	}
+	if !legacyEvent {
+		// Compiled graph outputs are material guarantees. A v2 attempt cannot
+		// succeed unless every declared output was actually persisted.
+		rawParamsMap["required_output_artifact_keys"] = params.RequiredOutputs
 	}
 	if params.HandOff != nil {
 		rawParamsMap["hand_off"] = *params.HandOff
@@ -404,24 +414,16 @@ func launchPluginAttempt(
 		convID, sessionID, pluginID, stepID, task.ID, task.WorkspacePath)
 
 	// Create plugin_session_steps record.
-	attempt, _ := NextAttempt(ctx, db, sessionID, stepID)
+	attempt, attemptErr := NextAttempt(ctx, db, sessionID, stepID)
+	if attemptErr != nil {
+		return sessionID, task.ID, false, fmt.Errorf("plugin: allocate attempt: %w", attemptErr)
+	}
 	if _, stepErr := CreateSessionStep(ctx, db, sessionID, stepID, task.ID, attempt); stepErr != nil {
-		fmt.Printf("[Plugin] failed to create session step: %v\n", stepErr)
+		return sessionID, task.ID, false, fmt.Errorf("plugin: create session step: %w", stepErr)
 	} else {
 		fmt.Printf("[plugin] plugin_session_step created conv=%s session=%s step=%s task=%s attempt=%d\n",
 			convID, sessionID, stepID, task.ID, attempt)
 	}
-
-	// Seed Redis status.
-	_ = subagent.WriteStatus(ctx, stateStore, task.ID, map[string]any{
-		"status": subagent.StatusPending, "progress": 0,
-	})
-	fmt.Printf("[plugin] sub_agent status seeded conv=%s session=%s step=%s task=%s status=%s\n",
-		convID, sessionID, stepID, task.ID, subagent.StatusPending)
-
-	// Launch SubAgent goroutine.
-	// input_slots, output_slots, and tools are NOT forwarded here:
-	// the Python runner reads them from the DB task record and plugin_loader respectively.
 	runParams := map[string]any{
 		"plugin_id":  pluginID,
 		"step_id":    stepID,
@@ -430,20 +432,84 @@ func launchPluginAttempt(
 	if len(params.HistoryFilesPerTurn) > 0 {
 		runParams["history_files_per_turn"] = params.HistoryFilesPerTurn
 	}
-	go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
-		TaskID:        task.ID,
-		AgentType:     "plugin_step",
-		WorkspacePath: task.WorkspacePath,
-		Params:        runParams,
-		DBDSN:         subagent.DBDSN(),
-		Resume:        false,
-		LLMConfig:     llmConfig,
-		ToolConfig:    toolConfig,
-	})
-	fmt.Printf("[plugin] sub_agent launched conv=%s session=%s step=%s task=%s\n",
-		convID, sessionID, stepID, task.ID)
+	runRequest := subagent.RunRequest{
+		TaskID: task.ID, AgentType: "plugin_step", WorkspacePath: task.WorkspacePath,
+		Params: runParams, DBDSN: subagent.DBDSN(), Resume: false,
+		LLMConfig: llmConfig, ToolConfig: toolConfig,
+	}
+	if enqueueErr := enqueuePluginAttemptRunner(ctx, db, runRequest); enqueueErr != nil {
+		return sessionID, task.ID, false, fmt.Errorf("plugin: enqueue attempt runner: %w", enqueueErr)
+	}
+
+	if launchNow {
+		dispatchPluginAttemptRunner(db, stateStore, task.ID)
+	}
 
 	return sessionID, task.ID, false, nil
+}
+
+func enqueuePluginAttemptRunner(ctx context.Context, db *gorm.DB, request subagent.RunRequest) error {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	return db.WithContext(ctx).Create(&orm.PluginRunOutbox{
+		TaskID: request.TaskID, Payload: payload, Status: "pending", CreatedAt: now, UpdatedAt: now,
+	}).Error
+}
+
+// dispatchPluginAttemptRunner atomically claims a durable outbox item. It is
+// called only after the transaction that accepted the transition has committed.
+func dispatchPluginAttemptRunner(db *gorm.DB, stateStore state.Store, taskID string) {
+	var row orm.PluginRunOutbox
+	claimed := false
+	if err := db.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&orm.PluginRunOutbox{}).
+			Where("task_id = ? AND status = ?", taskID, "pending").
+			Updates(map[string]any{"status": "dispatching", "updated_at": time.Now().UTC()})
+		if result.Error != nil || result.RowsAffected != 1 {
+			return result.Error
+		}
+		if err := tx.Where("task_id = ?", taskID).First(&row).Error; err != nil {
+			return err
+		}
+		var task orm.SubAgentTask
+		if err := tx.Select("status").Where("id = ?", taskID).First(&task).Error; err != nil {
+			return err
+		}
+		if task.Status == subagent.StatusSucceeded || task.Status == subagent.StatusFailed || task.Status == subagent.StatusInterrupted || task.Status == subagent.StatusCanceled {
+			return tx.Model(&orm.PluginRunOutbox{}).Where("task_id = ?", taskID).
+				Updates(map[string]any{"status": "completed", "updated_at": time.Now().UTC()}).Error
+		}
+		claimed = true
+		return nil
+	}); err != nil || !claimed {
+		return
+	}
+	var request subagent.RunRequest
+	if err := json.Unmarshal(row.Payload, &request); err != nil {
+		_ = db.Model(&orm.PluginRunOutbox{}).Where("task_id = ?", taskID).
+			Updates(map[string]any{"status": "failed", "last_error": err.Error(), "updated_at": time.Now().UTC()}).Error
+		_ = subagent.UpdateFinalStatus(context.Background(), db, taskID, subagent.StatusFailed, "invalid plugin run outbox payload")
+		_ = UpdateStepStatus(context.Background(), db, taskID, StepStatusFailed)
+		if pctx := loadPluginChatContextFromDB(context.Background(), db, taskID); pctx != nil {
+			_ = UpdateSessionStatus(context.Background(), db, pctx.SessionID, SessionStatusWaiting)
+		}
+		return
+	}
+	_ = subagent.WriteStatus(context.Background(), stateStore, taskID, map[string]any{
+		"status": subagent.StatusPending, "progress": 0,
+	})
+	go func() {
+		err := subagent.Run(context.Background(), db, stateStore, request)
+		status, lastError := "completed", ""
+		if err != nil {
+			status, lastError = "failed", err.Error()
+		}
+		_ = db.Model(&orm.PluginRunOutbox{}).Where("task_id = ?", taskID).
+			Updates(map[string]any{"status": status, "last_error": lastError, "updated_at": time.Now().UTC()}).Error
+	}()
 }
 
 // OnSubAgentDone is called when a plugin_step task reaches terminal status.

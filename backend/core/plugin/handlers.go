@@ -61,12 +61,13 @@ type sessionDTO struct {
 	Steps          []stepDTO `json:"steps,omitempty"`
 }
 
-// stepDTO summarises one plugin_session_steps row (used for dependency validation).
+// stepDTO summarises one plugin_session_steps attempt for UI history.
 type stepDTO struct {
 	StepID        string    `json:"step_id"`
 	Attempt       int       `json:"attempt"`
 	TaskID        string    `json:"task_id"`
 	Status        string    `json:"status"`
+	Validity      string    `json:"validity"`
 	IntentContext string    `json:"intent_context,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 }
@@ -114,6 +115,7 @@ func toStepDTO(r *orm.PluginSessionStep) stepDTO {
 		Attempt:   r.Attempt,
 		TaskID:    r.TaskID,
 		Status:    r.Status,
+		Validity:  r.Validity,
 		CreatedAt: r.CreatedAt,
 	}
 }
@@ -381,7 +383,7 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
 	}
 	enrichSlots(ctx, db, sessionID, dto.Slots)
-	// Load steps inline (used by Python Layer-2 dependency validation).
+	// Load attempt history inline for panel controls and audit display.
 	steps, _ := ListSteps(ctx, db, sessionID)
 	intentMap := buildStepIntentMap(ctx, db, sessionID)
 	for i := range steps {
@@ -471,6 +473,7 @@ func GetSessionSteps(w http.ResponseWriter, r *http.Request) {
 		Attempt       int    `json:"attempt"`
 		TaskID        string `json:"task_id"`
 		Status        string `json:"status"`
+		Validity      string `json:"validity"`
 		IntentContext string `json:"intent_context,omitempty"`
 		CreatedAt     string `json:"created_at"`
 		UpdatedAt     string `json:"updated_at"`
@@ -485,6 +488,7 @@ func GetSessionSteps(w http.ResponseWriter, r *http.Request) {
 			Attempt:       s.Attempt,
 			TaskID:        s.TaskID,
 			Status:        s.Status,
+			Validity:      s.Validity,
 			IntentContext: intentMap[s.StepID],
 			CreatedAt:     s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 			UpdatedAt:     s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
@@ -1064,6 +1068,14 @@ func DismissSessionHandler(w http.ResponseWriter, r *http.Request) {
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
+	}
+	if session, err := GetSession(r.Context(), db, sessionID); err == nil &&
+		!session.Dismissed && session.Status == SessionStatusActive {
+		// Reuse the same cancellation path as the visible Stop button so every
+		// pending/running parallel SubAgent receives a Python cancel signal. Only
+		// do this for the session being dismissed: an older waiting session may
+		// share the conversation with a newer active session.
+		stopPluginSession(r.Context(), db, store.State(), session)
 	}
 	if err := DismissSession(r.Context(), db, sessionID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == "session not found or already dismissed" {

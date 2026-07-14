@@ -44,6 +44,9 @@ type ProjectionEnvelope = {
     static_order?: string[];
     nodes?: Record<string, { id: string; label?: string }>;
   };
+  attempt_history?: Record<string, {
+    attempt: number; status: string; duration_sec: number; artifact_count: number; started_at: string;
+  }[]>;
 };
 
 function projectionToGraph(raw: ProjectionEnvelope): StateGraphData {
@@ -66,6 +69,8 @@ function projectionToGraph(raw: ProjectionEnvelope): StateGraphData {
         step_index: index + 1,
         status,
         is_current: (projection.current ?? []).includes(id),
+        is_stale: (projection.stale ?? []).includes(id),
+        step_attempts: raw.attempt_history?.[id] ?? [],
       };
     }),
     { id: '__end__', label: '__end__', step_index: order.length + 1, status: projection.completed ? 'succeeded' : 'pending', is_current: false },
@@ -77,6 +82,7 @@ function projectionToGraph(raw: ProjectionEnvelope): StateGraphData {
     edge_type: edge.state === 'active'
       ? ((projection.past ?? []).includes(edge.to) || edge.to === '__end__' ? 'executed' : 'current_direct')
       : edge.state === 'pruned' ? 'pruned'
+      : edge.state === 'bypassed' ? 'bypassed'
       : edge.state === 'stale' ? 'stale'
       : 'inactive',
   } as const));

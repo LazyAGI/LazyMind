@@ -29,6 +29,8 @@ export interface SGNode {
   step_index: number;
   status: string;
   is_current: boolean;
+  /** The node has stale historical attempts even when it is Ready again. */
+  is_stale?: boolean;
   artifact_summary?: string | null; // legacy, unused
   artifact_items?: { slot: string; content_type: string; preview: string }[];
   step_attempts?: SGAttempt[];
@@ -39,7 +41,7 @@ export interface SGEdge {
   to: string;
   condition: string;
   // server-computed
-  edge_type: 'executed' | 'current_direct' | 'current_reachable' | 'skipped' | 'pruned' | 'stale' | 'inactive';
+  edge_type: 'executed' | 'current_direct' | 'current_reachable' | 'skipped' | 'pruned' | 'bypassed' | 'stale' | 'inactive';
   // legacy — ignored
   is_active_path?: boolean;
 }
@@ -101,6 +103,7 @@ const EDGE_STYLE: Record<string, { stroke: string; dash?: string; width: number 
   current_reachable: { stroke: '#1677ff', dash: '6 3', width: 1.2 },
   skipped:           { stroke: '#bfbfbf', dash: '5 3', width: 1.2 },
   pruned:            { stroke: '#bfbfbf', dash: '2 3', width: 1.2 },
+  bypassed:          { stroke: '#8c8c8c', dash: '5 3', width: 1.2 },
   stale:             { stroke: '#9254de', dash: '5 3', width: 1.2 },
   inactive:          { stroke: '#d9d9d9', dash: '5 3', width: 1.0 },
 };
@@ -110,6 +113,7 @@ const ARROW_IDS: Record<string, string> = {
   current_reachable: 'arr-blue',
   skipped: 'arr-gray',
   pruned: 'arr-gray',
+  bypassed: 'arr-gray',
   stale: 'arr-gray',
   inactive: 'arr-gray',
 };
@@ -193,6 +197,7 @@ function NodePopover({ node }: { node: SGNode }) {
           )}
           <span style={{ fontWeight: 600, fontSize: 14, color: '#141414', flex: 1 }}>{node.label}</span>
           <AttemptTag status={node.status} />
+          {node.is_stale && node.status !== 'stale' && <AttemptTag status='stale' />}
         </div>
         <div style={{ display: 'flex', gap: 14, fontSize: 12, color: '#8c8c8c' }}>
           <span>执行 {attempts.length} 次</span>
@@ -237,8 +242,8 @@ function NodePopover({ node }: { node: SGNode }) {
 
 // ─── SVG components ───────────────────────────────────────────────────────────
 function TerminalNode({ pn }: { pn: PosNode }) {
-  // __start__ → blue, __end__ → green
-  const fill = pn.id === '__start__' ? '#1677ff' : '#52c41a';
+	// __start__ is always active; __end__ turns green only when Go reports completion.
+	const fill = pn.id === '__start__' ? '#1677ff' : pn.data.status === 'succeeded' ? '#52c41a' : '#bfbfbf';
   const isEnd = pn.id === '__end__';
   return (
     <g>
@@ -281,6 +286,9 @@ function StepNode({ pn, svgRef }: { pn: PosNode; svgRef: React.RefObject<SVGSVGE
             <span style={{ display: 'inline-block', background: `${c.dot}20`, color: c.color, borderRadius: 6, fontSize: 11, fontWeight: 700, padding: '1px 6px', lineHeight: '18px' }}>
               {String(data.step_index).padStart(2, '0')}
             </span>
+          )}
+          {data.is_stale && data.status !== 'stale' && (
+            <span style={{ float: 'right', color: S.stale.color, fontSize: 10, lineHeight: '18px' }}>历史失效</span>
           )}
         </div>
         {/* Row 2: label */}

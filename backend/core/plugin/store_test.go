@@ -22,6 +22,7 @@ func newTestDB(t *testing.T) *orm.DB {
 		&orm.PluginSession{},
 		&orm.PluginSessionStep{},
 		&orm.PluginSlotRevision{},
+		&orm.PluginRunOutbox{},
 		&orm.PluginSlotOrder{},
 		&orm.PluginStepIntent{},
 	); err != nil {
@@ -207,6 +208,13 @@ func TestUpdateStepStatus(t *testing.T) {
 	step, _ = GetStepByTaskID(ctx, db.DB, "task-a")
 	if step.Status != StepStatusSucceeded {
 		t.Fatalf("expected succeeded, got %s", step.Status)
+	}
+	if err := UpdateStepStatus(ctx, db.DB, "task-a", StepStatusRunning); err != nil {
+		t.Fatalf("late running status: %v", err)
+	}
+	step, _ = GetStepByTaskID(ctx, db.DB, "task-a")
+	if step.Status != StepStatusSucceeded {
+		t.Fatalf("late start revived terminal step: %s", step.Status)
 	}
 }
 

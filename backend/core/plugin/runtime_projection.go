@@ -17,13 +17,29 @@ import (
 func loadSessionGraph(ctx context.Context, db *gorm.DB, session *orm.PluginSession) (*graphengine.CompiledStateGraph, error) {
 	if session.PluginRevisionID != "" {
 		var revision orm.PluginRevision
-		if err := db.WithContext(ctx).Where("id = ?", session.PluginRevisionID).First(&revision).Error; err == nil && len(revision.CompiledGraph) > 0 {
-			var graph graphengine.CompiledStateGraph
-			if err := json.Unmarshal(revision.CompiledGraph, &graph); err != nil {
-				return nil, fmt.Errorf("decode compiled graph: %w", err)
-			}
-			return &graph, nil
+		if err := db.WithContext(ctx).Where("id = ?", session.PluginRevisionID).First(&revision).Error; err != nil {
+			return nil, fmt.Errorf("load plugin revision %s: %w", session.PluginRevisionID, err)
 		}
+		if len(revision.CompiledGraph) == 0 {
+			return nil, fmt.Errorf("plugin revision %s has no compiled graph", session.PluginRevisionID)
+		}
+		var graph graphengine.CompiledStateGraph
+		if err := json.Unmarshal(revision.CompiledGraph, &graph); err != nil {
+			return nil, fmt.Errorf("decode compiled graph: %w", err)
+		}
+		if graph.SchemaVersion != graphengine.SchemaVersion || revision.GraphSchemaVersion != graphengine.SchemaVersion {
+			return nil, fmt.Errorf("unsupported compiled graph schema: graph=%q revision=%q supported=%q", graph.SchemaVersion, revision.GraphSchemaVersion, graphengine.SchemaVersion)
+		}
+		if graph.GraphHash == "" || revision.GraphHash == "" || graph.GraphHash != revision.GraphHash {
+			return nil, fmt.Errorf("compiled graph hash does not match revision metadata")
+		}
+		if session.GraphSchemaVersion != "" && session.GraphSchemaVersion != graph.SchemaVersion {
+			return nil, fmt.Errorf("session graph schema mismatch: session=%q revision=%q", session.GraphSchemaVersion, graph.SchemaVersion)
+		}
+		if session.GraphHash != "" && session.GraphHash != graph.GraphHash {
+			return nil, fmt.Errorf("session graph hash mismatch: session=%q revision=%q", session.GraphHash, graph.GraphHash)
+		}
+		return &graph, nil
 	}
 	// Compatibility path for built-ins and pre-v2 revisions. It is read-only;
 	// new publishes are required to persist a strict compiled graph.
@@ -45,8 +61,8 @@ func loadSessionGraph(ctx context.Context, db *gorm.DB, session *orm.PluginSessi
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return nil, err
 	}
-	compiled := graphengine.Compile(body.PluginYAML, body.StateYAML, body.Scenario, graphengine.ProfileEditor)
-	if compiled.Graph == nil {
+	compiled := graphengine.Compile(body.PluginYAML, body.StateYAML, body.Scenario, graphengine.ProfileRuntimeLoad)
+	if !compiled.Valid || compiled.Graph == nil {
 		return nil, fmt.Errorf("legacy plugin cannot be compiled: %v", compiled.Diagnostics)
 	}
 	return compiled.Graph, nil
@@ -91,12 +107,24 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 }
 
 type projectionResponse struct {
-	SessionID     string                          `json:"session_id"`
-	StateVersion  int64                           `json:"state_version"`
-	GraphHash     string                          `json:"graph_hash"`
-	SchemaVersion string                          `json:"schema_version"`
-	Projection    graphengine.Projection          `json:"projection"`
-	Graph         *graphengine.CompiledStateGraph `json:"graph"`
+	SessionID      string                           `json:"session_id"`
+	StateVersion   int64                            `json:"state_version"`
+	GraphHash      string                           `json:"graph_hash"`
+	SchemaVersion  string                           `json:"schema_version"`
+	Projection     graphengine.Projection           `json:"projection"`
+	Graph          *graphengine.CompiledStateGraph  `json:"graph"`
+	AttemptHistory map[string][]attemptHistoryDTO   `json:"attempt_history"`
+	InputWitnesses map[string][]graphengine.Witness `json:"input_witnesses"`
+}
+
+type attemptHistoryDTO struct {
+	Attempt       int     `json:"attempt"`
+	TaskID        string  `json:"task_id"`
+	Status        string  `json:"status"`
+	Validity      string  `json:"validity"`
+	DurationSec   float64 `json:"duration_sec"`
+	ArtifactCount int64   `json:"artifact_count"`
+	StartedAt     string  `json:"started_at"`
 }
 
 func projectSession(ctx context.Context, db *gorm.DB, session *orm.PluginSession) (projectionResponse, error) {
@@ -108,7 +136,43 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.PluginSession
 	if err != nil {
 		return projectionResponse{}, err
 	}
-	return projectionResponse{SessionID: session.ID, StateVersion: session.StateVersion, GraphHash: graph.GraphHash, SchemaVersion: graph.SchemaVersion, Projection: graphengine.Project(graph, snapshot), Graph: graph}, nil
+	attemptHistory := map[string][]attemptHistoryDTO{}
+	inputWitnesses := map[string][]graphengine.Witness{}
+	var attempts []orm.PluginSessionStep
+	if err := db.WithContext(ctx).Where("session_id = ?", session.ID).Order("created_at ASC").Find(&attempts).Error; err != nil {
+		return projectionResponse{}, err
+	}
+	for _, attempt := range attempts {
+		validity := attempt.Validity
+		if validity == "" {
+			validity = "effective"
+		}
+		var artifactCount int64
+		if attempt.TaskID != "" {
+			if err := db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).Where("task_id = ?", attempt.TaskID).Count(&artifactCount).Error; err != nil {
+				return projectionResponse{}, err
+			}
+		}
+		duration := attempt.UpdatedAt.Sub(attempt.CreatedAt).Seconds()
+		if duration < 0 {
+			duration = 0
+		}
+		attemptHistory[attempt.StepID] = append(attemptHistory[attempt.StepID], attemptHistoryDTO{
+			Attempt: attempt.Attempt, TaskID: attempt.TaskID, Status: attempt.Status, Validity: validity,
+			DurationSec: duration, ArtifactCount: artifactCount, StartedAt: attempt.CreatedAt.UTC().Format(time.RFC3339),
+		})
+		var bindings []orm.PluginAttemptInputBinding
+		if err := db.WithContext(ctx).Where("attempt_id = ?", attempt.ID).Order("created_at ASC").Find(&bindings).Error; err != nil {
+			return projectionResponse{}, err
+		}
+		for _, binding := range bindings {
+			inputWitnesses[attempt.ID] = append(inputWitnesses[attempt.ID], graphengine.Witness{MaterialID: binding.MaterialID, RevisionID: binding.MaterialRevisionID, BindAs: binding.BindAs})
+		}
+	}
+	return projectionResponse{
+		SessionID: session.ID, StateVersion: session.StateVersion, GraphHash: graph.GraphHash, SchemaVersion: graph.SchemaVersion,
+		Projection: graphengine.Project(graph, snapshot), Graph: graph, AttemptHistory: attemptHistory, InputWitnesses: inputWitnesses,
+	}, nil
 }
 
 func GetSessionProjection(w http.ResponseWriter, r *http.Request) {
@@ -134,26 +198,28 @@ func persistRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, att
 }
 
 func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, attemptID string) error {
-	var session orm.PluginSession
-	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
-		return err
-	}
-	graph, err := loadSessionGraph(ctx, db, &session)
-	if err != nil {
-		return err
-	}
-	snapshot, err := loadRuntimeSnapshot(ctx, db, sessionID)
-	if err != nil {
-		return err
-	}
-	decision := graphengine.DecideRoute(graph, from, snapshot.Materials)
-	if err := db.WithContext(ctx).Model(&orm.PluginRouteDecision{}).Where("session_id = ? AND from_step_id = ? AND validity = ?", sessionID, from, "effective").Update("validity", "stale").Error; err != nil {
-		return err
-	}
-	if err := persistRouteDecision(ctx, db, sessionID, from, attemptID, decision.Activated, decision.Pruned, decision.Bypassed, decision.Witnesses, session.StateVersion); err != nil {
-		return err
-	}
-	return reconcileSessionProjection(ctx, db, &session)
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var session orm.PluginSession
+		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+			return err
+		}
+		graph, err := loadSessionGraph(ctx, tx, &session)
+		if err != nil {
+			return err
+		}
+		snapshot, err := loadRuntimeSnapshot(ctx, tx, sessionID)
+		if err != nil {
+			return err
+		}
+		decision := graphengine.DecideRoute(graph, from, snapshot.Materials)
+		if err := tx.Model(&orm.PluginRouteDecision{}).Where("session_id = ? AND from_step_id = ? AND validity = ?", sessionID, from, "effective").Update("validity", "stale").Error; err != nil {
+			return err
+		}
+		if err := persistRouteDecision(ctx, tx, sessionID, from, attemptID, decision.Activated, decision.Pruned, decision.Bypassed, decision.Witnesses, session.StateVersion); err != nil {
+			return err
+		}
+		return reconcileSessionProjection(ctx, tx, &session)
+	})
 }
 
 // reconcileSessionProjection derives terminal state from the same projection

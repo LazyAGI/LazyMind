@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -435,6 +436,12 @@ func TestStopActivePluginSession_SendsTaskCancel(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
+	if _, err := subagent.CreateTask(ctx, db.DB, subagent.CreateTaskInput{
+		TaskID: "stop-task-1", ConversationID: "stop-conv-1", AgentType: "plugin_step",
+		Title: "analyze_subject", Objective: "analyze_subject", CreateUserID: "user-1",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
 	if _, err := CreateSessionStep(ctx, db.DB, "stop-sess-1", "analyze_subject", "stop-task-1", 1); err != nil {
 		t.Fatalf("CreateSessionStep: %v", err)
 	}
@@ -460,6 +467,122 @@ func TestStopActivePluginSession_SendsTaskCancel(t *testing.T) {
 
 	if taskCancelCalls == 0 {
 		t.Fatal("expected at least one /api/plugin/task-cancel call")
+	}
+}
+
+func TestStopActivePluginSession_CancelsAllPendingAndRunningAttempts(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "stop-sess-parallel", ConversationID: "stop-conv-parallel", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	for _, item := range []struct {
+		stepID string
+		taskID string
+		status string
+	}{
+		{stepID: "queued_branch", taskID: "stop-task-pending", status: StepStatusPending},
+		{stepID: "active_branch", taskID: "stop-task-running", status: StepStatusRunning},
+	} {
+		if _, err := subagent.CreateTask(ctx, db.DB, subagent.CreateTaskInput{
+			TaskID: item.taskID, ConversationID: "stop-conv-parallel", AgentType: "plugin_step",
+			Title: item.stepID, Objective: item.stepID, CreateUserID: "user-1",
+		}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", item.taskID, err)
+		}
+		if _, err := CreateSessionStep(ctx, db.DB, "stop-sess-parallel", item.stepID, item.taskID, 1); err != nil {
+			t.Fatalf("CreateSessionStep(%s): %v", item.taskID, err)
+		}
+		if item.status == StepStatusRunning {
+			if err := UpdateStepStatus(ctx, db.DB, item.taskID, item.status); err != nil {
+				t.Fatalf("UpdateStepStatus(%s): %v", item.taskID, err)
+			}
+		}
+	}
+
+	var mu sync.Mutex
+	cancelled := map[string]bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "task-cancel") {
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			cancelled[body["task_id"]] = true
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
+
+	StopActivePluginSession(ctx, db.DB, nil, "stop-conv-parallel")
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		allCancelled := cancelled["stop-task-pending"] && cancelled["stop-task-running"]
+		mu.Unlock()
+		if allCancelled {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	for _, taskID := range []string{"stop-task-pending", "stop-task-running"} {
+		task, err := subagent.GetTask(ctx, db.DB, taskID)
+		if err != nil || task == nil {
+			t.Fatalf("GetTask(%s): task=%v err=%v", taskID, task, err)
+		}
+		if task.Status != subagent.StatusInterrupted {
+			t.Errorf("task %s status = %q, want interrupted", taskID, task.Status)
+		}
+		step, err := GetStepByTaskID(ctx, db.DB, taskID)
+		if err != nil || step == nil {
+			t.Fatalf("GetStepByTaskID(%s): step=%v err=%v", taskID, step, err)
+		}
+		if step.Status != StepStatusInterrupted {
+			t.Errorf("step %s status = %q, want interrupted", taskID, step.Status)
+		}
+		mu.Lock()
+		wasCancelled := cancelled[taskID]
+		mu.Unlock()
+		if !wasCancelled {
+			t.Errorf("task %s did not receive a Python cancel request", taskID)
+		}
+	}
+}
+
+func TestPluginRunOutboxDoesNotDispatchInterruptedTask(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	const taskID = "outbox-interrupted-task"
+	if _, err := subagent.CreateTask(ctx, db.DB, subagent.CreateTaskInput{
+		TaskID: taskID, ConversationID: "outbox-conv", AgentType: "plugin_step",
+		Title: "outbox", Objective: "outbox", CreateUserID: "user-1",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := enqueuePluginAttemptRunner(ctx, db.DB, subagent.RunRequest{TaskID: taskID, AgentType: "plugin_step"}); err != nil {
+		t.Fatalf("enqueuePluginAttemptRunner: %v", err)
+	}
+	if err := subagent.UpdateFinalStatus(ctx, db.DB, taskID, subagent.StatusInterrupted, "stopped"); err != nil {
+		t.Fatalf("interrupt task: %v", err)
+	}
+	dispatchPluginAttemptRunner(db.DB, nil, taskID)
+
+	var row orm.PluginRunOutbox
+	if err := db.Where("task_id = ?", taskID).First(&row).Error; err != nil {
+		t.Fatalf("load outbox: %v", err)
+	}
+	if row.Status != "completed" {
+		t.Fatalf("interrupted task outbox status = %q, want completed", row.Status)
+	}
+	task, err := subagent.GetTask(ctx, db.DB, taskID)
+	if err != nil || task.Status != subagent.StatusInterrupted {
+		t.Fatalf("dispatch revived interrupted task: task=%#v err=%v", task, err)
 	}
 }
 

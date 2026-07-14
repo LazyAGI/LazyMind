@@ -128,7 +128,10 @@ func Run(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunReques
 func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent) {
 	switch ev.Type {
 	case "task_start":
-		_ = UpdateStatus(ctx, db, ev.TaskID, StatusRunning)
+		accepted, _ := AcceptTaskStart(ctx, db, ev.TaskID)
+		if !accepted {
+			return
+		}
 		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": StatusRunning, "progress": 0})
 		// Mirror running status into plugin_session_steps if this is a plugin_step task.
 		routePluginStepStatus(ctx, db, stateStore, ev.TaskID, StatusRunning, "")
@@ -152,7 +155,10 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 		if status == "" {
 			status = StatusSucceeded
 		}
-		_ = UpdateFinalStatus(ctx, db, ev.TaskID, status, ev.Summary)
+		accepted, _ := AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Summary)
+		if !accepted {
+			return
+		}
 		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{
 			"status": status, "progress": 100, "summary": ev.Summary,
 		})
@@ -163,21 +169,24 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 		if status == "" {
 			status = StatusFailed
 		}
-		_ = UpdateFinalStatus(ctx, db, ev.TaskID, status, ev.Message)
+		accepted, _ := AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Message)
+		if !accepted {
+			return
+		}
 		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": status, "summary": ev.Message})
 		routePluginStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Message)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
 }
 
-// routeError synthesizes a terminal error event when the run cannot be driven by the stream.
-// The actual DB write is protected at the UpdateFinalStatus layer: "failed" will never overwrite
-// an already-terminal "interrupted" or "succeeded" status, so a race between
-// StopActivePluginSession (which writes interrupted) and the SSE EOF handler (which calls us)
-// cannot silently downgrade interrupted → failed.
+// routeError synthesizes a terminal error event when the run cannot be driven by
+// the stream. AcceptFinalStatus ignores it if an explicit stop won the race.
 func routeError(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, message string) {
 	ev := TaskEvent{Type: "error", TaskID: taskID, Status: StatusFailed, Message: message}
-	_ = UpdateFinalStatus(ctx, db, taskID, StatusFailed, message)
+	accepted, _ := AcceptFinalStatus(ctx, db, taskID, StatusFailed, message)
+	if !accepted {
+		return
+	}
 	_ = WriteStatus(ctx, stateStore, taskID, map[string]any{"status": StatusFailed, "summary": message})
 	_ = AppendStreamEvent(ctx, stateStore, taskID, ev)
 	routePluginStepStatus(ctx, db, stateStore, taskID, StatusFailed, message)

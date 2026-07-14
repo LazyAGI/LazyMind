@@ -55,8 +55,20 @@ func Project(graph *CompiledStateGraph, snapshot RuntimeSnapshot) Projection {
 	}
 	materials := snapshot.Materials
 	routes := map[string]RouteFact{}
+	staleEdgeStates := map[string]bool{}
 	for _, route := range snapshot.Routes {
-		if route.Validity != "stale" {
+		if route.Validity == "stale" {
+			for _, to := range append(append([]string{}, route.Activated...), route.Pruned...) {
+				staleEdgeStates[route.From+"->"+to] = true
+			}
+			for _, bypassID := range route.Bypassed {
+				for _, edge := range graph.ControlEdges {
+					if edge.From == bypassID || edge.To == bypassID {
+						staleEdgeStates[projectedEdgeKey(edge)] = true
+					}
+				}
+			}
+		} else {
 			routes[route.From] = route
 		}
 	}
@@ -82,6 +94,11 @@ func Project(graph *CompiledStateGraph, snapshot RuntimeSnapshot) Projection {
 		}
 		for _, id := range frozenBypassed {
 			bypassed[id] = true
+			for _, edge := range graph.ControlEdges {
+				if edge.From == id || edge.To == id {
+					edgeStates[projectedEdgeKey(edge)] = "bypassed"
+				}
+			}
 		}
 		for _, to := range pruned {
 			prunedTargets[to] = true
@@ -108,6 +125,9 @@ func Project(graph *CompiledStateGraph, snapshot RuntimeSnapshot) Projection {
 		node := NodeProjection{ID: id, Execution: "none", Validity: "effective", Reachability: "unreachable", Readiness: "not_applicable", Branch: "active", Evaluation: Evaluation{Satisfied: true}}
 		if stale[id] {
 			projection.Stale = append(projection.Stale, id)
+			if !hasAttempt {
+				node.Validity = "stale"
+			}
 		}
 		if hasAttempt {
 			node.Execution = attempt.Status
@@ -142,15 +162,27 @@ func Project(graph *CompiledStateGraph, snapshot RuntimeSnapshot) Projection {
 		projection.Nodes[id] = node
 	}
 	for _, edge := range graph.ControlEdges {
-		state := edgeStates[edge.ID]
+		key := projectedEdgeKey(edge)
+		state := edgeStates[key]
 		if state == "" {
-			state = "inactive"
+			if staleEdgeStates[key] {
+				state = "stale"
+			} else {
+				state = "inactive"
+			}
 		}
 		projection.Edges = append(projection.Edges, ProjectedEdge{From: edge.From, To: edge.To, State: state})
 	}
 	projection.Completed = projection.EndReached && len(projection.Current) == 0 && len(projection.Ready) == 0 && len(projection.Blocked) == 0
 	sortProjection(&projection)
 	return projection
+}
+
+func projectedEdgeKey(edge CompiledEdge) string {
+	if edge.ID != "" {
+		return edge.ID
+	}
+	return edge.From + "->" + edge.To
 }
 
 func sortProjection(p *Projection) {

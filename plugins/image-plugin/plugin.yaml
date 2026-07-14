@@ -63,6 +63,11 @@ slots:
     cardinality: single
     summary_max_chars: 200
 
+  - id: edit_route
+    label: Edit Route Token
+    type: text
+    cardinality: single
+
   - id: material_images
     label: Reference Materials
     type: image
@@ -86,8 +91,13 @@ slots:
     cardinality: list
     ordered: true
 
-  - id: image_output
-    label: Raw Image
+  - id: raw_source_image
+    label: Raw Source Image
+    type: image
+    cardinality: single
+
+  - id: generated_image_output
+    label: Generated Image
     type: image
     cardinality: single
 
@@ -105,6 +115,7 @@ ui:
       slots:
         - id: material_images
         - id: material_summary
+        - id: raw_source_image
 
     - id: prompt
       label: Prompt
@@ -116,7 +127,7 @@ ui:
       label: Result
       layout: horizontal
       slots:
-        - id: image_output
+        - id: generated_image_output
         - id: enhanced_image_output
 
 i18n:

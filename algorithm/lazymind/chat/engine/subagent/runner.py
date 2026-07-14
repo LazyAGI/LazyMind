@@ -456,6 +456,20 @@ async def run_subagent_stream(
             yield 'data: [DONE]\n\n'
             return
 
+        # Go persists an accepted task before launching this request. A user stop
+        # may race with the launch and mark that pending task interrupted first.
+        # Treat the persisted terminal state as authoritative and never revive the
+        # task by emitting task_start after it has already been cancelled.
+        if str(task.get('status') or '') in {'interrupted', 'canceled'}:
+            yield _sse({
+                'type': 'done',
+                'task_id': task_id,
+                'status': 'interrupted',
+                'summary': str(task.get('summary') or 'stopped by user'),
+            })
+            yield 'data: [DONE]\n\n'
+            return
+
         output_keys = _coerce_str_list(task.get('output_slots'))
         input_keys = _coerce_str_list(task.get('input_slots'))
         params = _coerce_dict(task.get('params'))
@@ -640,10 +654,21 @@ async def run_subagent_stream(
             yield _sse({'type': ev_type, 'task_id': task_id,
                         'think': frame.get('think'), 'text': frame.get('text')})
 
+        # Flush required drafts before checking graph material guarantees.
+        if effective_agent_type == 'plugin_step' and required_output_keys:
+            _auto_flush_drafts(ctx, db)
+
         # Completeness check: every required output key must have at least one artifact.
         saved = set(ctx.saved_keys())
         missing = [k for k in required_output_keys if k not in saved]
         if missing:
+            if effective_agent_type == 'plugin_step':
+                cost = round(time.time() - start_time, 3)
+                message = f'缺少必需产出素材: {", ".join(missing)}'
+                yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
+                            'summary': message, 'message': message, 'cost': cost})
+                yield 'data: [DONE]\n\n'
+                return
             steps = db.load_steps(task_id)
             is_ok, eval_summary = _evaluate_completion(
                 llm=llm,

@@ -150,45 +150,74 @@ func StartPluginSession(w http.ResponseWriter, r *http.Request) {
 		req.TaskID = uuid.NewString()
 	}
 	handOff := req.HandOff
-	params := PluginStepParams{PluginID: req.PluginID, PluginRef: req.PluginRef, RevisionID: req.PluginRevisionID, RevisionNo: req.PluginRevisionNo, TreeHash: req.PluginTreeHash, RemoteRoot: req.PluginRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, PluginMode: req.PluginMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters}
+	params := PluginStepParams{PluginID: req.PluginID, PluginRef: req.PluginRef, RevisionID: req.PluginRevisionID, RevisionNo: req.PluginRevisionNo, TreeHash: req.PluginTreeHash, RemoteRoot: req.PluginRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, PluginMode: req.PluginMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs}
 	nodeDef := graph.Nodes[req.TargetStepID]
-	sessionID, taskID, _, launchErr := launchPluginAttempt(r.Context(), store.DB(), store.State(), req.ConversationID, req.TriggerHistoryID, req.UserID, req.TaskID, req.PluginID+":"+req.TargetStepID, req.Objective, params, graphengine.Materials(nodeDef.Input), nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false)
-	if launchErr != nil {
-		response := transitionCommandResponse{Accepted: false, CommandID: req.CommandID, Error: &transitionError{Code: "TRANSITION_LAUNCH_FAILED", Message: launchErr.Error(), Retryable: true}}
-		_ = persistTransitionCommand(store.DB(), req, response, "rejected")
-		writeTransitionResponse(w, response, http.StatusServiceUnavailable)
-		return
+	inputKeys := graphengine.Materials(nodeDef.Input)
+	for _, optional := range nodeDef.OptionalInputs {
+		inputKeys = append(inputKeys, optional.Material)
 	}
-	_ = store.DB().Model(&orm.PluginSession{}).Where("id = ?", sessionID).Updates(map[string]any{"state_version": 1, "graph_hash": graph.GraphHash, "graph_schema_version": graph.SchemaVersion}).Error
-	now := time.Now().UTC()
-	revisionIDs := map[string]string{}
-	for _, material := range externalMaterials {
-		revisionID := "psr_" + common.GenerateID()
-		revisionIDs[material.MaterialID] = revisionID
-		content, _ := json.Marshal(map[string]any{"value": req.ExternalMaterials[material.MaterialID], "source": "external"})
-		_ = store.DB().Create(&orm.PluginSlotRevision{ID: revisionID, SessionID: sessionID, SlotID: material.MaterialID, Revision: 1, Selected: true, ContentSnapshot: content, ChangeSource: "human", Slot: material.MaterialID, StepID: "__start__", Attempt: 0, Validity: "effective", CreatedAt: now}).Error
-	}
-	materialFacts := make([]graphengine.MaterialValue, 0, len(revisionIDs))
-	for materialID, revisionID := range revisionIDs {
-		materialFacts = append(materialFacts, graphengine.MaterialValue{MaterialID: materialID, RevisionID: revisionID, Valid: true})
-	}
-	startDecision := graphengine.DecideRoute(graph, "__start__", materialFacts)
-	_ = persistRouteDecision(r.Context(), store.DB(), sessionID, "__start__", "", startDecision.Activated, startDecision.Pruned, startDecision.Bypassed, startDecision.Witnesses, 1)
-	var attempt orm.PluginSessionStep
-	if store.DB().Where("task_id = ?", taskID).First(&attempt).Error == nil {
-		for _, witness := range node.Evaluation.Witnesses {
+	var sessionID, taskID string
+	var response transitionCommandResponse
+	launchErr := store.DB().Transaction(func(tx *gorm.DB) error {
+		var err error
+		sessionID, taskID, _, err = launchPluginAttempt(r.Context(), tx, store.State(), req.ConversationID, req.TriggerHistoryID, req.UserID, req.TaskID, req.PluginID+":"+req.TargetStepID, req.Objective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.PluginSession{}).Where("id = ?", sessionID).Updates(map[string]any{"state_version": 1, "graph_hash": graph.GraphHash, "graph_schema_version": graph.SchemaVersion}).Error; err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		revisionIDs := map[string]string{}
+		for _, material := range externalMaterials {
+			revisionID := "psr_" + common.GenerateID()
+			revisionIDs[material.MaterialID] = revisionID
+			content, _ := json.Marshal(map[string]any{"value": req.ExternalMaterials[material.MaterialID], "source": "external"})
+			if err := tx.Create(&orm.PluginSlotRevision{ID: revisionID, SessionID: sessionID, SlotID: material.MaterialID, Revision: 1, Selected: true, ContentSnapshot: content, ChangeSource: "human", Slot: material.MaterialID, StepID: "__start__", Attempt: 0, Validity: "effective", CreatedAt: now}).Error; err != nil {
+				return err
+			}
+		}
+		materialFacts := make([]graphengine.MaterialValue, 0, len(revisionIDs))
+		for materialID, revisionID := range revisionIDs {
+			materialFacts = append(materialFacts, graphengine.MaterialValue{MaterialID: materialID, RevisionID: revisionID, Valid: true})
+		}
+		startDecision := graphengine.DecideRoute(graph, "__start__", materialFacts)
+		if err := persistRouteDecision(r.Context(), tx, sessionID, "__start__", "", startDecision.Activated, startDecision.Pruned, startDecision.Bypassed, startDecision.Witnesses, 1); err != nil {
+			return err
+		}
+		var attempt orm.PluginSessionStep
+		if err := tx.Where("task_id = ?", taskID).First(&attempt).Error; err != nil {
+			return err
+		}
+		witnesses := append([]graphengine.Witness{}, node.Evaluation.Witnesses...)
+		witnesses = append(witnesses, graphengine.EvaluateOptional(nodeDef.OptionalInputs, materialFacts).Witnesses...)
+		for _, witness := range witnesses {
 			revisionID := revisionIDs[witness.MaterialID]
 			if revisionID == "" {
 				continue
 			}
-			_ = store.DB().Create(&orm.PluginAttemptInputBinding{ID: "paib_" + common.GenerateID(), SessionID: sessionID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: revisionID, BindAs: witness.BindAs, CreatedAt: now}).Error
+			if err := tx.Create(&orm.PluginAttemptInputBinding{ID: "paib_" + common.GenerateID(), SessionID: sessionID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: revisionID, BindAs: witness.BindAs, CreatedAt: now}).Error; err != nil {
+				return err
+			}
 		}
+		var session orm.PluginSession
+		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+			return err
+		}
+		projected, err := projectSession(r.Context(), tx, &session)
+		if err != nil {
+			return err
+		}
+		response = transitionCommandResponse{Accepted: true, CommandID: req.CommandID, SessionID: sessionID, TaskID: taskID, StateVersion: 1, StepState: "pending", Projection: projected.Projection}
+		return persistTransitionCommand(tx, req, response, "accepted")
+	})
+	if launchErr != nil {
+		response = transitionCommandResponse{Accepted: false, CommandID: req.CommandID, Error: &transitionError{Code: "TRANSITION_LAUNCH_FAILED", Message: launchErr.Error(), Retryable: true}}
+		_ = persistTransitionCommand(store.DB(), req, response, "rejected")
+		writeTransitionResponse(w, response, http.StatusServiceUnavailable)
+		return
 	}
-	var session orm.PluginSession
-	_ = store.DB().Where("id = ?", sessionID).First(&session).Error
-	projected, _ := projectSession(r.Context(), store.DB(), &session)
-	response := transitionCommandResponse{Accepted: true, CommandID: req.CommandID, SessionID: sessionID, TaskID: taskID, StateVersion: 1, StepState: "pending", Projection: projected.Projection}
-	_ = persistTransitionCommand(store.DB(), req, response, "accepted")
+	dispatchPluginAttemptRunner(store.DB(), store.State(), taskID)
 	writeTransitionResponse(w, response, http.StatusOK)
 }
 
@@ -294,11 +323,15 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.TaskID == "" {
+		req.TaskID = uuid.NewString()
+	}
 
 	var session orm.PluginSession
 	var graph *graphengine.CompiledStateGraph
-	var evaluation graphengine.Evaluation
 	var reservedVersion int64
+	var taskID string
+	var response transitionCommandResponse
 	var rejection *transitionRejection
 	err := store.DB().Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND dismissed = false", common.PathVar(r, "session_id")).First(&session).Error; err != nil {
@@ -333,7 +366,11 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			if invalidErr := invalidateForOperation(r.Context(), tx, &session, graph, req.CommandID, req.Operation, req.TargetStepID); invalidErr != nil {
 				return invalidErr
 			}
-			snapshot, _ = loadRuntimeSnapshot(r.Context(), tx, session.ID)
+			var reloadErr error
+			snapshot, reloadErr = loadRuntimeSnapshot(r.Context(), tx, session.ID)
+			if reloadErr != nil {
+				return reloadErr
+			}
 			projection = graphengine.Project(graph, snapshot)
 		}
 		node := projection.Nodes[req.TargetStepID]
@@ -343,7 +380,8 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 		if node.Readiness != "ready" {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STEP_NOT_READY", "target step input expression is not satisfied", false, map[string]any{"missing_groups": node.Evaluation.MissingGroups, "ready": projection.Ready})
 		}
-		evaluation = node.Evaluation
+		evaluation := node.Evaluation
+		evaluation.Witnesses = append(evaluation.Witnesses, graphengine.EvaluateOptional(graph.Nodes[req.TargetStepID].OptionalInputs, snapshot.Materials).Witnesses...)
 		update := tx.Model(&orm.PluginSession{}).Where("id = ? AND state_version = ?", session.ID, session.StateVersion).Updates(map[string]any{"state_version": gorm.Expr("state_version + 1"), "updated_at": time.Now().UTC()})
 		if update.Error != nil {
 			return update.Error
@@ -352,7 +390,35 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STATE_VERSION_CONFLICT", "plugin session state changed during transition", true, nil)
 		}
 		reservedVersion = session.StateVersion + 1
-		return nil
+		handOff := req.HandOff
+		nodeDef := graph.Nodes[req.TargetStepID]
+		inputKeys := graphengine.Materials(nodeDef.Input)
+		for _, optional := range nodeDef.OptionalInputs {
+			inputKeys = append(inputKeys, optional.Material)
+		}
+		params := PluginStepParams{PluginID: session.PluginID, PluginRef: session.PluginRef, RevisionID: session.PluginRevisionID, RevisionNo: session.PluginRevisionNo, TreeHash: session.PluginTreeHash, RemoteRoot: session.PluginRemoteRoot, StepID: req.TargetStepID, SessionID: session.ID, UserInput: req.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, PluginMode: req.PluginMode, RetryHint: req.RuntimeInstruction, PartialIndices: req.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs}
+		var launchErr error
+		_, taskID, _, launchErr = launchPluginAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, req.TaskID, session.PluginID+":"+req.TargetStepID, req.Objective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
+		if launchErr != nil {
+			return launchErr
+		}
+		var attempt orm.PluginSessionStep
+		if err := tx.Where("task_id = ?", taskID).First(&attempt).Error; err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		for _, witness := range evaluation.Witnesses {
+			if err := tx.Create(&orm.PluginAttemptInputBinding{ID: "paib_" + common.GenerateID(), SessionID: session.ID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: witness.RevisionID, BindAs: witness.BindAs, CreatedAt: now}).Error; err != nil {
+				return err
+			}
+		}
+		session.StateVersion = reservedVersion
+		projected, err := projectSession(r.Context(), tx, &session)
+		if err != nil {
+			return err
+		}
+		response = transitionCommandResponse{Accepted: true, CommandID: req.CommandID, SessionID: session.ID, TaskID: taskID, StateVersion: reservedVersion, StepState: "pending", Projection: projected.Projection}
+		return persistTransitionCommand(tx, req, response, "accepted")
 	})
 	if err != nil {
 		if errors.As(err, &rejection) {
@@ -360,37 +426,12 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			writeTransitionResponse(w, rejection.response, rejection.status)
 			return
 		}
-		common.ReplyErr(w, "transition validation failed: "+err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-	if req.TaskID == "" {
-		req.TaskID = uuid.NewString()
-	}
-	handOff := req.HandOff
-	node := graph.Nodes[req.TargetStepID]
-	inputKeys := graphengine.Materials(node.Input)
-	for _, optional := range node.OptionalInputs {
-		inputKeys = append(inputKeys, optional.Material)
-	}
-	params := PluginStepParams{PluginID: session.PluginID, PluginRef: session.PluginRef, RevisionID: session.PluginRevisionID, RevisionNo: session.PluginRevisionNo, TreeHash: session.PluginTreeHash, RemoteRoot: session.PluginRemoteRoot, StepID: req.TargetStepID, SessionID: session.ID, UserInput: req.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, PluginMode: req.PluginMode, RetryHint: req.RuntimeInstruction, PartialIndices: req.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, UserID: session.CreateUserID}
-	_, taskID, _, launchErr := launchPluginAttempt(r.Context(), store.DB(), store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, req.TaskID, session.PluginID+":"+req.TargetStepID, req.Objective, params, inputKeys, node.Outputs, req.LLMConfig, req.ToolConfig, false)
-	if launchErr != nil {
-		response := transitionCommandResponse{Accepted: false, CommandID: req.CommandID, SessionID: session.ID, StateVersion: reservedVersion, Error: &transitionError{Code: "TRANSITION_LAUNCH_FAILED", Message: launchErr.Error(), Retryable: true}}
+		response = transitionCommandResponse{Accepted: false, CommandID: req.CommandID, SessionID: session.ID, StateVersion: session.StateVersion, Error: &transitionError{Code: "TRANSITION_LAUNCH_FAILED", Message: err.Error(), Retryable: true}}
 		_ = persistTransitionCommand(store.DB(), req, response, "rejected")
 		writeTransitionResponse(w, response, http.StatusServiceUnavailable)
 		return
 	}
-	var attempt orm.PluginSessionStep
-	if store.DB().Where("task_id = ?", taskID).First(&attempt).Error == nil {
-		now := time.Now().UTC()
-		for _, witness := range evaluation.Witnesses {
-			_ = store.DB().Create(&orm.PluginAttemptInputBinding{ID: "paib_" + common.GenerateID(), SessionID: session.ID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: witness.RevisionID, BindAs: witness.BindAs, CreatedAt: now}).Error
-		}
-	}
-	session.StateVersion = reservedVersion
-	projection, _ := projectSession(r.Context(), store.DB(), &session)
-	response := transitionCommandResponse{Accepted: true, CommandID: req.CommandID, SessionID: session.ID, TaskID: taskID, StateVersion: reservedVersion, StepState: "pending", Projection: projection.Projection}
-	_ = persistTransitionCommand(store.DB(), req, response, "accepted")
+	dispatchPluginAttemptRunner(store.DB(), store.State(), taskID)
 	writeTransitionResponse(w, response, http.StatusOK)
 }
 
@@ -423,11 +464,17 @@ func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.Plugi
 			return err
 		}
 		var outputs []orm.PluginSlotRevision
-		tx.Where("session_id = ? AND ((producer_attempt_id = ? AND producer_attempt_id != '') OR (step_id = ? AND attempt = ?))", session.ID, current.ID, current.StepID, current.Attempt).Find(&outputs)
+		if err := tx.Where("session_id = ? AND ((producer_attempt_id = ? AND producer_attempt_id != '') OR (step_id = ? AND attempt = ?))", session.ID, current.ID, current.StepID, current.Attempt).Find(&outputs).Error; err != nil {
+			return err
+		}
 		for _, output := range outputs {
-			_ = tx.Model(&orm.PluginSlotRevision{}).Where("id = ?", output.ID).Updates(map[string]any{"validity": "stale", "selected": false}).Error
+			if err := tx.Model(&orm.PluginSlotRevision{}).Where("id = ?", output.ID).Updates(map[string]any{"validity": "stale", "selected": false}).Error; err != nil {
+				return err
+			}
 			var bindings []orm.PluginAttemptInputBinding
-			tx.Where("material_revision_id = ?", output.ID).Find(&bindings)
+			if err := tx.Where("material_revision_id = ?", output.ID).Find(&bindings).Error; err != nil {
+				return err
+			}
 			for _, binding := range bindings {
 				var consumer orm.PluginSessionStep
 				if tx.Where("id = ? AND validity = ?", binding.AttemptID, "effective").First(&consumer).Error == nil {
@@ -435,7 +482,9 @@ func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.Plugi
 				}
 			}
 			var decisions []orm.PluginRouteDecision
-			tx.Where("session_id = ? AND validity = ?", session.ID, "effective").Find(&decisions)
+			if err := tx.Where("session_id = ? AND validity = ?", session.ID, "effective").Find(&decisions).Error; err != nil {
+				return err
+			}
 			for _, decision := range decisions {
 				var witnesses []graphengine.Witness
 				_ = json.Unmarshal(decision.WitnessJSON, &witnesses)
@@ -447,22 +496,32 @@ func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.Plugi
 					}
 				}
 				if usesRevision {
-					enqueueExclusiveRouteAttempts(tx, session.ID, decision, &queue)
-					_ = tx.Model(&orm.PluginRouteDecision{}).Where("id = ?", decision.ID).Update("validity", "stale").Error
+					if err := enqueueExclusiveRouteAttempts(tx, session.ID, decision, &queue); err != nil {
+						return err
+					}
+					if err := tx.Model(&orm.PluginRouteDecision{}).Where("id = ?", decision.ID).Update("validity", "stale").Error; err != nil {
+						return err
+					}
 				}
 			}
 		}
 		var sourceDecisions []orm.PluginRouteDecision
-		tx.Where("session_id = ? AND source_attempt_id IN ? AND validity = ?", session.ID, []string{current.ID, current.TaskID}, "effective").Find(&sourceDecisions)
+		if err := tx.Where("session_id = ? AND source_attempt_id IN ? AND validity = ?", session.ID, []string{current.ID, current.TaskID}, "effective").Find(&sourceDecisions).Error; err != nil {
+			return err
+		}
 		for _, decision := range sourceDecisions {
-			enqueueExclusiveRouteAttempts(tx, session.ID, decision, &queue)
-			_ = tx.Model(&orm.PluginRouteDecision{}).Where("id = ?", decision.ID).Update("validity", "stale").Error
+			if err := enqueueExclusiveRouteAttempts(tx, session.ID, decision, &queue); err != nil {
+				return err
+			}
+			if err := tx.Model(&orm.PluginRouteDecision{}).Where("id = ?", decision.ID).Update("validity", "stale").Error; err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func enqueueExclusiveRouteAttempts(tx *gorm.DB, sessionID string, decision orm.PluginRouteDecision, queue *[]orm.PluginSessionStep) {
+func enqueueExclusiveRouteAttempts(tx *gorm.DB, sessionID string, decision orm.PluginRouteDecision, queue *[]orm.PluginSessionStep) error {
 	var targets []string
 	_ = json.Unmarshal(decision.ActivatedJSON, &targets)
 	for _, target := range targets {
@@ -470,7 +529,9 @@ func enqueueExclusiveRouteAttempts(tx *gorm.DB, sessionID string, decision orm.P
 			continue
 		}
 		var other []orm.PluginRouteDecision
-		tx.Where("session_id = ? AND validity = ? AND id != ?", sessionID, "effective", decision.ID).Find(&other)
+		if err := tx.Where("session_id = ? AND validity = ? AND id != ?", sessionID, "effective", decision.ID).Find(&other).Error; err != nil {
+			return err
+		}
 		stillActivated := false
 		for _, candidate := range other {
 			var activated []string
@@ -489,10 +550,14 @@ func enqueueExclusiveRouteAttempts(tx *gorm.DB, sessionID string, decision orm.P
 			continue
 		}
 		var attempt orm.PluginSessionStep
-		if tx.Where("session_id = ? AND step_id = ? AND validity = ?", sessionID, target, "effective").Order("attempt DESC").First(&attempt).Error == nil {
+		query := tx.Where("session_id = ? AND step_id = ? AND validity = ?", sessionID, target, "effective").Order("attempt DESC").First(&attempt)
+		if query.Error == nil {
 			*queue = append(*queue, attempt)
+		} else if !errors.Is(query.Error, gorm.ErrRecordNotFound) {
+			return query.Error
 		}
 	}
+	return nil
 }
 
 func GetTransitionCommand(w http.ResponseWriter, r *http.Request) {

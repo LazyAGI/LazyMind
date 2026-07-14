@@ -45,13 +45,14 @@ type ProducerRef struct {
 }
 
 type CompiledNode struct {
-	ID             string        `json:"id"`
-	Label          string        `json:"label,omitempty"`
-	Route          string        `json:"route"`
-	Input          *Expression   `json:"input_expression,omitempty"`
-	OptionalInputs []MaterialRef `json:"optional_inputs,omitempty"`
-	Outputs        []string      `json:"outputs,omitempty"`
-	SkipIf         *Expression   `json:"skip_if,omitempty"`
+	ID              string        `json:"id"`
+	Label           string        `json:"label,omitempty"`
+	Route           string        `json:"route"`
+	Input           *Expression   `json:"input_expression,omitempty"`
+	OptionalInputs  []MaterialRef `json:"optional_inputs,omitempty"`
+	Outputs         []string      `json:"outputs,omitempty"`
+	RequiredOutputs []string      `json:"required_outputs,omitempty"`
+	SkipIf          *Expression   `json:"skip_if,omitempty"`
 }
 
 type CompiledEdge struct {
@@ -156,7 +157,7 @@ type Projection struct {
 type ProjectedEdge struct {
 	From  string `json:"from"`
 	To    string `json:"to"`
-	State string `json:"state"` // inactive | active | pruned | stale
+	State string `json:"state"` // inactive | active | pruned | bypassed | stale
 }
 
 type RouteDecision struct {

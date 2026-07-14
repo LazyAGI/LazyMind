@@ -55,6 +55,16 @@ slots:
     type: text
     cardinality: single
     summary_max_chars: 600
+  - id: writing_context_after_outline
+    label: Writing Context After Outline
+    type: text
+    cardinality: single
+    summary_max_chars: 600
+  - id: writing_context_after_draft
+    label: Writing Context After Draft
+    type: text
+    cardinality: single
+    summary_max_chars: 600
   - id: outline
     label: Outline
     type: text
@@ -106,7 +116,7 @@ ui:
       layout: list
       slots:
         - id: outline
-        - id: writing_context
+        - id: writing_context_after_outline
 
     - id: plan_sections
       step_id: plan_sections
@@ -122,7 +132,7 @@ ui:
       slots:
         - id: draft_sections
         - id: draft_document
-        - id: writing_context
+        - id: writing_context_after_draft
 
     - id: review
       step_id: review_document

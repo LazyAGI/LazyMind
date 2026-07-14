@@ -6,15 +6,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
+	"time"
 
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
+	"lazymind/core/common/orm"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
 )
+
+var pluginOutboxDispatcherOnce sync.Once
 
 // RegisterSubAgentHooks wires plugin lifecycle hooks into the subagent EventHooks.
 // Must be called once at application startup (after store is initialized).
@@ -30,6 +35,60 @@ func RegisterSubAgentHooks() {
 			StopActivePluginSession(ctx, db, stateStore, convID)
 		}
 		go NotifyChatCancel(convID)
+	}
+}
+
+// RecoverPendingPluginRuns closes the accepted-but-not-started crash window.
+// Pending items are safe to claim once; dispatching items belonged to a worker
+// in the previous process and are made explicitly interrupted instead of being
+// silently retried or left running forever.
+func RecoverPendingPluginRuns() {
+	pluginOutboxDispatcherOnce.Do(func() {
+		recoverPluginRunOutboxOnce()
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				dispatchPendingPluginRuns()
+			}
+		}()
+	})
+}
+
+func recoverPluginRunOutboxOnce() {
+	db := store.DB()
+	if db == nil {
+		return
+	}
+	ctx := context.Background()
+	var abandoned []orm.PluginRunOutbox
+	if err := db.WithContext(ctx).Where("status = ?", "dispatching").Find(&abandoned).Error; err == nil {
+		for _, row := range abandoned {
+			reason := "plugin worker interrupted by backend restart"
+			_ = subagent.UpdateFinalStatus(ctx, db, row.TaskID, subagent.StatusInterrupted, reason)
+			_ = UpdateStepStatus(ctx, db, row.TaskID, StepStatusInterrupted)
+			if pctx := loadPluginChatContextFromDB(ctx, db, row.TaskID); pctx != nil {
+				_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+			}
+			_ = db.Model(&orm.PluginRunOutbox{}).Where("task_id = ?", row.TaskID).
+				Updates(map[string]any{"status": "failed", "last_error": reason, "updated_at": time.Now().UTC()}).Error
+		}
+	}
+	dispatchPendingPluginRuns()
+}
+
+func dispatchPendingPluginRuns() {
+	db := store.DB()
+	if db == nil {
+		return
+	}
+	ctx := context.Background()
+	var pending []orm.PluginRunOutbox
+	if err := db.WithContext(ctx).Where("status = ?", "pending").Order("created_at ASC").Find(&pending).Error; err != nil {
+		return
+	}
+	for _, row := range pending {
+		dispatchPluginAttemptRunner(db, store.State(), row.TaskID)
 	}
 }
 
@@ -97,7 +156,7 @@ func loadPluginChatContextFromDB(ctx context.Context, db *gorm.DB, taskID string
 	}
 }
 
-// StopActivePluginSession marks all running steps as interrupted and puts the session
+// StopActivePluginSession marks all queued or running steps as interrupted and puts the session
 // into waiting status. Python task cancellation and UI notification use the generic
 // task lifecycle paths; no plugin-specific step completion queue is involved.
 func StopActivePluginSession(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string) {
@@ -105,18 +164,42 @@ func StopActivePluginSession(ctx context.Context, db *gorm.DB, stateStore state.
 	if err != nil || session == nil {
 		return
 	}
+	stopPluginSession(ctx, db, stateStore, session)
+}
 
-	// Find running steps to interrupt.
+// stopPluginSession cancels one specific session. Callers that already resolved a
+// session must use this scoped form instead of looking it up again by conversation;
+// a conversation can retain an older waiting session next to a newer active one.
+func stopPluginSession(
+	ctx context.Context,
+	db *gorm.DB,
+	stateStore state.Store,
+	session *orm.PluginSession,
+) {
+	if session == nil || session.Status != SessionStatusActive {
+		return
+	}
+
+	// A transition persists the task and step before the runner emits task_start.
+	// Include pending attempts so a stop racing with that launch cannot leave a
+	// parallel subtask behind. Waiting/failed/interrupted attempts have no live
+	// runner and therefore do not need a cancellation signal.
 	steps, err := ListSteps(ctx, db, session.ID)
 	if err != nil {
 		return
 	}
 	for _, step := range steps {
-		if step.Status != StepStatusRunning {
+		if step.Validity == "stale" || (step.Status != StepStatusPending && step.Status != StepStatusRunning) {
 			continue
 		}
-		// Mark the sub_agent_task as interrupted.
-		_ = subagent.UpdateFinalStatus(ctx, db, step.TaskID, subagent.StatusInterrupted, "stopped by user")
+		// Mark the task first. If a terminal completion won the race, preserve it
+		// and do not create a contradictory interrupted plugin-step projection.
+		accepted, err := subagent.AcceptFinalStatus(
+			ctx, db, step.TaskID, subagent.StatusInterrupted, "stopped by user",
+		)
+		if err != nil || !accepted {
+			continue
+		}
 		// Mirror into plugin_session_steps.
 		_ = UpdateStepStatus(ctx, db, step.TaskID, StepStatusInterrupted)
 		// Notify Python to cancel the ReAct loop for this task.
@@ -128,7 +211,7 @@ func StopActivePluginSession(ctx context.Context, db *gorm.DB, stateStore state.
 
 	// Push step_waiting SSE event to the conversation channel.
 	if subagent.EventHooks != nil {
-		subagent.EventHooks.CallConversationEvent(ctx, stateStore, convID, "", "step_waiting", map[string]any{
+		subagent.EventHooks.CallConversationEvent(ctx, stateStore, session.ConversationID, "", "step_waiting", map[string]any{
 			"session_id":   session.ID,
 			"step_id":      session.CurrentStepID,
 			"interrupted":  true,
