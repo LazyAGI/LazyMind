@@ -128,8 +128,10 @@ _SKELETON_SYSTEM = (
     '    tools (external API calls, local data processing, complex computation).\n'
     '    DO NOT add tool_scripts for pure LLM reasoning/writing workflows.\n\n'
     'Do NOT include state machine logic or execution prompts — those come in Phase 2.\n\n'
-    'Return ONLY a JSON object:\n'
-    '  {{"plugin_yaml": "<full plugin.yaml content as YAML string>"}}\n\n'
+    'Return ONLY a JSON object with the skeleton represented as a JSON object:\n'
+    '  {{"plugin": {{"id": "...", "name": "...", "description": "..."}}}}\n'
+    'Include every required field described above inside `plugin`. Do not return YAML and do not '
+    'wrap the JSON in markdown fences.\n\n'
     'Follow the format specification below.\n\n'
     '=== Plugin Format Specification ===\n'
     '{__spec__}\n'
@@ -323,6 +325,15 @@ _SKELETON_PATCH_TEMPLATE = (
     'Fix only the missing fields. No explanation.'
 )
 
+_SKELETON_YAML_REPAIR_TEMPLATE = (
+    'The plugin skeleton below was returned as YAML, but it is invalid and could not be parsed.\n'
+    'Parse its intended structure and return the complete skeleton as a JSON object.\n'
+    'Preserve all values and quote-sensitive text exactly; do not add or remove workflow behavior.\n\n'
+    'YAML parser error:\n{__yaml_error__}\n\n'
+    'Invalid skeleton:\n{__plugin_yaml__}\n\n'
+    'Return ONLY: {"plugin": {<complete plugin skeleton>}}'
+)
+
 _STATE_MACHINE_PATCH_TEMPLATE = (
     'The generated state.yml has missing or invalid fields:\n'
     '{__missing_fields__}\n\n'
@@ -356,6 +367,45 @@ def _patch_skeleton(
         from lazymind.chat.api.generate_plugin_routes import _deep_merge  # noqa: PLC0415
         plugin_dict = _deep_merge(plugin_dict, patch['plugin'])
     return plugin_dict
+
+
+def _plugin_dict_from_skeleton_response(
+    data: Dict[str, Any],
+    system_prompt: str,
+) -> Dict[str, Any]:
+    """Accept the object contract and repair legacy invalid embedded YAML once."""
+    plugin = data.get('plugin')
+    if isinstance(plugin, dict):
+        return plugin
+
+    plugin_yaml = data.get('plugin_yaml', '')
+    if not isinstance(plugin_yaml, str) or not plugin_yaml.strip():
+        raise HTTPException(status_code=500, detail='Phase 1: missing plugin object in response')
+    try:
+        parsed = yaml.safe_load(plugin_yaml) or {}
+    except yaml.YAMLError as exc:
+        repair_prompt = _tmpl(
+            _SKELETON_YAML_REPAIR_TEMPLATE,
+            yaml_error=str(exc),
+            plugin_yaml=plugin_yaml,
+        )
+        raw = _call_llm(f'{system_prompt}\n\n{repair_prompt}')
+        try:
+            repaired = _extract_json(raw)
+        except ValueError as repair_exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f'Phase 1 skeleton repair JSON parse error: {repair_exc}',
+            ) from repair_exc
+        parsed = repaired.get('plugin')
+        if not isinstance(parsed, dict):
+            raise HTTPException(
+                status_code=500,
+                detail=f'Phase 1 YAML parse error: {exc}; repair response missing plugin object',
+            ) from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=500, detail='Phase 1: plugin skeleton must be an object')
+    return parsed
 
 
 def _patch_state_machine(
@@ -1113,9 +1163,11 @@ Deterministic script inventory (authoritative):
             covered[path] = 'unresolved'
     for path in deterministically_unresolved:
         covered[path] = 'unresolved'
-    if any(v == 'unresolved' for v in covered.values()) and verdict == 'generatable':
-        verdict = 'needs_confirmation'
-        data['verdict_code'] = 'generation_coverage_incomplete'
+    # Coverage is a report, not a user-resolvable choice.  An unresolved ancillary
+    # file must remain visible in the report, but presenting the sole workflow as
+    # a confirmation button cannot resolve that file.  The analyzer has already
+    # been instructed to request confirmation/reject when unresolved behavior is
+    # indispensable, so do not overwrite a coherent generatable verdict here.
     catalog_by_name = {str(item.get('name') or ''): item for item in tool_catalog}
     for mapping in tool_mappings.values():
         if isinstance(mapping, dict) and mapping.get('action') == 'replace':
@@ -1211,14 +1263,7 @@ async def generate_skeleton(req: SkeletonRequest) -> SkeletonResponse:
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=f'Phase 1 JSON parse error: {exc}') from exc
 
-    plugin_yaml = data.get('plugin_yaml', '')
-    if not plugin_yaml:
-        raise HTTPException(status_code=500, detail='Phase 1: missing plugin_yaml in response')
-
-    try:
-        plugin_dict = yaml.safe_load(plugin_yaml) or {}
-    except yaml.YAMLError as exc:
-        raise HTTPException(status_code=500, detail=f'Phase 1 YAML parse error: {exc}') from exc
+    plugin_dict = _plugin_dict_from_skeleton_response(data, system_prompt)
     _apply_tool_replacements(plugin_dict, None, req.workflow_analysis)
 
     # Validate skeleton fields + patch retry

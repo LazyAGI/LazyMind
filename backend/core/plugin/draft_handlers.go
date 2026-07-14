@@ -528,11 +528,10 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 	reusableScripts := map[string]string(nil)
 	if body.SkillID != "" && !body.Reanalyze {
 		var cached orm.PluginGenerationAnalysis
-		// A rejection is evaluator-dependent rather than a reusable generated artifact.
-		// Re-run it so prompt/model improvements cannot leave a Skill permanently
-		// blocked by an old negative analysis. Positive and confirmation-required
-		// analyses remain reusable for an unchanged Skill revision.
-		cacheErr := db.Where("user_id=? AND source_skill_id=? AND source_skill_revision_id=? AND source_skill_tree_hash=? AND status IN ?", userID, body.SkillID, skillSnapshot.RevisionID, skillSnapshot.TreeHash, []string{"generatable", "needs_confirmation"}).Order("created_at DESC").First(&cached).Error
+		// Only a positive analysis is a reusable generated artifact. Re-run rejected
+		// and confirmation-required results so analyzer improvements cannot leave a
+		// Skill blocked by a stale or non-user-resolvable verdict.
+		cacheErr := db.Where("user_id=? AND source_skill_id=? AND source_skill_revision_id=? AND source_skill_tree_hash=? AND status = ?", userID, body.SkillID, skillSnapshot.RevisionID, skillSnapshot.TreeHash, "generatable").Order("created_at DESC").First(&cached).Error
 		if cacheErr == nil {
 			now := time.Now().UTC()
 			clone := cached
