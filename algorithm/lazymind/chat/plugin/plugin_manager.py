@@ -6,6 +6,8 @@ Tool types registered dynamically per-conversation:
 - advance_step_and_hand_off : Step-advancement tool (stop-tool). Default; queues step and hands off control to user.
 - advance_step              : Synchronous step-advancement tool. Only in 'dynamic' mode; blocks until
                               the SubAgent finishes before ReAct continues.
+- advance_steps             : Atomic synchronous batch advancement for multiple Ready steps.
+- advance_steps_and_hand_off: Atomic asynchronous batch advancement (stop-tool).
 - ask_user                  : Ask the user a question (stop-tool). ChatAgent only; absent in auto mode.
 - update_intent             : Upsert a global or step-level intent/constraint (ChatAgent only).
 - list_plugin_steps         : Read-only step status query (ChatAgent only, when session active).
@@ -57,6 +59,7 @@ class _TransitionSubmission:
     session_id: str = ''
     state_version: int = 0
     projection: Optional[Dict[str, Any]] = None
+    tasks: Optional[List[Dict[str, str]]] = None
 
 
 def _core_response_data(response: Any) -> Dict[str, Any]:
@@ -78,6 +81,7 @@ def _format_transition_rejection(step_id: str, data: Dict[str, Any]) -> str:
     ready = projection.get('ready') or details.get('ready') or []
     blocked = projection.get('blocked') or []
     missing = details.get('missing_groups') or []
+    rejected_targets = details.get('targets') or []
     lines = [
         f'Transition rejected [{code}].',
         f'Target: {step_id}',
@@ -85,6 +89,8 @@ def _format_transition_rejection(step_id: str, data: Dict[str, Any]) -> str:
     ]
     if missing:
         lines.append(f'Missing material groups: {missing}')
+    if rejected_targets:
+        lines.append(f'Rejected batch targets: {rejected_targets}')
     if ready:
         lines.append(f'Currently ready: {ready}')
     if blocked:
@@ -101,7 +107,8 @@ def _submit_transition_to_core(
         objective: str, user_input: str, hand_off: bool,
         runtime_instruction: str, partial_indices: Dict[str, List[int]],
         operation: str = 'execute', is_start: bool = False,
-        preflight_id: str = '') -> _TransitionSubmission:
+        preflight_id: str = '',
+        targets: Optional[List[Dict[str, Any]]] = None) -> _TransitionSubmission:
     import httpx
     from lazymind.config import config as _cfg
 
@@ -150,6 +157,8 @@ def _submit_transition_to_core(
         'preflight_id': preflight_id,
         'external_materials': cfg.get('plugin_external_materials') or {},
     }
+    if targets:
+        payload['targets'] = targets
     endpoint = (
         f'{core_url}/internal/plugin-sessions:start'
         if is_start else f'{core_url}/internal/plugin-sessions/{session_id}:transition'
@@ -187,19 +196,41 @@ def _submit_transition_to_core(
         )
     state_version = int(data.get('state_version') or expected_version)
     cfg['_plugin_state_version'] = state_version
-    cfg['_last_plugin_task_id'] = str(data.get('task_id') or task_id)
+    response_tasks = data.get('tasks') if isinstance(data.get('tasks'), list) else []
+    normalised_tasks = [
+        {
+            'step_id': str(item.get('step_id') or ''),
+            'task_id': str(item.get('task_id') or ''),
+            'step_state': str(item.get('step_state') or ''),
+        }
+        for item in response_tasks if isinstance(item, dict) and item.get('task_id')
+    ]
+    if not normalised_tasks:
+        normalised_tasks = [{
+            'step_id': step_id,
+            'task_id': str(data.get('task_id') or task_id),
+            'step_state': str(data.get('step_state') or 'pending'),
+        }]
+    cfg['_last_plugin_task_id'] = normalised_tasks[0]['task_id']
+    cfg['_last_plugin_tasks'] = normalised_tasks
     if is_start:
         cfg['plugin_session_id'] = str(data.get('session_id') or '')
         cfg['plugin_id'] = plugin_id
         cfg['plugin_step'] = step_id
     return _TransitionSubmission(
         True,
-        f'Advance for step {step_id!r} accepted by Go and durably queued.',
+        (
+            f'Batch advance for steps {[item["step_id"] for item in normalised_tasks]!r} '
+            'accepted by Go and durably queued.'
+            if len(normalised_tasks) > 1
+            else f'Advance for step {step_id!r} accepted by Go and durably queued.'
+        ),
         command_id=command_id,
         task_id=str(data.get('task_id') or task_id),
         session_id=str(data.get('session_id') or session_id),
         state_version=state_version,
         projection=data.get('projection') if isinstance(data.get('projection'), dict) else {},
+        tasks=normalised_tasks,
     )
 
 
@@ -455,6 +486,82 @@ def _trigger_plugin_step(
         submission.command_id, submission.accepted,
     )
     return submission.message
+
+
+def _trigger_plugin_steps(
+        plugin_id: str,
+        steps: List[Dict[str, Any]],
+        *,
+        hand_off: bool = False) -> _TransitionSubmission:
+    """Atomically submit multiple currently-Ready steps to Go.
+
+    Go validates every target against one projection and either persists every
+    attempt or rejects the whole command. Retry/rewind deliberately remain on
+    the single-step compatibility path.
+    """
+    if not isinstance(steps, list) or len(steps) < 2:
+        raise ValueError('steps must contain at least two step commands; use advance_step for one target.')
+    if plugin_loader.get_plugin(plugin_id) is None:
+        raise ValueError(f'plugin {plugin_id!r} not found.')
+
+    cfg = _agentic_config()
+    session_id = str(cfg.get('plugin_session_id') or '')
+    if not session_id:
+        raise ValueError('batch advancement requires an active plugin session.')
+    focused_tab = cfg.get('focused_tab')
+    targets: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in steps:
+        if not isinstance(raw, dict):
+            raise ValueError('every batch item must be an object.')
+        step_id = str(raw.get('step_id') or '').strip()
+        if not step_id or step_id == '__end__':
+            raise ValueError('every batch item requires a non-__end__ step_id.')
+        if step_id in seen:
+            raise ValueError(f'duplicate batch step_id: {step_id!r}.')
+        seen.add(step_id)
+        step_config = plugin_loader.get_step_config(plugin_id, step_id)
+        if not step_config:
+            raise ValueError(f'step {step_id!r} is not defined in plugin {plugin_id!r}.')
+        user_input = str(raw.get('user_input') or cfg.get('query') or '').strip()
+        if not user_input:
+            raise ValueError(f'user_input must not be empty for step {step_id!r}.')
+        runtime_instruction = str(raw.get('runtime_instruction') or '')
+        enriched_instruction = runtime_instruction
+        if focused_tab:
+            enriched_instruction += (' ' if enriched_instruction else '') + (
+                f'User is currently viewing tab: {focused_tab}.'
+            )
+        partial_indices = raw.get('partial_indices') or {}
+        if not isinstance(partial_indices, dict):
+            raise ValueError(f'partial_indices for step {step_id!r} must be an object.')
+        targets.append({
+            'target_step_id': step_id,
+            'task_id': str(uuid.uuid4()),
+            'objective': _render_step_objective(step_config, user_input, enriched_instruction),
+            'user_input': user_input,
+            'runtime_instruction': runtime_instruction,
+            'partial_indices': partial_indices,
+        })
+
+    submission = _submit_transition_to_core(
+        plugin_id=plugin_id,
+        step_id=', '.join(target['target_step_id'] for target in targets),
+        session_id=session_id,
+        task_id=targets[0]['task_id'],
+        objective='',
+        user_input='',
+        hand_off=hand_off,
+        runtime_instruction='',
+        partial_indices={},
+        operation='execute_batch',
+        targets=targets,
+    )
+    cfg['_last_plugin_transition_accepted'] = submission.accepted
+    if submission.accepted:
+        cfg['_last_plugin_task_id'] = submission.task_id
+        cfg['_last_plugin_tasks'] = submission.tasks or []
+    return submission
 
 
 def _build_step_choices_doc(
@@ -1511,6 +1618,92 @@ def build_advance_step_tool(
     return advance_step
 
 
+def build_advance_steps_and_hand_off_tool(
+    plugin_id: str,
+    current_step: str,
+    rewind_steps: Optional[List[str]] = None,
+    step_labels: Optional[Dict[str, str]] = None,
+) -> Any:
+    """Build the atomic asynchronous batch-advance stop tool."""
+    forward = _live_reachability_snapshot(plugin_id, current_step, rewind_steps).forward_steps
+    choices_doc = _build_step_choices_doc(
+        forward, [], step_labels or {}, plugin_id=plugin_id, current_step=current_step,
+    )
+
+    def advance_steps_and_hand_off(steps: List[Dict[str, Any]]) -> str:
+        """Atomically queue multiple currently-Ready steps and end this ReAct turn."""
+        submission = _trigger_plugin_steps(plugin_id, steps, hand_off=True)
+        if not submission.accepted:
+            raise RuntimeError(submission.message)
+        return submission.message
+
+    advance_steps_and_hand_off.__doc__ = (
+        'Atomically start two or more independent Ready plugin steps and end the current turn.\n\n'
+        'Use one call when Go reports multiple Ready steps that should start now. Go evaluates all\n'
+        'items against the same projection and either queues every item or rejects the entire batch.\n'
+        'Never include a downstream step that needs an output from another item in this batch.\n'
+        'Retry and rewind are not supported in batches; use advance_step_and_hand_off for those.\n\n'
+        + choices_doc + '\n\n'
+        'Args:\n'
+        '    steps: At least two objects. Each object must contain step_id and user_input, and may\n'
+        '        contain runtime_instruction and partial_indices. Give every step its own focused\n'
+        '        instruction; do not combine instructions for different steps.\n\n'
+        'Returns:\n'
+        '    One durable acceptance for all steps. Exits ReAct only after Go accepts the full batch.'
+    )
+    return advance_steps_and_hand_off
+
+
+def build_advance_steps_tool(
+    plugin_id: str,
+    current_step: str,
+    rewind_steps: Optional[List[str]] = None,
+    step_labels: Optional[Dict[str, str]] = None,
+) -> Any:
+    """Build the atomic synchronous batch-advance tool."""
+    forward = _live_reachability_snapshot(plugin_id, current_step, rewind_steps).forward_steps
+    choices_doc = _build_step_choices_doc(
+        forward, [], step_labels or {}, plugin_id=plugin_id, current_step=current_step,
+    )
+
+    def advance_steps(steps: List[Dict[str, Any]]) -> str:
+        """Atomically start multiple Ready steps and wait for every task result."""
+        submission = _trigger_plugin_steps(plugin_id, steps, hand_off=False)
+        if not submission.accepted:
+            return submission.message
+        summaries: List[str] = []
+        cfg = _agentic_config()
+        for task in submission.tasks or []:
+            step_id = str(task.get('step_id') or '')
+            task_id = str(task.get('task_id') or '')
+            if not step_id or not task_id:
+                continue
+            cfg['_last_plugin_task_id'] = task_id
+            result = _wait_for_go_task(step_id, submission.message)
+            summaries.append(f'## {step_id}\n{result}')
+        cfg['_last_plugin_tasks'] = submission.tasks or []
+        if not summaries:
+            return submission.message
+        return '\n\n'.join(summaries) + _append_step_transition_hint(
+            '', plugin_id=plugin_id, current_step='', rewind_steps=rewind_steps or [],
+            step_labels=step_labels or {},
+        )
+
+    advance_steps.__doc__ = (
+        'Atomically start two or more independent Ready plugin steps and wait for all results.\n\n'
+        'Prefer this over repeated advance_step calls whenever the authoritative Ready list contains\n'
+        'multiple steps that should run now. The batch is all-or-rejected and increments state_version\n'
+        'once. Never batch a downstream dependency, retry, or rewind.\n\n'
+        + choices_doc + '\n\n'
+        'Args:\n'
+        '    steps: At least two objects. Each object contains step_id, user_input, and optional\n'
+        '        runtime_instruction / partial_indices specific to that step.\n\n'
+        'Returns:\n'
+        '    Per-step results after every task in the accepted batch reaches a terminal state.'
+    )
+    return advance_steps
+
+
 def _append_step_transition_hint(
     summary: str,
     plugin_id: str,
@@ -1944,20 +2137,34 @@ def resolve_plugin_injection(
             # Build plugin tools according to plugin_mode.
             # advance_step_and_hand_off is always registered (stop-tool).
             # advance_step (sync) is only registered in dynamic mode.
-            plugin_tools = [build_advance_step_and_hand_off_tool(
-                p_plugin_id, p_current_step,
-                rewind_steps=rewind_steps,
-                step_labels=step_labels,
-                include_approval_guidance=plugin_mode != 'auto',
-            )]
-            plugin_stop_tools = ['advance_step_and_hand_off']
-
-            if plugin_mode == 'dynamic':
-                plugin_tools.append(build_advance_step_tool(
+            plugin_tools = [
+                build_advance_step_and_hand_off_tool(
                     p_plugin_id, p_current_step,
                     rewind_steps=rewind_steps,
                     step_labels=step_labels,
-                ))
+                    include_approval_guidance=plugin_mode != 'auto',
+                ),
+                build_advance_steps_and_hand_off_tool(
+                    p_plugin_id, p_current_step,
+                    rewind_steps=rewind_steps,
+                    step_labels=step_labels,
+                ),
+            ]
+            plugin_stop_tools = ['advance_step_and_hand_off', 'advance_steps_and_hand_off']
+
+            if plugin_mode == 'dynamic':
+                plugin_tools.extend([
+                    build_advance_step_tool(
+                        p_plugin_id, p_current_step,
+                        rewind_steps=rewind_steps,
+                        step_labels=step_labels,
+                    ),
+                    build_advance_steps_tool(
+                        p_plugin_id, p_current_step,
+                        rewind_steps=rewind_steps,
+                        step_labels=step_labels,
+                    ),
+                ])
 
             # update_intent for ChatAgent only.
             plugin_tools.append(build_update_intent_tool())
@@ -2112,6 +2319,7 @@ def _build_step_status_section(
 
         projection = _fetch_go_projection(session_id)
         succeeded = list(projection.get('past') or [])
+        ready = list(projection.get('ready') or [])
 
         lines = ['## Plugin Step Status [AUTHORITATIVE — queried at request time]']
         lines.append('> Any step-status information in the conversation history is OUTDATED. Use only this section.')
@@ -2135,13 +2343,14 @@ def _build_step_status_section(
             lines.append('Rewind-eligible steps (already succeeded, can be re-run): '
                          + ', '.join(_label(s) for s in rewind_steps))
 
-        if current_step:
-            forward = _live_reachability_snapshot(
-                plugin_id, current_step, rewind_steps,
-            ).forward_steps
-            if forward:
-                lines.append('Ready steps reported by Go (valid targets now): '
-                             + ', '.join(_label(s) for s in forward))
+        if ready:
+            lines.append('Ready steps reported by Go (valid targets now): '
+                         + ', '.join(_label(s) for s in ready))
+            if len(ready) > 1:
+                lines.append(
+                    'Batching hint: multiple Ready nodes form the current parallel frontier. '
+                    'Start the applicable nodes with one plural advancement tool call.'
+                )
 
         return '\n'.join(lines)
     except Exception:
@@ -2154,8 +2363,10 @@ def _build_mode_guidance(
     if plugin_mode == 'auto':
         return (
             '## Current Plugin Execution Policy [AUTHORITATIVE]\n\n'
-            'Only `advance_step_and_hand_off` is available for step advancement. '
-            'Always use it to start the selected next step and end the current turn.\n'
+            'Only asynchronous advancement tools are available. Use '
+            '`advance_steps_and_hand_off` exactly once when two or more independent Ready '
+            'steps should start now; use `advance_step_and_hand_off` for one Ready step. '
+            'Both tools end the current turn only after Go accepts the full command.\n'
             'After the step completes, the backend controller evaluates the result and '
             'starts the next decision turn. Do not wait for synchronous step results or ask '
             'the user questions during execution.'
@@ -2185,27 +2396,31 @@ def _build_mode_guidance(
         '    than what the current artifacts reflect.\n'
         'If intent has changed, identify the EARLIEST step whose output is now\n'
         'invalidated and rewind to that step using `advance_step_and_hand_off` with\n'
-        '`step_id=<affected_step>` and `rewind=True` (clears that step\'s artifacts\n'
+        '`step_id=<affected_step>` (a succeeded target is recognized as a rewind and clears artifacts\n'
         'and re-runs from scratch). Do NOT continue to the next forward step.\n\n'
-        '### Rule 2 — Step order enforcement\n'
-        'Steps MUST be executed in the order defined by the pipeline. You may only\n'
-        'execute `current_step` or rewind to a rewind-eligible step. The next forward\n'
-        'step becomes available only AFTER `current_step` succeeds.\n'
-        'Never skip steps — do not call a downstream step while an upstream step is\n'
-        'still pending.\n\n'
+        '### Rule 2 — DAG frontier and atomic batching\n'
+        'The authoritative Ready list is the only forward execution frontier. Never infer\n'
+        'serial order from `current_step`, conversation history, or visual position.\n'
+        'If exactly one Ready step should start now, use the single-step tool. If two or more\n'
+        'independent Ready steps should start now, issue ONE batch call containing all of them,\n'
+        'with a separate user_input/runtime_instruction for every step. Do not issue repeated\n'
+        'single-step calls for the same frontier. Never include a Blocked node or a downstream\n'
+        'node that needs another batch item\'s future output. Retry and rewind remain single-step.\n\n'
         '### Rule 3 — Approval precedence and workflow advancement\n'
         'Select the advancement tool with this priority:\n'
         '  1. Explicit intent in the latest query or persisted session intent wins. Match a\n'
         '     user-named target against the compact "Plugin Step Name Index". If that boundary\n'
         '     is a currently valid next step, use `advance_step_and_hand_off` for it. If it is\n'
         '     another known step and the user requests continuous execution until that boundary,\n'
-        '     use `advance_step` for prerequisite currently reachable steps. Do NOT hand off an\n'
+        '     use `advance_step` or `advance_steps` for prerequisite Ready frontiers. Do NOT hand off an\n'
         '     intermediate step merely because the user requested confirmation at the later\n'
         '     boundary. If the user requests uninterrupted execution without a boundary, use\n'
-        '     `advance_step`.\n'
+        '     the singular or plural waiting tool according to the Ready frontier size.\n'
         '  2. If the user expresses no approval preference, read the target step\'s\n'
-        '     `[default approval: ...]` annotation. Use `advance_step_and_hand_off` when\n'
-        '     approval is required; use `advance_step` when it is not required.\n'
+        '     `[default approval: ...]` annotation. Use a hand-off variant when approval is\n'
+        '     required; use a waiting variant when it is not required. For multiple selected\n'
+        '     Ready steps, use one plural tool; if any selected target needs an asynchronous\n'
+        '     boundary, use `advance_steps_and_hand_off`.\n'
         'After an `advance_step` result, repeat this decision for the next target. This lets\n'
         'automatic steps continue until the workflow reaches a step that requires approval.\n\n'
         'If the user clearly asks to proceed with the existing plugin workflow and\n'
@@ -2217,10 +2432,10 @@ def _build_mode_guidance(
         '  - If continuous mode IS active with no target boundary: use `advance_step`\n'
         '    for prerequisite remaining steps, then use `advance_step_and_hand_off`\n'
         '    for the terminal/final-deliverable step and stop.\n'
-        'Select the target from "Next forward steps (valid targets for continuing)"\n'
-        'in the step-status block. If multiple forward targets are listed, choose\n'
-        'the target whose transition condition best matches the current artifacts\n'
-        'and user intent; if the choice is genuinely ambiguous, ask the user.\n'
+        'Select targets only from "Ready steps reported by Go" in the status block. Multiple\n'
+        'listed targets are valid parallel choices, not an implicit N-select-1 choice. Unless\n'
+        'the user explicitly limits the work to a subset, start all Ready steps that advance\n'
+        'the requested workflow in one plural-tool call.\n'
         'Do NOT reply only with prose such as "正在生成..." without calling a tool.\n'
         'Do NOT pass the current plugin step state unless it is explicitly listed\n'
         'as a valid forward or rewind target.\n'
@@ -2229,11 +2444,13 @@ def _build_mode_guidance(
         '\n\n## Plugin execution guidance\n\n'
         'Tools for step advancement:\n'
         '- `advance_step_and_hand_off`: Start a step asynchronously and end the current turn.\n'
+        '- `advance_steps_and_hand_off`: Atomically start multiple Ready steps and end the turn.\n'
     )
     common += (
         (
             'An asynchronous boundary returns the next decision to the user.\n'
-            '- `advance_step`: Queue a step and WAIT for its result. '
+            '- `advance_step`: Queue one step and WAIT for its result.\n'
+            '- `advance_steps`: Atomically queue multiple Ready steps and WAIT for all results. '
             'Use this in continuous/uninterrupted mode (see Rule 4 below). '
             'Use `advance_step` for prerequisite steps before a requested boundary, then '
             '`advance_step_and_hand_off` for the boundary step.\n'
@@ -2256,26 +2473,27 @@ def _build_mode_guidance(
             'example, "一次性执行到 X，中间不要问我" means run only through the\n'
             'matched boundary step X, then stop after queuing X.\n'
             'In continuous mode:\n'
-            '  1. If an explicit target boundary exists, use `advance_step` only for steps\n'
-            '     before the boundary, in pipeline order.\n'
+            '  1. If an explicit target boundary exists, use singular or plural waiting tools\n'
+            '     for each Ready frontier before the boundary; batch every multi-step frontier.\n'
             '  2. Execute the target boundary step with `advance_step_and_hand_off`, then stop.\n'
             '     Do NOT wait for the boundary step with `advance_step`.\n'
             '  3. Do NOT call downstream steps and do NOT call `__end__` after a non-`__end__`\n'
             '     boundary hand-off.\n'
             '  4. If there is no explicit target boundary and the user requested the whole\n'
-            '     pipeline/final deliverable, run prerequisite steps with `advance_step`,\n'
+            '     pipeline/final deliverable, run prerequisite Ready frontiers with the\n'
+            '     appropriate singular/plural waiting tool,\n'
             '     execute the terminal step with `advance_step_and_hand_off`, then stop.\n'
             '  5. NEVER call `advance_step_and_hand_off` for intermediate steps — '
             '     it hands off control and breaks the continuous run.\n'
-            '  6. If `advance_step` returns an error, stop the sequence immediately and '
+            '  6. If any advancement tool returns an error, stop the sequence immediately and '
             '     report the failure; do not skip or continue to a later step.\n\n'
             'Outside explicit continuous mode, step defaults still apply whenever the user has '
             'not stated an approval preference.\n\n'
             'When a step is interrupted and user says "继续": call advance_step_and_hand_off with '
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
             'and only produce missing outputs (resume from checkpoint)."\n'
-            'When user says "重试": call advance_step_and_hand_off with rewind=True '
-            '(restarts the interrupted step from scratch, ignoring previous partial artifacts).'
+            'When user says "重试": call the single-step advance_step_and_hand_off for that '
+            'failed/interrupted step; never place retry or rewind in a batch.'
         )
     )
     return global_rules + common

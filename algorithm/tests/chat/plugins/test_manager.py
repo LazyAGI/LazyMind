@@ -592,14 +592,20 @@ def test_active_injection_switches_tools_and_request_local_policy_per_turn(
             'plugin_mode': 'dynamic',
         })
 
-    auto_tools, auto_system_prompt, _, _, auto_context = auto_result
-    dynamic_tools, dynamic_system_prompt, _, _, dynamic_context = dynamic_result
+    auto_tools, auto_system_prompt, auto_stop_tools, _, auto_context = auto_result
+    dynamic_tools, dynamic_system_prompt, dynamic_stop_tools, _, dynamic_context = dynamic_result
     auto_names = {tool.__name__ for tool in auto_tools}
     dynamic_names = {tool.__name__ for tool in dynamic_tools}
 
     assert 'advance_step_and_hand_off' in auto_names
+    assert 'advance_steps_and_hand_off' in auto_names
     assert 'advance_step' not in auto_names
-    assert {'advance_step', 'advance_step_and_hand_off'} <= dynamic_names
+    assert {
+        'advance_step', 'advance_steps',
+        'advance_step_and_hand_off', 'advance_steps_and_hand_off',
+    } <= dynamic_names
+    assert set(auto_stop_tools) == {'advance_step_and_hand_off', 'advance_steps_and_hand_off'}
+    assert set(dynamic_stop_tools) == {'advance_step_and_hand_off', 'advance_steps_and_hand_off'}
     assert 'Current Plugin Execution Policy' not in auto_system_prompt
     assert 'Current Plugin Execution Policy' not in dynamic_system_prompt
     assert 'Current Plugin Execution Policy' in auto_context
@@ -705,6 +711,51 @@ def test_trigger_plugin_step_rejects_missing_step_config(mock_agentic_config):
                 'go',
                 is_cold_start=False,
             )
+
+
+def test_trigger_plugin_steps_submits_one_atomic_batch(
+        loaded_plugin, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+
+    mock_agentic_config.update({
+        'plugin_session_id': 'session-batch',
+        'query': 'continue workflow',
+    })
+    accepted = plugin_manager._TransitionSubmission(
+        accepted=True,
+        message='accepted',
+        command_id='command-batch',
+        task_id='task-b',
+        tasks=[
+            {'step_id': 'step_b', 'task_id': 'task-b', 'step_state': 'pending'},
+            {'step_id': 'step_c', 'task_id': 'task-c', 'step_state': 'pending'},
+        ],
+    )
+    with patch.object(plugin_manager, '_submit_transition_to_core', return_value=accepted) as submit:
+        result = plugin_manager._trigger_plugin_steps('test-plugin', [
+            {'step_id': 'step_b', 'user_input': 'run B', 'runtime_instruction': 'instruction B'},
+            {'step_id': 'step_c', 'user_input': 'run C', 'runtime_instruction': 'instruction C'},
+        ])
+
+    assert result.accepted is True
+    kwargs = submit.call_args.kwargs
+    assert kwargs['operation'] == 'execute_batch'
+    assert [target['target_step_id'] for target in kwargs['targets']] == ['step_b', 'step_c']
+    assert kwargs['targets'][0]['runtime_instruction'] == 'instruction B'
+    assert kwargs['targets'][1]['runtime_instruction'] == 'instruction C'
+    assert mock_agentic_config['_last_plugin_tasks'][1]['task_id'] == 'task-c'
+
+
+def test_trigger_plugin_steps_rejects_duplicate_step_locally(
+        loaded_plugin, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+
+    mock_agentic_config['plugin_session_id'] = 'session-batch'
+    with pytest.raises(ValueError, match='duplicate batch step_id'):
+        plugin_manager._trigger_plugin_steps('test-plugin', [
+            {'step_id': 'step_b', 'user_input': 'first'},
+            {'step_id': 'step_b', 'user_input': 'second'},
+        ])
 
 
 # ---------------------------------------------------------------------------
@@ -985,10 +1036,37 @@ def test_guidance_without_approval_choice_assigns_continuation_to_backend(loaded
     guidance = plugin_manager._build_mode_guidance('auto')
 
     assert 'backend controller evaluates the result' in guidance
-    assert 'Only `advance_step_and_hand_off` is available' in guidance
+    assert '`advance_steps_and_hand_off` exactly once' in guidance
     assert 'default approval' not in guidance.lower()
     assert 'auto mode' not in guidance.lower()
     assert 'dynamic mode' not in guidance.lower()
+
+
+def test_batch_guidance_requires_one_atomic_call_for_ready_frontier(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    guidance = plugin_manager._build_mode_guidance('dynamic')
+
+    assert 'ONE batch call' in guidance
+    assert 'Do not issue repeated' in guidance
+    assert 'Retry and rewind remain single-step' in guidance
+    assert 'valid parallel choices' in guidance
+
+
+def test_step_status_exposes_multi_ready_batch_hint(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    with patch.object(plugin_manager, '_fetch_go_projection', return_value={
+        'past': ['step_a'], 'ready': ['step_b', 'step_c'],
+    }):
+        section = plugin_manager._build_step_status_section(
+            'test-plugin', 'session-batch', '', [],
+            step_labels={'step_b': 'B', 'step_c': 'C'},
+        )
+
+    assert 'step_b (B), step_c (C)' in section
+    assert 'parallel frontier' in section
+    assert 'one plural advancement tool call' in section
 
 
 # ---------------------------------------------------------------------------

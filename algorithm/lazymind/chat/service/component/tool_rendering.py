@@ -99,6 +99,8 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'FeishuWikiFS_copy': 'path1',
     'advance_step': 'step_id',
     'advance_step_and_hand_off': 'step_id',
+    'advance_steps': 'steps',
+    'advance_steps_and_hand_off': 'steps',
 }
 
 _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
@@ -213,6 +215,8 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_copy': 'Copying Feishu file from {value} to the target path.',
     'advance_step': 'Switching to step {value}.',
     'advance_step_and_hand_off': 'Switching to step {value} and handing off.',
+    'advance_steps': 'Starting the Ready step batch {value}.',
+    'advance_steps_and_hand_off': 'Starting the Ready step batch {value} and handing off.',
     'regex:get_(.+)_methods': 'Expanding the {match} tool group.',
     'regex:trigger_(.+)_plugin': 'Checking whether the {match} plugin fits this request.',
 }
@@ -280,6 +284,8 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_copy': '正在将飞书文件从 {value} 复制到目标路径。',
     'advance_step': '正在切换到步骤 {value}...',
     'advance_step_and_hand_off': '正在切换到步骤 {value} 并交出控制权...',
+    'advance_steps': '正在批量启动可执行步骤 {value}...',
+    'advance_steps_and_hand_off': '正在批量启动可执行步骤 {value} 并交出控制权...',
     'regex:get_(.+)_methods': '正在展开{match}工具组。',
     'regex:trigger_(.+)_plugin': '正在检查 {match} 插件是否适合当前需求...',
 }
@@ -350,6 +356,8 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_copy': 'Feishu file was copied from {value} to the target path successfully.',
     'advance_step': 'Plugin launched.',
     'advance_step_and_hand_off': 'Step queued. Plugin launched.',
+    'advance_steps': 'Plugin step batch launched.',
+    'advance_steps_and_hand_off': 'Plugin step batch queued and launched.',
     'regex:get_(.+)_methods': 'The {match} tool group has been expanded.',
     'regex:trigger_(.+)_plugin': (
         'Plugin preflight completed. Result: {result.outcome}. Reason: {result.reason}.'
@@ -418,6 +426,8 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_copy': '已成功将飞书文件从 {value} 复制到目标路径。',
     'advance_step': '插件已启动',
     'advance_step_and_hand_off': '步骤已排队，插件已启动',
+    'advance_steps': '插件步骤已批量启动',
+    'advance_steps_and_hand_off': '插件步骤已批量排队并启动',
     'regex:get_(.+)_methods': '已经展开{match}工具组。',
     'regex:trigger_(.+)_plugin': (
         '插件启动检查已完成，结果是 {result.outcome}，原因是 {result.reason}。'
@@ -485,6 +495,8 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_copy': 'Feishu file could not be copied from {value} to the target path.',
     'advance_step': 'Step {value} could not be started.',
     'advance_step_and_hand_off': 'Step {value} could not be queued.',
+    'advance_steps': 'Step batch {value} could not be started.',
+    'advance_steps_and_hand_off': 'Step batch {value} could not be queued.',
     'regex:get_(.+)_methods': 'The {match} tool group could not be expanded.',
     'regex:trigger_(.+)_plugin': (
         'Plugin preflight completed. Result: {result.outcome}. Reason: {result.reason}.'
@@ -552,6 +564,8 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_copy': '未能将飞书文件从 {value} 复制到目标路径。',
     'advance_step': '步骤 {value} 启动失败',
     'advance_step_and_hand_off': '步骤 {value} 排队失败',
+    'advance_steps': '步骤批次 {value} 启动失败',
+    'advance_steps_and_hand_off': '步骤批次 {value} 排队失败',
     'regex:get_(.+)_methods': '未能展开{match}工具组。',
     'regex:trigger_(.+)_plugin': (
         '插件启动检查已完成，结果是 {result.outcome}，原因是 {result.reason}。'

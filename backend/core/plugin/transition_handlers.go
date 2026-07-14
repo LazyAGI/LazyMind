@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,6 +47,66 @@ type transitionCommandRequest struct {
 	UserID               string              `json:"user_id"`
 	PreflightID          string              `json:"preflight_id"`
 	ExternalMaterials    map[string]any      `json:"external_materials"`
+	Targets              []transitionTarget  `json:"targets,omitempty"`
+}
+
+type transitionTarget struct {
+	TargetStepID       string           `json:"target_step_id"`
+	TaskID             string           `json:"task_id"`
+	Objective          string           `json:"objective"`
+	UserInput          string           `json:"user_input"`
+	RuntimeInstruction string           `json:"runtime_instruction"`
+	PartialIndices     map[string][]int `json:"partial_indices"`
+}
+
+type transitionTaskResponse struct {
+	StepID    string `json:"step_id"`
+	TaskID    string `json:"task_id"`
+	StepState string `json:"step_state"`
+}
+
+func normalizedTransitionTargets(req *transitionCommandRequest) ([]transitionTarget, error) {
+	targets := append([]transitionTarget(nil), req.Targets...)
+	if len(targets) == 0 && req.TargetStepID != "" {
+		targets = []transitionTarget{{
+			TargetStepID: req.TargetStepID, TaskID: req.TaskID, Objective: req.Objective,
+			UserInput: req.UserInput, RuntimeInstruction: req.RuntimeInstruction,
+			PartialIndices: req.PartialIndices,
+		}}
+	}
+	if len(targets) == 0 {
+		return nil, errors.New("at least one transition target is required")
+	}
+	seenSteps := make(map[string]bool, len(targets))
+	seenTasks := make(map[string]bool, len(targets))
+	for i := range targets {
+		targets[i].TargetStepID = strings.TrimSpace(targets[i].TargetStepID)
+		if targets[i].TargetStepID == "" {
+			return nil, errors.New("target_step_id is required for every target")
+		}
+		if seenSteps[targets[i].TargetStepID] {
+			return nil, fmt.Errorf("duplicate target step %q", targets[i].TargetStepID)
+		}
+		seenSteps[targets[i].TargetStepID] = true
+		if targets[i].TaskID == "" {
+			targets[i].TaskID = uuid.NewString()
+		}
+		if seenTasks[targets[i].TaskID] {
+			return nil, fmt.Errorf("duplicate task id %q", targets[i].TaskID)
+		}
+		seenTasks[targets[i].TaskID] = true
+	}
+	return targets, nil
+}
+
+func commandTargetID(req transitionCommandRequest) string {
+	if len(req.Targets) > 1 {
+		return "__batch__"
+	}
+	if len(req.Targets) == 1 {
+		return req.Targets[0].TargetStepID
+	}
+	return req.TargetStepID
 }
 
 // PlanPluginSessionStart returns the same authoritative projection used by
@@ -229,14 +291,15 @@ type transitionError struct {
 }
 
 type transitionCommandResponse struct {
-	Accepted     bool                   `json:"accepted"`
-	CommandID    string                 `json:"command_id"`
-	SessionID    string                 `json:"session_id,omitempty"`
-	TaskID       string                 `json:"task_id,omitempty"`
-	StateVersion int64                  `json:"state_version"`
-	StepState    string                 `json:"step_state,omitempty"`
-	Error        *transitionError       `json:"error,omitempty"`
-	Projection   graphengine.Projection `json:"projection"`
+	Accepted     bool                     `json:"accepted"`
+	CommandID    string                   `json:"command_id"`
+	SessionID    string                   `json:"session_id,omitempty"`
+	TaskID       string                   `json:"task_id,omitempty"`
+	StateVersion int64                    `json:"state_version"`
+	StepState    string                   `json:"step_state,omitempty"`
+	Tasks        []transitionTaskResponse `json:"tasks,omitempty"`
+	Error        *transitionError         `json:"error,omitempty"`
+	Projection   graphengine.Projection   `json:"projection"`
 }
 
 type transitionRejection struct {
@@ -261,7 +324,7 @@ func rejectTransition(commandID string, session *orm.PluginSession, projection g
 func persistTransitionCommand(db *gorm.DB, req transitionCommandRequest, response transitionCommandResponse, status string) error {
 	body, _ := json.Marshal(response)
 	now := time.Now().UTC()
-	row := orm.PluginTransitionCommand{CommandID: req.CommandID, SessionID: response.SessionID, Operation: req.Operation, TargetStepID: req.TargetStepID, Status: status, TaskID: response.TaskID, ExpectedStateVersion: req.ExpectedStateVersion, ResultingStateVersion: response.StateVersion, ResponseJSON: body, CreatedAt: now, UpdatedAt: now}
+	row := orm.PluginTransitionCommand{CommandID: req.CommandID, SessionID: response.SessionID, Operation: req.Operation, TargetStepID: commandTargetID(req), Status: status, TaskID: response.TaskID, ExpectedStateVersion: req.ExpectedStateVersion, ResultingStateVersion: response.StateVersion, ResponseJSON: body, CreatedAt: now, UpdatedAt: now}
 	return db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "command_id"}}, DoUpdates: clause.AssignmentColumns([]string{"session_id", "status", "task_id", "resulting_state_version", "response_json", "updated_at"})}).Create(&row).Error
 }
 
@@ -269,7 +332,7 @@ func reserveTransitionCommand(db *gorm.DB, req transitionCommandRequest) (bool, 
 	pending := transitionCommandResponse{Accepted: false, CommandID: req.CommandID, Error: &transitionError{Code: "TRANSITION_RESULT_UNKNOWN", Message: "transition command is still being processed", Retryable: true}}
 	body, _ := json.Marshal(pending)
 	now := time.Now().UTC()
-	row := orm.PluginTransitionCommand{CommandID: req.CommandID, Operation: req.Operation, TargetStepID: req.TargetStepID, Status: "processing", ExpectedStateVersion: req.ExpectedStateVersion, ResponseJSON: body, CreatedAt: now, UpdatedAt: now}
+	row := orm.PluginTransitionCommand{CommandID: req.CommandID, Operation: req.Operation, TargetStepID: commandTargetID(req), Status: "processing", ExpectedStateVersion: req.ExpectedStateVersion, ResponseJSON: body, CreatedAt: now, UpdatedAt: now}
 	result := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 	return result.RowsAffected == 1, result.Error
 }
@@ -305,11 +368,27 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 		writeTransitionResponse(w, *existing, status)
 		return
 	}
-	if req.Operation == "" {
-		req.Operation = "execute"
+	targets, targetErr := normalizedTransitionTargets(&req)
+	if targetErr != nil {
+		common.ReplyErr(w, targetErr.Error(), http.StatusUnprocessableEntity)
+		return
 	}
-	if req.Operation != "execute" && req.Operation != "retry" && req.Operation != "rewind" {
-		common.ReplyErr(w, "operation must be execute, retry, or rewind", http.StatusUnprocessableEntity)
+	req.Targets = targets
+	req.TargetStepID = targets[0].TargetStepID
+	req.TaskID = targets[0].TaskID
+	if req.Operation == "" || (req.Operation == "execute" && len(targets) > 1) {
+		if len(targets) > 1 {
+			req.Operation = "execute_batch"
+		} else {
+			req.Operation = "execute"
+		}
+	}
+	if req.Operation != "execute" && req.Operation != "execute_batch" && req.Operation != "retry" && req.Operation != "rewind" {
+		common.ReplyErr(w, "operation must be execute, execute_batch, retry, or rewind", http.StatusUnprocessableEntity)
+		return
+	}
+	if (req.Operation == "retry" || req.Operation == "rewind") && len(targets) != 1 {
+		common.ReplyErr(w, "retry and rewind require exactly one target", http.StatusUnprocessableEntity)
 		return
 	}
 	reserved, reserveErr := reserveTransitionCommand(store.DB(), req)
@@ -323,14 +402,10 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.TaskID == "" {
-		req.TaskID = uuid.NewString()
-	}
-
 	var session orm.PluginSession
 	var graph *graphengine.CompiledStateGraph
 	var reservedVersion int64
-	var taskID string
+	taskIDs := make([]string, 0, len(targets))
 	var response transitionCommandResponse
 	var rejection *transitionRejection
 	err := store.DB().Transaction(func(tx *gorm.DB) error {
@@ -359,11 +434,8 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 		if req.GraphHash != "" && graph.GraphHash != "" && req.GraphHash != graph.GraphHash {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "GRAPH_REVISION_MISMATCH", "session graph revision does not match the command", false, map[string]any{"expected": req.GraphHash, "actual": graph.GraphHash})
 		}
-		if _, ok := graph.Nodes[req.TargetStepID]; !ok {
-			return rejectTransition(req.CommandID, &session, projection, http.StatusUnprocessableEntity, "INVALID_TARGET", "target step is not defined in the session graph", false, nil)
-		}
 		if req.Operation == "retry" || req.Operation == "rewind" {
-			if invalidErr := invalidateForOperation(r.Context(), tx, &session, graph, req.CommandID, req.Operation, req.TargetStepID); invalidErr != nil {
+			if invalidErr := invalidateForOperation(r.Context(), tx, &session, graph, req.CommandID, req.Operation, targets[0].TargetStepID); invalidErr != nil {
 				return invalidErr
 			}
 			var reloadErr error
@@ -373,15 +445,47 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			}
 			projection = graphengine.Project(graph, snapshot)
 		}
-		node := projection.Nodes[req.TargetStepID]
-		if node.Reachability != "reachable" {
-			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STEP_NOT_REACHABLE", "target step is not currently reachable", false, map[string]any{"ready": projection.Ready, "blocked": projection.Blocked})
+		evaluations := make(map[string]graphengine.Evaluation, len(targets))
+		invalidTargets := make([]map[string]any, 0)
+		for _, target := range targets {
+			nodeDef, exists := graph.Nodes[target.TargetStepID]
+			if !exists {
+				invalidTargets = append(invalidTargets, map[string]any{"step_id": target.TargetStepID, "code": "INVALID_TARGET"})
+				continue
+			}
+			node := projection.Nodes[target.TargetStepID]
+			if node.Reachability != "reachable" {
+				invalidTargets = append(invalidTargets, map[string]any{"step_id": target.TargetStepID, "code": "STEP_NOT_REACHABLE"})
+				continue
+			}
+			if node.Readiness != "ready" {
+				invalidTargets = append(invalidTargets, map[string]any{"step_id": target.TargetStepID, "code": "STEP_NOT_READY", "missing_groups": node.Evaluation.MissingGroups})
+				continue
+			}
+			evaluation := node.Evaluation
+			evaluation.Witnesses = append(evaluation.Witnesses, graphengine.EvaluateOptional(nodeDef.OptionalInputs, snapshot.Materials).Witnesses...)
+			evaluations[target.TargetStepID] = evaluation
 		}
-		if node.Readiness != "ready" {
-			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STEP_NOT_READY", "target step input expression is not satisfied", false, map[string]any{"missing_groups": node.Evaluation.MissingGroups, "ready": projection.Ready})
+		if len(invalidTargets) > 0 {
+			if len(targets) == 1 {
+				invalid := invalidTargets[0]
+				code := invalid["code"].(string)
+				message := "target step is not currently reachable"
+				details := map[string]any{"ready": projection.Ready, "blocked": projection.Blocked}
+				status := http.StatusConflict
+				if code == "INVALID_TARGET" {
+					message = "target step is not defined in the session graph"
+					status = http.StatusUnprocessableEntity
+				} else if code == "STEP_NOT_READY" {
+					message = "target step input expression is not satisfied"
+					details["missing_groups"] = invalid["missing_groups"]
+				}
+				return rejectTransition(req.CommandID, &session, projection, status, code, message, false, details)
+			}
+			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict,
+				"BATCH_TRANSITION_REJECTED", "one or more batch targets are not currently Ready; no target was started", false,
+				map[string]any{"targets": invalidTargets, "ready": projection.Ready, "blocked": projection.Blocked})
 		}
-		evaluation := node.Evaluation
-		evaluation.Witnesses = append(evaluation.Witnesses, graphengine.EvaluateOptional(graph.Nodes[req.TargetStepID].OptionalInputs, snapshot.Materials).Witnesses...)
 		update := tx.Model(&orm.PluginSession{}).Where("id = ? AND state_version = ?", session.ID, session.StateVersion).Updates(map[string]any{"state_version": gorm.Expr("state_version + 1"), "updated_at": time.Now().UTC()})
 		if update.Error != nil {
 			return update.Error
@@ -390,34 +494,38 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STATE_VERSION_CONFLICT", "plugin session state changed during transition", true, nil)
 		}
 		reservedVersion = session.StateVersion + 1
-		handOff := req.HandOff
-		nodeDef := graph.Nodes[req.TargetStepID]
-		inputKeys := graphengine.Materials(nodeDef.Input)
-		for _, optional := range nodeDef.OptionalInputs {
-			inputKeys = append(inputKeys, optional.Material)
-		}
-		params := PluginStepParams{PluginID: session.PluginID, PluginRef: session.PluginRef, RevisionID: session.PluginRevisionID, RevisionNo: session.PluginRevisionNo, TreeHash: session.PluginTreeHash, RemoteRoot: session.PluginRemoteRoot, StepID: req.TargetStepID, SessionID: session.ID, UserInput: req.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, PluginMode: req.PluginMode, RetryHint: req.RuntimeInstruction, PartialIndices: req.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs}
-		var launchErr error
-		_, taskID, _, launchErr = launchPluginAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, req.TaskID, session.PluginID+":"+req.TargetStepID, req.Objective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
-		if launchErr != nil {
-			return launchErr
-		}
-		var attempt orm.PluginSessionStep
-		if err := tx.Where("task_id = ?", taskID).First(&attempt).Error; err != nil {
-			return err
-		}
 		now := time.Now().UTC()
-		for _, witness := range evaluation.Witnesses {
-			if err := tx.Create(&orm.PluginAttemptInputBinding{ID: "paib_" + common.GenerateID(), SessionID: session.ID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: witness.RevisionID, BindAs: witness.BindAs, CreatedAt: now}).Error; err != nil {
+		responseTasks := make([]transitionTaskResponse, 0, len(targets))
+		for _, target := range targets {
+			handOff := req.HandOff
+			nodeDef := graph.Nodes[target.TargetStepID]
+			inputKeys := graphengine.Materials(nodeDef.Input)
+			for _, optional := range nodeDef.OptionalInputs {
+				inputKeys = append(inputKeys, optional.Material)
+			}
+			params := PluginStepParams{PluginID: session.PluginID, PluginRef: session.PluginRef, RevisionID: session.PluginRevisionID, RevisionNo: session.PluginRevisionNo, TreeHash: session.PluginTreeHash, RemoteRoot: session.PluginRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, PluginMode: req.PluginMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs}
+			_, taskID, _, launchErr := launchPluginAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.PluginID+":"+target.TargetStepID, target.Objective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
+			if launchErr != nil {
+				return launchErr
+			}
+			var attempt orm.PluginSessionStep
+			if err := tx.Where("task_id = ?", taskID).First(&attempt).Error; err != nil {
 				return err
 			}
+			for _, witness := range evaluations[target.TargetStepID].Witnesses {
+				if err := tx.Create(&orm.PluginAttemptInputBinding{ID: "paib_" + common.GenerateID(), SessionID: session.ID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: witness.RevisionID, BindAs: witness.BindAs, CreatedAt: now}).Error; err != nil {
+					return err
+				}
+			}
+			taskIDs = append(taskIDs, taskID)
+			responseTasks = append(responseTasks, transitionTaskResponse{StepID: target.TargetStepID, TaskID: taskID, StepState: "pending"})
 		}
 		session.StateVersion = reservedVersion
 		projected, err := projectSession(r.Context(), tx, &session)
 		if err != nil {
 			return err
 		}
-		response = transitionCommandResponse{Accepted: true, CommandID: req.CommandID, SessionID: session.ID, TaskID: taskID, StateVersion: reservedVersion, StepState: "pending", Projection: projected.Projection}
+		response = transitionCommandResponse{Accepted: true, CommandID: req.CommandID, SessionID: session.ID, TaskID: taskIDs[0], StateVersion: reservedVersion, StepState: "pending", Tasks: responseTasks, Projection: projected.Projection}
 		return persistTransitionCommand(tx, req, response, "accepted")
 	})
 	if err != nil {
@@ -431,7 +539,9 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 		writeTransitionResponse(w, response, http.StatusServiceUnavailable)
 		return
 	}
-	dispatchPluginAttemptRunner(store.DB(), store.State(), taskID)
+	for _, taskID := range taskIDs {
+		dispatchPluginAttemptRunner(store.DB(), store.State(), taskID)
+	}
 	writeTransitionResponse(w, response, http.StatusOK)
 }
 
