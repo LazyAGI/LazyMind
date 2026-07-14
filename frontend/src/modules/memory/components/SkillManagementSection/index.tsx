@@ -46,6 +46,9 @@ export default function SkillManagementSection() {
   const [debouncedMarketKeyword, setDebouncedMarketKeyword] = useState("");
   const [adminPublishOpen, setAdminPublishOpen] = useState(false);
   const [marketCatalogAssets, setMarketCatalogAssets] = useState<MarketSkillAsset[]>([]);
+  // Use a ref for the builtin cache so updating it never triggers useCallback/useEffect rebuilds.
+  const marketBuiltinCacheRef = useRef<MarketSkillAsset[]>([]);
+  // Keep a state copy only for rendering (installedSkills comparison in SkillMarketView).
   const [marketBuiltinAssets, setMarketBuiltinAssets] = useState<MarketSkillAsset[]>([]);
   const [marketCatalogLoading, setMarketCatalogLoading] = useState(false);
   const [marketListPage, setMarketListPage] = useState(1);
@@ -117,21 +120,23 @@ export default function SkillManagementSection() {
     setMarketListPage(1);
   }, [debouncedMarketKeyword, marketCategory, marketSkillSource, marketListPageSize]);
 
-  const ensureMarketBuiltins = useCallback(async () => {
-    if (marketBuiltinAssets.length) {
-      return marketBuiltinAssets;
+  const ensureMarketBuiltins = useCallback(async (forceRefresh = false) => {
+    if (!forceRefresh && marketBuiltinCacheRef.current.length) {
+      return marketBuiltinCacheRef.current;
     }
     const records = await listBuiltinSkills();
     const assets = records.map(mapMarketSkillRecordToAsset);
+    marketBuiltinCacheRef.current = assets;
     setMarketBuiltinAssets(assets);
     return assets;
-  }, [marketBuiltinAssets]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const loadMarketCatalog = useCallback(async () => {
+  const loadMarketCatalog = useCallback(async (forceRefreshBuiltins = false) => {
     const requestId = ++marketRequestIdRef.current;
     setMarketCatalogLoading(true);
     try {
-      const builtins = await ensureMarketBuiltins();
+      const builtins = await ensureMarketBuiltins(forceRefreshBuiltins);
       if (requestId !== marketRequestIdRef.current) {
         return;
       }
@@ -488,7 +493,25 @@ export default function SkillManagementSection() {
 
   const handleMarketInstall = (item: StructuredAsset) => {
     if ((item as MarketSkillAsset).marketSource === "builtin") {
-      void _handleEnableBuiltinSkill(item);
+      void (async () => {
+        try {
+          await _handleEnableBuiltinSkill(item);
+          // Optimistically mark this builtin item as installed so the UI
+          // updates immediately without triggering a loading state.
+          const updated = marketBuiltinCacheRef.current.map((asset) =>
+            asset.id === item.id ? { ...asset, installed: true } : asset,
+          );
+          marketBuiltinCacheRef.current = updated;
+          setMarketBuiltinAssets(updated);
+          setMarketCatalogAssets((previous) =>
+            previous.map((asset) =>
+              asset.id === item.id ? { ...asset, installed: true } : asset,
+            ),
+          );
+        } catch {
+          // Error already handled and shown by _handleEnableBuiltinSkill.
+        }
+      })();
       return;
     }
     const marketItemId = (item as MarketSkillAsset).marketItemId || item.id;

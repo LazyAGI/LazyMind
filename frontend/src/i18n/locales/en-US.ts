@@ -2694,6 +2694,11 @@ const enUS = {
     memorySkillPackageNewFolderNameInvalid: "Folder name cannot contain /",
     memorySkillPackageReplaceFile: "Replace file",
     memorySkillPackageUploadFile: "Upload file",
+    memorySkillPackageUploadFileTooltip:
+      "Only the following formats are supported, max 512 KiB per file:\n.md, .markdown, .txt, .json, .yaml, .yml, .toml, .py, .js, .ts, .css, .html, .sh",
+    memorySkillPackageUploadFileTypeError:
+      "Unsupported file format. Only allowed: .md, .markdown, .txt, .json, .yaml, .yml, .toml, .py, .js, .ts, .css, .html, .sh",
+    memorySkillPackageUploadFileSizeError: "File exceeds 512 KiB limit. Please choose a smaller file.",
     memorySkillPackageBinaryFileHint: "This is a binary file. Use Upload file to replace it.",
     memorySkillPackageBinaryDiffHint: "Binary files cannot be diff-previewed.",
     memorySkillPackageDiffTooLarge: "File is too large to show diff.",
@@ -3089,6 +3094,11 @@ const enUS = {
     memorySkillCreateManualPlaceholder: "Write SKILL.md body content",
     memorySkillCreateManualHint: "Content will be packaged as ZIP on save",
     memorySkillImportMdFile: "Import Markdown",
+    memorySkillImportMdFileTooltip:
+      "Only .md / .markdown files are supported, max 512 KiB, must be valid UTF-8 encoding",
+    memorySkillImportMdFileTypeError: "Only .md / .markdown files are supported",
+    memorySkillImportMdFileSizeError: "File exceeds 512 KiB limit. Please choose a smaller file.",
+    memorySkillUploadPackageTypeError: "Only .zip, .tgz, .tar, .gz archives are supported",
     memorySkillEditMetadataHint:
       "Only name, description, category, and tags can be edited here. Edit skill content on the detail page.",
     memorySkillImportMethodLink: "Import from link",
@@ -3099,7 +3109,7 @@ const enUS = {
       "https://github.com/org/my-ability or an internal repository link",
     memorySkillUploadFileTitle: "Install from local package",
     memorySkillUploadFileHint:
-      "Supports .zip, .tgz, or archives containing skill instruction files",
+      "Supports .zip, .tgz, or archives containing skill instruction files. Max 512 MiB per file.",
     memorySkillUploadFileReady: "{{size}} KB, ready to upload",
     memorySkillUploadClear: "Clear",
     memorySkillUploadSubmit: "Upload skill",

@@ -9,6 +9,7 @@ import {
   Space,
   Spin,
   Tag,
+  Tooltip,
   Tree,
   Typography,
   Upload,
@@ -70,6 +71,15 @@ import {
   pickDefaultFilePath,
   resolveParentPathFromSelection,
 } from "./skillTreeUtils";
+
+const SKILL_UPLOAD_ACCEPT_EXTS = new Set([
+  ".md", ".markdown",
+  ".txt", ".json", ".yaml", ".yml", ".toml",
+  ".py", ".js", ".ts", ".css", ".html", ".sh",
+]);
+
+const SKILL_UPLOAD_ACCEPT_ATTR =
+  ".md,.markdown,.txt,.json,.yaml,.yml,.toml,.py,.js,.ts,.css,.html,.sh";
 
 interface SkillPackageEditorProps {
   skillId: string;
@@ -717,6 +727,15 @@ export default function SkillPackageEditor({
     if (!selectedPath || !draftStatus || reviewMode) {
       return false;
     }
+    const ext = file.name.toLowerCase().replace(/^.*(\.[^.]+)$/, "$1");
+    if (!SKILL_UPLOAD_ACCEPT_EXTS.has(ext)) {
+      message.warning(t("admin.memorySkillPackageUploadFileTypeError"));
+      return false;
+    }
+    if (file.size > 512 * 1024) {
+      message.warning(t("admin.memorySkillPackageUploadFileSizeError"));
+      return false;
+    }
     try {
       const upload = await uploadSkillTempFile(file);
       const nextVersion = await uploadSkillDraftFile(skillId, {
@@ -950,10 +969,21 @@ export default function SkillPackageEditor({
         {canManageSelectedFile ? (
           <Space wrap className="memory-skill-package-file-actions">
             <Upload
+              accept={SKILL_UPLOAD_ACCEPT_ATTR}
               showUploadList={false}
               beforeUpload={(file) => void handleUploadFile(file as File)}
             >
-              <Button icon={<UploadOutlined />}>{t("admin.memorySkillPackageUploadFile")}</Button>
+              <Tooltip
+                placement="bottomRight"
+                title={
+                  <>
+                    <div>{t("admin.memorySkillPackageUploadFileTooltip").split("\n")[0]}</div>
+                    <div style={{ marginTop: 4 }}>{t("admin.memorySkillPackageUploadFileTooltip").split("\n")[1]}</div>
+                  </>
+                }
+              >
+                <Button icon={<UploadOutlined />}>{t("admin.memorySkillPackageUploadFile")}</Button>
+              </Tooltip>
             </Upload>
             {canEditSelectedFile ? (
               isEditing ? (

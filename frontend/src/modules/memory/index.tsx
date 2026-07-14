@@ -3172,6 +3172,16 @@ export default function MemoryManagement() {
     if (!file) {
       return;
     }
+    const name = file.name.toLowerCase();
+    const valid =
+      name.endsWith(".zip") ||
+      name.endsWith(".tgz") ||
+      name.endsWith(".tar") ||
+      name.endsWith(".gz");
+    if (!valid) {
+      message.warning(t("admin.memorySkillUploadPackageTypeError"));
+      return;
+    }
 
     setPendingSkillPackageFile(file);
     setPendingSkillSourceUrl("");
@@ -4821,7 +4831,8 @@ export default function MemoryManagement() {
       );
       try {
         await enableBuiltinSkill(builtinSkillUid);
-        await refreshSkillAssets({ page: skillListPage });
+        // No extra list refresh here — caller handles optimistic UI update.
+        // Data syncs when the user switches tabs.
         message.success(t("admin.memoryBuiltinSkillEnableSuccess"));
       } catch (error) {
         console.error("Enable builtin skill failed:", error);
@@ -4831,6 +4842,7 @@ export default function MemoryManagement() {
             t("admin.memoryBuiltinSkillEnableFailed"),
           ) || t("admin.memoryBuiltinSkillEnableFailed"),
         );
+        throw error;
       } finally {
         setBuiltinSkillEnableLoading((previous) => {
           const next = new Set(previous);
@@ -4839,7 +4851,7 @@ export default function MemoryManagement() {
         });
       }
     },
-    [refreshSkillAssets, skillListPage, t],
+    [t],
   );
 
   const handleBatchDeleteGlossary = () => {

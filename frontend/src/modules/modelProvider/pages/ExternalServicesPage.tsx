@@ -146,6 +146,30 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     status: "tbd",
   },
   {
+    key: "tavily",
+    name: "Tavily",
+    description: "",
+    summary: "",
+    category: "search",
+    fields: ["apiKey"],
+    logo: <CompassOutlined />,
+    logoUrl: "https://www.google.com/s2/favicons?domain=tavily.com&sz=96",
+    tone: "violet",
+    status: "missing",
+  },
+  {
+    key: "bocha",
+    name: "Bocha",
+    description: "",
+    summary: "",
+    category: "search",
+    fields: ["apiKey"],
+    logo: <SearchOutlined />,
+    logoUrl: "https://www.google.com/s2/favicons?domain=bochaai.com&sz=96",
+    tone: "green",
+    status: "missing",
+  },
+  {
     key: "bingSearch",
     name: "Bing Search",
     description: "",
@@ -170,30 +194,6 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     status: "configured",
   },
   {
-    key: "bocha",
-    name: "Bocha",
-    description: "",
-    summary: "",
-    category: "search",
-    fields: ["apiKey"],
-    logo: <SearchOutlined />,
-    logoUrl: "https://www.google.com/s2/favicons?domain=bochaai.com&sz=96",
-    tone: "green",
-    status: "missing",
-  },
-  {
-    key: "tavily",
-    name: "Tavily",
-    description: "",
-    summary: "",
-    category: "search",
-    fields: ["apiKey"],
-    logo: <CompassOutlined />,
-    logoUrl: "https://www.google.com/s2/favicons?domain=tavily.com&sz=96",
-    tone: "violet",
-    status: "missing",
-  },
-  {
     key: "sciverse",
     name: "Sciverse",
     description: "",
@@ -210,6 +210,20 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
 const fallbackServiceByName = new Map<string, ExternalServiceConfig>(
   externalServiceConfigs.map((service) => [normalizeProviderName(service.name), service])
 );
+
+/** Display order for search engines: Tavily → Bocha → Bing → Google Custom Search */
+const SEARCH_ENGINE_DISPLAY_ORDER: Array<{ match: RegExp; order: number }> = [
+  { match: /^tavily/, order: 0 },
+  { match: /^bocha/, order: 1 },
+  { match: /^bing/, order: 2 },
+  { match: /^google/, order: 3 },
+];
+
+function getSearchEngineDisplayOrder(name: string) {
+  const normalizedName = normalizeProviderName(name);
+  const matched = SEARCH_ENGINE_DISPLAY_ORDER.find(({ match }) => match.test(normalizedName));
+  return matched?.order ?? Number.MAX_SAFE_INTEGER;
+}
 
 const serviceToneByCategory: Record<ServiceCategoryKey, ServiceTone> = {
   parsing: "blue",
@@ -925,6 +939,14 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
     };
     services.forEach((service) => {
       byCategory[service.category].push(service);
+    });
+    byCategory.search.sort((a, b) => {
+      const orderA = getSearchEngineDisplayOrder(a.name);
+      const orderB = getSearchEngineDisplayOrder(b.name);
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      return a.name.localeCompare(b.name);
     });
     return byCategory;
   }, [services]);

@@ -110,6 +110,16 @@ export default function SkillAdminPublishModal({
           multiple={false}
           showUploadList={false}
           beforeUpload={(file) => {
+            const name = file.name.toLowerCase();
+            const valid =
+              name.endsWith(".zip") ||
+              name.endsWith(".tgz") ||
+              name.endsWith(".tar") ||
+              name.endsWith(".gz");
+            if (!valid) {
+              message.warning(t("admin.memorySkillUploadPackageTypeError"));
+              return false;
+            }
             setSelectedFile(file);
             setRepoUrl("");
             return false;

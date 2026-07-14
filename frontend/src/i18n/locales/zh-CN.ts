@@ -2572,6 +2572,11 @@ const zhCN = {
     memorySkillPackageNewFolderNameInvalid: "目录名称不能包含 /",
     memorySkillPackageReplaceFile: "替换文件",
     memorySkillPackageUploadFile: "上传文件",
+    memorySkillPackageUploadFileTooltip:
+      "仅支持以下格式，单文件不超过 512 KiB：\n.md、.markdown、.txt、.json、.yaml、.yml、.toml、.py、.js、.ts、.css、.html、.sh",
+    memorySkillPackageUploadFileTypeError:
+      "不支持该文件格式，仅允许上传：.md、.markdown、.txt、.json、.yaml、.yml、.toml、.py、.js、.ts、.css、.html、.sh",
+    memorySkillPackageUploadFileSizeError: "文件超过 512 KiB 限制，请选择更小的文件",
     memorySkillPackageBinaryFileHint: "该文件为二进制内容，请使用「上传文件」覆盖。",
     memorySkillPackageBinaryDiffHint: "二进制文件不支持 diff 预览。",
     memorySkillPackageDiffTooLarge: "文件过大，无法展示 diff。",
@@ -2936,6 +2941,10 @@ const zhCN = {
     memorySkillCreateManualPlaceholder: "编写 SKILL.md 正文内容",
     memorySkillCreateManualHint: "保存时将自动打包为 ZIP 并上传",
     memorySkillImportMdFile: "导入 Markdown",
+    memorySkillImportMdFileTooltip: "仅支持 .md / .markdown 文件，单文件不超过 512 KiB，内容必须为合法 UTF-8 编码",
+    memorySkillImportMdFileTypeError: "仅支持 .md / .markdown 文件",
+    memorySkillImportMdFileSizeError: "文件超过 512 KiB 限制，请选择更小的文件",
+    memorySkillUploadPackageTypeError: "仅支持 .zip、.tgz、.tar、.gz 压缩包",
     memorySkillEditMetadataHint:
       "此处仅修改名称、描述、分类与标签。技能内容请在详情页编辑并提交。",
     memorySkillImportMethodLink: "链接导入",
@@ -2945,7 +2954,7 @@ const zhCN = {
     memorySkillUploadRepoPlaceholder:
       "https://github.com/org/my-ability 或内部仓库链接",
     memorySkillUploadFileTitle: "从本地包安装",
-    memorySkillUploadFileHint: "支持 .zip、.tgz 或包含技能说明文件的压缩包",
+    memorySkillUploadFileHint: "支持 .zip、.tgz 或包含技能说明文件的压缩包，单文件不超过 512 MiB",
     memorySkillUploadFileReady: "{{size}} KB，准备上传",
     memorySkillUploadClear: "清空",
     memorySkillUploadSubmit: "上传技能",
