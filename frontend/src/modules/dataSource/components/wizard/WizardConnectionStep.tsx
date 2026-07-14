@@ -64,6 +64,7 @@ export interface WizardConnectionStepProps {
 export default function WizardConnectionStep({
   t,
   form,
+  isEditMode,
   selectedType,
   syncMode,
   localPathOptions,
