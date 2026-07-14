@@ -27,6 +27,7 @@ type rawState struct {
 
 type rawTransition struct {
 	To        string `yaml:"to"`
+	When      string `yaml:"when"`
 	Condition any    `yaml:"condition"`
 }
 
@@ -95,6 +96,7 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 	}
 	rawSteps, stepDiags := normalizeSteps(state.Steps)
 	result.Diagnostics = append(result.Diagnostics, stepDiags...)
+	inputPaths := map[string]string{}
 	for id := range pluginSteps {
 		if _, ok := rawSteps[id]; !ok {
 			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_STATE_STEP_MISSING", "error", "scenario/state.yml.steps."+id, id, "plugin step has no state configuration"))
@@ -117,8 +119,16 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 			node.Route = "all"
 		}
 		node.Outputs, node.RequiredOutputs = parseOutputs(step.Outputs)
-		node.OptionalInputs = parseMaterialRefs(step.OptionalInputs)
-		if step.InputExpression != nil {
+		if step.Inputs != nil {
+			inputPaths[id] = "scenario/state.yml.steps." + id + ".inputs"
+			node.Input, node.OptionalInputs, stepDiags = parseUnifiedInputs(step.Inputs, id)
+			result.Diagnostics = append(result.Diagnostics, stepDiags...)
+			if step.InputExpression != nil || step.OptionalInputs != nil {
+				result.Diagnostics = append(result.Diagnostics, nodeDiag("E_INPUT_FORMAT_CONFLICT", "error", inputPaths[id], id, "use inputs only; do not combine it with input_expression or optional_inputs"))
+			}
+		} else if step.InputExpression != nil {
+			inputPaths[id] = "scenario/state.yml.steps." + id + ".input_expression"
+			node.OptionalInputs = parseMaterialRefs(step.OptionalInputs)
 			expr, err := parseExpression(step.InputExpression)
 			if err != nil {
 				result.Diagnostics = append(result.Diagnostics, nodeDiag("E_EXPRESSION_INVALID", "error", "scenario/state.yml.steps."+id+".input_expression", id, err.Error()))
@@ -126,7 +136,8 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 				node.Input = expr
 			}
 		} else {
-			node.Input, node.OptionalInputs = migrateLegacyInputs(step.Inputs, node.OptionalInputs)
+			inputPaths[id] = "scenario/state.yml.steps." + id + ".optional_inputs"
+			node.OptionalInputs = parseMaterialRefs(step.OptionalInputs)
 		}
 		if step.SkipIf != nil {
 			expr, err := parseExpression(step.SkipIf)
@@ -202,25 +213,18 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 				result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "E_EDGE_DUPLICATE", Severity: "error", Path: path, EdgeID: id, Message: "duplicate control edge: " + id, Fixable: true})
 			}
 			seenEdges[id] = true
-			compiled := CompiledEdge{ID: id, From: from, To: edge.To}
+			compiled := CompiledEdge{ID: id, From: from, To: edge.To, When: strings.TrimSpace(edge.When)}
 			switch value := edge.Condition.(type) {
 			case nil:
 			case string:
 				if strings.TrimSpace(value) != "" {
-					compiled.Legacy = value
-					severity := "warning"
-					if profile == ProfilePublish || profile == ProfileRuntimeLoad {
-						severity = "error"
+					if compiled.When == "" {
+						compiled.When = strings.TrimSpace(value)
 					}
-					result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "E_LEGACY_ROUTE_CONDITION", Severity: severity, Path: path + ".condition", EdgeID: id, Message: "natural-language route conditions are not executable; use a material expression", Fixable: true})
+					result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "W_ROUTE_CONDITION_MIGRATED", Severity: "warning", Path: path + ".condition", EdgeID: id, Message: "natural-language route condition was accepted; save it as `when`", Fixable: true})
 				}
 			default:
-				expr, err := parseExpression(value)
-				if err != nil {
-					result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "E_ROUTE_EXPRESSION_INVALID", Severity: "error", Path: path + ".condition", EdgeID: id, Message: err.Error(), Fixable: true})
-				} else {
-					compiled.Condition = expr
-				}
+				result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "E_ROUTE_MATERIAL_CONDITION_UNSUPPORTED", Severity: "error", Path: path + ".condition", EdgeID: id, Message: "route conditions must be natural-language `when` hints; material expressions are only supported by skip_if and inputs", Fixable: true})
 			}
 			graph.ControlEdges = append(graph.ControlEdges, compiled)
 		}
@@ -257,56 +261,19 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 		}
 	}
 	graph.StaticOrder = topoOrder(allNodes, adj)
-	for from, targets := range state.Transitions {
-		route := graph.StartRoute
-		if node, ok := graph.Nodes[from]; ok {
-			route = node.Route
-		}
-		seenConditions := map[string]bool{}
-		unconditional := false
-		guaranteedMatch := false
-		for index, rawEdge := range targets {
-			path := fmt.Sprintf("scenario/state.yml.transitions.%s[%d].condition", from, index)
-			conditionBytes, _ := json.Marshal(rawEdge.Condition)
-			conditionKey := string(conditionBytes)
-			isUnconditional := rawEdge.Condition == nil
-			if text, ok := rawEdge.Condition.(string); ok && strings.TrimSpace(text) == "" {
-				isUnconditional = true
-			}
-			if isUnconditional {
-				if route == "choice" && unconditional {
-					result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "E_CHOICE_BRANCH_SHADOWED", Severity: "error", Path: path, EdgeID: from + "->" + rawEdge.To, Message: "choice branch is shadowed by an earlier unconditional branch", Fixable: true})
-				}
-				unconditional = true
-				guaranteedMatch = true
-				continue
-			}
-			if condition, err := parseExpression(rawEdge.Condition); err == nil && expressionGuaranteed(condition, from, graph.MaterialProducers, guaranteedMaterials, dominators, true) {
-				guaranteedMatch = true
-			}
-			if route == "choice" && (unconditional || seenConditions[conditionKey]) {
-				result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "E_CHOICE_BRANCH_SHADOWED", Severity: "error", Path: path, EdgeID: from + "->" + rawEdge.To, Message: "choice branch is completely shadowed by an earlier branch", Fixable: true})
-			}
-			seenConditions[conditionKey] = true
-		}
-		if !guaranteedMatch {
-			code := "E_ROUTE_NO_FALLBACK"
-			message := "route can finish without activating an edge; add an unconditional fallback"
-			if route == "choice" {
-				code = "E_CHOICE_NO_FALLBACK"
-				message = "choice route can finish without selecting an edge; add an unconditional fallback"
-			}
-			result.Diagnostics = append(result.Diagnostics, nodeDiag(code, "error", "scenario/state.yml.transitions."+from, from, message))
-		}
-	}
-
 	// Expressions and producer ancestry.
 	for id, node := range graph.Nodes {
-		result.Diagnostics = append(result.Diagnostics, validateExpression(node.Input, "scenario/state.yml.steps."+id+".input_expression", id, knownMaterials)...)
+		inputPath := inputPaths[id]
+		result.Diagnostics = append(result.Diagnostics, validateExpression(node.Input, inputPath, id, knownMaterials)...)
+		result.Diagnostics = append(result.Diagnostics, validateInputExpressionShape(node.Input, inputPath, id)...)
 		result.Diagnostics = append(result.Diagnostics, validateExpression(node.SkipIf, "scenario/state.yml.steps."+id+".skip_if", id, knownMaterials)...)
+		result.Diagnostics = append(result.Diagnostics, validateSkipExpressionShape(node.SkipIf, "scenario/state.yml.steps."+id+".skip_if", id)...)
 		for _, ref := range node.OptionalInputs {
+			if ref.BindAs != "" {
+				result.Diagnostics = append(result.Diagnostics, nodeDiag("E_BIND_ALIAS_UNSUPPORTED", "error", inputPath, id, "bind_as is no longer supported; reference materials by their unique ids"))
+			}
 			if !knownMaterials[ref.Material] {
-				result.Diagnostics = append(result.Diagnostics, materialNodeDiag("E_MATERIAL_UNKNOWN", "error", "scenario/state.yml.steps."+id+".optional_inputs", id, ref.Material, "optional input references an unknown material"))
+				result.Diagnostics = append(result.Diagnostics, materialNodeDiag("E_MATERIAL_UNKNOWN", "error", inputPath, id, ref.Material, "optional input references an unknown material"))
 			}
 		}
 		materials := expressionMaterials(node.Input)
@@ -316,7 +283,7 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 		for _, material := range materials {
 			producer, ok := graph.MaterialProducers[material]
 			if ok && producer.Kind == "step" && !traverse(producer.StepID, adj)[id] {
-				result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "E_MATERIAL_PRODUCER_NOT_UPSTREAM", Severity: "error", Path: "scenario/state.yml.steps." + id + ".input_expression", NodeID: id, MaterialID: material, Message: "material producer must be a control ancestor of the consumer", Details: map[string]any{"producer_step_id": producer.StepID}, Fixable: true})
+				result.Diagnostics = append(result.Diagnostics, Diagnostic{Code: "E_MATERIAL_PRODUCER_NOT_UPSTREAM", Severity: "error", Path: inputPath, NodeID: id, MaterialID: material, Message: "material producer must be a control ancestor of the consumer", Details: map[string]any{"producer_step_id": producer.StepID}, Fixable: true})
 			}
 		}
 		if node.SkipIf != nil {
@@ -330,19 +297,6 @@ func Compile(pluginYAML, stateYAML, scenario string, profile Profile) CompileRes
 				}
 			}
 			graph.SkipExpansions = append(graph.SkipExpansions, CompiledBypass{NodeID: id, From: reverse[id], To: adj[id]})
-		}
-	}
-	for _, edge := range graph.ControlEdges {
-		result.Diagnostics = append(result.Diagnostics, validateExpression(edge.Condition, "scenario/state.yml.transitions."+edge.From, edge.From, knownMaterials)...)
-		for _, material := range expressionMaterials(edge.Condition) {
-			producer := graph.MaterialProducers[material]
-			if producer.Kind == "step" && producer.StepID == edge.From {
-				if node := graph.Nodes[edge.From]; node.SkipIf != nil {
-					result.Diagnostics = append(result.Diagnostics, materialNodeDiag("E_ROUTE_SKIPPED_OUTPUT", "error", "scenario/state.yml.transitions."+edge.From, edge.From, material, "route condition cannot depend on an output of a node that may be bypassed"))
-				}
-			} else if producer.Kind == "step" && !dominators[edge.From][producer.StepID] {
-				result.Diagnostics = append(result.Diagnostics, materialNodeDiag("E_ROUTE_RACY_MATERIAL", "error", "scenario/state.yml.transitions."+edge.From, edge.From, material, "route condition depends on a material not guaranteed at decision time"))
-			}
 		}
 	}
 	result.Diagnostics = append(result.Diagnostics, validateUI(plugin.UI, knownMaterials, exposed, profile)...)
@@ -442,17 +396,20 @@ func parseExpression(value any) (*Expression, error) {
 	return &expr, nil
 }
 
-func migrateLegacyInputs(value any, optional []MaterialRef) (*Expression, []MaterialRef) {
+func parseUnifiedInputs(value any, nodeID string) (*Expression, []MaterialRef, []Diagnostic) {
 	if value == nil {
-		return nil, optional
+		return nil, nil, nil
 	}
 	b, _ := yaml.Marshal(value)
 	var items []any
 	if yaml.Unmarshal(b, &items) != nil {
-		return nil, optional
+		return nil, nil, []Diagnostic{nodeDiag("E_INPUTS_INVALID", "error", "scenario/state.yml.steps."+nodeID+".inputs", nodeID, "inputs must be a list")}
 	}
 	var required []Expression
-	for _, item := range items {
+	var optional []MaterialRef
+	var diags []Diagnostic
+	for index, item := range items {
+		path := fmt.Sprintf("scenario/state.yml.steps.%s.inputs[%d]", nodeID, index)
 		switch v := item.(type) {
 		case string:
 			if v != "" {
@@ -461,22 +418,39 @@ func migrateLegacyInputs(value any, optional []MaterialRef) (*Expression, []Mate
 		case map[string]any:
 			id := scalar(firstNonNil(v["slot"], v["material"], v["id"]))
 			if id == "" {
+				diags = append(diags, nodeDiag("E_INPUT_MATERIAL_REQUIRED", "error", path+".material", nodeID, "input material is required"))
 				continue
 			}
-			if boolValue(v["required"]) {
-				required = append(required, Expression{Material: id})
+			requiredValue, hasRequired := v["required"]
+			if !hasRequired {
+				diags = append(diags, nodeDiag("E_INPUT_REQUIRED_FLAG_MISSING", "error", path+".required", nodeID, "input must explicitly declare required: true or false"))
+			}
+			if boolValue(requiredValue) {
+				alternatives := parseMaterialList(v["alternatives"])
+				if len(alternatives) == 0 {
+					required = append(required, Expression{Material: id})
+				} else {
+					choices := []Expression{{Material: id}}
+					for _, alternative := range alternatives {
+						choices = append(choices, Expression{Material: alternative})
+					}
+					required = append(required, Expression{Any: choices})
+				}
 			} else {
+				if len(parseMaterialList(v["alternatives"])) > 0 {
+					diags = append(diags, nodeDiag("E_OPTIONAL_ALTERNATIVES_UNSUPPORTED", "error", path+".alternatives", nodeID, "optional inputs cannot declare alternatives"))
+				}
 				optional = append(optional, MaterialRef{Material: id})
 			}
 		}
 	}
 	if len(required) == 0 {
-		return nil, optional
+		return nil, optional, diags
 	}
 	if len(required) == 1 {
-		return &required[0], optional
+		return &required[0], optional, diags
 	}
-	return &Expression{All: required}, optional
+	return &Expression{All: required}, optional, diags
 }
 
 func parseMaterialList(value any) []string {

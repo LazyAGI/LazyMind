@@ -17,6 +17,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
+	"lazymind/core/plugin/graphengine"
 	"lazymind/core/store"
 )
 
@@ -719,18 +720,20 @@ func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
 		warnings, draft.PluginYAMLContent == "", draft.StateYAMLContent == "")
 
 	prevStatus := draft.GenerateStatus
+	beforeDiagnostics := diagnosePluginWithProfile(draft.PluginYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent, graphengine.ProfilePublish)
 	payload := pluginDraftRepairPayload{
 		DraftID:      draftID,
 		UserID:       userID,
 		Target:       strings.TrimSpace(body.Target),
 		RepairHint:   strings.TrimSpace(body.RepairHint),
 		Warnings:     warnings,
+		Diagnostics:  repairDiagnosticsPayload(beforeDiagnostics),
 		PrevStatus:   prevStatus,
 		LLMConfig:    llmConfig,
 		DraftVersion: draft.Version,
 		Mode:         body.Mode,
 	}
-	repairRun := orm.PluginRepairRun{ID: uuid.NewString(), DraftID: draft.ID, UserID: userID, BasePluginRevisionID: draft.BaseRevisionID, DraftVersionBefore: draft.Version, Target: body.Target, Mode: body.Mode, SourceAnalysisID: body.SourceAnalysisID, SourceSkillRevisionID: draft.SourceSkillRevisionID, RepairHint: body.RepairHint, DiagnosticsBeforeJSON: diagnosticsJSON(diagnosePlugin(draft.PluginYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent)), ChangesJSON: "{}", DiagnosticsAfterJSON: "{}", Status: "queued", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	repairRun := orm.PluginRepairRun{ID: uuid.NewString(), DraftID: draft.ID, UserID: userID, BasePluginRevisionID: draft.BaseRevisionID, DraftVersionBefore: draft.Version, Target: body.Target, Mode: body.Mode, SourceAnalysisID: body.SourceAnalysisID, SourceSkillRevisionID: draft.SourceSkillRevisionID, RepairHint: body.RepairHint, DiagnosticsBeforeJSON: diagnosticsJSON(beforeDiagnostics), ChangesJSON: "{}", DiagnosticsAfterJSON: "{}", Status: "queued", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := db.Create(&repairRun).Error; err != nil {
 		common.ReplyErr(w, "create repair run failed", http.StatusInternalServerError)
 		return

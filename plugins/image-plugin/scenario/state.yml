@@ -19,8 +19,9 @@ transitions:
 
   optimize_prompt:
     - to: enhance_image
-      condition: {material: edit_route}
+      when: 用户希望编辑已有图片
     - to: generate_image
+      when: 用户希望生成一张新图片
 
   generate_image:
     - to: __end__
@@ -82,14 +83,11 @@ steps:
 
       Stop after saving required artifacts only.
     outputs:
-      - slot: subject_analysis
-        content_type: text
+      - material: subject_analysis
         required: true
-      - slot: workflow_routing
-        content_type: text
+      - material: workflow_routing
         required: true
-      - slot: edit_route
-        content_type: text
+      - material: edit_route
         required: false
     acceptance_criteria: |
       subject_analysis must be saved (50+ words), user-facing natural language only —
@@ -153,19 +151,16 @@ steps:
       - image_search_tool
       - validate_image_ref
     inputs:
-      - slot: subject_analysis
+      - material: subject_analysis
         required: true
-      - slot: workflow_routing
+      - material: workflow_routing
         required: true
     outputs:
-      - slot: material_images
-        content_type: image
+      - material: material_images
         required: false
-      - slot: material_summary
-        content_type: text
+      - material: material_summary
         required: true
-      - slot: raw_source_image
-        content_type: image
+      - material: raw_source_image
         required: false
     acceptance_criteria: |
       For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: 1–3 validated material_images should be saved (never more than 3).
@@ -213,16 +208,16 @@ steps:
 
       Stop after saving. Do not output anything else.
     inputs:
-      - slot: subject_analysis
+      - material: subject_analysis
         required: true
-      - slot: workflow_routing
+      - material: workflow_routing
         required: true
-      - slot: material_images
+      - material: material_images
         required: false
-      - slot: raw_source_image
+      - material: raw_source_image
         required: false
     outputs:
-      - slot: prompt_used
+      - material: prompt_used
     acceptance_criteria: |
       prompt_used artifact must be saved in English.
       For generation workflows: at least 30 words, suitable for image_generator.
@@ -230,7 +225,6 @@ steps:
 
   generate_image:
     label: Generate Image
-    route: choice
     prompt: |
       You are an image generation agent.
 
@@ -252,10 +246,10 @@ steps:
     tools:
       - image_generator
     inputs:
-      - slot: prompt_used
+      - material: prompt_used
         required: true
     outputs:
-      - slot: generated_image_output
+      - material: generated_image_output
     acceptance_criteria: |
       generated_image_output artifact must be saved with a valid local path or http(s) URL.
 
@@ -302,13 +296,13 @@ steps:
       - multimodal
       - validate_image_ref
     inputs:
-      - slot: raw_source_image
+      - material: raw_source_image
         required: false
-      - slot: material_images
+      - material: material_images
         required: false
-      - slot: prompt_used
+      - material: prompt_used
         required: false
     outputs:
-      - slot: enhanced_image_output
+      - material: enhanced_image_output
     acceptance_criteria: |
       enhanced_image_output artifact must be saved with a valid local path or http(s) URL.

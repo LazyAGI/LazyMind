@@ -43,6 +43,7 @@ export function serializePluginModel(model: PluginModel, graphModel?: GraphModel
         if (slot.allow_manual_add !== undefined) entry.allow_manual_add = slot.allow_manual_add;
       }
       if (slot.summary_max_chars != null) entry.summary_max_chars = slot.summary_max_chars;
+      if (slot.external) entry.external = true;
       return entry;
     });
   }

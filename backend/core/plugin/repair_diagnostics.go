@@ -22,7 +22,11 @@ type repairDiagnostic struct {
 }
 
 func diagnosePlugin(pluginYAML, stateYAML, scenario, scriptsJSON string) []repairDiagnostic {
-	compiled := graphengine.Compile(pluginYAML, stateYAML, scenario, graphengine.ProfileEditor)
+	return diagnosePluginWithProfile(pluginYAML, stateYAML, scenario, scriptsJSON, graphengine.ProfileEditor)
+}
+
+func diagnosePluginWithProfile(pluginYAML, stateYAML, scenario, scriptsJSON string, profile graphengine.Profile) []repairDiagnostic {
+	compiled := graphengine.Compile(pluginYAML, stateYAML, scenario, profile)
 	out := make([]repairDiagnostic, 0, len(compiled.Diagnostics))
 	for _, item := range compiled.Diagnostics {
 		out = append(out, repairDiagnostic{Code: item.Code, Path: item.Path, Message: item.Message, Severity: item.Severity, NodeID: item.NodeID, EdgeID: item.EdgeID, MaterialID: item.MaterialID, Details: item.Details, Fixable: item.Fixable})

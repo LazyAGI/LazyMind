@@ -1,5 +1,5 @@
 import type { GraphModel } from './model';
-import { VIRTUAL_END, VIRTUAL_START } from './model';
+import { expressionMaterials, VIRTUAL_END, VIRTUAL_START } from './model';
 
 export interface ValidationError {
   code: string;
@@ -57,17 +57,21 @@ export function validateStateGraph(model: GraphModel): ValidationError[] {
   // Obvious material-reference typos can be shown before the debounced Go call.
   const slotIds = new Set(Object.keys(model.slots));
   for (const node of nodes) {
-    for (const s of [...node.inputs, ...node.outputs]) {
-      if (slotIds.size > 0 && !slotIds.has(s.slot) && s.slot !== '') {
+    const refs = [
+      ...node.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])]),
+      ...node.outputs.map((ref) => ref.material),
+      ...expressionMaterials(node.skipIf),
+    ];
+    for (const material of refs) {
+      if (slotIds.size > 0 && !slotIds.has(material) && material !== '') {
         errors.push({
           code: 'LOCAL_UNKNOWN_MATERIAL',
-          message: `节点 "${node.id}" 引用了未在 slots 中定义的 slot "${s.slot}"`,
+          message: `节点 "${node.id}" 引用了未在 slots 中定义的素材 "${material}"`,
           nodeId: node.id,
         });
       }
     }
   }
-
   return errors;
 }
 

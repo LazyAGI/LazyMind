@@ -3,6 +3,7 @@ import { Button, Checkbox, Input, InputNumber, Select, Tooltip, Empty, Dropdown,
 import { PlusOutlined, CloseOutlined, CheckOutlined, DownOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { SlotDef, GraphModel } from '../core/model';
+import { removeMaterialFromExpression } from '../core/model';
 import type { PluginModel, PluginUiTab, WidgetConfig, WidgetType, CompositePanelNode } from '../core/pluginModel';
 import { SLOT_DEFAULT_WIDGET, SLOT_COMPATIBLE_WIDGETS } from '../core/pluginModel';
 import WidgetSelector from '../UiEditorPanel/WidgetSelector';
@@ -44,6 +45,7 @@ interface EditDraft {
   cardinality: 'single' | 'list';
   ordered: boolean;
   allow_manual_add: boolean;
+  external: boolean;
   summary_max_chars: string;
   idError?: string;
 }
@@ -55,12 +57,15 @@ const EMPTY_DRAFT: EditDraft = {
   cardinality: 'single',
   ordered: false,
   allow_manual_add: true,
+  external: false,
   summary_max_chars: '',
 };
 
 /** Returns true if any step node uses slotId as an input. */
 function isUsedAsInput(model: GraphModel, slotId: string): boolean {
-  return model.nodes.some((n) => n.inputs.some((r) => r.slot === slotId));
+  return model.nodes.some((n) =>
+    n.inputs.some((input) => input.material === slotId || input.alternatives?.includes(slotId)),
+  );
 }
 
 // ── Composite layout helpers ─────────────────────────────────────────────────
@@ -350,6 +355,12 @@ function EditForm({ draft, isNew, onChange, onSave, onCancel, saveLabel }: EditF
       </div>
       <div className="artifact-edit-row artifact-edit-row--flags">
         <Checkbox
+          checked={draft.external}
+          onChange={(e) => onChange({ external: e.target.checked })}
+        >
+          外部输入
+        </Checkbox>
+        <Checkbox
           checked={draft.cardinality === 'list'}
           onChange={(e) => onChange({ cardinality: e.target.checked ? 'list' : 'single' })}
         >
@@ -432,6 +443,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
       cardinality: art.cardinality === 'list' ? 'list' : 'single',
       ordered: !!art.ordered,
       allow_manual_add: resolveAllowManualAdd(),
+      external: !!art.external,
       summary_max_chars: art.summary_max_chars != null ? String(art.summary_max_chars) : '',
     });
     setEditing(true);
@@ -446,6 +458,7 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
       cardinality: isList ? 'list' : undefined,
       ordered: (isList && draft.ordered) ? true : undefined,
       allow_manual_add: isList ? draft.allow_manual_add : undefined,
+      external: draft.external || undefined,
       summary_max_chars: (!isNaN(maxChars) && maxChars > 0) ? maxChars : undefined,
     });
     setEditing(false);
@@ -652,6 +665,7 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
       cardinality: isList ? 'list' : undefined,
       ordered: (isList && newDraft.ordered) ? true : undefined,
       allow_manual_add: isList ? newDraft.allow_manual_add : undefined,
+      external: newDraft.external || undefined,
       summary_max_chars: (!isNaN(maxChars) && maxChars > 0) ? maxChars : undefined,
     };
     onModelChange((prev) => ({ ...prev, slots: { ...prev.slots, [newDraft.id]: newSlot } }));
@@ -665,10 +679,24 @@ export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, i
       delete newSlots[id];
       const newNodes = prev.nodes.map((n) => ({
         ...n,
-        inputs: n.inputs.filter((r) => r.slot !== id),
-        outputs: n.outputs.filter((r) => r.slot !== id),
+        inputs: n.inputs
+          .filter((input) => input.material !== id)
+          .map((input) => ({
+            ...input,
+            alternatives: input.alternatives?.filter((material) => material !== id),
+          })),
+        outputs: n.outputs.filter((r) => r.material !== id),
+        skipIf: removeMaterialFromExpression(n.skipIf, id),
+        transitions: n.transitions.map((transition) => ({
+          ...transition,
+          condition: removeMaterialFromExpression(transition.condition, id),
+        })),
       }));
-      return { ...prev, slots: newSlots, nodes: newNodes };
+      const startTransitions = prev.startTransitions.map((transition) => ({
+        ...transition,
+        condition: removeMaterialFromExpression(transition.condition, id),
+      }));
+      return { ...prev, slots: newSlots, nodes: newNodes, startTransitions };
     });
   };
 

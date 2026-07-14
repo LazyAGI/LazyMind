@@ -99,6 +99,82 @@ func normalizedTransitionTargets(req *transitionCommandRequest) ([]transitionTar
 	return targets, nil
 }
 
+// selectLLMChoiceRoutes freezes an N-select-1 route only when ChatAgent starts
+// one of its Reachable candidates. The update shares the transition transaction,
+// so a batch either selects every compatible route and starts every task or does
+// nothing. Multiple targets from the same choice are rejected.
+func selectLLMChoiceRoutes(ctx context.Context, tx *gorm.DB, sessionID string, graph *graphengine.CompiledStateGraph, targets []transitionTarget) error {
+	targetSet := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		targetSet[target.TargetStepID] = true
+	}
+	var decisions []orm.PluginRouteDecision
+	if err := tx.WithContext(ctx).Where("session_id = ? AND validity = ?", sessionID, "effective").Find(&decisions).Error; err != nil {
+		return err
+	}
+	for _, decision := range decisions {
+		route := graph.StartRoute
+		if node, ok := graph.Nodes[decision.FromStepID]; ok {
+			route = node.Route
+		}
+		if route != "choice" {
+			continue
+		}
+		hasLLMHint := false
+		for _, edge := range graph.ControlEdges {
+			if edge.From == decision.FromStepID && (edge.When != "" || edge.Legacy != "") {
+				hasLLMHint = true
+				break
+			}
+		}
+		if !hasLLMHint {
+			continue
+		}
+		var active, pruned []string
+		if err := json.Unmarshal(decision.ActivatedJSON, &active); err != nil {
+			return err
+		}
+		_ = json.Unmarshal(decision.PrunedJSON, &pruned)
+		selected := ""
+		for _, candidate := range active {
+			if !targetSet[candidate] {
+				continue
+			}
+			if selected != "" && selected != candidate {
+				return fmt.Errorf("steps %s and %s belong to the same N-select-1 route from %s", selected, candidate, decision.FromStepID)
+			}
+			selected = candidate
+		}
+		if selected == "" {
+			continue
+		}
+		for _, candidate := range active {
+			if candidate == selected {
+				continue
+			}
+			found := false
+			for _, existing := range pruned {
+				if existing == candidate {
+					found = true
+					break
+				}
+			}
+			if !found {
+				pruned = append(pruned, candidate)
+			}
+		}
+		activeJSON, _ := json.Marshal([]string{selected})
+		prunedJSON, _ := json.Marshal(pruned)
+		if err := tx.Model(&orm.PluginRouteDecision{}).Where("id = ?", decision.ID).Updates(map[string]any{
+			"activated_json": activeJSON,
+			"pruned_json":    prunedJSON,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func commandTargetID(req transitionCommandRequest) string {
 	if len(req.Targets) > 1 {
 		return "__batch__"
@@ -244,6 +320,7 @@ func StartPluginSession(w http.ResponseWriter, r *http.Request) {
 			materialFacts = append(materialFacts, graphengine.MaterialValue{MaterialID: materialID, RevisionID: revisionID, Valid: true})
 		}
 		startDecision := graphengine.DecideRoute(graph, "__start__", materialFacts)
+		startDecision = graphengine.SelectRouteTarget(graph, "__start__", req.TargetStepID, startDecision)
 		if err := persistRouteDecision(r.Context(), tx, sessionID, "__start__", "", startDecision.Activated, startDecision.Pruned, startDecision.Bypassed, startDecision.Witnesses, 1); err != nil {
 			return err
 		}
@@ -485,6 +562,10 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict,
 				"BATCH_TRANSITION_REJECTED", "one or more batch targets are not currently Ready; no target was started", false,
 				map[string]any{"targets": invalidTargets, "ready": projection.Ready, "blocked": projection.Blocked})
+		}
+		if choiceErr := selectLLMChoiceRoutes(r.Context(), tx, session.ID, graph, targets); choiceErr != nil {
+			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict,
+				"BATCH_CHOICE_CONFLICT", choiceErr.Error(), false, map[string]any{"ready": projection.Ready})
 		}
 		update := tx.Model(&orm.PluginSession{}).Where("id = ? AND state_version = ?", session.ID, session.StateVersion).Updates(map[string]any{"state_version": gorm.Expr("state_version + 1"), "updated_at": time.Now().UTC()})
 		if update.Error != nil {

@@ -1,15 +1,11 @@
 import { memo, useRef, useState } from 'react';
 import { EdgeLabelRenderer, getBezierPath } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
-import { Input } from 'antd';
-import { useTranslation } from 'react-i18next';
-import { EditOutlined } from '@ant-design/icons';
 
 export interface TransitionEdgeData extends Record<string, unknown> {
   condition: string;
   hasError: boolean;
   isParallel?: boolean;
-  onConditionChange: (sourceId: string, targetId: string, condition: string) => void;
 }
 
 function TransitionEdgeComponent({  id,
@@ -21,13 +17,8 @@ function TransitionEdgeComponent({  id,
   targetPosition,
   data,
   selected,
-  source,
-  target,
 }: EdgeProps) {
-  const { t } = useTranslation();
   const edgeData = data as unknown as TransitionEdgeData | undefined;
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
   const [hovered, setHovered] = useState(false);
 
   // Debounce leave so moving between path ↔ popover doesn't flicker
@@ -40,7 +31,7 @@ function TransitionEdgeComponent({  id,
 
   const onLeave = () => {
     leaveTimer.current = setTimeout(() => {
-      if (!editing) setHovered(false);
+      setHovered(false);
     }, 120);
   };
 
@@ -60,12 +51,6 @@ function TransitionEdgeComponent({  id,
   const strokeColor = hasError ? '#ff4d4f' : selected ? '#1677ff' : hovered ? '#555' : '#8c8c8c';
   const strokeWidth = selected || hovered ? 2.5 : 1.5;
   const strokeDash = isParallel ? '6 3' : undefined;
-
-  const commitEdit = () => {
-    setEditing(false);
-    setHovered(false);
-    edgeData?.onConditionChange(source, target, draft);
-  };
 
   // Position popover above the midpoint of the edge
   const popX = labelX;
@@ -97,7 +82,7 @@ function TransitionEdgeComponent({  id,
 
       {/* Popover label — floats above the edge midpoint */}
       <EdgeLabelRenderer>
-        {(hovered || editing) && (
+        {hovered && condition && (
           <div
             className="nodrag nopan transition-edge-popover"
             style={{
@@ -108,36 +93,11 @@ function TransitionEdgeComponent({  id,
             onMouseEnter={onEnter}
             onMouseLeave={onLeave}
           >
-            {editing ? (
-              <Input
-                size="small"
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={commitEdit}
-                onPressEnter={commitEdit}
-                onKeyDown={(e) => { if (e.key === 'Escape') { setEditing(false); setHovered(false); } }}
-                style={{ width: 160, fontSize: 12 }}
-                 placeholder={t('selfEvolutionRun.transitionConditionPlaceholder')}
-              />
-            ) : (
-              <button
-                type="button"
-                className={`transition-edge-popover-inner${hasError ? ' has-error' : ''}`}
-                onClick={() => {
-                  setDraft(condition);
-                  setEditing(true);
-                }}
-                title={t('selfEvolutionRun.transitionEdgeClickToEdit')}
-              >
-                <EditOutlined className="transition-edge-popover-icon" />
-                <span className="transition-edge-popover-text">
-                  {condition || <span className="transition-edge-popover-empty">{t('selfEvolutionRun.transitionEdgeClickToAddCondition')}</span>}
-                </span>
-              </button>
-            )}
+            <div className={`transition-edge-popover-inner${hasError ? ' has-error' : ''}`}>
+              <span className="transition-edge-popover-text">{condition}</span>
+            </div>
             {/* Arrow pointing down to the edge */}
-            {!editing && <div className="transition-edge-popover-arrow" />}
+            <div className="transition-edge-popover-arrow" />
           </div>
         )}
       </EdgeLabelRenderer>

@@ -404,12 +404,6 @@ export default function PluginDetailPage() {
     return diagnostics;
   }, [pluginId]);
 
-  useEffect(() => {
-    if (draft && selectedRevision === 'draft' && EDITOR_READY_STATUSES.has(draft.generate_status)) {
-      void handleValidate().catch(() => undefined);
-    }
-  }, [draft?.id, draft?.generate_status, selectedRevision, handleValidate]);
-
   const handlePublish = useCallback(async () => {
     if (!draft) return;
     setPublishing(true);

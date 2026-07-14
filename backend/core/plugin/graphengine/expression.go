@@ -35,7 +35,6 @@ func validateExpression(expr *Expression, path, nodeID string, known map[string]
 		return nil
 	}
 	var out []Diagnostic
-	aliases := map[string]bool{}
 	var walk func(Expression, string)
 	walk = func(e Expression, p string) {
 		kinds := 0
@@ -53,10 +52,7 @@ func validateExpression(expr *Expression, path, nodeID string, known map[string]
 			return
 		}
 		if e.BindAs != "" {
-			if aliases[e.BindAs] {
-				out = append(out, Diagnostic{Code: "E_BIND_ALIAS_DUPLICATE", Severity: "error", Path: p + ".bind_as", NodeID: nodeID, Message: "bind alias is duplicated: " + e.BindAs, Details: map[string]any{"bind_as": e.BindAs}, Fixable: true})
-			}
-			aliases[e.BindAs] = true
+			out = append(out, Diagnostic{Code: "E_BIND_ALIAS_UNSUPPORTED", Severity: "error", Path: p + ".bind_as", NodeID: nodeID, Message: "bind_as is no longer supported; reference materials by their unique ids", Details: map[string]any{"bind_as": e.BindAs}, Fixable: true})
 		}
 		if e.Material != "" && !known[e.Material] {
 			out = append(out, Diagnostic{Code: "E_MATERIAL_UNKNOWN", Severity: "error", Path: p + ".material", NodeID: nodeID, MaterialID: e.Material, Message: "expression references an unknown material: " + e.Material, Fixable: true})
@@ -70,6 +66,85 @@ func validateExpression(expr *Expression, path, nodeID string, known map[string]
 	}
 	walk(*expr, path)
 	return out
+}
+
+// validateInputExpressionShape keeps required inputs intentionally simple:
+// AND(required groups), where each group is either one material or OR(materials).
+func validateInputExpressionShape(expr *Expression, path, nodeID string) []Diagnostic {
+	if expr == nil {
+		return nil
+	}
+	isMaterial := func(item Expression) bool {
+		return item.Material != "" && len(item.All) == 0 && len(item.Any) == 0
+	}
+	isGroup := func(item Expression) bool {
+		if isMaterial(item) {
+			return true
+		}
+		if len(item.Any) < 2 || item.Material != "" || len(item.All) != 0 {
+			return false
+		}
+		for _, child := range item.Any {
+			if !isMaterial(child) {
+				return false
+			}
+		}
+		return true
+	}
+	valid := isGroup(*expr)
+	if len(expr.All) > 0 && expr.Material == "" && len(expr.Any) == 0 {
+		valid = true
+		for _, child := range expr.All {
+			if !isGroup(child) {
+				valid = false
+				break
+			}
+		}
+	}
+	if valid {
+		return nil
+	}
+	return []Diagnostic{{
+		Code:     "E_INPUT_EXPRESSION_SHAPE",
+		Severity: "error",
+		Path:     path,
+		NodeID:   nodeID,
+		Message:  "input_expression must be AND groups whose members are a material or OR(materials); nested groups are not supported",
+		Fixable:  true,
+	}}
+}
+
+// Skip conditions intentionally have one flat operator: all(materials) or
+// any(materials). This mirrors the authoring UI and prevents nested logic that
+// is difficult to explain at execution time.
+func validateSkipExpressionShape(expr *Expression, path, nodeID string) []Diagnostic {
+	if expr == nil {
+		return nil
+	}
+	isMaterial := func(item Expression) bool {
+		return item.Material != "" && len(item.All) == 0 && len(item.Any) == 0
+	}
+	valid := isMaterial(*expr)
+	children := expr.All
+	if len(expr.Any) > 0 {
+		children = expr.Any
+	}
+	if len(children) > 0 && expr.Material == "" && !(len(expr.All) > 0 && len(expr.Any) > 0) {
+		valid = true
+		for _, child := range children {
+			if !isMaterial(child) {
+				valid = false
+				break
+			}
+		}
+	}
+	if valid {
+		return nil
+	}
+	return []Diagnostic{{
+		Code: "E_SKIP_EXPRESSION_SHAPE", Severity: "error", Path: path, NodeID: nodeID,
+		Message: "skip_if must be one flat all(materials) or any(materials) expression; nested groups are not supported", Fixable: true,
+	}}
 }
 
 // Evaluate uses declaration order for any-expressions and returns the selected

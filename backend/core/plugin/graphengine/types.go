@@ -4,7 +4,7 @@ package graphengine
 
 import "encoding/json"
 
-const SchemaVersion = "2"
+const SchemaVersion = "3"
 
 type Profile string
 
@@ -56,9 +56,11 @@ type CompiledNode struct {
 }
 
 type CompiledEdge struct {
-	ID        string      `json:"id"`
-	From      string      `json:"from"`
-	To        string      `json:"to"`
+	ID   string `json:"id"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	When string `json:"when,omitempty"`
+	// Condition and Legacy are retained so schema-v3 sessions remain readable.
 	Condition *Expression `json:"condition,omitempty"`
 	Legacy    string      `json:"legacy_condition,omitempty"`
 }
@@ -158,6 +160,7 @@ type ProjectedEdge struct {
 	From  string `json:"from"`
 	To    string `json:"to"`
 	State string `json:"state"` // inactive | active | pruned | bypassed | stale
+	When  string `json:"when,omitempty"`
 }
 
 type RouteDecision struct {

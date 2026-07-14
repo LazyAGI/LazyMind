@@ -24,7 +24,12 @@ import {
 import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
 import type { GraphModel, StepNode, NodeLayout } from '../core/model';
-import { VIRTUAL_END, VIRTUAL_START, newHiddenId } from '../core/model';
+import {
+  VIRTUAL_END,
+  VIRTUAL_START,
+  formatExpression,
+  newHiddenId,
+} from '../core/model';
 import type { ValidationError } from '../core/validator';
 import type { PluginModel } from '../core/pluginModel';
 import type { ScenarioData } from '../ScenarioEditor';
@@ -108,7 +113,7 @@ function modelToFlowNodes(
     // Build output label map: slotId → display label
     const outputLabels: Record<string, string> = {};
     for (const ref of node.outputs) {
-      const slotId = ref.slot;
+      const slotId = ref.material;
       const slot = model.slots[slotId];
       outputLabels[slotId] = slot?.label ?? slotId;
     }
@@ -118,9 +123,8 @@ function modelToFlowNodes(
       position: pos,
       data: {
         ...node,
-        // StepNodeData.inputs/outputs are string[] (slot ids for display); StepNode uses StepInputRef[].
-        inputs: node.inputs.map((r) => r.slot),
-        outputs: node.outputs.map((r) => r.slot),
+        inputs: node.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])]),
+        outputs: node.outputs.map((r) => r.material),
         hasError: errMsgs.length > 0,
         errorMessages: errMsgs,
         predecessorIds: predMap.get(node.id) ?? [],
@@ -148,7 +152,7 @@ function modelToFlowNodes(
   return flowNodes;
 }
 
-function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>, onConditionChange: (src: string, tgt: string, cond: string) => void): Edge[] {
+function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>): Edge[] {
   const edges: Edge[] = [];
   const edgeErrorSet = new Set(
     [...nodeErrorMap.entries()].flatMap(([, msgs]) => msgs.filter((m) => m.includes('->'))),
@@ -163,7 +167,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
       type: 'transition',
       reconnectable: 'target' as const,
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: { condition: t.condition, hasError: false, onConditionChange },
+      data: { condition: t.when || formatExpression(t.condition) || '', hasError: false },
     });
   }
 
@@ -172,7 +176,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
     const isParallel = (node.route === 'all' || !node.route) && isMultiExit;
     for (const t of node.transitions) {
       const edgeKey = `${node.id}->${t.to}`;
-      const hasError = edgeErrorSet.has(edgeKey) || (node.route === 'choice' && !t.condition.trim());
+      const hasError = edgeErrorSet.has(edgeKey) || Boolean(t.condition);
       edges.push({
         id: edgeKey,
         source: node.id,
@@ -181,10 +185,9 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
         reconnectable: 'target' as const,
         markerEnd: { type: MarkerType.ArrowClosed },
         data: {
-          condition: t.condition,
+          condition: t.when || formatExpression(t.condition) || '',
           hasError,
           isParallel,
-          onConditionChange,
         },
       });
     }
@@ -238,32 +241,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
 
   // Keep nodeErrorMap in a ref so stable callbacks can always read the latest value.
   const nodeErrorMapRef = useRef(nodeErrorMap);
-  useEffect(() => { nodeErrorMapRef.current = nodeErrorMap; }, [nodeErrorMap]);
-
-  // Stable callback — never changes reference, reads from refs.
-  const handleConditionChange = useCallback(
-    (sourceId: string, targetId: string, condition: string) => {
-      const m = modelRef.current;
-      if (sourceId === VIRTUAL_START) {
-        const updatedTransitions = m.startTransitions.map((t) =>
-          t.to === targetId ? { ...t, condition } : t,
-        );
-        onModelChangeRef.current({ ...m, startTransitions: updatedTransitions });
-        return;
-      }
-      const updatedNodes = m.nodes.map((n) => {
-        if (n.id !== sourceId) return n;
-        return {
-          ...n,
-          transitions: n.transitions.map((t) =>
-            t.to === targetId ? { ...t, condition } : t,
-          ),
-        };
-      });
-      onModelChangeRef.current({ ...m, nodes: updatedNodes });
-    },
-    [], // stable — intentionally no deps
-  );
+  nodeErrorMapRef.current = nodeErrorMap;
 
   const initialNodes = useMemo(
     () => modelToFlowNodes(model, nodeErrorMap, stableResizeEnd, stableResizeDrag, stableGetZoom),
@@ -271,7 +249,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     [],
   );
   const initialEdges = useMemo(
-    () => modelToFlowEdges(model, nodeErrorMap, handleConditionChange),
+    () => modelToFlowEdges(model, nodeErrorMap),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -329,7 +307,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       skipSyncRef.current = false;
       return;
     }
-    const newNodes = modelToFlowNodes(model, nodeErrorMap, stableResizeEnd, stableResizeDrag, stableGetZoom);
+    const newNodes = modelToFlowNodes(model, nodeErrorMapRef.current, stableResizeEnd, stableResizeDrag, stableGetZoom);
     // Preserve selected state and, importantly, the current rendered width of each
     // node. Width is managed independently via onResizeDrag/onResizeEnd and may
     // have been updated inside a setNodes callback that hasn't propagated back into
@@ -356,17 +334,13 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         };
       });
     });
-    setEdges(modelToFlowEdges(model, nodeErrorMap, handleConditionChange));
-  }, [model, nodeErrorMap, handleConditionChange, setNodes, setEdges]);
+    setEdges(modelToFlowEdges(model, nodeErrorMapRef.current));
+  }, [model, setNodes, setEdges]);
 
   // Propagate error state changes to ReactFlow nodes independently of the main
   // model sync. This runs even when skipSyncRef suppresses the full sync above,
   // so error highlights update immediately after the parent re-validates.
   useEffect(() => {
-    // nodeErrorMapRef is already kept up to date by the effect above; use it to
-    // detect whether the map actually changed before running the update.
-    const prevMap = nodeErrorMapRef.current;
-    if (prevMap === nodeErrorMap) return;
     setNodes((currentNodes) => {
       let changed = false;
       const next = currentNodes.map((n) => {
@@ -383,7 +357,8 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       });
       return changed ? next : currentNodes;
     });
-  }, [nodeErrorMap, setNodes]);
+    setEdges(modelToFlowEdges(modelRef.current, nodeErrorMap));
+  }, [nodeErrorMap, setNodes, setEdges]);
 
   // When a new edge is drawn in the canvas, add a transition to the model
   const onConnect = useCallback(
@@ -396,7 +371,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         // Prevent duplicate edges to the same target
         const target = connection.target;
         if (m.startTransitions.some((t) => t.to === target)) return;
-        const newTransition = { to: target, condition: '' };
+        const newTransition = { to: target };
         const edgeId = `${VIRTUAL_START}->${target}`;
         setEdges((eds) =>
           addEdge(
@@ -405,7 +380,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
               id: edgeId,
               type: 'transition',
               markerEnd: { type: MarkerType.ArrowClosed },
-              data: { condition: '', hasError: false, onConditionChange: handleConditionChange },
+              data: { condition: '', hasError: false },
             },
             eds,
           ),
@@ -418,7 +393,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       const sourceNode = m.nodes.find((n) => n.id === connection.source);
       if (!sourceNode) return;
 
-      const newTransition = { to: connection.target, condition: '' };
+      const newTransition = { to: connection.target };
       const updatedNodes = m.nodes.map((n) =>
         n.id === connection.source
           ? { ...n, transitions: [...n.transitions, newTransition] }
@@ -438,9 +413,9 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
             : n,
         ),
       );
-      setEdges((eds) => addEdge({ ...connection, type: 'transition', markerEnd: { type: MarkerType.ArrowClosed }, data: { condition: '', hasError: false, onConditionChange: handleConditionChange } }, eds));
+      setEdges((eds) => addEdge({ ...connection, type: 'transition', markerEnd: { type: MarkerType.ArrowClosed }, data: { condition: '', hasError: false } }, eds));
     },
-    [setEdges, handleConditionChange],
+    [setEdges, setNodes, nodeErrorMap],
   );
 
   // Reconnect: user drags the target end of an existing edge to a new node.
@@ -800,16 +775,16 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
             if (n.id !== currentSelectedNodeId) return n;
             const updatedOutputLabels: Record<string, string> = {};
             for (const ref of normalised.outputs) {
-              const slot = newModel.slots[ref.slot];
-              updatedOutputLabels[ref.slot] = slot?.label ?? ref.slot;
+              const slot = newModel.slots[ref.material];
+              updatedOutputLabels[ref.material] = slot?.label ?? ref.material;
             }
             return {
               ...n,
               data: {
                 ...n.data,
                 ...normalised,
-                inputs: normalised.inputs.map((r) => r.slot),
-                outputs: normalised.outputs.map((r) => r.slot),
+                inputs: normalised.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])]),
+                outputs: normalised.outputs.map((ref) => ref.material),
                 outputLabels: updatedOutputLabels,
                 hasError: (errMap.get(currentSelectedNodeId!) ?? []).length > 0,
                 errorMessages: errMap.get(currentSelectedNodeId!) ?? [],
@@ -817,7 +792,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
             };
           }),
         );
-        setEdges(modelToFlowEdges(newModel, errMap, handleConditionChange));
+        setEdges(modelToFlowEdges(newModel, errMap));
       });
     }
     return true;

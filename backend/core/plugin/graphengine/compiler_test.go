@@ -109,7 +109,7 @@ steps:
 
 func TestEvaluateOrderedORWitness(t *testing.T) {
 	expr := &Expression{All: []Expression{
-		{Any: []Expression{{Material: "revised"}, {Material: "outline"}}, BindAs: "outline_input"},
+		{Any: []Expression{{Material: "revised"}, {Material: "outline"}}},
 		{Material: "references"},
 	}}
 	evaluation := Evaluate(expr, []MaterialValue{
@@ -117,13 +117,13 @@ func TestEvaluateOrderedORWitness(t *testing.T) {
 		{MaterialID: "outline", RevisionID: "o1", Valid: true},
 		{MaterialID: "references", RevisionID: "x1", Valid: true},
 	})
-	if !evaluation.Satisfied || len(evaluation.Witnesses) != 2 || evaluation.Witnesses[0].RevisionID != "r1" || evaluation.Witnesses[0].BindAs != "outline_input" {
+	if !evaluation.Satisfied || len(evaluation.Witnesses) != 2 || evaluation.Witnesses[0].RevisionID != "r1" {
 		t.Fatalf("unexpected ordered witness: %#v", evaluation)
 	}
 }
 
-func TestEvaluateBindsEverySelectedListRevisionDeterministically(t *testing.T) {
-	expr := &Expression{Any: []Expression{{Material: "references"}, {Material: "fallback"}}, BindAs: "reference_inputs"}
+func TestEvaluateSelectsEveryListRevisionDeterministically(t *testing.T) {
+	expr := &Expression{Any: []Expression{{Material: "references"}, {Material: "fallback"}}}
 	evaluation := Evaluate(expr, []MaterialValue{
 		{MaterialID: "references", RevisionID: "r2", Valid: true},
 		{MaterialID: "references", RevisionID: "r1", Valid: true},
@@ -135,23 +135,107 @@ func TestEvaluateBindsEverySelectedListRevisionDeterministically(t *testing.T) {
 	if evaluation.Witnesses[0].RevisionID != "r1" || evaluation.Witnesses[1].RevisionID != "r2" {
 		t.Fatalf("witness revisions must be stable: %#v", evaluation.Witnesses)
 	}
-	for _, witness := range evaluation.Witnesses {
-		if witness.BindAs != "reference_inputs" {
-			t.Fatalf("OR bind alias must apply to every selected revision: %#v", evaluation.Witnesses)
-		}
-	}
 }
 
-func TestEvaluateOptionalBindsPresentMaterialsWithoutBlocking(t *testing.T) {
+func TestEvaluateOptionalPresentMaterialsWithoutBlocking(t *testing.T) {
 	evaluation := EvaluateOptional([]MaterialRef{
-		{Material: "style", BindAs: "style_hint"},
+		{Material: "style"},
 		{Material: "missing"},
 	}, []MaterialValue{{MaterialID: "style", RevisionID: "s1", Valid: true}})
 	if !evaluation.Satisfied || len(evaluation.Witnesses) != 1 {
 		t.Fatalf("optional inputs must not block: %#v", evaluation)
 	}
-	if evaluation.Witnesses[0].RevisionID != "s1" || evaluation.Witnesses[0].BindAs != "style_hint" {
+	if evaluation.Witnesses[0].RevisionID != "s1" {
 		t.Fatalf("present optional material must be witnessed: %#v", evaluation)
+	}
+}
+
+func TestCompileUnifiedInputsPreservesAlternativesAndOptionalBindings(t *testing.T) {
+	pluginYAML := `
+id: unified-inputs
+slots:
+  - {id: outline, external: true}
+  - {id: revised_outline, external: true}
+  - {id: style, external: true}
+  - {id: draft}
+steps:
+  - {id: write, label: Write}
+`
+	stateYAML := `
+transitions:
+  __start__: [{to: write}]
+  write: [{to: __end__}]
+steps:
+  write:
+    inputs:
+      - material: revised_outline
+        required: true
+        alternatives:
+          - {material: outline}
+      - {material: style, required: false}
+    outputs: [{material: draft}]
+`
+	result := Compile(pluginYAML, stateYAML, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("expected unified inputs to compile, diagnostics=%#v", result.Diagnostics)
+	}
+	node := result.Graph.Nodes["write"]
+	if node.Input == nil || len(node.Input.Any) != 2 || node.Input.Any[0].Material != "revised_outline" || node.Input.Any[1].Material != "outline" {
+		t.Fatalf("unexpected required alternatives: %#v", node.Input)
+	}
+	if len(node.OptionalInputs) != 1 || node.OptionalInputs[0].Material != "style" {
+		t.Fatalf("unexpected optional inputs: %#v", node.OptionalInputs)
+	}
+}
+
+func TestCompileRejectsAlternativesOnOptionalInput(t *testing.T) {
+	state := `
+transitions:
+  __start__: [{to: a}]
+  a: [{to: b}]
+  b: [{to: c}]
+  c: [{to: d}]
+  d: [{to: e}]
+  e: [{to: f}]
+  f: [{to: __end__}]
+steps:
+  a:
+    inputs:
+      - material: seed
+        required: false
+        alternatives: [{material: b_result}]
+    outputs: []
+  b: {outputs: [b_result]}
+  c: {outputs: []}
+  d: {outputs: [d_result]}
+  e: {outputs: []}
+  f: {outputs: [final]}
+`
+	result := Compile(validPlugin, state, "", ProfilePublish)
+	found := false
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "E_OPTIONAL_ALTERNATIVES_UNSUPPORTED" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected optional-alternatives diagnostic, got %#v", result.Diagnostics)
+	}
+}
+
+func TestInputExpressionRejectsNestedGroupsAndBindAlias(t *testing.T) {
+	nested := &Expression{All: []Expression{{Any: []Expression{
+		{Material: "a"},
+		{All: []Expression{{Material: "b"}, {Material: "c"}}},
+	}}}}
+	if diagnostics := validateInputExpressionShape(nested, "input", "step"); len(diagnostics) != 1 || diagnostics[0].Code != "E_INPUT_EXPRESSION_SHAPE" {
+		t.Fatalf("expected nested input shape error, got %#v", diagnostics)
+	}
+	withAlias := &Expression{Material: "a", BindAs: "input"}
+	diagnostics := validateExpression(withAlias, "input", "step", map[string]bool{"a": true})
+	if len(diagnostics) != 1 || diagnostics[0].Code != "E_BIND_ALIAS_UNSUPPORTED" {
+		t.Fatalf("expected unsupported bind alias error, got %#v", diagnostics)
 	}
 }
 
@@ -328,7 +412,7 @@ func TestBundledPluginsCompileForRuntime(t *testing.T) {
 	}
 }
 
-func TestCompileRejectsChoiceWithoutTotalFallback(t *testing.T) {
+func TestCompileAcceptsNaturalLanguageChoiceWithoutFallback(t *testing.T) {
 	plugin := `
 id: choice-test
 slots:
@@ -342,19 +426,19 @@ transitions:
   __start__: [{to: choose}]
   choose:
     - to: selected
-      condition: {material: optional_flag}
+      when: the user wants this branch
   selected: [{to: __end__}]
 steps:
   choose: {route: choice}
   selected: {}
 `
 	result := Compile(plugin, state, "", ProfilePublish)
-	if !hasDiagnostic(result.Diagnostics, "E_CHOICE_NO_FALLBACK") {
-		t.Fatalf("non-total choice must be rejected: %#v", result.Diagnostics)
+	if !result.Valid {
+		t.Fatalf("natural-language choice hints must compile without a fallback: %#v", result.Diagnostics)
 	}
 }
 
-func TestCompileRejectsAllRouteThatCanActivateNothing(t *testing.T) {
+func TestCompileAcceptsNaturalLanguageAllRouteWithoutFallback(t *testing.T) {
 	plugin := `
 id: all-route-test
 slots:
@@ -368,15 +452,43 @@ transitions:
   __start__: [{to: fanout}]
   fanout:
     - to: selected
-      condition: {material: optional_flag}
+      when: the model determines this step is useful
   selected: [{to: __end__}]
 steps:
   fanout: {route: all}
   selected: {}
 `
 	result := Compile(plugin, state, "", ProfilePublish)
-	if !hasDiagnostic(result.Diagnostics, "E_ROUTE_NO_FALLBACK") {
-		t.Fatalf("all route with no guaranteed exit must be rejected: %#v", result.Diagnostics)
+	if !result.Valid {
+		t.Fatalf("natural-language route hints must not require a fallback: %#v", result.Diagnostics)
+	}
+}
+
+func TestChoiceWhenHintsExposeAllCandidatesAsReachable(t *testing.T) {
+	graph := &CompiledStateGraph{
+		SchemaVersion: SchemaVersion,
+		StartRoute:    "choice",
+		Nodes: map[string]CompiledNode{
+			"write":  {ID: "write", Route: "all"},
+			"revise": {ID: "revise", Route: "all"},
+		},
+		ControlEdges: []CompiledEdge{
+			{ID: "__start__->write", From: "__start__", To: "write", When: "user accepts"},
+			{ID: "__start__->revise", From: "__start__", To: "revise", When: "user requests changes"},
+		},
+	}
+	projection := Project(graph, RuntimeSnapshot{})
+	if len(projection.Ready) != 2 || projection.Ready[0] != "revise" || projection.Ready[1] != "write" {
+		t.Fatalf("LLM-decided exits must all remain candidates: %#v", projection)
+	}
+	for _, edge := range projection.Edges {
+		if edge.State != "active" || edge.When == "" {
+			t.Fatalf("projected candidate edge must retain its when hint: %#v", edge)
+		}
+	}
+	selected := SelectRouteTarget(graph, "__start__", "write", DecideRoute(graph, "__start__", nil))
+	if len(selected.Activated) != 1 || selected.Activated[0] != "write" || len(selected.Pruned) != 1 || selected.Pruned[0] != "revise" {
+		t.Fatalf("advancing one choice candidate must prune its siblings: %#v", selected)
 	}
 }
 

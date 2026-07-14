@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, message, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
@@ -125,6 +125,7 @@ function initGraphModel(stateYaml: string | undefined, pluginYaml: string | unde
           id: s.id, type: s.type, label: s.label,
           cardinality: s.cardinality, ordered: s.ordered,
           allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+          external: s.external,
         };
       }
     }
@@ -187,10 +188,10 @@ export default function StateGraphEditor({
   const [model, setModelState] = useState<GraphModel>(modelRef.current);
   const [errors, setErrors] = useState<ValidationError[]>(() => validateStateGraph(modelRef.current));
   const [authoritativeErrors, setAuthoritativeErrors] = useState<ValidationError[]>([]);
-  const displayErrors = [
+  const displayErrors = useMemo(() => [
     ...errors.filter((local) => !authoritativeErrors.some((server) => server.code === local.code)),
     ...authoritativeErrors,
-  ];
+  ], [errors, authoritativeErrors]);
 
   // scenario data
   const [scenarioData, setScenarioData] = useState<ScenarioData>(() =>
@@ -212,6 +213,31 @@ export default function StateGraphEditor({
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
   const onValidateRef = useRef(onValidate);
   useEffect(() => { onValidateRef.current = onValidate; }, [onValidate]);
+  const validationRequestRef = useRef(0);
+
+  const runAuthoritativeValidation = useCallback(async () => {
+    const validate = onValidateRef.current;
+    if (!validate) return;
+    const requestId = ++validationRequestRef.current;
+    try {
+      const nextErrors = await validate();
+      if (validationRequestRef.current === requestId) {
+        setAuthoritativeErrors(nextErrors);
+      }
+    } catch {
+      // A validation transport failure must not turn a successful save into a
+      // save failure or erase the last known diagnostics.
+    }
+  }, []);
+
+  // The Go validator is authoritative. Load its diagnostics as soon as an
+  // editable draft opens instead of waiting for the first user modification.
+  useEffect(() => {
+    if (!readonly) void runAuthoritativeValidation();
+    return () => {
+      validationRequestRef.current += 1;
+    };
+  }, [readonly, runAuthoritativeValidation]);
 
   const buildPayload = useCallback((m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string): SavePayload => ({
     stateYaml: serializeModel(m, false),
@@ -231,17 +257,15 @@ export default function StateGraphEditor({
     setSaveStatus('saving');
     try {
       await fn(buildPayload(m, pm, sd, sc));
-      if (onValidateRef.current) {
-        setAuthoritativeErrors(await onValidateRef.current());
-      }
       setSaveStatus('saved');
+      await runAuthoritativeValidation();
     } catch (error: unknown) {
       setSaveStatus('error');
       if (!(error as { isSaveConflict?: boolean })?.isSaveConflict) {
         message.error(t('selfEvolutionRun.sgeSaveFailed'));
       }
     }
-  }, [buildPayload]);
+  }, [buildPayload, runAuthoritativeValidation]);
 
   const triggerAutoSave = useCallback((m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string) => {
     if (!onSaveRef.current) return;
@@ -300,6 +324,7 @@ export default function StateGraphEditor({
         id: s.id, type: s.type as import('./core/pluginModel').PluginSlotDef['type'],
         label: s.label, cardinality: s.cardinality, ordered: s.ordered,
         allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+        external: s.external,
       }));
       const syncedPm = { ...pluginModelRef.current, slots: syncedSlots };
       pluginModelRef.current = syncedPm;
@@ -353,6 +378,7 @@ export default function StateGraphEditor({
         id: s.id, type: s.type, label: s.label,
         cardinality: s.cardinality, ordered: s.ordered,
         allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+        external: s.external,
       };
     }
     const updatedModel = { ...modelRef.current, slots };
@@ -379,6 +405,7 @@ export default function StateGraphEditor({
           id: s.id, type: s.type, label: s.label,
           cardinality: s.cardinality, ordered: s.ordered,
           allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+          external: s.external,
         };
       }
       const updatedModel: GraphModel = { ...modelRef.current, slots };

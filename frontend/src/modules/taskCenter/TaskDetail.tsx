@@ -1,19 +1,44 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Button, Drawer, Empty, Progress, Tag } from 'antd';
 import { CheckCircleFilled, ClockCircleOutlined, CloseOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { Task } from './api';
+import { axiosInstance, BASE_URL } from '@/components/request';
 
 interface TaskDetailProps {
   task: Task | null;
   onClose: () => void;
   onOpenConversation: (conversationId: string) => void;
+  onOpenGraph?: (sessionId: string) => void;
 }
 
 const isDone = (status: string) => ['completed', 'succeeded'].includes(status);
 
-export default function TaskDetail({ task, onClose, onOpenConversation }: TaskDetailProps) {
+type PlannedStep = { step_id: string; status: string };
+
+export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGraph }: TaskDetailProps) {
   const { t } = useTranslation();
-  const steps = task?.steps ?? [];
+  const [plannedSteps, setPlannedSteps] = useState<PlannedStep[] | null>(null);
+  useEffect(() => {
+    setPlannedSteps(null);
+    if (!task?.plugin_session_id) return;
+    let active = true;
+    axiosInstance.get(`${BASE_URL}/api/core/plugin-sessions/${encodeURIComponent(task.plugin_session_id)}/projection`, { silentError: true } as never)
+      .then((response) => {
+        if (!active) return;
+        const payload = response.data?.data ?? response.data;
+        const order: string[] = payload?.graph?.static_order ?? Object.keys(payload?.graph?.nodes ?? {});
+        const nodes = payload?.projection?.nodes ?? {};
+        const current: string[] = payload?.projection?.current ?? [];
+        setPlannedSteps(order.filter((id) => id !== '__start__' && id !== '__end__').map((id) => ({
+          step_id: payload?.graph?.nodes?.[id]?.label || id,
+          status: current.includes(id) ? 'running' : nodes[id]?.execution || 'pending',
+        })));
+      })
+      .catch(() => setPlannedSteps(null));
+    return () => { active = false; };
+  }, [task]);
+  const steps = useMemo(() => plannedSteps ?? task?.steps ?? [], [plannedSteps, task]);
   const completed = steps.filter((step) => isDone(step.status)).length;
 
   return (
@@ -38,7 +63,7 @@ export default function TaskDetail({ task, onClose, onOpenConversation }: TaskDe
               <h2>{task.conversation_title || task.title || t('taskCenter.noTitle')}</h2>
               <span>{formatDate(task.created_at)}</span>
             </div>
-            <StatusTag status={task.status} />
+            <StatusTag status={task.status} onClick={task.plugin_session_id && onOpenGraph ? () => onOpenGraph(task.plugin_session_id!) : undefined} />
           </div>
 
           <section className='task-detail-section task-detail-description'>
@@ -77,11 +102,11 @@ export default function TaskDetail({ task, onClose, onOpenConversation }: TaskDe
   );
 }
 
-export function StatusTag({ status }: { status: string }) {
+export function StatusTag({ status, onClick }: { status: string; onClick?: () => void }) {
   const { t } = useTranslation();
   const color = isDone(status) ? 'success' : status === 'failed' ? 'error' : status === 'running' ? 'processing' : 'warning';
   const key = status === 'succeeded' ? 'Completed' : `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
-  return <Tag color={color}>{t(`taskCenter.status${key}`, { defaultValue: status })}</Tag>;
+  return <Tag className={onClick ? 'clickable-status' : undefined} color={color} onClick={(event) => { event.stopPropagation(); onClick?.(); }}>{t(`taskCenter.status${key}`, { defaultValue: status })}</Tag>;
 }
 
 export function formatDate(value?: string) {

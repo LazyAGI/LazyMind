@@ -28,9 +28,11 @@ export interface StateGraphModalProps {
   pluginId: string;
   liveRefresh?: boolean;
   conversationId?: string;
+  fallbackSteps?: { step_id: string; status: string }[];
 }
 
 const coreApiBase = `${BASE_URL}/api/core`;
+const EMPTY_FALLBACK_STEPS: { step_id: string; status: string }[] = [];
 
 type ProjectionEnvelope = {
   projection: {
@@ -89,12 +91,37 @@ function projectionToGraph(raw: ProjectionEnvelope): StateGraphData {
   return { nodes, edges, initial: '__start__' };
 }
 
+function fallbackStepsToGraph(steps: { step_id: string; status: string }[]): StateGraphData {
+  const nodes: StateGraphData['nodes'] = [
+    { id: '__start__', label: '__start__', step_index: 0, status: 'succeeded', is_current: false },
+    ...steps.map((step, index) => ({
+      id: `fallback-${index}`,
+      label: step.step_id || `Step ${index + 1}`,
+      step_index: index + 1,
+      status: step.status || 'pending',
+      is_current: step.status === 'running',
+    })),
+    { id: '__end__', label: '__end__', step_index: steps.length + 1, status: steps.every((step) => ['completed', 'succeeded'].includes(step.status)) ? 'succeeded' : 'pending', is_current: false },
+  ];
+  return {
+    nodes,
+    edges: nodes.slice(0, -1).map((node, index) => ({
+      from: node.id,
+      to: nodes[index + 1].id,
+      condition: '',
+      edge_type: ['completed', 'succeeded'].includes(nodes[index + 1].status) ? 'executed' : 'inactive',
+    })),
+    initial: '__start__',
+  };
+}
+
 export default function StateGraphModal({
   open,
   onClose,
   sessionId,
   liveRefresh = false,
   conversationId,
+  fallbackSteps = EMPTY_FALLBACK_STEPS,
 }: StateGraphModalProps) {
   const [data, setData] = useState<StateGraphData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -108,6 +135,7 @@ export default function StateGraphModal({
     try {
       const resp = await axiosInstance.get(
         `${coreApiBase}/plugin-sessions/${encodeURIComponent(sessionId)}/projection`,
+        { silentError: true } as never,
       );
       // ReplyOK wraps the payload as { code, message, data: {...} }.
       const incoming = projectionToGraph(resp.data?.data ?? resp.data);
@@ -139,11 +167,18 @@ export default function StateGraphModal({
       setData(incoming);
       setError(null);
     } catch {
-      setError('加载工作流图失败');
+      if (fallbackSteps.length > 0) {
+        const fallback = fallbackStepsToGraph(fallbackSteps);
+        cachedDataRef.current = fallback;
+        setData(fallback);
+        setError(null);
+      } else {
+        setError('加载工作流图失败');
+      }
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [fallbackSteps, sessionId]);
 
   // Fetch on open.
   useEffect(() => {

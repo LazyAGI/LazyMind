@@ -23,6 +23,7 @@ import ast
 import copy
 import hashlib
 import importlib.util
+import json
 import logging
 import sys
 import tempfile
@@ -77,9 +78,11 @@ _DESIGN_BRIEF_SYSTEM = (
     '1. `step_id` — one-sentence responsibility\n'
     '   - Inputs: slot_id1, slot_id2 (or "user input")\n'
     '   - Outputs: slot_id3\n'
-    '   - Next: → next_step_id (condition)\n\n'
+    '   - Next: → next_step_id (optional natural-language when hint)\n\n'
     'Rules:\n'
     '  - Every slot_id used in Steps must appear in the Slots section.\n'
+    '  - Every non-external slot has exactly one producer; transformations create new slot IDs.\n'
+    '  - Required inputs may use Boolean groups such as (A OR B) AND C.\n'
     '  - Use snake_case for all IDs.\n'
     '  - Keep it concise; this brief is injected as context into later phases.\n\n'
     'Return ONLY a JSON object: {{"design_brief": "<markdown string>"}}\n'
@@ -95,11 +98,12 @@ _SKELETON_SYSTEM = (
     '  - when_to_use — REQUIRED. Write in English. Use clear trigger conditions:\n'
     '    "ONLY call this tool when ... Do NOT trigger if ..."\n'
     '  - slots list (each slot: id, label, type, cardinality)\n'
+    '    Mark user/session-provided slots with external: true.\n'
     '  - steps list (each step: id, label) — list of step IDs only, NO execution details\n'
     '  - ui block — REQUIRED. Must contain:\n'
     '      tabs: list of tab objects. Each tab must have id, label, layout, and slots.\n'
     '        Every tab MUST contain at least one slot; never emit `slots: []`.\n'
-    '        Every declared plugin slot MUST appear in exactly one tab.\n'
+    '        Every user-visible slot MUST appear in exactly one tab; internal routing materials may be omitted.\n'
     '        Put user-provided inputs in an Input tab and generated/intermediate results in result tabs.\n'
     '        A syntactically valid but empty layout is invalid because the UI cannot display anything.\n'
     '      slots: map of slot_id → widget config, each with widgetType. Use these mappings:\n'
@@ -128,13 +132,25 @@ _STATE_MACHINE_SYSTEM = (
     'The state.yml must include:\n'
     '  - initial: __start__\n'
     '  - transitions (dict): __start__ key holds the entry transitions list; other keys hold per-step transitions\n'
-    '  - steps (dict, each step needs: prompt, and optionally inputs/outputs/tools/route/skipif)\n\n'
+    '  - steps (dict, each step needs prompt; optionally inputs/'
+    'outputs/tools/route/skip_if)\n\n'
+    'MATERIAL RULES:\n'
+    '  - Inputs use one ordered list: [{material: id, required: true|false, alternatives?: [{material: id}]}].\n'
+    '  - alternatives is allowed only for required inputs; never emit bind_as.\n'
+    '  - Outputs use [{material: id}] and are always required. Each non-external material has one producer.\n'
+    '  - A producer must be a control ancestor of every consumer; never invent implicit control edges.\n'
+    '  - A step cannot consume and produce the same material; transformations use a new ID.\n'
+    'ROUTING RULES:\n'
+    '  - Edge routing uses optional natural-language `when` hints evaluated by ChatAgent. '
+    'Do not use material conditions on edges.\n'
+    '  - skip_if is material-based and flat: one all(materials) or any(materials) group, with no nesting.\n'
+    '  - Natural-language route hints make their targets candidates; they do not require an unconditional fallback.\n'
+    '  - Keep the control graph acyclic; retry/rewind are runtime commands, not back edges.\n\n'
     'CRITICAL RULE — transitions.__start__ MUST always be present and non-empty.\n'
     'Example of the mandatory __start__ entry:\n'
     '  transitions:\n'
     '    __start__:\n'
     '      - to: <first_step_id>\n'
-    '        condition: "Always enter <first_step_id> first."\n'
     '  Never omit transitions.__start__. It is required for the state machine to start.\n\n'
     'CRITICAL RULE — every step listed in plugin.yaml MUST have a transitions entry\n'
     '(even if it only leads to __end__).\n\n'
@@ -277,7 +293,7 @@ def _check_skeleton_missing(plugin_dict: Dict[str, Any]) -> List[str]:
                     placed.add(str(slot_id))
         declared = {
             str(slot.get('id')) for slot in (slots or [])
-            if isinstance(slot, dict) and slot.get('id')
+            if isinstance(slot, dict) and slot.get('id') and slot.get('exposed') is True
         }
         for slot_id in sorted(declared - placed):
             missing.append(f'plugin.ui.tabs slot coverage (declared slot {slot_id!r} is not placed in any tab)')
@@ -532,31 +548,66 @@ def _validate_slot_references(
         if isinstance(s, dict) and s.get('id')
     }
     errors: List[str] = []
+
+    def expression_refs(value: Any) -> List[str]:
+        if not isinstance(value, dict):
+            return []
+        refs: List[str] = []
+        material = value.get('material')
+        if isinstance(material, str) and material:
+            refs.append(material)
+        for key in ('all', 'any'):
+            children = value.get(key)
+            if isinstance(children, list):
+                for child in children:
+                    refs.extend(expression_refs(child))
+        return refs
+
+    def material_ref(value: Any) -> Optional[str]:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            raw = value.get('material') or value.get('slot') or value.get('id')
+            return str(raw) if raw else None
+        return None
+
     steps = state_dict.get('steps') or {}
     if not isinstance(steps, dict):
         return errors
     for step_id, step in steps.items():
         if not isinstance(step, dict):
             continue
+        refs_by_path: Dict[str, List[str]] = {
+            'skip_if': expression_refs(step.get('skip_if')),
+        }
         for direction in ('inputs', 'outputs'):
-            refs = step.get(direction) or []
-            if isinstance(refs, list):
-                for ref in refs:
-                    ref_id = (
-                        ref if isinstance(ref, str)
-                        else ref.get('id') or ref.get('slot') if isinstance(ref, dict)
-                        else None
+            raw_refs = step.get(direction) or []
+            refs_by_path[direction] = []
+            if isinstance(raw_refs, list):
+                for ref in raw_refs:
+                    ref_id = material_ref(ref)
+                    if ref_id:
+                        refs_by_path[direction].append(ref_id)
+                    if direction == 'inputs' and isinstance(ref, dict):
+                        alternatives = ref.get('alternatives') or []
+                        if isinstance(alternatives, list):
+                            refs_by_path[direction].extend(
+                                alternative_id
+                                for alternative_id in (material_ref(value) for value in alternatives)
+                                if alternative_id
+                            )
+        for path, refs in refs_by_path.items():
+            for ref_id in refs:
+                if ref_id not in defined_slots:
+                    errors.append(
+                        f"step '{step_id}' references undefined slot '{ref_id}' in {path}"
                     )
-                    if ref_id and ref_id not in defined_slots:
-                        errors.append(
-                            f"step '{step_id}' references undefined slot '{ref_id}' in {direction}"
-                        )
     return errors
 
 
 _SLOT_REPAIR_SYSTEM = (
     'You are a plugin schema doctor. You receive a plugin.yaml (slots definition) and a '
-    'state.yml (step inputs/outputs) that have mismatched slot IDs.\n\n'
+    'state.yml (inputs/outputs/route/skip expressions) that have mismatched slot IDs.\n\n'
     'Your task: fix the mismatch. You may EITHER:\n'
     '  A) Add missing slot definitions to plugin.yaml slots[] when the state.yml references '
     'are semantically correct but the slot was simply never declared, OR\n'
@@ -569,7 +620,11 @@ _SLOT_REPAIR_SYSTEM = (
     '- Only add new slot entries to plugin.yaml when there is genuinely new data being '
     'produced with no equivalent in the existing slots.\n'
     '- Do NOT remove any existing slot from plugin.yaml.\n'
-    '- Do NOT change step names, transitions, or prompts.\n'
+    '- Do NOT change step names, transition targets, or prompts; only material references may change.\n'
+    '- Preserve the single-producer rule. Never make two steps produce the same material, '
+    'and never let a step consume and produce the same material.\n'
+    '- Use canonical {material: id} references; do not introduce legacy {slot: id} inputs. '
+    'Route `when` values are natural-language hints and must not be changed by slot repair.\n'
     '- Return ONLY valid JSON: {"plugin_yaml": "...", "state_yaml": "..."}\n'
     '- No markdown fences, no explanation outside the JSON.'
 )
@@ -1581,7 +1636,8 @@ class RepairRequest(_LLMConfigMixin):
     plugin_yaml: str
     state_yaml: str
     repair_hint: str = ''
-    warnings: List[str] = []
+    warnings: List[str] = Field(default_factory=list)
+    diagnostics: List[Dict[str, Any]] = Field(default_factory=list)
     target: str = 'statemachine'  # 'statemachine' | 'ui' | 'scenario'
     scenario_md: str = ''
     scripts: Dict[str, str] = Field(default_factory=dict)
@@ -1714,14 +1770,17 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
             'Hard requirements:\n'
             '- ui.tabs must be a non-empty list.\n'
             '- Every tab must have id, label, layout, and a non-empty slots list.\n'
-            '- Every declared plugin slot must appear in exactly one tab as {id: slot_id}.\n'
+            '- Every slot with exposed: true must appear in exactly one tab as {id: slot_id}; '
+            'internal materials may be omitted.\n'
             '- Put user-provided inputs in an Input tab and generated/intermediate artifacts in result tabs.\n'
-            '- ui.slots must define a compatible widgetType for every declared slot.\n'
+            '- ui.slots must define a compatible widgetType for every exposed slot.\n'
             '- Never return slots: [] and never invent slot ids.\n'
             '- Preserve steps, tool_scripts, metadata, and all other non-UI fields exactly.\n\n'
             'Return ONLY JSON: {"plugin_yaml": "<complete fixed plugin.yaml>"}.\n'
         )
         known_issues = '\n'.join(f'- {w}' for w in req.warnings)
+        if req.diagnostics:
+            known_issues += '\n' + json.dumps(req.diagnostics, ensure_ascii=False, indent=2)
         ui_user = (
             f'Known issues:\n{known_issues or "- Infer and fix all unusable UI layout issues."}\n\n'
             f'User instruction:\n{req.repair_hint or "Repair the UI layout."}\n\n'
@@ -1767,6 +1826,12 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
     warnings_section = ''
     if req.warnings:
         warnings_section = 'Known issues to fix:\n' + '\n'.join(f'  - {w}' for w in req.warnings) + '\n\n'
+    if req.diagnostics:
+        warnings_section += (
+            'Authoritative Go diagnostics (preserve code/path/details while fixing every error):\n'
+            + json.dumps(req.diagnostics, ensure_ascii=False, indent=2)
+            + '\n\n'
+        )
     hint_section = ''
     if req.repair_hint and req.repair_hint.strip():
         hint_section = f'User instruction: {req.repair_hint.strip()}\n\n'
@@ -1831,7 +1896,7 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
             return (
                 f'transitions must be a YAML mapping (dict), '
                 f'got {type(transitions).__name__}. '
-                f'Each key is a step id and each value is a list of {{to, condition}} entries.'
+                f'Each key is a step id and each value is a list of {{to, when?}} entries.'
             )
         steps = state.get('steps')
         if steps is not None and not isinstance(steps, dict):

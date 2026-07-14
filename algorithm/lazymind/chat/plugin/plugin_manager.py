@@ -256,6 +256,15 @@ def _fetch_go_start_candidates(plugin_id: str) -> List[str]:
     ready = projection.get('ready') or []
     if not isinstance(ready, list):
         raise RuntimeError('Go start planning returned an invalid Ready set')
+    hints: Dict[str, List[str]] = {}
+    for edge in projection.get('edges') or []:
+        if not isinstance(edge, dict) or edge.get('state') != 'active':
+            continue
+        target = str(edge.get('to') or '')
+        when = str(edge.get('when') or '').strip()
+        if target and when:
+            hints.setdefault(target, []).append(when)
+    cfg['_plugin_start_route_hints'] = hints
     return [str(step_id) for step_id in ready if step_id]
 
 
@@ -926,12 +935,20 @@ def build_cold_start_tools(
                 )
                 plugin_mode = str(cfg.get('plugin_mode') or 'dynamic')
                 try:
+                    start_hints = cfg.pop('_plugin_start_route_hints', {})
+                    preflight_scenario = resolved_spec.scenario_md
+                    if start_hints:
+                        hint_lines = ['Start route candidates (natural-language ChatAgent decision):']
+                        for step_id in resolved_first:
+                            hints = start_hints.get(step_id) or []
+                            hint_lines.append(f'- {step_id}: {" OR ".join(hints) if hints else "always applicable"}')
+                        preflight_scenario = preflight_scenario + '\n\n' + '\n'.join(hint_lines)
                     raw_result = _evaluate_plugin_preflight(
                         plugin_id=resolved_plugin_id,
                         plugin_name=plugin_name,
                         description=plugin_desc,
                         when_to_use=plugin_when_to_use,
-                        scenario=resolved_spec.scenario_md,
+                        scenario=preflight_scenario,
                         request_context=request_context,
                         previous=previous,
                         first_steps=resolved_first,
@@ -2320,6 +2337,14 @@ def _build_step_status_section(
         projection = _fetch_go_projection(session_id)
         succeeded = list(projection.get('past') or [])
         ready = list(projection.get('ready') or [])
+        route_hints: Dict[str, List[str]] = {}
+        for edge in projection.get('edges') or []:
+            if not isinstance(edge, dict) or edge.get('state') != 'active':
+                continue
+            target = str(edge.get('to') or '')
+            when = str(edge.get('when') or '').strip()
+            if target and when:
+                route_hints.setdefault(target, []).append(when)
 
         lines = ['## Plugin Step Status [AUTHORITATIVE — queried at request time]']
         lines.append('> Any step-status information in the conversation history is OUTDATED. Use only this section.')
@@ -2344,12 +2369,19 @@ def _build_step_status_section(
                          + ', '.join(_label(s) for s in rewind_steps))
 
         if ready:
+            ready_labels = []
+            for step in ready:
+                hints = route_hints.get(step) or []
+                suffix = f' [when: {" OR ".join(hints)}]' if hints else ''
+                ready_labels.append(_label(step) + suffix)
             lines.append('Ready steps reported by Go (valid targets now): '
-                         + ', '.join(_label(s) for s in ready))
+                         + ', '.join(ready_labels))
             if len(ready) > 1:
                 lines.append(
-                    'Batching hint: multiple Ready nodes form the current parallel frontier. '
-                    'Start the applicable nodes with one plural advancement tool call.'
+                    'Decision hint: evaluate every natural-language `when` hint against the current '
+                    'user intent. A hinted step is Reachable, not automatically selected. Batch only '
+                    'the independent Ready steps that are simultaneously applicable; for N-select-1 '
+                    'alternatives, advance only the selected step.'
                 )
 
         return '\n'.join(lines)

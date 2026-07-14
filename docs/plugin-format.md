@@ -58,6 +58,7 @@ slots:                               # artifact 数据槽完整定义（list 格
     label: My Text                   # slot 显示名称（用户可见）
     type: text                       # artifact 类型：text | image | file | json
     cardinality: single              # single（单值，重写覆盖）| list（追加或按 index 更新）
+    external: true                   # 由用户/session 提供；否则必须有且仅有一个 step producer
 
   - id: my_image_list
     label: Image Collection
@@ -110,11 +111,14 @@ i18n:                                # 可选：国际化翻译，有就写，�
 | `slots[].ordered` | 否 | list 时是否支持拖拽重排，默认 false |
 | `slots[].allow_manual_add` | 否 | list 时用户是否可手动添加，默认 true |
 | `slots[].summary_max_chars` | 否 | 注入 prompt 时的摘要字符上限 |
+| `slots[].external` | 否 | true 表示外部输入素材，不需要 step producer |
 | `ui.tabs[].id` | 条件 | tab 唯一标识（有 ui 时必填）|
 | `ui.tabs[].label` | 条件 | tab 显示标签 |
 | `ui.tabs[].layout` | 条件 | `list` / `grid` / `horizontal` |
 | `ui.tabs[].slots[].id` | 条件 | 引用 slots 中的 id |
 | `i18n` | 否 | 国际化翻译，有就写，AI 自动生成时不产出此字段 |
+
+素材 ID 必须遵守单 producer：每个非 external 素材恰好由一个步骤产出，可以被任意多个后继步骤读取；同一步骤不能读取并重新产出同一个素材。多阶段加工必须使用不同 ID（如 `outline`、`revised_outline`）。素材 producer 必须是 consumer 的控制祖先，系统不会自动补控制边。
 
 ---
 
@@ -135,18 +139,17 @@ initial: __start__    # 状态机起始状态，固定为 __start__
 transitions:
   __start__:
     - to: step_one
-      condition: 'Always enter step_one first.'   # 供 LLM 阅读的自然语言条件
   step_one:
+    - to: step_two
+      when: 用户希望继续完善结果                 # 可选，自然语言提示，由 ChatAgent 判断
+    - to: step_three
+      when: 用户希望直接使用当前结果
 
   step_two:
     - to: step_three
-      condition: 'step_two complete — proceed to step_three.'
-    - to: step_one          # 条件路由：需配合 route: choice
-      condition: 'step_two failed — retry from step_one.'
 
   step_three:
     - to: __end__
-      condition: 'Pipeline complete.'
 
 steps:
   step_one:
@@ -166,17 +169,26 @@ steps:
       Stop after saving.
     tools:                        # 可选：该步骤 SubAgent 可用的工具名列表
       - web_search_tool           # 框架工具（save_artifact 等）始终自动注入，无需声明
-    inputs:                       # 可选：前置依赖 slot 列表
-      - slot: prior_slot          # 引用 plugin.yaml 中 slots 的 id
-        required: true            # true（缺失时拒绝触发）| false（可选，缺失时仍执行）
+    inputs:                       # 有序输入列表；required 决定是否阻塞 Ready
+      - material: revised_outline
+        required: true
+        alternatives:
+          - material: outline
+      - material: references
+        required: true
+      - material: style_guide
+        required: false
     outputs:                      # 可选：本步骤应产出的 slot 列表
-      - slot: my_output
+      - material: my_output
     acceptance_criteria: |        # 可选：步骤质量标准，供 DriverAgent 评判时参考
       my_output artifact must be saved and contain at least 20 words.
-    skipif: 'condition to skip'   # 可选：满足时 StateMachine 生成 bypass 边允许跳过
+    skip_if:                      # 可选：满足素材表达式时 bypass，不创建 attempt
+      any:
+        - material: existing_result
+        - material: imported_result
     route: choice                 # 可选，仅在有多个出边时有意义：
-                                  #   all（默认）：同时触发所有满足条件的出边（并行）
-                                  #   choice：只走第一个满足条件的出边（条件路由，互斥选一）
+                                  #   all（默认）：可并行推进适用的出边
+                                  #   choice：由 ChatAgent 根据 when 选择适用出边
 ```
 
 ### 字段速查表
@@ -186,19 +198,18 @@ steps:
 | `initial` | 是 | 固定为 `__start__` |
 | `transitions` | 是 | 转移规则 map，key 为源步骤 id；`__start__` key 定义从起始节点出发的入口转移 |
 | `transitions.__start__[].to` | 是 | 第一个目标步骤 |
-| `transitions.__start__[].condition` | 推荐 | 起始转移条件描述 |
+| `transitions.__start__[].when` | 否 | 给 ChatAgent 的自然语言选择提示；候选节点仍由 Go 标记为 Reachable |
 | `transitions[src][].to` | 是 | 目标状态 |
-| `transitions[src][].condition` | 推荐 | 供 LLM 阅读的转移条件描述 |
+| `transitions[src][].when` | 否 | 自然语言路由提示，不参与 Go 素材求值，也不要求无条件 fallback |
 | `steps[step_id].label` | 否 | 步骤显示名称 |
 | `steps[step_id].mode` | 否 | `auto`（DriverAgent 推进）/ `human`（等用户）；**即将支持，当前不生效** |
 | `steps[step_id].prompt` | 是 | SubAgent 执行指令，支持 `{{...}}` 占位符 |
 | `steps[step_id].tools` | 否 | 自定义工具名列表（框架工具自动注入，无需写）|
-| `steps[step_id].inputs[].slot` | 条件 | 依赖的 slot id |
-| `steps[step_id].inputs[].required` | 否 | 默认 true；false 表示可选 |
-| `steps[step_id].outputs[].slot` | 条件 | 产出的 slot id |
+| `steps[step_id].inputs` | 否 | 有序输入列表；每项通过 `required` 区分必须/可选，必须输入可声明一层 `alternatives` |
+| `steps[step_id].outputs[].material` | 条件 | 产出的素材 id |
 | `steps[step_id].acceptance_criteria` | 否 | 步骤质量标准，供 DriverAgent 评判参考 |
 | `steps[step_id].route` | 否 | `all`（默认）/ `choice`（条件路由）|
-| `steps[step_id].skipif` | 否 | 满足时允许 LLM 跳过此步骤 |
+| `steps[step_id].skip_if` | 否 | 一层 `all(materials)` 或 `any(materials)`；为真时由 Go bypass，不支持嵌套和自然语言 |
 
 ### 保留关键字
 
@@ -215,7 +226,9 @@ steps:
 | `{{runtime_instruction}}` | Go 注入的运行时指令（重试 hint 等），无时为空字符串 |
 | `{{<slot_id>}}` | 指定 slot 的 artifact 值（text → 文本；image → URL）|
 
-**约束**：`{{<slot_id>}}` 只能引用该步骤 `inputs` 里声明的 slot。引用了不在 inputs 里的 slot 时，运行时该占位符会被替换为空字符串，导致 SubAgent 获取不到预期内容。
+**约束**：`{{<slot_id>}}` 只能引用该步骤 `inputs` 中声明的主素材或替代素材。
+
+输入固定为有序列表。`required: true` 的各项之间是 AND；该项的主素材与 `alternatives` 之间是 OR；`required: false` 不参与 Ready 判断且不能配置替代素材。素材 ID 全局唯一，因此不提供 `bind_as`。步骤声明的所有 outputs 均视为必产，前端不提供可选产出配置。
 
 ---
 
@@ -300,20 +313,9 @@ Write 1-2 plain sentences describing what happened.
 
 ---
 
-## 六、重试语义
+## 六、重试与回溯
 
-重试通过 `transitions` 自环或回退边表达，无需额外字段。
-
-```yaml
-transitions:
-  step_one:
-    - to: step_two
-      condition: 'step_one artifact meets quality standard.'
-    - to: step_one               # 自环 = 重试本步骤
-      condition: 'step_one artifact is missing or below quality standard.'
-```
-
-配合 `route: choice` 使用：ChatAgent 根据 DriverAgent 的评估消息，选择走推进边还是重试边。
+控制图必须是 DAG，不允许自环或回退边。`retry` 与 `rewind` 是 Go 运行时命令：重试失效当前 attempt；回溯则按实际素材 witness 和 route provenance 递归标记 Stale，再重新计算 Ready。
 
 ---
 
@@ -323,9 +325,9 @@ transitions:
 
 ```yaml
 transitions:
-  __start__: [{to: step_a, condition: 'Always.'}]
-  step_a: [{to: step_b, condition: 'step_a done.'}]
-  step_b: [{to: __end__, condition: 'Pipeline complete.'}]
+  __start__: [{to: step_a}]
+  step_a: [{to: step_b}]
+  step_b: [{to: __end__}]
 ```
 
 ### 7.2 条件路由
@@ -334,21 +336,24 @@ transitions:
 transitions:
   step_a:
     - to: step_b
-      condition: 'User provided outline — skip to writing.'
+      when: 用户认可当前大纲
     - to: step_outline
-      condition: 'No outline provided — generate outline first.'
+      when: 用户希望继续修改大纲
 steps:
   step_a:
-    route: choice    # 必须配合 choice，否则两条边都触发
+    route: choice    # Go 暴露候选 Reachable 节点，ChatAgent 根据 when 选择；不需要 fallback
 ```
 
-### 7.3 可选步骤（skipif）
+### 7.3 可选步骤（skip_if）
 
 ```yaml
 steps:
   step_optional:
-    skipif: 'User already provided reference materials.'
-    # StateMachine 自动生成 bypass 边，LLM 可选择跳过
+    skip_if:
+      any:
+        - material: existing_references
+        - material: imported_references
+    # 条件为真时由 Go 编译后的 bypass 路径绕过，节点自身不会执行
 ```
 
 ### 7.5 Composite 布局（新格式 C）

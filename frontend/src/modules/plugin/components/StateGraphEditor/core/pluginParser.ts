@@ -81,6 +81,9 @@ function parseSlots(raw: unknown): PluginSlotDef[] {
       if (typeof entry.summary_max_chars === 'number' && entry.summary_max_chars > 0) {
         slot.summary_max_chars = entry.summary_max_chars;
       }
+      if (entry.external === true || entry.external === 'true' || entry.producer === 'external') {
+        slot.external = true;
+      }
       return [slot];
     });
   }
@@ -101,6 +104,9 @@ function parseSlots(raw: unknown): PluginSlotDef[] {
       }
       if (typeof entry.summary_max_chars === 'number' && entry.summary_max_chars > 0) {
         slot.summary_max_chars = entry.summary_max_chars;
+      }
+      if (entry.external === true || entry.external === 'true' || entry.producer === 'external') {
+        slot.external = true;
       }
       return [slot];
     });

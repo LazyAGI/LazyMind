@@ -15,12 +15,18 @@ func DecideRoute(graph *CompiledStateGraph, from string, materials []MaterialVal
 			if edge.From != source {
 				continue
 			}
-			evaluation := Evaluate(edge.Condition, materials)
-			if !evaluation.Satisfied || (route == "choice" && matched) {
+			llmDecided := edge.When != "" || edge.Legacy != ""
+			evaluation := Evaluation{Satisfied: true}
+			if !llmDecided {
+				evaluation = Evaluate(edge.Condition, materials)
+			}
+			if !evaluation.Satisfied || (route == "choice" && matched && !llmDecided) {
 				decision.Pruned = append(decision.Pruned, edge.To)
 				continue
 			}
-			matched = true
+			if !llmDecided {
+				matched = true
+			}
 			decision.Witnesses = append(decision.Witnesses, evaluation.Witnesses...)
 			node, isNode := graph.Nodes[edge.To]
 			if isNode && node.SkipIf != nil {
@@ -37,6 +43,56 @@ func DecideRoute(graph *CompiledStateGraph, from string, materials []MaterialVal
 	}
 	decideFrom(from)
 	return decision
+}
+
+// SelectRouteTarget freezes an LLM-decided choice only after ChatAgent actually
+// advances one of its candidates. Until then every hinted exit remains
+// Reachable. Machine-decided schema-v3 routes keep their existing behavior.
+func SelectRouteTarget(graph *CompiledStateGraph, from, target string, decision RouteDecision) RouteDecision {
+	route := graph.StartRoute
+	if node, ok := graph.Nodes[from]; ok {
+		route = node.Route
+	}
+	if route != "choice" {
+		return decision
+	}
+	hasLLMHint := false
+	for _, edge := range graph.ControlEdges {
+		if edge.From == from && (edge.When != "" || edge.Legacy != "") {
+			hasLLMHint = true
+			break
+		}
+	}
+	if !hasLLMHint {
+		return decision
+	}
+	selected := false
+	for _, candidate := range decision.Activated {
+		if candidate == target {
+			selected = true
+			break
+		}
+	}
+	if !selected {
+		return decision
+	}
+	result := decision
+	result.Activated = []string{target}
+	for _, candidate := range decision.Activated {
+		if candidate != target {
+			result.Pruned = appendUnique(result.Pruned, candidate)
+		}
+	}
+	return result
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 // Project calculates the full live state from immutable graph and persisted facts.
@@ -171,7 +227,11 @@ func Project(graph *CompiledStateGraph, snapshot RuntimeSnapshot) Projection {
 				state = "inactive"
 			}
 		}
-		projection.Edges = append(projection.Edges, ProjectedEdge{From: edge.From, To: edge.To, State: state})
+		when := edge.When
+		if when == "" {
+			when = edge.Legacy
+		}
+		projection.Edges = append(projection.Edges, ProjectedEdge{From: edge.From, To: edge.To, State: state, When: when})
 	}
 	projection.Completed = projection.EndReached && len(projection.Current) == 0 && len(projection.Ready) == 0 && len(projection.Blocked) == 0
 	sortProjection(&projection)
