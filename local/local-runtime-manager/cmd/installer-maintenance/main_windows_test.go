@@ -20,6 +20,12 @@ func TestLocalAppDataTargetIsFixedChild(t *testing.T) {
 	}
 }
 
+func TestProcessAliveDetectsCurrentProcess(t *testing.T) {
+	if !processAlive(uint32(os.Getpid())) {
+		t.Fatal("current process was not detected as alive")
+	}
+}
+
 func TestPurgeLocalDataDoesNotTouchSiblingData(t *testing.T) {
 	base := t.TempDir()
 	target := filepath.Join(base, "LazyMind")

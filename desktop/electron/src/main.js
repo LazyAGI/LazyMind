@@ -280,6 +280,7 @@ async function runInstallerWarmup() {
     fs.appendFileSync(warmupLogPath, `[${new Date().toISOString()}] ${message}\n`);
   };
   let warmupWindow;
+  let activeError = null;
   log(`starting offline installer warmup with timeout ${timeoutSeconds}s`);
   try {
     await runSidecar("up", maintenanceArgs, {
@@ -314,6 +315,7 @@ async function runInstallerWarmup() {
     log("runtime and renderer warmup completed");
   } catch (error) {
     log(`warmup failed: ${serializeError(error)}`);
+    activeError = error;
     throw error;
   } finally {
     if (warmupWindow && !warmupWindow.isDestroyed()) {
@@ -327,7 +329,9 @@ async function runInstallerWarmup() {
       log("maintenance runtime stopped");
     } catch (error) {
       log(`maintenance runtime shutdown failed: ${serializeError(error)}`);
-      throw error;
+      if (!activeError) {
+        throw error;
+      }
     }
   }
 }

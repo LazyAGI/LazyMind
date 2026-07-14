@@ -16,7 +16,6 @@ import (
 )
 
 const appDataLeaf = "LazyMind"
-const stillActiveExitCode = 259
 
 type processRegistry struct {
 	Processes []struct {
@@ -121,13 +120,13 @@ func unsafeSizeofProcessEntry32() uintptr {
 }
 
 func processAlive(pid uint32) bool {
-	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	handle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
 	if err != nil {
 		return false
 	}
 	defer windows.CloseHandle(handle)
-	var code uint32
-	return windows.GetExitCodeProcess(handle, &code) == nil && code == stillActiveExitCode
+	state, err := windows.WaitForSingleObject(handle, 0)
+	return err == nil && state == uint32(windows.WAIT_TIMEOUT)
 }
 
 func purgeLocalData(target string) error {
