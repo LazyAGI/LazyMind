@@ -72,7 +72,8 @@ const resolveAllowedMcpToolIds = (server: McpServerAsset, tools: McpToolAsset[])
 };
 
 export default function ToolManagementSection({ view }: ToolManagementSectionProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -150,7 +151,7 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
     } finally {
       setToolLoading(false);
     }
-  }, [listOptions, t]);
+  }, [currentLanguage, listOptions, t]);
 
   const refreshMcpServers = useCallback(async () => {
     setMcpLoading(true);

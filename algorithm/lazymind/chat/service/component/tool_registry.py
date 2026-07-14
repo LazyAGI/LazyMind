@@ -44,6 +44,8 @@ class ToolGroupConfig:
     label: str
     description: str
     instance: Any
+    label_en: str = ''
+    description_en: str = ''
     model_role: str | None = None
     key_source: Callable[[], Any] | None = None
     pick_first_valid: bool = False
@@ -86,6 +88,8 @@ SKILL_TOOL_GROUP = ToolGroupConfig(
     label='技能工具',
     description='利用已安装的技能进行查询、读文件、执行脚本',
     instance=None,
+    label_en='Skills',
+    description_en='Use installed skills to search, read files, and run scripts.',
 )
 
 DEFAULT_TOOLS: list[ToolGroupConfig] = [
@@ -94,6 +98,8 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='知识库检索',
         description='从知识库中搜索文档，支持语义检索、关键词检索、上下文窗口等',
         instance=KBToolGroup(),
+        label_en='Knowledge Base Search',
+        description_en='Search knowledge base documents using semantic search, keyword search, and context windows.',
         capability_id='knowledge_base_search',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['knowledge_base'],
     ),
@@ -102,6 +108,8 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='临时文件检索',
         description='从用户上传的临时文件中搜索相关内容',
         instance=kb_tmp_search,
+        label_en='Temporary File Search',
+        description_en='Search relevant content in temporary files uploaded by the user.',
         key_source=_temp_kb_key_source,
     ),
     ToolGroupConfig(
@@ -109,36 +117,52 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='系统数据查询',
         description='只读查询 LazyMind 知识库、文档、数据源和关联统计',
         instance=SystemQueryToolGroup(),
+        label_en='System Data Query',
+        description_en=(
+            'Read-only queries for LazyMind knowledge bases, documents, data sources, and related statistics.'
+        ),
     ),
     ToolGroupConfig(
         name='external_db',
         label='外部数据库查询',
         description='只读查看已配置外部数据库 schema，并执行只读 SELECT/WITH 查询',
         instance=ExternalDBToolGroup(),
+        label_en='External Database Query',
+        description_en='Inspect configured external database schemas and run read-only SELECT or WITH queries.',
     ),
     ToolGroupConfig(
         name='writer',
         label='AI 写作',
         description='构建写作任务、资料画像、写作上下文、大纲、章节草稿、审阅报告和最终成稿',
         instance=WriterToolGroup(),
+        label_en='AI Writing',
+        description_en=(
+            'Build writing tasks, source profiles, context, outlines, chapter drafts, review reports, and final drafts.'
+        ),
     ),
     ToolGroupConfig(
         name='calculator',
         label='科学计算器',
         description='安全地执行数学表达式计算',
         instance=calculator,
+        label_en='Scientific Calculator',
+        description_en='Safely evaluate mathematical expressions.',
     ),
     ToolGroupConfig(
         name='wikipedia',
         label='Wikipedia 搜索',
         description='从 Wikipedia 搜索知识条目',
         instance=WikipediaSearch(skip_auth=True),
+        label_en='Wikipedia Search',
+        description_en='Search Wikipedia knowledge entries.',
     ),
     ToolGroupConfig(
         name='web_search',
         label='网页搜索',
         description='使用搜索引擎检索互联网内容，自动选择可用的搜索服务',
         instance=_WEB_SEARCH_ENGINE_INSTANCES,
+        label_en='Web Search',
+        description_en='Search the internet using the first available search provider.',
         pick_first_valid=True,
         capability_id='web_search',
         equivalence_scope='provider_bound',
@@ -149,6 +173,8 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='学术搜索',
         description='搜索学术论文和科学文献，自动选择可用的学术搜索服务',
         instance=_ACADEMIC_SEARCH_ENGINE_INSTANCES,
+        label_en='Academic Search',
+        description_en='Search academic papers and scientific literature using the first available provider.',
         pick_first_valid=True,
         capability_id='academic_search',
         equivalence_scope='provider_bound',
@@ -159,12 +185,16 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='网页抓取',
         description='获取并解析公开网页的可读内容',
         instance=url_fetch,
+        label_en='Web Page Fetch',
+        description_en='Fetch and parse readable content from public web pages.',
     ),
     ToolGroupConfig(
         name='multimodal',
         label='多模态识别',
         description='从图片中提取文字描述',
         instance=vision_extractor,
+        label_en='Multimodal Recognition',
+        description_en='Extract text descriptions from images.',
         model_role='vlm',
     ),
     ToolGroupConfig(
@@ -172,6 +202,8 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='文生图',
         description='根据文字描述生成图片',
         instance=image_generator,
+        label_en='Image Generation',
+        description_en='Generate images from text descriptions.',
         model_role='image_generator',
         capability_id='image_generation',
         input_schema={'prompt': 'string'}, output_schema={'image': 'file'}, required_config=['image_generator_model'],
@@ -181,6 +213,8 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='图编辑',
         description='根据文字指令编辑参考图片',
         instance=image_editor,
+        label_en='Image Editing',
+        description_en='Edit reference images using text instructions.',
         model_role='image_editor',
         capability_id='image_editing',
     ),
@@ -189,42 +223,56 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='词汇学习',
         description='学习用户专属的词汇映射和同义词',
         instance=vocab_learn,
+        label_en='Vocabulary Learning',
+        description_en='Learn user-specific vocabulary mappings and synonyms.',
     ),
     ToolGroupConfig(
         name='read_memory',
         label='记忆读取',
         description='读取当前的用户记忆或偏好内容',
         instance=read_memory,
+        label_en='Memory Reading',
+        description_en='Read the current user memory and preferences.',
     ),
     ToolGroupConfig(
         name='memory_editor',
         label='记忆编辑',
         description='记录和编辑跨会话的用户记忆和偏好',
         instance=memory_editor,
+        label_en='Memory Editing',
+        description_en='Record and edit user memories and preferences across conversations.',
     ),
     ToolGroupConfig(
         name='skill_editor',
         label='技能编辑',
         description='创建、修改和删除技能',
         instance=SkillEditorToolGroup(),
+        label_en='Skill Editing',
+        description_en='Create, update, and delete skills.',
     ),
     ToolGroupConfig(
         name='local_fs',
         label='本地文件',
         description='在配置的本地路径内进行 glob 匹配、grep 搜索、文件读取（只读）',
         instance=LocalFSToolGroup(),
+        label_en='Local Files',
+        description_en='Run glob matching, grep searches, and read-only file access within configured local paths.',
     ),
     ToolGroupConfig(
         name='feishu',
         label='飞书文件系统',
         description='浏览和管理飞书云文档',
         instance=FeishuFS(space_id='dynamic', dynamic_auth=True),
+        label_en='Feishu File System',
+        description_en='Browse and manage Feishu cloud documents.',
     ),
     ToolGroupConfig(
         name='notion',
         label='Notion 文件系统',
         description='浏览、搜索和管理 Notion 页面',
         instance=NotionFS(dynamic_auth=True),
+        label_en='Notion File System',
+        description_en='Browse, search, and manage Notion pages.',
     ),
 ]
 
@@ -319,7 +367,18 @@ def group_is_active(cfg: ToolGroupConfig) -> bool:
     return result
 
 
-def get_all_tool_groups() -> list[dict]:
+def normalize_tool_locale(locale: str | None) -> str:
+    for part in (locale or '').split(','):
+        tag = part.split(';', 1)[0].strip().lower()
+        if tag == 'zh' or tag.startswith('zh-'):
+            return 'zh-CN'
+        if tag == 'en' or tag.startswith('en-'):
+            return 'en-US'
+    return 'zh-CN'
+
+
+def get_all_tool_groups(locale: str | None = None) -> list[dict]:
+    use_english = normalize_tool_locale(locale) == 'en-US'
     result = []
     for cfg in DEFAULT_TOOLS:
         if cfg.pick_first_valid:
@@ -328,8 +387,8 @@ def get_all_tool_groups() -> list[dict]:
             methods = _extract_methods(cfg.instance)
         result.append({
             'name': cfg.name,
-            'label': cfg.label,
-            'description': cfg.description,
+            'label': cfg.label_en or cfg.label if use_english else cfg.label,
+            'description': cfg.description_en or cfg.description if use_english else cfg.description,
             'methods': methods,
             'can_disable': True,
             'active': group_is_active(cfg),
@@ -343,8 +402,11 @@ def get_all_tool_groups() -> list[dict]:
         })
     result.append({
         'name': SKILL_TOOL_GROUP.name,
-        'label': SKILL_TOOL_GROUP.label,
-        'description': SKILL_TOOL_GROUP.description,
+        'label': SKILL_TOOL_GROUP.label_en or SKILL_TOOL_GROUP.label if use_english else SKILL_TOOL_GROUP.label,
+        'description': (
+            SKILL_TOOL_GROUP.description_en or SKILL_TOOL_GROUP.description
+            if use_english else SKILL_TOOL_GROUP.description
+        ),
         'methods': _SKILL_METHODS,
         'can_disable': False,
         'active': True,

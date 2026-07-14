@@ -86,6 +86,7 @@ func localProxyEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 func localRuntimeEnv(cfg RuntimeConfig) []string {
 	return []string{
 		runtimeProfileEnvVar + "=" + cfg.Profile,
+		runtimeOwnerTokenEnvVar + "=" + cfg.OwnerToken,
 		runtimeRootEnvVar + "=" + cfg.RuntimeRoot,
 		localBuildRootEnvVar + "=" + cfg.BuildRoot,
 		runtimeResourcesRootEnvVar + "=" + cfg.ResourcesRoot,

@@ -1,6 +1,7 @@
 import { CheckOutlined, CopyOutlined, FullscreenOutlined } from "@ant-design/icons";
 import { Modal, Tooltip, message } from "antd";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { highlightCode } from "./syntaxHighlight";
 
@@ -92,23 +93,20 @@ async function copyTextToClipboard(text: string) {
 }
 
 function getCopyTooltip(status: CopyStatus) {
-  if (status === "copied") {
-    return "已复制";
-  }
-  if (status === "failed") {
-    return "复制失败";
-  }
-  return "复制源码";
+  const key = status === "copied"
+    ? "chat.markdownCopied"
+    : status === "failed"
+      ? "chat.markdownCopyFailed"
+      : "chat.markdownCopySource";
+  return key;
 }
 
 function getCopyAnnouncement(status: CopyStatus) {
-  if (status === "copied") {
-    return "源码已复制";
-  }
-  if (status === "failed") {
-    return "源码复制失败";
-  }
-  return "";
+  return status === "copied"
+    ? "chat.markdownSourceCopied"
+    : status === "failed"
+      ? "chat.markdownSourceCopyFailed"
+      : "";
 }
 
 const MermaidSource = ({ code }: { code: string }) => {
@@ -135,9 +133,10 @@ const MermaidDiagram = ({
   svg: string;
   onOpen: () => void;
 }) => {
+  const { t } = useTranslation();
   return (
     <button
-      aria-label="放大流程图"
+      aria-label={t("chat.markdownEnlargeDiagram")}
       className="md-mermaid-preview"
       type="button"
       onClick={onOpen}
@@ -154,6 +153,7 @@ const MermaidBlockComponent = ({
   code: string;
   isStreaming?: boolean;
 }) => {
+  const { t } = useTranslation();
   const [activeView, setActiveView] = useState<MermaidView>("diagram");
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -256,10 +256,10 @@ const MermaidBlockComponent = ({
     try {
       await copyTextToClipboard(code);
       setCopyStatus("copied");
-      message.success("源码已复制");
+      message.success(t("chat.markdownSourceCopied"));
     } catch {
       setCopyStatus("failed");
-      message.error("复制失败，请手动复制");
+      message.error(t("chat.copyFailedManual"));
     } finally {
       resetCopyStatusLater();
     }
@@ -268,7 +268,7 @@ const MermaidBlockComponent = ({
   return (
     <div className="md-mermaid-block">
       <div className="md-mermaid-toolbar">
-        <div className="md-mermaid-tabs" role="tablist" aria-label="Mermaid展示">
+        <div className="md-mermaid-tabs" role="tablist" aria-label={t("chat.markdownMermaidDisplay")}>
           <button
             aria-selected={visibleView === "diagram"}
             className={visibleView === "diagram" ? "active" : ""}
@@ -277,7 +277,7 @@ const MermaidBlockComponent = ({
             type="button"
             onClick={() => setActiveView("diagram")}
           >
-            流程图
+            {t("chat.markdownDiagram")}
           </button>
           <button
             aria-selected={visibleView === "source"}
@@ -286,13 +286,13 @@ const MermaidBlockComponent = ({
             type="button"
             onClick={() => setActiveView("source")}
           >
-            源码
+            {t("chat.markdownSource")}
           </button>
         </div>
         <div className="md-mermaid-actions">
           {canShowDiagram && visibleView === "diagram" && (
             <button
-              aria-label="放大流程图"
+              aria-label={t("chat.markdownEnlargeDiagram")}
               className="md-mermaid-icon-button"
               type="button"
               onClick={() => setIsModalOpen(true)}
@@ -301,9 +301,9 @@ const MermaidBlockComponent = ({
             </button>
           )}
           {visibleView === "source" && (
-            <Tooltip title={getCopyTooltip(copyStatus)}>
+            <Tooltip title={t(getCopyTooltip(copyStatus))}>
               <button
-                aria-label="复制源码"
+                aria-label={t("chat.markdownCopySource")}
                 className={`md-mermaid-icon-button ${
                   copyStatus === "copied" ? "copied" : ""
                 }`}
@@ -316,19 +316,19 @@ const MermaidBlockComponent = ({
             </Tooltip>
           )}
           <span className="md-mermaid-copy-status" aria-live="polite">
-            {getCopyAnnouncement(copyStatus)}
+            {getCopyAnnouncement(copyStatus) ? t(getCopyAnnouncement(copyStatus)) : ""}
           </span>
         </div>
       </div>
 
       {renderState.status === "rendering" && (
-        <div className="md-mermaid-status">图表渲染中...</div>
+        <div className="md-mermaid-status">{t("chat.markdownDiagramRendering")}</div>
       )}
       {renderState.status === "error" && !isStreaming && (
-        <div className="md-mermaid-status">图表渲染失败，已显示源码</div>
+        <div className="md-mermaid-status">{t("chat.markdownDiagramRenderFailed")}</div>
       )}
       {renderState.status === "error" && isStreaming && !canShowDiagram && (
-        <div className="md-mermaid-status">图表生成中，等待完整内容...</div>
+        <div className="md-mermaid-status">{t("chat.markdownDiagramWaitingContent")}</div>
       )}
 
       {visibleView === "source" ? (
@@ -337,7 +337,7 @@ const MermaidBlockComponent = ({
         <MermaidDiagram svg={renderState.svg} onOpen={() => setIsModalOpen(true)} />
       ) : (
         <div className="md-mermaid-placeholder" aria-live="polite">
-          图表生成中...
+          {t("chat.markdownDiagramGenerating")}
         </div>
       )}
 
@@ -346,7 +346,7 @@ const MermaidBlockComponent = ({
         className="md-mermaid-modal"
         footer={null}
         open={isModalOpen}
-        title="流程图"
+        title={t("chat.markdownDiagram")}
         width="80vw"
         onCancel={() => setIsModalOpen(false)}
       >

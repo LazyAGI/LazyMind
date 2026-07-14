@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/glebarez/go-sqlite"
 )
 
 func TestRunUpAppliesMissingLowerVersionMigrationAfterManualHistoryBackfill(t *testing.T) {
@@ -27,7 +27,7 @@ func TestRunUpAppliesMissingLowerVersionMigrationAfterManualHistoryBackfill(t *t
 	}
 
 	dbPath := filepath.Join(t.TempDir(), "acl.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}
@@ -109,7 +109,7 @@ DROP TABLE IF EXISTS gamma;
 `)
 
 	dbPath := filepath.Join(t.TempDir(), "acl.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}
@@ -213,7 +213,7 @@ DROP TABLE IF EXISTS schema_migration_history;
 		t.Fatalf("Down: %v", err)
 	}
 
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}

@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/glebarez/go-sqlite"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/mattn/go-sqlite3"
 
 	"lazymind/core/log"
 )
@@ -761,7 +761,7 @@ func envOr(key, def string) string {
 func openSQL(driver, dsn string) (*sql.DB, string, error) {
 	switch driver {
 	case "sqlite":
-		db, err := sql.Open("sqlite3", dsn)
+		db, err := sql.Open("sqlite", dsn)
 		if err != nil {
 			return nil, "", err
 		}

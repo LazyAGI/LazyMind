@@ -7,6 +7,7 @@ import {
   useRef,
 } from "react";
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
 import { message } from "antd";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
@@ -30,10 +31,11 @@ import type { ChatContainerProps, ChatImperativeProps } from "./types";
 export type { ChatImperativeProps, ChatMessage } from "./types";
 
 const SKILL_DEPOSIT_REMINDER_KEY_PREFIX = "skill-deposit-reminded:";
-const SKILL_DEPOSIT_PROMPT_PREFIXES = [
-  "请把当前会话沉淀为 skill。",
-  "Deposit the current conversation as a skill.",
-];
+const SKILL_DEPOSIT_PROMPT_PREFIXES = ["zh-CN", "en-US"].map((language) =>
+  String(
+    i18n.getResource(language, "translation", "chat.skillDepositPrompt") ?? "",
+  ).split("\n")[0],
+);
 
 function getSkillDepositStats(messageList: any[]): SkillDepositStats {
   return messageList.reduce<SkillDepositStats>(

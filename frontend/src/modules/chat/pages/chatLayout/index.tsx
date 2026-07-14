@@ -420,7 +420,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             tags: chatConfig?.tags,
           },
         },
-        models: ["LazyMind 大模型"],
+        models: [t("chat.lazyMindModel")],
         // enable_thinking: think ? true : false,
         stream: true,
         input,

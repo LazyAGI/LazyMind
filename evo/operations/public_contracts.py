@@ -66,6 +66,7 @@ class DatasetRoot(Contract):
 class EvalSummary(Contract):
     run_id: StrictStr
     case_num: StrictInt
+    scored_case_num: StrictInt
     algo_id: StrictStr
     avg_correctness: FiniteFloat
     avg_relevance: FiniteFloat
@@ -80,6 +81,7 @@ class EvalSummary(Contract):
 
 
 class EvalBody(Contract):
+    scored_case_num: StrictInt
     avg_correctness: FiniteFloat
     avg_relevance: FiniteFloat
     avg_completeness: FiniteFloat
@@ -162,6 +164,7 @@ def build_eval_summary_root(
     payload = {
         'run_id': str(run_id),
         'case_num': len(cases),
+        'scored_case_num': len(scored),
         'algo_id': next((text for judge in judges for text in (algo_id(judge),) if text), ''),
         **{aggregate: _avg(scored, raw) for raw, (_, aggregate) in METRICS.items()},
         'correct_rate': round(sum(1 for row in scored if row.get('quality_label') == 'good') / len(scored), 4)
@@ -169,42 +172,6 @@ def build_eval_summary_root(
         'cases': cases,
     }
     return dump_contract(EvalSummary, payload)
-
-
-def build_abtest_comparison_root(
-    run_id: str,
-    baseline: Mapping[str, Any],
-    candidate: Mapping[str, Any],
-    service: Mapping[str, Any],
-) -> dict[str, Any]:
-    baseline = EvalSummary.model_validate(baseline).model_dump(mode='json')
-    candidate = EvalSummary.model_validate(candidate).model_dump(mode='json')
-    origin = _eval_body(baseline)
-    after = _eval_body(candidate)
-    verdict = 'review_candidate'
-    status = 'completed'
-    reasons: list[str] = []
-    if service.get('status') != 'ready':
-        verdict = 'candidate_service_unavailable'
-        status = 'failed'
-        reasons.append('candidate service is not ready')
-    delta = {key: round(float(after.get(key) or 0.0) - float(origin.get(key) or 0.0), 4) for key in AGGREGATES}
-    payload = {
-        'run_id': str(run_id),
-        'algo_id': str(baseline.get('algo_id') or ''),
-        'candidate_algo_id': str(service.get('algorithm_id') or ''),
-        'status': status,
-        'verdict': verdict,
-        'reasons': reasons,
-        'origin': origin,
-        'candidate': after,
-        'delta': delta,
-    }
-    return dump_contract(AbtestComparison, payload)
-
-
-def _eval_body(summary: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: summary[key] for key in (*AGGREGATES, 'cases') if key in summary}
 
 
 def _score(value: object) -> float:

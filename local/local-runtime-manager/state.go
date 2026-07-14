@@ -12,6 +12,7 @@ type RuntimeState struct {
 	Version        int                            `json:"version"`
 	Runtime        string                         `json:"runtime"`
 	Profile        string                         `json:"profile"`
+	OwnerToken     string                         `json:"ownerToken,omitempty"`
 	RepoRoot       string                         `json:"repoRoot"`
 	ResourcesRoot  string                         `json:"resourcesRoot,omitempty"`
 	RuntimeRoot    string                         `json:"runtimeRoot"`
@@ -55,6 +56,7 @@ type RuntimeServiceState struct {
 type StatusResponse struct {
 	Runtime        string                         `json:"runtime"`
 	Profile        string                         `json:"profile"`
+	OwnerMatched   bool                           `json:"ownerMatched,omitempty"`
 	OverallStatus  string                         `json:"overallStatus"`
 	RepoRoot       string                         `json:"repoRoot"`
 	ResourcesRoot  string                         `json:"resourcesRoot,omitempty"`
@@ -94,6 +96,7 @@ func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) Runti
 		Version:       processComposeVersion,
 		Runtime:       cfg.Profile,
 		Profile:       cfg.Profile,
+		OwnerToken:    cfg.OwnerToken,
 		RepoRoot:      cfg.RepoRoot,
 		ResourcesRoot: cfg.ResourcesRoot,
 		RuntimeRoot:   cfg.RuntimeRoot,

@@ -12,10 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -65,11 +63,17 @@ func (m *AuthServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 	cmd.Env = append(os.Environ(), authServiceEnv(cfg, paths)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureChildProcess(cmd, false)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start auth-service failed: %w", err)
 	}
+	releaseJob, err := attachManagedProcess(paths, authServiceProcessName, cmd.Process)
+	if err != nil {
+		_ = forceKillProcessTree(cmd.Process.Pid)
+		return fmt.Errorf("attach auth-service process containment failed: %w", err)
+	}
+	defer releaseJob()
 	if err := os.WriteFile(paths.AuthServicePIDFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
 		_ = cmd.Process.Kill()
 		return err
@@ -88,7 +92,7 @@ func (m *AuthServiceManager) Run(ctx context.Context, cfg RuntimeConfig, paths R
 		return err
 	}
 
-	err := <-waitErr
+	err = <-waitErr
 	_ = os.Remove(paths.AuthServicePIDFile)
 	unregisterLocalProcess(paths, authServiceProcessName, cmd.Process.Pid)
 	if ctx.Err() != nil {
@@ -122,9 +126,8 @@ func (m *AuthServiceManager) Down(ctx context.Context, cfg RuntimeConfig, paths 
 		_ = os.Remove(paths.AuthServicePIDFile)
 		return nil
 	}
-	if err := proc.Signal(os.Interrupt); err != nil {
-		_ = proc.Kill()
-	}
+	_ = proc
+	_ = interruptProcess(pid)
 
 	deadline := time.NewTimer(10 * time.Second)
 	defer deadline.Stop()
@@ -133,10 +136,10 @@ func (m *AuthServiceManager) Down(ctx context.Context, cfg RuntimeConfig, paths 
 	for {
 		select {
 		case <-ctx.Done():
-			_ = proc.Kill()
+			_ = forceStopManagedProcess(paths, authServiceProcessName, pid)
 			return ctx.Err()
 		case <-deadline.C:
-			_ = proc.Kill()
+			_ = forceStopManagedProcess(paths, authServiceProcessName, pid)
 			_ = os.Remove(paths.AuthServicePIDFile)
 			return nil
 		case <-ticker.C:
@@ -257,10 +260,7 @@ func authServicePermissionsPath(paths RuntimePaths) string {
 }
 
 func authServicePythonPath(paths RuntimePaths) string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(paths.AuthServiceVenvDir, "Scripts", "python.exe")
-	}
-	return filepath.Join(paths.AuthServiceVenvDir, "bin", "python")
+	return venvExecutable(paths.AuthServiceVenvDir, "python")
 }
 
 func pythonDependencyCacheEnv(paths RuntimePaths) []string {

@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 from uuid import uuid4
 
-from evo.operations.chat_router import RouterChatRequest, call_router_chat
+from evo.operations.route.chat_router import RouterChatRequest, call_router_chat
 
 HEX = re.compile(r'^[0-9a-fA-F]+$')
 DEFAULT_CASE_DEADLINE_SECONDS = 300.0

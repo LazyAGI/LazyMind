@@ -1,0 +1,4 @@
+# Host-local runtime dependencies shared by Windows, macOS, and Linux.
+# Milvus Lite 3 uses a new cross-platform storage engine and format.
+pymilvus==3.0.0
+milvus-lite==3.0.0

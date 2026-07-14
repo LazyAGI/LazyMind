@@ -1,4 +1,10 @@
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
+import i18n from '@/i18n';
+import { useTranslation } from 'react-i18next';
+
+function tr(key: string, options?: Record<string, unknown>): string {
+  return i18n.t(key, options);
+}
 
 /** Slot ids rendered by WriterArtifactContent in the writer-plugin panel. */
 export const WRITER_ARTIFACT_SLOT_IDS = new Set([
@@ -41,60 +47,60 @@ function isEmptyValue(value: unknown): boolean {
 
 function humanizeKey(key: string): string {
   const labels: Record<string, string> = {
-    query: '写作需求',
-    task_type: '任务类型',
-    length_target: '目标篇幅',
-    constraints: '约束条件',
-    context_id: '上下文 ID',
-    document_summary: '文档摘要',
-    key_points: '关键要点',
-    style_profile: '风格画像',
-    audience: '受众',
-    formality: '正式程度',
-    tone: '语气',
-    min_words: '最少字数',
-    max_words: '最多字数',
-    min_length: '最少字数',
-    max_length: '最多字数',
-    word_count: '字数',
-    language: '语言',
-    genre: '体裁',
-    style: '风格',
-    topic: '主题',
-    deadline: '截止时间',
-    format: '格式',
-    outline_id: '大纲 ID',
-    node_id: '章节 ID',
-    title: '标题',
-    instruction: '写作指引',
-    author_notes: '作者备注',
-    level: '层级',
-    section_id: '章节 ID',
-    draft_id: '初稿 ID',
-    output_id: '成稿 ID',
-    section_goal: '章节目标',
-    required_points: '必写要点',
-    outline_node_id: '关联大纲章节',
-    blocks: '正文内容',
-    sections: '章节',
-    content: '内容',
-    content_type: '内容类型',
-    output_format: '输出格式',
-    result: '审阅结果',
-    is_passed: '是否通过',
-    score: '评分',
-    summary: '摘要',
-    issues: '问题列表',
-    severity: '严重程度',
-    category: '问题分类',
-    description: '问题说明',
-    resource_id: '资源 ID',
-    resource_type: '资源类型',
-    mime_type: '文件类型',
-    uri: '资源地址',
-    meta: '扩展信息',
+    query: 'query',
+    task_type: 'taskType',
+    length_target: 'lengthTarget',
+    constraints: 'constraints',
+    context_id: 'contextId',
+    document_summary: 'documentSummary',
+    key_points: 'keyPoints',
+    style_profile: 'styleProfile',
+    audience: 'audience',
+    formality: 'formality',
+    tone: 'tone',
+    min_words: 'minWords',
+    max_words: 'maxWords',
+    min_length: 'minLength',
+    max_length: 'maxLength',
+    word_count: 'wordCount',
+    language: 'language',
+    genre: 'genre',
+    style: 'style',
+    topic: 'topic',
+    deadline: 'deadline',
+    format: 'format',
+    outline_id: 'outlineId',
+    node_id: 'nodeId',
+    title: 'title',
+    instruction: 'instruction',
+    author_notes: 'authorNotes',
+    level: 'level',
+    section_id: 'sectionId',
+    draft_id: 'draftId',
+    output_id: 'outputId',
+    section_goal: 'sectionGoal',
+    required_points: 'requiredPoints',
+    outline_node_id: 'outlineNodeId',
+    blocks: 'blocks',
+    sections: 'sections',
+    content: 'content',
+    content_type: 'contentType',
+    output_format: 'outputFormat',
+    result: 'result',
+    is_passed: 'isPassed',
+    score: 'score',
+    summary: 'summary',
+    issues: 'issues',
+    severity: 'severity',
+    category: 'category',
+    description: 'description',
+    resource_id: 'resourceId',
+    resource_type: 'resourceType',
+    mime_type: 'mimeType',
+    uri: 'uri',
+    meta: 'meta',
   };
-  return labels[key] ?? key.replace(/_/g, ' ');
+  return labels[key] ? tr(`chat.writer.fields.${labels[key]}`) : key.replace(/_/g, ' ');
 }
 
 /** Flatten a value into human-readable text without producing [object Object]. */
@@ -103,7 +109,7 @@ function formatDisplayValue(value: unknown): string {
   if (typeof value === 'string') return value.trim();
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) {
-    return value.map((item) => formatDisplayValue(item)).filter(Boolean).join('、');
+    return value.map((item) => formatDisplayValue(item)).filter(Boolean).join(tr('chat.writer.listSeparator'));
   }
   const record = asRecord(value);
   if (record) {
@@ -111,10 +117,10 @@ function formatDisplayValue(value: unknown): string {
       .filter(([, item]) => !isEmptyValue(item))
       .map(([key, item]) => {
         const formatted = formatDisplayValue(item);
-        return formatted ? `${humanizeKey(key)}：${formatted}` : '';
+        return formatted ? tr('chat.writer.keyValue', { key: humanizeKey(key), value: formatted }) : '';
       })
       .filter(Boolean)
-      .join('；');
+      .join(tr('chat.writer.fieldSeparator'));
   }
   return '';
 }
@@ -326,7 +332,7 @@ function OutlineNodesList({ nodes }: { nodes: unknown }) {
       {items.map((node, index) => {
         const item = asRecord(node);
         if (!item) return null;
-        const title = asString(item.title) || asString(item.section_title) || `章节 ${index + 1}`;
+        const title = asString(item.title) || asString(item.section_title) || tr('chat.writer.sectionNumber', { index: index + 1 });
         return (
           <div key={`${asString(item.node_id) || asString(item.section_id) || title}-${index}`} className='writer-artifact__card'>
             <div className='writer-artifact__card-header'>
@@ -352,7 +358,7 @@ function OutlineNodesList({ nodes }: { nodes: unknown }) {
 function RemainingDetails({
   data,
   omit,
-  title = '更多信息',
+  title = tr('chat.writer.moreInformation'),
 }: {
   data: unknown;
   omit: OmitSpec;
@@ -382,7 +388,7 @@ function BlockDetails({ blocks }: { blocks: unknown }) {
     <section className='writer-artifact__details-section'>
       <div className='writer-artifact__section-heading'>
         <span className='writer-artifact__section-heading-mark' />
-        <span>内容结构</span>
+        <span>{tr('chat.writer.contentStructure')}</span>
       </div>
       <DetailValue value={metadata} />
     </section>
@@ -397,14 +403,14 @@ function WritingTaskView({ data }: { data: unknown }) {
     <div className='writer-artifact writer-artifact--task'>
       {query && <p className='writer-artifact__lead'>{query}</p>}
       <div className='writer-artifact__meta-grid'>
-        <MetaRow label='任务类型' value={asString(record.task_type)} />
-        <MetaRow label='目标篇幅' value={asString(record.length_target)} />
-        <MetaRow label='写作语言' value={asString(record.language)} />
-        <MetaRow label='体裁' value={asString(record.genre)} />
+        <MetaRow label={tr('chat.writer.fields.taskType')} value={asString(record.task_type)} />
+        <MetaRow label={tr('chat.writer.fields.lengthTarget')} value={asString(record.length_target)} />
+        <MetaRow label={tr('chat.writer.writingLanguage')} value={asString(record.language)} />
+        <MetaRow label={tr('chat.writer.fields.genre')} value={asString(record.genre)} />
       </div>
       {!isEmptyValue(record.constraints) && (
         <div className='writer-artifact__section'>
-          <div className='writer-artifact__section-title'>约束条件</div>
+          <div className='writer-artifact__section-title'>{tr('chat.writer.fields.constraints')}</div>
           <StructuredValue value={record.constraints} />
         </div>
       )}
@@ -438,7 +444,7 @@ function ResourceProfilesView({ data }: { data: unknown }) {
       {profiles.map((item, index) => {
         const record = asRecord(item);
         if (!record) return null;
-        const title = asString(record.title) || asString(record.resource_id) || `资源 ${index + 1}`;
+        const title = asString(record.title) || asString(record.resource_id) || tr('chat.writer.resourceNumber', { index: index + 1 });
         return (
           <div key={`${title}-${index}`} className='writer-artifact__card'>
             <div className='writer-artifact__card-header'>
@@ -461,7 +467,7 @@ function ResourceProfilesView({ data }: { data: unknown }) {
                 summary: true,
                 uri: true,
               }}
-              title='资源详情'
+              title={tr('chat.writer.resourceDetails')}
             />
           </div>
         );
@@ -470,7 +476,7 @@ function ResourceProfilesView({ data }: { data: unknown }) {
         <RemainingDetails
           data={root}
           omit={{ profiles: true, resources: true, resource_profiles: true }}
-          title='资源集合信息'
+          title={tr('chat.writer.resourceCollectionInformation')}
         />
       )}
     </div>
@@ -488,13 +494,13 @@ function WritingContextView({ data }: { data: unknown }) {
     <div className='writer-artifact writer-artifact--context'>
       {asString(summary?.summary) && (
         <div className='writer-artifact__section'>
-          <div className='writer-artifact__section-title'>文档摘要</div>
+          <div className='writer-artifact__section-title'>{tr('chat.writer.fields.documentSummary')}</div>
           <p className='writer-artifact__paragraph'>{asString(summary?.summary)}</p>
         </div>
       )}
       {keyPoints.length > 0 && (
         <div className='writer-artifact__section'>
-          <div className='writer-artifact__section-title'>关键要点</div>
+          <div className='writer-artifact__section-title'>{tr('chat.writer.fields.keyPoints')}</div>
           <ul className='writer-artifact__list'>
             {keyPoints.map((point) => (
               <li key={point}>{point}</li>
@@ -504,11 +510,11 @@ function WritingContextView({ data }: { data: unknown }) {
       )}
       {style && (
         <div className='writer-artifact__section'>
-          <div className='writer-artifact__section-title'>风格画像</div>
+          <div className='writer-artifact__section-title'>{tr('chat.writer.fields.styleProfile')}</div>
           <div className='writer-artifact__meta-grid'>
-            <MetaRow label='受众' value={asString(style.audience)} />
-            <MetaRow label='正式程度' value={asString(style.formality)} />
-            <MetaRow label='语气' value={asString(style.tone)} />
+            <MetaRow label={tr('chat.writer.fields.audience')} value={asString(style.audience)} />
+            <MetaRow label={tr('chat.writer.fields.formality')} value={asString(style.formality)} />
+            <MetaRow label={tr('chat.writer.fields.tone')} value={asString(style.tone)} />
           </div>
         </div>
       )}
@@ -527,15 +533,15 @@ function OutlineView({ data }: { data: unknown }) {
   const record = asRecord(data);
   const nodes = asArray(record?.nodes);
   if (!nodes.length) {
-    return <div className='writer-artifact__empty'>暂无大纲</div>;
+    return <div className='writer-artifact__empty'>{tr('chat.writer.noOutline')}</div>;
   }
   return (
     <div className='writer-artifact writer-artifact--outline'>
       {asString(record?.outline_id) && (
-        <MetaRow label='大纲 ID' value={asString(record?.outline_id)} />
+        <MetaRow label={tr('chat.writer.fields.outlineId')} value={asString(record?.outline_id)} />
       )}
       <OutlineNodesList nodes={nodes} />
-      <RemainingDetails data={record} omit={{ nodes: true, outline_id: true }} title='大纲信息' />
+      <RemainingDetails data={record} omit={{ nodes: true, outline_id: true }} title={tr('chat.writer.outlineInformation')} />
     </div>
   );
 }
@@ -544,14 +550,14 @@ function SectionInstructionsView({ data }: { data: unknown }) {
   const record = asRecord(data);
   const instructions = asArray(record?.instructions ?? data);
   if (!instructions.length) {
-    return <div className='writer-artifact__empty'>暂无章节规划</div>;
+    return <div className='writer-artifact__empty'>{tr('chat.writer.noSectionPlan')}</div>;
   }
   return (
     <div className='writer-artifact writer-artifact--instructions'>
       {instructions.map((item, index) => {
         const recordItem = asRecord(item);
         if (!recordItem) return null;
-        const title = asString(recordItem.section_title) || `章节 ${index + 1}`;
+        const title = asString(recordItem.section_title) || tr('chat.writer.sectionNumber', { index: index + 1 });
         const requiredPoints = asArray(recordItem.required_points).map(asString).filter(Boolean);
         return (
           <div key={`${asString(recordItem.outline_node_id) || title}-${index}`} className='writer-artifact__card'>
@@ -577,12 +583,12 @@ function SectionInstructionsView({ data }: { data: unknown }) {
                 section_goal: true,
                 required_points: true,
               }}
-              title='写作细节'
+              title={tr('chat.writer.writingDetails')}
             />
           </div>
         );
       })}
-      <RemainingDetails data={record} omit={{ instructions: true }} title='规划信息' />
+      <RemainingDetails data={record} omit={{ instructions: true }} title={tr('chat.writer.planInformation')} />
     </div>
   );
 }
@@ -601,23 +607,23 @@ function DraftSectionView({ data }: { data: unknown }) {
     return (
       <div className='writer-artifact writer-artifact--draft-section'>
         <div className='writer-artifact__section'>
-          <div className='writer-artifact__section-title'>关联大纲</div>
-          <MetaRow label='大纲 ID' value={asString(record.outline_id)} />
+          <div className='writer-artifact__section-title'>{tr('chat.writer.relatedOutline')}</div>
+          <MetaRow label={tr('chat.writer.fields.outlineId')} value={asString(record.outline_id)} />
         </div>
         <div className='writer-artifact__section'>
-          <div className='writer-artifact__section-title'>章节结构</div>
+          <div className='writer-artifact__section-title'>{tr('chat.writer.sectionStructure')}</div>
           <OutlineNodesList nodes={record.nodes} />
         </div>
         {!isEmptyValue(record.meta) && (
           <div className='writer-artifact__section'>
-            <div className='writer-artifact__section-title'>创作说明</div>
+            <div className='writer-artifact__section-title'>{tr('chat.writer.creationNotes')}</div>
             <StructuredValue value={record.meta} />
           </div>
         )}
         <RemainingDetails
           data={record}
           omit={{ outline_id: true, nodes: true, meta: true }}
-          title='其他信息'
+          title={tr('chat.writer.otherInformation')}
         />
       </div>
     );
@@ -631,13 +637,13 @@ function DraftSectionView({ data }: { data: unknown }) {
       {content ? (
         <MarkdownBlock content={content} />
       ) : (
-        <div className='writer-artifact__empty'>章节正文生成中…</div>
+        <div className='writer-artifact__empty'>{tr('chat.writer.sectionGenerating')}</div>
       )}
       <BlockDetails blocks={record.blocks} />
       <RemainingDetails
         data={record}
         omit={{ title: true, content: true, blocks: true, section_id: true }}
-        title='章节信息'
+        title={tr('chat.writer.sectionInformation')}
       />
     </div>
   );
@@ -659,12 +665,12 @@ function DraftDocumentView({ data }: { data: unknown }) {
           <RemainingDetails
             data={record}
             omit={{ title: true, content: true, blocks: true, sections: true }}
-            title='文档信息'
+            title={tr('chat.writer.documentInformation')}
           />
         </div>
       );
     }
-    return <div className='writer-artifact__empty'>暂无初稿内容</div>;
+    return <div className='writer-artifact__empty'>{tr('chat.writer.noDraftContent')}</div>;
   }
   return (
     <div className='writer-artifact writer-artifact--draft-document'>
@@ -674,7 +680,7 @@ function DraftDocumentView({ data }: { data: unknown }) {
       {sections.map((section, index) => {
         const item = asRecord(section);
         if (!item) return null;
-        const title = asString(item.title) || `章节 ${index + 1}`;
+        const title = asString(item.title) || tr('chat.writer.sectionNumber', { index: index + 1 });
         const content = asString(item.content) || joinBlockContent(item.blocks);
         return (
           <section key={`${title}-${index}`} className='writer-artifact__document-section'>
@@ -687,7 +693,7 @@ function DraftDocumentView({ data }: { data: unknown }) {
             <RemainingDetails
               data={item}
               omit={{ title: true, content: true, blocks: true }}
-              title='章节信息'
+              title={tr('chat.writer.sectionInformation')}
             />
           </section>
         );
@@ -695,7 +701,7 @@ function DraftDocumentView({ data }: { data: unknown }) {
       <RemainingDetails
         data={record}
         omit={{ title: true, content: true, blocks: true, sections: true }}
-        title='文档信息'
+        title={tr('chat.writer.documentInformation')}
       />
     </div>
   );
@@ -716,17 +722,17 @@ function ReviewReportView({ data }: { data: unknown }) {
       <div className='writer-artifact__review-header'>
         {typeof passed === 'boolean' && (
           <span className={`writer-artifact__status-badge writer-artifact__status-badge--${passed ? 'pass' : 'fail'}`}>
-            {passed ? '通过' : '未通过'}
+            {passed ? tr('chat.writer.passed') : tr('chat.writer.failed')}
           </span>
         )}
         {typeof score === 'number' && (
-          <span className='writer-artifact__score'>评分 {score}</span>
+          <span className='writer-artifact__score'>{tr('chat.writer.scoreValue', { score })}</span>
         )}
       </div>
       {summary && <p className='writer-artifact__paragraph'>{summary}</p>}
       {issues.length > 0 && (
         <div className='writer-artifact__section'>
-          <div className='writer-artifact__section-title'>问题列表</div>
+          <div className='writer-artifact__section-title'>{tr('chat.writer.fields.issues')}</div>
           <div className='writer-artifact__issues'>
             {issues.map((issue, index) => {
               const item = asRecord(issue);
@@ -744,7 +750,7 @@ function ReviewReportView({ data }: { data: unknown }) {
                   <RemainingDetails
                     data={item}
                     omit={{ severity: true, category: true, description: true }}
-                    title='问题详情'
+                    title={tr('chat.writer.issueDetails')}
                   />
                 </div>
               );
@@ -755,10 +761,10 @@ function ReviewReportView({ data }: { data: unknown }) {
       <RemainingDetails
         data={result}
         omit={{ is_passed: true, score: true, summary: true, issues: true }}
-        title='审阅详情'
+        title={tr('chat.writer.reviewDetails')}
       />
       {record && record !== result && (
-        <RemainingDetails data={record} omit={{ result: true }} title='报告信息' />
+        <RemainingDetails data={record} omit={{ result: true }} title={tr('chat.writer.reportInformation')} />
       )}
     </div>
   );
@@ -768,21 +774,21 @@ function WritingOutputView({ data, hideDownload = false }: { data: unknown; hide
   const record = asRecord(data);
   const content = asString(record?.content);
   if (!content) {
-    return <div className='writer-artifact__empty'>暂无最终成稿</div>;
+    return <div className='writer-artifact__empty'>{tr('chat.writer.noFinalContent')}</div>;
   }
   return (
     <div className='writer-artifact writer-artifact--output'>
       {!hideDownload ? (
         <div className='writer-artifact__output-toolbar'>
           <ArtifactDownloadButton
-            label='下载 Markdown'
+            label={tr('chat.writer.downloadMarkdown')}
             filename='writing_output.md'
             content={content}
           />
         </div>
       ) : null}
       <MarkdownBlock content={content} />
-      <RemainingDetails data={record} omit={{ content: true }} title='成稿信息' />
+      <RemainingDetails data={record} omit={{ content: true }} title={tr('chat.writer.finalInformation')} />
     </div>
   );
 }
@@ -804,6 +810,7 @@ export function WriterArtifactContent({
   data: unknown;
   hideDownload?: boolean;
 }) {
+  useTranslation();
   const payload = unwrapArtifactPayload(data);
 
   switch (slotId) {

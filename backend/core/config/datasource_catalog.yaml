@@ -14,25 +14,42 @@ file_sources:
   capabilities: []
   suppliers:
     - name: Feishu
-      description: |
-        飞书文档/知识库数据源，支持 OAuth 授权后同步文档内容到知识库。
+      description:
+        zh-CN: |
+          飞书文档/知识库数据源，支持 OAuth 授权后同步文档内容到知识库。
 
-        接入教程：参考数据源管理页面中的飞书接入文档
+          接入教程：参考数据源管理页面中的飞书接入文档
+        en-US: |
+          Feishu Docs and Knowledge Base data source. It uses OAuth authorization to synchronize document content into a knowledge base.
+
+          Setup: follow the Feishu integration guide on the data source management page.
       base_url: "https://open.feishu.cn/open-apis"
 
 search_sources:
   capabilities: [api_key_required]
   suppliers:
     - name: Sciverse
-      description: |
-        Sciverse 面向科研场景提供论文搜索、元数据检索和文献内容读取能力，适合学术问答与论文调研。
+      description:
+        zh-CN: |
+          Sciverse 面向科研场景提供论文搜索、元数据检索和文献内容读取能力，适合学术问答与论文调研。
 
-        获取 API Key：
-        https://sciverse.space/docs#sciverse/overview
+          获取 API Key：
+          https://sciverse.space/docs#sciverse/overview
 
-        申请教程：
+          申请教程：
 
-        1. 访问 Sciverse 官方文档并登录账号。
+          1. 访问 Sciverse 官方文档并登录账号。
 
-        2. 根据文档说明申请或复制 API Key。
+          2. 根据文档说明申请或复制 API Key。
+        en-US: |
+          Sciverse provides paper search, metadata retrieval, and publication content access for academic question answering and literature research.
+
+          Get an API key:
+          https://sciverse.space/docs#sciverse/overview
+
+          Setup:
+
+          1. Open the Sciverse documentation and sign in.
+
+          2. Apply for or copy an API key by following the documentation.
       base_url: "https://api.sciverse.space"

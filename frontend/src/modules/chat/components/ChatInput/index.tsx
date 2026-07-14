@@ -39,6 +39,7 @@ import "./index.scss";
 import { ChatConfig } from "../ChatConfigs";
 import ChatSelector from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
+import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
 import type { ConversationPluginSettings } from "../../utils/request";
 import { PluginSessionApi } from "../../utils/request";
@@ -1260,7 +1261,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         </div>
         <PromptModal
           ref={promptRef}
-          onSelectPrompt={(prompt) => onChange(text + " " + prompt)}
+          onSelectPrompt={(prompt) => onChange(appendPromptToDraft(text, prompt))}
         />
         <BatchChatComponent ref={batchChatRef} cancelFn={() => {}} />
       </div>

@@ -291,6 +291,15 @@ func (b *schemaBuilder) inlineSchemaForType(t reflect.Type) map[string]any {
 			if description := strings.TrimSpace(field.Tag.Get("desc")); description != "" {
 				propertySchema["description"] = description
 			}
+			if values := openAPIEnumValues(field.Tag.Get("enum")); len(values) > 0 {
+				propertySchema["enum"] = values
+			}
+			if field.Tag.Get("nullable") == "true" {
+				propertySchema["nullable"] = true
+			}
+			if field.Tag.Get("freeform") == "true" {
+				propertySchema["additionalProperties"] = true
+			}
 			properties[name] = propertySchema
 			if field.Tag.Get("required") == "true" || (!omitEmpty && !isOptionalField(field.Type)) {
 				required = append(required, name)
@@ -446,6 +455,10 @@ type toolListQueryParams struct {
 	PageSize int32  `query:"page_size"`
 }
 
+type localizedCatalogHeaders struct {
+	AcceptLanguage string `header:"Accept-Language" desc:"Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN."`
+}
+
 type mcpServerListQueryParams struct {
 	Keyword  string `query:"keyword"`
 	Page     int32  `query:"page"`
@@ -485,6 +498,92 @@ type toolListOpenAPIResponse struct {
 type toolStateOpenAPIResponse struct {
 	Name     string `json:"name"`
 	Disabled bool   `json:"disabled"`
+}
+
+type promptPathParams struct {
+	Name string `path:"name"`
+}
+
+type promptListQueryParams struct {
+	PageSize  int32  `query:"page_size"`
+	PageToken string `query:"page_token"`
+	Keyword   string `query:"keyword"`
+	Category  string `query:"category"`
+	Scope     string `query:"scope"`
+	Sort      string `query:"sort"`
+	Locale    string `query:"locale"`
+}
+
+type promptGetQueryParams struct {
+	Locale string `query:"locale"`
+}
+
+type promptCategoryOpenAPIResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type promptCategoryListOpenAPIResponse struct {
+	Categories []promptCategoryOpenAPIResponse `json:"categories"`
+}
+
+type promptCategoryCreateOpenAPIRequest struct {
+	Name string `json:"name"`
+}
+
+type promptCreateOpenAPIRequest struct {
+	DisplayName string `json:"display_name"`
+	Content     string `json:"content"`
+	Category    string `json:"category"`
+}
+
+type promptPatchOpenAPIRequest struct {
+	DisplayName string `json:"display_name"`
+	Content     string `json:"content"`
+	Category    string `json:"category"`
+}
+
+type promptPolishOpenAPIRequest struct {
+	Content      string `json:"content"`
+	UserInstruct string `json:"user_instruct"`
+}
+
+type promptPolishOpenAPIResponse struct {
+	Content string `json:"content"`
+}
+
+type promptItemOpenAPIResponse struct {
+	Name        string `json:"name"`
+	ID          string `json:"id"`
+	Content     string `json:"content"`
+	DisplayName string `json:"display_name"`
+	Category    string `json:"category"`
+	Source      string `json:"source"`
+	IsFavorite  bool   `json:"is_favorite"`
+	UsageCount  int64  `json:"usage_count"`
+	LastUsedAt  string `json:"last_used_at,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
+}
+
+type promptFacetOpenAPIResponse struct {
+	Scopes     map[string]int64 `json:"scopes"`
+	Categories map[string]int64 `json:"categories"`
+}
+
+type promptListOpenAPIResponse struct {
+	Prompts          []promptItemOpenAPIResponse     `json:"prompts"`
+	CustomCategories []promptCategoryOpenAPIResponse `json:"custom_categories"`
+	NextPageToken    string                          `json:"next_page_token"`
+	Total            int64                           `json:"total"`
+	Facets           promptFacetOpenAPIResponse      `json:"facets"`
+}
+
+type promptStateOpenAPIResponse struct {
+	ID         string `json:"id"`
+	IsFavorite bool   `json:"is_favorite"`
+	UsageCount int64  `json:"usage_count"`
+	LastUsedAt string `json:"last_used_at,omitempty"`
 }
 
 type agentThreadPathParams struct {
@@ -552,6 +651,172 @@ type agentCandidatePathParams struct {
 
 type agentRouterAlgorithmPathParams struct {
 	AlgorithmID string `path:"algorithm_id"`
+}
+
+type agentRouterQueryParams struct {
+	RouterAdminURL string `query:"router_admin_url" desc:"Optional Router admin origin override."`
+	RouterChatURL  string `query:"router_chat_url" desc:"Optional Router chat stream URL override."`
+}
+
+type agentRouterAlgorithmQueryParams struct {
+	ThreadID       string `query:"thread_id" desc:"Filter by owning Evo thread."`
+	AlgorithmID    string `query:"algorithm_id" desc:"Filter by exact algorithm id."`
+	Status         string `query:"status" enum:"starting,active,disabled,missing" desc:"Filter by live Router status."`
+	RouterAdminURL string `query:"router_admin_url" desc:"Optional Router admin origin override."`
+	RouterChatURL  string `query:"router_chat_url" desc:"Optional Router chat stream URL override."`
+}
+
+type agentRouterOwnerInput struct {
+	ThreadID     string `json:"thread_id" required:"true" desc:"Owning Evo thread id."`
+	RunID        string `json:"run_id,omitempty" desc:"Optional artifact run id; when set it must equal thread_id."`
+	CandidateRef string `json:"candidate_ref,omitempty" desc:"Candidate artifact reference used for audit."`
+}
+
+type agentRouterOwner struct {
+	ThreadID     string `json:"thread_id"`
+	RunID        string `json:"run_id"`
+	CandidateRef string `json:"candidate_ref"`
+}
+
+type agentRouterRegisterRequest struct {
+	AlgorithmID      string                `json:"algorithm_id" required:"true" desc:"Evo-owned algorithm id; must start with evo_."`
+	Name             string                `json:"name,omitempty" desc:"Display name; defaults to algorithm_id."`
+	CodePath         string                `json:"code_path" required:"true" desc:"Candidate lazymind/chat source path visible to Router."`
+	InstanceCount    int32                 `json:"instance_count,omitempty" desc:"Instance count from 1 to 4; default 1."`
+	Config           map[string]any        `json:"config,omitempty" freeform:"true" desc:"Configuration passed to Router child processes."`
+	Owner            agentRouterOwnerInput `json:"owner" required:"true"`
+	WaitReadySeconds float64               `json:"wait_ready_seconds,omitempty" desc:"Readiness timeout in seconds; default 180, maximum 900."`
+	CleanupPolicy    string                `json:"cleanup_policy,omitempty" enum:"thread_delete,manual" desc:"Workspace cleanup policy; default thread_delete."`
+	RouterAdminURL   string                `json:"router_admin_url,omitempty" desc:"Optional Router admin origin override."`
+	RouterChatURL    string                `json:"router_chat_url,omitempty" desc:"Optional Router chat stream URL override."`
+}
+
+type agentRouterActionRequest struct {
+	Action           string  `json:"action" required:"true" enum:"healthcheck,restart,stop"`
+	WaitReadySeconds float64 `json:"wait_ready_seconds,omitempty" desc:"Restart readiness timeout in seconds; default 180, maximum 900."`
+}
+
+type agentRouterABStrategyRequest struct {
+	Weights        map[string]int         `json:"weights,omitempty" nullable:"true" desc:"Algorithm weights. Omit or set null to clear the strategy and return to default routing."`
+	Reason         string                 `json:"reason,omitempty" desc:"Audit reason for the strategy change."`
+	Owner          *agentRouterOwnerInput `json:"owner,omitempty" desc:"Optional Evo owner recorded in the AB audit."`
+	RouterAdminURL string                 `json:"router_admin_url,omitempty" desc:"Optional Router admin origin override."`
+	RouterChatURL  string                 `json:"router_chat_url,omitempty" desc:"Optional Router chat stream URL override."`
+}
+
+type agentRouterInstance struct {
+	Host       string `json:"host"`
+	Port       int32  `json:"port"`
+	Status     string `json:"status"`
+	Failures   int32  `json:"failures"`
+	InstanceID string `json:"instance_id"`
+}
+
+type agentRouterHealth struct {
+	Status           string                `json:"status" enum:"passed,failed,stopped"`
+	AlgorithmStatus  string                `json:"algorithm_status,omitempty" enum:"starting,active,disabled,missing"`
+	HealthyInstances int32                 `json:"healthy_instances"`
+	Instances        []agentRouterInstance `json:"instances" required:"true"`
+}
+
+type agentRouterStrategyView struct {
+	Active  bool           `json:"active"`
+	ID      *int64         `json:"id" required:"true" nullable:"true" desc:"Router strategy id; null when inactive."`
+	Weights map[string]int `json:"weights" required:"true"`
+}
+
+type agentRouterStatusCounts struct {
+	EvoOwned int32 `json:"evo_owned"`
+	Active   int32 `json:"active"`
+	Healthy  int32 `json:"healthy"`
+}
+
+type agentRouterStatusResponse struct {
+	Status         string                  `json:"status" enum:"ok"`
+	RouterAdminURL string                  `json:"router_admin_url"`
+	Algorithms     agentRouterStatusCounts `json:"algorithms"`
+	ABStrategy     agentRouterStrategyView `json:"ab_strategy"`
+}
+
+type agentRouterAlgorithm struct {
+	AlgorithmID      string           `json:"algorithm_id"`
+	Status           string           `json:"status" enum:"starting,active,disabled,missing"`
+	ExpectedState    string           `json:"expected_state" enum:"active,stopped,orphaned,claiming,deleting,managing"`
+	HealthyInstances int32            `json:"healthy_instances"`
+	InstanceCount    int32            `json:"instance_count"`
+	Owner            agentRouterOwner `json:"owner"`
+	RouterChatURL    string           `json:"router_chat_url"`
+	RouterAdminURL   string           `json:"router_admin_url"`
+}
+
+type agentRouterAlgorithmListResponse struct {
+	Items []agentRouterAlgorithm `json:"items" required:"true"`
+}
+
+type agentRouterRegisterResult struct {
+	AlgorithmID string `json:"algorithm_id,omitempty"`
+	Created     bool   `json:"created,omitempty"`
+	Reused      bool   `json:"reused,omitempty"`
+	Restarted   bool   `json:"restarted,omitempty"`
+	Reactivated bool   `json:"reactivated,omitempty"`
+}
+
+type agentRouterRegisterResponse struct {
+	Status           string                    `json:"status" enum:"ready"`
+	AlgorithmID      string                    `json:"algorithm_id"`
+	RouterChatURL    string                    `json:"router_chat_url"`
+	RouterAdminURL   string                    `json:"router_admin_url"`
+	RegisterResponse agentRouterRegisterResult `json:"register_response"`
+	Healthcheck      agentRouterHealth         `json:"healthcheck"`
+}
+
+type agentRouterActionResponse struct {
+	Status      string            `json:"status" enum:"passed,failed,stopped"`
+	AlgorithmID string            `json:"algorithm_id"`
+	Action      string            `json:"action" enum:"healthcheck,restart,stop"`
+	Healthcheck agentRouterHealth `json:"healthcheck"`
+}
+
+type agentRouterDeleteResponse struct {
+	Status               string   `json:"status" enum:"deleted"`
+	AlgorithmID          string   `json:"algorithm_id"`
+	RouterStatus         string   `json:"router_status" enum:"missing,disabled"`
+	RouterRecordRetained bool     `json:"router_record_retained"`
+	LedgerDeleted        bool     `json:"ledger_deleted"`
+	ArtifactsDeleted     int32    `json:"artifacts_deleted"`
+	Workspace            string   `json:"workspace" enum:"deleted,missing,retained_external,retained_shared"`
+	RetainedHistory      []string `json:"retained_history" required:"true"`
+}
+
+type agentRouterABAudit struct {
+	ThreadID     string `json:"thread_id,omitempty"`
+	CandidateRef string `json:"candidate_ref,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type agentRouterMutationResponse struct {
+	ID         *int64         `json:"id,omitempty"`
+	Status     string         `json:"status,omitempty" enum:"cleared"`
+	Weights    map[string]int `json:"weights,omitempty"`
+	IsActive   *bool          `json:"is_active,omitempty"`
+	Normalized *bool          `json:"normalized,omitempty"`
+}
+
+type agentRouterABStrategyResponse struct {
+	Active         bool                         `json:"active"`
+	ID             *int64                       `json:"id" required:"true" nullable:"true" desc:"Router strategy id; null when inactive."`
+	Weights        map[string]int               `json:"weights" required:"true"`
+	UpdatedBy      agentRouterABAudit           `json:"updated_by"`
+	RouterResponse *agentRouterMutationResponse `json:"router_response,omitempty" desc:"Present after PUT; contains the Router mutation result."`
+}
+
+type agentRouterErrorDetail struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+type agentRouterErrorResponse struct {
+	Detail agentRouterErrorDetail `json:"detail"`
 }
 
 type agentThreadOpenAPIResponse struct {
@@ -1152,6 +1417,8 @@ type skillListItemOpenAPIResponse struct {
 	FileContent         string                              `json:"file_content,omitempty"`
 	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
 	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
+	DeletedAt           *string                             `json:"deleted_at,omitempty"`
+	DeletedBy           string                              `json:"deleted_by,omitempty"`
 }
 
 type skillListOpenAPIResponse struct {
@@ -1544,6 +1811,20 @@ type skillDeleteOpenAPIResponse struct {
 	Deleted bool `json:"deleted"`
 }
 
+type skillRestoreOpenAPIResponse struct {
+	Restored bool   `json:"restored"`
+	SkillID  string `json:"skill_id"`
+}
+
+type skillPurgeOpenAPIResponse struct {
+	Purged  bool   `json:"purged"`
+	SkillID string `json:"skill_id"`
+}
+
+type skillEmptyTrashOpenAPIResponse struct {
+	Purged int `json:"purged"`
+}
+
 type skillDiscardOpenAPIResponse struct {
 	Discarded bool `json:"discarded"`
 }
@@ -1776,6 +2057,7 @@ func registeredCoreOperations() []openAPIOperation {
 	resp := func(description string, v any) openAPIResponse {
 		return openAPIResponse{Description: description, ContentType: "application/json", Schema: schemaSource{Type: v}}
 	}
+	routerErrorResp := resp("Router management error", agentRouterErrorResponse{})
 	rawResp := func(description string) openAPIResponse {
 		return openAPIResponse{Description: description, ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}}
 	}
@@ -2417,12 +2699,54 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Updated skill", skillWriteOpenAPIResponse{})},
 		},
 		{
-			Method:     "DELETE",
-			Path:       "/skills/{skill_id}",
-			Summary:    "Delete directory skill",
+			Method:      "DELETE",
+			Path:        "/skills/{skill_id}",
+			Summary:     "Move skill to trash",
+			Description: "Logically deletes a skill by moving it to the recycle bin.",
+			Tags:        []string{"skills"},
+			PathParams:  skillPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Moved skill to trash", skillDeleteOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/skills:trash",
+			Summary:     "List trashed skills",
+			Description: "Lists skills in the current user's recycle bin.",
+			Tags:        []string{"skills"},
+			QueryParams: skillListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Trashed skill list", skillListOpenAPIResponse{})},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/skills:trash",
+			Summary:     "Empty skill trash",
+			Description: "Permanently deletes every skill in the current user's recycle bin.",
+			Tags:        []string{"skills"},
+			Responses:   map[int]openAPIResponse{200: resp("Emptied skill trash", skillEmptyTrashOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/skills/{skill_id}:trash",
+			Summary:    "Move skill to trash",
 			Tags:       []string{"skills"},
 			PathParams: skillPathParams{},
-			Responses:  map[int]openAPIResponse{200: resp("Deleted skill", skillDeleteOpenAPIResponse{})},
+			Responses:  map[int]openAPIResponse{200: resp("Moved skill to trash", skillDeleteOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/skills/{skill_id}:restore",
+			Summary:    "Restore skill from trash",
+			Tags:       []string{"skills"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Restored skill", skillRestoreOpenAPIResponse{})},
+		},
+		{
+			Method:     "DELETE",
+			Path:       "/skills/{skill_id}:purge",
+			Summary:    "Permanently delete trashed skill",
+			Tags:       []string{"skills"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Purged skill", skillPurgeOpenAPIResponse{})},
 		},
 		{
 			Method:     "GET",
@@ -2910,6 +3234,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Description: "Per-user model provider list. Missing catalog rows are synced from default_model_providers on each request. Query parameter category filters by provider category (default model when category and exclude_category are both omitted). Query parameter exclude_category excludes a category (e.g. exclude_category=model returns ocr and search providers). Query parameter keyword filters by provider name case-insensitively.",
 			Tags:        []string{"model_providers"},
 			QueryParams: listUserModelProvidersQueryParams{},
+			Headers:     localizedCatalogHeaders{},
 			Responses:   map[int]openAPIResponse{200: resp("User model provider list", listUserModelProvidersOpenAPIResponse{})},
 		},
 		{
@@ -2918,6 +3243,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Summary:     "List user model providers that have groups",
 			Description: "Returns user_model_providers for the current user that have at least one non-deleted row in user_model_provider_groups. The current user identity is injected by the auth gateway from the token. Same response shape as GET /model_providers.",
 			Tags:        []string{"model_providers"},
+			Headers:     localizedCatalogHeaders{},
 			Responses:   map[int]openAPIResponse{200: resp("User model providers with groups", listUserModelProvidersOpenAPIResponse{})},
 		},
 		{
@@ -3182,10 +3508,108 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "GET",
+			Path:        "/prompts",
+			Summary:     "Prompt list",
+			Tags:        []string{"prompts"},
+			QueryParams: promptListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Prompt list", promptListOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/prompts",
+			Summary:     "Create prompt",
+			Tags:        []string{"prompts"},
+			RequestBody: jsonBodyOf(promptCreateOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Created prompt", promptItemOpenAPIResponse{})},
+		},
+		{
+			Method:    "GET",
+			Path:      "/prompt_categories",
+			Summary:   "Prompt category list",
+			Tags:      []string{"prompts"},
+			Responses: map[int]openAPIResponse{200: resp("Prompt category list", promptCategoryListOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/prompt_categories",
+			Summary:     "Create prompt category",
+			Tags:        []string{"prompts"},
+			RequestBody: jsonBodyOf(promptCategoryCreateOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Created prompt category", promptCategoryOpenAPIResponse{})},
+		},
+		{
+			Method:     "DELETE",
+			Path:       "/prompt_categories/{name}",
+			Summary:    "Delete prompt category",
+			Tags:       []string{"prompts"},
+			PathParams: promptPathParams{},
+			Responses:  map[int]openAPIResponse{200: refResp("Deleted successfully", "EmptyObject")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/prompts:polish",
+			Summary:     "Polish prompt",
+			Tags:        []string{"prompts"},
+			RequestBody: jsonBodyOf(promptPolishOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Polished prompt", promptPolishOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/prompts/{name}",
+			Summary:     "Get prompt",
+			Tags:        []string{"prompts"},
+			PathParams:  promptPathParams{},
+			QueryParams: promptGetQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Prompt details", promptItemOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/prompts/{name}",
+			Summary:     "Update prompt",
+			Tags:        []string{"prompts"},
+			PathParams:  promptPathParams{},
+			RequestBody: jsonBodyOf(promptPatchOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated prompt", promptItemOpenAPIResponse{})},
+		},
+		{
+			Method:     "DELETE",
+			Path:       "/prompts/{name}",
+			Summary:    "Delete prompt",
+			Tags:       []string{"prompts"},
+			PathParams: promptPathParams{},
+			Responses:  map[int]openAPIResponse{200: refResp("Deleted successfully", "EmptyObject")},
+		},
+		{
+			Method:     "POST",
+			Path:       "/prompts/{name}:favorite",
+			Summary:    "Favorite prompt",
+			Tags:       []string{"prompts"},
+			PathParams: promptPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Favorited successfully", promptStateOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/prompts/{name}:unfavorite",
+			Summary:    "Unfavorite prompt",
+			Tags:       []string{"prompts"},
+			PathParams: promptPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Unfavorited successfully", promptStateOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/prompts/{name}:use",
+			Summary:    "Record prompt usage",
+			Tags:       []string{"prompts"},
+			PathParams: promptPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Usage recorded", promptStateOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
 			Path:        "/tools",
 			Summary:     "Tool list",
 			Tags:        []string{"tools"},
 			QueryParams: toolListQueryParams{},
+			Headers:     localizedCatalogHeaders{},
 			Responses:   map[int]openAPIResponse{200: resp("Tool list", toolListOpenAPIResponse{})},
 		},
 		{
@@ -3515,64 +3939,85 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/agent/router/status",
 			Summary:     "Get Evo router status",
-			Description: "Proxies Evo GET /router/status.",
+			Description: "Returns Router availability, Evo-owned algorithm counts, and the current AB strategy. Evo error status and body are passed through unchanged.",
 			Tags:        []string{"agent"},
-			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router status")},
+			QueryParams: agentRouterQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Router status", agentRouterStatusResponse{})},
 		},
 		{
 			Method:      "GET",
 			Path:        "/agent/router/algorithms",
 			Summary:     "List Evo router algorithms",
-			Description: "Proxies Evo GET /router/algorithms.",
+			Description: "Lists only algorithms owned by Evo, enriched with live Router state and owner metadata.",
 			Tags:        []string{"agent"},
-			QueryParams: struct {
-				ThreadID       string `query:"thread_id"`
-				AlgorithmID    string `query:"algorithm_id"`
-				Status         string `query:"status"`
-				RouterAdminURL string `query:"router_admin_url"`
-				RouterChatURL  string `query:"router_chat_url"`
-			}{},
-			Responses: map[int]openAPIResponse{200: evoJSONResp("Evo router algorithms")},
+			QueryParams: agentRouterAlgorithmQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Evo-owned Router algorithms", agentRouterAlgorithmListResponse{})},
 		},
 		{
 			Method:      "POST",
 			Path:        "/agent/router/algorithms",
 			Summary:     "Register Evo router algorithm",
-			Description: "Proxies Evo POST /router/algorithms.",
+			Description: "Registers or reactivates an Evo-owned candidate in Router and waits for the requested instances to become healthy.",
 			Tags:        []string{"agent"},
-			RequestBody: evoJSONBody(true),
-			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router algorithm")},
+			RequestBody: jsonBodyOf(agentRouterRegisterRequest{}, true),
+			Responses: map[int]openAPIResponse{
+				200: resp("Registered Router algorithm", agentRouterRegisterResponse{}),
+				409: routerErrorResp,
+				422: evoJSONResp("Invalid Router algorithm registration"),
+			},
 		},
 		{
 			Method:      "POST",
-			Path:        "/agent/router/algorithms/{algorithm_id}:action",
+			Path:        "/agent/router/algorithms/{algorithm_id}/action",
 			Summary:     "Run Evo router algorithm action",
-			Description: "Proxies Evo POST /router/algorithms/{algorithm_id}:action.",
+			Description: "Runs healthcheck, restart, or stop for an Evo-owned algorithm. Restart requires the algorithm to be expected active; stop keeps its Evo ledger record.",
 			Tags:        []string{"agent"},
 			PathParams:  agentRouterAlgorithmPathParams{},
-			RequestBody: evoJSONBody(true),
-			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router algorithm action")},
+			QueryParams: agentRouterQueryParams{},
+			RequestBody: jsonBodyOf(agentRouterActionRequest{}, true),
+			Responses: map[int]openAPIResponse{
+				200: resp("Router algorithm action result", agentRouterActionResponse{}),
+				404: routerErrorResp,
+				409: routerErrorResp,
+				422: evoJSONResp("Invalid Router algorithm action"),
+			},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/agent/router/algorithms/{algorithm_id}",
+			Summary:     "Delete Evo router algorithm",
+			Description: "Stops the algorithm and deletes its Evo ledger entry, candidate artifacts, and managed workspace. Returns 409 while the algorithm is referenced by the active AB strategy. Router metadata is retained as disabled when Router already knew the algorithm.",
+			Tags:        []string{"agent"},
+			PathParams:  agentRouterAlgorithmPathParams{},
+			QueryParams: agentRouterQueryParams{},
+			Responses: map[int]openAPIResponse{
+				200: resp("Deleted Evo router algorithm", agentRouterDeleteResponse{}),
+				404: routerErrorResp,
+				409: routerErrorResp,
+			},
 		},
 		{
 			Method:      "GET",
 			Path:        "/agent/router/ab-strategy",
 			Summary:     "Get Evo router AB strategy",
-			Description: "Proxies Evo GET /router/ab-strategy.",
+			Description: "Returns the active Router weights and the latest Evo AB audit metadata.",
 			Tags:        []string{"agent"},
-			QueryParams: struct {
-				RouterAdminURL string `query:"router_admin_url"`
-				RouterChatURL  string `query:"router_chat_url"`
-			}{},
-			Responses: map[int]openAPIResponse{200: evoJSONResp("Evo router AB strategy")},
+			QueryParams: agentRouterQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Router AB strategy", agentRouterABStrategyResponse{})},
 		},
 		{
 			Method:      "PUT",
 			Path:        "/agent/router/ab-strategy",
 			Summary:     "Update Evo router AB strategy",
-			Description: "Proxies Evo PUT /router/ab-strategy.",
+			Description: "Activates the supplied positive integer weights after ownership and health validation. Omit weights or set it to null to clear AB routing and return to the default algorithm.",
 			Tags:        []string{"agent"},
-			RequestBody: evoJSONBody(true),
-			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo router AB strategy")},
+			RequestBody: jsonBodyOf(agentRouterABStrategyRequest{}, true),
+			Responses: map[int]openAPIResponse{
+				200: resp("Updated Router AB strategy", agentRouterABStrategyResponse{}),
+				404: routerErrorResp,
+				409: routerErrorResp,
+				422: evoJSONResp("Invalid Router AB strategy"),
+			},
 		},
 		{
 			Method:  "POST",

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import DatabaseIcon from "../../assets/icons/database.svg?react";
 import { UserDatabaseSummary } from "@/api/generated/knowledge-client";
 import { CheckOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import "./index.scss";
 
 interface SelectDatabaseProps {
@@ -11,6 +12,7 @@ interface SelectDatabaseProps {
 }
 
 function SelectDatabase(props: SelectDatabaseProps) {
+  const { t } = useTranslation();
   const { currentDatabase = "", onChangeFn } = props;
   const [open, setOpen] = useState(false);
   const [databaseBaseList, setDatabaseBaseList] = useState<
@@ -78,7 +80,7 @@ function SelectDatabase(props: SelectDatabaseProps) {
         className={`input-bottom-actions-left-item ${open || selectedId?.length ? "selected" : ""}`}
       >
         <DatabaseIcon />
-        数据库
+        {t("chat.configDatabase")}
       </div>
     </Popover>
   );

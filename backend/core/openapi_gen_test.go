@@ -102,7 +102,8 @@ func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 		{"get", "/api/core/agent/router/status"},
 		{"get", "/api/core/agent/router/algorithms"},
 		{"post", "/api/core/agent/router/algorithms"},
-		{"post", "/api/core/agent/router/algorithms/{algorithm_id}:action"},
+		{"post", "/api/core/agent/router/algorithms/{algorithm_id}/action"},
+		{"delete", "/api/core/agent/router/algorithms/{algorithm_id}"},
 		{"get", "/api/core/agent/router/ab-strategy"},
 		{"put", "/api/core/agent/router/ab-strategy"},
 	} {
@@ -1029,6 +1030,48 @@ func TestOpenAPISpecIncludesToolOperations(t *testing.T) {
 	for _, name := range []string{"tool_groups", "page", "page_size", "total"} {
 		if _, ok := listProperties[name]; !ok {
 			t.Fatalf("toolListOpenAPIResponse expected property %q", name)
+		}
+	}
+}
+
+func TestOpenAPISpecIncludesLocaleHeaderForLocalizedCatalogs(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	paths := spec["paths"].(map[string]any)
+	for _, path := range []string{
+		"/api/core/tools",
+		"/api/core/model_providers",
+		"/api/core/model_providers:with_groups",
+	} {
+		pathItem, ok := paths[path].(map[string]any)
+		if !ok {
+			t.Fatalf("path missing from openapi spec: %s", path)
+		}
+		op, ok := pathItem["get"].(map[string]any)
+		if !ok {
+			t.Fatalf("GET operation missing from openapi spec: %s", path)
+		}
+		found := false
+		for _, raw := range op["parameters"].([]any) {
+			parameter, ok := raw.(map[string]any)
+			if ok && parameter["in"] == "header" && parameter["name"] == "Accept-Language" {
+				found = true
+				if parameter["required"] != false {
+					t.Fatalf("Accept-Language should be optional for %s", path)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("Accept-Language header missing for %s", path)
 		}
 	}
 }

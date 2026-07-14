@@ -20,6 +20,7 @@ from lazyllm.tools.writer.tools import (
     WriterPlanningTools,
     WriterQualityTools,
     WriterResourceTools,
+    WriterRevisionTools,
 )
 from lazyllm.tools.writer.utils import save_artifact_json
 
@@ -135,6 +136,14 @@ class WriterToolGroup:
         'update_writing_context',
         'check_consistency',
         'generate_writing_output',
+        'build_revise_task',
+        'draft_to_doc_ir',
+        'locate_revision_target',
+        'generate_modify_plan',
+        'generate_patch_set',
+        'validate_patch_set',
+        'apply_patch',
+        'doc_ir_to_draft',
     ]
 
     def __key_source__(self) -> bool:
@@ -386,3 +395,177 @@ class WriterToolGroup:
             'writing_output': _primary_data(result),
             'writing_output_md': markdown,
         })
+
+    def build_revise_task(self, query: str) -> str:
+        """Build a revise-type WritingTask from the user's revision request.
+
+        Args:
+            query: The user's revision request.
+
+        Returns:
+            WritingTask (task_type='revise') as a JSON string.
+        """
+        task = WritingTask(query=query, task_type='revise')
+        return _json_dumps(task.model_dump())
+
+    def draft_to_doc_ir(self, draft_document_json: str) -> str:
+        """Convert a DraftDocument into a DocIR JSON string."""
+        root = _temp_root()
+        draft_path = _write_input_artifact(
+            root, 'draft_document.json', _json_loads(draft_document_json, {}),
+            writer_schema('writing.DraftDocument'),
+        )
+        result = WriterRevisionTools(
+            llm=None, artifact_store=str(root),
+        ).draft_to_doc_ir(draft=draft_path)
+        return _json_dumps(_primary_data(result))
+
+    def locate_revision_target(
+        self,
+        writing_task_json: str,
+        doc_ir_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Locate revision target blocks and return LocateResult JSON."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        doc_ir_path = _write_input_artifact(
+            root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterRevisionTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).locate_revision_target(task=task_path, doc_ir=doc_ir_path, context=context_path)
+        return _json_dumps(_primary_data(result))
+
+    def generate_modify_plan(
+        self,
+        writing_task_json: str,
+        doc_ir_json: str,
+        locate_result_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Generate a ModifyPlan JSON from the located revision targets."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        doc_ir_path = _write_input_artifact(
+            root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
+        )
+        locate_path = _write_input_artifact(
+            root, 'locate_result.json', _json_loads(locate_result_json, {}),
+            writer_schema('revision.LocateResult'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterRevisionTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).generate_modify_plan(
+            task=task_path, doc_ir=doc_ir_path, locate_result=locate_path, context=context_path,
+        )
+        return _json_dumps(_primary_data(result))
+
+    def generate_patch_set(
+        self,
+        doc_ir_json: str,
+        modify_plan_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Generate a PatchSet JSON from a modify plan."""
+        root = _temp_root()
+        doc_ir_path = _write_input_artifact(
+            root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
+        )
+        modify_plan_path = _write_input_artifact(
+            root, 'modify_plan.json', _json_loads(modify_plan_json, {}),
+            writer_schema('revision.ModifyPlan'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterRevisionTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).generate_patch_set(
+            doc_ir=doc_ir_path, modify_plan=modify_plan_path, context=context_path,
+        )
+        return _json_dumps(_primary_data(result))
+
+    def validate_patch_set(
+        self,
+        patch_set_json: str,
+        writing_context_json: str,
+        writing_task_json: str,
+    ) -> str:
+        """Validate a PatchSet and return the AuditResult JSON (patch_set_review)."""
+        root = _temp_root()
+        patch_set_path = _write_input_artifact(
+            root, 'patch_set.json', _json_loads(patch_set_json, {}), writer_schema('revision.PatchSet'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        result = WriterQualityTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).validate_patch_set(
+            patch_set=patch_set_path, context=context_path, task=task_path,
+        )
+        return _json_dumps({
+            'patch_set_review': _primary_data(result),
+            'patch_set_review_summary': result.get('summary') or '',
+        })
+
+    def apply_patch(
+        self,
+        doc_ir_json: str,
+        patch_set_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Apply a PatchSet to a DocIR.
+
+        Returns:
+            JSON string with `patch_result` and `revised_doc_ir`.
+        """
+        root = _temp_root()
+        doc_ir_path = _write_input_artifact(
+            root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
+        )
+        patch_set_path = _write_input_artifact(
+            root, 'patch_set.json', _json_loads(patch_set_json, {}), writer_schema('revision.PatchSet'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterRevisionTools(
+            llm=None, artifact_store=str(root),
+        ).apply_patch(doc_ir=doc_ir_path, patch_set=patch_set_path, context=context_path)
+        artifact_paths = (result.get('metadata') or {}).get('artifact_paths') or {}
+        revised_doc_ir_path = artifact_paths.get('revised_doc_ir', '')
+        return _json_dumps({
+            'patch_result': _primary_data(result),
+            'revised_doc_ir': _read_artifact_data(revised_doc_ir_path) if revised_doc_ir_path else {},
+        })
+
+    def doc_ir_to_draft(self, doc_ir_json: str) -> str:
+        """Convert a (revised) DocIR back into a DraftDocument JSON string."""
+        root = _temp_root()
+        doc_ir_path = _write_input_artifact(
+            root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
+        )
+        result = WriterRevisionTools(
+            llm=None, artifact_store=str(root),
+        ).doc_ir_to_draft(doc_ir=doc_ir_path)
+        return _json_dumps(_primary_data(result))

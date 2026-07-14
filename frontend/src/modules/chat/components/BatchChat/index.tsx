@@ -301,7 +301,7 @@ const BatchChatComponent = forwardRef<BatchChatImperativeProps, ForwardProps>(
                             <a
                               href={templateUrl}
                               target="_self"
-                              download="批量对话模板.xlsx"
+                              download={t("chat.batchChatTemplateFileName")}
                             >
                               {t("chat.template")}
                             </a>

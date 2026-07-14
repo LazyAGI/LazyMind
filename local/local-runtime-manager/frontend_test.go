@@ -4,9 +4,9 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -50,7 +50,10 @@ func TestFrontendDownStopsPIDFileProcess(t *testing.T) {
 	}
 
 	cmd := exec.Command("sleep", "60")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("powershell.exe", "-NoProfile", "-Command", "Start-Sleep -Seconds 60")
+	}
+	configureChildProcess(cmd, false)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sleep: %v", err)
 	}
@@ -60,7 +63,7 @@ func TestFrontendDownStopsPIDFileProcess(t *testing.T) {
 		close(waitCh)
 	}()
 	t.Cleanup(func() {
-		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
+		_ = forceKillProcessTree(cmd.Process.Pid)
 		_ = cmd.Process.Kill()
 		select {
 		case <-waitCh:

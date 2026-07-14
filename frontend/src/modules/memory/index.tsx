@@ -232,7 +232,27 @@ const isResourceUpdateTaskRunning = (status?: string) => {
     .toLowerCase();
   return normalized === "pending" || normalized === "running";
 };
+const MANUAL_SKILL_REVIEW_RESULT_ATTEMPTS = 5;
+const MANUAL_SKILL_REVIEW_SKILL_READY_ATTEMPTS = 8;
+const MANUAL_SKILL_REVIEW_RETRY_DELAY_MS = 1200;
 const MANUAL_SKILL_REVIEW_RUNNING_TASK_PAGE_SIZE = 1000;
+const waitManualSkillReviewRetry = () =>
+  new Promise((resolve) =>
+    window.setTimeout(resolve, MANUAL_SKILL_REVIEW_RETRY_DELAY_MS),
+  );
+const getManualSkillReviewCreatedSkillNames = (
+  results: SkillReviewResultRecord[],
+) =>
+  Array.from(
+    new Set(
+      results
+        .filter((item) => item.type.trim().toLowerCase() === "new")
+        .map((item) => item.skillName.trim())
+        .filter(Boolean),
+    ),
+  );
+const skillRecordNameMatches = (item: SkillAssetRecord, skillName: string) =>
+  item.name.trim().toLowerCase() === skillName.trim().toLowerCase();
 type ExperienceProfileFieldKey =
   | "agentPersona"
   | "preferredName"
@@ -383,10 +403,10 @@ export default function MemoryManagement() {
   );
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
   const [skillView, setSkillView] = useState<
-    "installed" | "market" | "plugins"
+    "installed" | "market" | "plugins" | "trash"
   >(() => {
     const sv = new URLSearchParams(window.location.search).get("skillView");
-    if (sv === "plugins" || sv === "market") return sv;
+    if (sv === "plugins" || sv === "market" || sv === "trash") return sv;
     return "installed";
   });
   const [installedSkillSource, setInstalledSkillSource] = useState<
@@ -939,6 +959,71 @@ export default function MemoryManagement() {
     [t],
   );
 
+  const loadManualSkillReviewResults = useCallback(
+    async (requestId: string) => {
+      if (!requestId.trim()) {
+        return [];
+      }
+
+      for (
+        let attempt = 0;
+        attempt < MANUAL_SKILL_REVIEW_RESULT_ATTEMPTS;
+        attempt += 1
+      ) {
+        const results = await listSkillReviewResultsByRequest(requestId);
+        if (
+          results.length > 0 ||
+          attempt === MANUAL_SKILL_REVIEW_RESULT_ATTEMPTS - 1
+        ) {
+          return results;
+        }
+        await waitManualSkillReviewRetry();
+      }
+
+      return [];
+    },
+    [],
+  );
+
+  const waitForManualSkillReviewCreatedSkills = useCallback(
+    async (results: SkillReviewResultRecord[]) => {
+      const skillNames = getManualSkillReviewCreatedSkillNames(results);
+      if (skillNames.length === 0) {
+        return;
+      }
+
+      for (
+        let attempt = 0;
+        attempt < MANUAL_SKILL_REVIEW_SKILL_READY_ATTEMPTS;
+        attempt += 1
+      ) {
+        const readyResults = await Promise.all(
+          skillNames.map(async (skillName) => {
+            const result = await listSkillAssetsPage({
+              keyword: skillName,
+              page: 1,
+              pageSize: 50,
+            });
+
+            return result.records.some((item) =>
+              skillRecordNameMatches(item, skillName),
+            );
+          }),
+        );
+
+        if (
+          readyResults.every(Boolean) ||
+          attempt === MANUAL_SKILL_REVIEW_SKILL_READY_ATTEMPTS - 1
+        ) {
+          return;
+        }
+
+        await waitManualSkillReviewRetry();
+      }
+    },
+    [],
+  );
+
   const pollManualSkillReviewTasks = useCallback(
     (requestId: string) => {
       const normalizedRequestId = requestId.trim();
@@ -981,16 +1066,24 @@ export default function MemoryManagement() {
               task.task?.errorMessage || task.runStatus || "skill review failed",
             );
           }
+
+          const results =
+            await loadManualSkillReviewResults(normalizedRequestId);
+          try {
+            await waitForManualSkillReviewCreatedSkills(results);
+          } catch (error) {
+            console.warn("Wait manual skill review skills failed:", error);
+          }
           await Promise.all([
             refreshSkillAssets({ page: 1, preserveChangeProposals: true }),
             refreshManualSkillReviewSummary({ silent: true }),
           ]);
-          setManualSkillReviewResults([]);
+          setManualSkillReviewResults(results);
           setManualSkillReviewResultStatus(
-            (task?.resultCount || 0) > 0 ? "done" : "empty",
+            results.length > 0 ? "done" : "empty",
           );
           setManualSkillReviewRunning(false);
-          if ((task?.resultCount || 0) > 0) {
+          if (results.length > 0) {
             message.success(t("admin.memoryManualSkillReviewDone"));
           } else {
             message.info(t("admin.memoryManualSkillReviewNoResult"));
@@ -4648,7 +4741,10 @@ export default function MemoryManagement() {
 
     Modal.confirm({
       title: t("common.delete"),
-      content: t("admin.memoryDeleteConfirm", { name: itemName }),
+      content:
+        activeTab === "skills"
+          ? t("admin.memorySkillDeleteConfirm", { name: itemName })
+          : t("admin.memoryDeleteConfirm", { name: itemName }),
       okText: t("common.confirm"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
