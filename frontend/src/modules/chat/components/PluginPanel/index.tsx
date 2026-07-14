@@ -154,10 +154,11 @@ function AutoSlotGrid({
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
 }) {
+  const { t } = useTranslation();
   if (!session.slots || session.slots.length === 0) {
     return (
       <div className='plugin-panel__empty' role='status' aria-live='polite'>
-        <span>Waiting for results…</span>
+        <span>{t('chat.pluginWaitingForResults')}</span>
       </div>
     );
   }
@@ -432,6 +433,7 @@ function CompositeSlotGrid({
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
 }) {
+  const { t } = useTranslation();
   const rows = getCompositeRows(tab, session);
   const columns = buildColumns(tab);
 
@@ -441,7 +443,7 @@ function CompositeSlotGrid({
   if (rows.length === 0) {
     return (
       <div className='plugin-panel__empty' role='status' aria-live='polite'>
-        <span>Waiting for results…</span>
+        <span>{t('chat.pluginWaitingForResults')}</span>
       </div>
     );
   }
@@ -455,7 +457,7 @@ function CompositeSlotGrid({
           onClick={() => onFocusSortOrder?.(sortOrder)}
           role='button'
           tabIndex={0}
-          aria-label={`行 ${sortOrder}`}
+          aria-label={t('chat.pluginRowAria', { index: sortOrder })}
         >
           {columns.map((col, colIdx) => {
             const flexBasis = `${(col.weight / totalWeight) * 100}%`;
@@ -688,7 +690,7 @@ function SortableImageList({
               onClick={() => onFocusSortOrder?.(rev.sort_order)}
               role='button'
               tabIndex={0}
-              aria-label={`图片 ${listIndex}`}
+              aria-label={t('chat.pluginImageAria', { index: listIndex })}
               className={`plugin-panel__image-list-item${dragSrcIdx.current === idx ? ' plugin-panel__image-list-item--dragging' : ''}`}
             >
               <SlotRenderer
@@ -715,8 +717,8 @@ function SortableImageList({
         <button
           className='plugin-panel__image-add-card'
           onClick={onAddItem}
-          title='新增附件'
-          aria-label='新增附件'
+          title={t('chat.pluginAddAttachment')}
+          aria-label={t('chat.pluginAddAttachment')}
           type='button'
         >
           <span className='plugin-panel__image-add-card-icon'>+</span>
@@ -870,7 +872,7 @@ function TabSlotGrid({
                   onClick={() => onFocusSortOrder?.(rev.sort_order)}
                   role='button'
                   tabIndex={0}
-                  aria-label={`内容项 ${rev.sort_order ?? ''}`}
+                  aria-label={t('chat.pluginContentItemAria', { index: rev.sort_order ?? '' })}
                 >
                   <SlotRenderer
                     slot={rev}
@@ -992,7 +994,7 @@ export function PluginPanel({
       <div
         className='plugin-panel plugin-panel--loading'
         role='status'
-        aria-label='Loading plugin panel'
+        aria-label={t('chat.pluginPanelLoading')}
       />
     );
   }
@@ -1040,7 +1042,7 @@ export function PluginPanel({
     <div
       className={`plugin-panel plugin-panel--${displayStatus}${collapsed ? ' plugin-panel--collapsed' : ''}`}
       data-session-id={session.session_id}
-      aria-label='Plugin Panel'
+      aria-label={t('chat.pluginPanelTitle')}
     >
       {/* Header */}
       <div className='plugin-panel__header'>
@@ -1048,10 +1050,10 @@ export function PluginPanel({
           <span className='plugin-panel__title'>{session.plugin_id}</span>
           <span
             className={`plugin-panel__status plugin-panel__status--${displayStatus}`}
-            aria-label={`Status: ${t(STATUS_KEY[displayStatus] ?? displayStatus)}`}
+            aria-label={t('chat.pluginStatusAria', { status: t(STATUS_KEY[displayStatus] ?? displayStatus) })}
             onClick={() => session && setStateGraphOpen(true)}
             style={{ cursor: 'pointer' }}
-            title='查看工作流图'
+            title={t('chat.pluginViewWorkflow')}
             role='button'
             tabIndex={0}
             onKeyDown={(e) => e.key === 'Enter' && session && setStateGraphOpen(true)}
@@ -1197,7 +1199,7 @@ export function PluginPanel({
 
       {/* Footer */}
       {!collapsed && showActions && (
-        <div className='plugin-panel__footer' role='group' aria-label='Session controls'>
+        <div className='plugin-panel__footer' role='group' aria-label={t('chat.pluginSessionControls')}>
           {displayStatus === 'active' && onStop && (
             <button
               type='button'

@@ -3,10 +3,12 @@ import react from "@vitejs/plugin-react";
 import svgr from "vite-plugin-svgr";
 import path from "node:path";
 
+// Allow local development to target a custom backend without changing this file.
 const devProxyTarget =
-  process.env.VITE_PROXY_TARGET || "http://localhost:5024";
+  process.env.VITE_PROXY_TARGET || "http://127.0.0.1:5024";
 const isDesktopBuild = process.env.VITE_LAZYMIND_MODE === "desktop";
 
+// Expose the globally loaded Excel preview library as an ES module.
 function jsPreviewExcelShimPlugin(): Plugin {
   const RESOLVED_ID = "\0virtual:js-preview-excel-shim";
 
@@ -28,11 +30,13 @@ export default defineConfig({
   plugins: [jsPreviewExcelShimPlugin(), react(), svgr()],
   base: "/",
   resolve: {
+    // Keep application imports independent of the current file location.
     alias: {
       "@": path.resolve(__dirname, "src"),
     },
   },
   css: {
+    // Use Sass's modern compiler API for both supported syntaxes.
     preprocessorOptions: {
       scss: {
         api: "modern-compiler",
@@ -44,6 +48,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Forward API and local-service requests to the selected backend.
     proxy: {
       "/api": {
         target: devProxyTarget,
@@ -63,6 +68,7 @@ export default defineConfig({
     outDir: "dist",
     rollupOptions: {
       onwarn(warning, warn) {
+        // Third-party client components emit harmless directives in desktop builds.
         if (
           isDesktopBuild &&
           warning.code === "MODULE_LEVEL_DIRECTIVE" &&
@@ -81,6 +87,7 @@ export default defineConfig({
           if (id.includes('monaco-editor')) {
             return 'monaco-editor';
           }
+          // Keep the graph editor dependencies out of the main application chunk.
           if (id.includes('@xyflow/react') || id.includes('@xyflow/')) {
             return 'xyflow';
           }

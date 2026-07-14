@@ -3,10 +3,11 @@ name: AI Writer
 description: >
   Compose structured long-form writing, including articles, reports, technical
   documents, creative stories, fiction, short stories, and novel-style drafts.
-  The workflow runs in six steps: parse the writing intent and scope, generate
-  an outline, plan per-chapter writing instructions, draft the full text,
-  review the draft and surface revision feedback, then produce the final
-  document. Each step supports a full rerun via the state machine self-loop.
+  The workflow runs in seven steps: parse the writing intent and scope, generate
+  an outline, plan per-chapter writing instructions, draft the full text, revise
+  the draft on user request, review the draft and surface revision feedback,
+  then produce the final document. Each step supports a full rerun via the state
+  machine self-loop.
 
 when_to_use: >
   Use this plugin only when the user explicitly requests it, or when the user
@@ -32,12 +33,18 @@ tool_scripts:
       - writer_update_writing_context
       - writer_check_consistency
       - writer_generate_writing_output
+      - writer_build_revise_task
+      - writer_generate_patch_set
+      - writer_validate_patch_set
+      - writer_apply_patch
 
 steps:
   - id: build_context
   - id: generate_outline
   - id: plan_sections
   - id: generate_draft
+  - id: generate_patch
+  - id: apply_patch
   - id: review_document
   - id: finalize_report
 
@@ -70,6 +77,30 @@ slots:
     ordered: true
   - id: draft_document
     label: Full Draft
+    type: text
+    cardinality: single
+  - id: revise_task
+    label: Revise Task
+    type: text
+    cardinality: single
+  - id: doc_ir
+    label: Doc IR
+    type: text
+    cardinality: single
+  - id: patch_set
+    label: Patch Set
+    type: text
+    cardinality: single
+  - id: patch_set_review
+    label: Patch Set Review
+    type: text
+    cardinality: single
+  - id: patch_set_review_summary
+    label: Patch Set Review Summary
+    type: text
+    cardinality: single
+  - id: patch_result
+    label: Patch Result
     type: text
     cardinality: single
   - id: review_report
@@ -124,6 +155,25 @@ ui:
         - id: draft_document
         - id: writing_context
 
+    - id: generate_patch
+      step_id: generate_patch
+      label: Generate Patch
+      layout: list
+      slots:
+        - id: revise_task
+        - id: patch_set
+        - id: patch_set_review
+        - id: patch_set_review_summary
+
+    - id: apply_patch
+      step_id: apply_patch
+      label: Apply Patch
+      layout: list
+      slots:
+        - id: patch_result
+        - id: draft_document
+        - id: writing_context
+
     - id: review
       step_id: review_document
       label: Review
@@ -148,6 +198,8 @@ i18n:
       generate_outline: {label: 生成大纲}
       plan_sections: {label: 规划章节}
       generate_draft: {label: 撰写初稿}
+      generate_patch: {label: 生成补丁}
+      apply_patch: {label: 应用补丁}
       review_document: {label: 审阅初稿}
       finalize_report: {label: 最终成稿}
     tabs:
@@ -155,6 +207,8 @@ i18n:
       outline: {label: 生成大纲}
       plan_sections: {label: 规划章节}
       draft: {label: 生成初稿}
+      generate_patch: {label: 生成补丁}
+      apply_patch: {label: 应用补丁}
       review: {label: 审阅初稿}
       result: {label: 最终成稿}
     slots:
@@ -165,6 +219,12 @@ i18n:
       section_instructions: {label: 章节规划}
       draft_sections: {label: 章节草稿}
       draft_document: {label: 完整初稿}
+      revise_task: {label: 修订任务}
+      doc_ir: {label: 文档 IR}
+      patch_set: {label: 补丁集}
+      patch_set_review: {label: 补丁校验}
+      patch_set_review_summary: {label: 补丁校验摘要}
+      patch_result: {label: 补丁应用}
       review_report: {label: 审阅报告}
       review_summary: {label: 审阅摘要}
       writing_output: {label: 最终成稿}

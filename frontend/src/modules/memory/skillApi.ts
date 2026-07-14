@@ -1,5 +1,6 @@
 import {
   Configuration as CoreConfiguration,
+  DefaultApiFactory,
   SkillDiffApiFactory,
   SkillDraftsApiFactory,
   SkillFsApiFactory,
@@ -30,6 +31,7 @@ import type { DiffLine } from "./shared";
 
 const coreConfig = new CoreConfiguration({ basePath: BASE_URL });
 const skillsApi = SkillsApiFactory(coreConfig, BASE_URL, axiosInstance);
+const defaultCoreApi = DefaultApiFactory(coreConfig, BASE_URL, axiosInstance);
 const skillDraftsApi = SkillDraftsApiFactory(coreConfig, BASE_URL, axiosInstance);
 const skillFsApi = SkillFsApiFactory(coreConfig, BASE_URL, axiosInstance);
 const skillRevisionsApi = SkillRevisionsApiFactory(coreConfig, BASE_URL, axiosInstance);
@@ -87,6 +89,8 @@ export interface SkillAssetRecord {
   draft: SkillDraftSummary;
   autoEvo: boolean;
   isEnabled: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 export interface SkillDraftGeneratePayload {
@@ -449,6 +453,14 @@ const normalizeSkillItem = (
     draft: normalizeDraftSummary(item.draft),
     autoEvo: toBoolean(item.auto_evo, false),
     isEnabled: toBoolean(item.is_enabled, true),
+    deletedAt:
+      typeof (item as { deleted_at?: unknown }).deleted_at === "string"
+        ? (item as { deleted_at?: string }).deleted_at
+        : undefined,
+    deletedBy:
+      typeof (item as { deleted_by?: unknown }).deleted_by === "string"
+        ? (item as { deleted_by?: string }).deleted_by
+        : undefined,
   };
 };
 
@@ -1033,6 +1045,57 @@ export async function removeSkillAsset(skillId: string) {
   return skillsApi.apiCoreSkillsSkillIdDelete({ skillId });
 }
 
+export async function trashSkillAsset(skillId: string) {
+  return defaultCoreApi.apiCoreSkillsSkillIdTrashPost({ skillId });
+}
+
+export async function listTrashedSkillAssetsPage(
+  options: ListSkillOptions = {},
+): Promise<SkillAssetListResult> {
+  const response = await defaultCoreApi.apiCoreSkillsTrashGet({
+    params: {
+      keyword: options.keyword?.trim() || undefined,
+      category: options.category?.trim() || undefined,
+      tags: (options.tags ?? []).map((item) => item.trim()).filter(Boolean),
+      page: options.page ?? 1,
+      page_size: options.pageSize ?? 200,
+    },
+  });
+  const payload = unwrapEnvelope<{
+    items?: SkillListItemOpenAPIResponse[];
+    page?: number;
+    page_size?: number;
+    total?: number;
+  }>(response.data);
+
+  const records = (payload.items || []).map((item) => normalizeSkillItem(item));
+
+  return {
+    records,
+    total: payload.total ?? records.length,
+    page: payload.page ?? options.page ?? 1,
+    pageSize: payload.page_size ?? options.pageSize ?? 200,
+  };
+}
+
+export async function restoreSkillAsset(skillId: string): Promise<boolean> {
+  const response = await defaultCoreApi.apiCoreSkillsSkillIdRestorePost({ skillId });
+  const payload = unwrapEnvelope<{ restored?: boolean }>(response.data);
+  return Boolean(payload.restored);
+}
+
+export async function purgeSkillAsset(skillId: string): Promise<boolean> {
+  const response = await defaultCoreApi.apiCoreSkillsSkillIdPurgeDelete({ skillId });
+  const payload = unwrapEnvelope<{ purged?: boolean }>(response.data);
+  return Boolean(payload.purged);
+}
+
+export async function emptySkillTrash(): Promise<number> {
+  const response = await defaultCoreApi.apiCoreSkillsTrashDelete();
+  const payload = unwrapEnvelope<{ purged?: number }>(response.data);
+  return payload.purged ?? 0;
+}
+
 export async function disableSkillAsset(skillId: string) {
   return removeSkillAsset(skillId);
 }
@@ -1155,6 +1218,27 @@ export async function getSkillRevisionFile(
   });
   const payload = unwrapEnvelope<SkillFileOpenAPIResponse>(response.data);
   return payload.content || "";
+}
+
+export async function rollbackSkill(
+  skillId: string,
+  targetRevisionId: string,
+): Promise<{ headRevisionId: string; revisionNo: number }> {
+  const response = await skillRevisionsApi.apiCoreSkillsSkillIdRollbackPost({
+    skillId,
+    skillRollbackOpenAPIRequest: {
+      revision_id: targetRevisionId,
+      target_revision_id: targetRevisionId,
+    },
+  });
+  const payload = unwrapEnvelope<{
+    head_revision_id?: string;
+    revision_no?: number;
+  }>(response.data);
+  return {
+    headRevisionId: payload.head_revision_id || "",
+    revisionNo: payload.revision_no ?? 0,
+  };
 }
 
 const readRawString = (value: Record<string, unknown>, keys: string[]): string => {

@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -106,8 +105,14 @@ func randomHexToken() (string, error) {
 }
 
 func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := validateRequestedRuntimeOwner(cfg); err != nil {
+		return err
+	}
 	freshCfg := cfg
-	if err := paths.EnsureAllDirs(); err != nil {
+	if err := ensureRuntimeDirs(cfg, paths); err != nil {
+		return err
+	}
+	if err := relocateDesktopPythonVenvs(cfg, paths); err != nil {
 		return err
 	}
 	state, err := readOrNewState(paths, cfg)
@@ -115,6 +120,11 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	stateCfg := applyStateConfig(freshCfg, state)
+	if claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
+		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
+			return err
+		}
+	}
 	if m.isExistingRuntimeRunning(ctx, state, stateCfg, paths) {
 		return m.reportExistingRuntime(ctx, state, paths)
 	}
@@ -126,6 +136,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	}
 	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 		Profile:       cfg.Profile,
+		OwnerToken:    cfg.OwnerToken,
 		RepoRoot:      paths.RepoRoot,
 		RuntimeRoot:   cfg.RuntimeRoot,
 		ResourcesRoot: cfg.ResourcesRoot,
@@ -133,7 +144,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
-	if err := paths.EnsureAllDirs(); err != nil {
+	if err := ensureRuntimeDirs(freshCfg, paths); err != nil {
 		return err
 	}
 
@@ -148,6 +159,11 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	stateCfg = applyStateConfig(freshCfg, state)
+	if claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
+		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
+			return err
+		}
+	}
 	if m.isExistingRuntimeRunning(ctx, state, stateCfg, paths) {
 		return m.reportExistingRuntime(ctx, state, paths)
 	}
@@ -159,6 +175,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	}
 	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 		Profile:       cfg.Profile,
+		OwnerToken:    cfg.OwnerToken,
 		RepoRoot:      paths.RepoRoot,
 		RuntimeRoot:   cfg.RuntimeRoot,
 		ResourcesRoot: cfg.ResourcesRoot,
@@ -166,7 +183,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
-	if err := paths.EnsureAllDirs(); err != nil {
+	if err := ensureRuntimeDirs(freshCfg, paths); err != nil {
 		return err
 	}
 	cfg = freshCfg
@@ -203,6 +220,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	}
 
 	state.Profile = cfg.Profile
+	state.OwnerToken = cfg.OwnerToken
 	state.RepoRoot = cfg.RepoRoot
 	state.ResourcesRoot = cfg.ResourcesRoot
 	state.RuntimeRoot = cfg.RuntimeRoot
@@ -301,6 +319,16 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	m.printReadySummary(cfg)
 	if cfg.Profile == "desktop" {
 		return m.waitForDesktopRuntimeStop(ctx, paths)
+	}
+	return nil
+}
+
+func ensureRuntimeDirs(cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := paths.EnsureAllDirs(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(cfg.FileWatcher.WatchHostDir, 0o755); err != nil {
+		return fmt.Errorf("create local document scan directory: %w", err)
 	}
 	return nil
 }
@@ -475,12 +503,25 @@ func frontendHealthAlive(port int, timeout time.Duration) bool {
 }
 
 func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := validateRequestedRuntimeOwner(cfg); err != nil {
+		return err
+	}
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
 	state, err := readOrNewState(paths, cfg)
 	if err != nil {
 		return err
+	}
+	if err := activeRuntimeOwnershipError(state, cfg); err != nil {
+		active := claimsRuntimeRunning(state) ||
+			(state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond)) ||
+			processComposeSupervisorAlive(paths)
+		if active {
+			return err
+		}
+		m.progressf("runtime state belongs to another profile or instance; skipping shutdown")
+		return nil
 	}
 	cfg = applyStateConfig(cfg, state)
 	if state.ProcessCompose.APIPort > 0 {
@@ -704,7 +745,7 @@ func (m *RuntimeManager) stopProcessComposeSupervisor(ctx context.Context, paths
 		_ = os.Remove(paths.ProcessComposePIDFile)
 		return nil
 	}
-	if err := signalProcessGroup(pid, syscall.SIGINT); err != nil {
+	if err := stopSupervisorProcess(pid); err != nil {
 		_ = proc.Signal(os.Interrupt)
 	}
 	deadline := time.NewTimer(3 * time.Second)
@@ -714,12 +755,10 @@ func (m *RuntimeManager) stopProcessComposeSupervisor(ctx context.Context, paths
 	for {
 		select {
 		case <-ctx.Done():
-			_ = signalProcessGroup(pid, syscall.SIGKILL)
-			_ = proc.Kill()
+			_ = forceKillProcessTree(pid)
 			return ctx.Err()
 		case <-deadline.C:
-			_ = signalProcessGroup(pid, syscall.SIGKILL)
-			_ = proc.Kill()
+			_ = forceKillProcessTree(pid)
 			_ = os.Remove(paths.ProcessComposePIDFile)
 			return nil
 		case <-ticker.C:
@@ -1017,14 +1056,7 @@ func upLockProcessAlive(lockFile string) (bool, error) {
 	if err != nil || pid <= 0 {
 		return false, nil
 	}
-	err = syscall.Kill(pid, 0)
-	if err == nil || err == syscall.EPERM {
-		return true, nil
-	}
-	if err == syscall.ESRCH {
-		return false, nil
-	}
-	return true, err
+	return processAlive(pid), nil
 }
 
 func envDuration(name string, fallback time.Duration) time.Duration {
@@ -1064,6 +1096,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 	resp := StatusResponse{
 		Runtime:        state.Profile,
 		Profile:        state.Profile,
+		OwnerMatched:   cfg.Profile == "desktop" && cfg.OwnerToken != "" && cfg.OwnerToken == state.OwnerToken,
 		OverallStatus:  state.OverallStatus,
 		RepoRoot:       state.RepoRoot,
 		ResourcesRoot:  state.ResourcesRoot,

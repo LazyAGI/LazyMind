@@ -13,6 +13,12 @@ import {
   unwrapArtifactPayload,
 } from './writerArtifactViews';
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
+import i18n from '@/i18n';
+import { useTranslation } from 'react-i18next';
+
+function tr(key: string, options?: Record<string, unknown>): string {
+  return i18n.t(key, options);
+}
 
 /**
  * Context for notifying the parent PluginPanel when any text slot enters/exits editing mode.
@@ -180,20 +186,20 @@ function SlotPending({ type, cardMode }: { type: 'image' | 'file' | 'text'; card
     return (
       <div className={`plugin-slot plugin-slot--image plugin-slot--pending${cardMode ? ' plugin-slot--image-card' : ''}`}>
         <span className='plugin-slot__placeholder-icon' aria-hidden='true'>🖼</span>
-        <span className='plugin-slot__placeholder'>进行中…</span>
+        <span className='plugin-slot__placeholder'>{tr('chat.slots.inProgress')}</span>
       </div>
     );
   }
   if (type === 'file') {
     return (
       <div className='plugin-slot plugin-slot--file plugin-slot--pending'>
-        <span className='plugin-slot__placeholder'>待生成…</span>
+        <span className='plugin-slot__placeholder'>{tr('chat.slots.pendingGeneration')}</span>
       </div>
     );
   }
   return (
     <div className='plugin-slot plugin-slot--text plugin-slot--pending'>
-      <p className='plugin-slot__text plugin-slot__text--pending'>待计算…</p>
+      <p className='plugin-slot__text plugin-slot__text--pending'>{tr('chat.slots.pendingCalculation')}</p>
     </div>
   );
 }
@@ -224,7 +230,7 @@ function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiff
         {reversed ? (
           <>
             <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--remove'>
-              当前版本
+              {tr('chat.slots.currentVersion')}
             </span>
             <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--add'>
               {otherLabel}
@@ -236,7 +242,7 @@ function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiff
               {otherLabel}
             </span>
             <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--add'>
-              当前版本
+              {tr('chat.slots.currentVersion')}
             </span>
           </>
         )}
@@ -254,7 +260,7 @@ function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiff
           </div>
         ))}
         {diffLines.length === 0 && (
-          <div className='plugin-slot__version-diff-empty'>内容完全相同</div>
+          <div className='plugin-slot__version-diff-empty'>{tr('chat.slots.identicalContent')}</div>
         )}
       </div>
     </div>
@@ -333,7 +339,7 @@ function FileRevisionPreview({
               onClick={() => setPreviewOpen(true)}
               type='button'
             >
-              预览
+              {tr('chat.slots.preview')}
             </button>
             <a
               className='plugin-slot__file-action-btn'
@@ -341,7 +347,7 @@ function FileRevisionPreview({
               download={info.name || undefined}
               onClick={(e) => e.stopPropagation()}
             >
-              下载
+              {tr('chat.slots.download')}
             </a>
           </div>
         )}
@@ -552,19 +558,19 @@ export function SlotVersionPopover({
       <div
         className={`plugin-slot__version-popover${isImage ? ' plugin-slot__version-popover--image' : ''}${isFile ? ' plugin-slot__version-popover--file' : ''}`}
         role='dialog'
-        aria-label='版本历史'
+        aria-label={tr('chat.slots.versionHistory')}
         aria-modal='true'
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className='plugin-slot__version-popover-header'>
           <span className='plugin-slot__version-popover-title'>
-            版本历史
+            {tr('chat.slots.versionHistory')}
           </span>
           <button
             className='plugin-slot__version-popover-close'
             onClick={handleClose}
-            aria-label='关闭版本历史'
+            aria-label={tr('chat.slots.closeVersionHistory')}
           >×</button>
         </div>
 
@@ -573,10 +579,10 @@ export function SlotVersionPopover({
           <>
             {currentVersion && (
               <div className='plugin-slot__version-meta-row'>
-                <span className='plugin-slot__version-meta-label'>当前版本：</span>
+                <span className='plugin-slot__version-meta-label'>{tr('chat.slots.currentVersionLabel')}</span>
                 <span className='plugin-slot__version-meta-badge'>V{currentVersion.revision}</span>
                 <span className='plugin-slot__version-meta-time'>
-                  创建时间：{formatDate(currentVersion.created_at)}
+                  {tr('chat.slots.createdAt', { time: formatDate(currentVersion.created_at) })}
                 </span>
               </div>
             )}
@@ -587,7 +593,7 @@ export function SlotVersionPopover({
                   className='plugin-slot__version-nav plugin-slot__version-nav--prev'
                   onClick={() => setPreviewIndex((i) => Math.max(0, i - 1))}
                   disabled={previewIndex === 0}
-                  aria-label='上一版本'
+                  aria-label={tr('chat.slots.previousVersion')}
                 >‹</button>
               )}
               <div className='plugin-slot__version-preview-img-wrap'>
@@ -599,7 +605,7 @@ export function SlotVersionPopover({
                     alt=''
                   />
                 ) : previewedVersion ? (
-                  <span className='plugin-slot__version-preview-empty'>暂无图片</span>
+                  <span className='plugin-slot__version-preview-empty'>{tr('chat.slots.noImage')}</span>
                 ) : null}
               </div>
               {versions.length > 1 && (
@@ -607,7 +613,7 @@ export function SlotVersionPopover({
                   className='plugin-slot__version-nav plugin-slot__version-nav--next'
                   onClick={() => setPreviewIndex((i) => Math.min(versions.length - 1, i + 1))}
                   disabled={previewIndex === versions.length - 1}
-                  aria-label='下一版本'
+                  aria-label={tr('chat.slots.nextVersion')}
                 >›</button>
               )}
             </div>
@@ -622,7 +628,7 @@ export function SlotVersionPopover({
                     v.selected ? 'plugin-slot__version-thumb--current' : '',
                   ].join(' ')}
                   onClick={() => setPreviewIndex(idx)}
-                  aria-label={`版本 V${v.revision}`}
+                  aria-label={tr('chat.slots.versionAria', { version: `V${v.revision}` })}
                 >
                   <div className='plugin-slot__version-thumb-img-wrap'>
                     {extractText(v.content_snapshot) ? (
@@ -637,7 +643,7 @@ export function SlotVersionPopover({
                     <span className='plugin-slot__version-thumb-badge'>V{v.revision}</span>
                   </div>
                   {v.selected && (
-                    <span className='plugin-slot__version-thumb-current-tag'>当前版本</span>
+                    <span className='plugin-slot__version-thumb-current-tag'>{tr('chat.slots.currentVersion')}</span>
                   )}
                 </button>
               ))}
@@ -646,12 +652,12 @@ export function SlotVersionPopover({
                 className='plugin-slot__version-thumb plugin-slot__version-thumb--upload'
                 onClick={handleVersionUploadClick}
                 disabled={uploading}
-                aria-label='上传并选择'
+                aria-label={tr('chat.slots.uploadAndSelect')}
                 type='button'
               >
                 <span className='plugin-slot__version-thumb-upload-icon'>+</span>
                 <span className='plugin-slot__version-thumb-upload-label'>
-                  {uploading ? '上传中…' : '上传并选择'}
+                  {uploading ? tr('chat.slots.uploading') : tr('chat.slots.uploadAndSelect')}
                 </span>
               </button>
               <input
@@ -666,18 +672,18 @@ export function SlotVersionPopover({
 
             <div className='plugin-slot__version-footer'>
               <div className='plugin-slot__version-footer-actions'>
-                <button className='plugin-slot__version-footer-cancel' onClick={handleClose}>取消</button>
+                <button className='plugin-slot__version-footer-cancel' onClick={handleClose}>{tr('common.cancel')}</button>
                 <button
                   className='plugin-slot__version-footer-apply'
                   disabled={rolling || isPreviewingCurrent || !previewedVersion}
                   onClick={() => previewedVersion && handleRollback(previewedVersion.revision)}
                 >
-                  {rolling ? '回退中…' : '设为当前版本'}
+                  {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.setCurrentVersion')}
                 </button>
               </div>
               {previewedVersion && !isPreviewingCurrent && (
                 <p className='plugin-slot__version-footer-hint'>
-                  设为当前版本后，内容将更新为该版本，其他版本不受影响
+                  {tr('chat.slots.setCurrentVersionHint')}
                 </p>
               )}
             </div>
@@ -685,7 +691,7 @@ export function SlotVersionPopover({
         ) : isFile ? (
           /* ── File mode: left version list + right file preview ── */
           <div className='plugin-slot__version-popover-body'>
-            <ul className='plugin-slot__version-list' role='listbox' aria-label='版本列表'>
+            <ul className='plugin-slot__version-list' role='listbox' aria-label={tr('chat.slots.versionList')}>
               {versions.map((v) => {
                 const info = extractFileInfo(v.content_snapshot);
                 return (
@@ -702,16 +708,16 @@ export function SlotVersionPopover({
                   >
                     <span className='plugin-slot__version-label'>
                       <span className={`plugin-slot__version-source-badge plugin-slot__version-source-badge--${v.change_source}`}>
-                        {v.change_source === 'human' ? '手动' : 'AI'}
+                        {v.change_source === 'human' ? tr('chat.slots.manual') : tr('chat.slots.ai')}
                       </span>
                       v{v.revision}
-                      {v.selected && <span className='plugin-slot__version-current-tag'>当前</span>}
+                      {v.selected && <span className='plugin-slot__version-current-tag'>{tr('chat.slots.current')}</span>}
                     </span>
                     <span className='plugin-slot__version-file-name' title={info.name}>
                       {info.name || '—'}
                     </span>
                     <span className='plugin-slot__version-time'>
-                      {new Date(v.created_at).toLocaleString()}
+                      {new Date(v.created_at).toLocaleString(i18n.language)}
                     </span>
                   </li>
                 );
@@ -722,15 +728,18 @@ export function SlotVersionPopover({
               <div className='plugin-slot__version-compare plugin-slot__version-compare--file'>
                 <FileRevisionPreview
                   info={extractFileInfo(effectiveSelectedVersion.content_snapshot)}
-                  label={`v${effectiveSelectedVersion.revision} · ${effectiveSelectedVersion.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
+                  label={tr('chat.slots.versionSourceLabel', {
+                    version: `v${effectiveSelectedVersion.revision}`,
+                    source: effectiveSelectedVersion.change_source === 'human' ? tr('chat.slots.manualEdit') : tr('chat.slots.aiGenerated'),
+                  })}
                 />
                 <button
                   className='plugin-slot__version-apply-btn'
                   disabled={rolling}
                   onClick={() => handleRollback(effectiveSelectedVersion.revision)}
-                  aria-label={`应用 v${effectiveSelectedVersion.revision}`}
+                  aria-label={tr('chat.slots.applyVersionAria', { version: `v${effectiveSelectedVersion.revision}` })}
                 >
-                  {rolling ? '回退中…' : `应用此版本 (v${effectiveSelectedVersion.revision})`}
+                  {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.applyVersion', { version: `v${effectiveSelectedVersion.revision}` })}
                 </button>
               </div>
             ) : (
@@ -738,10 +747,10 @@ export function SlotVersionPopover({
                 {effectiveSelectedVersion ? (
                   <FileRevisionPreview
                     info={extractFileInfo(activeCurrentValue)}
-                    label='当前版本'
+                    label={tr('chat.slots.currentVersion')}
                   />
                 ) : (
-                  <div className='plugin-slot__version-compare-hint'>选择版本查看预览</div>
+                  <div className='plugin-slot__version-compare-hint'>{tr('chat.slots.selectVersionPreview')}</div>
                 )}
               </div>
             )}
@@ -749,7 +758,7 @@ export function SlotVersionPopover({
         ) : (
           /* ── Text mode: left list + right diff (unified, with optional draft entry) ── */
           <div className='plugin-slot__version-popover-body'>
-            <ul className='plugin-slot__version-list' role='listbox' aria-label='版本列表'>
+            <ul className='plugin-slot__version-list' role='listbox' aria-label={tr('chat.slots.versionList')}>
               {/* Draft entry — only shown when there is a pending local draft */}
               {draftText !== undefined && (
                 <li
@@ -764,11 +773,11 @@ export function SlotVersionPopover({
                 >
                   <span className='plugin-slot__version-label'>
                     <span className='plugin-slot__version-source-badge plugin-slot__version-source-badge--human'>
-                      草稿
+                      {tr('chat.slots.draft')}
                     </span>
-                    草稿
+                    {tr('chat.slots.draft')}
                   </span>
-                  <span className='plugin-slot__version-time'>未提交</span>
+                  <span className='plugin-slot__version-time'>{tr('chat.slots.notSubmitted')}</span>
                 </li>
               )}
               {versions.map((v) => (
@@ -785,13 +794,13 @@ export function SlotVersionPopover({
                 >
                   <span className='plugin-slot__version-label'>
                     <span className={`plugin-slot__version-source-badge plugin-slot__version-source-badge--${v.change_source}`}>
-                      {v.change_source === 'human' ? '手动' : 'AI'}
+                      {v.change_source === 'human' ? tr('chat.slots.manual') : tr('chat.slots.ai')}
                     </span>
                     v{v.revision}
-                    {v.selected && <span className='plugin-slot__version-current-tag'>当前</span>}
+                    {v.selected && <span className='plugin-slot__version-current-tag'>{tr('chat.slots.current')}</span>}
                   </span>
                   <span className='plugin-slot__version-time'>
-                    {new Date(v.created_at).toLocaleString()}
+                    {new Date(v.created_at).toLocaleString(i18n.language)}
                   </span>
                 </li>
               ))}
@@ -803,24 +812,24 @@ export function SlotVersionPopover({
                 <TextDiffView
                   currentText={extractText(activeCurrentValue)}
                   otherText={draftText}
-                  otherLabel='草稿'
+                  otherLabel={tr('chat.slots.draft')}
                   reversed={true}
                 />
                 <div className='plugin-slot__version-draft-actions'>
                   <button
                     className='plugin-slot__version-discard-btn'
                     onClick={() => { onDiscardDraft?.(); handleClose(); }}
-                    aria-label='丢弃草稿'
+                    aria-label={tr('chat.slots.discardDraft')}
                   >
-                    丢弃草稿
+                    {tr('chat.slots.discardDraft')}
                   </button>
                   <button
                     className='plugin-slot__version-flush-btn'
                     disabled={flushing}
                     onClick={handleFlushDraft}
-                    aria-label='确定变更'
+                    aria-label={tr('chat.slots.confirmChanges')}
                   >
-                    {flushing ? '提交中…' : '确定变更'}
+                    {flushing ? tr('chat.slots.submitting') : tr('chat.slots.confirmChanges')}
                   </button>
                 </div>
               </div>
@@ -829,26 +838,29 @@ export function SlotVersionPopover({
                 <TextDiffView
                   currentText={extractText(activeCurrentValue)}
                   otherText={extractText(effectiveSelectedVersion.content_snapshot)}
-                  otherLabel={`v${effectiveSelectedVersion.revision} · ${effectiveSelectedVersion.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
+                  otherLabel={tr('chat.slots.versionSourceLabel', {
+                    version: `v${effectiveSelectedVersion.revision}`,
+                    source: effectiveSelectedVersion.change_source === 'human' ? tr('chat.slots.manualEdit') : tr('chat.slots.aiGenerated'),
+                  })}
                   reversed={currentVersion !== null && effectiveSelectedVersion.revision > currentVersion.revision}
                 />
                 <button
                   className='plugin-slot__version-apply-btn'
                   disabled={rolling}
                   onClick={() => handleRollback(effectiveSelectedVersion.revision)}
-                  aria-label={`应用 v${effectiveSelectedVersion.revision}`}
+                  aria-label={tr('chat.slots.applyVersionAria', { version: `v${effectiveSelectedVersion.revision}` })}
                 >
-                  {rolling ? '回退中…' : `应用此版本 (v${effectiveSelectedVersion.revision})`}
+                  {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.applyVersion', { version: `v${effectiveSelectedVersion.revision}` })}
                 </button>
               </div>
             ) : (
               <div className='plugin-slot__version-compare plugin-slot__version-compare--same'>
                 {effectiveSelectedVersion ? (
                   <pre className='plugin-slot__version-current-text'>
-                    {extractText(activeCurrentValue) || '（无内容）'}
+                    {extractText(activeCurrentValue) || tr('chat.slots.noContent')}
                   </pre>
                 ) : (
-                  <div className='plugin-slot__version-compare-hint'>选择版本查看对比</div>
+                  <div className='plugin-slot__version-compare-hint'>{tr('chat.slots.selectVersionCompare')}</div>
                 )}
               </div>
             )}
@@ -864,8 +876,8 @@ export function SlotVersionPopover({
       <button
         className={`plugin-slot__version-btn${draftText !== undefined ? ' plugin-slot__version-btn--draft' : ''}`}
         onClick={handleOpen}
-        title={draftText !== undefined ? '草稿（点击查看与当前版本的对比）' : `版本历史 (${revisionCount})`}
-        aria-label={draftText !== undefined ? '草稿' : `版本历史 (${revisionCount})`}
+        title={draftText !== undefined ? tr('chat.slots.draftCompareHint') : tr('chat.slots.versionHistoryCount', { count: revisionCount })}
+        aria-label={draftText !== undefined ? tr('chat.slots.draft') : tr('chat.slots.versionHistoryCount', { count: revisionCount })}
         disabled={loading}
       >
         <span className='plugin-slot__version-count'>
@@ -1003,17 +1015,17 @@ export function SlotImage({
       {/* Delete + Upload buttons — top-right, shown on hover via CSS */}
       {confirmDelete ? (
         <span className='plugin-slot__delete-confirm plugin-slot__delete-confirm--overlay'>
-          <span className='plugin-slot__delete-confirm-text'>确认删除？</span>
+          <span className='plugin-slot__delete-confirm-text'>{tr('chat.slots.confirmDeleteQuestion')}</span>
           <button
             className='plugin-slot__delete-confirm-yes'
             onClick={handleDeleteConfirm}
-            aria-label='确认删除'
-          >删除</button>
+            aria-label={tr('chat.slots.confirmDelete')}
+          >{tr('common.delete')}</button>
           <button
             className='plugin-slot__delete-confirm-no'
             onClick={handleDeleteCancel}
-            aria-label='取消删除'
-          >取消</button>
+            aria-label={tr('chat.slots.cancelDelete')}
+          >{tr('common.cancel')}</button>
         </span>
       ) : (
         <span className='plugin-slot__top-right-actions'>
@@ -1021,16 +1033,16 @@ export function SlotImage({
             className='plugin-slot__upload-overlay-btn'
             onClick={handleUploadClick}
             disabled={uploading}
-            title='上传并选择'
-            aria-label='上传并选择'
+            title={tr('chat.slots.uploadAndSelect')}
+            aria-label={tr('chat.slots.uploadAndSelect')}
           >
             {uploading ? '…' : '+'}
           </button>
           <button
             className='plugin-slot__delete-btn plugin-slot__delete-btn--overlay'
             onClick={handleDeleteClick}
-            title='删除'
-            aria-label='删除图片'
+            title={tr('common.delete')}
+            aria-label={tr('chat.slots.deleteImage')}
           >×</button>
         </span>
       )}
@@ -1057,14 +1069,14 @@ export function SlotImage({
         <button
           className='plugin-slot__ref-btn plugin-slot__ref-btn--overlay'
           onClick={handleReference}
-          title='引用此图片'
-          aria-label='引用此图片'
+          title={tr('chat.slots.referenceImage')}
+          aria-label={tr('chat.slots.referenceImage')}
         >📎</button>
       )}
 
       {/* Drag handle — bottom-left edge, shown on hover */}
       {isDraggable && (
-        <span className='plugin-slot__drag-handle plugin-slot__drag-handle--overlay' title='拖拽排序' aria-hidden='true'>⠿</span>
+        <span className='plugin-slot__drag-handle plugin-slot__drag-handle--overlay' title={tr('chat.slots.dragToSort')} aria-hidden='true'>⠿</span>
       )}
     </>
   ) : null;
@@ -1098,19 +1110,19 @@ export function SlotImage({
                 onBlur={handleCaptionSave}
                 onKeyDown={handleCaptionKeyDown}
                 autoFocus
-                aria-label='编辑描述'
-                placeholder='添加描述…'
+                aria-label={tr('chat.slots.editDescription')}
+                placeholder={tr('chat.slots.addDescription')}
               />
             ) : (
               <span
                 className='plugin-slot__caption-text'
                 onClick={handleCaptionEdit}
-                title='点击编辑描述'
+                title={tr('chat.slots.clickToEditDescription')}
                 role='button'
                 tabIndex={0}
                 onKeyDown={(e) => e.key === 'Enter' && handleCaptionEdit()}
               >
-                {slot.caption || <span className='plugin-slot__caption-placeholder'>添加描述…</span>}
+                {slot.caption || <span className='plugin-slot__caption-placeholder'>{tr('chat.slots.addDescription')}</span>}
               </span>
             )}
           </div>
@@ -1132,19 +1144,19 @@ export function SlotImage({
               onBlur={handleCaptionSave}
               onKeyDown={handleCaptionKeyDown}
               autoFocus
-              aria-label='编辑描述'
-              placeholder='添加描述…'
+              aria-label={tr('chat.slots.editDescription')}
+              placeholder={tr('chat.slots.addDescription')}
             />
           ) : (
             <span
               className='plugin-slot__caption-text'
               onClick={handleCaptionEdit}
-              title='点击编辑描述'
+              title={tr('chat.slots.clickToEditDescription')}
               role='button'
               tabIndex={0}
               onKeyDown={(e) => e.key === 'Enter' && handleCaptionEdit()}
             >
-              {slot.caption || <span className='plugin-slot__caption-placeholder'>添加描述…</span>}
+              {slot.caption || <span className='plugin-slot__caption-placeholder'>{tr('chat.slots.addDescription')}</span>}
             </span>
           )}
         </div>
@@ -1220,7 +1232,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, re
         if (!cancelled) setOffloadedText(t);
       })
       .catch(() => {
-        if (!cancelled) setOffloadedText('[无法加载文件内容]');
+        if (!cancelled) setOffloadedText(tr('chat.slots.fileContentLoadFailed'));
       })
       .finally(() => {
         if (!cancelled) setOffloadLoading(false);
@@ -1393,14 +1405,14 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, re
           onBlur={handleSave}
           autoFocus
           rows={6}
-          aria-label='编辑文本'
+          aria-label={tr('chat.slots.editText')}
         />
       ) : (
         <>
           <p
             className={`plugin-slot__text${canEdit ? ' plugin-slot__text--editable' : ''}`}
             onClick={canEdit ? handleEdit : undefined}
-            title={canEdit ? '点击编辑' : undefined}
+            title={canEdit ? tr('chat.slots.clickToEdit') : undefined}
             role={canEdit ? 'button' : undefined}
             tabIndex={canEdit ? 0 : undefined}
             onKeyDown={canEdit ? (e) => e.key === 'Enter' && handleEdit() : undefined}
@@ -1439,19 +1451,19 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, re
                   onBlur={handleCaptionSave}
                   onKeyDown={handleCaptionKeyDown}
                   autoFocus
-                  aria-label='编辑描述'
-                  placeholder='添加描述…'
+                  aria-label={tr('chat.slots.editDescription')}
+                  placeholder={tr('chat.slots.addDescription')}
                 />
               ) : (
                 <span
                   className='plugin-slot__caption-text'
                   onClick={handleCaptionEdit}
-                  title='点击编辑描述'
+                  title={tr('chat.slots.clickToEditDescription')}
                   role='button'
                   tabIndex={0}
                   onKeyDown={(e) => e.key === 'Enter' && handleCaptionEdit()}
                 >
-                  {slot.caption || <span className='plugin-slot__caption-placeholder'>添加描述…</span>}
+                  {slot.caption || <span className='plugin-slot__caption-placeholder'>{tr('chat.slots.addDescription')}</span>}
                 </span>
               )}
             </div>
@@ -1605,7 +1617,7 @@ function SlotJsonFile({
   useEffect(() => {
     if (!hasSource) {
       setLoading(false);
-      setError('无法加载内容');
+      setError(tr('chat.slots.unableToLoadContent'));
       return;
     }
     if (resolving || !url) {
@@ -1631,7 +1643,7 @@ function SlotJsonFile({
       })
       .catch(() => {
         if (!cancelled) {
-          setError('内容加载失败');
+          setError(tr('chat.slots.contentLoadFailed'));
           setLoading(false);
         }
       });
@@ -1652,7 +1664,7 @@ function SlotJsonFile({
   if (!hasSource) {
     return (
       <div className='plugin-slot plugin-slot--text plugin-slot--pending'>
-        <span className='plugin-slot__placeholder'>待生成…</span>
+        <span className='plugin-slot__placeholder'>{tr('chat.slots.pendingGeneration')}</span>
       </div>
     );
   }
@@ -1660,7 +1672,7 @@ function SlotJsonFile({
   if (loading || resolving) {
     return (
       <div className='plugin-slot plugin-slot--artifact plugin-slot--pending'>
-        <span className='plugin-slot__placeholder'>加载中…</span>
+        <span className='plugin-slot__placeholder'>{tr('common.loading')}</span>
       </div>
     );
   }
@@ -1668,7 +1680,7 @@ function SlotJsonFile({
   if (error || payload === null) {
     return (
       <div className='plugin-slot plugin-slot--artifact plugin-slot--error'>
-        <span className='plugin-slot__placeholder'>{error ?? '内容加载失败'}</span>
+        <span className='plugin-slot__placeholder'>{error ?? tr('chat.slots.contentLoadFailed')}</span>
       </div>
     );
   }
@@ -1706,7 +1718,7 @@ function SlotJsonFile({
             onClick={handleToggleRaw}
             type='button'
           >
-            {showRaw ? '查看内容' : '原始数据'}
+            {showRaw ? tr('chat.slots.viewContent') : tr('chat.slots.rawData')}
           </button>
           <a
             href={url}
@@ -1714,7 +1726,7 @@ function SlotJsonFile({
             className='plugin-slot__file-action-btn'
             onClick={(e) => e.stopPropagation()}
           >
-            下载
+            {tr('chat.slots.download')}
           </a>
         </div>
       </div>
@@ -1751,7 +1763,7 @@ function SlotInlineStructured({
   if (payload === null) {
     return (
       <div className='plugin-slot plugin-slot--artifact plugin-slot--error'>
-        <span className='plugin-slot__placeholder'>内容加载失败</span>
+        <span className='plugin-slot__placeholder'>{tr('chat.slots.contentLoadFailed')}</span>
       </div>
     );
   }
@@ -1787,7 +1799,7 @@ function SlotInlineStructured({
             onClick={handleToggleRaw}
             type='button'
           >
-            {showRaw ? '查看内容' : '原始数据'}
+            {showRaw ? tr('chat.slots.viewContent') : tr('chat.slots.rawData')}
           </button>
         </div>
       </div>
@@ -1820,7 +1832,7 @@ function SlotMarkdownFile({
   useEffect(() => {
     if (!hasSource) {
       setLoading(false);
-      setError('无法加载内容');
+      setError(tr('chat.slots.unableToLoadContent'));
       return;
     }
     if (resolving || !url) {
@@ -1848,7 +1860,7 @@ function SlotMarkdownFile({
       })
       .catch(() => {
         if (!cancelled) {
-          setError('内容加载失败');
+          setError(tr('chat.slots.contentLoadFailed'));
           setLoading(false);
         }
       });
@@ -1866,7 +1878,7 @@ function SlotMarkdownFile({
   if (!hasSource) {
     return (
       <div className='plugin-slot plugin-slot--text plugin-slot--pending'>
-        <span className='plugin-slot__placeholder'>待生成…</span>
+        <span className='plugin-slot__placeholder'>{tr('chat.slots.pendingGeneration')}</span>
       </div>
     );
   }
@@ -1874,7 +1886,7 @@ function SlotMarkdownFile({
   if (loading || resolving) {
     return (
       <div className='plugin-slot plugin-slot--artifact plugin-slot--pending'>
-        <span className='plugin-slot__placeholder'>加载中…</span>
+        <span className='plugin-slot__placeholder'>{tr('common.loading')}</span>
       </div>
     );
   }
@@ -1882,7 +1894,7 @@ function SlotMarkdownFile({
   if (error || !content.trim()) {
     return (
       <div className='plugin-slot plugin-slot--artifact plugin-slot--error'>
-        <span className='plugin-slot__placeholder'>{error ?? '内容加载失败'}</span>
+        <span className='plugin-slot__placeholder'>{error ?? tr('chat.slots.contentLoadFailed')}</span>
       </div>
     );
   }
@@ -1903,7 +1915,7 @@ function SlotMarkdownFile({
             URL.revokeObjectURL(objectUrl);
           }}
         >
-          下载 Markdown
+          {tr('chat.writer.downloadMarkdown')}
         </button>
         {url ? (
           <a
@@ -1912,7 +1924,7 @@ function SlotMarkdownFile({
             className='plugin-slot__file-action-btn'
             onClick={(e) => e.stopPropagation()}
           >
-            下载原文件
+            {tr('chat.slots.downloadOriginalFile')}
           </a>
         ) : null}
       </div>
@@ -2035,27 +2047,27 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
           <button
             className='plugin-slot__file-action-btn'
             onClick={handlePreview}
-            title='预览'
-            aria-label={`预览 ${name}`}
+            title={tr('chat.slots.preview')}
+            aria-label={tr('chat.previewNamedFile', { name })}
             type='button'
           >
-            预览
+            {tr('chat.slots.preview')}
           </button>
           <a
             href={url}
             download={name}
             className='plugin-slot__file-action-btn'
-            aria-label={`下载 ${name}`}
+            aria-label={tr('chat.downloadNamedFile', { name })}
             onClick={(e) => e.stopPropagation()}
           >
-            下载
+            {tr('chat.slots.download')}
           </a>
           {canEdit && !confirmDelete && (
             <button
               className='plugin-slot__file-action-btn plugin-slot__file-action-btn--danger'
               onClick={handleDeleteClick}
-              title='删除'
-              aria-label={`删除 ${name}`}
+              title={tr('common.delete')}
+              aria-label={tr('chat.deleteNamedFile', { name })}
               type='button'
             >
               ×
@@ -2063,8 +2075,8 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
           )}
           {canEdit && confirmDelete && (
             <span className='plugin-slot__delete-confirm'>
-              <button className='plugin-slot__delete-confirm-yes' onClick={handleDeleteConfirm} aria-label='确认删除'>删除</button>
-              <button className='plugin-slot__delete-confirm-no' onClick={handleDeleteCancel} aria-label='取消删除'>取消</button>
+              <button className='plugin-slot__delete-confirm-yes' onClick={handleDeleteConfirm} aria-label={tr('chat.slots.confirmDelete')}>{tr('common.delete')}</button>
+              <button className='plugin-slot__delete-confirm-no' onClick={handleDeleteCancel} aria-label={tr('chat.slots.cancelDelete')}>{tr('common.cancel')}</button>
             </span>
           )}
         </div>
@@ -2079,19 +2091,19 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
               onBlur={handleCaptionSave}
               onKeyDown={handleCaptionKeyDown}
               autoFocus
-              aria-label='编辑描述'
-              placeholder='添加描述…'
+              aria-label={tr('chat.slots.editDescription')}
+              placeholder={tr('chat.slots.addDescription')}
             />
           ) : (
             <span
               className='plugin-slot__caption-text'
               onClick={handleCaptionEdit}
-              title='点击编辑描述'
+              title={tr('chat.slots.clickToEditDescription')}
               role='button'
               tabIndex={0}
               onKeyDown={(e) => e.key === 'Enter' && handleCaptionEdit()}
             >
-              {slot.caption || <span className='plugin-slot__caption-placeholder'>添加描述…</span>}
+              {slot.caption || <span className='plugin-slot__caption-placeholder'>{tr('chat.slots.addDescription')}</span>}
             </span>
           )}
         </div>
@@ -2135,6 +2147,7 @@ export function SlotRenderer({
   onReference?: (slot: SlotRevision) => void;
   readOnly?: boolean;
 }) {
+  useTranslation();
   if (slot.artifact_value === undefined || slot.artifact_value === null) {
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
   }
@@ -2213,6 +2226,7 @@ interface AddSlotItemButtonProps {
 }
 
 export function AddSlotItemButton({ sessionId, slotId, slotType, onCreated }: AddSlotItemButtonProps) {
+  useTranslation();
   const { createSlotItem } = usePluginStore();
   const [open, setOpen] = useState(false);
   const [textValue, setTextValue] = useState('');
@@ -2283,8 +2297,8 @@ export function AddSlotItemButton({ sessionId, slotId, slotType, onCreated }: Ad
         className='plugin-slot__add-btn'
         onClick={handleOpen}
         disabled={submitting}
-        title='添加条目'
-        aria-label='添加条目'
+        title={tr('chat.slots.addItem')}
+        aria-label={tr('chat.slots.addItem')}
       >
         {submitting ? '…' : '+'}
       </button>
@@ -2293,16 +2307,16 @@ export function AddSlotItemButton({ sessionId, slotId, slotType, onCreated }: Ad
           className='plugin-slot__modal-overlay'
           role='dialog'
           aria-modal='true'
-          aria-label='添加条目'
+          aria-label={tr('chat.slots.addItem')}
           onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
         >
           <div className='plugin-slot__modal'>
             <div className='plugin-slot__modal-header'>
-              <span>添加条目</span>
+              <span>{tr('chat.slots.addItem')}</span>
               <button
                 className='plugin-slot__modal-close'
                 onClick={() => setOpen(false)}
-                aria-label='关闭'
+                aria-label={tr('common.close')}
               >×</button>
             </div>
             <div className='plugin-slot__modal-body' onKeyDown={handleKeyDown}>
@@ -2311,18 +2325,18 @@ export function AddSlotItemButton({ sessionId, slotId, slotType, onCreated }: Ad
                   className='plugin-slot__modal-textarea'
                   value={textValue}
                   onChange={(e) => setTextValue(e.target.value)}
-                  placeholder='输入文本内容…'
+                  placeholder={tr('chat.slots.enterTextContent')}
                   rows={5}
                   autoFocus
-                  aria-label='条目内容'
+                  aria-label={tr('chat.slots.itemContent')}
                 />
               )}
               <input
                 className='plugin-slot__modal-caption'
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
-                placeholder='描述（可选）…'
-                aria-label='描述'
+                placeholder={tr('chat.slots.optionalDescription')}
+                aria-label={tr('common.description')}
               />
             </div>
             <div className='plugin-slot__modal-footer'>
@@ -2330,16 +2344,16 @@ export function AddSlotItemButton({ sessionId, slotId, slotType, onCreated }: Ad
                 className='plugin-slot__modal-submit'
                 onClick={handleSubmit}
                 disabled={submitting || (slotType === 'text' && !textValue.trim())}
-                aria-label='确认添加'
+                aria-label={tr('chat.slots.confirmAdd')}
               >
-                {submitting ? '添加中…' : '确认'}
+                {submitting ? tr('chat.slots.adding') : tr('common.confirm')}
               </button>
               <button
                 className='plugin-slot__modal-cancel'
                 onClick={() => setOpen(false)}
-                aria-label='取消'
+                aria-label={tr('common.cancel')}
               >
-                取消
+                {tr('common.cancel')}
               </button>
             </div>
           </div>

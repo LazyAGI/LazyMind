@@ -17,6 +17,8 @@ export const mapSkillAssetRecordToStructuredAsset = (
   draft: item.draft,
   autoEvo: item.autoEvo,
   isEnabled: item.isEnabled,
+  deletedAt: item.deletedAt,
+  deletedBy: item.deletedBy,
 });
 
 export const filterInstalledSkills = (

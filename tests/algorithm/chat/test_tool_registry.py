@@ -3,6 +3,7 @@ import pytest
 import lazyllm
 from lazymind.chat.service.component.tool_registry import (
     DEFAULT_TOOLS,
+    SKILL_TOOL_GROUP,
     ToolGroupConfig,
     build_agent_tools,
     filter_tools,
@@ -97,6 +98,28 @@ def test_pick_first_valid_agent_tool_uses_group_config_description():
     assert agent_tool['desc'] == web_search_cfg.description
     assert agent_tool['pick_first_valid'] is True
     assert agent_tool['tools'] == web_search_cfg.instance
+
+
+def test_tool_catalog_localizes_display_fields_without_changing_runtime_description():
+    zh_group = next(group for group in get_all_tool_groups('zh-CN') if group['name'] == 'web_search')
+    en_group = next(group for group in get_all_tool_groups('en-US') if group['name'] == 'web_search')
+    unsupported_group = next(group for group in get_all_tool_groups('fr-FR') if group['name'] == 'web_search')
+
+    assert zh_group['label'] == '网页搜索'
+    assert en_group['label'] == 'Web Search'
+    assert en_group['description'] == 'Search the internet using the first available search provider.'
+    assert unsupported_group['label'] == zh_group['label']
+    assert unsupported_group['description'] == zh_group['description']
+    assert en_group['name'] == zh_group['name']
+    assert en_group['methods'] == zh_group['methods']
+
+    config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'web_search')
+    agent_tool = build_agent_tools([config])[0]
+    assert agent_tool['desc'] == config.description
+
+    for group_config in [*DEFAULT_TOOLS, SKILL_TOOL_GROUP]:
+        assert group_config.label_en.strip()
+        assert group_config.description_en.strip()
 
 
 def test_pick_first_valid_requires_sequence_instance():

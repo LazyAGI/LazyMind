@@ -80,7 +80,7 @@ func defaultHostCacheDir(home string) string {
 	case "darwin":
 		return filepath.Join(home, "Library", "Caches")
 	case "windows":
-		if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" && !pathIsUnderRoot(localAppData, home) {
+		if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" {
 			return filepath.Clean(localAppData)
 		}
 		return filepath.Join(home, "AppData", "Local")

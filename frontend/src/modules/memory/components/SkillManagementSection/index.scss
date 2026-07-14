@@ -202,6 +202,7 @@
   }
 
   &__icon {
+    position: relative;
     width: 32px;
     height: 32px;
     border-radius: 8px;
@@ -233,6 +234,9 @@
   }
 
   &__count {
+    position: absolute;
+    top: -4px;
+    right: -4px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -245,6 +249,8 @@
     font-size: 11px;
     font-weight: 600;
     line-height: 1;
+    border: 1.5px solid #fff;
+    box-sizing: border-box;
   }
 
   &__hint {

@@ -29,6 +29,7 @@ export default function MemoryExperienceDetailPage() {
     refreshExperienceSection,
   } = useMemoryManagementOutletContext();
   const [versionDrawerOpen, setVersionDrawerOpen] = useState(false);
+  const [contentReloadKey, setContentReloadKey] = useState(0);
 
   const experience = useMemo(
     () => experienceAssets.find((item: ExperienceAsset) => item.id === itemId) || null,
@@ -85,6 +86,7 @@ export default function MemoryExperienceDetailPage() {
 
           <div className="memory-experience-detail-body">
             <PersonalResourceContentEditor
+              key={contentReloadKey}
               resourceType={experience.resourceType}
               canEdit={canEditExperience}
               t={t}
@@ -102,6 +104,10 @@ export default function MemoryExperienceDetailPage() {
           resourceType={resourceVersionType}
           t={t}
           onClose={() => setVersionDrawerOpen(false)}
+          onRolledBack={async () => {
+            setContentReloadKey((value) => value + 1);
+            await refreshExperienceSection({ silent: true });
+          }}
         />
       ) : null}
     </div>

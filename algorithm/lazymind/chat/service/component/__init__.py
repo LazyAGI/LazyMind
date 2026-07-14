@@ -8,6 +8,7 @@ from .tool_registry import (
     build_agent_tools,
     filter_tools,
     get_all_tool_groups,
+    normalize_tool_locale,
 )
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     'build_agent_tools',
     'filter_tools',
     'get_all_tool_groups',
+    'normalize_tool_locale',
     'normalize_history_for_agent',
 ]

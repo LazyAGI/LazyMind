@@ -1,20 +1,43 @@
 const { app, BrowserWindow, ipcMain, shell, dialog, clipboard } = require("electron");
 const { spawn, execFile } = require("node:child_process");
+const { randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { resolveWindowsDesktopPaths } = require("./desktop-paths");
+const { runtimeExitFailureMessage, statusFailureMessage } = require("./runtime-status");
+
+const isWindows = process.platform === "win32";
+const windowsDesktopPaths = isWindows
+  ? resolveWindowsDesktopPaths(process.env, app.getPath("home"))
+  : null;
+if (windowsDesktopPaths) {
+  for (const dir of [
+    windowsDesktopPaths.profileDir,
+    windowsDesktopPaths.logsDir,
+    windowsDesktopPaths.crashDumpsDir,
+  ]) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  app.setPath("userData", windowsDesktopPaths.profileDir);
+  app.setPath("sessionData", windowsDesktopPaths.profileDir);
+  app.setPath("crashDumps", windowsDesktopPaths.crashDumpsDir);
+  app.setAppLogsPath(windowsDesktopPaths.logsDir);
+}
 
 const isPackaged = app.isPackaged;
+const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
+const ownerToken = randomUUID();
 const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
   (isPackaged
     ? path.join(process.resourcesPath, "runtime")
-    : path.resolve(__dirname, "..", "..", "dist", "runtime"));
+    : path.resolve(__dirname, "..", "..", "build", desktopTarget, "runtime"));
 const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
 const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
 const desktopLogsDir = app.getPath("logs");
 const startupLogPath = path.join(desktopLogsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
-  path.join(runtimeResourcesRoot, "bin", "local-runtime-manager");
+  path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
 const maxStartupLogEntries = 1200;
 const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";
 const forceExitDelayMs = 1500;
@@ -23,7 +46,10 @@ let mainWindow;
 let runtimeProcess;
 let runtimeProcessExit = null;
 let guardProcess;
+let guardPID = 0;
+let guardWatchTimer;
 let currentStatus = null;
+let ownerReleaseRetries = 0;
 let isQuitting = false;
 let allowWindowClose = false;
 let startupLogEntries = [];
@@ -43,6 +69,7 @@ function sidecarArgs(command, extra = []) {
     "--profile", "desktop",
     "--repo-root", repoRoot,
     "--resources-root", runtimeResourcesRoot,
+    "--owner-token", ownerToken,
   ];
   if (explicitRuntimeRoot) {
     args.push("--runtime-root", explicitRuntimeRoot);
@@ -54,7 +81,11 @@ function sidecarEnv() {
   const env = {
     ...process.env,
     LAZYMIND_RUNTIME_PROFILE: "desktop",
+    LAZYMIND_RUNTIME_OWNER_TOKEN: ownerToken,
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
+    LAZYMIND_LOCAL_NETWORK_PROFILE: "localhost",
+    LAZYMIND_LOCAL_PROXY_ADDRESS: "127.0.0.1",
+    LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN: "false",
     VITE_LAZYMIND_MODE: "desktop",
     PYTHONDONTWRITEBYTECODE: "1",
   };
@@ -204,7 +235,10 @@ function broadcastStartupDiagnostics(extra = {}) {
 
 function runSidecar(command, extra = []) {
   return new Promise((resolve, reject) => {
-    execFile(sidecarPath, sidecarArgs(command, extra), { env: sidecarEnv() }, (error, stdout, stderr) => {
+    execFile(sidecarPath, sidecarArgs(command, extra), {
+      env: sidecarEnv(),
+      windowsHide: isWindows,
+    }, (error, stdout, stderr) => {
       if (error) {
         error.message = `${error.message}\n${stderr || ""}`;
         reject(error);
@@ -216,7 +250,7 @@ function runSidecar(command, extra = []) {
 }
 
 function startGuard() {
-  if (guardProcess || !fs.existsSync(sidecarPath)) {
+  if (guardProcess || guardPID || !fs.existsSync(sidecarPath)) {
     return;
   }
   ensureDesktopLogDirs();
@@ -235,11 +269,19 @@ function startGuard() {
     appendStartupLog("error", `failed to open desktop runtime guard log: ${serializeError(error)}`);
     errFd = "ignore";
   }
+  if (isWindows) {
+    if (typeof errFd === "number") {
+      fs.closeSync(errFd);
+    }
+    startWindowsGuard();
+    return;
+  }
   try {
     guardProcess = spawn(sidecarPath, sidecarArgs("guard", ["--owner-pid", String(process.pid)]), {
       env: sidecarShutdownEnv(),
       stdio: ["ignore", "ignore", errFd],
       detached: true,
+      windowsHide: isWindows,
     });
   } catch (error) {
     appendStartupLog("error", `failed to start desktop runtime guard: ${serializeError(error)}`);
@@ -249,10 +291,81 @@ function startGuard() {
       fs.closeSync(errFd);
     }
   }
-  guardProcess.once("exit", () => {
+  guardProcess.once("exit", (code, signal) => {
+    appendStartupLog(
+      "desktop",
+      `runtime guard exited with code ${code ?? "null"} signal ${signal ?? "null"}`,
+    );
     guardProcess = null;
   });
   guardProcess.unref();
+}
+
+function quoteWindowsArgument(value) {
+  const input = String(value);
+  if (input && !/[\s"]/u.test(input)) {
+    return input;
+  }
+  let output = '"';
+  let backslashes = 0;
+  for (const char of input) {
+    if (char === "\\") {
+      backslashes += 1;
+      continue;
+    }
+    if (char === '"') {
+      output += "\\".repeat(backslashes * 2 + 1) + '"';
+      backslashes = 0;
+      continue;
+    }
+    output += "\\".repeat(backslashes) + char;
+    backslashes = 0;
+  }
+  return output + "\\".repeat(backslashes * 2) + '"';
+}
+
+function startWindowsGuard() {
+  const commandLine = [sidecarPath, ...sidecarArgs("guard", ["--owner-pid", String(process.pid)])]
+    .map(quoteWindowsArgument)
+    .join(" ");
+  const encodedCommandLine = Buffer.from(commandLine, "utf8").toString("base64");
+  const script = [
+    `$commandLine = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedCommandLine}'))`,
+    "$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }",
+    "if ($result.ReturnValue -ne 0) { throw \"Win32_Process.Create failed with code $($result.ReturnValue)\" }",
+    "$result.ProcessId",
+  ].join("; ");
+  const encodedScript = Buffer.from(script, "utf16le").toString("base64");
+  guardProcess = execFile(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodedScript],
+    { windowsHide: true },
+    (error, stdout, stderr) => {
+      guardProcess = null;
+      if (error) {
+        appendStartupLog("error", `failed to launch Windows runtime guard: ${serializeError(error)} ${stderr || ""}`);
+        return;
+      }
+      const createdPID = Number.parseInt(String(stdout).trim(), 10);
+      if (!Number.isInteger(createdPID) || createdPID <= 0) {
+        appendStartupLog("error", `Windows runtime guard returned an invalid pid: ${String(stdout).trim()}`);
+        return;
+      }
+      guardPID = createdPID;
+      appendStartupLog("desktop", `Windows runtime guard running as pid ${guardPID}`);
+      guardWatchTimer = setInterval(() => {
+        try {
+          process.kill(guardPID, 0);
+        } catch {
+          appendStartupLog("desktop", `Windows runtime guard pid ${guardPID} exited`);
+          guardPID = 0;
+          clearInterval(guardWatchTimer);
+          guardWatchTimer = undefined;
+        }
+      }, 2000);
+      guardWatchTimer.unref();
+    },
+  );
 }
 
 function detachRuntimeMonitor() {
@@ -268,7 +381,11 @@ function detachRuntimeMonitor() {
   proc.stdout?.destroy();
   proc.stderr?.destroy();
   try {
-    proc.kill("SIGTERM");
+    if (isWindows) {
+      proc.kill();
+    } else {
+      proc.kill("SIGTERM");
+    }
   } catch (error) {
     appendStartupLog("error", `failed to stop desktop runtime monitor: ${serializeError(error)}`);
   }
@@ -292,6 +409,7 @@ function spawnDetachedShutdownHelper(reason) {
       env: sidecarShutdownEnv(),
       stdio: ["ignore", outFd, errFd],
       detached: true,
+      windowsHide: isWindows,
     });
     child.once("error", (error) => {
       appendStartupLog("error", `failed to spawn detached desktop shutdown: ${serializeError(error)}`);
@@ -321,7 +439,6 @@ function logStartupContext() {
 }
 
 function startRuntime() {
-  startGuard();
   if (runtimeProcess) {
     return;
   }
@@ -340,6 +457,7 @@ function startRuntime() {
     env: sidecarEnv(),
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
+    windowsHide: isWindows,
   });
   runtimeProcess.stdout?.on("data", (chunk) => appendStartupChunk("sidecar", chunk));
   runtimeProcess.stderr?.on("data", (chunk) => appendStartupChunk("sidecar", chunk));
@@ -369,7 +487,7 @@ function beginFastQuit(reason = "quit") {
   isQuitting = true;
   allowWindowClose = true;
   appendStartupLog("desktop", `quitting LazyMind Desktop (${reason}); runtime cleanup continues in background`);
-  const guardWillCleanUp = Boolean(guardProcess);
+  const guardWillCleanUp = Boolean(guardPID || (!isWindows && guardProcess));
   if (!guardWillCleanUp) {
     spawnDetachedShutdownHelper(reason);
   }
@@ -383,13 +501,15 @@ function beginFastQuit(reason = "quit") {
   app.quit();
 }
 
-function statusFailureMessage(status) {
-  const summary = status?.overallStatus ? `Runtime status is ${status.overallStatus}` : "Runtime did not become ready";
-  const failedServices = Object.entries(status?.services || {})
-    .filter(([, service]) => ["failed", "stale", "stopped"].includes(service?.status))
-    .map(([name, service]) => `${name}:${service.status}`)
-    .slice(0, 8);
-  return failedServices.length ? `${summary}; services: ${failedServices.join(", ")}` : summary;
+function sameRuntimePath(left, right) {
+  if (!left || !right) {
+    return false;
+  }
+  const normalizedLeft = path.resolve(String(left));
+  const normalizedRight = path.resolve(String(right));
+  return isWindows
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
 }
 
 async function waitForRuntimeReady() {
@@ -399,11 +519,17 @@ async function waitForRuntimeReady() {
   while (Date.now() < deadline) {
     try {
       const status = await readStatus();
-      const phase = status.overallStatus === "ready" ? "Ready" : `Waiting (${status.overallStatus || "unknown"})`;
+      const belongsToDesktop = status.profile === "desktop" &&
+        sameRuntimePath(status.resourcesRoot, runtimeResourcesRoot);
+      if (status.overallStatus === "ready" && !belongsToDesktop) {
+        throw new Error(`A ${status.profile || "different"} LazyMind runtime is already running. Stop it before opening Desktop.`);
+      }
+      const ownedReady = status.overallStatus === "ready" && belongsToDesktop && status.ownerMatched;
+      const phase = ownedReady ? "Ready" : `Waiting (${status.overallStatus || "unknown"})`;
       updateStartupState({
-        status: status.overallStatus || "starting",
+        status: ownedReady ? "ready" : (status.overallStatus || "starting"),
         phase,
-        message: status.overallStatus === "ready"
+        message: ownedReady
           ? "Desktop runtime is ready."
           : "Starting local desktop runtime...",
       });
@@ -415,15 +541,21 @@ async function waitForRuntimeReady() {
           );
         }
       }
-      if (status.overallStatus === "ready" && status.config?.frontendPort) {
+      if (ownedReady && status.config?.frontendPort) {
+        startGuard();
         updateStartupState({ status: "ready", phase: "Ready", message: "Opening LazyMind..." });
         return status;
       }
-      if (["failed"].includes(status.overallStatus)) {
-        throw new Error(statusFailureMessage(status));
+      if (runtimeProcessExit && belongsToDesktop && !status.ownerMatched && status.overallStatus === "stopped" && ownerReleaseRetries < 1) {
+        ownerReleaseRetries += 1;
+        runtimeProcessExit = null;
+        appendStartupLog("desktop", "previous Desktop instance finished cleanup; retrying runtime startup");
+        startRuntime();
+        continue;
       }
-      if (runtimeProcessExit && ["stopped", "stale", "unknown", ""].includes(status.overallStatus || "")) {
-        throw new Error(statusFailureMessage(status));
+      const exitFailure = runtimeExitFailureMessage(status, belongsToDesktop, runtimeProcessExit);
+      if (exitFailure) {
+        throw new Error(exitFailure);
       }
     } catch (error) {
       if (Date.now() >= nextStatusErrorLogAt) {
@@ -682,6 +814,9 @@ async function createWindow() {
     minWidth: 1120,
     minHeight: 760,
     title: "LazyMind",
+    icon: isWindows
+      ? (isPackaged ? path.join(process.resourcesPath, "LazyMind.ico") : process.env.LAZYMIND_DESKTOP_WINDOWS_ICON)
+      : undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -765,13 +900,33 @@ ipcMain.handle("lazymind:exportDiagnostics", async () => {
   return out;
 });
 
-app.whenReady().then(createWindow);
-app.on("window-all-closed", () => {
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
   app.quit();
-});
-app.on("before-quit", (event) => {
-  if (!isQuitting) {
-    event.preventDefault();
-    beginFastQuit("app quit");
-  }
-});
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
+  });
+  app.whenReady().then(() => {
+    if (isWindows) {
+      app.setAppUserModelId("ai.lazymind.desktop");
+    }
+    return createWindow();
+  });
+  app.on("window-all-closed", () => {
+    app.quit();
+  });
+  app.on("before-quit", (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      beginFastQuit("app quit");
+    }
+  });
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -20,6 +22,10 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 	requirements := filepath.Join(repo, "algorithm", "requirements.txt")
 	if err := os.WriteFile(requirements, []byte("pymilvus==2.4.14\n"), 0o644); err != nil {
 		t.Fatalf("write requirements: %v", err)
+	}
+	localRequirements := filepath.Join(repo, "algorithm", "requirements-local.txt")
+	if err := os.WriteFile(localRequirements, []byte("pymilvus==3.0.0\nmilvus-lite==3.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write local requirements: %v", err)
 	}
 
 	runner := &fakeRunner{t: t}
@@ -61,11 +67,15 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, filepath.Join(paths.AlgorithmVenv, "bin", "lazyllm"), "install", "rag")
+			assertCommand(t, cmd, venvExecutable(paths.AlgorithmVenv, "lazyllm"), "install", "rag")
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
 			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "-r", requirements)
+			return CommandResult{}, nil
+		},
+		func(cmd Command) (CommandResult, error) {
+			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "-r", localRequirements)
 			return CommandResult{}, nil
 		},
 	)
@@ -73,7 +83,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 	if err := manager.preparePython(context.Background(), cfg, paths, false); err != nil {
 		t.Fatalf("prepare algorithm python: %v", err)
 	}
-	runner.assertCommandCount(7)
+	runner.assertCommandCount(8)
 }
 
 func TestEnsureLazyLLMSubmoduleInitializesMissingSubmodule(t *testing.T) {
@@ -136,4 +146,36 @@ func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "traces"))
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "subagent"))
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "evo"))
+}
+
+func TestAlgorithmServiceEnvUsesFileBackedRelayArgumentsOnWindowsDesktop(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific Desktop process policy")
+	}
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	cfg.Profile = "desktop"
+
+	env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+	assertEnvContains(t, env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
+}
+
+func TestAlgorithmServiceCommandArgsUsesWindowsDesktopBootstrap(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific Desktop process policy")
+	}
+	cfg := RuntimeConfig{Profile: "desktop"}
+	spec := AlgorithmServiceSpec{Module: []string{"-m", "lazymind.router.app", "--port", "8092"}}
+
+	args := algorithmServiceCommandArgs(cfg, spec)
+
+	want := []string{"-m", "lazymind.windows_runtime", "--", "-m", "lazymind.router.app", "--port", "8092"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("algorithm service args = %#v, want %#v", args, want)
+	}
 }

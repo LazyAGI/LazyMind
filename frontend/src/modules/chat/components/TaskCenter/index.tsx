@@ -368,7 +368,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
           className="task-card-collapse-btn"
           onClick={() => setCollapsed((v) => !v)}
           aria-expanded={!collapsed}
-          aria-label={collapsed ? "展开" : "收起"}
+          aria-label={collapsed ? t("common.expand") : t("common.collapse")}
         >
           {collapsed ? <RightOutlined /> : <DownOutlined />}
         </button>
@@ -398,7 +398,9 @@ function TaskCard({ task }: { task: SubAgentTask }) {
                 <span>{task.current_phase}</span>
               </Tooltip>
               {task.estimated_sec ? (
-                <span className="task-card-eta">~{task.estimated_sec}s</span>
+                <span className="task-card-eta">
+                  {t("taskCenter.estimatedSeconds", { seconds: task.estimated_sec })}
+                </span>
               ) : null}
             </div>
           )}
