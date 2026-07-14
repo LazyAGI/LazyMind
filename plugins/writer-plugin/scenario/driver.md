@@ -43,7 +43,7 @@ Two sources are available for each step:
 
 ### review_document
 - review_report and review_summary are both present AND review_summary indicates the review passed → PASS
-- Both artifacts present but review_summary indicates the review failed → recommend rewinding to plan_sections
+- Both artifacts present but review_summary indicates the review FAILED → recommend rewinding to plan_sections. Do not advance to finalize_report with a failed review.
 - Either missing → RETRY
 - 2 consecutive failures → FAIL
 

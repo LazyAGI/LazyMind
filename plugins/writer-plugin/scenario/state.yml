@@ -255,7 +255,7 @@ steps:
 
       This step reviews the effective draft for consistency and quality. The input bindings select revised_draft_document over draft_document and writing_context_after_revision over writing_context_after_draft. Retrieve the selected files using their actual material IDs, then call writer_check_consistency(draft_path=<selected draft path>, writing_context_path=<selected context path>). Save review_report and review_summary separately.
 
-      The content of review_summary decides next_step: if the review passes, advance to finalize_report to produce the final report; if it fails, rewind to plan_sections to replan the sections. The final message of this step must follow this format: "Since {{review_summary}}, recommend advancing the next step to {{next_step}}."
+      When review_summary indicates the review passed, advance to finalize_report. When it indicates the review failed, you must rewind to plan_sections and replan. Do not advance to finalize_report if the review failed. The final message must state the verdict and next step as "Review {{PASSED|FAILED}}. {{review_summary}}. Next step {{next_step}}."
 
       If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
     tools:

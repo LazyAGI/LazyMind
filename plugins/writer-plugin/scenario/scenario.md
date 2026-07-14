@@ -100,6 +100,10 @@ When the user or DriverAgent indicates the problem originates from a prior step,
 - Concrete writing content (section drafts, final report, etc.) is produced by the tools the subagent collaborates with; the main Agent does not need to re-state the body.
 - `generate_patch` / `apply_patch` require a draft to already exist. The revised result is stored as `revised_draft_document` and `writing_context_after_revision`; the original materials remain immutable. To revise again, rewind to the relevant decision or patch step.
 
+## Quality Gate
+
+- When `review_document` produces a review_summary that indicates failure, the only valid action is to rewind to `plan_sections` and replan. Do not advance to `finalize_report` with a failed review.
+
 ## Artifact Handoff
 
 - Each step's output is stored as a file path — the artifact carrier is a file path, not the file content itself.
