@@ -5925,11 +5925,11 @@ paths:
                 - skill-market
     /api/core/agent/candidates:
         get:
-            description: Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
+            description: Proxies Evo GET /candidates. When thread_id is provided, Core validates that the thread belongs to the current user before proxying.
             parameters:
                 - in: query
                   name: thread_id
-                  required: true
+                  required: false
                   schema:
                     type: string
                 - in: query
@@ -5960,7 +5960,7 @@ paths:
                 - agent
     /api/core/agent/candidates/{candidate_id:.*}:
         get:
-            description: Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.
+            description: Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix is known to Core.
             parameters:
                 - in: path
                   name: candidate_id:.*
