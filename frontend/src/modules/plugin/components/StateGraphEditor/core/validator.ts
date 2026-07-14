@@ -9,6 +9,10 @@ export interface ValidationError {
   nodeId?: string;
   /** edge source→target if applicable */
   edgeKey?: string;
+  /** material id if applicable */
+  materialId?: string;
+  /** structured diagnostic context returned by the authoritative validator */
+  details?: Record<string, unknown>;
   /** line number hint for YAML view (optional) */
   line?: number;
 }
@@ -68,6 +72,7 @@ export function validateStateGraph(model: GraphModel): ValidationError[] {
           code: 'LOCAL_UNKNOWN_MATERIAL',
           message: `节点 "${node.id}" 引用了未在 slots 中定义的素材 "${material}"`,
           nodeId: node.id,
+          materialId: material,
         });
       }
     }

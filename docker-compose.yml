@@ -679,6 +679,7 @@ services:
 
   chat:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
+    restart: unless-stopped
     build:
       network: host
       context: .
@@ -698,6 +699,7 @@ services:
       # Router mode: mount algorithm source so child processes can load different versions.
       - ./algorithm/lazymind:/opt/lazymind
       - ./plugins:/app/plugins:ro
+      - ./docs/plugin-format.md:/app/docs/plugin-format.md:ro
     healthcheck:
       test: ['CMD-SHELL', 'curl -sf http://localhost:8046/health || exit 1']
       interval: 10s

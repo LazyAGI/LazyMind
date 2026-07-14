@@ -46,6 +46,8 @@ type WrappedMcpListResponse = ListServersResponse & {
 
 export type ToolListOptions = {
   keyword?: string;
+  /** Suppress the global error toast for optional/background requests. */
+  silentError?: boolean;
 };
 
 export type ToolAssetListResult = {
@@ -205,7 +207,8 @@ export async function listToolAssetsPage(
 ): Promise<ToolAssetListResult> {
   const response = await axiosInstance.get(`${coreBasePath}/tools`, {
     params: buildListParams(options),
-  });
+    silentError: options.silentError,
+  } as never);
   const payload = unwrapResponsePayload(response.data as WrappedToolListResponse);
   const rawPayload = toRecord(payload);
   const rawResponse = toRecord(response.data);

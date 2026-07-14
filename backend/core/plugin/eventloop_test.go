@@ -201,7 +201,7 @@ func TestOnSubAgentDone_Interrupted_SetsWaiting(t *testing.T) {
 	}
 }
 
-func TestOnSubAgentDone_Failed_SetsSessionWaiting(t *testing.T) {
+func TestOnSubAgentDone_Failed_SetsSessionFailed(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 
@@ -224,15 +224,13 @@ func TestOnSubAgentDone_Failed_SetsSessionWaiting(t *testing.T) {
 
 	OnSubAgentDone(ctx, db.DB, nil, "task-3", subagent.StatusFailed, "step error", onSSE, pctx)
 
-	// Failed path: first plugin_error (frontend can show error detail on subtask card),
-	// then step_waiting (session is demoted to waiting, not failed).
-	if len(gotEvents) < 2 || gotEvents[0] != "plugin_error" || gotEvents[len(gotEvents)-1] != "step_waiting" {
-		t.Fatalf("expected [plugin_error ... step_waiting], got %v", gotEvents)
+	if len(gotEvents) != 1 || gotEvents[0] != "plugin_error" {
+		t.Fatalf("expected only plugin_error, got %v", gotEvents)
 	}
-	// Session must be waiting so the user can retry.
+	// Session failure is distinct from a successful approval checkpoint.
 	s, _ := GetSession(ctx, db.DB, "ps-3")
-	if s.Status != SessionStatusWaiting {
-		t.Fatalf("expected session waiting, got %s", s.Status)
+	if s.Status != SessionStatusFailed {
+		t.Fatalf("expected session failed, got %s", s.Status)
 	}
 }
 

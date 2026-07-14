@@ -13,7 +13,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import type { GraphModel } from './core/model';
-import { createEmptyModel } from './core/model';
+import { createEmptyModel, expressionMaterials, VIRTUAL_START } from './core/model';
 import { parseYaml } from './core/parser';
 import { serializeModel } from './core/serializer';
 import { validateStateGraph } from './core/validator';
@@ -109,6 +109,28 @@ function parseScriptFiles(raw: string): Record<string, string> {
   return {};
 }
 
+function validationTargetNode(error: ValidationError, model: GraphModel): string | null {
+  if (error.nodeId && (error.nodeId === VIRTUAL_START || model.nodes.some((node) => node.id === error.nodeId))) {
+    return error.nodeId;
+  }
+  if (error.edgeKey) {
+    const source = error.edgeKey.split('->')[0];
+    if (source === VIRTUAL_START || model.nodes.some((node) => node.id === source)) return source;
+  }
+  if (error.materialId) {
+    const related = model.nodes.find((node) => {
+      const materials = [
+        ...node.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])]),
+        ...node.outputs.map((output) => output.material),
+        ...expressionMaterials(node.skipIf),
+      ];
+      return materials.includes(error.materialId!);
+    });
+    return related?.id ?? null;
+  }
+  return null;
+}
+
 /**
  * Build the initial GraphModel from state.yml + plugin.yaml.
  * Slots are always sourced from plugin.yaml (the single persistent store for slot definitions).
@@ -179,9 +201,18 @@ export default function StateGraphEditor({
   const editorRootRef = useRef<HTMLDivElement>(null);
 
   // plugin.yaml model — must be initialized before GraphModel so we can back-fill slots.
-  const [pluginModel, setPluginModel] = useState<PluginModel>(() =>
-    initialPluginYaml ? (parsePluginYaml(initialPluginYaml) ?? createEmptyPluginModel()) : createEmptyPluginModel(),
-  );
+  const [pluginModel, setPluginModel] = useState<PluginModel>(() => {
+    const parsedPlugin = initialPluginYaml
+      ? (parsePluginYaml(initialPluginYaml) ?? createEmptyPluginModel())
+      : createEmptyPluginModel();
+    // state.yml is authoritative for the editable step list. Older/generated
+    // drafts can have a populated state machine but no plugin.yaml `steps`
+    // block; do not let the next auto-save serialize that omission back to disk.
+    const graph = initialStateYaml ? parseYaml(initialStateYaml) : null;
+    return graph
+      ? { ...parsedPlugin, steps: graph.nodes.map((node) => ({ id: node.id, label: node.label })) }
+      : parsedPlugin;
+  });
 
   // state.yml model — back-fill slots from plugin.yaml when state.yml has none (post-migration drafts).
   const modelRef = useRef<GraphModel>(initGraphModel(initialStateYaml, initialPluginYaml));
@@ -316,17 +347,25 @@ export default function StateGraphEditor({
     setModelState(nextModel);
     setErrors(validateStateGraph(nextModel));
 
-    // Keep pluginModel.slots in sync with graphModel.slots.
+    // Keep pluginModel step metadata and slots in sync with GraphModel.
+    // A node rename must update plugin.yaml in the same auto-save; otherwise
+    // the server correctly reports that the renamed state step is undeclared.
     // ArtifactPanel writes new slots only into GraphModel; syncing back here
     // ensures handlePluginModelChange never overwrites them with stale data.
-    if (nextModel.slots !== prev.slots) {
+    const stepsChanged = nextModel.nodes !== prev.nodes;
+    const slotsChanged = nextModel.slots !== prev.slots;
+    if (stepsChanged || slotsChanged) {
       const syncedSlots: import('./core/pluginModel').PluginSlotDef[] = Object.values(nextModel.slots).map((s) => ({
         id: s.id, type: s.type as import('./core/pluginModel').PluginSlotDef['type'],
         label: s.label, cardinality: s.cardinality, ordered: s.ordered,
         allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
         external: s.external,
       }));
-      const syncedPm = { ...pluginModelRef.current, slots: syncedSlots };
+      const syncedPm = {
+        ...pluginModelRef.current,
+        steps: nextModel.nodes.map((node) => ({ id: node.id, label: node.label })),
+        slots: syncedSlots,
+      };
       pluginModelRef.current = syncedPm;
       setPluginModel(syncedPm);
     }
@@ -446,9 +485,10 @@ export default function StateGraphEditor({
   }, [handlePluginModelChange, handleScenarioChange, doSave]);
 
   const handleAddNode = useCallback(() => { canvasRef.current?.addNode(); }, []);
-  const handleSelectNode = useCallback(() => {
+  const handleSelectNode = useCallback((nodeId: string) => {
     setViewMode('preview');
     setContentTab('statemachine');
+    requestAnimationFrame(() => canvasRef.current?.focusNode(nodeId));
   }, []);
 
   // Switch to code mode, initialize activeCodeFile from current tab
@@ -659,7 +699,11 @@ export default function StateGraphEditor({
                 />
               )}
             </div>
-            <ValidationPanel errors={displayErrors} onSelectNode={handleSelectNode} />
+            <ValidationPanel
+              errors={displayErrors}
+              getTargetNodeId={(error) => validationTargetNode(error, model)}
+              onSelectNode={handleSelectNode}
+            />
           </div>
         )}
 

@@ -7,10 +7,11 @@ import './index.scss';
 
 interface Props {
   errors: ValidationError[];
+  getTargetNodeId?: (error: ValidationError) => string | null;
   onSelectNode?: (nodeId: string) => void;
 }
 
-export default function ValidationPanel({ errors, onSelectNode }: Props) {
+export default function ValidationPanel({ errors, getTargetNodeId, onSelectNode }: Props) {
   const { t } = useTranslation();
   const grouped = useMemo(() => {
     const map = new Map<string, ValidationError[]>();
@@ -32,22 +33,33 @@ export default function ValidationPanel({ errors, onSelectNode }: Props) {
       </div>
       <ul className="validation-panel-list">
         {[...grouped.entries()].map(([groupKey, groupErrors]) =>
-          groupErrors.map((err) => (
-            <li key={`${groupKey}-${err.code}`} className="validation-panel-item">
+          groupErrors.map((err, index) => {
+            const targetNodeId = getTargetNodeId?.(err) ?? err.nodeId ?? null;
+            const message = t(`selfEvolutionRun.validationErrors.${err.code}`, {
+              defaultValue: err.message,
+              node: err.nodeId ?? '',
+              edge: err.edgeKey ?? '',
+              material: err.materialId ?? '',
+              producer: String(err.details?.producer_step_id ?? ''),
+            });
+            return (
+            <li key={`${groupKey}-${err.code}-${index}`} className="validation-panel-item">
               <CloseCircleOutlined className="validation-panel-item-icon" />
-              <Tooltip title={err.code}>
+              <Tooltip title={targetNodeId ? t('selfEvolutionRun.validationPanelLocateNode', { code: err.code }) : err.code}>
                 <button
                   type="button"
-                  className="validation-panel-item-text"
+                  className={`validation-panel-item-text${targetNodeId ? ' is-locatable' : ''}`}
+                  disabled={!targetNodeId}
                   onClick={() => {
-                    if (err.nodeId) onSelectNode?.(err.nodeId);
+                    if (targetNodeId) onSelectNode?.(targetNodeId);
                   }}
                 >
-                  {err.message}
+                  {message}
                 </button>
               </Tooltip>
             </li>
-          )),
+            );
+          }),
         )}
       </ul>
     </div>

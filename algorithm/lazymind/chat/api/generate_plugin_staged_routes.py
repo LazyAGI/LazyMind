@@ -76,10 +76,15 @@ _DESIGN_BRIEF_SYSTEM = (
     '  (type: text | image | file | json; cardinality: single | list)\n\n'
     '## Steps & Flow\n'
     '1. `step_id` — one-sentence responsibility\n'
-    '   - Inputs: slot_id1, slot_id2 (or "user input")\n'
+    '   - Inputs: slot_id1, slot_id2 (material inputs only; omit this line when none)\n'
     '   - Outputs: slot_id3\n'
     '   - Next: → next_step_id (optional natural-language when hint)\n\n'
     'Rules:\n'
+    '  - A slot is a durable material/artifact: either extra data the user must provide separately '
+    '(an uploaded file, reference image, form field, dataset, etc.) or an output produced by a prior step.\n'
+    '  - The user query, task description, intent, instructions, prompt text, and conversation context are NOT slots. '
+    'Never create pseudo-slots such as user_query, search_query, request, topic, task_description, or instructions '
+    'unless the product explicitly asks the user for that value as a separate editable/uploaded input.\n'
     '  - Every slot_id used in Steps must appear in the Slots section.\n'
     '  - Every non-external slot has exactly one producer; transformations create new slot IDs.\n'
     '  - Required inputs may use Boolean groups such as (A OR B) AND C.\n'
@@ -98,7 +103,13 @@ _SKELETON_SYSTEM = (
     '  - when_to_use — REQUIRED. Write in English. Use clear trigger conditions:\n'
     '    "ONLY call this tool when ... Do NOT trigger if ..."\n'
     '  - slots list (each slot: id, label, type, cardinality)\n'
-    '    Mark user/session-provided slots with external: true.\n'
+    '    Mark genuine extra user/session-provided MATERIALS with external: true.\n'
+    '    A material is either separately supplied data (file/image/form value/dataset) or a prior step output.\n'
+    '    Do NOT model the user query, task description, intent, instructions, prompt text, '
+    'or conversation context as slots.\n'
+    '    Never invent query-like slots '
+    '(user_query/search_query/request/topic/task_description/instructions) merely to pass '
+    'the original request into a step; step prompts already operate with the task/conversation context.\n'
     '  - steps list (each step: id, label) — list of step IDs only, NO execution details\n'
     '  - ui block — REQUIRED. Must contain:\n'
     '      tabs: list of tab objects. Each tab must have id, label, layout, and slots.\n'
@@ -135,6 +146,10 @@ _STATE_MACHINE_SYSTEM = (
     '  - steps (dict, each step needs prompt; optionally inputs/'
     'outputs/tools/route/skip_if)\n\n'
     'MATERIAL RULES:\n'
+    '  - Materials are durable artifacts only: genuine extra user-provided inputs or outputs of prior steps.\n'
+    '  - The user query, task description, intent, instructions, prompt text, and conversation '
+    'context are not materials '
+    'and must not appear in inputs, outputs, or skip_if.\n'
     '  - Inputs use one ordered list: [{material: id, required: true|false, alternatives?: [{material: id}]}].\n'
     '  - alternatives is allowed only for required inputs; never emit bind_as.\n'
     '  - Outputs use [{material: id}] and are always required. Each non-external material has one producer.\n'
@@ -474,6 +489,10 @@ _NODE_FIX_TEMPLATE = (
     '```python\n{__node_source__}\n```\n'
     'Error: {__error__}\n\n'
     'Rules:\n'
+    '- Slots are durable materials only: separately supplied user data or prior-step outputs. Never add a slot for '
+    'the user query, task description, intent, instructions, prompt text, or conversation context.\n'
+    '- If an existing query-like pseudo-slot has no real producer, remove its plugin.yaml slot definition and all '
+    'state.yml material references; do NOT "fix" it by marking it external.\n'
     '  Allowed HTTP library: httpx (not requests).\n'
     '  Allowed stdlib: json, re, math, base64, hashlib, urllib.parse, datetime, typing, httpx.\n'
     '  Forbidden: exec, eval, open, compile, getattr, setattr, __import__, globals, locals, vars,\n'
@@ -1620,9 +1639,21 @@ _REPAIR_SYSTEM = (
     'CRITICAL RULE — transitions.__start__ MUST always be present and non-empty.\n'
     'CRITICAL RULE — every step in plugin.yaml MUST have a transitions entry.\n'
     'CRITICAL RULE — every step in plugin.yaml MUST have a prompt in state.yml.\n\n'
-    'Return the COMPLETE FIXED state.yml as:\n'
-    '  {"state_yaml": "<complete corrected state.yml as YAML string>"}\n\n'
-    'Do NOT return a partial patch. Return the full state.yml.\n\n'
+    'MATERIAL SEMANTICS:\n'
+    '  - A material/slot is durable data: either an extra input explicitly supplied separately by the user '
+    '(file, image, form field, dataset, etc.) or an output of exactly one prior step.\n'
+    '  - The user query, task description, intent, instructions, prompt text, and conversation '
+    'context are NOT materials.\n'
+    '  - Never solve a missing-producer error by marking a query-like pseudo-material external. '
+    'Remove pseudo-slots such as '
+    'user_query, search_query, request, topic, task_description, or instructions from plugin.yaml and remove their '
+    'state.yml inputs/outputs/skip_if references. The original request remains available as task/conversation context.\n'
+    '  - Every remaining slot must be either external: true because it is genuinely requested as separate user data, '
+    'or produced by exactly one control-ancestor step.\n\n'
+    'Return BOTH complete files as:\n'
+    '  {"plugin_yaml": "<complete corrected plugin.yaml>", '
+    '"state_yaml": "<complete corrected state.yml>"}\n\n'
+    'Do NOT return a partial patch. Return both full YAML files.\n\n'
     '=== Plugin Format Specification ===\n'
     '{__spec__}\n'
     '=== End of Specification ===\n\n'
@@ -1869,6 +1900,19 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
         logger.error('[repair/statemachine] YAML parse error on fixed output: %s | yaml=%r', exc, fixed_yaml[:300])
         raise HTTPException(status_code=500, detail=f'Repair YAML parse error: {exc}') from exc
 
+    # State-machine repairs may need to remove pseudo-materials or correct a
+    # slot's real provenance, which cannot be expressed in state.yml alone.
+    repaired_plugin_yaml = ''
+    candidate_plugin_yaml = data.get('plugin_yaml', '')
+    if candidate_plugin_yaml:
+        try:
+            candidate_plugin_dict = yaml.safe_load(candidate_plugin_yaml) or {}
+            if isinstance(candidate_plugin_dict, dict):
+                plugin_dict = candidate_plugin_dict
+                repaired_plugin_yaml = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
+        except yaml.YAMLError as exc:
+            logger.warning('[repair/statemachine] ignoring invalid plugin_yaml from repair: %s', exc)
+
     # Sanitize: remove reserved keywords from steps
     reserved_keys = {'__start__', '__end__'}
     state_steps = fixed_dict.get('steps')
@@ -1884,8 +1928,6 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
     # Slot check before structural/PluginSpec retries: only used to update remaining.
     # The definitive slot repair runs after all retries (see below) so that structural
     # or PluginSpec retries cannot re-introduce slot errors undetected.
-    repaired_plugin_yaml = ''
-
     # Structural pre-check before PluginSpec: catch common LLM mistakes that produce
     # cryptic AttributeErrors inside PluginSpec (e.g. transitions generated as a list).
     fixed_yaml_out = yaml.dump(fixed_dict, allow_unicode=True, sort_keys=False)
@@ -1919,6 +1961,12 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
         raw2 = _call_llm(f'{system_prompt}\n\n{retry_prompt}')
         try:
             data2 = _extract_json(raw2)
+            candidate_plugin_yaml2 = data2.get('plugin_yaml', '')
+            if candidate_plugin_yaml2:
+                candidate_plugin_dict2 = yaml.safe_load(candidate_plugin_yaml2) or {}
+                if isinstance(candidate_plugin_dict2, dict):
+                    plugin_dict = candidate_plugin_dict2
+                    repaired_plugin_yaml = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
             fixed_yaml2 = data2.get('state_yaml', '')
             if fixed_yaml2:
                 fixed_dict2 = yaml.safe_load(fixed_yaml2) or {}
@@ -1958,6 +2006,13 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
         raw3 = _call_llm(f'{system_prompt}\n\n{retry_prompt}')
         try:
             data3 = _extract_json(raw3)
+            candidate_plugin_yaml3 = data3.get('plugin_yaml', '')
+            if candidate_plugin_yaml3:
+                candidate_plugin_dict3 = yaml.safe_load(candidate_plugin_yaml3) or {}
+                if isinstance(candidate_plugin_dict3, dict):
+                    plugin_dict = candidate_plugin_dict3
+                    repaired_plugin_yaml = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
+                    final_plugin_yaml_for_check = repaired_plugin_yaml
             fixed_yaml3 = data3.get('state_yaml', '')
             if fixed_yaml3:
                 fixed_dict3 = yaml.safe_load(fixed_yaml3) or {}

@@ -36,6 +36,7 @@ type transitionCommandRequest struct {
 	Filters              map[string]any      `json:"filters"`
 	LLMConfig            map[string]any      `json:"llm_config"`
 	ToolConfig           map[string]any      `json:"tool_config"`
+	ParentAgenticConfig  map[string]any      `json:"parent_agentic_config"`
 	PluginID             string              `json:"plugin_id"`
 	PluginRef            string              `json:"plugin_ref"`
 	PluginRevisionID     string              `json:"plugin_revision_id"`
@@ -288,7 +289,7 @@ func StartPluginSession(w http.ResponseWriter, r *http.Request) {
 		req.TaskID = uuid.NewString()
 	}
 	handOff := req.HandOff
-	params := PluginStepParams{PluginID: req.PluginID, PluginRef: req.PluginRef, RevisionID: req.PluginRevisionID, RevisionNo: req.PluginRevisionNo, TreeHash: req.PluginTreeHash, RemoteRoot: req.PluginRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, PluginMode: req.PluginMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs}
+	params := PluginStepParams{PluginID: req.PluginID, PluginRef: req.PluginRef, RevisionID: req.PluginRevisionID, RevisionNo: req.PluginRevisionNo, TreeHash: req.PluginTreeHash, RemoteRoot: req.PluginRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, PluginMode: req.PluginMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs}
 	nodeDef := graph.Nodes[req.TargetStepID]
 	inputKeys := graphengine.Materials(nodeDef.Input)
 	for _, optional := range nodeDef.OptionalInputs {
@@ -584,7 +585,7 @@ func TransitionPluginSession(w http.ResponseWriter, r *http.Request) {
 			for _, optional := range nodeDef.OptionalInputs {
 				inputKeys = append(inputKeys, optional.Material)
 			}
-			params := PluginStepParams{PluginID: session.PluginID, PluginRef: session.PluginRef, RevisionID: session.PluginRevisionID, RevisionNo: session.PluginRevisionNo, TreeHash: session.PluginTreeHash, RemoteRoot: session.PluginRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, PluginMode: req.PluginMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs}
+			params := PluginStepParams{PluginID: session.PluginID, PluginRef: session.PluginRef, RevisionID: session.PluginRevisionID, RevisionNo: session.PluginRevisionNo, TreeHash: session.PluginTreeHash, RemoteRoot: session.PluginRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, PluginMode: req.PluginMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs}
 			_, taskID, _, launchErr := launchPluginAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.PluginID+":"+target.TargetStepID, target.Objective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
 			if launchErr != nil {
 				return launchErr

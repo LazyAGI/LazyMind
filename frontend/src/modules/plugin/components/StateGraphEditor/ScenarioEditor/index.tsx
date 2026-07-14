@@ -38,13 +38,16 @@ export function parseScenario(markdown: string, steps: StepNode[]): ScenarioData
   const data: ScenarioData = { overview: '', stepDescriptions: {}, notes: '' };
   if (!markdown) return data;
 
+  let foundStructuredSection = false;
   const sections = markdown.split(/^##\s+/m).filter(Boolean);
   for (const section of sections) {
     const [header, ...bodyLines] = section.split('\n');
     const body = bodyLines.join('\n').trim();
     if (header.includes('场景描述')) {
+      foundStructuredSection = true;
       data.overview = body;
     } else if (header.includes('工作流程')) {
+      foundStructuredSection = true;
       const stepBlocks = body.split(/^###\s+/m).filter(Boolean);
       for (const block of stepBlocks) {
         const [stepHeader, ...stepBodyLines] = block.split('\n');
@@ -53,6 +56,7 @@ export function parseScenario(markdown: string, steps: StepNode[]): ScenarioData
         if (stepId) data.stepDescriptions[stepId] = stepBody === '（暂无描述）' ? '' : stepBody;
       }
     } else if (header.includes('注意事项')) {
+      foundStructuredSection = true;
       data.notes = body;
     }
   }
@@ -63,13 +67,11 @@ export function parseScenario(markdown: string, steps: StepNode[]): ScenarioData
     }
   }
 
-  // Fallback: if no structured sections were parsed (AI returned free-form markdown),
-  // put the entire content into overview so users can at least read it.
-  const hasStructuredContent =
-    data.overview !== '' ||
-    Object.values(data.stepDescriptions).some((v) => v !== '') ||
-    data.notes !== '';
-  if (!hasStructuredContent && markdown.trim()) {
+  // Fallback only when there were no recognized sections at all. A valid
+  // generated scenario whose fields are empty still has structured headings
+  // and placeholder descriptions; treating that document as free-form overview
+  // makes every subsequent serialization append another complete workflow.
+  if (!foundStructuredSection && markdown.trim()) {
     data.overview = markdown.trim();
   }
 

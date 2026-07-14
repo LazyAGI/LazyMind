@@ -696,6 +696,32 @@ def test_render_step_objective_empty_prompt():
     assert rendered == ''
 
 
+def test_export_parent_agentic_config_preserves_runtime_context_without_credentials():
+    from lazymind.chat.plugin.plugin_manager import _export_parent_agentic_config
+
+    exported = _export_parent_agentic_config({
+        'databases': [{'id': 'db-1'}],
+        'dataset': 'default',
+        'local_fs_sources': [{'path': '/tmp/source'}],
+        'priority': 3,
+        'memory': 'preference',
+        'llm_config': {'llm': {'api_key': 'secret'}},
+        'tool_config': {'search': {'api_key': 'secret'}},
+        'ocr_config': {'api_key': 'secret'},
+        'citation_state': object(),
+    })
+
+    assert exported['databases'] == [{'id': 'db-1'}]
+    assert exported['dataset'] == 'default'
+    assert exported['local_fs_sources'] == [{'path': '/tmp/source'}]
+    assert exported['priority'] == 3
+    assert exported['memory'] == 'preference'
+    assert 'llm_config' not in exported
+    assert 'tool_config' not in exported
+    assert 'ocr_config' not in exported
+    assert 'citation_state' not in exported
+
+
 def test_trigger_plugin_step_rejects_missing_step_config(mock_agentic_config):
     from lazymind.chat.plugin import plugin_manager
 

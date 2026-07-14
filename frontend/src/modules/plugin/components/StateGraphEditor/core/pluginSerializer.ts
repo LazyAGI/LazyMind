@@ -23,8 +23,14 @@ export function serializePluginModel(model: PluginModel, graphModel?: GraphModel
     }));
   }
 
-  if (model.steps.length > 0) {
-    doc.steps = model.steps.map((s) => ({ id: s.id, label: s.label }));
+  // state.yml / GraphModel is authoritative for the step list. This keeps
+  // plugin.yaml declarations correct for canvas renames and direct state.yml
+  // edits, even if PluginModel was initialized from an incomplete draft.
+  const stepsSource = graphModel
+    ? graphModel.nodes.map((node) => ({ id: node.id, label: node.label }))
+    : model.steps;
+  if (stepsSource.length > 0) {
+    doc.steps = stepsSource.map((s) => ({ id: s.id, label: s.label }));
   }
 
   // Slots come from GraphModel.slots when available; fall back to PluginModel.slots for

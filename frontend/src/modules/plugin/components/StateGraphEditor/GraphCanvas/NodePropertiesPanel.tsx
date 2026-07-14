@@ -27,6 +27,32 @@ const STEP_ID_REGEX = /^[a-zA-Z0-9_]+$/;
 
 // Module-level cache so the tool list is fetched once per session.
 let _cachedSystemTools: Array<{ label: string; name: string }> | null = null;
+let _systemToolsRequest: Promise<Array<{ label: string; name: string }>> | null = null;
+let _systemToolsRetryAfter = 0;
+const SYSTEM_TOOLS_RETRY_DELAY_MS = 30_000;
+
+function loadSystemTools(): Promise<Array<{ label: string; name: string }>> {
+  if (_cachedSystemTools) return Promise.resolve(_cachedSystemTools);
+  if (_systemToolsRequest) return _systemToolsRequest;
+  if (Date.now() < _systemToolsRetryAfter) return Promise.resolve([]);
+
+  _systemToolsRequest = listToolAssets({ silentError: true })
+    .then((tools) => {
+      _cachedSystemTools = tools.map((tool) => ({
+        label: tool.name || tool.id,
+        name: tool.id,
+      }));
+      return _cachedSystemTools;
+    })
+    .catch(() => {
+      _systemToolsRetryAfter = Date.now() + SYSTEM_TOOLS_RETRY_DELAY_MS;
+      return [];
+    })
+    .finally(() => {
+      _systemToolsRequest = null;
+    });
+  return _systemToolsRequest;
+}
 
 interface Props {
   node: StepNode;
@@ -99,15 +125,13 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
   const [systemTools, setSystemTools] = useState<Array<{ label: string; name: string }>>(_cachedSystemTools ?? []);
 
   useEffect(() => {
-    if (_cachedSystemTools) {
-      setSystemTools(_cachedSystemTools);
-      return;
-    }
-    listToolAssets().then((tools) => {
-      // StructuredAsset: id = tool name (API 'name' field), name = display label
-      _cachedSystemTools = tools.map((tool) => ({ label: tool.name || tool.id, name: tool.id }));
-      setSystemTools(_cachedSystemTools);
-    }).catch(() => {});
+    let active = true;
+    void loadSystemTools().then((tools) => {
+      if (active) setSystemTools(tools);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Keep draft in sync when node.id changes from outside (e.g. undo, external rename),

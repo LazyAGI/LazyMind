@@ -118,6 +118,8 @@ i18n:                                # 可选：国际化翻译，有就写，�
 | `ui.tabs[].slots[].id` | 条件 | 引用 slots 中的 id |
 | `i18n` | 否 | 国际化翻译，有就写，AI 自动生成时不产出此字段 |
 
+素材表示可持久化的数据或制品，只允许来自两类来源：用户在任务描述之外额外提供的输入（例如上传文件、参考图片、表单字段、数据集），或者某个前序步骤的产出。用户 query、任务描述、意图、指令、prompt 文本和对话上下文不是素材，不得为了向步骤传递原始请求而创建 `user_query`、`search_query`、`request`、`topic`、`task_description`、`instructions` 等伪素材；步骤可直接使用任务和对话上下文。只有确实要求用户单独填写或上传的数据才声明为 `external: true`。
+
 素材 ID 必须遵守单 producer：每个非 external 素材恰好由一个步骤产出，可以被任意多个后继步骤读取；同一步骤不能读取并重新产出同一个素材。多阶段加工必须使用不同 ID（如 `outline`、`revised_outline`）。素材 producer 必须是 consumer 的控制祖先，系统不会自动补控制边。
 
 ---

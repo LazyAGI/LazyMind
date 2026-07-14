@@ -47,6 +47,7 @@ const DEFAULT_SPACING_Y = 100;
 
 export interface CanvasHandle {
   addNode: () => void;
+  focusNode: (nodeId: string) => boolean;
 }
 
 interface Props {
@@ -198,7 +199,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
 
 function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, onScenarioChange, readonly = false }: Props, ref: React.Ref<CanvasHandle>) {
   const { t } = useTranslation();
-  const { screenToFlowPosition, zoomIn, zoomOut, getZoom } = useReactFlow();
+  const { screenToFlowPosition, zoomIn, zoomOut, getZoom, setCenter } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
   const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides } = useAlignmentGuides();
 
@@ -258,6 +259,11 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const resizeFrameRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (resizeFrameRef.current !== null) cancelAnimationFrame(resizeFrameRef.current);
+  }, []);
 
   // When a canvas-internal operation calls onModelChange, we set this flag so
   // the sync useEffect below knows NOT to re-derive nodes/edges from the model
@@ -511,24 +517,29 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   // Persist resize: update layout width when user finishes resizing a node.
   const handleNodeResizeEnd = useCallback(
     (nodeId: string, width: number) => {
-      const m = modelRef.current;
       const w = Math.max(NODE_MIN_WIDTH, width);
-      // Read current node position from the snapshot synchronously before setNodes.
-      // Do NOT call onModelChangeRef or mutate skipSyncRef inside the setNodes updater
-      // (updaters must be pure functions; side effects there are unsafe in concurrent React).
-      const rfNodes = allNodesFromStore;
-      const rfNode = rfNodes.find((n) => n.id === nodeId);
-      const pos = m.layout[nodeId] ?? rfNode?.position ?? { x: 0, y: 0 };
-      const newLayout = { ...m.layout, [nodeId]: { ...pos, width: w } };
-      skipSyncRef.current = true;
-      onModelChangeRef.current({ ...m, layout: newLayout });
+      if (resizeFrameRef.current !== null) {
+        cancelAnimationFrame(resizeFrameRef.current);
+        resizeFrameRef.current = null;
+      }
       setNodes((nds) =>
-        nds.map((n) =>
-          n.id === nodeId
-            ? { ...n, width: w, data: { ...n.data, nodeWidth: w } }
-            : n,
-        ),
+        nds.map((n) => {
+          if (n.id !== nodeId || (n.width === w && (n.data as { nodeWidth?: number }).nodeWidth === w)) return n;
+          return { ...n, width: w, data: { ...n.data, nodeWidth: w } };
+        }),
       );
+      // Persist on the next frame, after ReactFlow has committed the visual width.
+      // Updating the parent model and ReactFlow's controlled node store in the
+      // same resize event can make its internal dimension sync recurse (#185).
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        const m = modelRef.current;
+        const rfNode = allNodesFromStore.find((n) => n.id === nodeId);
+        const pos = m.layout[nodeId] ?? rfNode?.position ?? { x: 0, y: 0 };
+        const newLayout = { ...m.layout, [nodeId]: { ...pos, width: w } };
+        skipSyncRef.current = true;
+        onModelChangeRef.current({ ...m, layout: newLayout });
+      });
     },
     [setNodes, allNodesFromStore],
   );
@@ -539,13 +550,16 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   const handleNodeResizeDrag = useCallback(
     (nodeId: string, width: number) => {
       const w = Math.max(NODE_MIN_WIDTH, width);
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === nodeId
-            ? { ...n, width: w, data: { ...n.data, nodeWidth: w } }
-            : n,
-        ),
-      );
+      if (resizeFrameRef.current !== null) cancelAnimationFrame(resizeFrameRef.current);
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id !== nodeId || (n.width === w && (n.data as { nodeWidth?: number }).nodeWidth === w)) return n;
+            return { ...n, width: w, data: { ...n.data, nodeWidth: w } };
+          }),
+        );
+      });
     },
     [setNodes],
   );
@@ -655,7 +669,22 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     onModelChangeRef.current({ ...m, nodes: [...m.nodes, newNode], layout: newLayout });
   }, [screenToFlowPosition, setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom]);
 
-  useImperativeHandle(ref, () => ({ addNode: addNodeAtCenter }), [addNodeAtCenter]);
+  const focusNode = useCallback((nodeId: string): boolean => {
+    const node = allNodesFromStore.find((candidate) => candidate.id === nodeId);
+    if (!node) return false;
+    const width = node.width ?? (node.data as { nodeWidth?: number }).nodeWidth ?? NODE_WIDTH;
+    const height = node.height ?? NODE_HEIGHT;
+    setSelectedNodeId(nodeId);
+    setSelectedEdgeId(null);
+    void setCenter(
+      node.position.x + width / 2,
+      node.position.y + height / 2,
+      { zoom: Math.max(getZoom(), 1), duration: 350 },
+    );
+    return true;
+  }, [allNodesFromStore, getZoom, setCenter]);
+
+  useImperativeHandle(ref, () => ({ addNode: addNodeAtCenter, focusNode }), [addNodeAtCenter, focusNode]);
 
   // Add a new node on canvas double-click
   const onDoubleClick = useCallback(
@@ -758,45 +787,25 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         delete newLayout[currentSelectedNodeId];
       }
       onModelChangeRef.current({ ...m, nodes: remappedNodes, startTransitions: remappedStartTransitions, layout: newLayout });
+      if (scenarioData && onScenarioChange && currentSelectedNodeId) {
+        const stepDescriptions = { ...scenarioData.stepDescriptions };
+        stepDescriptions[remaId] = stepDescriptions[currentSelectedNodeId] ?? '';
+        delete stepDescriptions[currentSelectedNodeId];
+        onScenarioChange({ ...scenarioData, stepDescriptions });
+      }
       setSelectedNodeId(remaId);
     } else {
-      // Same id, only data changed. Set skipSyncRef so the model-sync useEffect
-      // does not run a full RF rebuild (which would cause a position flicker).
-      // Then defer the RF node/edge update to the next microtask so it runs
-      // outside the current React render batch — this prevents Minified React
-      // error #185 caused by two concurrent setState calls in the same batch.
+      // Same id, only data changed. Let the model-sync effect update ReactFlow.
+      // Writing the parent model and the controlled ReactFlow nodes/edges from
+      // the same input event creates two competing sources of truth. React 18
+      // also batches queueMicrotask updates, so deferring the second write does
+      // not isolate it and can make ReactFlow's controlled-store sync recurse
+      // until React raises error #185.
       const newModel = { ...m, nodes: updatedNodes };
-      skipSyncRef.current = true;
       onModelChangeRef.current(newModel);
-      queueMicrotask(() => {
-        const errMap = nodeErrorMapRef.current;
-        setNodes((nds) =>
-          nds.map((n) => {
-            if (n.id !== currentSelectedNodeId) return n;
-            const updatedOutputLabels: Record<string, string> = {};
-            for (const ref of normalised.outputs) {
-              const slot = newModel.slots[ref.material];
-              updatedOutputLabels[ref.material] = slot?.label ?? ref.material;
-            }
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                ...normalised,
-                inputs: normalised.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])]),
-                outputs: normalised.outputs.map((ref) => ref.material),
-                outputLabels: updatedOutputLabels,
-                hasError: (errMap.get(currentSelectedNodeId!) ?? []).length > 0,
-                errorMessages: errMap.get(currentSelectedNodeId!) ?? [],
-              },
-            };
-          }),
-        );
-        setEdges(modelToFlowEdges(newModel, errMap));
-      });
     }
     return true;
-  }, [selectedNodeId, setNodes, setEdges]);
+  }, [selectedNodeId, scenarioData, onScenarioChange]);
 
   const handleNodeDelete = (nodeId: string) => {
     const m = modelRef.current;

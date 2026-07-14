@@ -66,6 +66,7 @@ type PluginStepParams struct {
 	// SubAgent can access uploaded files via read_user_attachment / find_user_attachment.
 	// Key = conversation turn sequence (string), value = list of absolute file paths.
 	HistoryFilesPerTurn map[string][]string `json:"history_files_per_turn,omitempty"`
+	ParentAgenticConfig map[string]any      `json:"parent_agentic_config,omitempty"`
 
 	// Filters carries retrieval filters (e.g. kb_id) from the chat session into plugin steps.
 	Filters map[string]any `json:"filters,omitempty"`
@@ -335,6 +336,11 @@ func launchPluginAttempt(
 			fmt.Printf("[plugin] session status active conv=%s session=%s step=%s\n",
 				convID, sessionID, stepID)
 		}
+		// A retry/rewind reopens a failed plugin run. Reset TaskCenter even when its
+		// previous value was terminal so later success can be synchronized normally.
+		_ = db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+			Where("plugin_session_id = ?", sessionID).
+			Updates(map[string]any{"status": "running", "updated_at": time.Now().UTC()}).Error
 	}
 
 	// Inject artifacts from previous steps into objective, then append retry_hint if present.
@@ -432,6 +438,9 @@ func launchPluginAttempt(
 	if len(params.HistoryFilesPerTurn) > 0 {
 		runParams["history_files_per_turn"] = params.HistoryFilesPerTurn
 	}
+	if len(params.ParentAgenticConfig) > 0 {
+		runParams["parent_agentic_config"] = params.ParentAgenticConfig
+	}
 	runRequest := subagent.RunRequest{
 		TaskID: task.ID, AgentType: "plugin_step", WorkspacePath: task.WorkspacePath,
 		Params: runParams, DBDSN: subagent.DBDSN(), Resume: false,
@@ -526,6 +535,7 @@ func OnSubAgentDone(
 	pctx *PluginChatContext,
 ) {
 	_ = UpdateStepStatus(ctx, db, taskID, status)
+	stepFailed := status != subagent.StatusSucceeded && status != subagent.StatusInterrupted
 	sessionCompleted := false
 	if status == subagent.StatusSucceeded && pctx != nil && pctx.SessionID != "" {
 		if err := freezeRouteDecision(ctx, db, pctx.SessionID, pctx.StepID, taskID); err != nil {
@@ -538,16 +548,22 @@ func OnSubAgentDone(
 		}
 	}
 
-	if status != subagent.StatusSucceeded && status != subagent.StatusInterrupted {
+	if stepFailed {
 		// Non-succeeded, non-interrupted (i.e. truly failed) steps: notify the frontend
-		// so it can show an error detail on the subtask card, then fall through to the
-		// unified waiting logic below.
+		// and mark the session failed. Auto mode still asks DriverAgent to diagnose
+		// and recommend retry/rewind; dynamic mode leaves the failure for the user.
 		if pctx != nil {
 			onSSE("plugin_error", map[string]any{
 				"session_id": pctx.SessionID,
 				"step_id":    pctx.StepID,
 				"message":    summary,
 			})
+		}
+		if pctx != nil && pctx.SessionID != "" {
+			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed)
+			_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "failed")
+			clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
+			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
 		}
 	}
 
@@ -593,6 +609,12 @@ func OnSubAgentDone(
 	}
 	fmt.Printf("[plugin] sub_agent terminal conv=%s session=%s step=%s task=%s status=%s mode=%s summary_len=%d\n",
 		pctx.ConvID, pctx.SessionID, pctx.StepID, taskID, status, mode, len(summary))
+	if stepFailed {
+		if mode == "auto" {
+			go advanceAutoMode(context.Background(), db, stateStore, status, summary, onSSE, pctx)
+		}
+		return
+	}
 
 	handOff := true // legacy tasks only had the hand-off advancement tool by default
 	if pctx.HandOff != nil {
@@ -623,7 +645,7 @@ func OnSubAgentDone(
 		}
 		// Use a detached context: ctx originates from the SubAgent Run loop and is
 		// cancelled as soon as Run returns, before this goroutine loads LLM config.
-		go advanceAutoMode(context.Background(), db, stateStore, summary, onSSE, pctx)
+		go advanceAutoMode(context.Background(), db, stateStore, status, summary, onSSE, pctx)
 	} else {
 		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
 		onSSE("step_waiting", map[string]any{
@@ -667,6 +689,7 @@ func advanceAutoMode(
 	ctx context.Context,
 	db *gorm.DB,
 	stateStore state.Store,
+	terminalStatus string,
 	summary string,
 	onSSE func(string, map[string]any),
 	pctx *PluginChatContext,
@@ -677,7 +700,7 @@ func advanceAutoMode(
 	if step != nil {
 		attempt = step.Attempt
 	}
-	if attempt >= defaultDriverMaxRetries {
+	if terminalStatus == subagent.StatusSucceeded && attempt >= defaultDriverMaxRetries {
 		onSSE("max_retries_exceeded", map[string]any{
 			"session_id": pctx.SessionID,
 			"step_id":    pctx.StepID,
@@ -716,7 +739,8 @@ func advanceAutoMode(
 	// Build plugin artifacts summary for DriverAgent evaluation.
 	artifactsSummary, _ := buildPluginArtifactsSummary(ctx, db, pctx.SessionID, pctx.StepID)
 
-	driverMsg, fallback := callDriverAgent(pctx.PluginID, pctx.StepID, summary, pctx.SessionID,
+	driverInput := fmt.Sprintf("Terminal status: %s\nAttempt: %d\n%s", terminalStatus, attempt, summary)
+	driverMsg, fallback := callDriverAgent(pctx.PluginID, pctx.StepID, driverInput, pctx.SessionID,
 		pctx.HistoryFilesPerTurn, llmCfg, artifactsSummary)
 
 	if fallback {

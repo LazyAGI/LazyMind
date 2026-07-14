@@ -145,6 +145,7 @@ def _submit_transition_to_core(
         'filters': cfg.get('filters') or {},
         'llm_config': cfg.get('llm_config') or {},
         'tool_config': cfg.get('tool_config') or {},
+        'parent_agentic_config': _export_parent_agentic_config(cfg),
         'plugin_id': plugin_id,
         'plugin_ref': str(cfg.get('plugin_ref') or ''),
         'plugin_revision_id': str(cfg.get('revision_id') or ''),
@@ -373,7 +374,9 @@ def _export_parent_agentic_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """Return the JSON-safe request context a plugin SubAgent should inherit."""
     exported: Dict[str, Any] = {}
     for key, value in (config or {}).items():
-        if key == 'citation_state':
+        # Credentials/config blobs have dedicated top-level transport fields and
+        # must not be duplicated into the persisted SubAgent context.
+        if key in {'citation_state', 'llm_config', 'tool_config', 'ocr_config'}:
             continue
         try:
             json.dumps(value)

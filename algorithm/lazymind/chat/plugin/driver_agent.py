@@ -184,7 +184,11 @@ def evaluate_step(
     )
     if plugin_artifacts_summary:
         user_msg += f'Session artifacts produced so far:\n{plugin_artifacts_summary}\n\n'
-    user_msg += 'Describe whether the step result is complete and acceptable.'
+    user_msg += (
+        'If the terminal status is failed, diagnose the likely cause and recommend whether '
+        'the ChatAgent should retry this step or rewind to a named upstream step. Otherwise, '
+        'describe whether the step result is complete and acceptable.'
+    )
 
     if user_files:
         file_list = ', '.join(_os.path.basename(f) for f in user_files)

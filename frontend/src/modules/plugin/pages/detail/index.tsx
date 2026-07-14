@@ -399,6 +399,8 @@ export default function PluginDetailPage() {
       severity: item.severity,
       nodeId: item.node_id,
       edgeKey: item.edge_id,
+      materialId: item.material_id,
+      details: item.details as Record<string, unknown> | undefined,
     }));
     setHasAuthoritativeErrors(result.diagnostics.some((item) => item.severity === 'error'));
     return diagnostics;
