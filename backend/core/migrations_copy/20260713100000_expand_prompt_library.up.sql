@@ -18,4 +18,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_prompt_user_states_user_prompt
     ON prompt_user_states (create_user_id, prompt_id);
 
 DROP TABLE IF EXISTS default_prompts CASCADE;
-
