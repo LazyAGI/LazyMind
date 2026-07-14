@@ -44,6 +44,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	manager.SetOutput(c.out, c.errOut)
 
 	switch args[0] {
+	case "shell":
+		return runProcessComposeShell(ctx, args[1:], c.out, c.errOut)
 	case "up":
 		opts, err := parseCommonArgs("up", args[1:], c.errOut)
 		if err != nil {
@@ -288,12 +290,14 @@ func parseGuardArgs(args []string, out io.Writer) (int, RuntimeConfigOptions, er
 func addRuntimeFlags(fs *flag.FlagSet) func() RuntimeConfigOptions {
 	repoRoot := fs.String("repo-root", "", "")
 	profile := fs.String("profile", "", "")
+	ownerToken := fs.String("owner-token", "", "")
 	runtimeRoot := fs.String("runtime-root", "", "")
 	buildRoot := fs.String("build-root", "", "")
 	resourcesRoot := fs.String("resources-root", "", "")
 	return func() RuntimeConfigOptions {
 		return RuntimeConfigOptions{
 			Profile:       *profile,
+			OwnerToken:    *ownerToken,
 			RepoRoot:      *repoRoot,
 			RuntimeRoot:   *runtimeRoot,
 			BuildRoot:     *buildRoot,

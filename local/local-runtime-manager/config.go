@@ -15,6 +15,7 @@ const (
 	runtimeRootEnvVar                = "LAZYMIND_RUNTIME_ROOT"
 	localBuildRootEnvVar             = "LAZYMIND_LOCAL_BUILD_ROOT"
 	runtimeResourcesRootEnvVar       = "LAZYMIND_RUNTIME_RESOURCES_ROOT"
+	runtimeOwnerTokenEnvVar          = "LAZYMIND_RUNTIME_OWNER_TOKEN"
 	localPortsPinnedEnvVar           = "LAZYMIND_LOCAL_PORTS_PINNED"
 	processComposePortEnvVar         = "LAZYMIND_PROCESS_COMPOSE_PORT"
 	processComposeDownTimeoutEnvVar  = "LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT"
@@ -40,7 +41,8 @@ const (
 	localChatPortEnvVar              = "LAZYMIND_LOCAL_CHAT_PORT"
 	localEvoPortEnvVar               = "LAZYMIND_LOCAL_EVO_PORT"
 	localMilvusPortEnvVar            = "LAZYMIND_LOCAL_MILVUS_PORT"
-	localMilvusLiteDBPathEnvVar      = "LAZYMIND_LOCAL_MILVUS_DB_PATH"
+	localMilvusLiteDataDirEnvVar     = "LAZYMIND_LOCAL_MILVUS_DATA_DIR"
+	localMilvusLiteDBPathEnvVar      = "LAZYMIND_LOCAL_MILVUS_DB_PATH" // legacy; remove after the v3 transition
 	localOpenSearchPortEnvVar        = "LAZYMIND_LOCAL_OPENSEARCH_PORT"
 	localEnableEvoEnvVar             = "LAZYMIND_LOCAL_ENABLE_EVO"
 	routerPortPoolStartEnvVar        = "LAZYMIND_ROUTER_PORT_POOL_START"
@@ -202,6 +204,7 @@ type RuntimePaths struct {
 
 type RuntimeConfig struct {
 	Profile            string
+	OwnerToken         string
 	RepoRoot           string
 	BuildRoot          string
 	ResourcesRoot      string
@@ -220,6 +223,7 @@ type RuntimeConfig struct {
 
 type RuntimeConfigOptions struct {
 	Profile       string
+	OwnerToken    string
 	RepoRoot      string
 	RuntimeRoot   string
 	BuildRoot     string
@@ -711,7 +715,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		RunDirTokenFile:          filepath.Join(runtimeRoot, "run", tokenFileName),
 		UpLockFile:               filepath.Join(runtimeRoot, "run", upLockFileName),
 		LogFilePath:              filepath.Join(logsRoot, logFileName),
-		ProcessComposeBin:        filepath.Join(buildRoot, "bin", "process-compose"),
+		ProcessComposeBin:        executablePath(filepath.Join(buildRoot, "bin"), "process-compose"),
 		ProcessComposePIDFile:    filepath.Join(runtimeRoot, "run", "process-compose.pid"),
 		LocalProxyLog:            filepath.Join(logsRoot, localProxyLogFileName),
 		AuthServiceLog:           filepath.Join(logsRoot, authServiceLogFileName),
@@ -730,7 +734,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		AuthServiceDBPath:        filepath.Join(sqliteRoot, "auth", "authservice.db"),
 		CoreLog:                  filepath.Join(logsRoot, coreLogFileName),
 		CorePIDFile:              filepath.Join(runtimeRoot, "run", "core.pid"),
-		CoreBin:                  filepath.Join(buildRoot, "bin", "core"),
+		CoreBin:                  executablePath(filepath.Join(buildRoot, "bin"), "core"),
 		CoreStateDir:             filepath.Join(dataRoot, "stores", "sqlite", "core-state"),
 		CoreDBPath:               filepath.Join(sqliteRoot, "core", "core.db"),
 		LazyLLMDBPath:            filepath.Join(sqliteRoot, "lazyllm", "app.db"),
@@ -744,12 +748,12 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		ScanDBPath:               filepath.Join(sqliteRoot, "scan", "scan_control_plane.db"),
 		ScanControlPlaneLog:      filepath.Join(logsRoot, scanControlPlaneProcessName+".log"),
 		ScanControlPlanePIDFile:  filepath.Join(runtimeRoot, "run", scanControlPlaneProcessName+".pid"),
-		ScanControlPlaneBin:      filepath.Join(buildRoot, "bin", scanControlPlaneProcessName),
+		ScanControlPlaneBin:      executablePath(filepath.Join(buildRoot, "bin"), scanControlPlaneProcessName),
 		ScanControlPlaneStateDir: filepath.Join(dataRoot, "stores", "sqlite", "scan-state"),
 		ScanControlPlaneTempDir:  filepath.Join(runtimeRoot, "tmp", scanControlPlaneProcessName, "sourceengine"),
 		FileWatcherLog:           filepath.Join(logsRoot, fileWatcherProcessName+".log"),
 		FileWatcherPIDFile:       filepath.Join(runtimeRoot, "run", fileWatcherProcessName+".pid"),
-		FileWatcherBin:           filepath.Join(buildRoot, "bin", fileWatcherProcessName),
+		FileWatcherBin:           executablePath(filepath.Join(buildRoot, "bin"), fileWatcherProcessName),
 		FileWatcherBaseRoot:      defaultFileWatcherBaseRoot(runtimeRoot),
 		FrontendLog:              filepath.Join(logsRoot, frontendLogFileName),
 		FrontendPIDFile:          filepath.Join(runtimeRoot, "run", frontendProcessName+".pid"),
@@ -761,9 +765,9 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		EvoLog:                   filepath.Join(logsRoot, evoProcessName+".log"),
 		MilvusLiteLog:            filepath.Join(logsRoot, milvusLiteProcessName+".log"),
 		MilvusLitePIDFile:        filepath.Join(runtimeRoot, "run", milvusLiteProcessName+".pid"),
-		MilvusLiteDBPath:         filepath.Join(dataRoot, "stores", "milvus", "lazymind.db"),
-		LocalProxyBin:            filepath.Join(buildRoot, "bin", "local-proxy"),
-		CaddyBin:                 filepath.Join(buildRoot, "bin", "caddy"),
+		MilvusLiteDBPath:         filepath.Join(dataRoot, "stores", "milvus", "lazymind-v3"),
+		LocalProxyBin:            executablePath(filepath.Join(buildRoot, "bin"), "local-proxy"),
+		CaddyBin:                 executablePath(filepath.Join(buildRoot, "bin"), "caddy"),
 		LocalProxyConfig:         filepath.Join(root, localProxyConfigName),
 		LocalProxyStopScript:     filepath.Join(root, localProxyScriptDirName, "stop.sh"),
 		CaddyConfig:              filepath.Join(runtimeRoot, "generated", "Caddyfile"),
@@ -771,7 +775,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		ServiceEndpointsJSON:     filepath.Join(runtimeRoot, "generated", serviceEndpointsJSONName),
 		ServiceEndpointsEnv:      filepath.Join(runtimeRoot, "generated", serviceEndpointsEnvName),
 		AlgorithmVenv:            filepath.Join(depsRoot, "python", "algorithm"),
-		AlgorithmPython:          filepath.Join(depsRoot, "python", "algorithm", "bin", "python"),
+		AlgorithmPython:          venvExecutable(filepath.Join(depsRoot, "python", "algorithm"), "python"),
 		AlgorithmHome:            filepath.Join(dataRoot, "homes", "lazymind"),
 		FrontendNodeModules:      frontendNodeModules,
 		AlgorithmPIDDir:          filepath.Join(runtimeRoot, "run", "algorithm"),
@@ -835,9 +839,14 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		}
 	}
 	routerPoolEnd := envPort(routerPortPoolEndEnvVar, routerPoolStart+defaultRouterPortsPerInstance-1)
-	milvusLiteDBPath := filepath.Clean(envText(localMilvusLiteDBPathEnvVar, p.MilvusLiteDBPath))
+	milvusDataDir := strings.TrimSpace(os.Getenv(localMilvusLiteDataDirEnvVar))
+	if milvusDataDir == "" {
+		milvusDataDir = envText(localMilvusLiteDBPathEnvVar, p.MilvusLiteDBPath)
+	}
+	milvusLiteDBPath := filepath.Clean(milvusDataDir)
 	return RuntimeConfig{
 		Profile:            profile,
+		OwnerToken:         strings.TrimSpace(firstNonEmpty(opts.OwnerToken, os.Getenv(runtimeOwnerTokenEnvVar))),
 		RepoRoot:           p.RepoRoot,
 		BuildRoot:          p.BuildRoot,
 		ResourcesRoot:      p.ResourcesRoot,
@@ -932,9 +941,27 @@ func applyDesktopManifestPaths(paths *RuntimePaths) error {
 	}
 	if value := joinResource(manifest.Paths.AlgorithmVenv); value != "" {
 		paths.AlgorithmVenv = value
-		paths.AlgorithmPython = filepath.Join(value, "bin", "python")
+		paths.AlgorithmPython = venvExecutable(value, "python")
 	}
 	return nil
+}
+
+func executableName(name string) string {
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		return name + ".exe"
+	}
+	return name
+}
+
+func executablePath(dir, name string) string {
+	return filepath.Join(dir, executableName(name))
+}
+
+func venvExecutable(venv, name string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(venv, "Scripts", executableName(name))
+	}
+	return filepath.Join(venv, "bin", name)
 }
 
 func normalizeRuntimeProfile(profile string) (string, error) {
@@ -1065,7 +1092,7 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		p.FileWatcherBaseRoot,
 		p.AlgorithmHome,
 		p.AlgorithmPIDDir,
-		filepath.Dir(p.MilvusLiteDBPath),
+		p.MilvusLiteDBPath,
 	}
 	if !p.buildRootIsBundledResources() {
 		dirs = append(dirs,

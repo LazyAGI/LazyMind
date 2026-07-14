@@ -48,8 +48,10 @@ RUN pip install --no-cache-dir lazyllm && lazyllm install rag; \
 
 # Copy only the dependency manifest so this layer is invalidated only when
 # requirements change, not when LazyMind source code changes.
-COPY algorithm/requirements.txt /app/algorithm/requirements.txt
-RUN pip install --no-cache-dir -r algorithm/requirements.txt
+COPY algorithm/requirements.txt algorithm/requirements-cloud.txt /app/algorithm/
+RUN pip install --no-cache-dir \
+        -r algorithm/requirements.txt \
+        -r algorithm/requirements-cloud.txt
 
 # Pre-warm tiktoken encoding cache so the worker never needs to fetch it at
 # runtime (openaipublic.blob.core.windows.net may be unreachable in air-gapped

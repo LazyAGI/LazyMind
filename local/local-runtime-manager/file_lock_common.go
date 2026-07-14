@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 func withFileLock(path string, fn func() error) error {
@@ -15,9 +14,9 @@ func withFileLock(path string, fn func() error) error {
 		return err
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFile(f); err != nil {
 		return err
 	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = unlockFile(f) }()
 	return fn()
 }

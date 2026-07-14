@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -38,7 +39,7 @@ func (m *FrontendManager) Run(ctx context.Context, cfg RuntimeConfig, paths Runt
 			return err
 		}
 		install := Command{
-			Name: "pnpm",
+			Name: pnpmCommand(),
 			Args: append([]string{"install", "--frozen-lockfile", "--prefer-offline", "--reporter", "append-only"}, pnpmLocalCacheArgs(paths)...),
 			Dir:  frontendDir,
 			Env:  pnpmLocalCacheEnv(paths),
@@ -53,7 +54,7 @@ func (m *FrontendManager) Run(ctx context.Context, cfg RuntimeConfig, paths Runt
 		}
 
 		build := Command{
-			Name: "pnpm",
+			Name: pnpmCommand(),
 			Args: []string{"build"},
 			Dir:  frontendDir,
 			Env:  append(pnpmLocalCacheEnv(paths), frontendBuildEnv()...),
@@ -122,7 +123,7 @@ func (m *FrontendManager) Down(ctx context.Context, cfg RuntimeConfig, paths Run
 		return err
 	}
 	if readPIDFileQuiet(paths.FrontendPIDFile) > 0 {
-		return stopPIDFileProcess(ctx, paths.FrontendPIDFile)
+		return stopPIDFileProcess(ctx, paths, frontendProcessName, paths.FrontendPIDFile)
 	}
 
 	records := discoverLocalRuntimeProcesses(paths, cfg, scanLocalRuntimeProcesses)
@@ -175,7 +176,7 @@ func prepareFrontendNodeModules(paths RuntimePaths, frontendDir string) error {
 	if err := os.MkdirAll(runtimeNodeModules, 0o755); err != nil {
 		return fmt.Errorf("create frontend runtime node_modules: %w", err)
 	}
-	if target, ok := symlinkTarget(nodeModules); ok {
+	if target, ok := directoryLinkTarget(nodeModules); ok {
 		if filepath.Clean(target) == filepath.Clean(runtimeNodeModules) {
 			if ready, _, err := frontendNodeModulesReady(paths, frontendDir); err != nil {
 				return err
@@ -209,25 +210,20 @@ func prepareFrontendNodeModules(paths RuntimePaths, frontendDir string) error {
 	} else if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("inspect frontend node_modules: %w", err)
 	}
-	if err := os.Symlink(runtimeNodeModules, nodeModules); err != nil {
+	if err := createDirectoryLink(runtimeNodeModules, nodeModules); err != nil {
 		return fmt.Errorf("link frontend node_modules to local build root: %w", err)
 	}
 	return nil
 }
 
-func symlinkTarget(path string) (string, bool) {
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink == 0 {
-		return "", false
+func pnpmCommand() string {
+	if explicit := strings.TrimSpace(os.Getenv("PNPM")); explicit != "" {
+		return explicit
 	}
-	target, err := os.Readlink(path)
-	if err != nil {
-		return "", false
+	if runtime.GOOS == "windows" {
+		return "pnpm.cmd"
 	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(path), target)
-	}
-	return target, true
+	return "pnpm"
 }
 
 func frontendRuntimeNodeModules(paths RuntimePaths) string {
@@ -256,7 +252,7 @@ func frontendNodeModulesReady(paths RuntimePaths, frontendDir string) (bool, str
 		return false, "pnpm virtualStoreDir does not point at frontend runtime node_modules", nil
 	}
 	for _, required := range []string{
-		filepath.Join(nodeModules, ".bin", "vite"),
+		frontendToolPath(nodeModules, "vite"),
 		filepath.Join(nodeModules, "vite", "bin", "vite.js"),
 	} {
 		if _, err := os.Stat(required); err != nil {
@@ -267,6 +263,13 @@ func frontendNodeModulesReady(paths RuntimePaths, frontendDir string) (bool, str
 		}
 	}
 	return true, "", nil
+}
+
+func frontendToolPath(nodeModules, name string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(nodeModules, ".bin", name+".cmd")
+	}
+	return filepath.Join(nodeModules, ".bin", name)
 }
 
 func relativePathOrEmpty(base string, target string) string {
