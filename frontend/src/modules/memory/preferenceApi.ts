@@ -1073,32 +1073,34 @@ export interface PersonalResourceRevisionRecord {
   createdAt: string;
   createdBy: string;
   parentRevisionId: string;
+  isHead: boolean;
 }
 
 const normalizePersonalResourceRevision = (
   item: RawObject,
 ): PersonalResourceRevisionRecord => {
   const nested =
-    item.revisionSummary && typeof item.revisionSummary === "object"
+    item.revisionSummary && typeof item.revisionSummary === 'object'
       ? (item.revisionSummary as RawObject)
-      : item.revision_summary && typeof item.revision_summary === "object"
+      : item.revision_summary && typeof item.revision_summary === 'object'
         ? (item.revision_summary as RawObject)
         : null;
   const source = nested || item;
   const revisionId = toStringValue(
     source.revision_id,
-    toStringValue(source.id, ""),
+    toStringValue(source.id, ''),
   );
 
   return {
     id: toStringValue(source.id, revisionId),
     revisionId,
     revisionNo: toNumberValue(source.revision_no, 0),
-    changeSource: toStringValue(source.change_source, ""),
-    message: toStringValue(source.message, ""),
-    createdAt: toStringValue(source.created_at, ""),
-    createdBy: toStringValue(source.created_by, ""),
-    parentRevisionId: toStringValue(source.parent_revision_id, ""),
+    changeSource: toStringValue(source.change_source, ''),
+    message: toStringValue(source.message, ''),
+    createdAt: toStringValue(source.created_at, ''),
+    createdBy: toStringValue(source.created_by, ''),
+    parentRevisionId: toStringValue(source.parent_revision_id, ''),
+    isHead: Boolean(source.is_head),
   };
 };
 
@@ -1128,6 +1130,14 @@ export async function getPersonalResourceRevision(
   };
 }
 
+export class RollbackConflictError extends Error {
+  readonly isConflict = true;
+  constructor(message = 'rollback conflict: uncommitted draft exists') {
+    super(message);
+    this.name = 'RollbackConflictError';
+  }
+}
+
 export async function rollbackPersonalResource(
   resourceType: PersonalResourceApiType,
   options: {
@@ -1149,7 +1159,13 @@ export async function rollbackPersonalResource(
   const response = await axiosInstance.post(
     `${coreBasePath}/personal-resource/${resourceType}:rollback`,
     requestPayload,
-  );
+  ).catch((err: unknown) => {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 409) {
+      throw new RollbackConflictError();
+    }
+    throw err;
+  });
   const payload = unwrapEnvelope<RawObject>(response.data);
   return {
     revisionId: toStringValue(payload?.revision_id, ""),

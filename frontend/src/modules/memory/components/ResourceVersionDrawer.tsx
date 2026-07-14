@@ -17,15 +17,17 @@ import {
   getPersonalResourceRevision,
   listPersonalResourceRevisions,
   rollbackPersonalResource,
+  RollbackConflictError as PersonalRollbackConflictError,
   type PersonalResourceApiType,
   type PersonalResourceRevisionRecord,
-} from "../preferenceApi";
+} from '../preferenceApi';
 import {
   getSkillRevisionFile,
   listSkillRevisions,
   rollbackSkill,
+  RollbackConflictError as SkillRollbackConflictError,
   type SkillRevisionRecord,
-} from "../skillApi";
+} from '../skillApi';
 import {
   buildDiffLinesWithInline,
   buildUnifiedDiffLines,
@@ -378,17 +380,24 @@ export default function ResourceVersionDrawer({
           if (ignore) {
             return;
           }
-          const nextRevisions = items.map((item, index) => ({
+          const nextRevisions = items.map((item) => ({
             revisionId: item.revisionId,
             revisionNo: item.revisionNo,
             changeSource: item.changeSource,
             createdAt: item.createdAt,
-            isHead: index === 0,
+            isHead: item.isHead,
           }));
           setSkillRevisionCache(items);
           setPersonalRevisionCache([]);
           setRevisions(nextRevisions);
-          setSelectedRevisionId((current) => current || nextRevisions[0]?.revisionId || "");
+          setSelectedRevisionId((current) => {
+            if (current) {
+              const stillExists = nextRevisions.some((r) => r.revisionId === current);
+              if (stillExists) return current;
+            }
+            const headRevision = nextRevisions.find((r) => r.isHead);
+            return headRevision?.revisionId || nextRevisions[0]?.revisionId || '';
+          });
           return;
         }
 
@@ -396,17 +405,24 @@ export default function ResourceVersionDrawer({
         if (ignore) {
           return;
         }
-        const nextRevisions = items.map((item, index) => ({
+        const nextRevisions = items.map((item) => ({
           revisionId: item.revisionId,
           revisionNo: item.revisionNo,
           changeSource: item.changeSource,
           createdAt: item.createdAt,
-          isHead: index === 0,
+          isHead: item.isHead,
         }));
         setPersonalRevisionCache(items);
         setSkillRevisionCache([]);
         setRevisions(nextRevisions);
-        setSelectedRevisionId((current) => current || nextRevisions[0]?.revisionId || "");
+        setSelectedRevisionId((current) => {
+          if (current) {
+            const stillExists = nextRevisions.some((r) => r.revisionId === current);
+            if (stillExists) return current;
+          }
+          const headRevision = nextRevisions.find((r) => r.isHead);
+          return headRevision?.revisionId || nextRevisions[0]?.revisionId || '';
+        });
       } catch (error) {
         if (ignore) {
           return;
@@ -520,35 +536,41 @@ export default function ResourceVersionDrawer({
     }
 
     Modal.confirm({
-      title: t("admin.memoryVersionRollbackConfirmTitle"),
-      content: t("admin.memoryVersionRollbackConfirmContent", {
+      title: t('admin.memoryVersionRollbackConfirmTitle'),
+      content: t('admin.memoryVersionRollbackConfirmContent', {
         version: `r${selectedRevision.revisionNo}`,
         name: resourceName || resourceId,
       }),
-      okText: t("admin.memoryVersionRollbackButton"),
-      cancelText: t("common.cancel"),
+      okText: t('admin.memoryVersionRollbackButton'),
+      cancelText: t('common.cancel'),
       onOk: async () => {
         setRollingBack(true);
         try {
           if (isSkillResource) {
             await rollbackSkill(resourceId, selectedRevision.revisionId);
           } else {
-            const headRevisionId = revisions[0]?.revisionId || "";
+            const headRevision = revisions.find((item) => item.isHead);
             await rollbackPersonalResource(personalResourceType, {
               revisionId: selectedRevision.revisionId,
-              expectedHeadRevisionId: headRevisionId || undefined,
+              expectedHeadRevisionId: headRevision?.revisionId || undefined,
               message: `rollback to r${selectedRevision.revisionNo}`,
             });
           }
-          message.success(t("admin.memoryVersionRollbackSuccess"));
-          setSelectedRevisionId("");
+          message.success(t('admin.memoryVersionRollbackSuccess'));
           setReloadKey((value) => value + 1);
           await onRolledBack?.();
         } catch (error) {
-          console.error("Rollback resource version failed:", error);
+          const isConflict =
+            error instanceof SkillRollbackConflictError ||
+            error instanceof PersonalRollbackConflictError;
+          if (isConflict) {
+            message.warning(t('admin.memoryVersionRollbackConflict'));
+            return;
+          }
+          console.error('Rollback resource version failed:', error);
           message.error(
-            getLocalizedErrorMessage(error, t("admin.memoryVersionRollbackFailed")) ||
-              t("admin.memoryVersionRollbackFailed"),
+            getLocalizedErrorMessage(error, t('admin.memoryVersionRollbackFailed')) ||
+              t('admin.memoryVersionRollbackFailed'),
           );
           throw error;
         } finally {

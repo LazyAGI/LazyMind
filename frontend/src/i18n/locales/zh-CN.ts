@@ -2654,6 +2654,7 @@ const zhCN = {
       "将“{{name}}”回滚到 {{version}}。系统会基于该版本创建新的当前版本，此操作可再次回滚。",
     memoryVersionRollbackSuccess: "已回滚到所选版本",
     memoryVersionRollbackFailed: "回滚失败，请稍后重试",
+    memoryVersionRollbackConflict: "存在未提交的草稿，请先提交或丢弃草稿后再执行回滚。",
     memoryVersionChangeSourceMetadataUpdate: "元数据修改",
     memoryVersionTabMetadata: "元数据",
     memoryDiffReviewAction: "审阅变更",

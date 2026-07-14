@@ -2777,6 +2777,7 @@ const enUS = {
       "Roll \"{{name}}\" back to {{version}}. A new current version will be created from it. You can roll back again later.",
     memoryVersionRollbackSuccess: "Rolled back to the selected version",
     memoryVersionRollbackFailed: "Rollback failed. Please try again.",
+    memoryVersionRollbackConflict: "There is an uncommitted draft. Please commit or discard the draft before rolling back.",
     memoryVersionChangeSourceMetadataUpdate: "Metadata Updated",
     memoryVersionTabMetadata: "Metadata",
     memoryDiffReviewAction: "Review Diff",

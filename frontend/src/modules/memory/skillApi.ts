@@ -250,6 +250,7 @@ export interface SkillRevisionRecord {
   createdBy: string;
   parentRevisionId: string;
   treeHash: string;
+  isHead: boolean;
 }
 
 export interface SkillDraftStatusRecord {
@@ -583,6 +584,7 @@ const normalizeRevision = (item: SkillRevisionOpenAPIResponse): SkillRevisionRec
   createdBy: item.created_by || "",
   parentRevisionId: item.parent_revision_id || "",
   treeHash: item.tree_hash || "",
+  isHead: Boolean(item.is_head),
 });
 
 const normalizeTreeNode = (node: SkillTreeNodeOpenAPIResponse): SkillTreeNodeRecord => ({
@@ -1220,6 +1222,14 @@ export async function getSkillRevisionFile(
   return payload.content || "";
 }
 
+export class RollbackConflictError extends Error {
+  readonly isConflict = true;
+  constructor(message = 'rollback conflict: uncommitted draft exists') {
+    super(message);
+    this.name = 'RollbackConflictError';
+  }
+}
+
 export async function rollbackSkill(
   skillId: string,
   targetRevisionId: string,
@@ -1230,13 +1240,19 @@ export async function rollbackSkill(
       revision_id: targetRevisionId,
       target_revision_id: targetRevisionId,
     },
+  }).catch((err: unknown) => {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 409) {
+      throw new RollbackConflictError();
+    }
+    throw err;
   });
   const payload = unwrapEnvelope<{
     head_revision_id?: string;
     revision_no?: number;
   }>(response.data);
   return {
-    headRevisionId: payload.head_revision_id || "",
+    headRevisionId: payload.head_revision_id || '',
     revisionNo: payload.revision_no ?? 0,
   };
 }
@@ -1244,14 +1260,14 @@ export async function rollbackSkill(
 const readRawString = (value: Record<string, unknown>, keys: string[]): string => {
   for (const key of keys) {
     const field = value[key];
-    if (typeof field === "string" && field.trim()) {
+    if (typeof field === 'string' && field.trim()) {
       return field.trim();
     }
-    if (typeof field === "number" && Number.isFinite(field)) {
+    if (typeof field === 'number' && Number.isFinite(field)) {
       return String(field);
     }
   }
-  return "";
+  return '';
 };
 
 const readRawBoolean = (value: Record<string, unknown>, keys: string[]) => {
