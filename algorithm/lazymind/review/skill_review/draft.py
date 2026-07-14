@@ -40,6 +40,7 @@ _SKILL_EXTRACTION_GATE_SCHEMA = {
     'required': ['should_extract', 'reason'],
 }
 
+
 def build_skill_drafts(
     trajectories: list[Trajectory],
     llm: AutoModel,
@@ -74,9 +75,10 @@ def build_skill_drafts(
         write_json_file(artifact_dir / STAGE_FILES[STAGE_DRAFT], drafts)
 
     metadata = _draft_report_metadata(jobs, results, errors)
+    input_count = metadata['trajectory']['input_count']
     LOG.info(
-        f"[SkillReview] built {len(drafts)} skill drafts from {metadata['trajectory']['input_count']} trajectories; "
-        f"errors={len(errors)}"
+        f'[SkillReview] built {len(drafts)} skill drafts from {input_count} trajectories; '
+        f'errors={len(errors)}'
     )
     report = finish_stage_report(
         STAGE_DRAFT,

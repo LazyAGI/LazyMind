@@ -52,6 +52,7 @@ _OUTLINE_RESPONSE_SCHEMA: dict[str, Any] = {
     'required': ['skill_name', 'applicable_scenario', 'sop'],
 }
 
+
 def build_skill_outline(cluster: TaskCluster, llm) -> SkillOutline | None:
     refined_trajectories = [
         draft.refined_trajectory.model_dump()

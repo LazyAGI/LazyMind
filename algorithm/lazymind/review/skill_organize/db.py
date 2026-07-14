@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
@@ -17,6 +18,7 @@ _DB_URL_ENV = 'LAZYMIND_DATABASE_URL'
 _CORE_DB_URL_ENV = 'LAZYMIND_CORE_DATABASE_URL'
 _DB_ENV_HINT = f'{_CORE_DB_URL_ENV} or {_DB_URL_ENV}'
 _engine_cache: dict[str, Engine] = {}
+_engine_cache_lock = threading.Lock()
 
 
 def insert_skill_organize_result(
@@ -83,9 +85,13 @@ def _get_core_db_url() -> Optional[str]:
 def _get_engine(url: str) -> Engine:
     engine_url = normalize_postgres_sqlalchemy_url(url)
     engine = _engine_cache.get(engine_url)
-    if engine is None:
-        engine = create_engine(engine_url, future=True, pool_pre_ping=True)
-        _engine_cache[engine_url] = engine
+    if engine is not None:
+        return engine
+    with _engine_cache_lock:
+        engine = _engine_cache.get(engine_url)
+        if engine is None:
+            engine = create_engine(engine_url, future=True, pool_pre_ping=True)
+            _engine_cache[engine_url] = engine
     return engine
 
 

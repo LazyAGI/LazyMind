@@ -559,8 +559,19 @@ def _apply_skill_review_record(record: SkillReviewResolution, store: SkillRemote
             and _skill_package_exists(store, new_category, new_name)
         ):
             raise ValueError(f'cannot rename skill {old_name!r} to existing skill {new_category}/{new_name}')
-        remove_result = store.remove(old_category, old_name)
-        create_result = store.create(new_category, new_name, record.skill_content)
+        if (new_category, new_name) == (old_category, old_name):
+            before = store.list_files(old_category, old_name)
+            after = dict(before)
+            after['SKILL.md'] = record.skill_content
+            replace_result = store.replace_files(old_category, old_name, before, after)
+            store_result = {'replace': replace_result}
+        else:
+            create_result = store.create(new_category, new_name, record.skill_content)
+            remove_result = store.remove(old_category, old_name)
+            store_result = {
+                'create': create_result,
+                'remove': remove_result,
+            }
         return {
             'id': record.id,
             'type': record.type,
@@ -568,10 +579,7 @@ def _apply_skill_review_record(record: SkillReviewResolution, store: SkillRemote
             'old_category': old_category,
             'name': new_name,
             'category': new_category,
-            'store_result': {
-                'remove': remove_result,
-                'create': create_result,
-            },
+            'store_result': store_result,
         }
 
     raise ValueError(f'unsupported skill review resolution type {record.type!r}')
