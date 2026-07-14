@@ -28,7 +28,7 @@ def insert_skill_organize_result(
 ) -> int:
     summary = json.dumps(_jsonable_value(organize_result), ensure_ascii=False)
     status = str(organize_result.get('status') or 'completed').strip()
-    if status not in {'running', 'completed', 'skipped', 'failed'}:
+    if not status:
         status = 'completed'
     with _get_app_conn().begin() as conn:
         conn.execute(

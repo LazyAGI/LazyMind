@@ -18,13 +18,6 @@ _STEP_HEADING_HINTS = {
     '步骤',
     '流程',
 }
-_SCENARIO_HEADING_HINTS = {
-    'applicable scenario',
-    'applicable scenarios',
-    'scenario',
-    'when to use',
-    '适用场景',
-}
 
 
 def parse_skill_summaries(skills: Iterable[SourceSkill]) -> list[SkillSummary]:
@@ -37,14 +30,11 @@ def parse_skill_summary(skill: SourceSkill) -> SkillSummary:
     name = str(frontmatter.get('name') or skill.name).strip()
     category = str(frontmatter.get('category') or skill.category).strip()
     description = str(frontmatter.get('description') or '').strip()
-    applicable_scenario = _extract_section_text(body, _SCENARIO_HEADING_HINTS)
     core_steps = _extract_core_steps(body)
     return SkillSummary(
         name=name,
-        path=skill.path,
         category=category,
         description=description,
-        applicable_scenario=applicable_scenario,
         core_steps=core_steps,
     )
 

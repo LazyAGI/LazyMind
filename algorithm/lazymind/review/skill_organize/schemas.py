@@ -20,9 +20,14 @@ class SkillOrganizeRequest(BaseModel):
     def validate_payload(self) -> 'SkillOrganizeRequest':
         self.requestid = self.requestid.strip()
         self.user_id = self.user_id.strip()
-        self.skills = [str(item).strip() for item in self.skills if str(item).strip()]
-        if not self.skills:
-            raise ValueError("'skills' must contain at least one skill name or path.")
+        raw_skills = [str(item).strip() for item in self.skills if str(item).strip()]
+        if not raw_skills:
+            raise ValueError("'skills' must contain at least one skill key in category/name format.")
+        normalized_skills = [_normalize_category_name_key(item) for item in raw_skills]
+        invalid_skills = [item for item, normalized in zip(raw_skills, normalized_skills) if normalized is None]
+        if invalid_skills:
+            raise ValueError(f"'skills' entries must use category/name format: {invalid_skills}")
+        self.skills = [item for item in normalized_skills if item is not None]
         if len(set(self.skills)) != len(self.skills):
             raise ValueError("'skills' must not contain duplicate entries.")
         return self
@@ -30,29 +35,23 @@ class SkillOrganizeRequest(BaseModel):
 
 class SourceSkill(BaseModel):
     name: str
-    path: str
     category: str = ''
     content: str
 
 
 class SkillSummary(BaseModel):
     name: str
-    path: str
     category: str = ''
     description: str = ''
-    applicable_scenario: str = ''
     core_steps: List[str] = Field(default_factory=list)
 
 
 class SkillPlan(BaseModel):
     type: Literal['keep', 'refactor', 'merge', 'delete_duplicate']
     source_names: List[str] = Field(default_factory=list)
-    source_paths: List[str] = Field(default_factory=list)
     target_name: str = ''
-    target_path: str = ''
     target_category: str = ''
     target_description: str = ''
-    target_applicable_scenario: str = ''
     step_handling_policy: Literal[
         'keep_steps',
         'minimally_adjust_steps',
@@ -67,7 +66,8 @@ class SkillOrganizePlan(BaseModel):
 
 
 class SkillFsDraftItem(BaseModel):
-    path: str
+    name: str
+    category: str = ''
     content: str
 
 
@@ -76,7 +76,7 @@ class MaterializedSkillContent(BaseModel):
 
 
 class SkillFsDraft(BaseModel):
-    delete_paths: List[str] = Field(default_factory=list)
+    delete_names: List[str] = Field(default_factory=list)
     upsert_skills: List[SkillFsDraftItem] = Field(default_factory=list)
 
 
@@ -87,3 +87,10 @@ class SkillOrganizeResult(BaseModel):
     inserted_count: int = 0
     artifact_dir: str = ''
     error: Optional[str] = None
+
+
+def _normalize_category_name_key(value: str) -> Optional[str]:
+    parts = [part.strip() for part in value.split('/')]
+    if len(parts) != 2 or not all(parts):
+        return None
+    return f'{parts[0]}/{parts[1]}'

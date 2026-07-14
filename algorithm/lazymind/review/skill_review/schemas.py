@@ -16,7 +16,6 @@ class SkillReviewRequest(BaseModel):
     min_user_turns: int = Field(default=2, ge=0)
     min_tool_turns: int = Field(default=5, ge=0)
     artifact_dir: Optional[str] = None
-    pending_skill_ids: List[str] = Field(default_factory=list)
     model_configs: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
@@ -130,7 +129,7 @@ class SkillReviewResolution(BaseModel):
 
 class UserSkillReviewResult(BaseModel):
     user_id: str
-    status: Literal['completed', 'skipped', 'failed', 'running']
+    status: Literal['completed', 'skipped', 'failed']
     qualified: bool
     session_count: int = 0
     qualified_session_count: int = 0
@@ -142,6 +141,7 @@ class UserSkillReviewResult(BaseModel):
 class SkillReviewBatchResult(BaseModel):
     success: bool
     inserted_count: int = 0
+    taskid: str = ''
     error: Optional[str] = None
 
 
@@ -149,7 +149,20 @@ class SkillReviewRunStat(BaseModel):
     id: str = Field(..., min_length=1)
     requestid: str = ''
     userid: str = ''
-    status: Literal['completed', 'skipped', 'failed', 'running']
+    status: Literal[
+        'pending',
+        'completed',
+        'skipped',
+        'failed',
+        'review_draft',
+        'review_cluster',
+        'review_miner',
+        'review_solution',
+        'review_apply',
+        'organize_plan',
+        'organize_draft',
+        'organize_apply',
+    ]
     started_at: str
     duration_ms: int = 0
     summary: Dict[str, Any] = Field(default_factory=dict)
