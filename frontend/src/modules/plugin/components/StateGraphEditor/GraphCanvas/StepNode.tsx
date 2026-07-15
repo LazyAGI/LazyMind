@@ -6,7 +6,8 @@ import { RobotOutlined, UserOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ValidationError } from '../core/validator';
 import { formatExpression, isHiddenId } from '../core/model';
-import type { MaterialExpression } from '../core/model';
+import type { MaterialExpression, NodeLayout } from '../core/model';
+import { NODE_MIN_HEIGHT } from '../core/layout';
 
 export const NODE_MIN_WIDTH = 90;  // 148 * ~0.6
 export const NODE_DEFAULT_WIDTH = 148;
@@ -29,10 +30,12 @@ export interface StepNodeData extends Record<string, unknown> {
   outputLabels: Record<string, string>;
   /** Persisted node width in canvas pixels */
   nodeWidth: number;
+  nodeHeight?: number;
+  visual: NodeLayout;
   /** Callback to persist width when user finishes resizing */
-  onResizeEnd: (nodeId: string, width: number) => void;
+  onResizeEnd: (nodeId: string, width: number, height?: number) => void;
   /** Callback for live width updates during drag (before mouseup) */
-  onResizeDrag: (nodeId: string, width: number) => void;
+  onResizeDrag: (nodeId: string, width: number, height?: number) => { width: number; height?: number };
   /** Returns current canvas zoom level for screen→canvas coordinate conversion */
   getZoom: () => number;
 }
@@ -106,7 +109,7 @@ function StepNodeComponent({ data, selected }: NodeProps) {
   const { t } = useTranslation();
   const nodeData = data as unknown as StepNodeData;
   const { hasError, errorMessages, mode, label, id, route, skipIf, legacySkipIf, transitions,
-          outputs, outputLabels, nodeWidth, onResizeEnd, onResizeDrag, getZoom } = nodeData;
+          outputs, outputLabels, nodeWidth, nodeHeight, visual, onResizeEnd, onResizeDrag, getZoom } = nodeData;
 
   const isChoice = route === 'choice';
   const isParallel = (route === 'all' || !route) && transitions.length > 1;
@@ -129,24 +132,28 @@ function StepNodeComponent({ data, selected }: NodeProps) {
   const dragStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const handleResizeMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+    (axis: 'x' | 'y' | 'xy') => (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
       const zoom = getZoom();
+      const startY=e.clientY; const startHeight=nodeHeight ?? bodyRef.current?.getBoundingClientRect().height! / zoom;
       dragStateRef.current = { startX: e.clientX, startWidth: nodeWidth };
 
       const onMouseMove = (moveEvent: MouseEvent) => {
         if (!dragStateRef.current) return;
         const dx = (moveEvent.clientX - dragStateRef.current.startX) / zoom;
         const newWidth = Math.max(NODE_MIN_WIDTH, Math.round(dragStateRef.current.startWidth + dx));
-        onResizeDrag(id, newWidth);
+        const newHeight=Math.max(NODE_MIN_HEIGHT,Math.round(startHeight+(moveEvent.clientY-startY)/zoom));
+        onResizeDrag(id, axis === 'y' ? nodeWidth : newWidth, axis === 'x' ? undefined : newHeight);
       };
 
       const onMouseUp = (upEvent: MouseEvent) => {
         if (!dragStateRef.current) return;
         const dx = (upEvent.clientX - dragStateRef.current.startX) / zoom;
         const newWidth = Math.max(NODE_MIN_WIDTH, Math.round(dragStateRef.current.startWidth + dx));
-        onResizeEnd(id, newWidth);
+        const newHeight=Math.max(NODE_MIN_HEIGHT,Math.round(startHeight+(upEvent.clientY-startY)/zoom));
+        const snapped=onResizeDrag(id,axis==='y'?nodeWidth:newWidth,axis==='x'?undefined:newHeight);
+        onResizeEnd(id, snapped.width, snapped.height);
         dragStateRef.current = null;
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
@@ -155,8 +162,16 @@ function StepNodeComponent({ data, selected }: NodeProps) {
       document.addEventListener('mousemove', onMouseMove);
       document.addEventListener('mouseup', onMouseUp);
     },
-    [id, nodeWidth, onResizeDrag, onResizeEnd, getZoom],
+    [id, nodeWidth, nodeHeight, onResizeDrag, onResizeEnd, getZoom],
   );
+
+  const safeVisual=visual??{x:0,y:0};
+  const visibility=safeVisual.visible??{};
+  const fill=safeVisual.fill;
+  const background = fill?.type === 'none' ? 'transparent' : fill?.type === 'solid'
+    ? `${fill.color ?? '#ffffff'}${Math.round((fill.opacity ?? 1)*255).toString(16).padStart(2,'0')}`
+    : fill?.type === 'linear-gradient' ? `linear-gradient(${fill.angle ?? 90}deg, ${(fill.stops??[]).map(s=>`${s.color}${Math.round(s.opacity*255).toString(16).padStart(2,'0')} ${s.offset*100}%`).join(', ')})` : undefined;
+  const border=safeVisual.border;
 
   return (
     <Tooltip
@@ -172,6 +187,7 @@ function StepNodeComponent({ data, selected }: NodeProps) {
           isSkippable ? 'is-skippable' : '',
         ].filter(Boolean).join(' ')}
         aria-label={t('selfEvolutionRun.stepNodeAriaLabel', { label: String(label) })}
+        style={{ height: nodeHeight, background, borderStyle:border?.style==='none'?'none':border?.style, borderWidth:border?.width, borderColor:border?.color, borderRadius:border?.radius, overflow:nodeHeight?'hidden':undefined }}
       >
         <Handle
           type="target"
@@ -181,32 +197,32 @@ function StepNodeComponent({ data, selected }: NodeProps) {
         />
 
         <div className="step-node-header">
-          <span className="step-node-id">{isHiddenId(id) ? '' : String(id)}</span>
+          {visibility.stepId !== false && <span className="step-node-id">{isHiddenId(id) ? '' : String(id)}</span>}
           <div className="step-node-badges">
-            {isChoice && (
+            {isChoice && visibility.conditionalRoute !== false && (
               <Tooltip title={t('selfEvolutionRun.stepNodeChoiceTooltip')}>
                 <span className="step-node-badge step-node-badge--choice" aria-label={t('selfEvolutionRun.stepNodeChoiceTooltip')}>◇</span>
               </Tooltip>
             )}
-            {isParallel && (
+            {isParallel && visibility.parallelRoute !== false && (
               <Tooltip title={t('selfEvolutionRun.stepNodeParallelTooltip')}>
                 <span className="step-node-badge step-node-badge--parallel" aria-label={t('selfEvolutionRun.stepNodeParallelTooltip')}>⑂</span>
               </Tooltip>
             )}
-            {isSkippable && (
+            {isSkippable && visibility.skippable !== false && (
               <Tooltip title={t('selfEvolutionRun.stepNodeSkippableTooltip', { skipif: skipSummary })}>
                 <span className="step-node-badge step-node-badge--skip" aria-label={t('selfEvolutionRun.stepNodeSkippableTooltip', { skipif: skipSummary })}>↷</span>
               </Tooltip>
             )}
-            <Tag
+            {visibility.approval !== false && <Tag
               className="step-node-mode-tag"
               icon={mode === 'auto' ? <RobotOutlined /> : <UserOutlined />}
               color={mode === 'auto' ? 'blue' : 'orange'}
-            />
+            />}
           </div>
         </div>
-        <div className="step-node-label">{String(label)}</div>
-        <OutputChips outputs={outputs} outputLabels={outputLabels} containerWidth={innerWidth} />
+        {visibility.label !== false && <div className="step-node-label">{String(label)}</div>}
+        {visibility.outputs !== false && <OutputChips outputs={outputs} outputLabels={outputLabels} containerWidth={innerWidth} />}
 
         <Handle type="source" position={Position.Right} className="step-node-handle" />
 
@@ -214,9 +230,11 @@ function StepNodeComponent({ data, selected }: NodeProps) {
             Uses noDragClassName so ReactFlow does not treat mousedown here as a node drag. */}
         <div
           className="step-node-resize-handle nodrag"
-          onMouseDown={handleResizeMouseDown}
+          onMouseDown={handleResizeMouseDown('x')}
           aria-hidden="true"
         />
+        <div className="step-node-resize-handle step-node-resize-handle--bottom nodrag" onMouseDown={handleResizeMouseDown('y')} aria-hidden="true" />
+        <div className="step-node-resize-handle step-node-resize-handle--corner nodrag" onMouseDown={handleResizeMouseDown('xy')} aria-hidden="true" />
       </div>
     </Tooltip>
   );
@@ -227,11 +245,13 @@ export const StepNodeRenderer = memo(StepNodeComponent);
 // Virtual terminal node: __start__ or __end__ — rendered as a card (not a dot)
 export function TerminalNode({ data }: NodeProps) {
   const { t } = useTranslation();
-  const nodeData = data as unknown as { type: 'start' | 'end' };
+  const nodeData = data as unknown as { type: 'start' | 'end'; visual?: NodeLayout };
   const isStart = nodeData.type === 'start';
   const label = isStart ? t('selfEvolutionRun.stepNodeStart') : t('selfEvolutionRun.stepNodeEnd');
+  const fill=nodeData.visual?.fill; const border=nodeData.visual?.border;
+  const background=fill?.type==='none'?'transparent':fill?.type==='solid'?fill.color:fill?.type==='linear-gradient'?`linear-gradient(${fill.angle??90}deg, ${(fill.stops??[]).map(s=>`${s.color} ${s.offset*100}%`).join(',')})`:undefined;
   return (
-    <div className={`terminal-node terminal-node--${nodeData.type}`} aria-label={label}>
+    <div className={`terminal-node terminal-node--${nodeData.type}`} aria-label={label} style={{width:'100%',height:nodeData.visual?.height,background,borderStyle:border?.style==='none'?'none':border?.style,borderWidth:border?.width,borderColor:border?.color,borderRadius:border?.radius}}>
       {!isStart && <Handle type="target" position={Position.Left} className="step-node-handle" />}
       <span className="terminal-node-label">{label}</span>
       {isStart && <Handle type="source" position={Position.Right} className="step-node-handle" />}

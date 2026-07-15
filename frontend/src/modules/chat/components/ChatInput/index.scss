@@ -123,6 +123,7 @@
   }
 
   .input-container {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -417,11 +418,15 @@
     }
 
     .prompt-suggestion-panel {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      left: 0;
+      z-index: 10;
       overflow: hidden;
       display: grid;
       grid-template-columns: 1fr;
       gap: 4px;
-      margin-top: 8px;
       border: 0;
       border-radius: 14px;
       padding: 6px;

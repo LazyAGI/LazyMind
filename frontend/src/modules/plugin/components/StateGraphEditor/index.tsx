@@ -16,6 +16,7 @@ import type { GraphModel } from './core/model';
 import { createEmptyModel, expressionMaterials, VIRTUAL_START } from './core/model';
 import { parseYaml } from './core/parser';
 import { serializeModel } from './core/serializer';
+import { serializeLayout } from './core/layout';
 import { validateStateGraph } from './core/validator';
 import type { ValidationError } from './core/validator';
 import { parsePluginYaml } from './core/pluginParser';
@@ -38,6 +39,12 @@ type ContentTab = 'statemachine' | 'ui' | 'scenario';
 // view mode: preview, code, or brief (AI design brief)
 type ViewMode = 'preview' | 'code' | 'brief';
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
+
+export interface SkillConversionReport {
+  coverage: unknown;
+  toolMappings: unknown;
+  scripts: unknown;
+}
 
 // code file derived from tab
 type CodeFile = 'plugin.yaml' | 'state.yml' | 'scenario.md' | string;
@@ -94,11 +101,10 @@ interface Props {
    * `validationErrors` carries the current graph validation errors (only for 'statemachine' target).
    */
   onRepair?: (target: RepairTarget, validationErrors?: ValidationError[]) => void;
-  /**
-   * When provided, a "草稿" button appears in the view-mode capsule.
-   * Clicking it shows the design brief content rendered as pre-formatted text.
-   */
+  /** Design draft used as reference while converting a Skill into a Plugin. */
   designBriefContent?: string;
+  /** Analysis produced by Skill-to-Plugin conversion. */
+  skillConversionReport?: SkillConversionReport;
 }
 
 function parseScriptFiles(raw: string): Record<string, string> {
@@ -172,6 +178,7 @@ export default function StateGraphEditor({
   onRepair,
   onArtifactsChange,
   designBriefContent,
+  skillConversionReport,
 }: Props) {
   const { t } = useTranslation();
   const [contentTab, setContentTab] = useState<ContentTab>('statemachine');
@@ -180,6 +187,7 @@ export default function StateGraphEditor({
   const [activeCodeFile, setActiveCodeFile] = useState<CodeFile>('state.yml');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [showArtifacts, setShowArtifacts] = useState(defaultShowArtifacts);
+  const [artifactAddRequest, setArtifactAddRequest] = useState(0);
   const toggleArtifacts = useCallback(() => {
     setShowArtifacts((v) => {
       const next = !v;
@@ -275,7 +283,7 @@ export default function StateGraphEditor({
     pluginYaml: serializePluginModel(pm, m),
     scenarioContent: serializeScenario(m.nodes, sd),
     scriptsContent: sc,
-    stateLayoutContent: JSON.stringify(m.layout),
+    stateLayoutContent: serializeLayout(m),
   }), []);
 
   const doSave = useCallback(async (m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string) => {
@@ -391,6 +399,7 @@ export default function StateGraphEditor({
         const mergedModel: GraphModel = {
           ...parsed,
           layout: { ...parsed.layout, ...modelRef.current.layout },
+          edgeLayout: { ...parsed.edgeLayout, ...modelRef.current.edgeLayout },
           // parseYaml always returns slots:{} — slot definitions live in plugin.yaml.
           // Preserve the current slots so editing state.yml never wipes them.
           slots: modelRef.current.slots,
@@ -535,7 +544,7 @@ export default function StateGraphEditor({
     if (file === 'plugin.yaml') return pluginYamlForCode;
     if (file === 'state.yml') return stateYamlForCode;
     if (file === 'scenario.md') return scenarioMdForCode;
-    if (file === 'layout.json') return JSON.stringify(model.layout, null, 2);
+    if (file === 'layout.json') return JSON.stringify(JSON.parse(serializeLayout(model)), null, 2);
     return scriptFiles[file] ?? '';
   };
 
@@ -608,7 +617,7 @@ export default function StateGraphEditor({
             >
               {t('selfEvolutionRun.sgeViewCode')}
             </button>
-            {designBriefContent && (
+            {(designBriefContent || skillConversionReport) && (
               <button
                 className={`sge-seg-btn${viewMode === 'brief' ? ' sge-seg-btn--active' : ''}`}
                 onClick={() => setViewMode('brief')}
@@ -676,6 +685,7 @@ export default function StateGraphEditor({
                 onScenarioChange={readonly ? undefined : handleScenarioChange}
                 canvasRef={canvasRef}
                 readonly={readonly}
+                onCreateArtifact={() => { setShowArtifacts(true); setArtifactAddRequest((value) => value + 1); }}
               />
               {model.nodes.length === 0 && showEmptyHint && (
                 <div className="sge-empty-state" aria-hidden="true">
@@ -696,6 +706,7 @@ export default function StateGraphEditor({
                   onClose={() => closeArtifacts()}
                   onModelChange={readonly ? () => {} : updateModelFromUpdater}
                   readonly={readonly}
+                  startAddingToken={artifactAddRequest}
                 />
               )}
             </div>
@@ -777,7 +788,7 @@ export default function StateGraphEditor({
             {/* Right: editor */}
             <div className="sge-code-editor">
               <YamlEditor
-                key={activeCodeFile === 'layout.json' ? `layout.json-${JSON.stringify(model.layout)}` : activeCodeFile}
+                key={activeCodeFile === 'layout.json' ? `layout.json-${serializeLayout(model)}` : activeCodeFile}
                 value={getCodeFileContent(activeCodeFile)}
                 onChange={(text) => {
                   if (readonly) return;
@@ -806,9 +817,35 @@ export default function StateGraphEditor({
           </div>
         )}
 
-        {viewMode === 'brief' && designBriefContent && (
+        {viewMode === 'brief' && (designBriefContent || skillConversionReport) && (
           <div className="sge-brief-preview">
-            <pre className="sge-brief-content">{designBriefContent}</pre>
+            {designBriefContent && (
+              <section className="sge-log-section">
+                <h2>{t('selfEvolutionRun.sgeConversionDraftTitle')}</h2>
+                <p className="sge-log-description">{t('selfEvolutionRun.sgeConversionDraftDescription')}</p>
+                <pre className="sge-brief-content">{designBriefContent}</pre>
+              </section>
+            )}
+            {skillConversionReport && (
+              <section className="sge-log-section">
+                <h2>{t('selfEvolutionRun.sgeConversionReportTitle')}</h2>
+                <p className="sge-log-description">{t('selfEvolutionRun.sgeConversionReportDescription')}</p>
+                <div className="sge-log-report-grid">
+                  <div>
+                    <h3>{t('selfEvolutionRun.pluginCoverageReport')}</h3>
+                    <pre className="sge-brief-content">{JSON.stringify(skillConversionReport.coverage, null, 2)}</pre>
+                  </div>
+                  <div>
+                    <h3>{t('selfEvolutionRun.pluginToolMappingReport')}</h3>
+                    <pre className="sge-brief-content">{JSON.stringify(skillConversionReport.toolMappings, null, 2)}</pre>
+                  </div>
+                  <div>
+                    <h3>{t('selfEvolutionRun.pluginScriptReport')}</h3>
+                    <pre className="sge-brief-content">{JSON.stringify(skillConversionReport.scripts, null, 2)}</pre>
+                  </div>
+                </div>
+              </section>
+            )}
           </div>
         )}
       </div>

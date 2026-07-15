@@ -78,6 +78,43 @@ export interface NodeLayout {
   y: number;
   /** Optional persisted width; defaults to NODE_WIDTH when absent. */
   width?: number;
+  /** Optional fixed height. Missing means content-driven auto height. */
+  height?: number;
+  visible?: NodeVisibility;
+  fill?: NodeFill;
+  border?: NodeBorder;
+}
+
+export interface NodeVisibility {
+  stepId?: boolean;
+  label?: boolean;
+  outputs?: boolean;
+  approval?: boolean;
+  conditionalRoute?: boolean;
+  parallelRoute?: boolean;
+  skippable?: boolean;
+}
+
+export interface GradientStop { offset: number; color: string; opacity: number }
+export interface NodeFill {
+  type: 'none' | 'solid' | 'linear-gradient';
+  color?: string;
+  opacity?: number;
+  angle?: number;
+  stops?: GradientStop[];
+}
+export interface NodeBorder {
+  style?: 'none' | 'solid' | 'dashed' | 'dotted';
+  width?: number;
+  color?: string;
+  radius?: number;
+}
+export interface EdgeVisual {
+  stroke?: { color?: string; width?: number; style?: 'solid' | 'dashed' | 'dotted' };
+  pathType?: 'bezier' | 'straight' | 'smoothstep';
+  showArrow?: boolean;
+  arrowSize?: number;
+  showLabel?: boolean;
 }
 
 export interface GraphModel {
@@ -87,6 +124,8 @@ export interface GraphModel {
   slots: Record<string, SlotDef>;
   /** layout positions per node id */
   layout: Record<string, NodeLayout>;
+  /** Presentation-only edge styles, keyed by `source->target`. */
+  edgeLayout: Record<string, EdgeVisual>;
   /**
    * Conditional transitions out of the virtual __start__ node.
    * Allows multiple possible entry points selected by condition
@@ -121,6 +160,7 @@ export const createEmptyModel = (): GraphModel => ({
   nodes: [],
   slots: {},
   layout: {},
+  edgeLayout: {},
   startTransitions: [],
   startRoute: undefined,
 });

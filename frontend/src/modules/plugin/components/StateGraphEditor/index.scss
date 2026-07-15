@@ -400,6 +400,43 @@
   background: #fafafa;
 }
 
+.sge-log-section {
+  max-width: 1120px;
+  margin: 0 auto 20px;
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 10px;
+
+  h2 {
+    margin: 0 0 6px;
+    font-size: 18px;
+  }
+
+  h3 {
+    margin: 0 0 10px;
+    font-size: 14px;
+  }
+}
+
+.sge-log-description {
+  margin: 0 0 20px;
+  color: #666;
+  line-height: 1.6;
+}
+
+.sge-log-report-grid {
+  display: grid;
+  gap: 16px;
+
+  > div {
+    padding: 16px;
+    background: #fafafa;
+    border: 1px solid #f0f0f0;
+    border-radius: 8px;
+  }
+}
+
 .sge-brief-content {
   white-space: pre-wrap;
   font-size: 13px;
@@ -407,4 +444,5 @@
   color: #1f1f1f;
   margin: 0;
   font-family: inherit;
+  overflow-wrap: anywhere;
 }
