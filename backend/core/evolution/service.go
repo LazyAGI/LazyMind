@@ -34,6 +34,8 @@ type PersonalResourceContent struct {
 	AutoEvo                bool
 	AutoEvoApplyStatus     string
 	AutoEvoGeneration      int64
+	AutoEvoStartedAt       *time.Time
+	AutoEvoFinishedAt      *time.Time
 	AutoEvoError           string
 	LatestVersionChange    *VersionChangeSummary
 	HasPendingReviewResult bool
@@ -252,6 +254,8 @@ func loadPersonalResourceContent(ctx context.Context, db *gorm.DB, userID, resou
 		AutoEvo:                resource.AutoEvo,
 		AutoEvoApplyStatus:     NormalizeAutoEvoApplyStatus(resource.AutoEvoApplyStatus),
 		AutoEvoGeneration:      resource.AutoEvoGeneration,
+		AutoEvoStartedAt:       resource.AutoEvoStartedAt,
+		AutoEvoFinishedAt:      resource.AutoEvoFinishedAt,
 		AutoEvoError:           resource.AutoEvoError,
 		LatestVersionChange:    versionChangeFromRevision(revision),
 		HasPendingReviewResult: hasPending,

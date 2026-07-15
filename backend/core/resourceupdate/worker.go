@@ -2,6 +2,7 @@ package resourceupdate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -173,7 +174,7 @@ func (w *Worker) claimPending(ctx context.Context, now time.Time) ([]orm.Resourc
 			return err
 		}
 		for _, task := range claimed {
-			if err := updateAutoEvoResourceState(tx, task, evolution.AutoEvoApplyStatusRunning, "", &now, nil); err != nil {
+			if _, err := updateAutoEvoResourceState(tx, task, evolution.AutoEvoApplyStatusRunning, "", &now, nil); err != nil {
 				return err
 			}
 		}
@@ -220,7 +221,7 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 			retryAfter = time.Minute
 		}
 		return w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
-			Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
+			Where("id = ? AND status = ? AND locked_by = ? AND locked_until IS NOT NULL AND locked_until > ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID, now).
 			Updates(map[string]any{
 				"status":        orm.ResourceUpdateTaskStatusPending,
 				"error_code":    outcome.ErrorCode,
@@ -245,17 +246,22 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 			"updated_at":    now,
 		}
 		return w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&orm.ResourceUpdateTask{}).
-				Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
-				Updates(updates).Error; err != nil {
-				return err
+			updated := tx.Model(&orm.ResourceUpdateTask{}).
+				Where("id = ? AND status = ? AND locked_by = ? AND locked_until IS NOT NULL AND locked_until > ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID, now).
+				Updates(updates)
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected == 0 {
+				return nil
 			}
 			if outcome.Status == orm.ResourceUpdateTaskStatusSkipped {
-				return updateAutoEvoResourceState(
+				_, err := updateAutoEvoResourceState(
 					tx, task, evolution.AutoEvoApplyStatusFailed,
 					firstNonEmpty(outcome.ErrorMessage, outcome.ErrorCode, "auto apply skipped"),
 					nil, &now,
 				)
+				return err
 			}
 			return nil
 		})
@@ -281,23 +287,30 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 			Int("attempt_count", task.AttemptCount).
 			Int("max_attempts", w.cfg.MaxAttempts).
 			Msg(logEventWorkerFinished)
-		if err := w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
-			Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
-			Updates(map[string]any{
-				"status":        orm.ResourceUpdateTaskStatusFailed,
-				"error_code":    outcome.ErrorCode,
-				"error_message": outcome.ErrorMessage,
-				"locked_by":     "",
-				"locked_until":  nil,
-				"finished_at":   now,
-				"updated_at":    now,
-			}).Error; err != nil {
+		return w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			updated := tx.Model(&orm.ResourceUpdateTask{}).
+				Where("id = ? AND status = ? AND locked_by = ? AND locked_until IS NOT NULL AND locked_until > ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID, now).
+				Updates(map[string]any{
+					"status":        orm.ResourceUpdateTaskStatusFailed,
+					"error_code":    outcome.ErrorCode,
+					"error_message": outcome.ErrorMessage,
+					"locked_by":     "",
+					"locked_until":  nil,
+					"finished_at":   now,
+					"updated_at":    now,
+				})
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected == 0 {
+				return nil
+			}
+			_, err := updateAutoEvoResourceState(
+				tx, task, evolution.AutoEvoApplyStatusFailed,
+				outcome.ErrorMessage, nil, &now,
+			)
 			return err
-		}
-		return updateAutoEvoResourceState(
-			w.db.WithContext(ctx), task, evolution.AutoEvoApplyStatusFailed,
-			outcome.ErrorMessage, nil, &now,
-		)
+		})
 	}
 	nextRunAt := now.Add(w.retryBackoff(task.AttemptCount))
 	resourceUpdateWarn(logEventWorkerFinished, nil).
@@ -314,7 +327,7 @@ func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, ou
 		Time("next_run_at", nextRunAt).
 		Msg(logEventWorkerFinished)
 	return w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
-		Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
+		Where("id = ? AND status = ? AND locked_by = ? AND locked_until IS NOT NULL AND locked_until > ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID, now).
 		Updates(map[string]any{
 			"status":        orm.ResourceUpdateTaskStatusPending,
 			"error_code":    outcome.ErrorCode,
@@ -333,9 +346,17 @@ func updateAutoEvoResourceState(
 	errorMessage string,
 	startedAt *time.Time,
 	finishedAt *time.Time,
-) error {
+) (bool, error) {
 	if task.TaskType != orm.ResourceUpdateTaskTypeAutoApplyReview {
-		return nil
+		return false, nil
+	}
+	resourceType := strings.TrimSpace(task.ResourceType)
+	if resourceType != orm.ResourceUpdateResourceTypeMemory && resourceType != orm.ResourceUpdateResourceTypeUserPreference {
+		return false, nil
+	}
+	generation, ok := autoApplyGeneration(task)
+	if !ok {
+		return false, nil
 	}
 	stateTime := time.Now().UTC()
 	if startedAt != nil {
@@ -356,18 +377,24 @@ func updateAutoEvoResourceState(
 		updates["auto_evo_finished_at"] = *finishedAt
 	}
 
-	var model any
-	switch strings.TrimSpace(task.ResourceType) {
-	case orm.ResourceUpdateResourceTypeMemory:
-		model = &orm.SystemMemory{}
-	case orm.ResourceUpdateResourceTypeUserPreference:
-		model = &orm.SystemUserPreference{}
-	case orm.ResourceUpdateResourceTypeSkill:
-		model = &orm.SkillResource{}
-	default:
-		return nil
+	updated := db.Model(&orm.PersonalResource{}).
+		Where(
+			"id = ? AND resource_type = ? AND auto_evo = ? AND auto_evo_generation = ?",
+			strings.TrimSpace(task.ResourceID), resourceType, true, generation,
+		).
+		Updates(updates)
+	return updated.RowsAffected == 1, updated.Error
+}
+
+func autoApplyGeneration(task orm.ResourceUpdateTask) (int64, bool) {
+	if len(task.RequestJSON) == 0 {
+		return 0, false
 	}
-	return db.Model(model).Where("id = ?", strings.TrimSpace(task.ResourceID)).Updates(updates).Error
+	var request autoApplyRequestJSON
+	if err := json.Unmarshal(task.RequestJSON, &request); err != nil {
+		return 0, false
+	}
+	return request.AutoEvoGeneration, true
 }
 
 func firstNonEmpty(values ...string) string {

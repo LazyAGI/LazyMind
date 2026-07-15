@@ -1069,7 +1069,9 @@ export interface ManagedStateOpenAPIResponse {
     'auto_evo': boolean;
     'auto_evo_apply_status': string;
     'auto_evo_error': string;
+    'auto_evo_finished_at'?: string;
     'auto_evo_generation': number;
+    'auto_evo_started_at'?: string;
     'content': string;
     'content_summary': string;
     'has_pending_review_result': boolean;
@@ -32763,6 +32765,5 @@ export class WordGroupApi extends BaseAPI {
         return WordGroupApiFp(this.configuration).apiCoreWordGroupUpdatePost(requestParameters.updateWordGroupRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
-
 
 

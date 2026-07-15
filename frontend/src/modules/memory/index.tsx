@@ -73,6 +73,11 @@ import {
 import { buildSkillZipBlob } from "./skillPackage";
 import { uploadSkillTempFile } from "./skillUpload";
 import {
+  formatPersonalizationEvolutionTime,
+  projectPersonalizationEvolutionState,
+  type PersonalizationEvolutionState,
+} from "./evolutionStatus";
+import {
   approveEvolutionSuggestion,
   batchApproveEvolutionSuggestions,
   batchRejectEvolutionSuggestions,
@@ -760,6 +765,8 @@ export default function MemoryManagement() {
             autoEvo: item.autoEvo,
             autoEvoApplyStatus: item.autoEvoApplyStatus,
             autoEvoGeneration: item.autoEvoGeneration,
+            autoEvoStartedAt: item.autoEvoStartedAt,
+            autoEvoFinishedAt: item.autoEvoFinishedAt,
             autoEvoError: item.autoEvoError,
             resourceType: item.resourceType,
             reviewStatus: item.reviewStatus,
@@ -6106,6 +6113,15 @@ export default function MemoryManagement() {
     [expandedExperienceProfileIds, renderExperienceProfileEditor],
   );
 
+  const evolutionStateColors: Record<PersonalizationEvolutionState, string> = {
+    off: "default",
+    waiting: "blue",
+    pending_review: "orange",
+    applying: "processing",
+    applied: "success",
+    failed: "error",
+  };
+
   const experienceColumns: ColumnsType<ExperienceAsset> = [
     {
       title: t("admin.memoryTitleCol"),
@@ -6168,42 +6184,72 @@ export default function MemoryManagement() {
     {
       title: t("admin.memoryAutoUpdate"),
       key: "autoEvo",
-      width: 90,
-      render: (_value, record) => (
-        <Switch
-          checked={Boolean(record.autoEvo)}
-          loading={experienceAutoEvoLoading.has(record.id)}
-          onChange={(checked) => {
-            void (async () => {
-              setExperienceAutoEvoLoading((prev) =>
-                new Set(prev).add(record.id),
-              );
-              try {
-                await patchPersonalResourceMetadata(
-                  resolvePersonalResourceApiType(record.resourceType),
-                  { autoEvo: checked },
-                );
-                await refreshExperienceSection({ silent: true });
-              } catch (error) {
-                console.error("Toggle auto_evo failed:", error);
-                await refreshExperienceSection({ silent: true });
-                message.error(
-                  getLocalizedErrorMessage(
-                    error,
-                    t("admin.memoryAutoEvoToggleFailed"),
-                  ) || t("admin.memoryAutoEvoToggleFailed"),
-                );
-              } finally {
-                setExperienceAutoEvoLoading((prev) => {
-                  const next = new Set(prev);
-                  next.delete(record.id);
-                  return next;
-                });
-              }
-            })();
-          }}
-        />
-      ),
+      width: 260,
+      render: (_value, record) => {
+        const projection = projectPersonalizationEvolutionState({
+          autoEvo: record.autoEvo,
+          autoEvoApplyStatus: record.autoEvoApplyStatus,
+          autoEvoError: record.autoEvoError,
+          autoEvoStartedAt: record.autoEvoStartedAt,
+          autoEvoFinishedAt: record.autoEvoFinishedAt,
+          hasPendingReviewSuggestions: record.hasPendingReviewSuggestions,
+          reviewStatus: record.reviewStatus,
+        });
+        const latestAt = formatPersonalizationEvolutionTime(projection.latestAt);
+
+        return (
+          <div className="memory-auto-evo-state">
+            <Switch
+              checked={Boolean(record.autoEvo)}
+              loading={experienceAutoEvoLoading.has(record.id)}
+              onChange={(checked) => {
+                void (async () => {
+                  setExperienceAutoEvoLoading((prev) =>
+                    new Set(prev).add(record.id),
+                  );
+                  try {
+                    await patchPersonalResourceMetadata(
+                      resolvePersonalResourceApiType(record.resourceType),
+                      { autoEvo: checked },
+                    );
+                    await refreshExperienceSection({ silent: true });
+                  } catch (error) {
+                    console.error("Toggle auto_evo failed:", error);
+                    await refreshExperienceSection({ silent: true });
+                    message.error(
+                      getLocalizedErrorMessage(
+                        error,
+                        t("admin.memoryAutoEvoToggleFailed"),
+                      ) || t("admin.memoryAutoEvoToggleFailed"),
+                    );
+                  } finally {
+                    setExperienceAutoEvoLoading((prev) => {
+                      const next = new Set(prev);
+                      next.delete(record.id);
+                      return next;
+                    });
+                  }
+                })();
+              }}
+            />
+            <div className="memory-auto-evo-state-copy">
+              <Tag color={evolutionStateColors[projection.state]}>
+                {t(`admin.memoryAutoEvoState.${projection.state}`)}
+              </Tag>
+              {projection.error ? (
+                <span className="is-error" title={projection.error}>
+                  {projection.error}
+                </span>
+              ) : null}
+              {latestAt ? (
+                <span>
+                  {t("admin.memoryAutoEvoLatestAt", { time: latestAt })}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        );
+      },
     },
   ];
   const glossaryColumns: ColumnsType<GlossaryAsset> = [

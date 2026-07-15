@@ -40,6 +40,9 @@ func (w *Worker) handleAutoApplyReview(ctx context.Context, task orm.ResourceUpd
 	}
 	now := w.clock().UTC()
 	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := w.validateAutoApplyLease(ctx, tx, task, now); err != nil {
+			return err
+		}
 		switch task.ResourceType {
 		case orm.ResourceUpdateResourceTypeSkill:
 			return autoApplySkillReviewResult(ctx, tx, task, now)
@@ -73,6 +76,23 @@ func (w *Worker) handleAutoApplyReview(ctx context.Context, task orm.ResourceUpd
 		return taskOutcome{Status: orm.ResourceUpdateTaskStatusSkipped, ErrorCode: "auto_apply_skipped", ErrorMessage: err.Error()}
 	}
 	return retryableOutcome("auto_apply_failed", err)
+}
+
+func (w *Worker) validateAutoApplyLease(ctx context.Context, tx *gorm.DB, task orm.ResourceUpdateTask, now time.Time) error {
+	var current orm.ResourceUpdateTask
+	if err := withUpdateLock(tx.WithContext(ctx)).Where("id = ?", task.ID).Take(&current).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: auto apply task no longer exists", errReviewConflict)
+		}
+		return err
+	}
+	if current.Status != orm.ResourceUpdateTaskStatusRunning || strings.TrimSpace(current.LockedBy) != strings.TrimSpace(w.workerID) {
+		return fmt.Errorf("%w: auto apply task lease changed", errReviewConflict)
+	}
+	if current.LockedUntil == nil || !current.LockedUntil.After(now) {
+		return fmt.Errorf("%w: auto apply task lease expired", errReviewConflict)
+	}
+	return nil
 }
 
 func autoApplySkillReviewResult(ctx context.Context, tx *gorm.DB, task orm.ResourceUpdateTask, _ time.Time) error {
@@ -129,6 +149,9 @@ func autoApplyMemoryReviewResult(ctx context.Context, tx *gorm.DB, task orm.Reso
 	if !resource.AutoEvo {
 		return fmt.Errorf("%w: memory auto_evo disabled", errReviewConflict)
 	}
+	if err := validateAutoApplyGeneration(task, resource.AutoEvoGeneration); err != nil {
+		return err
+	}
 	return applyPersonalResourceReviewResult(ctx, tx, orm.ResourceUpdateResourceTypeMemory, result, resource, now, true, resourcechange.Source{
 		ChangeSource:  resourcechange.ChangeSourceAutoApply,
 		SourceRefType: resourcechange.SourceRefTypeMemoryReview,
@@ -163,12 +186,26 @@ func autoApplyPreferenceReviewResult(ctx context.Context, tx *gorm.DB, task orm.
 	if !resource.AutoEvo {
 		return fmt.Errorf("%w: user_preference auto_evo disabled", errReviewConflict)
 	}
+	if err := validateAutoApplyGeneration(task, resource.AutoEvoGeneration); err != nil {
+		return err
+	}
 	return applyPersonalResourceReviewResult(ctx, tx, orm.ResourceUpdateResourceTypeUserPreference, result, resource, now, true, resourcechange.Source{
 		ChangeSource:  resourcechange.ChangeSourceAutoApply,
 		SourceRefType: resourcechange.SourceRefTypeMemoryReview,
 		SourceRefID:   result.ID,
 		ChangedAt:     now,
 	})
+}
+
+func validateAutoApplyGeneration(task orm.ResourceUpdateTask, current int64) error {
+	taskGeneration, ok := autoApplyGeneration(task)
+	if !ok {
+		return fmt.Errorf("%w: auto apply task has no generation snapshot", errReviewConflict)
+	}
+	if taskGeneration != current {
+		return fmt.Errorf("%w: auto_evo generation changed from %d to %d", errReviewConflict, taskGeneration, current)
+	}
+	return nil
 }
 
 func lockSkillReviewResult(ctx context.Context, tx *gorm.DB, id string) (SkillReviewResult, error) {
@@ -263,13 +300,15 @@ func applyPersonalResourceReviewResult(ctx context.Context, tx *gorm.DB, target 
 		return err
 	}
 	update := map[string]any{
-		"head_revision_id":      revisionID,
-		"version":               gorm.Expr("version + 1"),
-		"auto_evo_apply_status": evolution.AutoEvoApplyStatusIdle,
-		"auto_evo_error":        "",
-		"auto_evo_finished_at":  now,
-		"updated_by":            strings.TrimSpace(result.UserID),
-		"updated_at":            now,
+		"head_revision_id": revisionID,
+		"version":          gorm.Expr("version + 1"),
+		"updated_by":       strings.TrimSpace(result.UserID),
+		"updated_at":       now,
+	}
+	if requireAutoEvo {
+		update["auto_evo_apply_status"] = evolution.AutoEvoApplyStatusIdle
+		update["auto_evo_error"] = ""
+		update["auto_evo_finished_at"] = now
 	}
 	affected := tx.WithContext(ctx).Model(&orm.PersonalResource{}).
 		Where("id = ? AND version = ? AND head_revision_id = ?", resource.ID, resource.Version, *resource.HeadRevisionID).

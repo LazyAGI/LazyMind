@@ -503,9 +503,18 @@ func ensureAutoApplyTask(ctx context.Context, tx *gorm.DB, resourceType, userID,
 			Msg(logEventResultScanSkipped)
 		return false, nil
 	}
+	generation, err := currentAutoEvoGeneration(tx, resourceType, resourceID)
+	if err != nil {
+		return false, err
+	}
+	requestJSON, err := json.Marshal(autoApplyRequestJSON{AutoEvoGeneration: generation})
+	if err != nil {
+		return false, err
+	}
+	trigger.Generation = generation
 	triggerType, triggerID := autoApplyTriggerID(resourceType, resourceID, reviewResultID, trigger)
 	var activeTask orm.ResourceUpdateTask
-	err := tx.WithContext(ctx).
+	err = tx.WithContext(ctx).
 		Where("task_type = ? AND resource_type = ? AND review_result_id = ? AND status IN ?",
 			orm.ResourceUpdateTaskTypeAutoApplyReview, resourceType, reviewResultID, activeAutoApplyStatuses()).
 		Order("created_at ASC").
@@ -574,6 +583,7 @@ func ensureAutoApplyTask(ctx context.Context, tx *gorm.DB, resourceType, userID,
 			"user_id":          userID,
 			"resource_id":      resourceID,
 			"review_result_id": reviewResultID,
+			"request_json":     requestJSON,
 			"status":           orm.ResourceUpdateTaskStatusPending,
 			"error_code":       "",
 			"error_message":    "",
@@ -613,6 +623,7 @@ func ensureAutoApplyTask(ctx context.Context, tx *gorm.DB, resourceType, userID,
 		TriggerID:      triggerID,
 		Status:         orm.ResourceUpdateTaskStatusPending,
 		ReviewResultID: reviewResultID,
+		RequestJSON:    requestJSON,
 		NextRunAt:      now,
 		CreatedAt:      now,
 		UpdatedAt:      now,

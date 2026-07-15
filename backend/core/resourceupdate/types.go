@@ -64,6 +64,10 @@ type skillDraftAutoCommitRequestJSON struct {
 	DraftVersion int64  `json:"draft_version"`
 }
 
+type autoApplyRequestJSON struct {
+	AutoEvoGeneration int64 `json:"auto_evo_generation"`
+}
+
 type taskOutcome struct {
 	Status       string
 	ResultID     string

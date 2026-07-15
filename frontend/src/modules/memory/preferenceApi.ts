@@ -23,6 +23,7 @@ interface ManagedStateItem {
   auto_evo_error?: string;
   content?: string;
   content_summary?: string;
+  has_pending_review_result?: boolean;
   has_pending_review_suggestions?: boolean;
   response_style?: string;
   resource_id?: string;
@@ -535,7 +536,7 @@ const normalizeManagedPreference = (item: ManagedStateItem): PreferenceAssetReco
   const preferredName = toStringValue(item.preferred_name, "");
   const responseStyle = toStringValue(item.response_style, "");
   const hasPendingReviewSuggestions = toBoolean(
-    item.has_pending_review_suggestions,
+    item.has_pending_review_result ?? item.has_pending_review_suggestions,
     false,
   );
   const reviewStatus = toStringValue(item.review_status, "none");

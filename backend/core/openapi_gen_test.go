@@ -625,7 +625,7 @@ func TestOpenAPISpecAssignsMetadataFieldsToPersonalResourcePatch(t *testing.T) {
 			t.Fatalf("personalResourceWriteDraftOpenAPIRequest expected property %q", name)
 		}
 	}
-	for _, name := range []string{"agent_persona", "preferred_name", "response_style"} {
+	for _, name := range []string{"agent_persona", "preferred_name", "response_style", "auto_evo_started_at", "auto_evo_finished_at"} {
 		if _, ok := draftRequestProps[name]; ok {
 			t.Fatalf("personalResourceWriteDraftOpenAPIRequest must not include property %q", name)
 		}
@@ -638,7 +638,7 @@ func TestOpenAPISpecAssignsMetadataFieldsToPersonalResourcePatch(t *testing.T) {
 	}
 
 	memoryResponseProps := schemaProperties("managedStateOpenAPIResponse")
-	for _, name := range []string{"agent_persona", "preferred_name", "response_style"} {
+	for _, name := range []string{"agent_persona", "preferred_name", "response_style", "auto_evo_started_at", "auto_evo_finished_at"} {
 		if _, ok := memoryResponseProps[name]; !ok {
 			t.Fatalf("managedStateOpenAPIResponse expected property %q", name)
 		}

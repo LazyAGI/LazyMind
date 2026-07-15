@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -33,6 +34,8 @@ type ManagedStateItem struct {
 	AutoEvo                bool                  `json:"auto_evo"`
 	AutoEvoApplyStatus     string                `json:"auto_evo_apply_status"`
 	AutoEvoGeneration      int64                 `json:"auto_evo_generation"`
+	AutoEvoStartedAt       *string               `json:"auto_evo_started_at,omitempty"`
+	AutoEvoFinishedAt      *string               `json:"auto_evo_finished_at,omitempty"`
 	AutoEvoError           string                `json:"auto_evo_error"`
 }
 
@@ -100,6 +103,8 @@ func NewManagedStateItem(resourceType string, row *PersonalResourceContent, pref
 	item.AutoEvo = row.AutoEvo
 	item.AutoEvoApplyStatus = NormalizeAutoEvoApplyStatus(row.AutoEvoApplyStatus)
 	item.AutoEvoGeneration = row.AutoEvoGeneration
+	item.AutoEvoStartedAt = formatOptionalTime(row.AutoEvoStartedAt)
+	item.AutoEvoFinishedAt = formatOptionalTime(row.AutoEvoFinishedAt)
 	item.AutoEvoError = row.AutoEvoError
 	if preference != nil {
 		item.Content = preference.Content
@@ -109,6 +114,14 @@ func NewManagedStateItem(resourceType string, row *PersonalResourceContent, pref
 		item.ContentSummary = ManagedStateSummary(preference.Content)
 	}
 	return item
+}
+
+func formatOptionalTime(value *time.Time) *string {
+	if value == nil || value.IsZero() {
+		return nil
+	}
+	formatted := value.UTC().Format(time.RFC3339Nano)
+	return &formatted
 }
 
 func stringPtr(value string) *string {

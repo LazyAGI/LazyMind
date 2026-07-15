@@ -1602,6 +1602,131 @@ func TestAutoApplyReviewSkipsWhenAutoEvoDisabledAtExecution(t *testing.T) {
 	}
 }
 
+func TestAutoApplyPersonalResourceTracksCurrentGenerationLifecycle(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	createMemoryReviewTable(t, db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 15, 9, 0, 0, 0, time.UTC)
+	insertMemoryResource(t, db, orm.SystemMemory{
+		ID: "memory-current-generation", UserID: "user-1", Content: "old memory",
+		Version: 1, AutoEvo: true, AutoEvoGeneration: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	})
+	insertMemoryReviewResult(t, db, MemoryReviewResult{
+		ID: "memory-current-result", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeMemory,
+		Content: "new memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now,
+	})
+
+	if err := ScanPendingResultsForResource(ctx, db, orm.ResourceUpdateResourceTypeMemory, "user-1", "memory-current-generation"); err != nil {
+		t.Fatalf("scan pending result: %v", err)
+	}
+	var task orm.ResourceUpdateTask
+	if err := db.Take(&task, "review_result_id = ?", "memory-current-result").Error; err != nil {
+		t.Fatalf("read auto apply task: %v", err)
+	}
+	if generation, ok := autoApplyGeneration(task); !ok || generation != 2 {
+		t.Fatalf("expected generation snapshot 2, got generation=%d ok=%v request=%s", generation, ok, string(task.RequestJSON))
+	}
+
+	worker := NewWorker(db, Config{WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 2, RetryBackoffBase: time.Second, RetryBackoffMax: time.Second}, "worker-current-generation")
+	worker.clock = func() time.Time { return task.NextRunAt.Add(time.Minute) }
+	result, err := worker.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("worker run: %v", err)
+	}
+	if result.Done != 1 {
+		t.Fatalf("expected current generation task done, got %#v", result)
+	}
+	content, resource := readPersonalResourceHeadContent(t, db, "memory-current-generation")
+	if content != "new memory" || resource.Version != 2 {
+		t.Fatalf("expected auto-applied content, version=%d content=%q", resource.Version, content)
+	}
+	if resource.AutoEvoApplyStatus != evolution.AutoEvoApplyStatusIdle || resource.AutoEvoError != "" || resource.AutoEvoStartedAt == nil || resource.AutoEvoFinishedAt == nil {
+		t.Fatalf("unexpected applied lifecycle state: %#v", resource)
+	}
+}
+
+func TestAutoApplyPersonalResourceIgnoresStaleGeneration(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	createMemoryReviewTable(t, db)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	insertMemoryResource(t, db, orm.SystemMemory{
+		ID: "memory-stale-generation", UserID: "user-1", Content: "current memory",
+		Version: 1, AutoEvo: true, AutoEvoGeneration: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	})
+	insertMemoryReviewResult(t, db, MemoryReviewResult{
+		ID: "memory-stale-result", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeMemory,
+		Content: "stale memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now,
+	})
+	insertTask(t, db, orm.ResourceUpdateTask{
+		ID: "task-stale-generation", TaskType: orm.ResourceUpdateTaskTypeAutoApplyReview,
+		ResourceType: orm.ResourceUpdateResourceTypeMemory, UserID: "user-1", ResourceID: "memory-stale-generation",
+		TriggerType: orm.ResourceUpdateTriggerTypeReviewResult, TriggerID: "memory_review:memory-stale-result",
+		ReviewResultID: "memory-stale-result", RequestJSON: marshalJSON(t, autoApplyRequestJSON{AutoEvoGeneration: 1}),
+		Status: orm.ResourceUpdateTaskStatusPending, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+
+	worker := NewWorker(db, Config{WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 2, RetryBackoffBase: time.Second, RetryBackoffMax: time.Second}, "worker-stale-generation")
+	worker.clock = func() time.Time { return now }
+	result, err := worker.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("worker run: %v", err)
+	}
+	if result.Skipped != 1 {
+		t.Fatalf("expected stale generation task skipped, got %#v", result)
+	}
+	content, resource := readPersonalResourceHeadContent(t, db, "memory-stale-generation")
+	if content != "current memory" || resource.Version != 1 {
+		t.Fatalf("stale task changed content: version=%d content=%q", resource.Version, content)
+	}
+	if resource.AutoEvoApplyStatus != evolution.AutoEvoApplyStatusIdle || resource.AutoEvoError != "" || resource.AutoEvoStartedAt != nil || resource.AutoEvoFinishedAt != nil {
+		t.Fatalf("stale task changed current generation lifecycle: %#v", resource)
+	}
+}
+
+func TestFinishTaskDoesNotWriteResourceAfterLeaseLoss(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	now := time.Date(2026, 7, 15, 11, 0, 0, 0, time.UTC)
+	insertMemoryResource(t, db, orm.SystemMemory{
+		ID: "memory-lease-loss", UserID: "user-1", Content: "current memory",
+		Version: 1, AutoEvo: true, AutoEvoGeneration: 4, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	})
+	startedAt := now.Add(-time.Minute)
+	if err := db.Model(&orm.PersonalResource{}).Where("id = ?", "memory-lease-loss").Updates(map[string]any{
+		"auto_evo_apply_status": evolution.AutoEvoApplyStatusRunning,
+		"auto_evo_started_at":   startedAt,
+	}).Error; err != nil {
+		t.Fatalf("seed running resource state: %v", err)
+	}
+	task := insertTask(t, db, orm.ResourceUpdateTask{
+		ID: "task-lease-loss", TaskType: orm.ResourceUpdateTaskTypeAutoApplyReview,
+		ResourceType: orm.ResourceUpdateResourceTypeMemory, UserID: "user-1", ResourceID: "memory-lease-loss",
+		TriggerType: orm.ResourceUpdateTriggerTypeReviewResult, TriggerID: "memory_review:lease-loss",
+		ReviewResultID: "lease-loss", RequestJSON: marshalJSON(t, autoApplyRequestJSON{AutoEvoGeneration: 4}),
+		Status: orm.ResourceUpdateTaskStatusRunning, AttemptCount: 2, LockedBy: "new-worker",
+		LockedUntil: ptrTime(now.Add(time.Minute)), NextRunAt: now, StartedAt: &startedAt, CreatedAt: now, UpdatedAt: now,
+	})
+	worker := NewWorker(db, Config{MaxAttempts: 2}, "stale-worker")
+	worker.clock = func() time.Time { return now }
+	if err := worker.finishTask(context.Background(), task, permanentOutcome("apply_failed", "stale worker failed")); err != nil {
+		t.Fatalf("finish stale task: %v", err)
+	}
+	var resource orm.PersonalResource
+	if err := db.Take(&resource, "id = ?", "memory-lease-loss").Error; err != nil {
+		t.Fatalf("read personal resource: %v", err)
+	}
+	if resource.AutoEvoApplyStatus != evolution.AutoEvoApplyStatusRunning || resource.AutoEvoError != "" || resource.AutoEvoFinishedAt != nil {
+		t.Fatalf("stale worker overwrote resource lifecycle: %#v", resource)
+	}
+	var storedTask orm.ResourceUpdateTask
+	if err := db.Take(&storedTask, "id = ?", task.ID).Error; err != nil {
+		t.Fatalf("read task: %v", err)
+	}
+	if storedTask.Status != orm.ResourceUpdateTaskStatusRunning || storedTask.LockedBy != "new-worker" {
+		t.Fatalf("stale worker changed active lease: %#v", storedTask)
+	}
+}
+
 func TestSkillAcceptRejectAndUserFiltering(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
@@ -1731,6 +1856,14 @@ func TestMemoryAcceptRejectTaskAPIAndNoAsyncJobID(t *testing.T) {
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	insertMemoryResource(t, db, orm.SystemMemory{ID: "memory-1", UserID: "user-1", Content: "old memory", ContentHash: evolution.HashContent("old memory"), Version: 1, AutoEvo: false, CreatedAt: now, UpdatedAt: now})
+	previousFinishedAt := now.Add(-time.Hour)
+	if err := db.Model(&orm.PersonalResource{}).Where("id = ?", "memory-1").Updates(map[string]any{
+		"auto_evo_apply_status": evolution.AutoEvoApplyStatusFailed,
+		"auto_evo_error":        "previous automatic failure",
+		"auto_evo_finished_at":  previousFinishedAt,
+	}).Error; err != nil {
+		t.Fatalf("seed automatic lifecycle: %v", err)
+	}
 	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "memory-accept", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeMemory, Content: "new memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
 	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "memory-reject", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeMemory, Content: "reject memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
 	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "memory-other", UserID: "other-user", Target: orm.ResourceUpdateResourceTypeMemory, Content: "other memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
@@ -1759,6 +1892,9 @@ func TestMemoryAcceptRejectTaskAPIAndNoAsyncJobID(t *testing.T) {
 	memoryContent, memoryResource := readPersonalResourceHeadContent(t, db, "memory-1")
 	if memoryContent != "new memory" || memoryResource.Version != 2 {
 		t.Fatalf("memory not updated: version=%d content=%q", memoryResource.Version, memoryContent)
+	}
+	if memoryResource.AutoEvoApplyStatus != evolution.AutoEvoApplyStatusFailed || memoryResource.AutoEvoError != "previous automatic failure" || memoryResource.AutoEvoFinishedAt == nil || !memoryResource.AutoEvoFinishedAt.Equal(previousFinishedAt) {
+		t.Fatalf("manual review changed automatic lifecycle state: %#v", memoryResource)
 	}
 
 	otherReq := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/core/memory-review-results/memory-other", nil), map[string]string{"review_result_id": "memory-other"})
