@@ -240,7 +240,6 @@ def evaluate_step(
         _init_driver_sid(session_id, plugin_id, step_id)
         driver_db = _init_driver_artifact_context(session_id, plugin_id, step_id)
         lazyllm.set_trace_context({
-            'trace_id': session_id or '',
             'session_id': session_id or '',
             'sampled': True,
             'module_trace': {'default': True},
