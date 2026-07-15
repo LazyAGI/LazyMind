@@ -528,6 +528,75 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	}
 }
 
+func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:         defaultProfileValue(),
+		RepoRoot:        repo,
+		MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local", ".bin", "local-runtime-manager"))
+	var out strings.Builder
+	if err := manager.processCompose.WriteGeneratedConfig(&out, repo, paths, cfg, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
+		t.Fatalf("write generated config: %v", err)
+	}
+	var parsed processComposeConfig
+	if err := yaml.Unmarshal([]byte(out.String()), &parsed); err != nil {
+		t.Fatalf("generated config invalid yaml: %v\n%s", err, out.String())
+	}
+	for _, name := range []string{
+		localProxyProcessName,
+		authServiceProcessName,
+		coreProcessName,
+		frontendProcessName,
+		milvusLiteProcessName,
+		processorServerProcessName,
+		algoProcessName,
+		docServerProcessName,
+		chatProcessName,
+	} {
+		if _, ok := parsed.Processes[name]; !ok {
+			t.Fatalf("warmup graph missing process %s", name)
+		}
+	}
+	for _, name := range []string{fileWatcherProcessName, scanControlPlaneProcessName, processorWorkerProcessName} {
+		if _, ok := parsed.Processes[name]; ok {
+			t.Fatalf("warmup graph unexpectedly contains process %s", name)
+		}
+	}
+	for name, process := range parsed.Processes {
+		for _, item := range process.Environment {
+			if strings.HasPrefix(item, "LAZYMIND_MAINTENANCE_MODE=") {
+				t.Fatalf("process %s received installer scenario environment: %s", name, item)
+			}
+		}
+	}
+}
+
+func TestInstallerWarmupDoesNotCreateFileWatcherImportDirectory(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:         defaultProfileValue(),
+		RepoRoot:        repo,
+		MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	cfg.FileWatcher.WatchHostDir = filepath.Join(t.TempDir(), "Documents", "LazyMind")
+	if err := ensureRuntimeDirs(cfg, paths); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	if _, err := os.Stat(cfg.FileWatcher.WatchHostDir); !os.IsNotExist(err) {
+		t.Fatalf("warmup touched file watcher import directory %q: %v", cfg.FileWatcher.WatchHostDir, err)
+	}
+}
+
 func TestProcessComposeDesktopUsesHiddenWindowsShellWrapper(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows-specific process-compose shell")

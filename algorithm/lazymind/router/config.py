@@ -19,6 +19,8 @@ config.add('router_default_algo_path', str, '/opt/lazymind/chat', 'ROUTER_DEFAUL
            description='Code path for the default algorithm (registered as id=default on startup).')
 config.add('router_default_instance_count', int, 1, 'ROUTER_DEFAULT_INSTANCE_COUNT',
            description='Number of child process instances to start for the default algorithm.')
+config.add('router_child_processes_enabled', bool, True, 'ROUTER_CHILD_PROCESSES_ENABLED',
+           description='Enable router child recovery, startup, registry refresh, and health monitoring.')
 
 # Health checker
 config.add('router_health_interval', int, 10, 'ROUTER_HEALTH_INTERVAL',

@@ -706,7 +706,7 @@ func buildTempCleanupRunner(built Components, cfg config.Config) *worker.TempCle
 
 func (a *App) Run(ctx context.Context) error {
 	runtimeCtx, stopRuntime := context.WithCancel(ctx)
-	if a.runtime != nil && os.Getenv("LAZYMIND_MAINTENANCE_MODE") != "installer-warmup" {
+	if a.runtime != nil {
 		a.runtime.Start(runtimeCtx)
 	}
 	serverErr := make(chan error, 1)

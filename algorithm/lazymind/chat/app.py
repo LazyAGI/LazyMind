@@ -50,7 +50,8 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-start_local_trace_maintenance()
+if config['background_jobs_enabled']:
+    start_local_trace_maintenance()
 
 if __name__ == '__main__':
     import argparse

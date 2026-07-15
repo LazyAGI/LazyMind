@@ -13,7 +13,6 @@ import (
 const (
 	runtimeProfileEnvVar             = "LAZYMIND_RUNTIME_PROFILE"
 	runtimeRootEnvVar                = "LAZYMIND_RUNTIME_ROOT"
-	maintenanceModeEnvVar            = "LAZYMIND_MAINTENANCE_MODE"
 	localBuildRootEnvVar             = "LAZYMIND_LOCAL_BUILD_ROOT"
 	runtimeResourcesRootEnvVar       = "LAZYMIND_RUNTIME_RESOURCES_ROOT"
 	runtimeOwnerTokenEnvVar          = "LAZYMIND_RUNTIME_OWNER_TOKEN"
@@ -680,7 +679,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	if err != nil {
 		return RuntimeConfig{}, RuntimePaths{}, err
 	}
-	maintenanceMode := strings.TrimSpace(firstNonEmpty(opts.MaintenanceMode, os.Getenv(maintenanceModeEnvVar)))
+	maintenanceMode := strings.TrimSpace(opts.MaintenanceMode)
 	if maintenanceMode != "" && maintenanceMode != installerWarmupMaintenanceMode {
 		return RuntimeConfig{}, RuntimePaths{}, fmt.Errorf("unsupported maintenance mode %q", maintenanceMode)
 	}
@@ -854,9 +853,6 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	}
 	milvusLiteDBPath := filepath.Clean(milvusDataDir)
 	watchHostDir := defaultFileWatcherWatchHostDir(pathLayout.LocalImportRoot)
-	if maintenanceMode == installerWarmupMaintenanceMode {
-		watchHostDir = filepath.Join(runtimeRoot, "maintenance", "empty-import-root")
-	}
 	return RuntimeConfig{
 		Profile:            profile,
 		MaintenanceMode:    maintenanceMode,

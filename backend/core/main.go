@@ -36,6 +36,14 @@ import (
 //go:embed docs.html
 var swaggerUIHTML []byte
 
+func backgroundJobsEnabled() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("LAZYMIND_BACKGROUND_JOBS_ENABLED")))
+	if raw == "" {
+		return true
+	}
+	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
+}
+
 func exportOpenAPIArtifacts(openAPIJSON []byte) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -197,9 +205,9 @@ func main() {
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
 	evalset.RegisterAsyncJobs()
 	plugin.RegisterPluginDraftGenerateJob()
-	maintenance := os.Getenv("LAZYMIND_MAINTENANCE_MODE") == "installer-warmup"
-	if maintenance {
-		log.Logger.Info().Msg("installer warmup maintenance mode: core background jobs are disabled")
+	startBackgroundJobs := backgroundJobsEnabled()
+	if !startBackgroundJobs {
+		log.Logger.Info().Msg("core background jobs are disabled")
 	} else {
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
 		asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{
@@ -246,7 +254,7 @@ func main() {
 	log.Logger.Info().Msg("plugin subagent hooks registered")
 
 	// Start the schedule ticker.
-	if !maintenance {
+	if startBackgroundJobs {
 		scheduler.RunScheduler(context.Background(), store.DB(), "")
 	}
 

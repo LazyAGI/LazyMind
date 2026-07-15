@@ -616,13 +616,18 @@ func algorithmPIDFile(paths RuntimePaths, service string) string {
 	return filepath.Join(paths.AlgorithmPIDDir, service+".pid")
 }
 
-func waitForHostAlgorithmReadiness(ctx context.Context, cfg RuntimeConfig) error {
-	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
+func waitForHostAlgorithmReadiness(ctx context.Context, cfg RuntimeConfig, specs []AlgorithmServiceSpec) error {
+	for _, spec := range specs {
 		if err := waitForHTTPOnly(ctx, spec.Port, spec.HealthPath, spec.Name, algorithmHealthTimeout); err != nil {
 			return err
 		}
 	}
-	return waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, algorithmHealthTimeout)
+	for _, spec := range specs {
+		if spec.Name == algoProcessName {
+			return waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, algorithmHealthTimeout)
+		}
+	}
+	return nil
 }
 
 func waitForAlgorithmRegistration(ctx context.Context, processorPort int, timeout time.Duration) error {

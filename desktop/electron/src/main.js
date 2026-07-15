@@ -105,17 +105,6 @@ function sidecarShutdownEnv() {
   };
 }
 
-function installerWarmupEnv() {
-  return {
-    ...sidecarEnv(),
-    LAZYMIND_MAINTENANCE_MODE: "installer-warmup",
-    HF_HUB_OFFLINE: "1",
-    TRANSFORMERS_OFFLINE: "1",
-    PIP_NO_INDEX: "1",
-    PYTHONDONTWRITEBYTECODE: "0",
-  };
-}
-
 function installerWarmupTimeoutSeconds(argv = process.argv) {
   const index = argv.indexOf("--timeout-seconds");
   if (index < 0 || index + 1 >= argv.length) {
@@ -284,7 +273,6 @@ async function runInstallerWarmup() {
   log(`starting offline installer warmup with timeout ${timeoutSeconds}s`);
   try {
     await runSidecar("up", maintenanceArgs, {
-      env: installerWarmupEnv(),
       timeout: timeoutSeconds * 1000,
     });
     const status = await readStatus();
@@ -323,7 +311,7 @@ async function runInstallerWarmup() {
     }
     try {
       await runSidecar("down", maintenanceArgs, {
-        env: { ...installerWarmupEnv(), LAZYMIND_LOCAL_DOWN_TIMEOUT: "120s" },
+        env: { ...sidecarEnv(), LAZYMIND_LOCAL_DOWN_TIMEOUT: "120s" },
         timeout: 130000,
       });
       log("maintenance runtime stopped");

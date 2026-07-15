@@ -30,7 +30,7 @@ func TestRuntimeEnvCarriesLocalAutoLoginLANFlag(t *testing.T) {
 	assertEnvContains(t, runtimeCommandEnv(paths, cfg), localAutoLoginAllowLANEnvVar+"=true")
 }
 
-func TestInstallerWarmupRuntimeEnvIsOfflineAndAllowsBytecodeCache(t *testing.T) {
+func TestInstallerWarmupUsesPerProcessCapabilities(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
@@ -42,11 +42,48 @@ func TestInstallerWarmupRuntimeEnvIsOfflineAndAllowsBytecodeCache(t *testing.T) 
 		t.Fatalf("runtime config: %v", err)
 	}
 
-	env := runtimeCommandEnv(paths, cfg)
-	assertEnvContains(t, env, maintenanceModeEnvVar+"="+installerWarmupMaintenanceMode)
-	assertEnvContains(t, env, "HF_HUB_OFFLINE=1")
-	assertEnvContains(t, env, "TRANSFORMERS_OFFLINE=1")
-	assertEnvContains(t, env, "PIP_NO_INDEX=1")
-	assertEnvContains(t, env, "PYTHONDONTWRITEBYTECODE=0")
-	assertEnvContains(t, env, "LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR="+cfg.FileWatcher.WatchHostDir)
+	base := runtimeCommandEnv(paths, cfg)
+	plan := buildRuntimeProcessPlan(cfg)
+	assertEnvContains(t, base, "PYTHONDONTWRITEBYTECODE=1")
+	assertEnvMissing(t, base, "LAZYMIND_MAINTENANCE_MODE")
+
+	authEnv := runtimeProcessEnvironment(base, cfg, plan, authServiceProcessName)
+	assertEnvContains(t, authEnv, "HF_HUB_OFFLINE=1")
+	assertEnvContains(t, authEnv, "TRANSFORMERS_OFFLINE=1")
+	assertEnvContains(t, authEnv, "PIP_NO_INDEX=1")
+	assertEnvContains(t, authEnv, "PYTHONDONTWRITEBYTECODE=0")
+	assertEnvContains(t, authEnv, "LAZYMIND_CLOUD_AUTH_HEALTH_CHECK_ENABLED=false")
+
+	coreEnv := runtimeProcessEnvironment(base, cfg, plan, coreProcessName)
+	assertEnvContains(t, coreEnv, "LAZYMIND_BACKGROUND_JOBS_ENABLED=false")
+	assertEnvContains(t, coreEnv, "PYTHONDONTWRITEBYTECODE=1")
+	assertEnvMissing(t, coreEnv, "HF_HUB_OFFLINE")
+
+	chatEnv := runtimeProcessEnvironment(base, cfg, plan, chatProcessName)
+	assertEnvContains(t, chatEnv, "LAZYMIND_BACKGROUND_JOBS_ENABLED=false")
+	assertEnvContains(t, chatEnv, "LAZYMIND_ROUTER_CHILD_PROCESSES_ENABLED=false")
+	assertEnvContains(t, chatEnv, "PYTHONDONTWRITEBYTECODE=0")
+}
+
+func TestMaintenanceModeIsAcceptedOnlyFromTypedOptions(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	t.Setenv("LAZYMIND_MAINTENANCE_MODE", installerWarmupMaintenanceMode)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.MaintenanceMode != "" {
+		t.Fatalf("maintenance mode leaked from environment: %q", cfg.MaintenanceMode)
+	}
+}
+
+func assertEnvMissing(t *testing.T, env []string, key string) {
+	t.Helper()
+	prefix := key + "="
+	for _, item := range env {
+		if item == key || len(item) >= len(prefix) && item[:len(prefix)] == prefix {
+			t.Fatalf("environment unexpectedly contains %q: %v", key, env)
+		}
+	}
 }
