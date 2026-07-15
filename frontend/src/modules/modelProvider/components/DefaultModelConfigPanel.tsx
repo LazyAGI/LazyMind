@@ -1472,13 +1472,6 @@ export default function DefaultModelConfigPanel() {
                   );
                 })}
               </Select>
-              {shouldShowMaxInputTokens ? (
-                <p className="model-provider-max-input-tokens">
-                  {t("modelProvider.maxInputTokens", {
-                    value: maxInputTokens,
-                  })}
-                </p>
-              ) : null}
             </div>
           );
         })}
