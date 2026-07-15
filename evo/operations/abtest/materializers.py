@@ -6,7 +6,7 @@ from typing import Any, Callable
 from evo.operations.eval.judge import judge_case
 from evo.operations.public_contracts import build_eval_summary_root
 
-from .candidate import candidate_rag_answer, candidate_service
+from .candidate import candidate_rag_answer, candidate_service, finalize_candidate
 from .comparison import compare_abtest
 
 
@@ -39,12 +39,14 @@ def abtest_materializers() -> dict[str, Callable[[Any, Mapping[str, object]], Ma
         return {'summary': build_eval_summary_root(ctx.run_id, judges)}
 
     def compare(ctx: Any, inputs: Mapping[str, object]) -> Mapping[str, object]:
-        return {'comparison': compare_abtest(
+        comparison = compare_abtest(
             ctx.run_id,
             _mapping(inputs['baseline'], 'baseline'),
             _mapping(inputs['candidate'], 'candidate'),
             _mapping(inputs['service'], 'service'),
-        )}
+        )
+        finalize_candidate(_mapping(inputs['service'], 'service'), comparison)
+        return {'comparison': comparison}
 
     return {
         'abtest.candidate_service': service,

@@ -50,6 +50,17 @@ class RouterAlgorithmLedger:
         now = time.time()
         with self._transaction() as conn:
             self._recover_stale(conn, now)
+            published = conn.execute(
+                """
+                SELECT algorithm_id
+                FROM evo_router_algorithms
+                WHERE thread_id = ? AND algorithm_id != ? AND published_at IS NOT NULL
+                LIMIT 1
+                """,
+                (thread_id, algorithm_id),
+            ).fetchone()
+            if published is not None:
+                raise RouterLedgerError(f'thread already owns an algorithm: {thread_id}')
             foreign_router = conn.execute(
                 """
                 SELECT algorithm_id
@@ -92,6 +103,7 @@ class RouterAlgorithmLedger:
                   AND evo_router_algorithms.router_admin_url = excluded.router_admin_url
                   AND evo_router_algorithms.service_url = excluded.service_url
                   AND evo_router_algorithms.register_request_hash = excluded.register_request_hash
+                  AND evo_router_algorithms.published_at IS NULL
                 """,
                 (
                     algorithm_id,
@@ -213,6 +225,19 @@ class RouterAlgorithmLedger:
             if changed != 1:
                 raise RouterLedgerError(f'algorithm delete is no longer current: {algorithm_id}')
 
+    def publish_algorithm(self, algorithm_id: str) -> None:
+        now = time.time()
+        with self._transaction() as conn:
+            row = self._row(conn, algorithm_id)
+            if row is None:
+                raise RouterLedgerError(f'algorithm is not evo-owned: {algorithm_id}')
+            if row['expected_state'] != 'active':
+                raise RouterLedgerError(f'algorithm is not expected active: {algorithm_id}')
+            conn.execute(
+                'UPDATE evo_router_algorithms SET published_at = ?, updated_at = ? WHERE algorithm_id = ?',
+                (now, now, algorithm_id),
+            )
+
     def begin_manage(self, algorithm_id: str) -> tuple[dict[str, Any], str]:
         now = time.time()
         with self._transaction() as conn:
@@ -253,6 +278,7 @@ class RouterAlgorithmLedger:
         thread_id: str = '',
         algorithm_id: str = '',
         expected_state: str = '',
+        published: bool | None = None,
     ) -> list[dict[str, Any]]:
         query = 'SELECT * FROM evo_router_algorithms'
         clauses: list[str] = []
@@ -267,6 +293,8 @@ class RouterAlgorithmLedger:
             _require_state(expected_state)
             clauses.append('expected_state = ?')
             params.append(expected_state)
+        if published is not None:
+            clauses.append(f'published_at IS {"NOT " if published else ""}NULL')
         if clauses:
             query = f'{query} WHERE {" AND ".join(clauses)}'
         query = f'{query} ORDER BY updated_at DESC, algorithm_id'
@@ -378,7 +406,8 @@ class RouterAlgorithmLedger:
                   last_router_status TEXT NOT NULL,
                   last_seen_at REAL,
                   created_at REAL NOT NULL,
-                  updated_at REAL NOT NULL
+                  updated_at REAL NOT NULL,
+                  published_at REAL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_evo_router_algorithms_thread
@@ -408,6 +437,15 @@ class RouterAlgorithmLedger:
             columns = {row['name'] for row in conn.execute('PRAGMA table_info(evo_router_algorithms)')}
             if 'instance_count' not in columns:
                 conn.execute('ALTER TABLE evo_router_algorithms ADD COLUMN instance_count INTEGER')
+            if 'published_at' not in columns:
+                conn.execute('ALTER TABLE evo_router_algorithms ADD COLUMN published_at REAL')
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_evo_router_algorithms_published_thread
+                ON evo_router_algorithms(thread_id)
+                WHERE published_at IS NOT NULL
+                """
+            )
             self._recover_stale(conn, time.time())
             conn.commit()
 
