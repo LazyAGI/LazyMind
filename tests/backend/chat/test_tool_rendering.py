@@ -16,7 +16,7 @@ def test_lazy_tool_group_gateway_uses_group_expansion_preview_in_chinese():
     tool_call = {
         'id': 'call_1',
         'function': {
-            'name': 'get_KBToolGroup_methods',
+            'name': 'get_KBToolkit_methods',
             'arguments': json.dumps({}),
         },
     }
@@ -25,15 +25,15 @@ def test_lazy_tool_group_gateway_uses_group_expansion_preview_in_chinese():
     result_text = _tool_result_frame_text(
         {
             'id': 'call_1',
-            'name': 'get_KBToolGroup_methods',
-            'result': 'Activated tool group "KBToolGroup". Available tools: kb_search',
+            'name': 'get_KBToolkit_methods',
+            'result': 'Activated Toolkit "KBToolkit". Available tools: kb_search',
         },
         'zh',
         preview_value,
     )
 
-    assert '正在展开**KBToolGroup**工具组。' in call_text
-    assert '已经展开**KBToolGroup**工具组。' in result_text
+    assert '正在展开**KBToolkit**工具箱。' in call_text
+    assert '已经展开**KBToolkit**工具箱。' in result_text
 
 
 def test_plugin_preflight_result_renders_outcome_and_reason_in_chinese():

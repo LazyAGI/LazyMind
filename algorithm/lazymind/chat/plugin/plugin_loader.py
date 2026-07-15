@@ -244,11 +244,11 @@ class PluginSpec:
 
         required_framework_tools = self.yaml.get('required_framework_tools') or []
         if required_framework_tools:
-            from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, group_is_active
+            from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, tool_is_active
             by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS}
             unavailable = [
                 name for name in required_framework_tools
-                if name not in by_name or not group_is_active(by_name[name])
+                if name not in by_name or not tool_is_active(by_name[name])
             ]
             if unavailable:
                 raise ValueError(f'plugin requires unavailable framework tools: {unavailable}')

@@ -3,7 +3,7 @@ import zipfile
 
 from lazymind.chat.engine.tools.infra.github_skill_installer import GitHubSkillInstaller
 from lazymind.chat.engine.tools.infra.skill_remote_store import SkillRemoteStore
-from lazymind.chat.engine.tools.skill_editor import SkillEditorToolGroup
+from lazymind.chat.engine.tools.skill_editor import SkillManagementToolkit
 
 
 class _Response:
@@ -77,7 +77,7 @@ def test_install_public_github_skill_to_remote_fs():
     store.root = 'remote://skills'
     installer = GitHubSkillInstaller(session=_GitHubSession(_skill_archive()))
 
-    result = SkillEditorToolGroup(store=store, installer=installer).install_skill(
+    result = SkillManagementToolkit(store=store, installer=installer).install_skill(
         'https://github.com/owner/example'
     )
 

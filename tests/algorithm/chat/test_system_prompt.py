@@ -33,21 +33,22 @@ def test_system_prompt_falls_back_to_raw_time_when_timezone_is_invalid() -> None
     assert 'Current user time: 2026-05-11T11:48:00.000Z' in prompt
 
 
-def test_system_prompt_includes_kb_first_guidance_when_kb_is_active() -> None:
+def test_system_prompt_includes_cross_tool_policy_when_tools_are_active() -> None:
     prompt = build_system_prompt({'kb'})
 
-    assert 'The knowledge base is your primary evidence source.' in prompt
-    assert 'Knowledge evidence citation rules' in prompt
+    assert '# Tool use policy' in prompt
+    assert 'get_*Toolkit_methods' in prompt
+    assert 'knowledge-base evidence' in prompt
 
 
-def test_system_prompt_omits_kb_first_guidance_without_kb_tools() -> None:
+def test_system_prompt_omits_tool_policy_without_tools() -> None:
     prompt = build_system_prompt(set())
 
-    assert 'The knowledge base is your primary evidence source.' not in prompt
-    assert 'Knowledge evidence citation rules' not in prompt
+    assert '# Tool use policy' not in prompt
 
 
-def test_system_prompt_includes_web_search_guidance_when_web_search_is_active() -> None:
+def test_system_prompt_does_not_embed_tool_specific_web_guidance() -> None:
     prompt = build_system_prompt({'web_search'})
 
-    assert 'When using `web_search`, the `query` must represent one search intent.' in prompt
+    assert '# Tool use policy' in prompt
+    assert 'one search intent' not in prompt

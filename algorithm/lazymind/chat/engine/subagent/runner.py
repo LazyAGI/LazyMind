@@ -14,7 +14,7 @@ from lazymind.model_config import inject_model_config
 from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
-from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, build_agent_tools
+from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, tool_is_active
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
 from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
@@ -102,7 +102,7 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
     if explicit:
         name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
         # Build lookup from DEFAULT_TOOLS
-        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS}
+        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
         # Build lookup from plugin script tools
         script_by_name: Dict[str, Any] = {}
         if plugin_id:
@@ -120,12 +120,11 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
             if name in script_by_name:
                 result.append(script_by_name[name])
             elif name in default_by_name:
-                resolved = build_agent_tools([default_by_name[name]])
-                result.extend(resolved)
+                result.append(default_by_name[name].tool)
             else:
                 LOG.warning('[SubAgent] tool %r not found in plugin scripts or DEFAULT_TOOLS — skipped', name)
         return result
-    return build_agent_tools(list(DEFAULT_TOOLS))
+    return [cfg.tool for cfg in DEFAULT_TOOLS if tool_is_active(cfg)]
 
 
 def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
@@ -242,12 +241,6 @@ def _build_attachment_context_for_subagent(history_files_per_turn: 'Dict[str, Li
     lines.append('')
     lines.append('Turn numbers are 1-based integers matching the "Turn N" labels above.')
     lines.append('Omit the turn parameter to search the current turn first, then historical turns.')
-    lines.append(
-        'Do not parse attachments by default. '
-        'find_user_attachment for path/url (image tools, plugins); '
-        'read_user_attachment only when extracted text is required.'
-    )
-    lines.append('find_user_attachment(filename, turn=N) returns path/url without parsing.')
     return '\n'.join(lines)
 
 

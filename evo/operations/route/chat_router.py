@@ -749,7 +749,7 @@ def _trace_span_may_have_kb_result(span: Mapping[str, Any], attrs: Mapping[str, 
     if str(attrs.get('lazyllm.semantic_type') or '') != 'tool':
         return False
     text = str(attrs.get('lazyllm.io.input') or '') + str(attrs.get('lazyllm.io.output') or '')
-    return 'KBToolGroup' in text or any(tool in text for tool in KB_TOOL_NAMES)
+    return 'KBToolkit' in text or any(tool in text for tool in KB_TOOL_NAMES)
 
 
 def _tool_result_payloads(text: str) -> list[Mapping[str, Any]]:

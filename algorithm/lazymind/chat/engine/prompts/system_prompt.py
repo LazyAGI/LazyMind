@@ -5,17 +5,11 @@ import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .guidance import (
-    ATTACHED_FILES_GUIDANCE,
     DEFAULT_SYSTEM_PROMPT,
-    IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
-    KNOWLEDGE_EVIDENCE_CITATION_GUIDANCE,
     RESPONSE_LANGUAGE_GUIDANCE,
-    SEARCH_GUIDANCE,
     TOOL_CALL_STATUS_GUIDANCE,
-    WEB_SEARCH_GUIDANCE,
 )
 
-_KNOWLEDGE_EVIDENCE_GROUPS = {'kb', 'temp_kb'}
 _DEFAULT_UI_LOCALE = 'zh-CN'
 _CJK_PATTERN = re.compile(r'[\u3400-\u9fff]')
 _LATIN_PATTERN = re.compile(r'[A-Za-z]')
@@ -189,11 +183,11 @@ def _build_attached_files_prompt(files: list | None = None) -> str:
         return ''
     lines = ['## Attached Files']
     lines.extend(f'- {path}' for path in clean)
-    return '\n'.join(lines) + '\n\n' + ATTACHED_FILES_GUIDANCE
+    return '\n'.join(lines)
 
 
 def build_system_prompt(
-    active_groups: set[str],
+    active_capabilities: set[str],
     *,
     environment_context: dict | None = None,
     use_memory: bool = True,
@@ -249,18 +243,18 @@ def build_system_prompt(
         if isinstance(memory, str) and memory.strip():
             prompt_parts.append(f'## Agent Working Memory\n{memory.strip()}')
 
-    if active_groups:
+    if active_capabilities:
         prompt_parts.append(TOOL_CALL_STATUS_GUIDANCE)
-    if active_groups & _KNOWLEDGE_EVIDENCE_GROUPS:
-        prompt_parts.append(SEARCH_GUIDANCE)
-        prompt_parts.append(KNOWLEDGE_EVIDENCE_CITATION_GUIDANCE)
-    if 'web_search' in active_groups:
-        prompt_parts.append(WEB_SEARCH_GUIDANCE)
-    if (
-        files
-        or 'image_generator' in active_groups
-        or 'image_editor' in active_groups
-    ):
-        prompt_parts.append(IMAGE_REFERENCE_MARKDOWN_GUIDANCE)
+    if active_capabilities:
+        prompt_parts.append(
+            '# Tool use policy\n'
+            'First decide whether tools are needed. A tool named get_*Toolkit_methods '
+            'is a Toolkit gateway: call it before using that Toolkit. Prefer private '
+            'knowledge-base evidence when relevant; use academic search for scholarly '
+            'sources and web search for current or otherwise unavailable information. '
+            'Preserve citation and media-rendering fields exactly as tool results specify. '
+            'Confirm before destructive or externally visible actions unless the user '
+            'already requested that exact action.'
+        )
 
     return '\n\n'.join(prompt_parts)

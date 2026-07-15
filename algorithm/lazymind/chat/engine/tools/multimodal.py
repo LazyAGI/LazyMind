@@ -100,6 +100,8 @@ def image_generator(
     Returns:
         On success: ``success``, ``prompt``, ``local_path``, optional
         ``image_url`` / ``image_markdown``, and ``images`` (list per file).
+        Copy ``image_markdown`` verbatim when answering; never rewrite signed
+        ``/static-files/`` paths or expose bare local filesystem paths.
     """
     return run_image_model(
         'image_generator',
@@ -130,7 +132,8 @@ def image_editor(
         batch_size: Number of variants to generate (default 1).
 
     Returns:
-        Same shape as ``image_generator``.
+        Same shape and rendering contract as ``image_generator``; copy
+        ``image_markdown`` verbatim when it is present.
     """
     source_files = _resolve_source_image_paths(urls)
     return run_image_model(

@@ -19,18 +19,19 @@ from lazyllm.tools.tools.search import (
 )
 
 from lazymind.chat.engine.tools import (
-    KBToolGroup,
-    ExternalDBToolGroup,
-    LocalFSToolGroup,
-    SystemQueryToolGroup,
-    WriterToolGroup,
+    KBToolkit,
+    ExternalDatabaseToolkit,
+    LocalFileToolkit,
+    MemoryToolkit,
+    WriterCreateToolkit,
+    WriterRevisionToolkit,
     calculator,
     image_editor,
     image_generator,
     kb_tmp_search,
-    memory_editor,
-    read_memory,
-    SkillEditorToolGroup,
+    SkillManagementToolkit,
+    list_data_sources,
+    build_schedule_toolkit,
     url_fetch,
     video_generator,
     video_to_gif,
@@ -41,11 +42,12 @@ from lazymind.model_config import is_model_role_available
 
 
 @dataclass
-class ToolGroupConfig:
+class ToolConfig:
     name: str
     label: str
     description: str
-    instance: Any
+    tool: Any
+    module: str
     label_en: str = ''
     description_en: str = ''
     model_role: str | None = None
@@ -60,10 +62,10 @@ class ToolGroupConfig:
     required_config: list[str] | None = None
 
     def __post_init__(self) -> None:
-        if self.pick_first_valid and not isinstance(self.instance, (list, tuple)):
+        if self.pick_first_valid and not isinstance(self.tool, dict):
             raise TypeError(
-                'instance must be a list or tuple when pick_first_valid is True, '
-                f'got {type(self.instance).__name__}'
+                'tool must be a provider toolkit dict when pick_first_valid is True, '
+                f'got {type(self.tool).__name__}'
             )
 
 
@@ -80,89 +82,115 @@ _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [
 ]
 
 
+class WikipediaToolkit(WikipediaSearch):
+    """Search Wikipedia, then fetch one or more result contents when needed."""
+
+
+_CLOUD_FILE_TOOLKIT = {
+    'name': 'CloudFileToolkit',
+    'desc': (
+        'Cloud file systems. Expand this Toolkit, choose the supplier that owns '
+        'the requested file or URL, then expand that supplier Toolkit to use its '
+        'browse, search, read, or write tools.'
+    ),
+    'tools': [
+        FeishuFS(space_id='dynamic', dynamic_auth=True),
+        NotionFS(dynamic_auth=True),
+    ],
+    'lazy': True,
+}
+
+
 def _temp_kb_key_source() -> Any:
     agentic_config = lazyllm.globals.get('agentic_config') or {}
     return agentic_config.get('files')
 
 
-SKILL_TOOL_GROUP = ToolGroupConfig(
+SKILL_TOOL_CONFIG = ToolConfig(
     name='skill',
     label='技能工具',
     description='利用已安装的技能进行查询、读文件、执行脚本',
-    instance=None,
+    tool=None,
+    module='personalization',
     label_en='Skills',
     description_en='Use installed skills to search, read files, and run scripts.',
 )
 
-DEFAULT_TOOLS: list[ToolGroupConfig] = [
-    ToolGroupConfig(
+DEFAULT_TOOLS: list[ToolConfig] = [
+    ToolConfig(
         name='kb',
-        label='知识库检索',
-        description='从知识库中搜索文档，支持语义检索、关键词检索、上下文窗口等',
-        instance=KBToolGroup(),
-        label_en='Knowledge Base Search',
-        description_en='Search knowledge base documents using semantic search, keyword search, and context windows.',
+        label='知识库',
+        description='发现知识库、查询文档与统计，并进行语义、关键词和上下文检索',
+        tool=KBToolkit(), module='retrieval',
+        label_en='Knowledge Base',
+        description_en='Discover knowledge bases, inspect documents and statistics, and retrieve their content.',
         capability_id='knowledge_base_search',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['knowledge_base'],
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='temp_kb',
         label='临时文件检索',
         description='从用户上传的临时文件中搜索相关内容',
-        instance=kb_tmp_search,
+        tool=(kb_tmp_search, _temp_kb_key_source), module='retrieval',
         label_en='Temporary File Search',
         description_en='Search relevant content in temporary files uploaded by the user.',
         key_source=_temp_kb_key_source,
     ),
-    ToolGroupConfig(
-        name='system_query',
-        label='系统数据查询',
-        description='只读查询 LazyMind 知识库、文档、数据源和关联统计',
-        instance=SystemQueryToolGroup(),
-        label_en='System Data Query',
-        description_en=(
-            'Read-only queries for LazyMind knowledge bases, documents, data sources, and related statistics.'
-        ),
+    ToolConfig(
+        name='data_sources', label='数据源查询', description='查询已配置的数据源服务',
+        tool=list_data_sources, module='data', label_en='Data Sources',
+        description_en='List configured data-source provider services.',
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='external_db',
         label='外部数据库查询',
         description='只读查看已配置外部数据库 schema，并执行只读 SELECT/WITH 查询',
-        instance=ExternalDBToolGroup(),
+        tool=ExternalDatabaseToolkit(), module='data',
         label_en='External Database Query',
         description_en='Inspect configured external database schemas and run read-only SELECT or WITH queries.',
     ),
-    ToolGroupConfig(
-        name='writer',
-        label='AI 写作',
-        description='构建写作任务、资料画像、写作上下文、大纲、章节草稿、审阅报告和最终成稿',
-        instance=WriterToolGroup(),
-        label_en='AI Writing',
-        description_en=(
-            'Build writing tasks, source profiles, context, outlines, chapter drafts, review reports, and final drafts.'
-        ),
+    ToolConfig(
+        name='writer_create', label='AI 写作',
+        description='从资料画像和大纲构建章节草稿与最终成稿',
+        tool=WriterCreateToolkit(), module='content', label_en='AI Writing',
+        description_en='Create structured long-form writing from source material.',
     ),
-    ToolGroupConfig(
+    ToolConfig(
+        name='writer_revision', label='AI 修订', description='结构化定位、规划和修改已有草稿',
+        tool=WriterRevisionToolkit(), module='content', label_en='AI Revision',
+        description_en='Revise existing drafts through a validated patch workflow.',
+    ),
+    ToolConfig(
         name='calculator',
         label='科学计算器',
         description='安全地执行数学表达式计算',
-        instance=calculator,
+        tool=calculator, module='utility',
         label_en='Scientific Calculator',
         description_en='Safely evaluate mathematical expressions.',
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='wikipedia',
         label='Wikipedia 搜索',
         description='从 Wikipedia 搜索知识条目',
-        instance=WikipediaSearch(skip_auth=True),
+        tool=WikipediaToolkit(skip_auth=True), module='retrieval',
         label_en='Wikipedia Search',
         description_en='Search Wikipedia knowledge entries.',
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='web_search',
         label='网页搜索',
         description='使用搜索引擎检索互联网内容，自动选择可用的搜索服务',
-        instance=_WEB_SEARCH_ENGINE_INSTANCES,
+        tool={
+            'name': 'WebSearchToolkit',
+            'desc': (
+                'Search the web with the first available provider. Each search query must represent '
+                'one search intent; issue separate calls for unrelated topics. Use get_content or '
+                'get_contents when result snippets are insufficient.'
+            ),
+            'pick_first_valid': True,
+            'tools': _WEB_SEARCH_ENGINE_INSTANCES,
+        },
+        module='retrieval',
         label_en='Web Search',
         description_en='Search the internet using the first available search provider.',
         pick_first_valid=True,
@@ -170,11 +198,21 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['search_provider'],
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='academic_search',
         label='学术搜索',
         description='搜索学术论文和科学文献，自动选择可用的学术搜索服务',
-        instance=_ACADEMIC_SEARCH_ENGINE_INSTANCES,
+        tool={
+            'name': 'AcademicSearchToolkit',
+            'desc': (
+                'Search papers, authors, abstracts, and scholarly metadata with the first available '
+                'provider. Use this instead of general web search for academic questions, and fetch '
+                'content only after identifying the relevant paper.'
+            ),
+            'pick_first_valid': True,
+            'tools': _ACADEMIC_SEARCH_ENGINE_INSTANCES,
+        },
+        module='retrieval',
         label_en='Academic Search',
         description_en='Search academic papers and scientific literature using the first available provider.',
         pick_first_valid=True,
@@ -182,117 +220,101 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'papers': 'list'}, required_config=['academic_search_provider'],
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='url_fetch',
         label='网页抓取',
         description='获取并解析公开网页的可读内容',
-        instance=url_fetch,
+        tool=url_fetch, module='retrieval',
         label_en='Web Page Fetch',
         description_en='Fetch and parse readable content from public web pages.',
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='multimodal',
         label='多模态识别',
         description='从图片中提取文字描述',
-        instance=vision_extractor,
+        tool=vision_extractor, module='content',
         label_en='Multimodal Recognition',
         description_en='Extract text descriptions from images.',
         model_role='vlm',
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='image_generator',
         label='文生图',
         description='根据文字描述生成图片',
-        instance=image_generator,
+        tool=image_generator, module='content',
         label_en='Image Generation',
         description_en='Generate images from text descriptions.',
         model_role='image_generator',
         capability_id='image_generation',
         input_schema={'prompt': 'string'}, output_schema={'image': 'file'}, required_config=['image_generator_model'],
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='image_editor',
         label='图编辑',
         description='根据文字指令编辑参考图片',
-        instance=image_editor,
+        tool=image_editor, module='content',
         label_en='Image Editing',
         description_en='Edit reference images using text instructions.',
         model_role='image_editor',
         capability_id='image_editing',
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='video_generator',
         label='文生视频',
         description='根据文字描述生成视频，可选首帧参考图；同轮多次调用并行，视频侧最多同时3路',
-        instance=video_generator,
+        tool=video_generator, module='content',
         model_role='video_generator',
         capability_id='video_generation',
         input_schema={'prompt': 'string'}, output_schema={'video': 'file'},
         required_config=['video_generator_model'],
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='video_to_gif',
         label='视频转GIF',
         description='将本地视频转换为 GIF 动图；同轮多次调用并行，GIF 侧最多同时3路',
-        instance=video_to_gif,
+        tool=video_to_gif, module='content',
         capability_id='video_to_gif',
         input_schema={'url': 'string'}, output_schema={'image': 'file'},
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='vocab_learn',
         label='词汇学习',
         description='学习用户专属的词汇映射和同义词',
-        instance=vocab_learn,
+        tool=vocab_learn, module='personalization',
         label_en='Vocabulary Learning',
         description_en='Learn user-specific vocabulary mappings and synonyms.',
     ),
-    ToolGroupConfig(
-        name='read_memory',
-        label='记忆读取',
-        description='读取当前的用户记忆或偏好内容',
-        instance=read_memory,
-        label_en='Memory Reading',
-        description_en='Read the current user memory and preferences.',
+    ToolConfig(
+        name='memory', label='记忆', description='读取和编辑跨会话的记忆与用户偏好',
+        tool=MemoryToolkit(), module='personalization', label_en='Memory',
+        description_en='Read and edit durable memory and user preferences.',
     ),
-    ToolGroupConfig(
-        name='memory_editor',
-        label='记忆编辑',
-        description='记录和编辑跨会话的用户记忆和偏好',
-        instance=memory_editor,
-        label_en='Memory Editing',
-        description_en='Record and edit user memories and preferences across conversations.',
-    ),
-    ToolGroupConfig(
+    ToolConfig(
         name='skill_editor',
         label='技能编辑',
         description='创建、修改和删除技能',
-        instance=SkillEditorToolGroup(),
+        tool=SkillManagementToolkit(), module='personalization',
         label_en='Skill Editing',
         description_en='Create, update, and delete skills.',
     ),
-    ToolGroupConfig(
+    ToolConfig(
         name='local_fs',
         label='本地文件',
         description='在配置的本地路径内进行 glob 匹配、grep 搜索、文件读取（只读）',
-        instance=LocalFSToolGroup(),
+        tool=LocalFileToolkit(), module='data',
         label_en='Local Files',
         description_en='Run glob matching, grep searches, and read-only file access within configured local paths.',
     ),
-    ToolGroupConfig(
-        name='feishu',
-        label='飞书文件系统',
-        description='浏览和管理飞书云文档',
-        instance=FeishuFS(space_id='dynamic', dynamic_auth=True),
-        label_en='Feishu File System',
-        description_en='Browse and manage Feishu cloud documents.',
+    ToolConfig(
+        name='cloud_files', label='云文件', description='浏览、搜索和管理已连接的云文件系统',
+        tool=_CLOUD_FILE_TOOLKIT,
+        module='data', label_en='Cloud Files',
+        description_en='Browse, search, and manage connected cloud file systems.',
     ),
-    ToolGroupConfig(
-        name='notion',
-        label='Notion 文件系统',
-        description='浏览、搜索和管理 Notion 页面',
-        instance=NotionFS(dynamic_auth=True),
-        label_en='Notion File System',
-        description_en='Browse, search, and manage Notion pages.',
+    ToolConfig(
+        name='schedule', label='定时任务', description='创建、查询、修改、取消和立即触发定时任务',
+        tool=build_schedule_toolkit(), module='execution', label_en='Schedules',
+        description_en='Create, inspect, update, cancel, and trigger recurring schedules.',
     ),
 ]
 
@@ -304,6 +326,8 @@ def _resolve_method_name(instance: Any, method_name: str) -> str:
 
 
 def _extract_methods(instance: Any) -> list[dict]:
+    if isinstance(instance, dict):
+        return _extract_group_methods(instance.get('tools', []))
     public_apis = getattr(instance, '__public_apis__', None)
     if public_apis is not None:
         methods = []
@@ -371,20 +395,25 @@ def _key_source_is_active(key_source: Callable[[], Any]) -> bool:
         return False
 
 
-def group_is_active(cfg: ToolGroupConfig) -> bool:
+def _registration_target(tool: Any) -> Any:
+    if isinstance(tool, (tuple, list)) and len(tool) == 2:
+        return tool[0]
+    return tool
+
+
+def tool_is_active(cfg: ToolConfig) -> bool:
     if cfg.model_role and not is_model_role_available(cfg.model_role):
         return False
     if cfg.key_source and not _key_source_is_active(cfg.key_source):
         return False
     if cfg.pick_first_valid:
-        return any(_instance_is_active(inst) for inst in cfg.instance)
-    if cfg.instance is None:
+        return any(_instance_is_active(inst) for inst in cfg.tool.get('tools', []))
+    target = _registration_target(cfg.tool)
+    if target is None:
         return True
-    result = _instance_is_active(cfg.instance)
-    if cfg.name == 'kb':
-        from lazyllm import LOG as _LOG
-        _LOG.info(f'[KBToolGroup_DEBUG] group_is_active kb={result!r}')
-    return result
+    if isinstance(target, dict):
+        return any(_instance_is_active(inst) for inst in target.get('tools', []))
+    return _instance_is_active(target)
 
 
 def normalize_tool_locale(locale: str | None) -> str:
@@ -402,16 +431,17 @@ def get_all_tool_groups(locale: str | None = None) -> list[dict]:
     result = []
     for cfg in DEFAULT_TOOLS:
         if cfg.pick_first_valid:
-            methods = _extract_group_methods(cfg.instance)
+            methods = _extract_group_methods(cfg.tool.get('tools', []))
         else:
-            methods = _extract_methods(cfg.instance)
+            methods = _extract_methods(_registration_target(cfg.tool))
         result.append({
             'name': cfg.name,
             'label': cfg.label_en or cfg.label if use_english else cfg.label,
             'description': cfg.description_en or cfg.description if use_english else cfg.description,
             'methods': methods,
             'can_disable': True,
-            'active': group_is_active(cfg),
+            'active': tool_is_active(cfg),
+            'module': cfg.module,
             'capability_id': cfg.capability_id or cfg.name,
             'equivalence_scope': cfg.equivalence_scope,
             'provider_id': cfg.provider_id,
@@ -421,48 +451,29 @@ def get_all_tool_groups(locale: str | None = None) -> list[dict]:
             'required_config': cfg.required_config or [],
         })
     result.append({
-        'name': SKILL_TOOL_GROUP.name,
-        'label': SKILL_TOOL_GROUP.label_en or SKILL_TOOL_GROUP.label if use_english else SKILL_TOOL_GROUP.label,
+        'name': SKILL_TOOL_CONFIG.name,
+        'label': SKILL_TOOL_CONFIG.label_en or SKILL_TOOL_CONFIG.label if use_english else SKILL_TOOL_CONFIG.label,
         'description': (
-            SKILL_TOOL_GROUP.description_en or SKILL_TOOL_GROUP.description
-            if use_english else SKILL_TOOL_GROUP.description
+            SKILL_TOOL_CONFIG.description_en or SKILL_TOOL_CONFIG.description
+            if use_english else SKILL_TOOL_CONFIG.description
         ),
         'methods': _SKILL_METHODS,
         'can_disable': False,
         'active': True,
+        'module': SKILL_TOOL_CONFIG.module,
     })
     return result
 
 
 def filter_tools(
-    configs: list[ToolGroupConfig],
+    configs: list[ToolConfig],
     available_tools: list[str] | None = None,
-) -> list[ToolGroupConfig]:
+) -> list[ToolConfig]:
     result = []
     for cfg in configs:
         if available_tools is not None and cfg.name not in available_tools:
             continue
-        if not group_is_active(cfg):
+        if not tool_is_active(cfg):
             continue
         result.append(cfg)
-    return result
-
-
-def build_agent_tools(configs: list[ToolGroupConfig]) -> list:
-    result = []
-    for cfg in configs:
-        if cfg.pick_first_valid:
-            group = dict(
-                name=cfg.name,
-                desc=cfg.description,
-                pick_first_valid=True,
-                tools=list(cfg.instance),
-            )
-            if cfg.key_source:
-                group['key_source'] = cfg.key_source
-            result.append(group)
-        elif cfg.key_source:
-            result.append((cfg.instance, cfg.key_source))
-        else:
-            result.append(cfg.instance)
     return result

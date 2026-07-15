@@ -10,7 +10,7 @@ from lazyllm.tools.tool_config_inject import inject_tool_config
 router = APIRouter()
 
 
-@router.post('/api/chat/tools', summary='List all tool groups with their methods')
+@router.post('/api/chat/tools', summary='List the tool catalog and Toolkit methods')
 async def list_chat_tools(
     response: Response,
     llm_config: Annotated[

@@ -36,7 +36,7 @@ def _skill_editor_error(tool_name: str, prefix: str, exc: Exception) -> Dict[str
     return tool_error(tool_name, f'{prefix}: {message}')
 
 
-class SkillEditorToolGroup:
+class SkillManagementToolkit:
     """Create, edit, rename, and remove reusable skill packages."""
 
     __public_apis__ = [

@@ -25,6 +25,7 @@ from lazymind.chat.service.utils import (
 )
 from lazymind.config import EMBED_IMAGE, EMBED_MAIN, config as _cfg
 from lazymind.model_config import get_dynamic_role_slot_map
+from lazymind.chat.engine.tools.system_query import KnowledgeBaseQueryMixin
 
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
@@ -271,22 +272,40 @@ def _annotate_result_citations(result: Any) -> Any:
     return result
 
 
-class KBToolGroup:
-    """Knowledge base search and navigation tools.
+class KBToolkit(KnowledgeBaseQueryMixin):
+    """Knowledge-base discovery, inspection, search, and navigation tools.
 
-    This tool group has the highest retrieval priority. If this tool group is
+    This Toolkit has the highest retrieval priority. If it is
     visible, use it before Wikipedia, web search, academic search, URL fetching,
     or answering from the model's own knowledge for every factual, definition,
     explanation, or retrieval-style question. Do not skip it because the topic
     looks general, familiar, popular, or likely available on the web. Use other
     retrieval sources only after this knowledge-base search returns no useful
     evidence.
-    """
-    __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
 
-    def __key_source__(self) -> Any:
-        agentic_config = lazyllm.globals.get('agentic_config') or {}
-        return (agentic_config.get('filters') or {}).get('kb_id')
+    Use list_knowledge_bases to discover a knowledge base, then inspect its
+    documents or aggregates. Use kb_search for open-ended semantic questions,
+    kb_keyword_search for an exact phrase in a known document, and the parent
+    or window tools only to expand context around an existing search hit.
+    Search methods require either explicit kb_ids or a knowledge-base selection
+    in the current request. Retrieved evidence carries citation markers that
+    must be preserved verbatim in the final answer.
+    """
+
+    __public_apis__ = [
+        'list_knowledge_bases', 'list_knowledge_base_documents',
+        'aggregate_knowledge_base_documents', 'kb_search',
+        'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
+    ]
+
+    @staticmethod
+    def _kb_ids(explicit: Optional[List[str]] = None) -> List[str]:
+        config = lazyllm.globals.get('agentic_config') or {}
+        selected = explicit if explicit else (config.get('filters') or {}).get('kb_id')
+        ids = [str(item).strip() for item in iter_lookup_ids(selected, field_name='kb_ids') if item]
+        if not ids:
+            raise ValueError('kb_ids is required when no knowledge base is selected in the request')
+        return ids
 
     def kb_search(
         self,
@@ -296,6 +315,7 @@ class KBToolGroup:
         k_max: Optional[int] = None,
         image_topk: Optional[int] = None,
         filters: Optional[Dict[str, Any]] = None,
+        kb_ids: Optional[List[str]] = None,
     ) -> Any:
         """Search the knowledge base and return text and image retrieval results.
 
@@ -323,13 +343,18 @@ class KBToolGroup:
             image_topk: Top-k for the image retrieval branch. Defaults to 3.
             filters: Metadata filters for retrieval, e.g.
                 {'file_name': 'report.pdf'}.
+            kb_ids: Knowledge-base IDs. Overrides the knowledge bases selected
+                in the current request.
         """
         agentic_config = lazyllm.globals['agentic_config']
         retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
 
+        selected_ids = self._kb_ids(kb_ids)
+        effective_filters = dict(filters or agentic_config.get('filters') or {})
+        effective_filters['kb_id'] = selected_ids
         payload = {
             'query': query.strip(),
-            'filters': filters or agentic_config.get('filters') or {},
+            'filters': effective_filters,
             'user_id': agentic_config.get('user_id', ''),
         }
 
@@ -350,7 +375,7 @@ class KBToolGroup:
             serialized,
         )
 
-    def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
+    def kb_get_parent_node(self, node_id: str, kb_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """Get the parent node of a target document node.
 
         Retrieves the parent node (e.g., section heading or enclosing
@@ -364,13 +389,9 @@ class KBToolGroup:
             The matched parent node, if the current node has a parent and the
             parent can be found.
         """
-        config = lazyllm.globals['agentic_config']
         doc = DOCUMENT
 
-        for kb_id in iter_lookup_ids(
-            (config.get('filters') or {}).get('kb_id'),
-            field_name='agentic_config.filters.kb_id',
-        ):
+        for kb_id in self._kb_ids(kb_ids):
             current_nodes = doc.get_nodes(uids=[node_id], kb_id=kb_id)
             current_nodes = current_nodes if isinstance(current_nodes, list) else []
             if not current_nodes:
@@ -417,6 +438,7 @@ class KBToolGroup:
         docid: str,
         number: Any,
         group: str = 'block',
+        kb_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Get nodes by number range from a target document.
 
@@ -440,13 +462,9 @@ class KBToolGroup:
         if len(numbers) > _MAX_RESULT_ITEMS:
             raise ValueError(f'number range cannot exceed {_MAX_RESULT_ITEMS} nodes')
 
-        config = lazyllm.globals['agentic_config']
         doc = DOCUMENT
 
-        for kb_id in iter_lookup_ids(
-            (config.get('filters') or {}).get('kb_id'),
-            field_name='agentic_config.filters.kb_id',
-        ):
+        for kb_id in self._kb_ids(kb_ids):
             nodes = doc.get_nodes(
                 doc_ids=[docid],
                 group=group,
@@ -483,6 +501,7 @@ class KBToolGroup:
         phrase: bool = True,
         size: int = 10,
         sort_by: str = 'score',
+        kb_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Search for exact keyword or phrase matches within a specific document.
 
@@ -514,7 +533,6 @@ class KBToolGroup:
         Returns:
             Matching nodes with content snippets.
         """
-        config = lazyllm.globals['agentic_config']
         index_name = resolve_index(group)
         size = max(1, min(int(size), _MAX_RESULT_ITEMS))
         doc = DOCUMENT
@@ -527,10 +545,7 @@ class KBToolGroup:
         LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
                  f'file_name={file_name!r} group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 
-        for kb_id in iter_lookup_ids(
-            (config.get('filters') or {}).get('kb_id'),
-            field_name='agentic_config.filters.kb_id',
-        ):
+        for kb_id in self._kb_ids(kb_ids):
             LOG.info(f'[kb_keyword_search] trying kb_id={kb_id!r}')
             nodes = doc.keyword_search(
                 group=group, keyword=keyword, doc_id=docid,
