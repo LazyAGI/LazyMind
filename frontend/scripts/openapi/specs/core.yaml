@@ -439,22 +439,6 @@ components:
                 - success
                 - table_count
             type: object
-        CheckFileHashesRequest:
-            properties:
-                hashes:
-                    items:
-                        type: string
-                    type: array
-            required:
-                - hashes
-            type: object
-        CheckFileHashesResponse:
-            properties:
-                missing_hashes:
-                    items:
-                        type: string
-                    type: array
-            type: object
         CheckModelProviderData:
             properties:
                 message:
@@ -524,8 +508,6 @@ components:
             type: object
         CompleteUploadResponse:
             properties:
-                content_hash:
-                    type: string
                 content_url:
                     type: string
                 convert_error:
@@ -852,8 +834,6 @@ components:
             type: object
         CreateTaskItem:
             properties:
-                content_hash:
-                    type: string
                 cross_dataset:
                     type: boolean
                 task:
@@ -2523,8 +2503,6 @@ components:
                     type: string
                 id:
                     type: string
-                is_head:
-                    type: boolean
                 message:
                     type: string
                 parent_revision_id:
@@ -2548,7 +2526,6 @@ components:
                 - content_hash
                 - created_at
                 - id
-                - is_head
                 - message
                 - path
                 - revision_id
@@ -3140,8 +3117,6 @@ components:
             type: object
         UploadFileResponse:
             properties:
-                content_hash:
-                    type: string
                 content_type:
                     type: string
                 content_url:
@@ -3561,10 +3536,6 @@ components:
                     type: string
                 is_default:
                     type: boolean
-                max_input_tokens:
-                    description: Maximum catalog LLM or VLM input context window, for example 128K or 1M; null for other, custom, or unknown models
-                    nullable: true
-                    type: string
                 model_type:
                     type: string
                 name:
@@ -4044,10 +4015,6 @@ components:
                     type: string
                 group_name:
                     type: string
-                max_input_tokens:
-                    description: Maximum selected catalog LLM or VLM input context window, for example 128K or 1M; null for other, custom, or unknown models
-                    nullable: true
-                    type: string
                 model_id:
                     type: string
                 model_key:
@@ -4517,36 +4484,6 @@ components:
                 - page_size
                 - total
             type: object
-        skillMaintenanceStatusOpenAPIResponse:
-            properties:
-                has_active_task:
-                    type: boolean
-                message:
-                    type: string
-                task:
-                    $ref: '#/components/schemas/skillMaintenanceTaskOpenAPIResponse'
-            required:
-                - has_active_task
-            type: object
-        skillMaintenanceTaskOpenAPIResponse:
-            properties:
-                id:
-                    type: string
-                request_id:
-                    type: string
-                started_at:
-                    type: string
-                status:
-                    type: string
-                type:
-                    type: string
-            required:
-                - id
-                - request_id
-                - started_at
-                - status
-                - type
-            type: object
         skillOrganizeOpenAPIRequest:
             properties:
                 artifact_dir:
@@ -4592,8 +4529,6 @@ components:
                     type: string
                 id:
                     type: string
-                is_head:
-                    type: boolean
                 message:
                     type: string
                 parent_revision_id:
@@ -4611,7 +4546,6 @@ components:
                 - change_source
                 - created_at
                 - id
-                - is_head
                 - revision_id
                 - revision_no
                 - skill_id
@@ -7584,30 +7518,6 @@ paths:
             summary: Complete upload
             tags:
                 - tasks
-    /api/core/datasets/{dataset}/uploads:checkHashes:
-        post:
-            parameters:
-                - in: path
-                  name: dataset
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/CheckFileHashesRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/CheckFileHashesResponse'
-                    description: Missing file hashes
-            summary: Check reusable file hashes
-            tags:
-                - tasks
     /api/core/datasets/{dataset}/uploads:initUpload:
         post:
             parameters:
@@ -8934,7 +8844,7 @@ paths:
             summary: POST /model_providers/{model_provider_id}/groups/{group_id}/keys
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models:
         get:
-            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M. Other, custom, or unknown models return null.
+            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models).
             parameters:
                 - in: path
                   name: model_provider_id
@@ -9059,7 +8969,7 @@ paths:
                 - model_providers
     /api/core/model_providers/models:
         get:
-            description: Requires query model_type (e.g. llm or vlm). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M; other, custom, or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+            description: Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
             parameters:
                 - in: query
                   name: model_type
@@ -9103,7 +9013,7 @@ paths:
                 - model_providers
     /api/core/model_providers/selected_models:
         get:
-            description: Returns the current user's selected model for each model_type. Each selection includes nullable max_input_tokens, the selected catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M; other, custom, or unknown models return null.
+            description: Returns the current user's selected model for each model_type.
             responses:
                 "200":
                     content:
@@ -11891,18 +11801,6 @@ paths:
                                 $ref: '#/components/schemas/skillCategoriesOpenAPIResponse'
                     description: Skill category list
             summary: List skill categories
-            tags:
-                - skills
-    /api/core/skills/maintenance-task:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/skillMaintenanceStatusOpenAPIResponse'
-                    description: Skill maintenance task status
-            summary: Get current user's active Skill maintenance task
             tags:
                 - skills
     /api/core/skills/tags:

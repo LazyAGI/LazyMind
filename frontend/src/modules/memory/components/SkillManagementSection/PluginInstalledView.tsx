@@ -69,7 +69,6 @@ export default function PluginInstalledView({
       setBuiltinPlugins(builtins);
       setEnabledByRef(Object.fromEntries(pluginSettings.map((item) => [item.plugin_ref, item.enabled])));
     } catch {
-      message.error(t('admin.memoryPluginLoadFailed'));
     } finally {
       setLoading(false);
     }
@@ -85,7 +84,6 @@ export default function PluginInstalledView({
       message.success(t('admin.memoryPluginDeleteSuccess'));
       void loadList();
     } catch {
-      message.error(t('admin.memoryPluginDeleteFailed'));
     }
   };
 
@@ -105,7 +103,7 @@ export default function PluginInstalledView({
     const previous = enabledByRef[pluginRef] ?? false;
     setEnabledByRef((current) => ({ ...current, [pluginRef]: enabled }));
     try { await setUserPluginEnabled(pluginRef, enabled); message.success(enabled ? 'Plugin 已默认启用' : 'Plugin 已默认关闭'); }
-    catch { setEnabledByRef((current) => ({ ...current, [pluginRef]: previous })); message.error('Plugin 默认启用状态保存失败'); }
+    catch { setEnabledByRef((current) => ({ ...current, [pluginRef]: previous })); }
   };
 
   const openInfoModal = (record: PluginDraftRecord) => {

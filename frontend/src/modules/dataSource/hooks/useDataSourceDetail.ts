@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { message } from "antd";
 import type { TFunction } from "i18next";
 import { useLocation, useParams } from "react-router-dom";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { CLOUD_SYNC_TIMEOUT_MS } from "../constants/options";
 import { buildFallbackSources, buildDocumentStatusMap } from "../constants/detailDemoData";
 import type {
@@ -134,10 +132,16 @@ export function useDataSourceDetail(t: TFunction) {
 
       const requestSeq = detailRefreshSeqRef.current + 1;
       detailRefreshSeqRef.current = requestSeq;
+      const requestOptions = showError
+        ? undefined
+        : ({ silentError: true } as never);
 
       try {
         const client = dataSourceScanApi;
-        const sourceResponse = await client.getSource({ sourceId: id });
+        const sourceResponse = await client.getSource(
+          { sourceId: id },
+          requestOptions,
+        );
         const source = {
           ...sourceResponse.data.source,
           tenant_id: routeSource?.tenantId,
@@ -150,9 +154,12 @@ export function useDataSourceDetail(t: TFunction) {
           sourceId: id,
           page: 1,
           pageSize: 200,
-        });
+        }, requestOptions);
         const summaryResponse = await client
-          .getSourceSummary({ sourceId: id })
+          .getSourceSummary(
+            { sourceId: id },
+            { silentError: true } as never,
+          )
           .catch(() => null);
         const nextDocuments = (documentsResponse.data.items || []).map((item) =>
           mapScanDocumentToDetail(item, t, sourceType),
@@ -184,10 +191,7 @@ export function useDataSourceDetail(t: TFunction) {
         return nextDocuments;
       } catch (error) {
         if (showError && detailRefreshSeqRef.current === requestSeq) {
-          message.error(
-            getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-              t("common.requestFailed"),
-          );
+          console.error("Failed to refresh data source detail", error);
         }
         return null;
       } finally {
@@ -212,6 +216,9 @@ export function useDataSourceDetail(t: TFunction) {
 
       const requestSeq = documentRefreshSeqRef.current + 1;
       documentRefreshSeqRef.current = requestSeq;
+      const requestOptions = showError
+        ? undefined
+        : ({ silentError: true } as never);
 
       try {
         const client = dataSourceScanApi;
@@ -219,7 +226,7 @@ export function useDataSourceDetail(t: TFunction) {
           sourceId: id,
           page: 1,
           pageSize: 200,
-        });
+        }, requestOptions);
         const nextDocuments = (documentsResponse.data.items || []).map((item) =>
           mapScanDocumentToDetail(item, t),
         );
@@ -235,10 +242,7 @@ export function useDataSourceDetail(t: TFunction) {
         return nextDocuments;
       } catch (error) {
         if (showError && documentRefreshSeqRef.current === requestSeq) {
-          message.error(
-            getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-              t("common.requestFailed"),
-          );
+          console.error("Failed to refresh data source documents", error);
         }
         return null;
       }
@@ -351,10 +355,7 @@ export function useDataSourceDetail(t: TFunction) {
         if (documentSearchSeqRef.current !== requestSeq) {
           return;
         }
-        message.error(
-          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-            t("common.requestFailed"),
-        );
+        console.error("Failed to search data source documents", error);
       } finally {
         if (documentSearchSeqRef.current === requestSeq) {
           setDocumentLoading(false);

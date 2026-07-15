@@ -9,6 +9,7 @@ interface QuestionTypeSelectProps {
   placeholder?: string;
   allowClear?: boolean;
   options?: string[];
+  showAllOptions?: boolean;
 }
 
 export default function QuestionTypeSelect({
@@ -18,6 +19,7 @@ export default function QuestionTypeSelect({
   placeholder,
   allowClear,
   options,
+  showAllOptions = false,
 }: QuestionTypeSelectProps) {
   const { t } = useTranslation();
   const resolvedOptions = options ? options : questionTypeOptions;
@@ -33,8 +35,13 @@ export default function QuestionTypeSelect({
         label: t(questionTypeI18nKeys[item] || item),
         value: item,
       }))}
-      filterOption={(inputValue, option) =>
-        `${option?.label || ""}`.toLowerCase().includes(inputValue.toLowerCase())
+      filterOption={
+        showAllOptions
+          ? false
+          : (inputValue, option) =>
+              `${option?.label || ""}`
+                .toLowerCase()
+                .includes(inputValue.toLowerCase())
       }
     />
   );

@@ -11,6 +11,9 @@
     "preview": "vite preview",
     "gen:openapi": "node scripts/openapi/generate-api.mjs",
     "gen:openapi:check": "node scripts/openapi/check-stale.mjs",
+    "gen:error-codes": "node scripts/i18n/sync-error-codes.mjs",
+    "check:error-codes": "node scripts/i18n/sync-error-codes.mjs --check",
+    "check:error-prompts": "node scripts/i18n/check-error-prompts.mjs",
     "gen:auth": "bash scripts/openapi/generate-auth.sh",
     "lint": "eslint \"src/**/*.{ts,tsx}\""
   },

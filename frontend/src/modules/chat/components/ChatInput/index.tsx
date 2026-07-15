@@ -58,7 +58,6 @@ import { formatFileSize } from "@/modules/chat/utils";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
 import { Popover, Tag } from "antd";
 
@@ -110,11 +109,8 @@ function DismissedPluginRestoreButton({
       // Reload active session so PluginPanel re-appears immediately without needing a page refresh.
       usePluginStore.getState().loadActiveSession(conversationId);
       setOpen(false);
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { error?: string } } };
-      message.error(
-        err?.response?.data?.error ?? t("chat.pluginRestoreFailed"),
-      );
+    } catch {
+      // API errors are reported by the shared request interceptor.
     } finally {
       setRestoring(null);
     }
@@ -816,11 +812,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           debouncedSaveInput(sessionId, nextPrompt);
         }
         setTimeout(() => onHeightChange?.(), 0);
-      } catch (error) {
-        message.error(
-          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-            t("common.requestFailed"),
-        );
+      } catch {
+        // API errors are reported by the shared request interceptor.
       } finally {
         setPolishingSuggestionKey(null);
       }

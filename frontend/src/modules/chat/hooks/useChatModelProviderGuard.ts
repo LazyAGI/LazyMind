@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { message } from "antd";
 import { AgentAppsAuth, AUTH_USER_CHANGE_EVENT } from "@/components/auth";
-import { axiosInstance, BASE_URL } from "@/components/request";
+import {
+  axiosInstance,
+  BASE_URL,
+  localizeErrorCode,
+} from "@/components/request";
 import { fetchCurrentUser } from "@/modules/signin/utils/request";
 import {
   fetchModelFeatures,
@@ -139,24 +144,30 @@ export function useChatModelProviderGuard() {
     try {
       const features = await fetchModelFeatures(true);
       const imageEmbedRequired = isImageEmbedRequired(features);
+      const silentRequestOptions = { silentError: true } as never;
 
       const [chatReadyResp, embeddingResp, multimodalEmbeddingResp, rerankResp, vlmResp] = await Promise.all([
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=llm`
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=llm`,
+          silentRequestOptions,
         ).catch(() => null),
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`,
+          silentRequestOptions,
         ).catch(() => null),
         imageEmbedRequired
           ? axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-              `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`
+              `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`,
+              silentRequestOptions,
             ).catch(() => null)
           : Promise.resolve(null),
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=reranker`
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=reranker`,
+          silentRequestOptions,
         ).catch(() => null),
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=vlm`
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=vlm`,
+          silentRequestOptions,
         ).catch(() => null),
       ]);
 
@@ -164,9 +175,28 @@ export function useChatModelProviderGuard() {
         return false;
       }
 
-      const ready = chatReadyResp
-        ? unwrapResponse<ModelReadyResponse>(chatReadyResp.data).ready === true
-        : false;
+      if (!chatReadyResp) {
+        setStatus("error");
+        setEmbeddingReady(null);
+        setMultimodalEmbeddingReady(null);
+        setRerankReady(null);
+        setVlmReady(null);
+        setCachedSnapshot({
+          status: "error",
+          requiresModelProviderConfig: shouldCheckModelProvider,
+          embeddingReady: null,
+          multimodalEmbeddingReady: null,
+          rerankReady: null,
+          vlmReady: null,
+        });
+        message.error({
+          key: "api-request-error",
+          content: localizeErrorCode("2000509"),
+        });
+        return false;
+      }
+
+      const ready = unwrapResponse<ModelReadyResponse>(chatReadyResp.data).ready === true;
       const nextStatus: ChatModelProviderStatus = ready ? "ready" : "missing";
       setStatus(nextStatus);
 

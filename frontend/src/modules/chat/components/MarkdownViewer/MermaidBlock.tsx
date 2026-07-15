@@ -85,7 +85,7 @@ async function copyTextToClipboard(text: string) {
   try {
     const copied = document.execCommand("copy");
     if (!copied) {
-      throw new Error("Copy command failed");
+      throw new Error();
     }
   } finally {
     document.body.removeChild(textarea);

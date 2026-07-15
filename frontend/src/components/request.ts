@@ -82,6 +82,23 @@ function getErrorPayload(error: any): any {
   return error?.response?.data ?? error;
 }
 
+function hasApiResponse(error: any): boolean {
+  return error?.response !== undefined;
+}
+
+const HTTP_STATUS_ERROR_CODE_MAP: Record<number, string> = {
+  400: "2000103",
+  401: "2000104",
+  403: "2000102",
+  404: "2000106",
+  409: "2000107",
+  429: "2000108",
+  502: "2000110",
+};
+
+const GENERIC_REQUEST_ERROR_CODE = "2000509";
+const API_ERROR_MESSAGE_KEY = "api-request-error";
+
 const RAW_ERROR_MESSAGE_CODE_MAP: Record<string, string> = {
   "dataset name already exists": "2001102",
 };
@@ -92,9 +109,15 @@ export function extractErrorCode(error: any): string | undefined {
     responseData?.code,
     responseData?.error_code,
     responseData?.errorCode,
+    responseData?.err_code,
+    responseData?.err_msg,
+    responseData?.error?.code,
     responseData?.data?.code,
     responseData?.data?.error_code,
     responseData?.data?.errorCode,
+    responseData?.data?.err_code,
+    responseData?.data?.err_msg,
+    responseData?.data?.error?.code,
   ];
 
   for (const candidate of candidates) {
@@ -136,6 +159,17 @@ function extractRawErrorMessage(error: any): string | undefined {
     return responseData.message;
   }
 
+  if (typeof responseData?.err_msg === "string" && responseData.err_msg.trim()) {
+    return responseData.err_msg;
+  }
+
+  if (
+    typeof responseData?.error?.message === "string" &&
+    responseData.error.message.trim()
+  ) {
+    return responseData.error.message;
+  }
+
   if (
     typeof error?.response?.message === "string" &&
     error.response.message.trim()
@@ -150,10 +184,7 @@ function extractRawErrorMessage(error: any): string | undefined {
   return undefined;
 }
 
-export function getLocalizedErrorMessage(
-  error: any,
-  fallback?: string,
-): string | undefined {
+export function getLocalizedErrorMessage(error: any): string {
   const errorCode = extractErrorCode(error);
 
   if (errorCode && i18n.exists(`errors.${errorCode}`)) {
@@ -169,7 +200,32 @@ export function getLocalizedErrorMessage(
     return i18n.t(`errors.${rawMessageCode}`);
   }
 
-  return rawMessage || fallback;
+  // Backend response text is diagnostic data, not a user-facing translation.
+  // API failures may only use the shared error catalog, never page copy.
+  if (hasApiResponse(error)) {
+    const statusCode = Number(error?.response?.status);
+    return localizeErrorCode(
+      HTTP_STATUS_ERROR_CODE_MAP[statusCode] || GENERIC_REQUEST_ERROR_CODE,
+    );
+  }
+
+  // Some APIs return a business-error envelope with HTTP 200. Once a code is
+  // present, keep the same catalog-only rule even without an Axios response.
+  if (errorCode) {
+    return localizeErrorCode(GENERIC_REQUEST_ERROR_CODE);
+  }
+
+  if (
+    error?.isAxiosError ||
+    error?.request ||
+    ["ERR_NETWORK", "ECONNABORTED", "ETIMEDOUT"].includes(error?.code)
+  ) {
+    return localizeErrorCode(GENERIC_REQUEST_ERROR_CODE);
+  }
+
+  // This helper is reserved for request failures. Unknown errors must not leak
+  // browser, transport, or backend text through page-level fallbacks.
+  return localizeErrorCode(GENERIC_REQUEST_ERROR_CODE);
 }
 
 /** Resolve a core error code (e.g. err_msg "2000725") via errors.{code} i18n. */
@@ -178,12 +234,34 @@ export function localizeErrorCode(code?: string, fallback = ""): string {
   if (normalized && i18n.exists(`errors.${normalized}`)) {
     return i18n.t(`errors.${normalized}`);
   }
-  return normalized || fallback;
+  return fallback;
 }
 
 function isRefreshEndpoint(url?: string): boolean {
   if (!url) return false;
   return url.includes("/auth/refresh") || url.includes("/auth/login") || url.includes("/auth/logout");
+}
+
+function extractBusinessEnvelopeErrorCode(responseData: any): string | undefined {
+  if (!responseData || typeof responseData !== "object") return undefined;
+  const candidate =
+    responseData.code ??
+    responseData.error_code ??
+    responseData.errorCode ??
+    responseData.err_code ??
+    responseData.err_msg;
+  if (candidate === undefined || candidate === null) return undefined;
+  const code = String(candidate).trim();
+  if (!code || code === "0" || code === "200") return undefined;
+
+  const looksLikeEnvelope =
+    Object.prototype.hasOwnProperty.call(responseData, "message") &&
+    (Object.prototype.hasOwnProperty.call(responseData, "data") ||
+      /^\d{7}$/.test(code));
+  if (i18n.exists(`errors.${code}`) || looksLikeEnvelope) {
+    return code;
+  }
+  return undefined;
 }
 
 async function restoreLocalSessionAndRetry(
@@ -202,7 +280,7 @@ async function restoreLocalSessionAndRetry(
   return axiosInstance(originalRequest);
 }
 
-export const handleError = async (error: AxiosError) => {
+export const handleError = async (error: AxiosError): Promise<any> => {
   if (isCanceledError(error)) return Promise.reject(error);
   
   const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean; _localSessionRetry?: boolean; silentError?: boolean };
@@ -210,23 +288,26 @@ export const handleError = async (error: AxiosError) => {
   
   if (error.response) {
     if (error.response.status === 403) {
-      const errMsg = getLocalizedErrorMessage(
-        error,
-        i18n.t("common.accessDenied"),
-      );
+      const errMsg = getLocalizedErrorMessage(error);
       const errorCode = extractErrorCode(error);
       if (
         errorCode === "1000106" ||
         extractRawErrorMessage(error) === "User is disabled"
       ) {
-        message.error(errMsg || i18n.t("auth.userDisabled"));
+        message.error({
+          key: API_ERROR_MESSAGE_KEY,
+          content: errMsg || localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
+        });
         void AgentAppsAuth.logout(
           `${BASE_URL || window.location.origin}${window.BASENAME || ""}/agent/chat`,
         );
         return Promise.reject(error);
       }
       if (!silentError) {
-        message.error(errMsg || i18n.t("common.accessDenied"));
+        message.error({
+          key: API_ERROR_MESSAGE_KEY,
+          content: errMsg || localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
+        });
       }
     } else if (error.response.status === 401) {
       if (isRefreshEndpoint(originalRequest?.url)) {
@@ -239,7 +320,12 @@ export const handleError = async (error: AxiosError) => {
           return Promise.reject(error);
         }
         if (AgentAppsAuth.isLoggedIn()) {
-          message.warning(i18n.t("auth.sessionExpired"));
+          message.warning({
+            key: API_ERROR_MESSAGE_KEY,
+            content:
+              getLocalizedErrorMessage(error) ||
+              localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
+          });
         }
         void AgentAppsAuth.logout();
         return Promise.reject(error);
@@ -257,7 +343,12 @@ export const handleError = async (error: AxiosError) => {
           }
         }
         if (AgentAppsAuth.isLoggedIn()) {
-          message.warning(i18n.t("auth.authFailedRelogin"));
+          message.warning({
+            key: API_ERROR_MESSAGE_KEY,
+            content:
+              getLocalizedErrorMessage(error) ||
+              localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
+          });
         }
         void AgentAppsAuth.logout();
         return Promise.reject(error);
@@ -309,7 +400,12 @@ export const handleError = async (error: AxiosError) => {
         });
         refreshQueue = [];
         
-        message.warning(i18n.t("auth.sessionExpired"));
+        message.warning({
+          key: API_ERROR_MESSAGE_KEY,
+          content:
+            getLocalizedErrorMessage(refreshError) ||
+            localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
+        });
         void AgentAppsAuth.logout();
         return Promise.reject(refreshError);
       } finally {
@@ -317,22 +413,25 @@ export const handleError = async (error: AxiosError) => {
       }
     } else {
       if (!silentError) {
-        message.error(
-          getLocalizedErrorMessage(error, i18n.t("common.requestFailed")) ||
-            i18n.t("common.requestFailed"),
-        );
+        message.error({
+          key: API_ERROR_MESSAGE_KEY,
+          content: getLocalizedErrorMessage(error),
+        });
       }
     }
   } else if (error.request) {
     if (!silentError) {
-      message.error(i18n.t("common.serverNoResponse"));
+      message.error({
+        key: API_ERROR_MESSAGE_KEY,
+        content: localizeErrorCode(GENERIC_REQUEST_ERROR_CODE),
+      });
     }
   } else {
     if (!silentError) {
-      message.error(
-        getLocalizedErrorMessage(error, i18n.t("common.requestError")) ||
-          i18n.t("common.requestError"),
-      );
+      message.error({
+        key: API_ERROR_MESSAGE_KEY,
+        content: getLocalizedErrorMessage(error),
+      });
     }
   }
   return Promise.reject(error);
@@ -350,6 +449,18 @@ axiosInstance.interceptors.request.use(
   },
   handleError,
 );
-axiosInstance.interceptors.response.use((response) => response, handleError);
+axiosInstance.interceptors.response.use((response) => {
+  const businessErrorCode = extractBusinessEnvelopeErrorCode(response.data);
+  if (!businessErrorCode) return response;
+
+  const error = new axios.AxiosError(
+    "Business request failed",
+    "ERR_BAD_RESPONSE",
+    response.config,
+    response.request,
+    response,
+  );
+  return handleError(error);
+}, handleError);
 
 export { axiosInstance };

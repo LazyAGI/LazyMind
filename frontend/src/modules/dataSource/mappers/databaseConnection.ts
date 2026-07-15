@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import type { DatabaseConnectionItem } from "../api/databaseConnections";
 import type { DataSourceItem } from "../constants/types";
 import { formatDateTime } from "../utils/format";
+import { localizeErrorCode } from "@/components/request";
 
 export function mapDatabaseConnectionToDataSource(
   connection: DatabaseConnectionItem,
@@ -46,10 +47,12 @@ export function mapDatabaseConnectionToDataSource(
           : hasError
             ? t("admin.dataSourceDatabaseConnectionError")
             : t("admin.dataSourceDatabasePending"),
-        description: connection.last_check_error || t("admin.dataSourceDatabaseReadonlyQueryLog"),
+        description: hasError
+          ? localizeErrorCode("2000509")
+          : t("admin.dataSourceDatabaseReadonlyQueryLog"),
       },
     ],
-    warning: connection.last_check_error || undefined,
+    warning: hasError ? localizeErrorCode("2000509") : undefined,
     oauthConnection: null,
     scanManaged: false,
     storageUsed: "-",

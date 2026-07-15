@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { message } from "antd";
 import type { TFunction } from "i18next";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { CLOUD_SYNC_TIMEOUT_MS } from "../constants/options";
 import type { DataSourceSummary, DocumentStatusRow } from "../constants/types";
 import { dataSourceScanApi } from "../api/clients";
@@ -99,10 +97,16 @@ export function useScanSourceSyncFlow({
 
       const requestSeq = detailRefreshSeqRef.current + 1;
       detailRefreshSeqRef.current = requestSeq;
+      const requestOptions = showError
+        ? undefined
+        : ({ silentError: true } as never);
 
       try {
         const client = dataSourceScanApi;
-        const sourceResponse = await client.getSource({ sourceId });
+        const sourceResponse = await client.getSource(
+          { sourceId },
+          requestOptions,
+        );
         const source = sourceResponse.data.source;
         const binding = getFirstScanBinding(
           sourceResponse.data.bindings as ScanV2Binding[] | undefined,
@@ -112,9 +116,12 @@ export function useScanSourceSyncFlow({
           sourceId,
           page: 1,
           pageSize: 200,
-        });
+        }, requestOptions);
         const summaryResponse = await client
-          .getSourceSummary({ sourceId })
+          .getSourceSummary(
+            { sourceId },
+            { silentError: true } as never,
+          )
           .catch(() => null);
         const nextDocuments = (documentsResponse.data.items || []).map((item) =>
           mapScanDocumentToDetail(item, t, sourceType),
@@ -143,10 +150,7 @@ export function useScanSourceSyncFlow({
         return nextDocuments;
       } catch (error) {
         if (showError && detailRefreshSeqRef.current === requestSeq) {
-          message.error(
-            getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-              t("common.requestFailed"),
-          );
+          console.error("Failed to refresh scan source detail", error);
         }
         return null;
       } finally {
@@ -170,6 +174,9 @@ export function useScanSourceSyncFlow({
 
       const requestSeq = documentRefreshSeqRef.current + 1;
       documentRefreshSeqRef.current = requestSeq;
+      const requestOptions = showError
+        ? undefined
+        : ({ silentError: true } as never);
 
       try {
         const client = dataSourceScanApi;
@@ -177,7 +184,7 @@ export function useScanSourceSyncFlow({
           sourceId,
           page: 1,
           pageSize: 200,
-        });
+        }, requestOptions);
         const nextDocuments = (documentsResponse.data.items || []).map((item) =>
           mapScanDocumentToDetail(item, t),
         );
@@ -189,10 +196,7 @@ export function useScanSourceSyncFlow({
         return nextDocuments;
       } catch (error) {
         if (showError && documentRefreshSeqRef.current === requestSeq) {
-          message.error(
-            getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-              t("common.requestFailed"),
-          );
+          console.error("Failed to refresh scan source documents", error);
         }
         return null;
       }

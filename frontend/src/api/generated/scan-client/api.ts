@@ -23,6 +23,32 @@ import type { RequestArgs } from './base';
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, BaseAPI, RequiredError, operationServerMap } from './base';
 
+export interface AppendSourceRequest {
+    'bindings': Array<SourceAppendBindingRequest>;
+}
+export interface AppendSourceResponse {
+    'new_binding_ids': Array<string>;
+    'new_bindings': Array<SourceBindingResponse>;
+    'sync_job_errors'?: Array<JobError>;
+}
+export interface AuthConnectionStatus {
+    'connection_ids': Array<string>;
+    'status': CloudAuthConnectionStatus;
+}
+
+
+export interface BindingChatSettingEntry {
+    'binding_id': string;
+    'chat_enabled': boolean;
+    'connector_type': string;
+    'include_extensions'?: Array<string>;
+    'status': string;
+    'target_ref': string;
+    'target_type': string;
+}
+export interface BindingChatSettingsResponse {
+    'sources': Array<SourceChatSettingEntry>;
+}
 export interface BindingMutationResponse {
     'binding': SourceBindingResponse;
     'job_ids'?: Array<string>;
@@ -71,6 +97,18 @@ export interface BindingTargetSearchRequest {
     'target_ref'?: string;
     'target_type'?: string;
 }
+
+
+
+export const CloudAuthConnectionStatus = {
+    Active: 'ACTIVE',
+    Expired: 'EXPIRED',
+    Revoked: 'REVOKED',
+    Error: 'ERROR',
+    Pending: 'PENDING'
+} as const;
+
+export type CloudAuthConnectionStatus = typeof CloudAuthConnectionStatus[keyof typeof CloudAuthConnectionStatus];
 
 
 export interface Compensation {
@@ -215,6 +253,11 @@ export interface GetSourceResponse {
     'source': SourceResponse;
     'summary'?: { [key: string]: any; };
 }
+export interface JobError {
+    'code': string;
+    'details'?: { [key: string]: any; };
+    'message': string;
+}
 
 export const ListMode = {
     Page: 'page',
@@ -317,10 +360,15 @@ export const ScheduleRuleDaysEnum = {
 
 export type ScheduleRuleDaysEnum = typeof ScheduleRuleDaysEnum[keyof typeof ScheduleRuleDaysEnum];
 
+export interface SourceAppendBindingRequest {
+    'display_name'?: string;
+    'target_ref'?: string;
+}
 export interface SourceBindingRequest {
     'agent_id'?: string;
     'auth_connection_id'?: string;
     'binding_id'?: string;
+    'chat_enabled'?: boolean;
     'connector_type': string;
     'display_name'?: string;
     'exclude_extensions'?: Array<string>;
@@ -336,9 +384,11 @@ export interface SourceBindingRequest {
 export interface SourceBindingResponse {
     'binding_generation': number;
     'binding_id': string;
+    'chat_enabled'?: boolean;
     'connector_type': string;
     'core_parent_document_id': string;
-    'core_parent_document_name'?: string;
+    'exclude_extensions'?: Array<string>;
+    'include_extensions'?: Array<string>;
     'next_sync_at'?: string;
     'schedule_policy'?: SchedulePolicy;
     'source_id'?: string;
@@ -351,6 +401,13 @@ export interface SourceBindingResponse {
 }
 
 
+export interface SourceChatSettingEntry {
+    'bindings': Array<BindingChatSettingEntry>;
+    'dataset_id': string;
+    'name': string;
+    'source_id': string;
+    'tenant_id': string;
+}
 export interface SourceDocumentItem {
     'baseline_version'?: string;
     'binding_id'?: string;
@@ -358,6 +415,7 @@ export interface SourceDocumentItem {
     'directory'?: string;
     'display_name'?: string;
     'document_id'?: string;
+    'effective_parse_status'?: string;
     'file_type'?: string;
     'has_update'?: boolean;
     'last_error'?: { [key: string]: any; };
@@ -372,6 +430,7 @@ export interface SourceDocumentItem {
     'pending_action'?: string;
     'size_bytes'?: number;
     'source_id'?: string;
+    'source_modified_at'?: string;
     'source_state'?: SourceState;
     'source_version'?: string;
     'sync_state'?: SyncState;
@@ -388,6 +447,7 @@ export interface SourceDocumentListResponse {
     'total': number;
 }
 export interface SourceListItem {
+    'auth_connection_status'?: AuthConnectionStatus;
     'binding_count': number;
     'config_version': number;
     'created_at'?: string;
@@ -412,10 +472,18 @@ export interface SourceListResponse {
 }
 export interface SourceResponse {
     'config_version': number;
+    'created_at'?: string;
+    'created_by'?: string;
     'dataset_id': string;
+    'deleted_at'?: string;
+    'exclude_extensions'?: Array<string>;
+    'include_extensions'?: Array<string>;
     'name': string;
     'source_id': string;
+    'source_options'?: { [key: string]: any; };
     'status': SourceStatus;
+    'tenant_id'?: string;
+    'updated_at'?: string;
 }
 
 
@@ -424,7 +492,9 @@ export const SourceState = {
     New: 'NEW',
     Modified: 'MODIFIED',
     Deleted: 'DELETED',
-    Unchanged: 'UNCHANGED'
+    Unchanged: 'UNCHANGED',
+    OutOfScope: 'OUT_OF_SCOPE',
+    PendingDeletion: 'PENDING_DELETION'
 } as const;
 
 export type SourceState = typeof SourceState[keyof typeof SourceState];
@@ -467,6 +537,7 @@ export interface SourceTreeChildrenRequest {
     'max_items'?: number;
     'page_size'?: number;
     'parent_key'?: string;
+    'refresh_state'?: boolean;
     'state_filter'?: Array<string>;
     'tree_key'?: string;
     'use_cache'?: boolean;
@@ -483,6 +554,7 @@ export interface SourceTreeSearchRequest {
     'max_items'?: number;
     'page_size'?: number;
     'parent_key'?: string;
+    'refresh_state'?: boolean;
     'state_filter'?: Array<string>;
     'tree_key'?: string;
 }
@@ -582,9 +654,11 @@ export interface TaskObject {
 }
 export interface TreeNode {
     'binding_id'?: string;
+    'children'?: Array<TreeNode>;
     'connector_type'?: string;
     'display_name': string;
     'has_children': boolean;
+    'has_update'?: boolean;
     'is_container': boolean;
     'is_document': boolean;
     'key': string;
@@ -592,15 +666,20 @@ export interface TreeNode {
     'object_key'?: string;
     'parent_key'?: string;
     'parse_queue_state'?: string;
+    'pending_action'?: string;
     'provider_meta'?: { [key: string]: any; };
     'selectable': boolean;
     'source_id'?: string;
-    'source_state'?: string;
-    'sync_state'?: string;
+    'source_state'?: SourceState;
+    'sync_state'?: SyncState;
     'target_ref'?: string;
     'target_type'?: string;
     'tree_key'?: string;
+    'update_desc'?: string;
+    'update_type'?: string;
 }
+
+
 export interface TreeNodePage {
     'has_more': boolean;
     'items': Array<TreeNode>;
@@ -620,6 +699,13 @@ export interface TriggerSourceSyncResponse {
     'job_ids': Array<string>;
     'run_ids': Array<string>;
 }
+export interface UpdateBindingChatSettingRequest {
+    'chat_enabled': boolean;
+}
+export interface UpdateBindingChatSettingResponse {
+    'binding_id': string;
+    'chat_enabled': boolean;
+}
 export interface UpdateSourceRequest {
     'bindings'?: Array<SourceBindingRequest>;
     'config_version': number;
@@ -631,6 +717,7 @@ export interface UpdateSourceRequest {
 export interface UpdateSourceResponse {
     'bindings': Array<SourceBindingResponse>;
     'created_binding_ids'?: Array<string>;
+    'job_errors'?: Array<JobError>;
     'job_ids'?: Array<string>;
     'removed_binding_ids'?: Array<string>;
     'source': SourceResponse;
@@ -1021,6 +1108,35 @@ export const ScanApiAxiosParamCreator = function (configuration?: Configuration)
         },
         /**
          * 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listBindingChatSettings: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/scan/bindings/chat-settings`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @param {BindingTargetChildrenRequest} bindingTargetChildrenRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -1300,12 +1416,13 @@ export const ScanApiAxiosParamCreator = function (configuration?: Configuration)
          * @param {string} [keyword] 
          * @param {Array<string>} [stateFilter] 
          * @param {Array<string>} [parseStatus] 
+         * @param {boolean} [refreshState] 
          * @param {number} [page] 
          * @param {number} [pageSize] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listSourceDocuments: async (sourceId: string, bindingId?: string, keyword?: string, stateFilter?: Array<string>, parseStatus?: Array<string>, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listSourceDocuments: async (sourceId: string, bindingId?: string, keyword?: string, stateFilter?: Array<string>, parseStatus?: Array<string>, refreshState?: boolean, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'sourceId' is not null or undefined
             assertParamExists('listSourceDocuments', 'sourceId', sourceId)
             const localVarPath = `/api/scan/sources/{source_id}/documents`
@@ -1335,6 +1452,10 @@ export const ScanApiAxiosParamCreator = function (configuration?: Configuration)
 
             if (parseStatus) {
                 localVarQueryParameter['parse_status'] = parseStatus;
+            }
+
+            if (refreshState !== undefined) {
+                localVarQueryParameter['refresh_state'] = refreshState;
             }
 
             if (page !== undefined) {
@@ -1706,6 +1827,44 @@ export const ScanApiAxiosParamCreator = function (configuration?: Configuration)
         },
         /**
          * 
+         * @param {string} bindingId 
+         * @param {UpdateBindingChatSettingRequest} updateBindingChatSettingRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        updateBindingChatSetting: async (bindingId: string, updateBindingChatSettingRequest: UpdateBindingChatSettingRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'bindingId' is not null or undefined
+            assertParamExists('updateBindingChatSetting', 'bindingId', bindingId)
+            // verify required parameter 'updateBindingChatSettingRequest' is not null or undefined
+            assertParamExists('updateBindingChatSetting', 'updateBindingChatSettingRequest', updateBindingChatSettingRequest)
+            const localVarPath = `/api/scan/bindings/{binding_id}/chat-settings`
+                .replace(`{${"binding_id"}}`, encodeURIComponent(String(bindingId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateBindingChatSettingRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @param {string} sourceId 
          * @param {UpdateSourceRequest} updateSourceRequest 
          * @param {*} [options] Override http request option.
@@ -1955,6 +2114,17 @@ export const ScanApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listBindingChatSettings(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<BindingChatSettingsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listBindingChatSettings(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ScanApi.listBindingChatSettings']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @param {BindingTargetChildrenRequest} bindingTargetChildrenRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -2046,13 +2216,14 @@ export const ScanApiFp = function(configuration?: Configuration) {
          * @param {string} [keyword] 
          * @param {Array<string>} [stateFilter] 
          * @param {Array<string>} [parseStatus] 
+         * @param {boolean} [refreshState] 
          * @param {number} [page] 
          * @param {number} [pageSize] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listSourceDocuments(sourceId: string, bindingId?: string, keyword?: string, stateFilter?: Array<string>, parseStatus?: Array<string>, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SourceDocumentListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listSourceDocuments(sourceId, bindingId, keyword, stateFilter, parseStatus, page, pageSize, options);
+        async listSourceDocuments(sourceId: string, bindingId?: string, keyword?: string, stateFilter?: Array<string>, parseStatus?: Array<string>, refreshState?: boolean, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SourceDocumentListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listSourceDocuments(sourceId, bindingId, keyword, stateFilter, parseStatus, refreshState, page, pageSize, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ScanApi.listSourceDocuments']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -2173,6 +2344,19 @@ export const ScanApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.triggerSourceSync(sourceId, triggerSourceSyncRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ScanApi.triggerSourceSync']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @param {string} bindingId 
+         * @param {UpdateBindingChatSettingRequest} updateBindingChatSettingRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async updateBindingChatSetting(bindingId: string, updateBindingChatSettingRequest: UpdateBindingChatSettingRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<UpdateBindingChatSettingResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.updateBindingChatSetting(bindingId, updateBindingChatSettingRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ScanApi.updateBindingChatSetting']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -2315,6 +2499,14 @@ export const ScanApiFactory = function (configuration?: Configuration, basePath?
         },
         /**
          * 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listBindingChatSettings(options?: RawAxiosRequestConfig): AxiosPromise<BindingChatSettingsResponse> {
+            return localVarFp.listBindingChatSettings(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @param {ScanApiListBindingTargetChildrenRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -2373,7 +2565,7 @@ export const ScanApiFactory = function (configuration?: Configuration, basePath?
          * @throws {RequiredError}
          */
         listSourceDocuments(requestParameters: ScanApiListSourceDocumentsRequest, options?: RawAxiosRequestConfig): AxiosPromise<SourceDocumentListResponse> {
-            return localVarFp.listSourceDocuments(requestParameters.sourceId, requestParameters.bindingId, requestParameters.keyword, requestParameters.stateFilter, requestParameters.parseStatus, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.listSourceDocuments(requestParameters.sourceId, requestParameters.bindingId, requestParameters.keyword, requestParameters.stateFilter, requestParameters.parseStatus, requestParameters.refreshState, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -2455,6 +2647,15 @@ export const ScanApiFactory = function (configuration?: Configuration, basePath?
          */
         triggerSourceSync(requestParameters: ScanApiTriggerSourceSyncRequest, options?: RawAxiosRequestConfig): AxiosPromise<TriggerSourceSyncResponse> {
             return localVarFp.triggerSourceSync(requestParameters.sourceId, requestParameters.triggerSourceSyncRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @param {ScanApiUpdateBindingChatSettingRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        updateBindingChatSetting(requestParameters: ScanApiUpdateBindingChatSettingRequest, options?: RawAxiosRequestConfig): AxiosPromise<UpdateBindingChatSettingResponse> {
+            return localVarFp.updateBindingChatSetting(requestParameters.bindingId, requestParameters.updateBindingChatSettingRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -2647,6 +2848,8 @@ export interface ScanApiListSourceDocumentsRequest {
 
     readonly parseStatus?: Array<string>
 
+    readonly refreshState?: boolean
+
     readonly page?: number
 
     readonly pageSize?: number
@@ -2733,6 +2936,15 @@ export interface ScanApiTriggerSourceSyncRequest {
     readonly sourceId: string
 
     readonly triggerSourceSyncRequest: TriggerSourceSyncRequest
+}
+
+/**
+ * Request parameters for updateBindingChatSetting operation in ScanApi.
+ */
+export interface ScanApiUpdateBindingChatSettingRequest {
+    readonly bindingId: string
+
+    readonly updateBindingChatSettingRequest: UpdateBindingChatSettingRequest
 }
 
 /**
@@ -2868,6 +3080,15 @@ export class ScanApi extends BaseAPI {
 
     /**
      * 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listBindingChatSettings(options?: RawAxiosRequestConfig) {
+        return ScanApiFp(this.configuration).listBindingChatSettings(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
      * @param {ScanApiListBindingTargetChildrenRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -2932,7 +3153,7 @@ export class ScanApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public listSourceDocuments(requestParameters: ScanApiListSourceDocumentsRequest, options?: RawAxiosRequestConfig) {
-        return ScanApiFp(this.configuration).listSourceDocuments(requestParameters.sourceId, requestParameters.bindingId, requestParameters.keyword, requestParameters.stateFilter, requestParameters.parseStatus, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return ScanApiFp(this.configuration).listSourceDocuments(requestParameters.sourceId, requestParameters.bindingId, requestParameters.keyword, requestParameters.stateFilter, requestParameters.parseStatus, requestParameters.refreshState, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -3023,6 +3244,16 @@ export class ScanApi extends BaseAPI {
      */
     public triggerSourceSync(requestParameters: ScanApiTriggerSourceSyncRequest, options?: RawAxiosRequestConfig) {
         return ScanApiFp(this.configuration).triggerSourceSync(requestParameters.sourceId, requestParameters.triggerSourceSyncRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @param {ScanApiUpdateBindingChatSettingRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public updateBindingChatSetting(requestParameters: ScanApiUpdateBindingChatSettingRequest, options?: RawAxiosRequestConfig) {
+        return ScanApiFp(this.configuration).updateBindingChatSetting(requestParameters.bindingId, requestParameters.updateBindingChatSettingRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

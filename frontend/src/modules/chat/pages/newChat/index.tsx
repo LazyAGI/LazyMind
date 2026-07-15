@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
 import { AgentAppsAuth } from "@/components/auth";
+import { localizeErrorCode } from "@/components/request";
 import PreferenceConfigNotice from "@/modules/chat/components/PreferenceConfigNotice";
 import type { ConversationPluginSettings } from "@/modules/chat/utils/request";
 
@@ -45,12 +46,12 @@ const NewChatPage = () => {
   const chatDisabledReason = modelProviderGuard.isChecking
     ? t("chat.modelProviderChecking")
     : modelProviderGuard.status === "error"
-      ? t("chat.modelProviderCheckFailed")
+      ? localizeErrorCode("2000509")
       : t("chat.modelProviderRequiredTitle");
   const chatDisabledDescription = modelProviderGuard.isChecking
     ? t("chat.modelProviderCheckingDesc")
     : modelProviderGuard.status === "error"
-      ? t("chat.modelProviderCheckFailedDesc")
+      ? localizeErrorCode("2000509")
       : t("chat.modelProviderRequiredDesc");
   const chatDisabledAction = modelProviderGuard.isChecking ? null : modelProviderGuard.status === "error" ? (
     <Button size="small" onClick={() => void modelProviderGuard.refresh()}>

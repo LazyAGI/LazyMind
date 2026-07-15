@@ -15,6 +15,7 @@ import {
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
+import { localizeErrorCode } from '@/components/request';
 
 function tr(key: string, options?: Record<string, unknown>): string {
   return i18n.t(key, options);
@@ -1218,7 +1219,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, re
         : await resolveMarkdownImageUrlAsync(pathForSign);
       const response = await fetch(fetchUrl);
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error(localizeErrorCode('2000509'));
       }
       const text = await response.text();
       if (isSpaFallbackHtml(text)) {
@@ -1232,7 +1233,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, re
         if (!cancelled) setOffloadedText(t);
       })
       .catch(() => {
-        if (!cancelled) setOffloadedText(tr('chat.slots.fileContentLoadFailed'));
+        if (!cancelled) setOffloadedText(localizeErrorCode('2000509'));
       })
       .finally(() => {
         if (!cancelled) setOffloadLoading(false);
@@ -1617,7 +1618,7 @@ function SlotJsonFile({
   useEffect(() => {
     if (!hasSource) {
       setLoading(false);
-      setError(tr('chat.slots.unableToLoadContent'));
+      setError(localizeErrorCode('2000509'));
       return;
     }
     if (resolving || !url) {
@@ -1631,7 +1632,7 @@ function SlotJsonFile({
     fetch(url)
       .then((response) => {
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          throw new Error(localizeErrorCode('2000509'));
         }
         return response.json();
       })
@@ -1643,7 +1644,7 @@ function SlotJsonFile({
       })
       .catch(() => {
         if (!cancelled) {
-          setError(tr('chat.slots.contentLoadFailed'));
+          setError(localizeErrorCode('2000509'));
           setLoading(false);
         }
       });
@@ -1832,7 +1833,7 @@ function SlotMarkdownFile({
   useEffect(() => {
     if (!hasSource) {
       setLoading(false);
-      setError(tr('chat.slots.unableToLoadContent'));
+      setError(localizeErrorCode('2000509'));
       return;
     }
     if (resolving || !url) {
@@ -1846,7 +1847,7 @@ function SlotMarkdownFile({
     fetch(url)
       .then((response) => {
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          throw new Error(localizeErrorCode('2000509'));
         }
         return response.text();
       })
@@ -1860,7 +1861,7 @@ function SlotMarkdownFile({
       })
       .catch(() => {
         if (!cancelled) {
-          setError(tr('chat.slots.contentLoadFailed'));
+          setError(localizeErrorCode('2000509'));
           setLoading(false);
         }
       });

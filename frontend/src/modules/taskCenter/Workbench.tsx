@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Empty, Input, Progress, Select, Spin, Tooltip, message } from 'antd';
+import { Button, Empty, Input, Progress, Select, Spin, Tooltip } from 'antd';
 import { CheckCircleFilled, ClockCircleOutlined, DownOutlined, ReloadOutlined, SearchOutlined, UpOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -31,7 +31,7 @@ export default function Workbench({ active }: WorkbenchProps) {
       const response = await listTasks({ keyword: keyword || undefined, task_type: type || undefined, page: 1, page_size: 60 });
       setTasks(response.items ?? []);
     } catch {
-      message.error(t('taskCenter.loadError'));
+      // API errors are reported by the shared request interceptor.
     } finally {
       setLoading(false);
     }

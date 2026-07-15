@@ -1,5 +1,8 @@
 import { message } from "antd";
-import { getLocalizedErrorMessage } from "@/components/request";
+import {
+  getLocalizedErrorMessage,
+  localizeErrorCode,
+} from "@/components/request";
 import { dataSourceScanApi } from "../../api/clients";
 import {
   FEISHU_EXCLUDE_PATTERNS,
@@ -196,11 +199,9 @@ export function createSaveActions(ctx: ManagementContext) {
         markKnowledgeBaseNameDuplicated();
         return;
       }
-
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-        t("common.requestFailed"),
-      );
+      if (!(error as { isAxiosError?: boolean })?.isAxiosError) {
+        message.error(getLocalizedErrorMessage(error));
+      }
     }
   };
 
@@ -325,7 +326,7 @@ export function createSaveActions(ctx: ManagementContext) {
       }
 
       if (!sourceId) {
-        message.error(t("admin.dataSourceCreateMissingSourceId"));
+        message.error(localizeErrorCode("2000509"));
         return;
       }
 
@@ -352,10 +353,6 @@ export function createSaveActions(ctx: ManagementContext) {
         return;
       }
 
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-        t("common.requestFailed"),
-      );
     }
   };
 
@@ -462,7 +459,7 @@ export function createSaveActions(ctx: ManagementContext) {
       }
 
       if (!sourceId) {
-        message.error(t("admin.dataSourceNotionSourceCreationFailed"));
+        message.error(localizeErrorCode("2000509"));
         return;
       }
 
@@ -484,10 +481,9 @@ export function createSaveActions(ctx: ManagementContext) {
       message.success(getSaveSuccessMessage());
       ctx.handleCloseWizard();
     } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-        t("common.requestFailed"),
-      );
+      if (!(error as { isAxiosError?: boolean })?.isAxiosError) {
+        message.error(getLocalizedErrorMessage(error));
+      }
     }
   };
 

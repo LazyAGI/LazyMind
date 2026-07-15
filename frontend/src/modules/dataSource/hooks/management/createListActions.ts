@@ -1,5 +1,4 @@
 import { message } from "antd";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { dataSourceScanApi } from "../../api/clients";
 import {
   getLocalFSChatSetting,
@@ -118,12 +117,7 @@ export function createListActions(ctx: ManagementContext) {
         message.success(t("admin.dataSourceListRefreshed"));
       }
     } catch (error) {
-      if (showSuccessMessage) {
-        message.error(
-          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-            t("common.requestFailed"),
-        );
-      } else {
+      if (!showSuccessMessage) {
         console.error("Failed to refresh local sources", error);
       }
     } finally {
@@ -154,12 +148,8 @@ export function createListActions(ctx: ManagementContext) {
           ? t("admin.dataSourceLocalScanChatEnabledSuccess")
           : t("admin.dataSourceLocalScanChatDisabledSuccess"),
       );
-    } catch (error) {
+    } catch {
       ctx.setLocalScanChatEnabled(previousValue);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-          t("common.requestFailed"),
-      );
     } finally {
       ctx.setLocalScanChatSaving(false);
     }

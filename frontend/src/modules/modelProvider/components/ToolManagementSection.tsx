@@ -19,7 +19,7 @@ import {
 } from "antd";
 import { CloudServerOutlined, PlusOutlined, SearchOutlined, ToolOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getLocalizedErrorMessage } from "@/components/request";
+import { localizeErrorCode } from "@/components/request";
 import type { StructuredAsset } from "@/modules/memory/shared";
 import {
   checkMcpServer,
@@ -143,11 +143,7 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
       const result = await listToolAssetsPage(listOptions);
       setToolAssets(result.records);
       setToolListTotal(result.total);
-    } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(error, t("modelProvider.external.toolLoadFailed")) ||
-          t("modelProvider.external.toolLoadFailed"),
-      );
+    } catch {
     } finally {
       setToolLoading(false);
     }
@@ -159,11 +155,7 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
       const result = await listMcpServersPage(listOptions);
       setMcpServers(result.records);
       setMcpListTotal(result.total);
-    } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memoryMcpLoadFailed")) ||
-          t("admin.memoryMcpLoadFailed"),
-      );
+    } catch {
     } finally {
       setMcpLoading(false);
     }
@@ -206,11 +198,7 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
             ? t("admin.memoryToolEnableSuccess")
             : t("admin.memoryToolDisableSuccess"),
         );
-      } catch (error) {
-        message.error(
-          getLocalizedErrorMessage(error, t("modelProvider.external.toolToggleFailed")) ||
-            t("modelProvider.external.toolToggleFailed"),
-        );
+      } catch {
       } finally {
         markToolActionLoading(actionKey, false);
       }
@@ -293,10 +281,6 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
       if (error && typeof error === "object" && "errorFields" in error) {
         return;
       }
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memoryMcpSaveFailed")) ||
-          t("admin.memoryMcpSaveFailed"),
-      );
     } finally {
       setMcpSaving(false);
     }
@@ -321,11 +305,7 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
             ? t("admin.memoryMcpEnableSuccess")
             : t("admin.memoryMcpDisableSuccess"),
         );
-      } catch (error) {
-        message.error(
-          getLocalizedErrorMessage(error, t("admin.memoryMcpToggleFailed")) ||
-            t("admin.memoryMcpToggleFailed"),
-        );
+      } catch {
       } finally {
         markMcpActionLoading(actionKey, false);
       }
@@ -342,14 +322,10 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
         if (result.success) {
           message.success(t("admin.memoryMcpCheckResult", { count: result.toolCount }));
         } else {
-          message.warning(result.message || t("admin.memoryMcpCheckFailed"));
+          message.warning(localizeErrorCode("2000509"));
         }
         await refreshMcpServers();
-      } catch (error) {
-        message.error(
-          getLocalizedErrorMessage(error, t("admin.memoryMcpCheckFailed")) ||
-            t("admin.memoryMcpCheckFailed"),
-        );
+      } catch {
       } finally {
         markMcpActionLoading(actionKey, false);
       }
@@ -373,11 +349,7 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
         );
         openMcpToolsDrawer(nextServer);
         message.success(t("admin.memoryMcpDiscoverSuccess", { count: result.tools.length }));
-      } catch (error) {
-        message.error(
-          getLocalizedErrorMessage(error, t("admin.memoryMcpDiscoverFailed")) ||
-            t("admin.memoryMcpDiscoverFailed"),
-        );
+      } catch {
       } finally {
         markMcpActionLoading(actionKey, false);
       }
@@ -393,11 +365,7 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
         await deleteMcpServer(server.id);
         await refreshMcpServers();
         message.success(t("admin.memoryMcpDeleteSuccess"));
-      } catch (error) {
-        message.error(
-          getLocalizedErrorMessage(error, t("admin.memoryMcpDeleteFailed")) ||
-            t("admin.memoryMcpDeleteFailed"),
-        );
+      } catch {
       } finally {
         markMcpActionLoading(actionKey, false);
       }
@@ -422,11 +390,7 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
       setMcpToolsDrawerOpen(false);
       await refreshMcpServers();
       message.success(t("admin.memoryMcpToolsSaveSuccess"));
-    } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memoryMcpToolsSaveFailed")) ||
-          t("admin.memoryMcpToolsSaveFailed"),
-      );
+    } catch {
     } finally {
       setMcpToolSaving(false);
     }

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Button, Input, Modal, Upload, message } from "antd";
 import { DeleteOutlined, InboxOutlined, PaperClipOutlined } from "@ant-design/icons";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { publishSkillToMarket } from "../../skillApi";
 import { uploadSkillTempFile } from "../../skillUpload";
 
@@ -69,10 +68,6 @@ export default function SkillAdminPublishModal({
       handleClose();
     } catch (error) {
       console.error("Admin publish skill failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memorySkillAdminPublishFailed")) ||
-          t("admin.memorySkillAdminPublishFailed"),
-      );
     } finally {
       setSubmitting(false);
     }

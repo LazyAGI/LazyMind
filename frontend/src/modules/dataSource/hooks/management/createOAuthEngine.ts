@@ -1,4 +1,8 @@
 import { message } from "antd";
+import {
+  getLocalizedErrorMessage,
+  localizeErrorCode,
+} from "@/components/request";
 import { type CloudOAuthAppCredentialBody } from "@/api/generated/auth-client";
 import { dataSourceCloudOauthApi } from "../../api/clients";
 import {
@@ -293,15 +297,13 @@ export function createOAuthEngine(ctx: ManagementContext) {
       setOauthState("error");
       setConnectionVerified(false);
       ctx.openCloudSetupModal(cloudProvider, "create");
-      message.error(payload.message || t("admin.dataSourceOauthFailedRetry"));
+      message.error(localizeErrorCode("2000509"));
       return;
     }
 
     if (attempt?.previousConnection) {
       restorePreviousOauthState(
-        t("admin.dataSourceOauthReconnectFailed", {
-          message: payload.message ? ` ${payload.message}` : "",
-        }),
+        localizeErrorCode("2000509"),
         "error",
       );
       return;
@@ -327,7 +329,7 @@ export function createOAuthEngine(ctx: ManagementContext) {
         return nextAccounts;
       });
     }
-    message.error(payload.message || t("admin.dataSourceOauthFailedRetry"));
+    message.error(localizeErrorCode("2000509"));
   };
 
   const upsertFeishuAuthAccount = (
@@ -494,11 +496,16 @@ export function createOAuthEngine(ctx: ManagementContext) {
 
       window.location.assign(authorizeUrl);
       return true;
-    } catch (error: any) {
+    } catch (error) {
       setOauthState(previousState);
       setConnectionVerified(previousVerified);
       setOauthConnection(previousConnection);
-      message.error(error?.message || t("admin.dataSourceAuthorizeUrlFailed"));
+      const requestError = error as { response?: unknown; request?: unknown };
+      if (!requestError?.response && !requestError?.request) {
+        message.error(
+          getLocalizedErrorMessage(error),
+        );
+      }
       return false;
     }
   };

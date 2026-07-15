@@ -4,11 +4,10 @@ import type {
   CloudOAuthCallbackBody,
 } from "@/api/generated/auth-client";
 import i18n from "@/i18n";
+import { getLocalizedErrorMessage } from "@/components/request";
 import { dataSourceCloudOauthApi } from "../api/clients";
 import { unwrapApiData } from "../api/unwrap";
 import {
-  getErrorMessage,
-  getFeishuOAuthCallbackErrorMessage,
   hasBusinessError,
   normalizeConnection,
 } from "./mappers";
@@ -54,9 +53,8 @@ export async function requestCloudDataSourceAuthorizeUrl(
       cloudOAuthAuthorizeURLBody: body as CloudOAuthAuthorizeURLBody,
     });
     payload = response.data;
-  } catch (error: any) {
-    payload = error?.response?.data || error;
-    throw new Error(getErrorMessage(payload, i18n.t("admin.dataSourceAuthorizeUrlFailed")));
+  } catch (error) {
+    throw error;
   }
 
   const data = unwrapApiData<any>(payload);
@@ -73,7 +71,7 @@ export async function requestCloudDataSourceAuthorizeUrl(
     typeof state !== "string" ||
     !state.trim()
   ) {
-    throw new Error(getErrorMessage(payload, i18n.t("admin.dataSourceAuthorizeUrlFailed")));
+    throw new Error(getLocalizedErrorMessage({ response: { data: payload } }));
   }
 
   savePendingCloudOAuthSession(provider, {
@@ -118,15 +116,14 @@ export async function finishCloudDataSourceOAuth(
       } satisfies CloudOAuthCallbackBody,
     });
     payload = response.data;
-  } catch (error: any) {
-    payload = error?.response?.data || error;
-    throw new Error(getFeishuOAuthCallbackErrorMessage(payload));
+  } catch (error) {
+    throw error;
   }
 
   if (
     hasBusinessError(payload)
   ) {
-    throw new Error(getFeishuOAuthCallbackErrorMessage(payload));
+    throw new Error(getLocalizedErrorMessage({ response: { data: payload } }));
   }
 
   clearPendingCloudOAuthSession(provider, state);
@@ -150,13 +147,12 @@ export async function enableCloudConnectionForChat(connectionId: string) {
       cloudConnectionUpdateBody: body,
     });
     payload = response.data;
-  } catch (error: any) {
-    payload = error?.response?.data || error;
-    throw new Error(getErrorMessage(payload, i18n.t("common.requestFailed")));
+  } catch (error) {
+    throw error;
   }
 
   if (hasBusinessError(payload)) {
-    throw new Error(getErrorMessage(payload, i18n.t("common.requestFailed")));
+    throw new Error(getLocalizedErrorMessage({ response: { data: payload } }));
   }
 
   return unwrapApiData<any>(payload);

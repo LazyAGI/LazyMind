@@ -12,6 +12,7 @@ interface SkillMarketViewProps {
   installedSkills: StructuredAsset[];
   keyword: string;
   onKeywordChange: (value: string) => void;
+  onSearch: (value: string) => void;
   source: "all" | "builtin" | "admin";
   onSourceChange: (value: "all" | "builtin" | "admin") => void;
   category: string;
@@ -36,6 +37,7 @@ export default function SkillMarketView({
   installedSkills,
   keyword,
   onKeywordChange,
+  onSearch,
   source,
   onSourceChange,
   category,
@@ -54,10 +56,11 @@ export default function SkillMarketView({
     <div className="memory-skill-market">
       <div className="memory-skill-filter-strip">
         <div className="memory-skill-filter-controls">
-          <Input
+          <Input.Search
             allowClear
             value={keyword}
             onChange={(event) => onKeywordChange(event.target.value)}
+            onSearch={onSearch}
             placeholder={t("admin.memorySkillMarketSearchPlaceholder")}
             className="memory-skill-market-search"
           />

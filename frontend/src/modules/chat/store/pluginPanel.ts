@@ -343,7 +343,10 @@ interface PluginStore {
 
   setSession: (conversationId: string, session: PluginSession | null) => void;
   updateSlot: (conversationId: string, slot: SlotRevision) => void;
-  loadActiveSession: (conversationId: string) => Promise<void>;
+  loadActiveSession: (
+    conversationId: string,
+    options?: { silentError?: boolean },
+  ) => Promise<void>;
   refreshSlots: (conversationId: string, sessionId: string) => Promise<void>;
   patchSlot: (conversationId: string, sessionId: string, slotId: string, revision: number) => Promise<void>;
   syncSessionSearchConfig: (conversationId: string, sessionId: string, searchConfig: Record<string, unknown>) => Promise<void>;
@@ -442,7 +445,7 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     });
   },
 
-  loadActiveSession: async (conversationId) => {
+  loadActiveSession: async (conversationId, options) => {
     if (!conversationId) return;
     // Deduplicate concurrent calls for the same conversation.
     if (get().loadingByConversation[conversationId]) return;
@@ -450,14 +453,20 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
       loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
     }));
     try {
-      const res = await PluginSessionApi().getLatestSession(conversationId);
+      const requestOptions = options?.silentError
+        ? ({ silentError: true } as never)
+        : undefined;
+      const res = await PluginSessionApi().getLatestSession(
+        conversationId,
+        requestOptions,
+      );
       const session: PluginSession | null = res?.data?.data?.session ?? null;
       // Runtime controls and rollback candidates come from Go's projection.
       // Steps are attempt history only; they never define Past/Ready locally.
       if (session?.session_id) {
         try {
           const [stepsRes, projectionRes] = await Promise.all([
-            PluginSessionApi().getSteps(session.session_id),
+            PluginSessionApi().getSteps(session.session_id, requestOptions),
             PluginSessionApi().getProjection(
               session.session_id,
               { silentError: true } as never,

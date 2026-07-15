@@ -12,31 +12,6 @@ function unwrapPayload<T>(payload: any): T {
   return (payload?.data || payload) as T;
 }
 
-export function getErrorMessage(payload: any, fallback: string) {
-  if (typeof payload?.message === "string" && payload.message.trim()) {
-    return payload.message;
-  }
-
-  if (typeof payload?.detail === "string" && payload.detail.trim()) {
-    return payload.detail;
-  }
-
-  if (Array.isArray(payload?.detail)) {
-    const joined = payload.detail
-      .map((item: any) =>
-        typeof item === "string" ? item : item?.msg || item?.message,
-      )
-      .filter(Boolean)
-      .join("；");
-
-    if (joined) {
-      return joined;
-    }
-  }
-
-  return fallback;
-}
-
 export function hasBusinessError(payload: any) {
   const code = payload?.code ?? payload?.data?.code;
   if (code === undefined || code === null || code === "") {
@@ -44,32 +19,6 @@ export function hasBusinessError(payload: any) {
   }
 
   return !["0", "200"].includes(String(code).trim());
-}
-
-export function getFeishuOAuthCallbackErrorMessage(payload: any) {
-  const normalizedPayload = unwrapPayload<any>(payload);
-  const rawMessage = [
-    payload?.code,
-    payload?.message,
-    payload?.ex_message,
-    payload?.ex_mesage,
-    normalizedPayload?.code,
-    normalizedPayload?.message,
-    normalizedPayload?.ex_message,
-    normalizedPayload?.ex_mesage,
-  ]
-    .map((item) => `${item || ""}`.trim().toLowerCase())
-    .filter(Boolean)
-    .join(" ");
-
-  if (
-    rawMessage.includes("1000706") ||
-    rawMessage.includes("reauthorized account does not match")
-  ) {
-    return i18n.t("admin.dataSourceOauthReauthorizeAccountMismatch");
-  }
-
-  return getErrorMessage(payload, i18n.t("admin.dataSourceOauthFailedRetry"));
 }
 
 function normalizeScopes(value: unknown): string[] {

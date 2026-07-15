@@ -154,10 +154,7 @@ export function useLocalPathTree({
       setLocalPathOptions(
         buildLocalPathHelperOptions(
           agentId
-            ? getLocalizedErrorMessage(
-                error,
-                t("admin.dataSourceLocalDirectoryListFailedManual"),
-              )
+            ? getLocalizedErrorMessage(error)
             : t("admin.dataSourceNoScanAgentManual"),
         ),
       );

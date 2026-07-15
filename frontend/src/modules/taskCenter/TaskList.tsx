@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Input, Progress, Segmented, Select, Table, Tooltip, message } from 'antd';
+import { Button, Input, Progress, Segmented, Select, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, ReloadOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -40,7 +40,7 @@ export default function TaskList({ active }: TaskListProps) {
       setTotal(response.total ?? 0);
       if (response.status_counts) setStatusCounts(response.status_counts);
     } catch {
-      message.error(t('taskCenter.loadError'));
+      // API errors are reported by the shared request interceptor.
     } finally {
       if (!silent) setLoading(false);
     }

@@ -16,6 +16,7 @@ import {
 
 import "./index.scss";
 import { uploadFileInChunks } from "@/modules/chat/utils/chunkUpload";
+import { localizeErrorCode } from "@/components/request";
 
 export interface ImageUploadImperativeProps {
   removeFile: (uid?: string) => void;
@@ -191,7 +192,7 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
         })
         .catch((error) => {
           console.error(t("chat.fileUploadFailedLog"), error);
-          message.error(t("chat.fileUploadFailedRetry"));
+          message.error(localizeErrorCode("2000509"));
           setUploadingCount((prev) => prev - 1);
           onError?.();
         });

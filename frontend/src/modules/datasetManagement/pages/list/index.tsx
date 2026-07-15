@@ -65,8 +65,8 @@ export default function DatasetListPage() {
       ]);
       setDatasets(datasetList);
       setKnowledgeBases(kbList);
-    } catch (error: any) {
-      message.error(error?.message || t("datasetManagement.list.message.loadFailed"));
+    } catch {
+      // API errors are reported by the shared request interceptor.
     } finally {
       setLoading(false);
     }
@@ -95,8 +95,8 @@ export default function DatasetListPage() {
       setEditingDataset(detail);
       setEditingDatasetId(detail.id);
       setFormModalOpen(true);
-    } catch (error: any) {
-      message.error(error?.message || t("datasetManagement.list.message.detailLoadFailed"));
+    } catch {
+      // API errors are reported by the shared request interceptor.
     } finally {
       setEditingLoadingId("");
     }

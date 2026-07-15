@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
+import { localizeErrorCode } from "@/components/request";
 import {
   CheckCircleFilled,
   DeleteOutlined,
@@ -12,7 +13,6 @@ import {
   SearchOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { modelProvidersApi, unwrapModelProviderData } from "../api";
 import "../index.scss";
 
@@ -388,18 +388,6 @@ function mapApiGroup(
   });
 }
 
-function getCheckFailureMessage(checkResult?: CheckModelProviderResult): string | undefined {
-  if (!checkResult || typeof checkResult !== "object") {
-    return undefined;
-  }
-
-  if (typeof checkResult.message === "string" && checkResult.message.trim()) {
-    return checkResult.message.trim();
-  }
-
-  return undefined;
-}
-
 function ProviderLogo({ provider, compact = false }: { provider: ProviderOption; compact?: boolean }) {
   return (
     <span
@@ -538,7 +526,6 @@ export default function ModelProviderPage() {
         }
       } catch (error) {
         if (providerSearchRequestIdRef.current === requestId) {
-          message.error(getLocalizedErrorMessage(error, t("modelProvider.error.searchFailed")));
         }
       } finally {
         if (providerSearchRequestIdRef.current === requestId) {
@@ -582,7 +569,6 @@ export default function ModelProviderPage() {
         return next;
       });
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.error.loadProvidersFailed")));
     } finally {
       initialProvidersLoadedRef.current = true;
       setLoading(false);
@@ -725,7 +711,6 @@ export default function ModelProviderPage() {
       providerConfigForm.resetFields();
       setSensenovaBaseUrlPreset("");
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.error.saveFailed")));
     } finally {
       setProviderConfigSaving(false);
     }
@@ -795,9 +780,8 @@ export default function ModelProviderPage() {
         message.success(t("modelProvider.message.groupVerified"));
         return;
       }
-      message.error(getCheckFailureMessage(checkResult) || t("modelProvider.message.groupVerifyFailed"));
+      message.error(localizeErrorCode("2000509"));
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.error.verifyFailed")));
     } finally {
       setVerifyingGroupIds((current) => {
         const next = { ...current };
@@ -866,7 +850,6 @@ export default function ModelProviderPage() {
       });
       message.success(t("modelProvider.message.groupRemoved", { name: group.name }));
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.error.deleteGroupFailed")));
     }
   };
 
@@ -895,7 +878,6 @@ export default function ModelProviderPage() {
       });
       message.success(t("modelProvider.message.providerRemoved", { name: provider.name }));
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.error.removeProviderFailed")));
     }
   };
 
@@ -926,7 +908,6 @@ export default function ModelProviderPage() {
         )
       );
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.error.loadModelsFailed")));
     } finally {
       setLoadingGroupModelIds((current) => {
         const next = { ...current };
@@ -1019,7 +1000,6 @@ export default function ModelProviderPage() {
       message.success(t("modelProvider.message.modelAdded"));
       closeCustomModelModal();
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.error.addModelFailed")));
     }
   };
 
@@ -1049,7 +1029,6 @@ export default function ModelProviderPage() {
       );
       message.success(t("modelProvider.message.modelDeleted"));
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.error.deleteModelFailed")));
     }
   };
 

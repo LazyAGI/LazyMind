@@ -500,7 +500,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                       setTaskConvIds((prev) => new Set([...prev, convId]));
                       message.success(t("chat.addToTaskCenterSuccess"));
                     } catch {
-                      message.error(t("chat.addToTaskCenterFailed"));
                     }
                   }}
                 />

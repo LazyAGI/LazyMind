@@ -18,6 +18,7 @@ import {
   type SkillDraftStatusOpenAPIResponse,
   type SkillFileOpenAPIResponse,
   type SkillListItemOpenAPIResponse,
+  type SkillOrganizeOpenAPIResponse,
   type SkillRevisionOpenAPIResponse,
   type SkillShareDetailOpenAPIResponse,
   type SkillShareListItemOpenAPIResponse,
@@ -25,7 +26,11 @@ import {
   type SkillTreeNodeOpenAPIResponse,
   type SkillUpdateManagedOpenAPIRequest,
 } from "@/api/generated/core-client";
-import { axiosInstance, BASE_URL } from "@/components/request";
+import {
+  axiosInstance,
+  BASE_URL,
+  localizeErrorCode,
+} from "@/components/request";
 import { mapDiffEntryLines } from "./components/skillPackage/skillDiffUtils";
 import type { DiffLine } from "./shared";
 
@@ -123,6 +128,12 @@ export interface SkillAssetListResult {
   total: number;
   page: number;
   pageSize: number;
+}
+
+export interface SkillOrganizeRunRecord {
+  requestId: string;
+  status: string;
+  taskId: string;
 }
 
 export interface ShareSkillPayload {
@@ -499,7 +510,9 @@ const normalizeOutgoingShare = (
   message: item.message || "",
   status: normalizeSkillShareStatus(item.status),
   rawStatus: item.status,
-  errorMessage: item.error_message,
+  errorMessage: item.error_message
+    ? localizeErrorCode("2000509")
+    : undefined,
   sender: {
     id: item.source_user_id,
     name: item.source_user_name || item.source_user_id,
@@ -536,7 +549,9 @@ const normalizeShareTarget = (
   message: item.message || "",
   status: normalizeSkillShareStatus(item.status),
   rawStatus: item.status,
-  errorMessage: item.error_message,
+  errorMessage: item.error_message
+    ? localizeErrorCode("2000509")
+    : undefined,
   sender: null,
   recipients: [
     {
@@ -700,7 +715,12 @@ const normalizeResourceUpdateTask = (value: unknown): ResourceUpdateTaskRecord |
     triggerId: toStringValue(raw?.trigger_id, ""),
     status: toStringValue(raw?.status, ""),
     errorCode: toStringValue(raw?.error_code, ""),
-    errorMessage: toStringValue(raw?.error_message, ""),
+    errorMessage: raw?.error_message
+      ? localizeErrorCode(
+          toStringValue(raw?.error_code, ""),
+          localizeErrorCode("2000509"),
+        )
+      : "",
     createdAt: toStringValue(raw?.created_at, ""),
     updatedAt: toStringValue(raw?.updated_at, ""),
     startedAt: toStringValue(raw?.started_at, "") || undefined,
@@ -845,6 +865,26 @@ export async function listSkillAssets(
 ): Promise<SkillAssetRecord[]> {
   const result = await listSkillAssetsPage(options);
   return result.records;
+}
+
+export async function organizeSkills(
+  skills: string[],
+): Promise<SkillOrganizeRunRecord> {
+  const response = await skillsApi.apiCoreSkillOrganizePost(
+    {
+      skillOrganizeOpenAPIRequest: {
+        requestid: `org_${crypto.randomUUID()}`,
+        skills,
+      },
+    },
+    { silentError: true } as never,
+  );
+  const payload = unwrapEnvelope<SkillOrganizeOpenAPIResponse>(response.data);
+  return {
+    requestId: payload.requestid || "",
+    status: payload.status || "",
+    taskId: payload.taskid || "",
+  };
 }
 
 export async function listSkillTags(): Promise<string[]> {

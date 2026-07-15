@@ -1,4 +1,8 @@
-import { axiosInstance, BASE_URL } from "@/components/request";
+import {
+  axiosInstance,
+  BASE_URL,
+  localizeErrorCode,
+} from "@/components/request";
 import type { DiffEntryLine } from "@/api/generated/core-client";
 
 const coreBasePath = `${BASE_URL}/api/core`;
@@ -284,7 +288,9 @@ const normalizeEvolutionSuggestion = (
     createdAt: toStringValue(item.created_at, ""),
     fileExt: toStringValue(item.file_ext, ""),
     fullContent: toStringValue(item.full_content, ""),
-    invalidReason: toStringValue(item.invalid_reason, ""),
+    invalidReason: item.invalid_reason
+      ? localizeErrorCode("2000509")
+      : "",
     outdated: toBoolean(item.outdated, false),
     parentSkillName: toStringValue(item.parent_skill_name, ""),
     reason: toStringValue(item.reason, ""),
@@ -566,7 +572,9 @@ const normalizeManagedPreference = (item: ManagedStateItem): PreferenceAssetReco
     suggestionStatus,
     autoEvoApplyStatus: toStringValue(item.auto_evo_apply_status, ""),
     autoEvoGeneration: toNumberValue(item.auto_evo_generation, 0),
-    autoEvoError: toStringValue(item.auto_evo_error, ""),
+    autoEvoError: item.auto_evo_error
+      ? localizeErrorCode("2000509")
+      : "",
   };
 };
 
@@ -787,7 +795,9 @@ export async function createPreferenceSuggestions(input: {
     .map((item) => ({
       id: toStringValue(item.id, ""),
       status: toStringValue(item.status, ""),
-      invalidReason: toStringValue(item.invalid_reason, ""),
+      invalidReason: item.invalid_reason
+        ? localizeErrorCode("2000509")
+        : "",
     }))
     .filter((item) => Boolean(item.id));
 }
