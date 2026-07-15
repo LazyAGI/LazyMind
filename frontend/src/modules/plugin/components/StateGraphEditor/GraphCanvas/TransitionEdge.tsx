@@ -1,11 +1,13 @@
 import { memo, useLayoutEffect, useRef, useState } from 'react';
-import { EdgeLabelRenderer, getBezierPath } from '@xyflow/react';
+import { EdgeLabelRenderer, getBezierPath, getStraightPath, getSmoothStepPath } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
+import type { EdgeVisual } from '../core/model';
 
 export interface TransitionEdgeData extends Record<string, unknown> {
   condition: string;
   hasError: boolean;
   isParallel?: boolean;
+  visual?: EdgeVisual;
 }
 
 function TransitionEdgeComponent({  id,
@@ -37,14 +39,17 @@ function TransitionEdgeComponent({  id,
     }, 120);
   };
 
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const visual=edgeData?.visual??{};
+  const pathArgs={
     sourceX,
     sourceY,
     sourcePosition,
     targetX,
     targetY,
     targetPosition,
-  });
+  };
+  const [edgePath, labelX, labelY] = visual.pathType === 'straight' ? getStraightPath(pathArgs)
+    : visual.pathType === 'smoothstep' ? getSmoothStepPath(pathArgs) : getBezierPath(pathArgs);
 
   // SVG markers use the mathematical tangent exactly at the endpoint. React
   // Flow's bezier path forces that final tangent to match the handle direction,
@@ -55,7 +60,7 @@ function TransitionEdgeComponent({  id,
     const path = pathRef.current;
     if (!path) return;
     const length = path.getTotalLength();
-    const tipLength = Math.max(0, length - 4);
+    const tipLength = length;
     const from = path.getPointAtLength(Math.max(0, tipLength - 12));
     const tip = path.getPointAtLength(tipLength);
     setArrow({
@@ -65,13 +70,14 @@ function TransitionEdgeComponent({  id,
     });
   }, [edgePath]);
 
-  const isParallel = edgeData?.isParallel ?? false;
   const hasError = edgeData?.hasError ?? false;
   const condition = edgeData?.condition ?? '';
 
-  const strokeColor = hasError ? '#ff4d4f' : selected ? '#1677ff' : hovered ? '#555' : '#8c8c8c';
-  const strokeWidth = selected || hovered ? 2.5 : 1.5;
-  const strokeDash = isParallel ? '6 3' : undefined;
+  const baseColor=visual.stroke?.color??'#8c8c8c';
+  const strokeColor = hasError ? '#ff4d4f' : visual.stroke?.color ? baseColor : selected ? '#1677ff' : hovered ? '#555' : baseColor;
+  const baseWidth=visual.stroke?.width??1.5;
+  const strokeWidth = selected || hovered ? Math.max(2.5,baseWidth+1) : baseWidth;
+  const strokeDash = visual.stroke?.style === 'dashed' ? '6 3' : visual.stroke?.style === 'dotted' ? '2 3' : undefined;
 
   // Position popover above the midpoint of the edge
   const popX = labelX;
@@ -81,6 +87,7 @@ function TransitionEdgeComponent({  id,
     <>
       {/* Wide invisible hit area */}
       <path
+        className="react-flow__edge-interaction"
         d={edgePath}
         fill="none"
         stroke="transparent"
@@ -98,11 +105,11 @@ function TransitionEdgeComponent({  id,
         strokeWidth={strokeWidth}
         strokeDasharray={strokeDash}
         fill="none"
-        style={{ transition: 'stroke-width 0.1s, stroke 0.1s', pointerEvents: 'none' }}
+        style={{ stroke: strokeColor, strokeWidth, strokeDasharray: strokeDash, transition: 'stroke-width 0.1s, stroke 0.1s', pointerEvents: 'none' }}
       />
-      {arrow && (
+      {arrow && visual.showArrow !== false && (
         <path
-          d="M 0 0 L -10 -5 L -10 5 Z"
+          d={`M 0 0 L -${visual.arrowSize??10} -${(visual.arrowSize??10)/2} L -${visual.arrowSize??10} ${(visual.arrowSize??10)/2} Z`}
           fill={strokeColor}
           transform={`translate(${arrow.x} ${arrow.y}) rotate(${arrow.angle})`}
           style={{ pointerEvents: 'none', transition: 'fill 0.1s' }}
@@ -111,7 +118,7 @@ function TransitionEdgeComponent({  id,
 
       {/* Popover label — floats above the edge midpoint */}
       <EdgeLabelRenderer>
-        {hovered && condition && (
+        {hovered && condition && visual.showLabel !== false && (
           <div
             className="nodrag nopan transition-edge-popover"
             style={{

@@ -7,6 +7,7 @@ import {
 import type { ConversationHistoryItem as CoreConversationHistoryItem } from "@/api/generated/core-client";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { splitThinkingContent } from "@/modules/chat/utils/thinking";
+import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
 
 const CITE_MESSAGE_PATTERN =
   /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
@@ -35,6 +36,7 @@ export type ConversationHistoryRecord = Omit<
     thinking_time_s?: number | string;
     second_thinking_time_s?: number | string;
     tool_call_turns?: number | string;
+    mentions?: ChatMention[] | null;
   };
 
 interface BuildChatMessageListOptions {
@@ -148,6 +150,7 @@ export function buildChatMessageListFromHistory(
       finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       inputs: normalizedInputs,
       create_time: record.create_time || fallbackCreateTime,
+      mentions: Array.isArray(record.mentions) ? record.mentions : [],
     });
 
     const isLastRecord = record === lastRecord;

@@ -7,6 +7,7 @@ const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { runtimeExitFailureMessage, statusFailureMessage } = require("./runtime-status");
 
 const isWindows = process.platform === "win32";
+const isInstallerWarmup = isWindows && process.argv.includes("--installer-warmup");
 const windowsDesktopPaths = isWindows
   ? resolveWindowsDesktopPaths(process.env, app.getPath("home"))
   : null;
@@ -102,6 +103,15 @@ function sidecarShutdownEnv() {
     ...sidecarEnv(),
     LAZYMIND_LOCAL_DOWN_TIMEOUT: desktopShutdownTimeout,
   };
+}
+
+function installerWarmupTimeoutSeconds(argv = process.argv) {
+  const index = argv.indexOf("--timeout-seconds");
+  if (index < 0 || index + 1 >= argv.length) {
+    return 900;
+  }
+  const value = Number.parseInt(argv[index + 1], 10);
+  return Number.isFinite(value) && value > 0 ? value : 900;
 }
 
 function currentRuntimeRoot() {
@@ -233,10 +243,11 @@ function broadcastStartupDiagnostics(extra = {}) {
   });
 }
 
-function runSidecar(command, extra = []) {
+function runSidecar(command, extra = [], options = {}) {
   return new Promise((resolve, reject) => {
     execFile(sidecarPath, sidecarArgs(command, extra), {
-      env: sidecarEnv(),
+      env: options.env || sidecarEnv(),
+      timeout: options.timeout,
       windowsHide: isWindows,
     }, (error, stdout, stderr) => {
       if (error) {
@@ -247,6 +258,70 @@ function runSidecar(command, extra = []) {
       resolve(stdout);
     });
   });
+}
+
+async function runInstallerWarmup() {
+  const timeoutSeconds = installerWarmupTimeoutSeconds();
+  const maintenanceArgs = ["--maintenance", "installer-warmup"];
+  const warmupLogPath = path.join(desktopLogsDir, "installer-warmup.log");
+  const log = (message) => {
+    fs.mkdirSync(desktopLogsDir, { recursive: true });
+    fs.appendFileSync(warmupLogPath, `[${new Date().toISOString()}] ${message}\n`);
+  };
+  let warmupWindow;
+  let activeError = null;
+  log(`starting offline installer warmup with timeout ${timeoutSeconds}s`);
+  try {
+    await runSidecar("up", maintenanceArgs, {
+      timeout: timeoutSeconds * 1000,
+    });
+    const status = await readStatus();
+    if (status.overallStatus !== "ready" || !status.config?.frontendPort) {
+      throw new Error(`maintenance runtime did not become ready (status=${status.overallStatus || "unknown"})`);
+    }
+
+    warmupWindow = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    warmupWindow.webContents.session.webRequest.onBeforeRequest((details, callback) => {
+      try {
+        const url = new URL(details.url);
+        const allowed = url.protocol === "data:" ||
+          ((url.protocol === "http:" || url.protocol === "ws:") &&
+            (url.hostname === "127.0.0.1" || url.hostname === "localhost"));
+        callback({ cancel: !allowed });
+      } catch {
+        callback({ cancel: true });
+      }
+    });
+    await warmupWindow.loadURL(`http://127.0.0.1:${status.config.frontendPort}`);
+    log("runtime and renderer warmup completed");
+  } catch (error) {
+    log(`warmup failed: ${serializeError(error)}`);
+    activeError = error;
+    throw error;
+  } finally {
+    if (warmupWindow && !warmupWindow.isDestroyed()) {
+      warmupWindow.destroy();
+    }
+    try {
+      await runSidecar("down", maintenanceArgs, {
+        env: { ...sidecarEnv(), LAZYMIND_LOCAL_DOWN_TIMEOUT: "120s" },
+        timeout: 130000,
+      });
+      log("maintenance runtime stopped");
+    } catch (error) {
+      log(`maintenance runtime shutdown failed: ${serializeError(error)}`);
+      if (!activeError) {
+        throw error;
+      }
+    }
+  }
 }
 
 function startGuard() {
@@ -902,7 +977,11 @@ ipcMain.handle("lazymind:exportDiagnostics", async () => {
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
-  app.quit();
+  if (isInstallerWarmup) {
+    app.exit(1);
+  } else {
+    app.quit();
+  }
 } else {
   app.on("second-instance", () => {
     if (!mainWindow || mainWindow.isDestroyed()) {
@@ -918,12 +997,24 @@ if (!hasSingleInstanceLock) {
     if (isWindows) {
       app.setAppUserModelId("ai.lazymind.desktop");
     }
+    if (isInstallerWarmup) {
+      return runInstallerWarmup().then(
+        () => app.exit(0),
+        (error) => {
+          console.error("LazyMind installer warmup failed:", error);
+          app.exit(1);
+        },
+      );
+    }
     return createWindow();
   });
   app.on("window-all-closed", () => {
     app.quit();
   });
   app.on("before-quit", (event) => {
+    if (isInstallerWarmup) {
+      return;
+    }
     if (!isQuitting) {
       event.preventDefault();
       beginFastQuit("app quit");

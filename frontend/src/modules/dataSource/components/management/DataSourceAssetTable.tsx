@@ -170,7 +170,7 @@ export default function DataSourceAssetTable({ vm }: { vm: DataSourceManagementV
                 vm.openDatabaseConnectionConfig(record);
                 return;
               }
-              openEditWizard(record);
+              void openEditWizard(record);
             }}
           >
             {t("admin.dataSourceActionConfig")}

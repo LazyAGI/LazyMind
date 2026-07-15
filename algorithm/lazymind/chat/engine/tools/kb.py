@@ -120,6 +120,7 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
             'file_name',
             'source',
             'source_path',
+            'normalized_source_path',
             'store_num',
             'lazyllm_store_num',
             'page',
@@ -141,13 +142,22 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
         and local_path.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'))
     )
     image_markdown = None
-    source_path = metadata.get('source_path')
-    if source_path:
-        signed = static_file_url_from_any(source_path)
+    # Prefer durable normalized JPEG over volatile OCR cache (.image_cache).
+    render_path = (
+        metadata.get('normalized_source_path')
+        or metadata.get('source_path')
+        or ''
+    )
+    if isinstance(render_path, str):
+        render_path = render_path.strip()
+    else:
+        render_path = ''
+    if render_path:
+        signed = static_file_url_from_any(render_path)
         text = signed
         compact_metadata = dict(compact_metadata)
         compact_metadata['image_url'] = signed
-        compact_metadata['local_path'] = source_path
+        compact_metadata['local_path'] = render_path
         doc_file_name = global_md.get('file_name') or compact_metadata.get('file_name')
         file_label = doc_file_name or basename_from_path(signed)
         image_markdown = f'![{file_label}]({signed})'
@@ -187,7 +197,7 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
     }
     if image_markdown:
         serialized['image_markdown'] = image_markdown
-        serialized['local_path'] = source_path or local_path
+        serialized['local_path'] = render_path or local_path
     return serialized
 
 

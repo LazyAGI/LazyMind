@@ -15,15 +15,20 @@ export function serializeModel(model: GraphModel, includeLayout = false): string
 
   // x-layout block (only when includeLayout is true and non-empty)
   if (includeLayout && Object.keys(model.layout).length > 0) {
-    const layoutBlock: Record<string, { x: number; y: number; w?: number }> = {};
+    const layoutBlock: Record<string, unknown> = {};
     for (const [id, pos] of Object.entries(model.layout)) {
-      const entry: { x: number; y: number; w?: number } = {
+      const entry: Record<string, unknown> = {
         x: Math.round(pos.x),
         y: Math.round(pos.y),
       };
       if (pos.width != null) entry.w = Math.round(pos.width);
+      if (pos.height != null) entry.height = Math.round(pos.height);
+      if (pos.visible) entry.visible = pos.visible;
+      if (pos.fill) entry.fill = pos.fill;
+      if (pos.border) entry.border = pos.border;
       layoutBlock[id] = entry;
     }
+    if (Object.keys(model.edgeLayout).length) layoutBlock.$edges = model.edgeLayout;
     doc['x-layout'] = layoutBlock;
   }
 

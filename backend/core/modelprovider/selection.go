@@ -21,6 +21,7 @@ var allowedSelectionModelTypes = map[string]struct{}{
 	"evo_llm":       {},
 	"vlm":           {},
 	"text2image":    {},
+	"text2video":    {},
 	"embed_main":    {},
 	"tts":           {},
 	"image_editing": {},

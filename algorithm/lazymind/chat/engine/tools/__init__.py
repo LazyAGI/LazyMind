@@ -10,7 +10,7 @@ from .kb import KBToolGroup, kb_tmp_search
 from .local_fs import LocalFSToolGroup
 from .memory_editor import memory_editor
 from .memory_reader import read_memory
-from .multimodal import image_editor, image_generator, vision_extractor
+from .multimodal import image_editor, image_generator, video_generator, video_to_gif, vision_extractor
 from .plugin_chat_tools import create_plugin_draft
 from .schedule import build_schedule_tool_group
 from .skill_editor import SkillEditorToolGroup
@@ -26,6 +26,8 @@ __all__ = [
     'ExternalDBToolGroup',
     'image_editor',
     'image_generator',
+    'video_generator',
+    'video_to_gif',
     'KBToolGroup',
     'kb_tmp_search',
     'LocalFSToolGroup',

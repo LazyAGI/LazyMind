@@ -281,6 +281,30 @@ export interface TabDef {
   composite_layout?: CompositePanelNode | CompositeLayoutNode[];
   /** Composite mode: global tab-bar position. */
   composite_tab_position?: 'top' | 'bottom' | 'left' | 'right';
+  /**
+   * Generic composite display rules declared by the plugin.
+   * PluginPanel must not special-case plugin IDs; it only executes these rules.
+   */
+  composite_behavior?: CompositeBehavior;
+}
+
+/** Mutually exclusive column group: keep the first preferred slot that has data. */
+export interface CompositeMutuallyExclusiveGroup {
+  slots: string[];
+  /** Preference order when multiple group members have data. Defaults to `slots`. */
+  prefer?: string[];
+}
+
+/**
+ * Plugin-declared composite display behavior (UI schema).
+ * - hide_empty_columns: drop columns with no matching revisions
+ * - empty_column_scope: which revisions count as non-empty
+ * - mutually_exclusive: among a group, show only one winner column
+ */
+export interface CompositeBehavior {
+  hide_empty_columns?: boolean;
+  empty_column_scope?: 'selected' | 'tab';
+  mutually_exclusive?: CompositeMutuallyExclusiveGroup[];
 }
 
 export interface PluginUI {

@@ -71,6 +71,7 @@ export function serializePluginModel(model: PluginModel, graphModel?: GraphModel
       t.slots = tab.slots.map((s) => ({ id: s.id }));
       if (tab.composite_tab_position) t.composite_tab_position = tab.composite_tab_position;
       if (tab.composite_layout != null) t.composite_layout = tab.composite_layout;
+      if (tab.composite_behavior != null) t.composite_behavior = tab.composite_behavior;
       return t;
     });
 

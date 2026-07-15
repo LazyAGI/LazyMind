@@ -70,6 +70,7 @@ interface Props {
   disableAddTransition?: boolean;
   /** When true all editing controls are disabled (read-only view). */
   readonly?: boolean;
+  visualContent?: React.ReactNode;
 }
 
 interface SectionProps {
@@ -111,7 +112,7 @@ function FieldRow({ label, tip, children }: { label: string; tip: string; childr
   );
 }
 
-export default function NodePropertiesPanel({ node, model, pluginModel, scenarioData, onScenarioChange, onClose, onChange, onDelete, disableAddTransition, readonly = false }: Props) {
+export default function NodePropertiesPanel({ node, model, pluginModel, scenarioData, onScenarioChange, onClose, onChange, onDelete, disableAddTransition, readonly = false, visualContent }: Props) {
   const { t } = useTranslation();
   // Derive allowSkip directly from node state so it stays in sync when node
   // prop updates. Using local state here caused the checkbox and model to
@@ -121,6 +122,7 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
   const [idDraft, setIdDraft] = useState<string>(isHiddenId(node.id) ? '' : node.id);
   // Set when the upstream rejects the id (e.g. duplicate).
   const [idConflict, setIdConflict] = useState(false);
+  const [activeTab, setActiveTab] = useState<'step' | 'visual'>('step');
 
   const [systemTools, setSystemTools] = useState<Array<{ label: string; name: string }>>(_cachedSystemTools ?? []);
 
@@ -276,12 +278,12 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
     <div className="node-props-panel" role="complementary" aria-label={t('selfEvolutionRun.stateGraphPanelTitle')} onDoubleClick={(e) => e.stopPropagation()}>
       {/* header */}
       <div className="node-props-panel-header">
-        <span className="node-props-panel-title">{t('selfEvolutionRun.stateGraphPanelTitle')}</span>
+        <div className="node-props-tabs"><button className={activeTab === 'step' ? 'active' : ''} onClick={() => setActiveTab('step')}>步骤设置</button><button className={activeTab === 'visual' ? 'active' : ''} onClick={() => setActiveTab('visual')}>视觉效果</button></div>
         <Button type="text" icon={<CloseOutlined />} size="small" onClick={onClose} aria-label={t('selfEvolutionRun.stateGraphPanelTitle')} />
       </div>
 
       {/* body */}
-      <div className="node-props-panel-body">
+      {activeTab === 'visual' ? visualContent : <><div className="node-props-panel-body">
         {/* ── 分组一：基本信息 ── */}
         <Section title={t('selfEvolutionRun.stateGraphBasicInfo')}>
           <FieldRow label={t('selfEvolutionRun.stateGraphFieldStepId')} tip={t('selfEvolutionRun.stateGraphFieldStepIdTip')}>
@@ -591,6 +593,7 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
           </Button>
         )}
       </div>
+      </>}
     </div>
   );
 }

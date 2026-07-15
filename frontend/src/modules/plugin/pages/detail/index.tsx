@@ -486,15 +486,12 @@ export default function PluginDetailPage() {
   let stateYaml = rawStateYaml;
   if (!viewingHistory && rawStateYaml && draft.state_layout_content) {
     try {
-      const layoutObj = JSON.parse(draft.state_layout_content) as Record<string, { x: number; y: number; w?: number; width?: number }>;
+      const layoutObj = JSON.parse(draft.state_layout_content) as Record<string, unknown>;
       if (Object.keys(layoutObj).length > 0) {
         // Prepend x-layout block to state YAML so the parser picks it up.
         // Support both 'w' (legacy) and 'width' (current NodeLayout field name).
         const layoutYaml = `x-layout:\n${Object.entries(layoutObj)
-          .map(([id, pos]) => {
-            const w = pos.w ?? pos.width;
-            return `  ${id}: { x: ${pos.x}, y: ${pos.y}${w != null ? `, w: ${w}` : ''} }`;
-          })
+          .map(([id, value]) => `  ${JSON.stringify(id)}: ${JSON.stringify(value)}`)
           .join('\n')}\n`;
         stateYaml = layoutYaml + rawStateYaml;
       }
@@ -522,9 +519,6 @@ export default function PluginDetailPage() {
       )}
       {draft.generate_status === 'rejected' && (
         <Alert className="plugin-detail-banner" type="error" showIcon message={t('selfEvolutionRun.pluginWorkflowRejected')} description={draft.generate_error} />
-      )}
-      {generationAnalysis && draft.generate_status !== 'needs_confirmation' && (
-        <details className="plugin-detail-banner"><summary>{t('selfEvolutionRun.pluginAnalysisReport')}</summary><h4>{t('selfEvolutionRun.pluginCoverageReport')}</h4><pre>{JSON.stringify(generationAnalysis.coverage,null,2)}</pre><h4>{t('selfEvolutionRun.pluginToolMappingReport')}</h4><pre>{JSON.stringify(generationAnalysis.tool_mappings,null,2)}</pre><h4>{t('selfEvolutionRun.pluginScriptReport')}</h4><pre>{JSON.stringify(generationAnalysis.scripts,null,2)}</pre></details>
       )}
       {/* Generation progress banner — shown while Phase 3 is still running (editor already ready) */}
       {isPhase3Running && !repairModalOpen && (
@@ -643,6 +637,11 @@ export default function PluginDetailPage() {
             defaultShowArtifacts={showArtifactsRef.current}
             onArtifactsChange={(show) => { showArtifactsRef.current = show; }}
             designBriefContent={draft.design_brief_content || undefined}
+            skillConversionReport={generationAnalysis && draft.generate_status !== 'needs_confirmation' ? {
+              coverage: generationAnalysis.coverage,
+              toolMappings: generationAnalysis.tool_mappings,
+              scripts: generationAnalysis.scripts,
+            } : undefined}
             pluginName={
               <Space size={8}>
                 <Breadcrumb items={[

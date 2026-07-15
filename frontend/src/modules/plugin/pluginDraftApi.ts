@@ -25,6 +25,12 @@ export interface BuiltinPluginUiTab {
   label: string;
   layout: string;
   slots: BuiltinPluginUiTabSlot[];
+  composite_layout?: unknown;
+  composite_behavior?: {
+    hide_empty_columns?: boolean;
+    empty_column_scope?: 'selected' | 'tab';
+    mutually_exclusive?: Array<{ slots: string[]; prefer?: string[] }>;
+  };
 }
 
 export interface BuiltinPlugin {

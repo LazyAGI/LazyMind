@@ -5,7 +5,7 @@ import path from "node:path";
 
 // Allow local development to target a custom backend without changing this file.
 const devProxyTarget =
-  process.env.VITE_PROXY_TARGET || "http://127.0.0.1:5024";
+  process.env.VITE_PROXY_TARGET || "http://10.210.0.49:5024";
 const isDesktopBuild = process.env.VITE_LAZYMIND_MODE === "desktop";
 
 // Expose the globally loaded Excel preview library as an ES module.

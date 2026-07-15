@@ -376,6 +376,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     start_time = time.time()
     priority = runtime.priority or LAZYMIND_LLM_PRIORITY
     query, agent_query = _normalize_cite_message_query_for_agent(message.query)
+    language_query = (message.user_query or query).strip()
     is_driver_turn = is_plugin_driver_turn(plugin.plugin_context)
     sensitive_word = None if is_driver_turn else check_sensitive_content(query)
     if sensitive_word:
@@ -558,7 +559,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         user_preference=personalization.user_preference,
         memory=personalization.memory,
         files=display_files,
-        current_query=query,
+        current_query=language_query,
         conversation_history=agent_history,
     )
     if plugin_system_prompt:

@@ -20,6 +20,14 @@
     touch-action: pan-y pinch-zoom;
   }
 }
+.canvas-create-menu { position:absolute; z-index:30; width:180px; padding:6px; background:#fff; border:1px solid #d9d9d9; border-radius:9px; box-shadow:0 6px 20px rgba(0,0,0,.16); }
+.canvas-create-menu button { width:100%; display:flex; align-items:center; gap:10px; padding:8px 9px; border:0; border-radius:6px; background:transparent; color:#1f1f1f; text-align:left; cursor:pointer; }
+.canvas-create-menu button:hover { background:#f5f5f5; }
+.canvas-create-menu button + button { border-top:1px solid #f0f0f0; border-radius:0 0 6px 6px; }
+.canvas-create-menu-icon { width:24px; height:24px; display:grid; place-items:center; flex:0 0 auto; border:1px solid #bfbfbf; border-radius:6px; font-size:16px; }
+.canvas-create-menu button > span:last-child { min-width:0; display:flex; flex-direction:column; }
+.canvas-create-menu strong { font-size:13px; font-weight:600; }
+.canvas-create-menu small { margin-top:2px; color:#8c8c8c; font-size:10px; white-space:nowrap; }
 
 // Step node card
 .step-node {
@@ -42,19 +50,16 @@
   // Do not clip — allows source Handle and resize grip to extend beyond the node border
 
   &.is-selected {
-    border-color: #1677ff;
+    outline: 2px solid #1677ff;
+    outline-offset: 1px;
     box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.18);
   }
 
   &.has-error {
-    border-color: #ff4d4f;
+    outline: 2px solid #ff4d4f;
     box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.15);
   }
 
-  &.is-skippable {
-    border-style: dashed;
-    border-color: #faad14;
-  }
 }
 
 // Right-edge resize grip — always present, visible on node hover
@@ -63,8 +68,8 @@
   top: 0;
   // Center the grip on the node's right border: shift it 3px outward so the
   // 6px-wide hit area straddles the border (3px inside + 3px outside).
-  right: -3px;
-  width: 6px;
+  right: -7px;
+  width: 14px;
   height: 100%;
   cursor: ew-resize;
   // Below the source Handle (z-index: 20) so the connection dot stays clickable
@@ -74,7 +79,7 @@
     content: '';
     position: absolute;
     top: 50%;
-    right: 1px;
+    right: 5px;
     transform: translateY(-50%);
     width: 3px;
     height: 20px;
@@ -89,6 +94,10 @@
 .step-node.is-selected .step-node-resize-handle::after {
   opacity: 1;
 }
+.step-node-resize-handle--bottom { left:0; right:auto; top:auto; bottom:-7px; width:100%; height:14px; cursor:ns-resize; }
+.step-node-resize-handle--bottom::after { display:none; }
+.step-node-resize-handle--corner { top:auto; right:-8px; bottom:-8px; width:16px; height:16px; cursor:nwse-resize; z-index:10; }
+.step-node-resize-handle--corner::after { display:none; }
 
 .step-node-header {
   display: flex;

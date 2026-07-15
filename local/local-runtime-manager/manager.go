@@ -27,7 +27,7 @@ type RuntimeManager struct {
 	probeCore                 func(port int, timeout time.Duration) bool
 	probeScan                 func(port int, timeout time.Duration) bool
 	probeFileWatch            func(port int, timeout time.Duration) bool
-	waitHostReady             func(context.Context, RuntimeConfig) error
+	waitHostReady             func(context.Context, RuntimeConfig, []AlgorithmServiceSpec) error
 	runtimeReady              func(context.Context, RuntimeConfig, RuntimePaths) bool
 	processScanner            localProcessScanner
 	pollInterval              time.Duration
@@ -126,7 +126,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		}
 	}
 	if m.isExistingRuntimeRunning(ctx, state, stateCfg, paths) {
-		return m.reportExistingRuntime(ctx, state, paths)
+		return m.reportExistingRuntime(ctx, state, stateCfg, paths)
 	}
 	if err := m.stopStaleRuntimeIfNeeded(ctx, state, stateCfg, paths); err != nil {
 		return err
@@ -135,11 +135,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
-		Profile:       cfg.Profile,
-		OwnerToken:    cfg.OwnerToken,
-		RepoRoot:      paths.RepoRoot,
-		RuntimeRoot:   cfg.RuntimeRoot,
-		ResourcesRoot: cfg.ResourcesRoot,
+		Profile:         cfg.Profile,
+		MaintenanceMode: cfg.MaintenanceMode,
+		OwnerToken:      cfg.OwnerToken,
+		RepoRoot:        paths.RepoRoot,
+		RuntimeRoot:     cfg.RuntimeRoot,
+		ResourcesRoot:   cfg.ResourcesRoot,
 	})
 	if err != nil {
 		return err
@@ -165,7 +166,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		}
 	}
 	if m.isExistingRuntimeRunning(ctx, state, stateCfg, paths) {
-		return m.reportExistingRuntime(ctx, state, paths)
+		return m.reportExistingRuntime(ctx, state, stateCfg, paths)
 	}
 	if err := m.stopStaleRuntimeIfNeeded(ctx, state, stateCfg, paths); err != nil {
 		return err
@@ -174,11 +175,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
-		Profile:       cfg.Profile,
-		OwnerToken:    cfg.OwnerToken,
-		RepoRoot:      paths.RepoRoot,
-		RuntimeRoot:   cfg.RuntimeRoot,
-		ResourcesRoot: cfg.ResourcesRoot,
+		Profile:         cfg.Profile,
+		MaintenanceMode: cfg.MaintenanceMode,
+		OwnerToken:      cfg.OwnerToken,
+		RepoRoot:        paths.RepoRoot,
+		RuntimeRoot:     cfg.RuntimeRoot,
+		ResourcesRoot:   cfg.ResourcesRoot,
 	})
 	if err != nil {
 		return err
@@ -187,6 +189,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	cfg = freshCfg
+	plan := buildRuntimeProcessPlan(cfg)
 	if err := validatePinnedLocalPorts(cfg); err != nil {
 		return err
 	}
@@ -228,14 +231,14 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	state.ProcessCompose.APIRoot = "http://127.0.0.1:" + strconv.Itoa(cfg.ProcessComposePort)
 	state.ProcessCompose.TokenFile = paths.RunDirTokenFile
 	state.Config = snapshotRuntimeConfig(cfg)
-	state = newStateWithServiceStatus(state, "starting")
+	state = newStateWithServiceStatus(state, cfg, "starting")
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		return err
 	}
 
 	m.progressf("starting process-compose supervisor on 127.0.0.1:%d", cfg.ProcessComposePort)
 	if err := m.processCompose.Up(ctx, cfg, paths); err != nil {
-		state = newStateWithServiceStatus(state, "failed")
+		state = newStateWithServiceStatus(state, cfg, "failed")
 		state.OverallStatus = "failed"
 		_ = writeRuntimeState(paths.StateFile, state)
 		return err
@@ -243,7 +246,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 
 	m.progressf("waiting for process-compose API on 127.0.0.1:%d", cfg.ProcessComposePort)
 	if !m.waitForProcessComposeAPI(ctx, cfg.ProcessComposePort, 15*time.Second) {
-		state = newStateWithServiceStatus(state, "failed")
+		state = newStateWithServiceStatus(state, cfg, "failed")
 		state.OverallStatus = "failed"
 		_ = writeRuntimeState(paths.StateFile, state)
 		return fmt.Errorf("process-compose API did not become ready on port %d", cfg.ProcessComposePort)
@@ -260,75 +263,105 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	select {
 	case logErr := <-logErrCh:
 		if logErr != nil {
-			state = newStateWithServiceStatus(state, "failed")
+			state = newStateWithServiceStatus(state, cfg, "failed")
 			state.OverallStatus = "failed"
 			_ = writeRuntimeState(paths.StateFile, state)
 			return logErr
 		}
 	default:
 	}
-	if err := m.waitForLocalProxyHealthy(ctx, cfg.LocalProxy.Port, m.upTimeout); err != nil {
-		state = newStateWithServiceStatus(state, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
-		return err
+	if plan.includes(localProxyProcessName) {
+		if err := m.waitForLocalProxyHealthy(ctx, cfg.LocalProxy.Port, m.upTimeout); err != nil {
+			state = newStateWithServiceStatus(state, cfg, "failed")
+			state.OverallStatus = "failed"
+			_ = writeRuntimeState(paths.StateFile, state)
+			return err
+		}
 	}
-	if err := m.waitForAuthServiceHealthy(ctx, cfg.AuthService.Port, m.upTimeout, paths.AuthServicePIDFile); err != nil {
-		state = newStateWithServiceStatus(state, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
-		return err
+	if plan.includes(authServiceProcessName) {
+		if err := m.waitForAuthServiceHealthy(ctx, cfg.AuthService.Port, m.upTimeout, paths.AuthServicePIDFile); err != nil {
+			state = newStateWithServiceStatus(state, cfg, "failed")
+			state.OverallStatus = "failed"
+			_ = writeRuntimeState(paths.StateFile, state)
+			return err
+		}
 	}
-	if err := m.waitForCoreHealthy(ctx, cfg.LocalProxy.CoreHostPort, m.upTimeout); err != nil {
-		state = newStateWithServiceStatus(state, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
-		return err
+	if plan.includes(coreProcessName) {
+		if err := m.waitForCoreHealthy(ctx, cfg.LocalProxy.CoreHostPort, m.upTimeout); err != nil {
+			state = newStateWithServiceStatus(state, cfg, "failed")
+			state.OverallStatus = "failed"
+			_ = writeRuntimeState(paths.StateFile, state)
+			return err
+		}
 	}
-	if err := m.waitForScanControlPlaneHealthy(ctx, cfg.LocalProxy.ScanHostPort, m.upTimeout); err != nil {
-		state = newStateWithServiceStatus(state, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
-		return err
+	if plan.includes(scanControlPlaneProcessName) {
+		if err := m.waitForScanControlPlaneHealthy(ctx, cfg.LocalProxy.ScanHostPort, m.upTimeout); err != nil {
+			state = newStateWithServiceStatus(state, cfg, "failed")
+			state.OverallStatus = "failed"
+			_ = writeRuntimeState(paths.StateFile, state)
+			return err
+		}
 	}
-	if err := m.waitForFileWatcherHealthy(ctx, cfg.FileWatcher.Port, m.upTimeout); err != nil {
-		state = newStateWithServiceStatus(state, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
-		return err
+	if plan.includes(fileWatcherProcessName) {
+		if err := m.waitForFileWatcherHealthy(ctx, cfg.FileWatcher.Port, m.upTimeout); err != nil {
+			state = newStateWithServiceStatus(state, cfg, "failed")
+			state.OverallStatus = "failed"
+			_ = writeRuntimeState(paths.StateFile, state)
+			return err
+		}
 	}
-	if waitErr := m.waitHostAlgorithmsReady(ctx, cfg); waitErr != nil {
-		state = newStateWithServiceStatus(state, "failed")
+	if waitErr := m.waitHostAlgorithmsReady(ctx, cfg, plan.AlgorithmServices); waitErr != nil {
+		state = newStateWithServiceStatus(state, cfg, "failed")
 		state.OverallStatus = "failed"
 		_ = writeRuntimeState(paths.StateFile, state)
 		return waitErr
 	}
-	if err := m.waitForFrontendHealthy(ctx, cfg.FrontendPort, m.upTimeout); err != nil {
-		state = newStateWithServiceStatus(state, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
-		return err
+	if plan.includes(frontendProcessName) {
+		if err := m.waitForFrontendHealthy(ctx, cfg.FrontendPort, m.upTimeout); err != nil {
+			state = newStateWithServiceStatus(state, cfg, "failed")
+			state.OverallStatus = "failed"
+			_ = writeRuntimeState(paths.StateFile, state)
+			return err
+		}
 	}
 
-	state = newStateWithServiceStatus(state, "running")
+	state = newStateWithServiceStatus(state, cfg, "running")
 	state.OverallStatus = "ready"
 	state.UpdatedAt = m.now().UTC().Format(time.RFC3339)
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		return err
 	}
 	m.printReadySummary(cfg)
+	if cfg.MaintenanceMode == installerWarmupMaintenanceMode {
+		return nil
+	}
 	if cfg.Profile == "desktop" {
 		return m.waitForDesktopRuntimeStop(ctx, paths)
 	}
 	return nil
 }
 
+func (m *RuntimeManager) Warmup(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (err error) {
+	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
+		return fmt.Errorf("warmup requires maintenance mode %q", installerWarmupMaintenanceMode)
+	}
+	defer func() {
+		downErr := m.Down(context.Background(), cfg, paths)
+		if err == nil && downErr != nil {
+			err = downErr
+		}
+	}()
+	return m.Up(ctx, cfg, paths)
+}
+
 func ensureRuntimeDirs(cfg RuntimeConfig, paths RuntimePaths) error {
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(cfg.FileWatcher.WatchHostDir, 0o755); err != nil {
-		return fmt.Errorf("create local document scan directory: %w", err)
+	if buildRuntimeProcessPlan(cfg).includes(fileWatcherProcessName) {
+		if err := os.MkdirAll(cfg.FileWatcher.WatchHostDir, 0o755); err != nil {
+			return fmt.Errorf("create local document scan directory: %w", err)
+		}
 	}
 	return nil
 }
@@ -434,16 +467,16 @@ func (m *RuntimeManager) waitForServiceProbeReady(ctx context.Context, probe fun
 	}
 }
 
-func (m *RuntimeManager) waitHostAlgorithmsReady(ctx context.Context, cfg RuntimeConfig) error {
+func (m *RuntimeManager) waitHostAlgorithmsReady(ctx context.Context, cfg RuntimeConfig, specs []AlgorithmServiceSpec) error {
 	m.progressf("waiting for host algorithm services")
 	monitorCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		m.reportHostAlgorithmReadiness(monitorCtx, cfg)
+		m.reportHostAlgorithmReadiness(monitorCtx, cfg, specs)
 	}()
 
-	waitErr := m.waitHostReady(ctx, cfg)
+	waitErr := m.waitHostReady(ctx, cfg, specs)
 	cancel()
 	select {
 	case <-done:
@@ -456,8 +489,8 @@ func (m *RuntimeManager) waitHostAlgorithmsReady(ctx context.Context, cfg Runtim
 	return nil
 }
 
-func (m *RuntimeManager) reportHostAlgorithmReadiness(ctx context.Context, cfg RuntimeConfig) {
-	m.progressf("host algorithm status: %s", hostAlgorithmReadinessSummary(ctx, cfg))
+func (m *RuntimeManager) reportHostAlgorithmReadiness(ctx context.Context, cfg RuntimeConfig, specs []AlgorithmServiceSpec) {
+	m.progressf("host algorithm status: %s", hostAlgorithmReadinessSummary(ctx, cfg, specs))
 	ticker := time.NewTicker(startupProgressInterval)
 	defer ticker.Stop()
 	for {
@@ -465,24 +498,29 @@ func (m *RuntimeManager) reportHostAlgorithmReadiness(ctx context.Context, cfg R
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.progressf("host algorithm status: %s", hostAlgorithmReadinessSummary(ctx, cfg))
+			m.progressf("host algorithm status: %s", hostAlgorithmReadinessSummary(ctx, cfg, specs))
 		}
 	}
 }
 
-func hostAlgorithmReadinessSummary(ctx context.Context, cfg RuntimeConfig) string {
-	statuses := make([]string, 0, len(algorithmProcessSpecs(cfg.Algorithm))+2)
+func hostAlgorithmReadinessSummary(ctx context.Context, cfg RuntimeConfig, specs []AlgorithmServiceSpec) string {
+	statuses := make([]string, 0, len(specs)+2)
 	if cfg.ModeProfile.VectorStore.ManagedProcess {
 		statuses = append(statuses, readinessLabel(milvusLiteProcessName, tcpOK(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, 500*time.Millisecond)))
 	}
-	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
+	for _, spec := range specs {
 		url := fmt.Sprintf("http://127.0.0.1:%d%s", spec.Port, spec.HealthPath)
 		statuses = append(statuses, readinessLabel(spec.Name, httpOK(ctx, url, 500*time.Millisecond)))
 	}
-	registrationURL := fmt.Sprintf("http://127.0.0.1:%d/algo/list", cfg.Algorithm.ProcessorPort)
-	registrationCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-	statuses = append(statuses, readinessLabel("algorithm-registration", algorithmRegistered(registrationCtx, registrationURL)))
+	for _, spec := range specs {
+		if spec.Name == algoProcessName {
+			registrationURL := fmt.Sprintf("http://127.0.0.1:%d/algo/list", cfg.Algorithm.ProcessorPort)
+			registrationCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			statuses = append(statuses, readinessLabel("algorithm-registration", algorithmRegistered(registrationCtx, registrationURL)))
+			cancel()
+			break
+		}
+	}
 	return strings.Join(statuses, ", ")
 }
 
@@ -524,6 +562,7 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		return nil
 	}
 	cfg = applyStateConfig(cfg, state)
+	plan := buildRuntimeProcessPlan(cfg)
 	if state.ProcessCompose.APIPort > 0 {
 		cfg.ProcessComposePort = state.ProcessCompose.APIPort
 	}
@@ -566,39 +605,53 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 			}
 		}
 		_ = m.killStaleRuntimeProcesses(context.Background(), cfg, paths)
-		m.progressf("stopping frontend Caddy on 127.0.0.1:%d", cfg.FrontendPort)
-		if err := m.frontend.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
-			fallbackErr = err
+		if plan.includes(frontendProcessName) {
+			m.progressf("stopping frontend Caddy on 127.0.0.1:%d", cfg.FrontendPort)
+			if err := m.frontend.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
+				fallbackErr = err
+			}
 		}
-		m.progressf("stopping Local Gateway proxy on 127.0.0.1:%d", cfg.LocalProxy.Port)
-		if err := m.localProxy.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
-			fallbackErr = err
+		if plan.includes(localProxyProcessName) {
+			m.progressf("stopping Local Gateway proxy on 127.0.0.1:%d", cfg.LocalProxy.Port)
+			if err := m.localProxy.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
+				fallbackErr = err
+			}
 		}
-		for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
+		for _, spec := range plan.AlgorithmServices {
 			m.progressf("stopping algorithm process %s", spec.Name)
 			if err := m.algorithm.Down(ctx, paths, spec.Name); err != nil && fallbackErr == nil {
 				fallbackErr = err
 			}
 		}
-		m.progressf("stopping Milvus Lite process")
-		if err := m.milvusLite.Down(ctx, paths); err != nil && fallbackErr == nil {
-			fallbackErr = err
+		if plan.includes(milvusLiteProcessName) {
+			m.progressf("stopping Milvus Lite process")
+			if err := m.milvusLite.Down(ctx, paths); err != nil && fallbackErr == nil {
+				fallbackErr = err
+			}
 		}
-		m.progressf("stopping core service on 127.0.0.1:%d", cfg.LocalProxy.CoreHostPort)
-		if err := m.coreService.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
-			fallbackErr = err
+		if plan.includes(coreProcessName) {
+			m.progressf("stopping core service on 127.0.0.1:%d", cfg.LocalProxy.CoreHostPort)
+			if err := m.coreService.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
+				fallbackErr = err
+			}
 		}
-		m.progressf("stopping scan-control-plane on 127.0.0.1:%d", cfg.LocalProxy.ScanHostPort)
-		if err := m.scanControl.Down(ctx, paths); err != nil && fallbackErr == nil {
-			fallbackErr = err
+		if plan.includes(scanControlPlaneProcessName) {
+			m.progressf("stopping scan-control-plane on 127.0.0.1:%d", cfg.LocalProxy.ScanHostPort)
+			if err := m.scanControl.Down(ctx, paths); err != nil && fallbackErr == nil {
+				fallbackErr = err
+			}
 		}
-		m.progressf("stopping file-watcher on 127.0.0.1:%d", cfg.FileWatcher.Port)
-		if err := m.fileWatcher.Down(ctx, paths); err != nil && fallbackErr == nil {
-			fallbackErr = err
+		if plan.includes(fileWatcherProcessName) {
+			m.progressf("stopping file-watcher on 127.0.0.1:%d", cfg.FileWatcher.Port)
+			if err := m.fileWatcher.Down(ctx, paths); err != nil && fallbackErr == nil {
+				fallbackErr = err
+			}
 		}
-		m.progressf("stopping auth-service on 127.0.0.1:%d", cfg.AuthService.Port)
-		if err := m.authService.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
-			fallbackErr = err
+		if plan.includes(authServiceProcessName) {
+			m.progressf("stopping auth-service on 127.0.0.1:%d", cfg.AuthService.Port)
+			if err := m.authService.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
+				fallbackErr = err
+			}
 		}
 		if fallbackErr == nil {
 			if err := m.killStaleRuntimeProcesses(context.Background(), cfg, paths); err != nil {
@@ -614,12 +667,12 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		}
 	}
 	if downErr != nil {
-		state = newStateWithServiceStatus(state, "failed")
+		state = newStateWithServiceStatus(state, cfg, "failed")
 		state.OverallStatus = "failed"
 		_ = writeRuntimeState(paths.StateFile, state)
 		return downErr
 	}
-	state = newStateWithServiceStatus(state, "stopped")
+	state = newStateWithServiceStatus(state, cfg, "stopped")
 	state.OverallStatus = "stopped"
 	state.UpdatedAt = m.now().UTC().Format(time.RFC3339)
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
@@ -774,33 +827,39 @@ func (m *RuntimeManager) checkRuntimeReady(ctx context.Context, cfg RuntimeConfi
 	if m.runtimeReady != nil {
 		return m.runtimeReady(ctx, cfg, paths)
 	}
-	if !m.probeLocalProxy(cfg.LocalProxy.Port, 500*time.Millisecond) {
-		return false
-	}
-	if !m.probeFrontend(cfg.FrontendPort, 500*time.Millisecond) {
-		return false
-	}
-	if !m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond) {
-		return false
-	}
-	if !m.probeCore(cfg.LocalProxy.CoreHostPort, 500*time.Millisecond) {
-		return false
-	}
-	if !m.probeScan(cfg.LocalProxy.ScanHostPort, 500*time.Millisecond) {
-		return false
-	}
-	if !m.probeFileWatch(cfg.FileWatcher.Port, 500*time.Millisecond) {
-		return false
-	}
-	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
-		if !httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d%s", spec.Port, spec.HealthPath), 500*time.Millisecond) {
+	plan := buildRuntimeProcessPlan(cfg)
+	for _, name := range plan.HostProcesses {
+		if !m.plannedServiceHealthy(ctx, cfg, name, AlgorithmServiceSpec{}) {
 			return false
 		}
 	}
-	if cfg.ModeProfile.VectorStore.ManagedProcess && !tcpOK(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, 500*time.Millisecond) {
-		return false
+	for _, spec := range plan.AlgorithmServices {
+		if !m.plannedServiceHealthy(ctx, cfg, spec.Name, spec) {
+			return false
+		}
 	}
 	return true
+}
+
+func (m *RuntimeManager) plannedServiceHealthy(ctx context.Context, cfg RuntimeConfig, name string, spec AlgorithmServiceSpec) bool {
+	switch name {
+	case localProxyProcessName:
+		return m.probeLocalProxy(cfg.LocalProxy.Port, 500*time.Millisecond)
+	case authServiceProcessName:
+		return m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond)
+	case frontendProcessName:
+		return m.probeFrontend(cfg.FrontendPort, 500*time.Millisecond)
+	case coreProcessName:
+		return m.probeCore(cfg.LocalProxy.CoreHostPort, 500*time.Millisecond)
+	case scanControlPlaneProcessName:
+		return m.probeScan(cfg.LocalProxy.ScanHostPort, 500*time.Millisecond)
+	case fileWatcherProcessName:
+		return m.probeFileWatch(cfg.FileWatcher.Port, 500*time.Millisecond)
+	case milvusLiteProcessName:
+		return tcpOK(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, 500*time.Millisecond)
+	default:
+		return spec.Port > 0 && httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d%s", spec.Port, spec.HealthPath), 500*time.Millisecond)
+	}
 }
 
 func claimsRuntimeRunning(state RuntimeState) bool {
@@ -809,8 +868,8 @@ func claimsRuntimeRunning(state RuntimeState) bool {
 		svc.Status == "running" || svc.Status == "starting"
 }
 
-func (m *RuntimeManager) reportExistingRuntime(ctx context.Context, state RuntimeState, paths RuntimePaths) error {
-	state = newStateWithServiceStatus(state, "running")
+func (m *RuntimeManager) reportExistingRuntime(ctx context.Context, state RuntimeState, cfg RuntimeConfig, paths RuntimePaths) error {
+	state = newStateWithServiceStatus(state, cfg, "running")
 	state.OverallStatus = "ready"
 	state.UpdatedAt = m.now().UTC().Format(time.RFC3339)
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
@@ -971,7 +1030,7 @@ func resolvedLocalPorts(cfg RuntimeConfig) []localPortItem {
 	if cfg.Algorithm.EnableEvo {
 		items = append(items, localPortItem{name: "evo-api", port: cfg.Algorithm.EvoPort, address: "127.0.0.1"})
 	}
-	if cfg.Algorithm.RouterPortPoolStart > 0 {
+	if cfg.MaintenanceMode != installerWarmupMaintenanceMode && cfg.Algorithm.RouterPortPoolStart > 0 {
 		end := cfg.Algorithm.RouterPortPoolEnd
 		if end < cfg.Algorithm.RouterPortPoolStart {
 			end = cfg.Algorithm.RouterPortPoolStart
@@ -979,6 +1038,18 @@ func resolvedLocalPorts(cfg RuntimeConfig) []localPortItem {
 		for port := cfg.Algorithm.RouterPortPoolStart; port <= end; port++ {
 			items = append(items, localPortItem{name: "router-port-pool", port: port, address: "127.0.0.1"})
 		}
+	}
+	if cfg.MaintenanceMode == installerWarmupMaintenanceMode {
+		filtered := items[:0]
+		for _, item := range items {
+			switch item.name {
+			case "scan-control-plane", "file-watcher", "processor-worker":
+				continue
+			default:
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
 	}
 	return items
 }
@@ -1108,55 +1179,8 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		Config:         snapshotRuntimeConfig(cfg),
 		Services:       state.Services,
 	}
-	if resp.Services == nil {
-		resp.Services = map[string]RuntimeServiceState{}
-	}
-	if _, ok := resp.Services[processComposeServiceName]; !ok {
-		resp.Services[processComposeServiceName] = RuntimeServiceState{
-			Kind:   "host-supervisor",
-			Status: "unknown",
-		}
-	}
-	if _, ok := resp.Services[localProxyProcessName]; !ok {
-		resp.Services[localProxyProcessName] = RuntimeServiceState{
-			Kind:   "host-process",
-			Status: "unknown",
-		}
-	}
-	if _, ok := resp.Services[authServiceProcessName]; !ok {
-		resp.Services[authServiceProcessName] = RuntimeServiceState{
-			Kind:   "host-process",
-			Status: "unknown",
-		}
-	}
-	if _, ok := resp.Services[frontendProcessName]; !ok {
-		resp.Services[frontendProcessName] = RuntimeServiceState{
-			Kind:   "host-process",
-			Status: "unknown",
-		}
-	}
-	if _, ok := resp.Services[coreProcessName]; !ok {
-		resp.Services[coreProcessName] = RuntimeServiceState{
-			Kind:   "host-process",
-			Status: "unknown",
-		}
-	}
-	if cfg.ModeProfile.VectorStore.ManagedProcess {
-		if _, ok := resp.Services[milvusLiteProcessName]; !ok {
-			resp.Services[milvusLiteProcessName] = RuntimeServiceState{
-				Kind:   "host-process",
-				Status: "unknown",
-			}
-		}
-	}
-	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
-		if _, ok := resp.Services[spec.Name]; !ok {
-			resp.Services[spec.Name] = RuntimeServiceState{
-				Kind:   "host-process",
-				Status: "unknown",
-			}
-		}
-	}
+	resp.Services = normalizeRuntimeServices(resp.Services, cfg)
+	plan := buildRuntimeProcessPlan(cfg)
 
 	if m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
 		resp.OverallStatus = "ready"
@@ -1164,57 +1188,23 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		s.Status = "running"
 		resp.Services[processComposeServiceName] = s
 		hostHealthy := true
-		lp := resp.Services[localProxyProcessName]
-		lp.Kind = "host-process"
-		if m.probeLocalProxy(cfg.LocalProxy.Port, 500*time.Millisecond) {
-			lp.Status = "running"
-		} else {
-			hostHealthy = false
-		}
-		resp.Services[localProxyProcessName] = lp
-		auth := resp.Services[authServiceProcessName]
-		auth.Kind = "host-process"
-		if m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond) {
-			auth.Status = "running"
-		} else {
-			hostHealthy = false
-		}
-		resp.Services[authServiceProcessName] = auth
-		frontend := resp.Services[frontendProcessName]
-		frontend.Kind = "host-process"
-		if m.probeFrontend(cfg.FrontendPort, 500*time.Millisecond) {
-			frontend.Status = "running"
-		} else {
-			hostHealthy = false
-		}
-		resp.Services[frontendProcessName] = frontend
-		core := resp.Services[coreProcessName]
-		core.Kind = "host-process"
-		if m.probeCore(cfg.LocalProxy.CoreHostPort, 500*time.Millisecond) {
-			core.Status = "running"
-		} else {
-			hostHealthy = false
-		}
-		resp.Services[coreProcessName] = core
-		if cfg.ModeProfile.VectorStore.ManagedProcess {
-			milvus := resp.Services[milvusLiteProcessName]
-			milvus.Kind = "host-process"
-			if tcpOK(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, 500*time.Millisecond) {
-				milvus.Status = "running"
+		for _, name := range plan.HostProcesses {
+			svc := resp.Services[name]
+			if m.plannedServiceHealthy(ctx, cfg, name, AlgorithmServiceSpec{}) {
+				svc.Status = "running"
 			} else {
 				hostHealthy = false
-				if milvus.Status == "running" || milvus.Status == "starting" {
-					milvus.Status = "stale"
-				} else if milvus.Status == "" || milvus.Status == "unknown" {
-					milvus.Status = "stopped"
+				if svc.Status == "running" || svc.Status == "starting" {
+					svc.Status = "stale"
+				} else if svc.Status == "" || svc.Status == "unknown" {
+					svc.Status = "stopped"
 				}
 			}
-			resp.Services[milvusLiteProcessName] = milvus
+			resp.Services[name] = svc
 		}
-		for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
+		for _, spec := range plan.AlgorithmServices {
 			svc := resp.Services[spec.Name]
-			svc.Kind = "host-process"
-			if httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d%s", spec.Port, spec.HealthPath), 500*time.Millisecond) {
+			if m.plannedServiceHealthy(ctx, cfg, spec.Name, spec) {
 				svc.Status = "running"
 			} else if svc.Status == "running" || svc.Status == "starting" {
 				svc.Status = "stale"

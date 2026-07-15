@@ -643,10 +643,14 @@ func mapChunkToSegment(datasetID, documentID string, item map[string]any) Segmen
 	tableContent := firstAnyStringWithFallbackMaps(item, meta, globalMetaMap, "", "table_content")
 	imageKey := firstAnyStringWithFallbackMaps(item, meta, globalMetaMap, "", "image_key")
 	imageURI := firstAnyStringWithFallbackMaps(item, meta, globalMetaMap, "", "image_uri")
-	sourcePath := firstAnyStringWithMeta(item, meta, "", "source_path")
+	// Prefer durable normalized JPEG over volatile OCR cache (.image_cache) for display.
+	renderPath := firstAnyStringWithMeta(item, meta, "", "normalized_source_path")
+	if renderPath == "" {
+		renderPath = firstAnyStringWithMeta(item, meta, "", "source_path")
+	}
 	var displayContent string
-	if sourcePath != "" {
-		imageKeys = []string{sourcePath}
+	if renderPath != "" {
+		imageKeys = []string{renderPath}
 	} else {
 		displayContent = firstAnyStringWithFallbackMaps(item, meta, globalMetaMap, "", "display_content")
 		if displayContent == "" {
@@ -657,12 +661,12 @@ func mapChunkToSegment(datasetID, documentID string, item map[string]any) Segmen
 		imageKeys = []string{}
 	}
 	imageKeys = signSegmentImageKeys(imageKeys)
-	if sourcePath != "" {
+	if renderPath != "" {
 		fileName := firstAnyStringWithMeta(item, meta, "", "file_name")
 		if strings.TrimSpace(fileName) == "" {
-			fileName = filepath.Base(sourcePath)
+			fileName = filepath.Base(renderPath)
 		}
-		imgURL := sourcePath
+		imgURL := renderPath
 		if len(imageKeys) > 0 {
 			if signed := strings.TrimSpace(imageKeys[0]); signed != "" {
 				imgURL = signed

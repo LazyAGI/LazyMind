@@ -19,9 +19,14 @@ import {
   KNOWLEDGE_BASE_NAME_PATTERN,
 } from "@/modules/knowledge/constants/validation";
 import { DATA_SOURCE_FILE_TYPE_OPTIONS } from "../../constants/options";
-import type { SourceFormValues, SourceType, SyncMode } from "../../constants/types";
+import type {
+  SourceFormValues,
+  SourceType,
+  SyncMode,
+} from "../../constants/types";
 import {
   buildTreeValuePathMap,
+  buildTreeValueTitleMap,
   collapseSelectedTreeValues,
   collectTreeExpandableKeys,
   getTreeSelectLabelText,
@@ -54,7 +59,6 @@ export interface WizardConnectionStepProps {
   onLoadFeishuTargetOptions?: () => void;
   onSearchFeishuTargetOptions?: (keyword: string) => void;
   onLoadFeishuTargetChildren?: TreeSelectProps["loadData"];
-  onResetFeishuTargetBrowseOptions?: () => void;
 }
 
 export default function WizardConnectionStep({
@@ -74,21 +78,27 @@ export default function WizardConnectionStep({
   onLoadFeishuTargetOptions,
   onSearchFeishuTargetOptions,
   onLoadFeishuTargetChildren,
-  onResetFeishuTargetBrowseOptions,
 }: WizardConnectionStepProps) {
   const [localPathSearchValue, setLocalPathSearchValue] = useState("");
   const [feishuTargetSearchValue, setFeishuTargetSearchValue] = useState("");
   const [feishuTargetExpandedKeys, setFeishuTargetExpandedKeys] = useState<
     Array<string | number>
   >([]);
+  const [feishuTargetBrowseExpandedKeys, setFeishuTargetBrowseExpandedKeys] =
+    useState<Array<string | number>>([]);
   const [localPathBrowseKey, setLocalPathBrowseKey] = useState(0);
-  const [feishuTargetBrowseKey, setFeishuTargetBrowseKey] = useState(0);
+  const [feishuTargetTitleCache, setFeishuTargetTitleCache] = useState(
+    () => new Map<string, string>(),
+  );
+  const [feishuTargetPathCache, setFeishuTargetPathCache] = useState(
+    () => new Map<string, string>(),
+  );
 
   const isFeishuTargetSearching = Boolean(feishuTargetSearchValue.trim());
 
   useEffect(() => {
     if (!isFeishuTargetSearching) {
-      setFeishuTargetExpandedKeys([]);
+      setFeishuTargetExpandedKeys(feishuTargetBrowseExpandedKeys);
       return;
     }
     if (feishuTargetLoading) {
@@ -97,25 +107,67 @@ export default function WizardConnectionStep({
     setFeishuTargetExpandedKeys(
       collectTreeExpandableKeys(feishuTargetTreeData as CollapsibleTreeNode[]),
     );
-  }, [feishuTargetTreeData, feishuTargetLoading, isFeishuTargetSearching]);
+  }, [
+    feishuTargetTreeData,
+    feishuTargetLoading,
+    isFeishuTargetSearching,
+    feishuTargetBrowseExpandedKeys,
+  ]);
+
+  useEffect(() => {
+    if (feishuTargetTreeData.length === 0) {
+      return;
+    }
+    const nextTitles = buildTreeValueTitleMap(
+      feishuTargetTreeData as CollapsibleTreeNode[],
+    );
+    const nextPaths = buildTreeValuePathMap(
+      feishuTargetTreeData as CollapsibleTreeNode[],
+    );
+    if (nextTitles.size === 0 && nextPaths.size === 0) {
+      return;
+    }
+    setFeishuTargetTitleCache((prev) => {
+      const merged = new Map(prev);
+      nextTitles.forEach((title, value) => {
+        if (title && title !== value) {
+          merged.set(value, title);
+        }
+      });
+      return merged;
+    });
+    setFeishuTargetPathCache((prev) => {
+      const merged = new Map(prev);
+      nextPaths.forEach((path, value) => {
+        if (path && path !== value) {
+          merged.set(value, path);
+        }
+      });
+      return merged;
+    });
+  }, [feishuTargetTreeData]);
 
   const localPathValue = Form.useWatch("path", form);
   const selectedLocalPathValues = normalizeTreeSelectValues(localPathValue);
-  const feishuTargetPathMap = useMemo(
-    () => buildTreeValuePathMap(feishuTargetTreeData as CollapsibleTreeNode[]),
-    [feishuTargetTreeData],
-  );
   const selectedFeishuTargetValues = normalizeTreeSelectValues(
     Form.useWatch("target", form),
   );
   const feishuTargetTitle = selectedFeishuTargetValues
-    .map((value) => feishuTargetPathMap.get(value) || value)
+    .map(
+      (value) =>
+        feishuTargetPathCache.get(value) ||
+        feishuTargetTitleCache.get(value) ||
+        value,
+    )
     .filter(Boolean)
     .join("\n");
   const fileTypeLabelMap = useMemo(
     () =>
       new Map(
-        DATA_SOURCE_FILE_TYPE_OPTIONS.map((item) => [item.value, t(item.i18nKey)]),
+        DATA_SOURCE_FILE_TYPE_OPTIONS.map((item) => [
+          item.value,
+          t(item.i18nKey),
+        ]),
       ),
     [t],
   );
@@ -128,7 +180,10 @@ export default function WizardConnectionStep({
     }
 
     const labels = omittedValues
-      .map((item) => fileTypeLabelMap.get(`${item.value || ""}` as any) || item.label)
+      .map(
+        (item) =>
+          fileTypeLabelMap.get(`${item.value || ""}` as any) || item.label,
+      )
       .filter(Boolean);
 
     return (
@@ -136,7 +191,9 @@ export default function WizardConnectionStep({
         title={
           <div className="data-source-tree-select-tooltip-list">
             {labels.map((label, index) => (
-              <div key={`${getTreeSelectLabelText(label)}-${index}`}>{label}</div>
+              <div key={`${getTreeSelectLabelText(label)}-${index}`}>
+                {label}
+              </div>
             ))}
           </div>
         }
@@ -152,7 +209,15 @@ export default function WizardConnectionStep({
     closable,
     onClose,
   }) => (
-    <Tooltip title={getFeishuTargetValuePath(value, label, feishuTargetPathMap, t)}>
+    <Tooltip
+      title={getFeishuTargetValuePath(
+        value,
+        label,
+        feishuTargetPathCache,
+        t,
+        feishuTargetTitleCache,
+      )}
+    >
       <Tag
         className="data-source-tree-select-tag"
         closable={closable}
@@ -163,39 +228,44 @@ export default function WizardConnectionStep({
         }}
       >
         <span className="data-source-tree-select-tag-label">
-          {getFeishuTargetDisplayText(value, label, t)}
+          {getFeishuTargetDisplayText(value, label, t, feishuTargetTitleCache)}
         </span>
       </Tag>
     </Tooltip>
   );
 
-  const renderFeishuTargetMaxTagPlaceholder: TreeSelectProps["maxTagPlaceholder"] = (
-    omittedValues,
-  ) => {
-    if (omittedValues.length === 0) {
-      return null;
-    }
+  const renderFeishuTargetMaxTagPlaceholder: TreeSelectProps["maxTagPlaceholder"] =
+    (omittedValues) => {
+      if (omittedValues.length === 0) {
+        return null;
+      }
 
-    const paths = omittedValues
-      .map((item) =>
-        getFeishuTargetValuePath(item.value, item.label, feishuTargetPathMap, t),
-      )
-      .filter(Boolean);
+      const paths = omittedValues
+        .map((item) =>
+          getFeishuTargetValuePath(
+            item.value,
+            item.label,
+            feishuTargetPathCache,
+            t,
+            feishuTargetTitleCache,
+          ),
+        )
+        .filter(Boolean);
 
-    return (
-      <Tooltip
-        title={
-          <div className="data-source-tree-select-tooltip-list">
-            {paths.map((path, index) => (
-              <div key={`${path}-${index}`}>{path}</div>
-            ))}
-          </div>
-        }
-      >
-        <span>{`+ ${omittedValues.length} ...`}</span>
-      </Tooltip>
-    );
-  };
+      return (
+        <Tooltip
+          title={
+            <div className="data-source-tree-select-tooltip-list">
+              {paths.map((path, index) => (
+                <div key={`${path}-${index}`}>{path}</div>
+              ))}
+            </div>
+          }
+        >
+          <span>{`+ ${omittedValues.length} ...`}</span>
+        </Tooltip>
+      );
+    };
 
   return (
     <div className="data-source-wizard-body">
@@ -220,7 +290,6 @@ export default function WizardConnectionStep({
           ]}
         >
           <Input
-            disabled={isEditMode}
             maxLength={KNOWLEDGE_BASE_NAME_MAX_LENGTH}
             placeholder={t("admin.dataSourceKnowledgeBaseNamePlaceholder")}
           />
@@ -241,7 +310,11 @@ export default function WizardConnectionStep({
             rules={[
               {
                 validator: (_rule, value) => {
-                  const values = Array.isArray(value) ? value : value ? [value] : [];
+                  const values = Array.isArray(value)
+                    ? value
+                    : value
+                      ? [value]
+                      : [];
                   return values.length > 0
                     ? Promise.resolve()
                     : Promise.reject(
@@ -253,9 +326,9 @@ export default function WizardConnectionStep({
           >
             <TreeSelect
               key={`local-path-browse-${localPathBrowseKey}`}
+              disabled={isEditMode}
               multiple
               allowClear
-              disabled={isEditMode}
               filterTreeNode={false}
               loadData={onLoadLocalPathChildren}
               loading={localPathLoading}
@@ -280,19 +353,15 @@ export default function WizardConnectionStep({
                   onResetLocalPathBrowseOptions?.();
                   return;
                 }
-                if (!isEditMode) {
-                  onLoadLocalPathOptions?.(
-                    selectedLocalPathValues.length === 1
-                      ? selectedLocalPathValues[0]
-                      : "",
-                  );
-                }
+                onLoadLocalPathOptions?.(
+                  selectedLocalPathValues.length === 1
+                    ? selectedLocalPathValues[0]
+                    : "",
+                );
               }}
               onSearch={(value) => {
                 setLocalPathSearchValue(value);
-                if (!isEditMode) {
-                  onSearchLocalPathOptions?.(value);
-                }
+                onSearchLocalPathOptions?.(value);
               }}
             />
           </Form.Item>
@@ -306,7 +375,11 @@ export default function WizardConnectionStep({
             rules={[
               {
                 validator: (_rule, value) => {
-                  const values = Array.isArray(value) ? value : value ? [value] : [];
+                  const values = Array.isArray(value)
+                    ? value
+                    : value
+                      ? [value]
+                      : [];
                   return values.length > 0
                     ? Promise.resolve()
                     : Promise.reject(
@@ -317,16 +390,16 @@ export default function WizardConnectionStep({
             ]}
           >
             <TreeSelect
-              key={`feishu-target-browse-${feishuTargetBrowseKey}`}
               multiple
               allowClear
-              disabled={isEditMode}
               filterTreeNode={false}
               loadData={onLoadFeishuTargetChildren}
               loading={feishuTargetLoading}
               maxTagCount="responsive"
               maxTagPlaceholder={renderFeishuTargetMaxTagPlaceholder}
-              notFoundContent={feishuTargetLoading ? <Spin size="small" /> : null}
+              notFoundContent={
+                feishuTargetLoading ? <Spin size="small" /> : null
+              }
               placeholder={t("admin.dataSourceFeishuTargetPlaceholderWiki")}
               showSearch
               searchValue={feishuTargetSearchValue}
@@ -335,13 +408,14 @@ export default function WizardConnectionStep({
               title={feishuTargetTitle}
               treeCheckable
               treeData={feishuTargetTreeData}
-              treeExpandedKeys={
-                isFeishuTargetSearching ? feishuTargetExpandedKeys : undefined
-              }
+              treeExpandedKeys={feishuTargetExpandedKeys}
               treeLine
-              onTreeExpand={
-                isFeishuTargetSearching ? setFeishuTargetExpandedKeys : undefined
-              }
+              onTreeExpand={(keys) => {
+                setFeishuTargetExpandedKeys(keys);
+                if (!isFeishuTargetSearching) {
+                  setFeishuTargetBrowseExpandedKeys(keys);
+                }
+              }}
               showCheckedStrategy={TreeSelect.SHOW_PARENT}
               styles={{
                 popup: { root: { maxHeight: 360, overflow: "auto" } },
@@ -349,21 +423,18 @@ export default function WizardConnectionStep({
               onOpenChange={(open) => {
                 if (!open) {
                   setFeishuTargetSearchValue("");
-                  if (!isEditMode) {
-                    setFeishuTargetBrowseKey((key) => key + 1);
-                    onResetFeishuTargetBrowseOptions?.();
-                  }
+                  // Keep browsed directory tree cached while the wizard stays open.
+                  // Restore browse expansion after leaving search mode.
+                  setFeishuTargetExpandedKeys(feishuTargetBrowseExpandedKeys);
+                  onSearchFeishuTargetOptions?.("");
                   return;
                 }
-                if (!isEditMode) {
-                  onLoadFeishuTargetOptions?.();
-                }
+                onLoadFeishuTargetOptions?.();
+                setFeishuTargetExpandedKeys(feishuTargetBrowseExpandedKeys);
               }}
               onSearch={(value) => {
                 setFeishuTargetSearchValue(value);
-                if (!isEditMode) {
-                  onSearchFeishuTargetOptions?.(value);
-                }
+                onSearchFeishuTargetOptions?.(value);
               }}
             />
           </Form.Item>
@@ -372,9 +443,14 @@ export default function WizardConnectionStep({
             <Form.Item
               label={t("admin.dataSourceNotionTargetTypeLabel")}
               name="targetType"
-              rules={[{ required: true, message: t("admin.dataSourceNotionTargetTypeRequired") }]}
+              rules={[
+                {
+                  required: true,
+                  message: t("admin.dataSourceNotionTargetTypeRequired"),
+                },
+              ]}
             >
-              <Radio.Group disabled={isEditMode}>
+              <Radio.Group>
                 <Radio.Button value="page">
                   {t("admin.dataSourceNotionTargetTypePage")}
                 </Radio.Button>
@@ -389,18 +465,23 @@ export default function WizardConnectionStep({
               rules={[
                 {
                   validator: (_rule, value) => {
-                    const values = Array.isArray(value) ? value : value ? [value] : [];
+                    const values = Array.isArray(value)
+                      ? value
+                      : value
+                        ? [value]
+                        : [];
                     return values
                       .map((item) => `${item || ""}`.trim())
                       .filter(Boolean).length > 0
                       ? Promise.resolve()
-                      : Promise.reject(new Error(t("admin.dataSourceNotionTargetRequired")));
+                      : Promise.reject(
+                          new Error(t("admin.dataSourceNotionTargetRequired")),
+                        );
                   },
                 },
               ]}
             >
               <Input.TextArea
-                disabled={isEditMode}
                 placeholder={t("admin.dataSourceNotionTargetPlaceholder")}
                 autoSize={{ minRows: 3, maxRows: 6 }}
               />
@@ -462,7 +543,9 @@ export default function WizardConnectionStep({
           </Form.Item>
         </div>
 
-        {syncMode === "scheduled" ? <WizardSchedulePanel t={t} form={form} /> : null}
+        {syncMode === "scheduled" ? (
+          <WizardSchedulePanel t={t} form={form} />
+        ) : null}
       </section>
     </div>
   );

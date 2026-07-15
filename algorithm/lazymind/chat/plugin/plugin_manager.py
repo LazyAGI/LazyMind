@@ -330,11 +330,10 @@ _COLD_START_PLUGIN_PROMPT = (
     '"启动绘图插件", "打开图片生成插件", "启动图片插件", "start the image plugin"), '
     'you MUST call the matching `trigger_<plugin_id>_plugin` tool in this same '
     'response before any other action. Do NOT reply with text only, do NOT call '
-    '`image_generator` / `image_editor` directly, and do NOT ask clarification '
-    'questions first. Pass the complete user request as `request_context` (or repeat their '
-    'start phrase if they gave no further detail), and set `explicit_plugin_request=true`. '
-    'An explicit plugin request is authoritative: plugin suitability heuristics may not '
-    'downgrade it to not_applicable.\n'
+    '`image_generator` / `image_editor` / `video_generator` / `video_to_gif` directly, '
+    'and do NOT ask clarification '
+    'questions first. Pass the user\'s request as `user_input` (or repeat their '
+    'start phrase if they gave no further detail).\n'
     'For the AI image plugin (`image-plugin`), call `trigger_image_plugin`.\n\n'
 )
 

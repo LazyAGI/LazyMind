@@ -87,6 +87,39 @@
           background-color: #d1e6ff;
         }
 
+        .chat-user-mention-text {
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+
+        .chat-history-mention {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          max-width: 100%;
+          margin: 0 2px;
+          padding: 1px 7px;
+          border: 1px solid rgba(47, 115, 216, 0.25);
+          border-radius: 6px;
+          background: rgba(255, 255, 255, 0.72);
+          color: #1769d2;
+          line-height: 22px;
+          text-decoration: none;
+          vertical-align: baseline;
+
+          span {
+            min-width: 0;
+            overflow-wrap: anywhere;
+            white-space: normal;
+          }
+
+          &:hover {
+            border-color: #2f73d8;
+            background: #fff;
+            color: #0958d9;
+          }
+        }
+
         .chat-user-toolbar {
           display: flex;
           align-items: center;

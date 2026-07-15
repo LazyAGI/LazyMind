@@ -25,6 +25,7 @@ module.exports = {
   asar: true,
   directories: {
     output: process.env.LAZYMIND_DESKTOP_OUTPUT_DIR || path.join(__dirname, "..", "dist"),
+    buildResources: process.env.LAZYMIND_DESKTOP_INSTALLER_RESOURCES || path.join(__dirname, "assets"),
   },
   files: [
     "src/**/*",
@@ -42,6 +43,19 @@ module.exports = {
     icon: process.env.LAZYMIND_DESKTOP_WINDOWS_ICON || "assets/LazyMind.ico",
     target: ["zip"],
     requestedExecutionLevel: "asInvoker",
-    signAndEditExecutable: false,
+    signAndEditExecutable: Boolean(process.env.CSC_LINK),
+  },
+  nsis: {
+    oneClick: false,
+    perMachine: false,
+    allowElevation: false,
+    allowToChangeInstallationDirectory: false,
+    installerLanguages: ["en_US", "zh_CN"],
+    displayLanguageSelector: false,
+    include: path.join(__dirname, "..", "installer", "installer.nsh"),
+    artifactName: "LazyMind-windows-x64-installer.${ext}",
+    differentialPackage: false,
+    useZip: true,
+    runAfterFinish: true,
   },
 };

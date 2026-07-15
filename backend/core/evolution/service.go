@@ -395,6 +395,40 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	return context, nil
 }
 
+// AddMentionedSkills makes explicitly mentioned skills available for this chat
+// session without changing the user's persistent is_enabled preference.
+func AddMentionedSkills(ctx context.Context, db *gorm.DB, userID, sessionID string, skillIDs []string, resourceContext *ChatResourceContext) error {
+	if resourceContext == nil || len(skillIDs) == 0 {
+		return nil
+	}
+	existing := map[string]bool{}
+	for _, name := range resourceContext.AvailableSkills {
+		existing[name] = true
+	}
+	for _, skillID := range skillIDs {
+		var skill orm.SkillV2Skill
+		if err := db.WithContext(ctx).Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", skillID, userID).Take(&skill).Error; err != nil {
+			return fmt.Errorf("mentioned skill is not accessible: %s", skillID)
+		}
+		state, err := skillStateFromV2Resource(ctx, db, &skill)
+		if err != nil {
+			return fmt.Errorf("mentioned skill is unpublished: %s", skillID)
+		}
+		name := fmt.Sprintf("%s/%s", strings.TrimSpace(skill.Category), strings.TrimSpace(skill.SkillName))
+		if existing[name] {
+			continue
+		}
+		existing[name] = true
+		resourceContext.AvailableSkills = append(resourceContext.AvailableSkills, name)
+		snapshot := orm.ResourceSessionSnapshot{ID: newUUID(), SessionID: sessionID, UserID: userID, ResourceType: ResourceTypeSkill, ResourceKey: skill.ID, Category: skill.Category, ParentSkillName: skill.SkillName, SkillName: skill.SkillName, FileExt: "md", RelativePath: state.RelativePath, SnapshotHash: state.ContentHash, CreatedAt: time.Now()}
+		if err := db.WithContext(ctx).Create(&snapshot).Error; err != nil {
+			return err
+		}
+	}
+	sort.Strings(resourceContext.AvailableSkills)
+	return nil
+}
+
 func ResolveSessionUser(ctx context.Context, db *gorm.DB, sessionID string) (string, string, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {

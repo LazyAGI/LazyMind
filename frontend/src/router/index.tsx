@@ -41,6 +41,7 @@ import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage
 import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
 import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPage";
 import {
+  SelfEvolutionAlgorithmManagementPage,
   SelfEvolutionHomePage,
   SelfEvolutionDetailPage,
   SelfEvolutionObservationPage,
@@ -205,6 +206,10 @@ export default function AppRouter() {
               <Route
                 path="self-evolution"
                 element={<SelfEvolutionHomePage />}
+              />
+              <Route
+                path="self-evolution/algorithms"
+                element={<SelfEvolutionAlgorithmManagementPage />}
               />
               <Route
                 path="self-evolution/detail/:threadId/observation/:kind"

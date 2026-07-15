@@ -19,7 +19,7 @@ import type {
 import { SlotRenderer, SlotEditingContext } from './SlotComponents';
 import './PluginPanel.scss';
 
-/** Parse a JSON intent_context string and return the text field, or '' if empty/invalid. */
+/** Parse a JSON intent context string and return the text field, or '' if empty/invalid. */
 function parseIntentText(raw?: string): string {
   if (!raw || raw === '{}') return '';
   try {
@@ -46,20 +46,6 @@ function parseSelectedSlotText(session: PluginSession, slotKey: string, includeU
     if (obj.value !== undefined) return String(obj.value);
   }
   return String(raw);
-}
-
-/** Latest _source_tool among selected image slots (newest first). */
-function getLatestSelectedImageSourceTool(session: PluginSession): string {
-  const selectedImageSlots = (session.slots ?? []).filter(
-    (s) => s.selected && s.content_type === 'image',
-  );
-  if (!selectedImageSlots.length) {
-    return '';
-  }
-  const latest = [...selectedImageSlots].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  )[0];
-  return String(latest?.artifact_value?._source_tool ?? '').trim();
 }
 
 /** IntentPopover shows global intent + per-step intent inside a floating popover. */
@@ -297,6 +283,90 @@ function getTabStepId(tab: TabDef): string | undefined {
   return tab.step_id ?? tab.id;
 }
 
+function revisionMatchesTabScope(
+  session: PluginSession,
+  tab: TabDef,
+  slot: SlotRevision,
+  scope: 'selected' | 'tab',
+): boolean {
+  if (scope === 'selected') {
+    return Boolean(slot.selected);
+  }
+  if (tab.step_id) {
+    return slot.step_id === tab.step_id;
+  }
+  const isStepTab = session.steps?.some((s) => s.step_id === tab.id);
+  if (isStepTab) {
+    return slot.step_id === tab.id;
+  }
+  return Boolean(slot.selected);
+}
+
+/** Slot ids that currently have at least one revision under the tab's empty-column scope. */
+function getPresentSlotIds(
+  tab: TabDef,
+  session: PluginSession,
+  scope: 'selected' | 'tab' = 'selected',
+): Set<string> {
+  const participating = new Set(tab.slots.map((s) => s.id));
+  const present = new Set<string>();
+  for (const slot of session.slots ?? []) {
+    if (!participating.has(slot.slot)) continue;
+    if (!revisionMatchesTabScope(session, tab, slot, scope)) continue;
+    present.add(slot.slot);
+  }
+  return present;
+}
+
+/**
+ * Resolve which slot ids should be visible for a tab from `composite_behavior`.
+ * Returns null when no behavior is declared (show all configured columns/slots).
+ */
+function resolveVisibleSlotIds(
+  tab: TabDef,
+  session: PluginSession,
+): Set<string> | null {
+  const behavior = tab.composite_behavior;
+  if (!behavior) return null;
+
+  const scope = behavior.empty_column_scope === 'tab' ? 'tab' : 'selected';
+  const present = getPresentSlotIds(tab, session, scope);
+  const allowed = new Set(tab.slots.map((s) => s.id));
+
+  for (const group of behavior.mutually_exclusive ?? []) {
+    const members = (group.slots ?? []).filter((id) => allowed.has(id));
+    if (members.length < 2) continue;
+    const prefer = (group.prefer?.length ? group.prefer : members)
+      .filter((id) => members.includes(id));
+    const winner = prefer.find((id) => present.has(id))
+      ?? members.find((id) => present.has(id));
+    if (!winner) continue;
+    for (const id of members) {
+      if (id !== winner) allowed.delete(id);
+    }
+  }
+
+  if (behavior.hide_empty_columns) {
+    for (const id of [...allowed]) {
+      if (!present.has(id)) allowed.delete(id);
+    }
+  }
+
+  return allowed;
+}
+
+function filterColumnsByVisibleSlots(
+  columns: Array<{ slotId: string | InnerTabsNode; weight: number }>,
+  visible: Set<string> | null,
+): Array<{ slotId: string | InnerTabsNode; weight: number }> {
+  if (!visible) return columns;
+  const filtered = columns.filter((col) => {
+    if (typeof col.slotId !== 'string') return true;
+    return visible.has(col.slotId);
+  });
+  return filtered.length > 0 ? filtered : columns;
+}
+
 function getTabSlotRevisions(
   session: PluginSession,
   tab: TabDef,
@@ -435,10 +505,13 @@ function CompositeSlotGrid({
 }) {
   const { t } = useTranslation();
   const rows = getCompositeRows(tab, session);
-  const columns = buildColumns(tab);
+  const columns = filterColumnsByVisibleSlots(
+    buildColumns(tab),
+    resolveVisibleSlotIds(tab, session),
+  );
 
   // Compute total weight for flex proportions.
-  const totalWeight = columns.reduce((s, c) => s + c.weight, 0);
+  const totalWeight = columns.reduce((s, c) => s + c.weight, 0) || 1;
 
   if (rows.length === 0) {
     return (
@@ -745,7 +818,6 @@ function TabSlotGrid({
   const addFileInputRef = useRef<HTMLInputElement>(null);
   const addingSlotIdRef = useRef<string>('');
   const addingSlotTypeRef = useRef<string>('');
-  const { t } = useTranslation();
   const { createSlotItem } = usePluginStore();
 
   const handleAddItem = useCallback((slotId: string, slotType: string) => {
@@ -782,47 +854,12 @@ function TabSlotGrid({
     );
   }
   const resolveVisibleSlots = (slotDefs: SlotDef[]): SlotDef[] => {
-    if (session.plugin_id !== 'image-plugin' || tab.id !== 'result') {
-      return slotDefs;
-    }
-    const selectedImageSlots = (session.slots ?? []).filter(
-      (s) => s.selected && s.content_type === 'image',
-    );
-    if (!selectedImageSlots.length) {
-      return slotDefs;
-    }
-    const latest = [...selectedImageSlots].sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    )[0];
-    const sourceTool = String(latest?.artifact_value?._source_tool ?? '').trim();
-    if (sourceTool === 'image_generator') {
-      return slotDefs
-        .filter((s) => s.id === 'image_output')
-        .map((s) => ({
-          ...s,
-          // In pure generation flow, this slot is the final generated output, not an editor input.
-          label: 'Generated Image',
-        }));
-    }
-    if (sourceTool === 'image_editor') {
-      const allowed = new Set(['image_output', 'enhanced_image_output']);
-      return slotDefs.filter((s) => allowed.has(s.id));
-    }
-    return slotDefs;
+    const visible = resolveVisibleSlotIds(tab, session);
+    if (!visible) return slotDefs;
+    const filtered = slotDefs.filter((s) => visible.has(s.id));
+    return filtered.length > 0 ? filtered : slotDefs;
   };
   const visibleSlots = resolveVisibleSlots(tab.slots);
-  const resolveSlotLabel = (slotDef: SlotDef): string => {
-    const key = slotDef.id;
-    if (
-      session.plugin_id === 'image-plugin'
-      && tab.id === 'result'
-      && key === 'image_output'
-      && getLatestSelectedImageSourceTool(session) === 'image_generator'
-    ) {
-      return t('chat.pluginGeneratedImage');
-    }
-    return slotDef.label ?? slotDef.id;
-  };
   return (
     <div className={`plugin-panel__tab-content plugin-panel__tab-content--${tab.layout ?? 'vertical'}`}>
       {/* Hidden file input for adding new items */}
@@ -837,20 +874,22 @@ function TabSlotGrid({
       {visibleSlots.map((slotDef) => {
         const artifactKey = slotDef.id;
         const revisions = getTabSlotRevisions(session, tab, artifactKey);
-        if (session.plugin_id === 'image-plugin' && tab.id === 'result' && revisions.length === 0) {
+        const hideEmpty = Boolean(tab.composite_behavior?.hide_empty_columns);
+        if (hideEmpty && revisions.length === 0) {
           return null;
         }
+        const slotLabel = slotDef.label ?? slotDef.id;
         const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
         const isDraggable = Boolean(slotDef.ordered);
         return (
           <div key={slotDef.id} className='plugin-panel__named-slot'>
             {(slotDef.label || slotDef.id) && (
-              <span className='plugin-panel__slot-label'>{resolveSlotLabel(slotDef)}</span>
+              <span className='plugin-panel__slot-label'>{slotLabel}</span>
             )}
             {revisions.length === 0 ? (
               <div
                 className='plugin-panel__slot-placeholder'
-                aria-label={`${resolveSlotLabel(slotDef)} pending`}
+                aria-label={`${slotLabel} pending`}
               >
                 <span>—</span>
               </div>

@@ -62,3 +62,9 @@ image_editor:
     type: image_editing
     name: Kwai-Kolors/Kolors
     api_key: ${LAZYLLM_SILICONFLOW_API_KEY}
+
+video_generator:
+  - source: doubao
+    type: text2video
+    name: doubao-seedance-1-0-pro-fast-251015
+    api_key: ${LAZYLLM_DOUBAO_API_KEY}

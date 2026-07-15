@@ -12,9 +12,9 @@
 #   has_models       — group has a model list (seeded from default_models)
 #   api_key_required — api_key must not be empty
 #
-# model type values align with runtime_models.yaml role keys:
+# model type values align with runtime_models.yaml role keys / lazyllm multimodal types:
 #   llm, evo_llm, vlm, embed_main, embed_image, reranker,
-#   tts, stt, text2image, image_editing
+#   tts, stt, text2image, image_editing, text2video
 #
 # base_url rules:
 #   - Provider-level base_url must end with '/'.
@@ -165,10 +165,28 @@ model_providers:
           type: llm
         - name: doubao-seed-code-preview-251028
           type: llm
+        - name: doubao-seedream-5-0-pro-260628
+          type: text2image
+        - name: doubao-seedream-5-0-260128
+          type: text2image
+        - name: doubao-seedream-4-5-251128
+          type: text2image
+        - name: doubao-seedream-4-0-250828
+          type: text2image
         - name: doubao-seedream-3-0-t2i-250415
           type: text2image
-        - name: doubao-seedream-5-0
-          type: text2image
+        - name: doubao-seedance-2-0
+          type: text2video
+        - name: doubao-seedance-2-0-fast
+          type: text2video
+        - name: doubao-seedance-2-0-mini
+          type: text2video
+        - name: doubao-seedance-1-5-pro-251215
+          type: text2video
+        - name: doubao-seedance-1-0-pro-250528
+          type: text2video
+        - name: doubao-seedance-1-0-pro-fast-251015
+          type: text2video
         - name: glm-4-7-251222
           type: llm
 

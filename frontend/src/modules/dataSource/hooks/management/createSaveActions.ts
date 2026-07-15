@@ -7,7 +7,10 @@ import {
 } from "../../constants/options";
 import type { SourceFormValues } from "../../constants/types";
 import { getSourceTypeTitle } from "../../utils/status";
-import { createScanRequestId } from "../../utils/scanAccessors";
+import {
+  createScanRequestId,
+  getScanSourceConfigVersion,
+} from "../../utils/scanAccessors";
 import { buildSchedulePolicy } from "../../utils/schedule";
 import {
   getDataSourceFileTypeExtensions,
@@ -28,6 +31,26 @@ import {
 import { pickScanAgent, waitForCloudSyncRun } from "../../utils/cloudSync";
 import { isKnowledgeBaseNameDuplicatedError } from "../../utils/dataSourceErrors";
 import type { DataSourceSaveMode, ManagementContext } from "./context";
+
+const resolveBindingIdByTargetRef = (
+  targetRef: string,
+  existingTargetRefs: string[] | undefined,
+  bindingIds: string[] | undefined,
+  fallbackBindingId?: string,
+) => {
+  const refs = existingTargetRefs || [];
+  const matchedIndex = refs.findIndex((item) => item === targetRef);
+  if (matchedIndex >= 0) {
+    return bindingIds?.[matchedIndex] || (matchedIndex === 0 ? fallbackBindingId : undefined);
+  }
+  return undefined;
+};
+
+/** Fetch the latest config_version from source detail before update. */
+const fetchSourceConfigVersion = async (sourceId: string) => {
+  const response = await dataSourceScanApi.getSource({ sourceId });
+  return getScanSourceConfigVersion(response.data.source);
+};
 
 export function createSaveActions(ctx: ManagementContext) {
   const { t, form, scanAgents } = ctx;
@@ -56,6 +79,8 @@ export function createSaveActions(ctx: ManagementContext) {
     values: SourceFormValues,
     saveMode: DataSourceSaveMode,
   ) => {
+    const isEditing = ctx.wizardMode === "edit";
+    const editingSourceId = isEditing ? `${ctx.editingId || ""}`.trim() : "";
     const rootPaths = normalizeLocalPathRefs(values.path);
     const sourceName = `${values.knowledgeBase || getSourceTypeTitle("local", t)}`.trim();
     const isScheduled = (values.syncMode || "scheduled") === "scheduled";
@@ -94,17 +119,21 @@ export function createSaveActions(ctx: ManagementContext) {
     });
 
     try {
-      if (currentLocalSource?.scanManaged) {
+      if (isEditing) {
+        const configVersion = await fetchSourceConfigVersion(editingSourceId);
         await client.updateSource({
-          sourceId: currentLocalSource.id,
+          sourceId: editingSourceId,
           updateSourceRequest: {
             name: sourceName,
-            config_version: currentLocalSource.configVersion || 0,
-            bindings: rootPaths.map((pathValue, index) => ({
+            config_version: configVersion,
+            bindings: rootPaths.map((pathValue) => ({
               ...buildBindingRequest(pathValue),
-              binding_id:
-                currentLocalSource.bindingIds?.[index] ||
-                (index === 0 ? currentLocalSource.bindingId : undefined),
+              binding_id: resolveBindingIdByTargetRef(
+                pathValue,
+                currentLocalSource?.targetRefs,
+                currentLocalSource?.bindingIds,
+                currentLocalSource?.bindingId,
+              ),
             })) as any,
             source_options: {
               source_type: "local",
@@ -149,7 +178,7 @@ export function createSaveActions(ctx: ManagementContext) {
 
       message.error(
         getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-          t("common.requestFailed"),
+        t("common.requestFailed"),
       );
     }
   };
@@ -158,6 +187,8 @@ export function createSaveActions(ctx: ManagementContext) {
     values: SourceFormValues,
     saveMode: DataSourceSaveMode,
   ) => {
+    const isEditing = ctx.wizardMode === "edit";
+    const editingSourceId = isEditing ? `${ctx.editingId || ""}`.trim() : "";
     const sourceName = `${values.knowledgeBase || getSourceTypeTitle("feishu", t)}`.trim();
     const selectedTargetValues = normalizeFeishuTargetRefs(values.target);
     const currentFeishuSource =
@@ -203,7 +234,7 @@ export function createSaveActions(ctx: ManagementContext) {
     });
 
     try {
-      let sourceId = currentFeishuSource?.id || "";
+      let sourceId = editingSourceId;
       const schedulePolicy =
         values.syncMode === "scheduled"
           ? buildSchedulePolicy(values.scheduleWeekdays, values.scheduleTime)
@@ -226,19 +257,23 @@ export function createSaveActions(ctx: ManagementContext) {
         },
       };
 
-      if (currentFeishuSource?.scanManaged) {
+      if (isEditing) {
+        const configVersion = await fetchSourceConfigVersion(editingSourceId);
         await client.updateSource({
-          sourceId: currentFeishuSource.id,
+          sourceId: editingSourceId,
           updateSourceRequest: {
             name: sourceName,
-            config_version: currentFeishuSource.configVersion || 0,
-            bindings: targets.map(({ targetRef, targetType }, index) => ({
+            config_version: configVersion,
+            bindings: targets.map(({ targetRef, targetType }) => ({
               ...bindingRequest,
               target_type: toScanFeishuTargetType(targetType),
               target_ref: targetRef,
-              binding_id:
-                currentFeishuSource.bindingIds?.[index] ||
-                (index === 0 ? currentFeishuSource.bindingId : undefined),
+              binding_id: resolveBindingIdByTargetRef(
+                targetRef,
+                currentFeishuSource?.targetRefs,
+                currentFeishuSource?.bindingIds,
+                currentFeishuSource?.bindingId,
+              ),
             })) as any,
             source_options: {
               source_type: "feishu",
@@ -296,7 +331,7 @@ export function createSaveActions(ctx: ManagementContext) {
 
       message.error(
         getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-          t("common.requestFailed"),
+        t("common.requestFailed"),
       );
     }
   };
@@ -305,6 +340,8 @@ export function createSaveActions(ctx: ManagementContext) {
     values: SourceFormValues,
     saveMode: DataSourceSaveMode,
   ) => {
+    const isEditing = ctx.wizardMode === "edit";
+    const editingSourceId = isEditing ? `${ctx.editingId || ""}`.trim() : "";
     const sourceName = `${values.knowledgeBase || getSourceTypeTitle("notion", t)}`.trim();
     const targetRefs = normalizeCloudTargetRefs(values.target);
     const currentNotionSource =
@@ -339,7 +376,7 @@ export function createSaveActions(ctx: ManagementContext) {
     );
 
     try {
-      let sourceId = currentNotionSource?.id || "";
+      let sourceId = editingSourceId;
       const schedulePolicy =
         values.syncMode === "scheduled"
           ? buildSchedulePolicy(values.scheduleWeekdays, values.scheduleTime)
@@ -356,19 +393,23 @@ export function createSaveActions(ctx: ManagementContext) {
         },
       };
 
-      if (currentNotionSource?.scanManaged) {
+      if (isEditing) {
+        const configVersion = await fetchSourceConfigVersion(editingSourceId);
         await client.updateSource({
-          sourceId: currentNotionSource.id,
+          sourceId: editingSourceId,
           updateSourceRequest: {
             name: sourceName,
-            config_version: currentNotionSource.configVersion || 0,
-            bindings: targetRefs.map((targetRef, index) => ({
+            config_version: configVersion,
+            bindings: targetRefs.map((targetRef) => ({
               ...bindingRequest,
               target_type: targetType,
               target_ref: targetRef,
-              binding_id:
-                currentNotionSource.bindingIds?.[index] ||
-                (index === 0 ? currentNotionSource.bindingId : undefined),
+              binding_id: resolveBindingIdByTargetRef(
+                targetRef,
+                currentNotionSource?.targetRefs,
+                currentNotionSource?.bindingIds,
+                currentNotionSource?.bindingId,
+              ),
             })) as any,
             source_options: {
               source_type: "notion",
@@ -420,7 +461,7 @@ export function createSaveActions(ctx: ManagementContext) {
     } catch (error) {
       message.error(
         getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-          t("common.requestFailed"),
+        t("common.requestFailed"),
       );
     }
   };
@@ -433,22 +474,18 @@ export function createSaveActions(ctx: ManagementContext) {
     ctx.setWizardSaving(true);
     ctx.setWizardSavingMode(saveMode);
     try {
-      const syncStrategyFields =
-        form.getFieldValue("syncMode") === "scheduled"
-          ? ["syncMode", "scheduleWeekdays", "scheduleTime", "fileTypes"]
-          : ["syncMode", "fileTypes"];
-
-      if (ctx.wizardMode === "edit") {
-        await form.validateFields(syncStrategyFields);
-      } else {
-        await form.validateFields();
-      }
+      // Edit mode also allows changing name / access path, so validate the full form.
+      await form.validateFields();
 
       const values = form.getFieldsValue(true);
       const effectiveSourceType = resolveSourceTypeFromValues(ctx.selectedType, values);
 
       if (!effectiveSourceType) {
         message.warning(t("admin.dataSourceSelectTypeFirst"));
+        return;
+      }
+      if (ctx.wizardMode === "edit" && !`${ctx.editingId || ""}`.trim()) {
+        message.error(t("admin.dataSourceEditContextMissing"));
         return;
       }
       if (effectiveSourceType === "local" && !ctx.canCreateLocalSource) {

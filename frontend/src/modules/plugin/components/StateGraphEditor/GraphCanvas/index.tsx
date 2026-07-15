@@ -20,6 +20,7 @@ interface Props {
   onScenarioChange?: (data: ScenarioData) => void;
   canvasRef?: React.Ref<CanvasHandle>;
   readonly?: boolean;
+  onCreateArtifact?: () => void;
 }
 
 export default function GraphCanvas(props: Props) {

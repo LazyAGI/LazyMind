@@ -34,7 +34,7 @@ interface RawStep {
 }
 
 interface RawYaml {
-  'x-layout'?: Record<string, { x?: number; y?: number; w?: number }>;
+  'x-layout'?: Record<string, unknown>;
   /** Array format (AI-generated drafts): list of step objects. */
   steps?: unknown[] | Record<string, unknown>;
   /** Legacy flat key (pre-refactor). Superseded by transitions.__start__. */
@@ -45,6 +45,30 @@ interface RawYaml {
   initial?: unknown;
   /** Route mode for __start__ transitions: 'choice' picks first match; default is 'all'. */
   start_route?: unknown;
+}
+
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const color = (value: unknown): value is string => typeof value === 'string' && (/^#[0-9a-f]{6}$/i.test(value) || /^rgba?\(/i.test(value));
+function parseEdgeVisuals(value: unknown): GraphModel['edgeLayout'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const result: GraphModel['edgeLayout'] = {};
+  for (const [id, raw] of Object.entries(value)) {
+    if (!id.includes('->') || !raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const item=raw as Record<string,unknown>; const visual: GraphModel['edgeLayout'][string]={};
+    if (['bezier','straight','smoothstep'].includes(String(item.pathType))) visual.pathType=item.pathType as 'bezier'|'straight'|'smoothstep';
+    if(typeof item.showArrow==='boolean')visual.showArrow=item.showArrow;if(typeof item.showLabel==='boolean')visual.showLabel=item.showLabel;
+    if(finite(item.arrowSize))visual.arrowSize=Math.min(24,Math.max(4,item.arrowSize));
+    if(item.stroke&&typeof item.stroke==='object'&&!Array.isArray(item.stroke)){const s=item.stroke as Record<string,unknown>;visual.stroke={...(color(s.color)?{color:s.color}:{}),...(finite(s.width)?{width:Math.min(12,Math.max(1,s.width))}:{}),...(['solid','dashed','dotted'].includes(String(s.style))?{style:s.style as 'solid'|'dashed'|'dotted'}:{})};}
+    result[id]=visual;
+  }
+  return result;
+}
+function parseNodeStyle(pos: Record<string,unknown>): Pick<GraphModel['layout'][string],'visible'|'fill'|'border'> {
+  const out: Pick<GraphModel['layout'][string],'visible'|'fill'|'border'>={};
+  if(pos.visible&&typeof pos.visible==='object'&&!Array.isArray(pos.visible)){const allowed=['stepId','label','outputs','approval','conditionalRoute','parallelRoute','skippable'];out.visible=Object.fromEntries(Object.entries(pos.visible).filter(([k,v])=>allowed.includes(k)&&typeof v==='boolean'));}
+  if(pos.border&&typeof pos.border==='object'&&!Array.isArray(pos.border)){const b=pos.border as Record<string,unknown>;const parsed={...(['none','solid','dashed','dotted'].includes(String(b.style))?{style:b.style as 'none'|'solid'|'dashed'|'dotted'}:{}),...(finite(b.width)?{width:Math.min(12,Math.max(0,b.width))}:{}),...(color(b.color)?{color:b.color}:{}),...(finite(b.radius)?{radius:Math.min(100,Math.max(0,b.radius))}:{})};if(Object.keys(parsed).length)out.border=parsed;}
+  if(pos.fill&&typeof pos.fill==='object'&&!Array.isArray(pos.fill)){const f=pos.fill as Record<string,unknown>;if(['none','solid','linear-gradient'].includes(String(f.type))){const stops=Array.isArray(f.stops)?f.stops.flatMap((raw)=>{if(!raw||typeof raw!=='object'||Array.isArray(raw))return[];const s=raw as Record<string,unknown>;return color(s.color)&&finite(s.offset)&&finite(s.opacity)?[{color:s.color,offset:Math.min(1,Math.max(0,s.offset)),opacity:Math.min(1,Math.max(0,s.opacity))}]:[];}).sort((a,b)=>a.offset-b.offset):undefined;out.fill={type:f.type as 'none'|'solid'|'linear-gradient',...(color(f.color)?{color:f.color}:{}),...(finite(f.opacity)?{opacity:Math.min(1,Math.max(0,f.opacity))}:{}),...(finite(f.angle)?{angle:((f.angle%360)+360)%360}:{}),...(stops&&stops.length>=2?{stops}:{})};}}
+  return out;
 }
 
 function parseTransitions(raw: unknown): Transition[] {
@@ -213,12 +237,23 @@ export function parseYaml(yamlText: string): GraphModel | null {
   }
 
   const layout: GraphModel['layout'] = {};
+  let edgeLayout: GraphModel['edgeLayout'] = {};
   if (raw['x-layout'] && typeof raw['x-layout'] === 'object') {
-    for (const [id, pos] of Object.entries(raw['x-layout'])) {
+    const rawLayout = raw['x-layout'];
+    const rawEdges = rawLayout.$edges;
+    if (rawEdges && typeof rawEdges === 'object' && !Array.isArray(rawEdges)) {
+      edgeLayout = parseEdgeVisuals(rawEdges);
+    }
+    for (const [id, value] of Object.entries(rawLayout)) {
+      if (id.startsWith('$') || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const pos = value as Record<string, unknown>;
       layout[id] = {
-        x: typeof pos.x === 'number' ? pos.x : 0,
-        y: typeof pos.y === 'number' ? pos.y : 0,
-        ...(typeof pos.w === 'number' ? { width: pos.w } : {}),
+        x: finite(pos.x) ? pos.x : 0,
+        y: finite(pos.y) ? pos.y : 0,
+        ...(finite(pos.w) ? { width: Math.max(90,pos.w) } : {}),
+        ...(finite(pos.width) ? { width: Math.max(90,pos.width) } : {}),
+        ...(finite(pos.height) ? { height: Math.max(64,pos.height) } : {}),
+        ...parseNodeStyle(pos),
       };
     }
   }
@@ -274,5 +309,5 @@ export function parseYaml(yamlText: string): GraphModel | null {
 
   const startRoute: GraphModel['startRoute'] = raw.start_route === 'choice' ? 'choice' : raw.start_route === 'all' ? 'all' : undefined;
 
-  return { nodes, slots, layout, startTransitions, startRoute };
+  return { nodes, slots, layout, edgeLayout, startTransitions, startRoute };
 }

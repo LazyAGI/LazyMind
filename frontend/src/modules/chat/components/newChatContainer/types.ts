@@ -5,6 +5,7 @@ import {
   Source,
 } from "@/api/generated/chatbot-client";
 import type { SendMessageParams } from "../ChatInput";
+import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
 
 export interface ChatImperativeProps {
@@ -92,4 +93,5 @@ export interface ChatMessage {
   cite_message?: string;
   cite_messages?: string[];
   tool_call_turns?: number;
+  mentions?: ChatMention[];
 }

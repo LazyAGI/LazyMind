@@ -1,10 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Space, Tooltip } from "antd";
 import {
+  AppstoreOutlined,
+  BookOutlined,
   CloseOutlined,
   CommentOutlined,
   CopyOutlined,
+  DatabaseOutlined,
   EditOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import AssistantMessage from "../../AssistantMessage";
@@ -12,6 +16,81 @@ import type { PreferenceType } from "../../MultiAnswerDisplay";
 import "../index.scss";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
+import type { ChatMention } from "../../ChatInput/MentionEditor";
+import { CHAT_SELECT_CONVERSATION_EVENT } from "@/modules/chat/constants/chat";
+
+const MENTION_ICONS = {
+  knowledge_base: <DatabaseOutlined />,
+  skill: <ThunderboltOutlined />,
+  plugin: <AppstoreOutlined />,
+  tool: <ThunderboltOutlined />,
+  conversation: <CommentOutlined />,
+};
+
+function mentionHref(mention: ChatMention) {
+  const id = encodeURIComponent(mention.resource_id);
+  switch (mention.type) {
+    case "knowledge_base":
+      return `/lib/knowledge/detail/${id}`;
+    case "skill":
+      return `/memory-management/skills/${id}`;
+    case "plugin":
+      return mention.resource_id.startsWith("builtin:")
+        ? `/memory-management/plugins/builtin/${encodeURIComponent(mention.resource_id.slice(8))}`
+        : `/memory-management/plugins/${id}`;
+    case "tool":
+      return "/model-providers/tools";
+    case "conversation":
+      return `/agent/chat?conversation_id=${id}`;
+    default:
+      return undefined;
+  }
+}
+
+function UserMessageWithMentions({ text, mentions }: { text: string; mentions?: ChatMention[] }) {
+  if (!Array.isArray(mentions) || mentions.length === 0) return <>{text}</>;
+  let cursor = 0;
+  const ranges = mentions.map((mention) => {
+    let start = Number.isInteger(mention.start) ? mention.start! : text.indexOf(mention.display_name, cursor);
+    if (start < cursor || text.slice(start, start + mention.display_name.length) !== mention.display_name) {
+      start = text.indexOf(mention.display_name, cursor);
+    }
+    const end = start >= 0 ? start + mention.display_name.length : -1;
+    if (end >= 0) cursor = end;
+    return { mention, start, end };
+  }).filter((item) => item.start >= 0).sort((a, b) => a.start - b.start);
+  if (ranges.length === 0) return <>{text}</>;
+  cursor = 0;
+  const content: React.ReactNode[] = [];
+  ranges.forEach(({ mention, start, end }, index) => {
+    if (start < cursor) return;
+    if (start > cursor) content.push(text.slice(cursor, start));
+    const href = mentionHref(mention);
+    const label = `${mention.display_name}\n${mention.type}\nID: ${mention.resource_id}`;
+    content.push(
+      <Tooltip title={<span style={{ whiteSpace: "pre-line" }}>{label}</span>} key={`${mention.mention_id}-${index}`}>
+        <a
+          className="chat-history-mention"
+          href={href}
+          onClick={(event) => {
+            if (!href || mention.type === "conversation") event.preventDefault();
+            if (mention.type === "conversation") {
+              window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
+                detail: { conversationId: mention.resource_id, source: "mention" },
+              }));
+            }
+          }}
+        >
+          {MENTION_ICONS[mention.type] || <BookOutlined />}
+          <span>{mention.display_name}</span>
+        </a>
+      </Tooltip>,
+    );
+    cursor = end;
+  });
+  if (cursor < text.length) content.push(text.slice(cursor));
+  return <>{content}</>;
+}
 
 interface MessageListProps {
   messageList: any[];
@@ -303,7 +382,11 @@ const MessageList: React.FC<MessageListProps> = ({
                 </Space>
               </div>
             ) : (
-              renderText(item)
+              Array.isArray(item.mentions) && item.mentions.length > 0 ? (
+                <div className="chat-user-mention-text">
+                  <UserMessageWithMentions text={item.display_delta || item.delta || ""} mentions={item.mentions} />
+                </div>
+              ) : renderText(item)
             )}
           </div>
           {!isEditing ? (

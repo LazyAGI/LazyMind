@@ -139,7 +139,16 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     resetLocalPathBrowseOptions,
   } = useLocalPathTree({ t, form, getPreferredLocalAgentId });
 
-  const getActiveFeishuAuthConnectionId = () => oauthConnection?.connectionId || "";
+  const getActiveFeishuAuthConnectionId = () => {
+    const fromOauth = `${oauthConnection?.connectionId || ""}`.trim();
+    if (fromOauth) {
+      return fromOauth;
+    }
+    if (validFeishuAccounts.length === 1) {
+      return `${validFeishuAccounts[0].connection?.connectionId || ""}`.trim();
+    }
+    return "";
+  };
 
   const {
     feishuTargetTreeData,
@@ -372,6 +381,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     handleSearchFeishuTargetOptions,
     handleLoadFeishuTargetChildren,
     resetFeishuTargetBrowseOptions,
+    seedFeishuTargetTree,
     handleCreateProviderSelect: ctx.handleCreateProviderSelect,
     handleOpenFeishuGuideFromAuthSelect: ctx.handleOpenFeishuGuideFromAuthSelect,
     handleAddFeishuAuthFromSelect: ctx.handleAddFeishuAuthFromSelect,

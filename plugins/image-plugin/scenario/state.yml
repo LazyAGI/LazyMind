@@ -21,7 +21,7 @@ transitions:
     - to: enhance_image
       when: 用户希望编辑已有图片
     - to: generate_image
-      when: 用户希望生成一张新图片
+      when: 用户希望生成一张新图片或动态表情包
 
   generate_image:
     - to: __end__
@@ -43,43 +43,56 @@ steps:
       Your task:
       1. This step is ANALYSIS ONLY.
          Do NOT call any search tools, do NOT call kb_search, do NOT save any images.
-         Do NOT save material_images, raw_source_image, prompt_used, or material_summary here.
+         Do NOT save material_images, raw_source_image, image_output, prompt_used, or material_summary here.
       2. Identify the main subject(s) and sub-topics that require reference materials.
-      3. Suggest a suitable artistic style (photorealistic, oil painting, anime, etc.).
+      3. Suggest a suitable artistic style (photorealistic, oil painting, anime, sticker, etc.).
       4. Note mood, lighting, and composition hints from the user text and any uploaded images.
       5. Classify the workflow internally (do NOT write routing fields into subject_analysis):
-           - CREATE_NEW — brand-new image from scratch (text-to-image).
+           - CREATE_NEW — brand-new still image from scratch (text-to-image).
            - KB_STYLE — user wants style/content from a selected knowledge base as reference
              (e.g. "根据知识库中的风格画图"). KB retrieval will be done in collect_materials.
            - REFERENCE_GENERATE — user wants to search/collect reference images first, then
-             generate a **new** image inspired by those refs (text-to-image, NOT editing the found photo).
+             generate a **new** still image inspired by those refs (text-to-image, NOT editing).
            - FIND_AND_EDIT — user asks to find/search an existing photo online, then edit it.
-           - EDIT_UPLOAD — user uploaded the source image for THIS edit request and wants to
-             edit that upload directly (not search the web for a new photo).
+           - EDIT_UPLOAD — user uploaded the source image for THIS still-image edit request and
+             wants to edit that upload directly (not search the web for a new photo).
+           - CREATE_ANIMATED — user wants an animated GIF / 动态表情包 / 动图.
+             Includes: pure text description, OR "先联网找一张图再做成动态表情包".
+             Always ends at generate_image (video_generator → video_to_gif), NEVER enhance_image.
+             If the user asks to find/search a photo first, collect will save it as image_output
+             (first frame); generate_image then passes it via urls.
+           - ANIMATE_UPLOAD — user uploaded an image and wants it turned into an animated GIF /
+             动态表情包 (image-to-video first frame + motion, then GIF).
+         Prefer CREATE_ANIMATED / ANIMATE_UPLOAD when the user says 动态表情包, 动图, GIF,
+         animated sticker, or clearly wants motion — even if they also say "找一张" / "搜一张" /
+         "画" / "生成". Do NOT classify animated requests as FIND_AND_EDIT.
       6. If the runtime instruction mentions a selected knowledge base, filters.kb_id is set,
-         or the user explicitly references 知识库 / knowledge base style, prefer WORKFLOW: KB_STYLE.
+         or the user explicitly references 知识库 / knowledge base style, prefer WORKFLOW: KB_STYLE
+         (unless the request is clearly animated — then CREATE_ANIMATED / ANIMATE_UPLOAD wins).
       7. Save a **user-facing** analysis (shown in the Analysis tab):
            save_artifact(key='subject_analysis', content_type='text', value=<analysis text>)
          Write 100–200 words in clear natural language (Chinese if the user wrote in Chinese).
          Cover: subject, style, mood/lighting/composition, and what will happen next in plain words
-         (e.g. "将先联网搜索参考图，再优化编辑指令并编辑图片").
+         (e.g. "将先联网搜索参考图，再优化编辑指令并编辑图片",
+          or "将先联网找一张底图，再生成短视频并转换成动态 GIF 表情包").
          Do NOT include machine routing lines such as WORKFLOW:, NEXT_STEPS:, SKIP_STEPS:,
          or comma-separated step ids — those belong in workflow_routing only.
       8. Save **routing metadata** separately (for ChatAgent, not shown in the Analysis tab):
            save_artifact(key='workflow_routing', content_type='text', value=<routing block>)
          Use exactly this format (3 lines):
-           WORKFLOW: <CREATE_NEW|KB_STYLE|REFERENCE_GENERATE|FIND_AND_EDIT|EDIT_UPLOAD>
+           WORKFLOW: <CREATE_NEW|KB_STYLE|REFERENCE_GENERATE|FIND_AND_EDIT|EDIT_UPLOAD|CREATE_ANIMATED|ANIMATE_UPLOAD>
            NEXT_STEPS: <comma-separated step ids>
            SKIP_STEPS: <comma-separated step ids or none>
          Routing table:
-           KB_STYLE / CREATE_NEW / REFERENCE_GENERATE → NEXT_STEPS: collect_materials,optimize_prompt,generate_image
-                                                       SKIP_STEPS: enhance_image
+           KB_STYLE / CREATE_NEW / REFERENCE_GENERATE / CREATE_ANIMATED / ANIMATE_UPLOAD
+             → NEXT_STEPS: collect_materials,optimize_prompt,generate_image
+               SKIP_STEPS: enhance_image
            FIND_AND_EDIT / EDIT_UPLOAD → NEXT_STEPS: collect_materials,optimize_prompt,enhance_image
                                         SKIP_STEPS: generate_image
-         Do NOT save raw_source_image, prompt_used, material_images, or material_summary in this step.
+         Do NOT save raw_source_image, image_output, prompt_used, material_images, or material_summary in this step.
       9. For FIND_AND_EDIT / EDIT_UPLOAD, save the material route token:
            save_artifact(key='edit_route', content_type='text', value='edit')
-         For generation workflows, do not save edit_route; generation is the default branch.
+         For generation / animated workflows, do not save edit_route; generation is the default branch.
 
       Stop after saving required artifacts only.
     outputs:
@@ -94,7 +107,7 @@ steps:
       no WORKFLOW:/NEXT_STEPS:/SKIP_STEPS: lines or step-id lists.
       workflow_routing must be saved with WORKFLOW, NEXT_STEPS, and SKIP_STEPS lines.
       Do NOT call kb_search/web_search/image_search_tool in this step.
-      Do NOT save material_images, raw_source_image, prompt_used, or material_summary in this step.
+      Do NOT save material_images, raw_source_image, image_output, prompt_used, or material_summary in this step.
 
   collect_materials:
     label: Collect Reference Materials
@@ -113,6 +126,18 @@ steps:
       0. Read WORKFLOW from workflow_routing (not from subject_analysis).
          - CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: collect 1–3 reference images for prompt writing.
          - FIND_AND_EDIT / EDIT_UPLOAD: prepare source image(s) for image editing.
+         - CREATE_ANIMATED:
+             * Parse desired sticker count N from the user request (三个→3, default 1, max 5).
+             * If the user asked to find/search photo(s) first
+               (e.g. "找一张XX做成动态表情包" / "找三张不同的图做成表情包"):
+               web_search / image_search_tool → validate → save material_images.
+               Also save origin(s) as image_output with sort_order:
+                 - N distinct subjects/photos requested → up to N origins, sort_order=1..N
+                 - Otherwise 1 origin is enough (generate will reuse it N times), sort_order=1
+             * Else (pure text sticker): optional 0–3 style refs as material_images only;
+               skip heavy search if the text description is already clear.
+         - ANIMATE_UPLOAD: confirm the uploaded source image as both material_images and
+           image_output with sort_order=1 (first frame; generate will reuse it if N>1).
       - This is the ONLY step for external information/material collection.
       - You may use BOTH kb_search and web_search in this step.
       - For KB_STYLE (or when filters.kb_id is set), run kb_search first to collect style references.
@@ -129,16 +154,25 @@ steps:
         For FIND_AND_EDIT: 1 validated image is enough if it matches the subject; 2–3 only when
         the first candidates are poor fits.
       - For REFERENCE_GENERATE: save validated reference URLs as material_images only.
-        Do NOT save raw_source_image or prompt_used — those belong in later generation steps.
+        Do NOT save raw_source_image, image_output, or prompt_used — those belong in later steps.
       - If WORKFLOW is EDIT_UPLOAD, use find_user_attachment to get the uploaded source image.
-        Save it as raw_source_image (the raw image entering image_editor). Do not web-search.
+        Save the same path/URL as both material_images and raw_source_image
+        (so the Materials tab reference grid is not empty). Do not web-search.
         Do NOT save prompt_used here — optimize_prompt will write the edit instruction.
+      - If WORKFLOW is ANIMATE_UPLOAD, use find_user_attachment to get the uploaded source image.
+        Save the same path/URL as both material_images and image_output with sort_order=1
+        (first frame). Do not web-search.
+        Do NOT save prompt_used here — optimize_prompt will write the motion instruction.
       - If WORKFLOW is FIND_AND_EDIT, after validating and saving the best subject photo
         as material_images, also save the same validated URL as raw_source_image.
         Do NOT save prompt_used here — optimize_prompt will write the edit instruction.
+      - If WORKFLOW is CREATE_ANIMATED and the user asked to find a photo first, after
+        validating the best subject photo as material_images, also save that same URL as
+        image_output (first frame). Do NOT save prompt_used here.
       - Before stopping, write a concise Chinese summary (80–200 words) of what you collected:
           - what you searched for and key findings from web_search / wikipedia
-          - how many material_images were saved and which one was chosen as raw_source_image (if any)
+          - how many material_images were saved and which one was chosen as
+            raw_source_image / image_output (if any)
           - why that image fits the user's request, or note gaps (e.g. no jersey photo found)
           save_artifact(key='material_summary', content_type='text', value=<summary>)
       - Follow any "Partial retry instruction" block for sort_order on list slots.
@@ -162,10 +196,18 @@ steps:
         required: true
       - material: raw_source_image
         required: false
+      - material: image_output
+        required: false
     acceptance_criteria: |
       For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: 1–3 validated material_images should be saved (never more than 3).
+      For CREATE_ANIMATED: if the user asked to find a photo first, 1–3 material_images and
+      one image_output must be saved; otherwise material_images optional (0–3).
+      material_summary should still be saved.
       For FIND_AND_EDIT: 1–3 material_images and one raw_source_image must be saved (never more than 3 images).
-      For EDIT_UPLOAD: raw_source_image must be saved from the user upload.
+      For EDIT_UPLOAD: both material_images and raw_source_image must be saved from the user upload
+      (same path/URL).
+      For ANIMATE_UPLOAD: both material_images and image_output must be saved from the user upload
+      (same path/URL, image_output sort_order=1).
       material_summary should be saved with a concise description of search results and image selection.
       optimize_prompt writes prompt_used in the next step.
 
@@ -173,7 +215,7 @@ steps:
     label: Optimize Prompt
     route: choice
     prompt: |
-      You are a professional image prompt engineer for both text-to-image and image editing.
+      You are a professional prompt engineer for still images, image editing, and short videos.
 
       Subject analysis:
       {{subject_analysis}}
@@ -186,6 +228,9 @@ steps:
 
       Source image for editing (if already collected):
       {{raw_source_image}}
+
+      First-frame image for animation (if already collected):
+      {{image_output}}
 
       Original user request:
       {{user_input}}
@@ -201,9 +246,16 @@ steps:
       3. For FIND_AND_EDIT or EDIT_UPLOAD (when raw_source_image is available):
          Write a concise English **edit instruction** for image_editor (not a generation prompt).
          Focus on what to change while keeping the rest of the photo realistic and unchanged.
-      4. When subject_analysis includes KB text findings, mirror their color palette,
+      4. For CREATE_ANIMATED or ANIMATE_UPLOAD:
+         Write an English **video motion prompt** for video_generator (40–120 words).
+         Describe subject, sticker/emoji aesthetic, short looping-friendly motion, and camera.
+         Prefer cute/expressive sticker motion (bounce, blink, wave, sparkle) over cinematic shots.
+         When image_output is present (upload OR web-found first frame): keep that subject
+         recognizable and describe how it should move.
+         Do NOT write a still-image-only prompt or an image_editor edit instruction.
+      5. When subject_analysis includes KB text findings, mirror their color palette,
          composition, and artistic style. Use material_images only as an optional reference.
-      5. Save the result:
+      6. Save the result:
            save_artifact(key='prompt_used', content_type='text', value=<prompt or edit instruction>)
 
       Stop after saving. Do not output anything else.
@@ -216,42 +268,130 @@ steps:
         required: false
       - material: raw_source_image
         required: false
+      - material: image_output
+        required: false
     outputs:
       - material: prompt_used
     acceptance_criteria: |
       prompt_used artifact must be saved in English.
       For generation workflows: at least 30 words, suitable for image_generator.
       For edit workflows (FIND_AND_EDIT / EDIT_UPLOAD): a clear edit instruction for image_editor.
+      For animated workflows (CREATE_ANIMATED / ANIMATE_UPLOAD): a clear motion prompt for video_generator.
 
   generate_image:
     label: Generate Image
+    route: choice
     prompt: |
-      You are an image generation agent.
+      You are an image / animated-sticker generation agent.
 
-      Use the following optimized prompt to generate an image:
+      Optimized prompt:
       {{prompt_used}}
+
+      Workflow routing (internal):
+      {{workflow_routing}}
+
+      Optional first-frame image (upload or web-found):
+      {{image_output}}
+
+      Original user request:
+      {{user_input}}
 
       {{runtime_instruction}}
 
-      Steps:
+      Decide the path from WORKFLOW + user_input (animated intent wins over still-image wording):
+
+      === Still image (CREATE_NEW / KB_STYLE / REFERENCE_GENERATE) ===
+      Only when the user wants a still image (NOT 动态表情包 / 动图 / GIF / animated sticker).
       1. Call image_generator exactly ONCE with:
            prompt=<prompt_used>, image_size='1024x1024', batch_size=1.
       2. If the tool call fails, STOP immediately with a concise failure note.
       3. Take `local_path` (preferred) or `image_url` — do NOT fabricate paths.
       4. Save:
            save_artifact(key='generated_image_output', content_type='image',
-                         value=<local_path or image_url>, source_tool='image_generator')
+                         value=<local_path or image_url>, source_tool='image_generator',
+                         sort_order=1)
       5. Final text image links MUST start with `/static-files/` if present.
-      6. Stop after saving.
+      6. Stop after saving. Do NOT save gif_output or image_output.
+
+      === Animated sticker / 动态表情包 (CREATE_ANIMATED / ANIMATE_UPLOAD, or user asks for GIF) ===
+      Pipeline: parallel video_generator → parallel video_to_gif → **sequential** save_artifact.
+      Do NOT call image_generator. Do NOT use any *_batch tools.
+      Do NOT overwrite origins with GIFs — origins stay in image_output; GIFs go to gif_output.
+
+      Count N (how many stickers):
+        - Parse from user_input: 三个/3个/three → 3, 两个 → 2, etc. Default N=1. Cap at 5.
+      Origin sources (first-frame images):
+        - If material_images has multiple validated photos and user asked for different
+          subjects/variants, use up to N distinct origins (one per sticker).
+        - Else if image_output / a single material / upload exists, reuse THAT same origin
+          for all N stickers.
+        - Else text-only (no urls) for all N.
+
+      Step A — parallel video generation (ONE assistant turn, N tool_calls):
+        Emit N separate `video_generator` calls in a single response (not sequential turns).
+        Seedance concurrency is capped at 3 inside the tool.
+        Each call MUST mark its index in the prompt, e.g. prepend "Sticker i of N: "
+        (i is 1-based). Optionally add a short motion variation when N>1.
+        Args per call: prompt=<marked prompt_used>, urls=[origin_i] when origin exists,
+        resolution='480p', duration=5, ratio='1:1'.
+        Do NOT save_artifact in this turn.
+
+      Step B — parallel GIF conversion (NEXT assistant turn, N tool_calls):
+        Emit N separate `video_to_gif` calls in ONE turn.
+        Map each video result to the same sticker index used in Step A
+        (match by tool-call order / "Sticker i of N" mark — keep a stable i→video path table).
+        Each: url=<video local_path for sticker i>, fps=24, width=360.
+        Do NOT save_artifact in this turn.
+
+      Step C — sequential saves (AFTER all GIFs return; NEVER parallel save_artifact):
+        Walk i = 1..N in ascending order. For each successful sticker i, call save_artifact
+        **one at a time** (wait for each confirmation before the next).
+        First full generation of this step (list empty / regenerating all):
+          **omit sort_order** so each list slot appends in the same order 1..N.
+        Partial retry only (user asked to redo sticker k while others already exist):
+          pass sort_order=k to overwrite that row only.
+        Per sticker i (caption MUST include the index, e.g. caption='Sticker i'):
+          1. optional: save_artifact(key='video_output', content_type='file',
+               value=<video path>, source_tool='video_generator', caption='Sticker i')
+          2. if origin exists: save_artifact(key='image_output', content_type='image',
+               value=<origin>, caption='Sticker i')  — NEVER put GIF into image_output
+          3. save_artifact(key='gif_output', content_type='image',
+               value=<gif path>, source_tool='video_to_gif', caption='Sticker i')
+        Saving in the same i-order across slots keeps composite rows aligned.
+        If some generate/gif calls fail, save only successful stickers in index order
+        (partial saves OK) and STOP with a concise note.
+      Prefer quoting image_markdown from tool results verbatim.
+      Stop after sequential saves finish for all successful stickers.
     tools:
       - image_generator
+      - video_generator
+      - video_to_gif
     inputs:
       - material: prompt_used
         required: true
+      - material: workflow_routing
+        required: false
+      - material: image_output
+        required: false
+      - material: material_images
+        required: false
     outputs:
       - material: generated_image_output
+        required: false
+      - material: image_output
+        required: false
+      - material: gif_output
+        required: false
+      - material: video_output
+        required: false
     acceptance_criteria: |
-      generated_image_output artifact must be saved with a valid local path or http(s) URL.
+      Still workflows: generated_image_output must be saved (sort_order=1 only for overwrite / still path).
+      Animated workflows: gif_output must exist for each successful sticker after
+      video_generator → video_to_gif → sequential append saves (omit sort_order on first full run).
+      When an origin exists, image_output must also be appended in the SAME order as gif_output
+      (origin still, NOT the GIF). Never put GIF into image_output.
+      Use sort_order=N only when overwriting an existing list row on partial retry.
+      N is taken from the user request (default 1).
 
   enhance_image:
     label: Enhance Image

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Checkbox, Input, InputNumber, Select, Tooltip, Empty, Dropdown, Popconfirm } from 'antd';
 import { PlusOutlined, CloseOutlined, CheckOutlined, DownOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -36,6 +36,8 @@ interface Props {
   onTabNavigate?: (tabId: string) => void;
   /** When true, hide all editing controls. */
   readonly?: boolean;
+  /** Increment to open and focus the new-artifact form from an external command. */
+  startAddingToken?: number;
 }
 
 interface EditDraft {
@@ -633,10 +635,11 @@ function ArtifactRow({ art, model, uiMode, tabs, uiSlots, slotMap, onUpdate, onD
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, inline, pluginModel, onUiModelChange, onTabNavigate, readonly = false }: Props) {
+export default function ArtifactPanel({ model, onClose, onModelChange, uiMode, inline, pluginModel, onUiModelChange, onTabNavigate, readonly = false, startAddingToken = 0 }: Props) {
   const { t } = useTranslation();
   const [newDraft, setNewDraft] = useState<EditDraft>(EMPTY_DRAFT);
   const [adding, setAdding] = useState(false);
+  useEffect(() => { if (startAddingToken > 0 && !readonly) setAdding(true); }, [startAddingToken, readonly]);
 
   const artifacts = Object.values(model.slots);
   const tabs: PluginUiTab[] = pluginModel?.ui?.tabs ?? [];

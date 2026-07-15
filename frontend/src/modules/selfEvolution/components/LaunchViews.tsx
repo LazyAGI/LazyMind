@@ -1,6 +1,7 @@
 import { Modal, Tag, Typography } from "antd";
-import { HistoryOutlined, LoadingOutlined } from "@ant-design/icons";
+import { BranchesOutlined, HistoryOutlined, LoadingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import {
   type SelfEvolutionLaunchOptionCard,
   type SelfEvolutionSummaryItem,
@@ -184,6 +185,7 @@ export function SelfEvolutionHomeView({
   onStartSession,
 }: SelfEvolutionHomeViewProps) {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const workflowImageSrc = getSelfEvolutionWorkflowImageSrc(i18n.resolvedLanguage || i18n.language);
   return (
     <div className="self-evolution-chatlike-page admin-page">
@@ -192,6 +194,15 @@ export function SelfEvolutionHomeView({
           {t("selfEvolutionRun.singleThreadSession")}
         </Tag>
         <div className="self-evolution-chatlike-top-actions">
+          <button
+            type="button"
+            className="self-evolution-chatlike-top-history"
+            onClick={() => navigate("/self-evolution/algorithms")}
+            aria-label={t("selfEvolutionRun.openAlgorithmManagementAria")}
+          >
+            <BranchesOutlined />
+            <span>{t("selfEvolutionRun.algorithmManagement")}</span>
+          </button>
           <button
             type="button"
             className="self-evolution-chatlike-top-history"
