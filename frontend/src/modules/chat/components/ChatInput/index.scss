@@ -417,6 +417,182 @@
       }
     }
 
+    .chat-mention-editor-wrapper {
+      position: relative;
+      min-width: 0;
+    }
+
+    .chat-mention-editor {
+      min-height: 48px;
+      max-height: 132px;
+      overflow-y: auto;
+      outline: none;
+      white-space: pre-wrap;
+      word-break: break-word;
+
+      &:empty::before {
+        color: #b8c3d6;
+        content: attr(data-placeholder);
+        pointer-events: none;
+      }
+    }
+
+    .chat-mention-chip {
+      display: inline;
+      margin: 0 2px;
+      padding: 1px 7px;
+      border: 1px solid rgba(70, 137, 255, 0.24);
+      border-radius: 6px;
+      background: #eef5ff;
+      color: #216fff;
+      font-weight: 500;
+      line-height: 22px;
+      overflow-wrap: anywhere;
+      white-space: normal;
+      -webkit-box-decoration-break: clone;
+      box-decoration-break: clone;
+    }
+
+    .chat-mention-menu {
+      position: absolute;
+      right: auto;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      z-index: 30;
+      width: min(720px, 100%);
+      height: min(420px, calc(100vh - 180px));
+      overflow-x: hidden;
+      overflow-y: scroll;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+      padding: 7px;
+      border: 1px solid #e4e9f2;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 16px 48px rgba(38, 54, 84, 0.16);
+      backdrop-filter: blur(16px);
+      transform: translateX(-50%);
+
+      &::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      &::-webkit-scrollbar-thumb {
+        border: 2px solid transparent;
+        border-radius: 999px;
+        background: rgba(122, 135, 155, 0.36);
+        background-clip: padding-box;
+      }
+    }
+
+    .chat-mention-group + .chat-mention-group {
+      margin-top: 5px;
+      padding-top: 5px;
+      border-top: 1px solid #edf0f5;
+    }
+
+    .chat-mention-group-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 3px 5px 5px;
+      color: #7a879b;
+      font-size: 11px;
+
+      span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+    }
+
+    .chat-mention-shortcut {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: #6d7c92;
+
+      code {
+        padding: 2px 6px;
+        border: 1px solid rgba(33, 111, 255, 0.18);
+        border-radius: 5px;
+        background: #eef5ff;
+        color: #216fff;
+        font-family: inherit;
+        font-size: 11px;
+        font-weight: 600;
+      }
+    }
+
+    .chat-mention-options {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 3px;
+    }
+
+    .chat-mention-group.is-conversation .chat-mention-options {
+      grid-template-columns: 1fr;
+    }
+
+    .chat-mention-option {
+      width: 100%;
+      min-width: 0;
+      min-height: 28px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 7px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: #344158;
+      cursor: pointer;
+      text-align: left;
+
+      &.is-active,
+      &:hover {
+        background: #f0f5ff;
+        color: #1769e0;
+      }
+    }
+
+    .chat-mention-option-name {
+      min-width: 0;
+      overflow: hidden;
+      font-size: 12px;
+      font-weight: 500;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chat-mention-option-description {
+      min-width: 0;
+      overflow: hidden;
+      color: #8b96a8;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chat-mention-empty {
+      padding: 20px;
+      color: #9aa6b8;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .chat-mention-expand {
+      width: 100%;
+      padding: 4px 7px 2px;
+      border: 0;
+      background: transparent;
+      color: #216fff;
+      cursor: pointer;
+      font-size: 11px;
+      text-align: left;
+    }
+
     .prompt-suggestion-panel {
       position: absolute;
       top: calc(100% + 8px);

@@ -63,6 +63,7 @@ type LazyChatRequest struct {
 
 type ChatMessageOptions struct {
 	Query          string              `json:"query"`
+	UserQuery      string              `json:"user_query,omitempty"`
 	History        []ChatMessage       `json:"history,omitempty"`
 	Files          map[string][]string `json:"files,omitempty"`
 	CurrentTurnSeq int                 `json:"current_turn_seq,omitempty"`
@@ -356,6 +357,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if q, ok := body["query"].(string); ok {
 		req.Message.Query = q
+	}
+	if q, ok := body["user_query"].(string); ok {
+		req.Message.UserQuery = q
 	}
 	if s, ok := body["session_id"].(string); ok {
 		req.Conversation.SessionID = s

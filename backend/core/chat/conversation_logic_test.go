@@ -364,6 +364,17 @@ func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
 	}
 }
 
+func TestChatHistoryResponseIncludesMentions(t *testing.T) {
+	item := chatHistoryToResponseItem(orm.ChatHistory{
+		RawContent: "查看知识库1",
+		Ext:        json.RawMessage(`{"input":[{"input_type":"text","text":"查看知识库1"}],"mentions":[{"mention_id":"m1","type":"knowledge_base","resource_id":"ds_1","display_name":"知识库1","start":2,"end":7}]}`),
+	})
+	mentions, ok := item["mentions"].([]any)
+	if !ok || len(mentions) != 1 {
+		t.Fatalf("mentions missing from history response: %#v", item["mentions"])
+	}
+}
+
 func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
 	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail-datasets.db")
 	if err != nil {
@@ -592,7 +603,8 @@ func TestBuildChatRequestBodyFilesMergeDedupesAndSkipsHTTP(t *testing.T) {
 
 func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	req := buildLazyChatRequest(map[string]any{
-		"query":      "hello",
+		"query":      "injected context\n\nhello",
+		"user_query": "hello",
 		"session_id": "conv-1",
 		"history": []any{
 			map[string]any{"role": "user", "content": "q1"},
@@ -656,7 +668,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 		},
 	})
 
-	if req.Message.Query != "hello" || req.Conversation.SessionID != "conv-1" {
+	if req.Message.Query != "injected context\n\nhello" || req.Message.UserQuery != "hello" || req.Conversation.SessionID != "conv-1" {
 		t.Fatalf("unexpected base fields: %#v", req)
 	}
 	if len(req.Message.History) != 2 || req.Message.History[0].Role != "user" || req.Message.History[1].Content != "a1" {

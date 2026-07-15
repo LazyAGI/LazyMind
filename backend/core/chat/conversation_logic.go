@@ -505,7 +505,11 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 	if input == nil {
 		return nil
 	}
-	b, err := json.Marshal(map[string]any{"input": input})
+	ext := map[string]any{"input": input}
+	if mentions, ok := raw["mentions"].([]any); ok && len(mentions) > 0 {
+		ext["mentions"] = mentions
+	}
+	b, err := json.Marshal(ext)
 	if err != nil {
 		return nil
 	}
@@ -682,6 +686,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
 	body := map[string]any{
 		"query":            query,
+		"user_query":       query,
 		"session_id":       sessionID,
 		"conversation_id":  convID,
 		"history":          buildHistoryMessages(histories, askAnswersStructuredFromRaw(raw)),
@@ -695,6 +700,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"use_memory":       useMemory,
 		"user_id":          strings.TrimSpace(userID),
 		"mode":             mode,
+	}
+	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
+		body["query"] = mentionContext + "\n\nUser query:\n" + query
 	}
 	if environmentContext, ok := raw["environment_context"].(map[string]any); ok {
 		body["environment_context"] = environmentContext
