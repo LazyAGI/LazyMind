@@ -370,6 +370,7 @@ REFINED_TRAJECTORIES:
 def candidate_prompt(outline: dict[str, Any], guidelines: dict[str, Any]) -> str:
     return f"""You are an expert Skill Materializer for autonomous agents.
 Your task is to transform a **Skill Outline** into a complete reusable `SKILL.md`.
+Use the same language as the Skill Outline for all natural-language fields and Markdown content. The only exception is `skill_name`, which must remain concise English kebab-case.
 The Skill Outline already defines the workflow. Your job is **not** to redesign or expand the workflow, but to enrich each procedure step with reusable operational knowledge distilled from the provided success and failure guidelines.
 The output should read like a human-authored operational playbook rather than a collection of extracted observations.
 
@@ -552,6 +553,8 @@ def merge_skill_patch_prompt(
 ) -> str:
     return (
         'Merge a newly mined candidate skill into an existing SKILL.md.\n\n'
+        'Use the same language as CANDIDATE_SKILL for all natural-language fields and Markdown content. '
+        'The only exception is `skill_name`, which must remain concise English kebab-case.\n\n'
         'You receive:\n'
         '1. TARGET_SKILL_NAME: the existing skill selected for patching. This is the old/current name.\n'
         '2. EXISTING_SKILL: the full current SKILL.md content.\n'
