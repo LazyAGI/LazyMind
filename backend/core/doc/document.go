@@ -710,7 +710,8 @@ func DeleteDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		return
 	}
-	if _, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetWrite); !ok {
+	ds, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetWrite)
+	if !ok {
 		replyDatasetForbidden(w)
 		return
 	}
@@ -727,6 +728,10 @@ func DeleteDocument(w http.ResponseWriter, r *http.Request) {
 	if err := deleteExternalDocs(r, datasetID, rowsToDelete); err != nil {
 		common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
 		return
+	}
+	// 删除上传的源文件（upload_xxx），清理共享文件夹中的残留文件
+	if err := deleteUploadedFiles(r.Context(), ds.TenantID, datasetID, rowsToDelete); err != nil {
+		log.Logger.Error().Err(err).Str("handler", "DeleteDocument").Msg("failed to delete uploaded files")
 	}
 	now := time.Now().UTC()
 	docIDs := documentIDsFromRows(rowsToDelete)
@@ -1213,7 +1218,8 @@ func BatchDeleteDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		return
 	}
-	if _, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetWrite); !ok {
+	ds, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetWrite)
+	if !ok {
 		replyDatasetForbidden(w)
 		return
 	}
@@ -1243,6 +1249,10 @@ func BatchDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	if err := deleteExternalDocs(r, datasetID, rowsToDelete); err != nil {
 		common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
 		return
+	}
+	// 删除上传的源文件（upload_xxx），清理共享文件夹中的残留文件
+	if err := deleteUploadedFiles(r.Context(), ds.TenantID, datasetID, rowsToDelete); err != nil {
+		log.Logger.Error().Err(err).Str("handler", "DeleteDocument").Msg("failed to delete uploaded files")
 	}
 	now := time.Now().UTC()
 	docIDs := documentIDsFromRows(rowsToDelete)
@@ -1509,6 +1519,68 @@ func deleteExternalDocs(r *http.Request, datasetID string, rows []orm.Document) 
 		Any("request_body", req).
 		Any("response_body", resp).
 		Msg("external delete-docs request succeeded")
+	return nil
+}
+
+// deleteUploadedFiles 删除文档关联的上传文件，清理共享文件夹中的残留 upload_xxx 文件。
+// 通过 UploadedFile.document_id 关联查询 upload_file_id，再删除对应文件目录。
+func deleteUploadedFiles(ctx context.Context, tenantID, datasetID string, rows []orm.Document) error {
+	docIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row.ID) == "" {
+			continue
+		}
+		docIDs = append(docIDs, row.ID)
+	}
+	if len(docIDs) == 0 {
+		return nil
+	}
+	// 查询 UploadedFile 表，通过 document_id 找到对应的 upload_file_id
+	var uploadedFiles []orm.UploadedFile
+	if err := store.DB().WithContext(ctx).
+		Where("document_id IN ? AND deleted_at IS NULL", docIDs).
+		Find(&uploadedFiles).Error; err != nil {
+		return fmt.Errorf("query uploaded files: %w", err)
+	}
+	if len(uploadedFiles) == 0 {
+		return nil
+	}
+	log.Logger.Info().
+		Str("handler", "deleteUploadedFiles").
+		Str("tenant_id", tenantID).
+		Str("dataset_id", datasetID).
+		Int("file_count", len(uploadedFiles)).
+		Msg("cleaning up uploaded source files")
+	for _, uf := range uploadedFiles {
+		fid := strings.TrimSpace(uf.UploadFileID)
+		if fid == "" {
+			continue
+		}
+		dir := buildDatasetDocFileDir(tenantID, datasetID, "", fid)
+		if err := os.RemoveAll(dir); err != nil {
+			log.Logger.Warn().
+				Str("file_id", fid).
+				Str("path", dir).
+				Err(err).
+				Msg("failed to remove upload file directory")
+		} else {
+			log.Logger.Debug().
+				Str("file_id", fid).
+				Str("path", dir).
+				Msg("removed upload file directory")
+		}
+	}
+	// 软删除 UploadedFile 记录
+	now := time.Now().UTC()
+	fileIDs := make([]string, 0, len(uploadedFiles))
+	for _, uf := range uploadedFiles {
+		fileIDs = append(fileIDs, uf.UploadFileID)
+	}
+	if err := store.DB().WithContext(ctx).Model(&orm.UploadedFile{}).
+		Where("upload_file_id IN ?", fileIDs).
+		Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+		return fmt.Errorf("soft delete uploaded file records: %w", err)
+	}
 	return nil
 }
 

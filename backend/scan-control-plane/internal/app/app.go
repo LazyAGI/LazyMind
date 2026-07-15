@@ -164,6 +164,9 @@ func buildSQLComponents(cfg config.Config, opener DBOpener) (Components, error) 
 			return Components{}, err
 		}
 	}
+	if err := repo.Migrate(context.Background()); err != nil {
+		return Components{}, err
+	}
 	adapters.Repository = repo
 	adapters.JobQueue = taskengine.NewDBJobQueue(repo)
 	adapters.Scheduler = buildScheduleEngine(adapters, cfg)
@@ -294,7 +297,10 @@ func newHandlerWithComponents(built Components) http.Handler {
 	if jobQueue == nil {
 		panic("app job queue is required")
 	}
-	taskPlanner := taskengine.NewDBTaskPlanner(repo, taskengine.WithMaxObjectsPerGenerateRequest(built.GenerateTasksMaxObjectsPerRequest))
+	taskPlanner := taskengine.NewDBTaskPlanner(repo,
+		taskengine.WithMaxObjectsPerGenerateRequest(built.GenerateTasksMaxObjectsPerRequest),
+		taskengine.WithCoreResource(built.CoreResource),
+	)
 	scheduler := built.Scheduler
 	if scheduler == nil {
 		scheduler = schedule.NewCheckpointScheduleEngine(repo, jobQueue, schedule.WithTaskPlanner(pendingTaskPlanner{planner: taskPlanner}))

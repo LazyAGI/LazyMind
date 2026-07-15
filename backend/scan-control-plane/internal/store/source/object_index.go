@@ -235,3 +235,41 @@ func scanObjectWithStateRows(row scanner) (ObjectWithState, error) {
 	}
 	return item, nil
 }
+
+
+// ListDocumentsByBinding 查询某个 binding 下的所有 Document 记录。
+func (r *SQLRepository) ListDocumentsByBinding(ctx context.Context, sourceID, bindingID string) ([]Document, error) {
+	var rows []ormDocument
+	err := r.ormDB(ctx).
+		Where("source_id = ? AND binding_id = ?", sourceID, bindingID).
+		Find(&rows).Error
+	if err != nil {
+		return nil, mapSQLConstraint(err)
+	}
+	docs := make([]Document, 0, len(rows))
+	for _, row := range rows {
+		docs = append(docs, documentFromORM(row))
+	}
+	return docs, nil
+}
+
+// DeleteObjectsByBinding 按 binding 删除所有 SourceObject。
+func (r *SQLRepository) DeleteObjectsByBinding(ctx context.Context, sourceID, bindingID string) error {
+	return r.ormDB(ctx).
+		Where("source_id = ? AND binding_id = ?", sourceID, bindingID).
+		Delete(&ormSourceObject{}).Error
+}
+
+// DeleteDocumentStatesByBinding 按 binding 删除所有 DocumentState。
+func (r *SQLRepository) DeleteDocumentStatesByBinding(ctx context.Context, sourceID, bindingID string) error {
+	return r.ormDB(ctx).
+		Where("source_id = ? AND binding_id = ?", sourceID, bindingID).
+		Delete(&ormDocumentState{}).Error
+}
+
+// DeleteParseTasksByBinding 按 binding 删除所有 ParseTask。
+func (r *SQLRepository) DeleteParseTasksByBinding(ctx context.Context, sourceID, bindingID string) error {
+	return r.ormDB(ctx).
+		Where("source_id = ? AND binding_id = ?", sourceID, bindingID).
+		Delete(&ormParseTask{}).Error
+}

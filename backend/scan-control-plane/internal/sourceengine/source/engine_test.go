@@ -1855,15 +1855,16 @@ func (c *sourceSpyConnector) MapObject(context.Context, connector.RawObject) (co
 }
 
 type sourceCoreSpy struct {
-	createdDatasets []string
-	deletedDatasets []string
-	createdFolders  []string
-	deletedFolders  []string
-	datasetRequests []coreclient.CreateDatasetRequest
-	folderRequests  []coreclient.CreateBindingRootDocumentRequest
-	datasetDeletes  []coreclient.DeleteDatasetRequest
-	deleteRequests  []coreclient.DeleteDocumentRequest
-	batchDeletes    []coreclient.BatchDeleteDocumentsRequest
+	createdDatasets  []string
+	deletedDatasets  []string
+	createdFolders   []string
+	deletedFolders   []string
+	datasetRequests  []coreclient.CreateDatasetRequest
+	folderRequests   []coreclient.CreateBindingRootDocumentRequest
+	datasetDeletes   []coreclient.DeleteDatasetRequest
+	datasetUpdates   []coreclient.UpdateDatasetRequest
+	deleteRequests   []coreclient.DeleteDocumentRequest
+	batchDeletes     []coreclient.BatchDeleteDocumentsRequest
 }
 
 func (c *sourceCoreSpy) CreateDataset(_ context.Context, req coreclient.CreateDatasetRequest) (coreclient.CreateDatasetResponse, error) {
@@ -1876,6 +1877,11 @@ func (c *sourceCoreSpy) CreateDataset(_ context.Context, req coreclient.CreateDa
 func (c *sourceCoreSpy) DeleteDataset(_ context.Context, req coreclient.DeleteDatasetRequest) error {
 	c.deletedDatasets = append(c.deletedDatasets, req.DatasetID)
 	c.datasetDeletes = append(c.datasetDeletes, req)
+	return nil
+}
+
+func (c *sourceCoreSpy) UpdateDataset(_ context.Context, req coreclient.UpdateDatasetRequest) error {
+	c.datasetUpdates = append(c.datasetUpdates, req)
 	return nil
 }
 
@@ -1982,6 +1988,20 @@ func (r *sourceEngineRepoStub) GetSourceByDatasetID(_ context.Context, datasetID
 	}
 	return store.Source{}, store.NewStoreError(store.ErrCodeSourceNotFound, "source not found")
 }
+func (r *sourceEngineRepoStub) ListSourcesByDatasetIDs(_ context.Context, datasetIDs []string) ([]store.Source, error) {
+	idSet := make(map[string]struct{}, len(datasetIDs))
+	for _, id := range datasetIDs {
+		idSet[id] = struct{}{}
+	}
+	var result []store.Source
+	for _, src := range r.sources {
+		if _, ok := idSet[src.DatasetID]; ok && src.DeletedAt == nil {
+			result = append(result, src)
+		}
+	}
+	return result, nil
+}
+
 
 func (r *sourceEngineRepoStub) UpdateSource(context.Context, store.Source) error {
 	panic("sourceEngineRepoStub.UpdateSource is not used by these tests")
@@ -2194,6 +2214,19 @@ func operationKey(callerID, requestID string) string {
 	return callerID + "\x00" + requestID
 }
 
+
+func (r *sourceEngineRepoStub) UpdateBindingChatEnabled(_ context.Context, bindingID string, chatEnabled bool) error {
+	for sourceID, bindings := range r.bindings {
+		for i := range bindings {
+			if bindings[i].BindingID == bindingID {
+				bindings[i].ChatEnabled = chatEnabled
+				r.bindings[sourceID] = bindings
+				return nil
+			}
+		}
+	}
+	return store.NewStoreError(store.ErrCodeBindingNotFound, "binding not found")
+}
 var _ SourceRepository = (*sourceEngineRepoStub)(nil)
 var _ coreclient.ResourceClient = (*sourceCoreSpy)(nil)
 var _ connector.SourceConnector = (*sourceSpyConnector)(nil)

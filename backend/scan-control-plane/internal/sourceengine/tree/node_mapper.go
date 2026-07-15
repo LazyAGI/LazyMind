@@ -431,6 +431,8 @@ func updateTypeForState(sourceState string) string {
 		return "deleted"
 	case "OUT_OF_SCOPE":
 		return "cleanup"
+	case "PENDING_DELETION":
+		return "cleanup"
 	default:
 		return "unchanged"
 	}

@@ -884,4 +884,59 @@ func documentState(objectKey, sourceState string, selectable bool, now time.Time
 	}
 }
 
+func (s *plannerStore) ListDocumentsByBinding(_ context.Context, sourceID, bindingID string) ([]store.Document, error) {
+	out := make([]store.Document, 0, len(s.docs))
+	for _, doc := range s.docs {
+		if doc.SourceID == sourceID && doc.BindingID == bindingID {
+			out = append(out, doc)
+		}
+	}
+	return out, nil
+}
+
+func (s *plannerStore) DeleteObjectsByBinding(_ context.Context, sourceID, bindingID string) error {
+	for key, obj := range s.objects {
+		if obj.SourceID == sourceID && obj.BindingID == bindingID {
+			delete(s.objects, key)
+		}
+	}
+	return nil
+}
+
+func (s *plannerStore) DeleteDocumentStatesByBinding(_ context.Context, sourceID, bindingID string) error {
+	for key, st := range s.states {
+		if st.SourceID == sourceID && st.BindingID == bindingID {
+			delete(s.states, key)
+		}
+	}
+	return nil
+}
+
+func (s *plannerStore) DeleteParseTasksByBinding(_ context.Context, sourceID, bindingID string) error {
+	for key, task := range s.tasks {
+		if task.SourceID == sourceID && task.BindingID == bindingID {
+			delete(s.tasks, key)
+		}
+	}
+	return nil
+}
+
+func (s *plannerStore) DeleteBinding(_ context.Context, sourceID, bindingID string, deletedAt time.Time) (store.BindingDeleteResult, error) {
+	return store.BindingDeleteResult{}, nil
+}
+
+func (s *plannerStore) ListSyncRuns(_ context.Context, sourceID, bindingID string) ([]store.SyncRun, error) {
+	return nil, nil
+}
+
+func (s *plannerStore) ListDocumentStatesBySourceState(_ context.Context, sourceID string, sourceState string) ([]store.DocumentState, error) {
+	out := make([]store.DocumentState, 0, len(s.states))
+	for _, st := range s.states {
+		if st.SourceID == sourceID && st.SourceState == sourceState {
+			out = append(out, st)
+		}
+	}
+	return out, nil
+}
+
 var _ Store = (*plannerStore)(nil)

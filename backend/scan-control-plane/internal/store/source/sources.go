@@ -143,6 +143,25 @@ func (r *SQLRepository) GetSourceByDatasetID(ctx context.Context, datasetID stri
 	return sourceFromORM(source), nil
 }
 
+func (r *SQLRepository) ListSourcesByDatasetIDs(ctx context.Context, datasetIDs []string) ([]Source, error) {
+	db := r.ormDB(ctx)
+	if db == nil {
+		return nil, NewStoreError(ErrCodeInternal, "orm repository is not initialized")
+	}
+	if len(datasetIDs) == 0 {
+		return nil, nil
+	}
+	var rows []ormSource
+	if err := db.Where("dataset_id IN ? AND deleted_at IS NULL", datasetIDs).Find(&rows).Error; err != nil {
+		return nil, mapORMNotFound(err, ErrCodeSourceNotFound, "source not found")
+	}
+	sources := make([]Source, 0, len(rows))
+	for _, row := range rows {
+		sources = append(sources, sourceFromORM(row))
+	}
+	return sources, nil
+}
+
 func (r *SQLRepository) ListSourceAccess(ctx context.Context, tenantID string) ([]Source, error) {
 	db := r.ormDB(ctx)
 	if db == nil {
@@ -183,6 +202,19 @@ func (r *SQLRepository) UpdateSourceWithBindings(ctx context.Context, mutation S
 		}
 		if err := releaseCurrentBindingTargets(ctx, tx, mutation, mutation.Now); err != nil {
 			return err
+		}
+		// 处理待清理的 binding：状态改为 PENDING_CLEANUP，文件标记 PENDING_DELETION
+		for _, item := range mutation.PendingCleanupBindings {
+			if err := tx.Model(&ormBinding{}).Where("binding_id = ?", item.BindingID).Update("status", "PENDING_CLEANUP").Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&ormDocumentState{}).Where("source_id = ? AND binding_id = ?", item.SourceID, item.BindingID).Updates(map[string]any{
+				"source_state":   "PENDING_DELETION",
+				"pending_action": "DELETE",
+				"updated_at":     mutation.Now,
+			}).Error; err != nil {
+				return err
+			}
 		}
 		for _, item := range mutation.DeleteBindings {
 			binding, cleanup, err := r.softDeleteBindingTx(ctx, tx, item.SourceID, item.BindingID, item.DeletedAt)

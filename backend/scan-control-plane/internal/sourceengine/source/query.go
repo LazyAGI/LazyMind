@@ -179,7 +179,14 @@ func (e *DefaultEngine) GetSource(ctx context.Context, req GetSourceRequest) (Ge
 		if err != nil {
 			return GetSourceResponse{}, mapStoreError(err)
 		}
-		resp.Bindings = bindingsToResponse(bindings)
+		// 过滤掉已软删除的 binding（DELETING 状态）
+		activeBindings := make([]store.Binding, 0, len(bindings))
+		for _, b := range bindings {
+			if b.Status != BindingStatusDeleting {
+				activeBindings = append(activeBindings, b)
+			}
+		}
+		resp.Bindings = bindingsToResponse(activeBindings)
 	}
 	if req.IncludeSummary {
 		summary, err := e.GetSourceSummary(ctx, SourceSummaryRequest{CallerID: req.CallerID, SourceID: req.SourceID})
@@ -198,6 +205,23 @@ func (e *DefaultEngine) GetSourceByDatasetID(ctx context.Context, datasetID stri
 	}
 	return GetSourceResponse{Source: sourceToResponse(src)}, nil
 }
+func (e *DefaultEngine) BatchGetSourcesByDatasetIDs(ctx context.Context, datasetIDs []string) (map[string]bool, error) {
+	sources, err := e.repo.ListSourcesByDatasetIDs(ctx, datasetIDs)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	sourceMap := make(map[string]bool, len(datasetIDs))
+	for _, id := range datasetIDs {
+		sourceMap[id] = false
+	}
+	for _, src := range sources {
+		if src.DatasetID != "" {
+			sourceMap[src.DatasetID] = true
+		}
+	}
+	return sourceMap, nil
+}
+
 
 func (e *DefaultEngine) TriggerSourceSync(ctx context.Context, req TriggerSourceSyncRequest) (TriggerSourceSyncResponse, error) {
 	if req.SourceID == "" {

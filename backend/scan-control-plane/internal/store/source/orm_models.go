@@ -40,6 +40,7 @@ type ormBinding struct {
 	NextSyncAt             *time.Time
 	IncludeExtensions      JSON       `gorm:"column:include_extensions_json;type:jsonb"`
 	ExcludeExtensions      JSON       `gorm:"column:exclude_extensions_json;type:jsonb"`
+	ChatEnabled            bool   `gorm:"column:chat_enabled"`
 	Status                 string     `gorm:"column:status"`
 	LastError              JSON       `gorm:"column:last_error;type:jsonb"`
 	DeletedAt              *time.Time `gorm:"column:deleted_at"`

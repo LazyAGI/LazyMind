@@ -484,3 +484,28 @@ func scanDocumentWithStateRows(row scanner) (DocumentWithState, error) {
 	}
 	return item, nil
 }
+
+
+// ListDocumentStatesBySourceState 查询指定 SourceState 的所有文档状态（跨 binding）。
+func (r *SQLRepository) ListDocumentStatesBySourceState(ctx context.Context, sourceID string, sourceState string) ([]DocumentState, error) {
+	var rows []ormDocumentState
+	err := r.ormDB(ctx).
+		Where("source_id = ? AND source_state = ?", sourceID, sourceState).
+		Order("object_key").
+		Find(&rows).Error
+	if err != nil {
+		return nil, mapSQLConstraint(err)
+	}
+	states := make([]DocumentState, 0, len(rows))
+	for _, row := range rows {
+		states = append(states, documentStateFromORM(row))
+	}
+	return states, nil
+}
+
+// BatchUpdateDocumentStatesByBinding 批量更新某个 binding 下所有 DocumentState 的指定字段。
+func (r *SQLRepository) BatchUpdateDocumentStatesByBinding(ctx context.Context, sourceID, bindingID string, values map[string]any) error {
+	return r.ormDB(ctx).Model(&ormDocumentState{}).
+		Where("source_id = ? AND binding_id = ?", sourceID, bindingID).
+		Updates(values).Error
+}

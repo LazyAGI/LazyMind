@@ -42,11 +42,19 @@ type SourceListRecord struct {
 }
 
 type SourceUpdateMutation struct {
-	Source         Source
-	CreateBindings []BindingCreateMutation
-	UpdateBindings []BindingUpdateMutation
-	DeleteBindings []BindingDeleteMutation
-	Now            time.Time
+	Source                Source
+	CreateBindings        []BindingCreateMutation
+	UpdateBindings        []BindingUpdateMutation
+	DeleteBindings        []BindingDeleteMutation
+	PendingCleanupBindings []BindingPendingCleanupMutation
+	Now                   time.Time
+}
+
+// BindingPendingCleanupMutation 标记待清理的 binding，包含其 ID 和根文件夹 ID。
+type BindingPendingCleanupMutation struct {
+	SourceID             string
+	BindingID            string
+	CoreParentDocumentID string
 }
 
 type SourceUpdateResult struct {

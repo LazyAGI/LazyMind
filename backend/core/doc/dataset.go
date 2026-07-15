@@ -479,6 +479,11 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	orderBy := strings.TrimSpace(q.Get("order_by"))
 	keyword := strings.TrimSpace(q.Get("keyword"))
 	rawTags := q["tags"]
+	sourceFilter := strings.ToLower(strings.TrimSpace(q.Get("source")))
+	if sourceFilter != "cloud" && sourceFilter != "manual" {
+		sourceFilter = ""
+	}
+
 
 	pageSize := 20
 	if pageSizeStr != "" {
@@ -540,8 +545,12 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	page := make([]orm.Dataset, 0, pageSize)
 	scanOffset := 0
 	hasMoreRows := true
+	candidates := make([]orm.Dataset, 0, pageSize)
+	pageSourceMap := make(map[string]bool, pageSize)
 
-	for hasMoreRows {
+
+
+	for hasMoreRows && len(page) < pageSize {
 		var rows []orm.Dataset
 		query := base.
 			Select(`id, kb_id, create_user_id, create_user_name, display_name, "desc", cover_image, created_at, updated_at, ext, type, share_type, dataset_state`).
@@ -559,7 +568,6 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		if len(rows) == 0 {
 			break
 		}
-
 		for _, ds := range rows {
 			perms := datasetACLForUserWithGroups(&ds, userID, groupIDs)
 			if len(perms) == 0 {
@@ -571,12 +579,35 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 			if len(wantTags) > 0 && !containsAll(parseDatasetTags(ds.Ext), wantTags) {
 				continue
 			}
-			if total >= offset && len(page) < pageSize {
-				page = append(page, ds)
-			}
-			total++
+			candidates = append(candidates, ds)
 		}
+
+		if len(candidates) > 0 {
+			candidateIDs := make([]string, len(candidates))
+			for i, c := range candidates {
+				candidateIDs[i] = c.ID
+			}
+			sourceMap := batchCheckDatasetsHaveSource(r.Context(), candidateIDs)
+
+			for _, c := range candidates {
+				if sourceFilter == "cloud" && !sourceMap[c.ID] {
+					continue
+				}
+				if sourceFilter == "manual" && sourceMap[c.ID] {
+					continue
+				}
+				if total >= offset && len(page) < pageSize {
+					page = append(page, c)
+					pageSourceMap[c.ID] = sourceMap[c.ID]
+				}
+				total++
+			}
+
+			candidates = candidates[:0]
+		}
+
 	}
+
 
 	end := offset + len(page)
 
@@ -588,6 +619,7 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	statsMap := calcDatasetStatsBatch(r.Context(), dsIDs)
 	parserCache := map[string][]ParserConfig{}
 
+
 	for _, ds := range page {
 		datasetACL := datasetACLForUserWithGroups(&ds, userID, groupIDs)
 		algo := parseDatasetAlgo(ds.Ext)
@@ -598,6 +630,8 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		}
 		parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), liveParsers)
 		stats := statsMap[ds.ID]
+		createdByDataSource := pageSourceMap[ds.ID]
+
 		out = append(out, Dataset{
 			Name:           "datasets/" + ds.ID,
 			DatasetID:      ds.ID,
@@ -621,6 +655,7 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 			Type:           datasetTypeToPB(ds.Type),
 			Tags:           parseDatasetTags(ds.Ext),
 			DefaultDataset: isDefaultDatasetForUser(r.Context(), userID, ds.ID),
+			CreatedByDataSource: &createdByDataSource,
 		})
 	}
 
@@ -799,6 +834,24 @@ func isDatasetCreatedByDataSource(ctx context.Context, datasetID string) bool {
 	}
 	return strings.TrimSpace(resp.Source.SourceID) != ""
 }
+func batchCheckDatasetsHaveSource(ctx context.Context, datasetIDs []string) map[string]bool {
+	if len(datasetIDs) == 0 {
+		return nil
+	}
+	scanURL := common.JoinURL(common.ScanControlPlaneEndpoint(), "/api/scan/internal/sources/by-datasets")
+	var resp struct {
+		SourceMap map[string]bool `json:"source_map"`
+	}
+	if err := common.ApiPost(ctx, scanURL, map[string]any{"dataset_ids": datasetIDs}, nil, &resp, 5*time.Second); err != nil {
+		result := make(map[string]bool, len(datasetIDs))
+		for _, id := range datasetIDs {
+			result[id] = false
+		}
+		return result
+	}
+	return resp.SourceMap
+}
+
 
 func algoDatasetDisplayName(userID, displayName string) string {
 	return fmt.Sprintf("user@%s@%s", strings.TrimSpace(userID), strings.TrimSpace(displayName))
@@ -1049,7 +1102,9 @@ func GetDataset(w http.ResponseWriter, r *http.Request) {
 	parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), fetchParsersByAlgoID(r.Context(), algo.AlgoID))
 	stats := calcDatasetStats(r.Context(), ds.ID)
 	createdByDataSource := isDatasetCreatedByDataSource(r.Context(), ds.ID)
+
 	common.ReplyJSON(w, Dataset{
+
 		Name:                "datasets/" + ds.ID,
 		DatasetID:           ds.ID,
 		DisplayName:         ds.DisplayName,
@@ -1381,6 +1436,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	datasetACL := datasetACLForUser(&ds, userID)
 	stats := calcDatasetStats(r.Context(), ds.ID)
 	createdByDataSource := isDatasetCreatedByDataSource(r.Context(), ds.ID)
+
 	common.ReplyJSON(w, Dataset{
 		Name:                "datasets/" + ds.ID,
 		DatasetID:           ds.ID,

@@ -700,6 +700,9 @@ services:
       - ./algorithm/lazymind:/opt/lazymind
       - ./plugins:/app/plugins:ro
       - ./docs/plugin-format.md:/app/docs/plugin-format.md:ro
+      - type: bind
+        source: *file-watcher-watch-host-dir
+        target: *file-watcher-watch-host-dir
     healthcheck:
       test: ['CMD-SHELL', 'curl -sf http://localhost:8046/health || exit 1']
       interval: 10s

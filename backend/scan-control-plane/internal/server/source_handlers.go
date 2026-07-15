@@ -143,6 +143,26 @@ func (h *Handler) getSourceByDataset(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+func (h *Handler) batchGetSourcesByDatasetIDs(w http.ResponseWriter, r *http.Request) {
+	if h.sources == nil {
+		writeError(w, missingDependency("source engine"))
+		return
+	}
+	var req struct {
+		DatasetIDs []string `json:"dataset_ids"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, invalidJSON(err))
+		return
+	}
+	result, err := h.sources.BatchGetSourcesByDatasetIDs(r.Context(), req.DatasetIDs)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"source_map": result})
+}
+
 
 func (h *Handler) triggerSourceSync(w http.ResponseWriter, r *http.Request) {
 	if h.sources == nil {
@@ -276,6 +296,47 @@ func (h *Handler) deleteSourceByDataset(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) appendSource(w http.ResponseWriter, r *http.Request) {
+	if h.sources == nil {
+		writeError(w, missingDependency("source engine"))
+		return
+	}
+	actor, err := actorFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	sourceID := r.PathValue("source_id")
+	if err := h.access.CanWriteSource(r.Context(), actor, sourceID); err != nil {
+		writeError(w, err)
+		return
+	}
+	var req sourceengine.AppendSourceRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, invalidJSON(err))
+		return
+	}
+	req.CallerID = actor.UserID
+	req.TenantID = actor.TenantID
+	req.SourceID = sourceID
+
+	if err := h.checkBindingTargetInputs(r, actor, sourceID, req.Bindings); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := h.requireLocalSourceAdmin(r, actor, req.Bindings, nil); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	resp, err := h.sources.AppendSource(r.Context(), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (h *Handler) createSourceBinding(w http.ResponseWriter, r *http.Request) {
@@ -442,3 +503,4 @@ func boolQueryDefault(r *http.Request, key string, fallback bool) bool {
 	}
 	return parsed
 }
+

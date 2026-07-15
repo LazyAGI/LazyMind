@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/lazymind/scan_control_plane/internal/coreclient"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
@@ -53,29 +54,40 @@ func (e *DefaultEngine) UpdateSource(ctx context.Context, callerID, sourceID str
 		UpdatedBindingIDs: changes.updated,
 		RemovedBindingIDs: changes.removed,
 	}
-	result.JobIDs, result.JobErrors = e.runPostCommitBindingActions(ctx, changes)
+	// 延迟处理：不再立即执行后置动作，等 generateParseTasks 统一处理
 	bindings, err := e.repo.ListBindings(ctx, sourceID)
 	if err != nil {
 		return UpdateSourceResponse{}, mapStoreError(err)
 	}
 	result.Bindings = bindingsToResponse(bindings)
+
+	// Sync display_name to core dataset when source name changes
+	if req.Name != nil {
+		_ = e.core.UpdateDataset(ctx, coreclient.UpdateDatasetRequest{
+			DatasetID:   src.DatasetID,
+			DisplayName: src.Name,
+			UserID:      callerID,
+		})
+	}
+
 	return result, nil
 }
 
 type bindingListChanges struct {
-	callerID        string
-	datasetID       string
-	tenantID        string
-	created         []string
-	updated         []string
-	removed         []string
-	createdBindings []preparedBinding
-	updatedBindings []store.BindingUpdateMutation
-	deletedBindings []store.BindingDeleteMutation
-	startWatchers   []store.Binding
-	stopWatchers    []store.Binding
-	reloadWatchers  []store.Binding
-	oldFolderIDs    []string
+	callerID               string
+	datasetID              string
+	tenantID               string
+	created                []string
+	updated                []string
+	removed                []string
+	createdBindings        []preparedBinding
+	updatedBindings        []store.BindingUpdateMutation
+	deletedBindings        []store.BindingDeleteMutation
+	pendingCleanupBindings []store.BindingPendingCleanupMutation
+	startWatchers          []store.Binding
+	stopWatchers           []store.Binding
+	reloadWatchers         []store.Binding
+	oldFolderIDs           []string
 }
 
 func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string, src store.Source, inputs []BindingInput, now time.Time) (bindingListChanges, error) {
@@ -127,11 +139,11 @@ func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string,
 			continue
 		}
 		changes.removed = append(changes.removed, binding.BindingID)
-		changes.deletedBindings = append(changes.deletedBindings, store.BindingDeleteMutation{SourceID: binding.SourceID, BindingID: binding.BindingID, DeletedAt: now})
-		if localWatcherStoppable(binding) {
-			changes.stopWatchers = append(changes.stopWatchers, binding)
-		}
-		changes.oldFolderIDs = append(changes.oldFolderIDs, binding.CoreParentDocumentID)
+		changes.pendingCleanupBindings = append(changes.pendingCleanupBindings, store.BindingPendingCleanupMutation{
+			SourceID:             binding.SourceID,
+			BindingID:            binding.BindingID,
+			CoreParentDocumentID: binding.CoreParentDocumentID,
+		})
 	}
 	if err := ensureFinalTargetsUnique(existing, changes); err != nil {
 		compensatePreparedMutations(ctx, e, changes)
@@ -141,7 +153,7 @@ func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string,
 }
 
 func (c bindingListChanges) mutation(src store.Source, now time.Time) store.SourceUpdateMutation {
-	mutation := store.SourceUpdateMutation{Source: src, UpdateBindings: c.updatedBindings, DeleteBindings: c.deletedBindings, Now: now}
+	mutation := store.SourceUpdateMutation{Source: src, UpdateBindings: c.updatedBindings, DeleteBindings: c.deletedBindings, PendingCleanupBindings: c.pendingCleanupBindings, Now: now}
 	for _, item := range c.createdBindings {
 		mutation.CreateBindings = append(mutation.CreateBindings, store.BindingCreateMutation{Binding: item.binding, Checkpoint: item.checkpoint})
 	}
