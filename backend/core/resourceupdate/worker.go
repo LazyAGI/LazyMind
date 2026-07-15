@@ -12,6 +12,7 @@ import (
 	"lazymind/core/algo"
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
+	"lazymind/core/state"
 )
 
 type Worker struct {
@@ -21,12 +22,17 @@ type Worker struct {
 	clock         clockFunc
 	loadLLMConfig func(context.Context, *gorm.DB, string) (map[string]any, error)
 	callers       reviewCallers
+	stateStore    state.Store
 }
 
-func NewWorker(db *gorm.DB, cfg Config, workerID string) *Worker {
+func NewWorker(db *gorm.DB, cfg Config, workerID string, stateStores ...state.Store) *Worker {
 	cfg = normalizeConfig(cfg)
 	if strings.TrimSpace(workerID) == "" {
 		workerID = defaultWorkerID("resourceupdate-worker")
+	}
+	var stateStore state.Store
+	if len(stateStores) > 0 {
+		stateStore = stateStores[0]
 	}
 	return &Worker{
 		db:            db,
@@ -38,6 +44,7 @@ func NewWorker(db *gorm.DB, cfg Config, workerID string) *Worker {
 			Skill:  algo.ReviewSkill,
 			Memory: algo.ReviewMemory,
 		},
+		stateStore: stateStore,
 	}
 }
 
@@ -75,6 +82,10 @@ func (w *Worker) RunOnce(ctx context.Context) (WorkerRunResult, error) {
 		outcome := w.dispatch(ctx, task)
 		if err := w.finishTask(ctx, task, outcome); err != nil {
 			return result, err
+		}
+		if outcome.Deferred {
+			result.Retried++
+			continue
 		}
 		switch outcome.Status {
 		case orm.ResourceUpdateTaskStatusDone:
@@ -163,6 +174,9 @@ func (w *Worker) claimPending(ctx context.Context, now time.Time) ([]orm.Resourc
 }
 
 func (w *Worker) dispatch(ctx context.Context, task orm.ResourceUpdateTask) taskOutcome {
+	if task.TaskType == orm.ResourceUpdateTaskTypeAutoCommitSkillDraft {
+		return w.handleAutoCommitSkillDraft(ctx, task)
+	}
 	if task.TaskType == orm.ResourceUpdateTaskTypeAutoApplyReview {
 		return w.handleAutoApplyReview(ctx, task)
 	}
@@ -191,6 +205,25 @@ func (w *Worker) dispatch(ctx context.Context, task orm.ResourceUpdateTask) task
 
 func (w *Worker) finishTask(ctx context.Context, task orm.ResourceUpdateTask, outcome taskOutcome) error {
 	now := w.clock().UTC()
+	if outcome.Deferred {
+		retryAfter := outcome.RetryAfter
+		if retryAfter <= 0 {
+			retryAfter = time.Minute
+		}
+		return w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
+			Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
+			Updates(map[string]any{
+				"status":        orm.ResourceUpdateTaskStatusPending,
+				"error_code":    outcome.ErrorCode,
+				"error_message": outcome.ErrorMessage,
+				"attempt_count": gorm.Expr("CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END"),
+				"next_run_at":   now.Add(retryAfter),
+				"locked_by":     "",
+				"locked_until":  nil,
+				"started_at":    nil,
+				"updated_at":    now,
+			}).Error
+	}
 	if outcome.Status == orm.ResourceUpdateTaskStatusDone || outcome.Status == orm.ResourceUpdateTaskStatusSkipped {
 		updates := map[string]any{
 			"status":        outcome.Status,
@@ -292,6 +325,16 @@ func retryableOutcome(code string, err error) taskOutcome {
 		Status:       orm.ResourceUpdateTaskStatusPending,
 		ErrorCode:    code,
 		ErrorMessage: message,
+	}
+}
+
+func deferredOutcome(code, message string, retryAfter time.Duration) taskOutcome {
+	return taskOutcome{
+		Status:       orm.ResourceUpdateTaskStatusPending,
+		ErrorCode:    code,
+		ErrorMessage: message,
+		Deferred:     true,
+		RetryAfter:   retryAfter,
 	}
 }
 

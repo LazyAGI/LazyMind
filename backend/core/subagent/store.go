@@ -137,6 +137,21 @@ func UpdateStatus(ctx context.Context, db *gorm.DB, taskID, status string) error
 		}).Error
 }
 
+// AcceptTaskStart applies a runner's task_start event only while the task is
+// still launchable. Explicit resume uses UpdateStatus above; a late start event
+// must never revive a task that Stop already made terminal.
+func AcceptTaskStart(ctx context.Context, db *gorm.DB, taskID string) (bool, error) {
+	now := time.Now().UTC()
+	result := db.WithContext(ctx).Model(&orm.SubAgentTask{}).
+		Where("id = ? AND status IN ?", taskID, []string{StatusPending, StatusRunning}).
+		Updates(map[string]any{
+			"status":         StatusRunning,
+			"last_heartbeat": now,
+			"updated_at":     now,
+		})
+	return result.RowsAffected > 0, result.Error
+}
+
 // UpdateProgress writes progress percentage / phase / eta and refreshes heartbeat.
 func UpdateProgress(ctx context.Context, db *gorm.DB, taskID string, pct int, phase string, estimatedSec int) error {
 	now := time.Now().UTC()
@@ -152,12 +167,20 @@ func UpdateProgress(ctx context.Context, db *gorm.DB, taskID string, pct int, ph
 	return db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("id = ?", taskID).Updates(updates).Error
 }
 
-// UpdateFinalStatus marks a terminal status (succeeded/failed/interrupted/canceled) with optional summary.
-// "failed" is never allowed to overwrite an already-terminal interrupted or succeeded status: a race
-// between StopActivePluginSession (which writes interrupted) and the SSE-EOF handler (which calls
-// routeError → UpdateFinalStatus with failed) would otherwise silently downgrade interrupted → failed,
-// breaking the checkpoint-resume path and causing the frontend to display "failed" after a user stop.
+// UpdateFinalStatus marks a terminal status with optional summary. Terminal state
+// is first-writer-wins so late runner frames cannot overwrite an explicit stop.
 func UpdateFinalStatus(ctx context.Context, db *gorm.DB, taskID, status, summary string) error {
+	_, err := AcceptFinalStatus(ctx, db, taskID, status, summary)
+	return err
+}
+
+// AcceptFinalStatus makes terminal task state first-writer-wins. This prevents
+// a delayed succeeded/error frame from overwriting an explicit user stop.
+func AcceptFinalStatus(
+	ctx context.Context,
+	db *gorm.DB,
+	taskID, status, summary string,
+) (bool, error) {
 	now := time.Now().UTC()
 	updates := map[string]any{
 		"status":         status,
@@ -168,12 +191,11 @@ func UpdateFinalStatus(ctx context.Context, db *gorm.DB, taskID, status, summary
 	if status == StatusSucceeded {
 		updates["progress_pct"] = 100
 	}
-	q := db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("id = ?", taskID)
-	if status == StatusFailed {
-		// Do not downgrade a terminal interrupted/succeeded status to failed.
-		q = q.Where("status NOT IN ?", []string{StatusInterrupted, StatusSucceeded})
-	}
-	return q.Updates(updates).Error
+	terminal := []string{StatusSucceeded, StatusFailed, StatusInterrupted, StatusCanceled}
+	result := db.WithContext(ctx).Model(&orm.SubAgentTask{}).
+		Where("id = ? AND (status NOT IN ? OR status = ?)", taskID, terminal, status).
+		Updates(updates)
+	return result.RowsAffected > 0, result.Error
 }
 
 // SaveArtifact appends one artifact row for a task.

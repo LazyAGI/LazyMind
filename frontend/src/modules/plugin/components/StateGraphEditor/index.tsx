@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, message, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
@@ -13,7 +13,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import type { GraphModel } from './core/model';
-import { createEmptyModel } from './core/model';
+import { createEmptyModel, expressionMaterials, VIRTUAL_START } from './core/model';
 import { parseYaml } from './core/parser';
 import { serializeModel } from './core/serializer';
 import { validateStateGraph } from './core/validator';
@@ -74,6 +74,8 @@ interface Props {
   topbarActions?: React.ReactNode;
   /** Called automatically when any file changes (auto-save). */
   onSave?: (payload: SavePayload) => Promise<void>;
+  /** Runs Go's authoritative editor-profile validation after a successful save. */
+  onValidate?: () => Promise<ValidationError[]>;
   onClose?: () => void;
   /** When false, the empty-canvas hint is suppressed (user already has experience). */
   showEmptyHint?: boolean;
@@ -107,6 +109,28 @@ function parseScriptFiles(raw: string): Record<string, string> {
   return {};
 }
 
+function validationTargetNode(error: ValidationError, model: GraphModel): string | null {
+  if (error.nodeId && (error.nodeId === VIRTUAL_START || model.nodes.some((node) => node.id === error.nodeId))) {
+    return error.nodeId;
+  }
+  if (error.edgeKey) {
+    const source = error.edgeKey.split('->')[0];
+    if (source === VIRTUAL_START || model.nodes.some((node) => node.id === source)) return source;
+  }
+  if (error.materialId) {
+    const related = model.nodes.find((node) => {
+      const materials = [
+        ...node.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])]),
+        ...node.outputs.map((output) => output.material),
+        ...expressionMaterials(node.skipIf),
+      ];
+      return materials.includes(error.materialId!);
+    });
+    return related?.id ?? null;
+  }
+  return null;
+}
+
 /**
  * Build the initial GraphModel from state.yml + plugin.yaml.
  * Slots are always sourced from plugin.yaml (the single persistent store for slot definitions).
@@ -123,6 +147,7 @@ function initGraphModel(stateYaml: string | undefined, pluginYaml: string | unde
           id: s.id, type: s.type, label: s.label,
           cardinality: s.cardinality, ordered: s.ordered,
           allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+          external: s.external,
         };
       }
     }
@@ -139,6 +164,7 @@ export default function StateGraphEditor({
   topbarExtra,
   topbarActions,
   onSave,
+  onValidate,
   onClose,
   showEmptyHint = true,
   readonly = false,
@@ -175,14 +201,28 @@ export default function StateGraphEditor({
   const editorRootRef = useRef<HTMLDivElement>(null);
 
   // plugin.yaml model — must be initialized before GraphModel so we can back-fill slots.
-  const [pluginModel, setPluginModel] = useState<PluginModel>(() =>
-    initialPluginYaml ? (parsePluginYaml(initialPluginYaml) ?? createEmptyPluginModel()) : createEmptyPluginModel(),
-  );
+  const [pluginModel, setPluginModel] = useState<PluginModel>(() => {
+    const parsedPlugin = initialPluginYaml
+      ? (parsePluginYaml(initialPluginYaml) ?? createEmptyPluginModel())
+      : createEmptyPluginModel();
+    // state.yml is authoritative for the editable step list. Older/generated
+    // drafts can have a populated state machine but no plugin.yaml `steps`
+    // block; do not let the next auto-save serialize that omission back to disk.
+    const graph = initialStateYaml ? parseYaml(initialStateYaml) : null;
+    return graph
+      ? { ...parsedPlugin, steps: graph.nodes.map((node) => ({ id: node.id, label: node.label })) }
+      : parsedPlugin;
+  });
 
   // state.yml model — back-fill slots from plugin.yaml when state.yml has none (post-migration drafts).
   const modelRef = useRef<GraphModel>(initGraphModel(initialStateYaml, initialPluginYaml));
   const [model, setModelState] = useState<GraphModel>(modelRef.current);
   const [errors, setErrors] = useState<ValidationError[]>(() => validateStateGraph(modelRef.current));
+  const [authoritativeErrors, setAuthoritativeErrors] = useState<ValidationError[]>([]);
+  const displayErrors = useMemo(() => [
+    ...errors.filter((local) => !authoritativeErrors.some((server) => server.code === local.code)),
+    ...authoritativeErrors,
+  ], [errors, authoritativeErrors]);
 
   // scenario data
   const [scenarioData, setScenarioData] = useState<ScenarioData>(() =>
@@ -202,6 +242,33 @@ export default function StateGraphEditor({
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
+  const onValidateRef = useRef(onValidate);
+  useEffect(() => { onValidateRef.current = onValidate; }, [onValidate]);
+  const validationRequestRef = useRef(0);
+
+  const runAuthoritativeValidation = useCallback(async () => {
+    const validate = onValidateRef.current;
+    if (!validate) return;
+    const requestId = ++validationRequestRef.current;
+    try {
+      const nextErrors = await validate();
+      if (validationRequestRef.current === requestId) {
+        setAuthoritativeErrors(nextErrors);
+      }
+    } catch {
+      // A validation transport failure must not turn a successful save into a
+      // save failure or erase the last known diagnostics.
+    }
+  }, []);
+
+  // The Go validator is authoritative. Load its diagnostics as soon as an
+  // editable draft opens instead of waiting for the first user modification.
+  useEffect(() => {
+    if (!readonly) void runAuthoritativeValidation();
+    return () => {
+      validationRequestRef.current += 1;
+    };
+  }, [readonly, runAuthoritativeValidation]);
 
   const buildPayload = useCallback((m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string): SavePayload => ({
     stateYaml: serializeModel(m, false),
@@ -222,13 +289,14 @@ export default function StateGraphEditor({
     try {
       await fn(buildPayload(m, pm, sd, sc));
       setSaveStatus('saved');
+      await runAuthoritativeValidation();
     } catch (error: unknown) {
       setSaveStatus('error');
       if (!(error as { isSaveConflict?: boolean })?.isSaveConflict) {
         message.error(t('selfEvolutionRun.sgeSaveFailed'));
       }
     }
-  }, [buildPayload]);
+  }, [buildPayload, runAuthoritativeValidation]);
 
   const triggerAutoSave = useCallback((m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string) => {
     if (!onSaveRef.current) return;
@@ -279,16 +347,25 @@ export default function StateGraphEditor({
     setModelState(nextModel);
     setErrors(validateStateGraph(nextModel));
 
-    // Keep pluginModel.slots in sync with graphModel.slots.
+    // Keep pluginModel step metadata and slots in sync with GraphModel.
+    // A node rename must update plugin.yaml in the same auto-save; otherwise
+    // the server correctly reports that the renamed state step is undeclared.
     // ArtifactPanel writes new slots only into GraphModel; syncing back here
     // ensures handlePluginModelChange never overwrites them with stale data.
-    if (nextModel.slots !== prev.slots) {
+    const stepsChanged = nextModel.nodes !== prev.nodes;
+    const slotsChanged = nextModel.slots !== prev.slots;
+    if (stepsChanged || slotsChanged) {
       const syncedSlots: import('./core/pluginModel').PluginSlotDef[] = Object.values(nextModel.slots).map((s) => ({
         id: s.id, type: s.type as import('./core/pluginModel').PluginSlotDef['type'],
         label: s.label, cardinality: s.cardinality, ordered: s.ordered,
         allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+        external: s.external,
       }));
-      const syncedPm = { ...pluginModelRef.current, slots: syncedSlots };
+      const syncedPm = {
+        ...pluginModelRef.current,
+        steps: nextModel.nodes.map((node) => ({ id: node.id, label: node.label })),
+        slots: syncedSlots,
+      };
       pluginModelRef.current = syncedPm;
       setPluginModel(syncedPm);
     }
@@ -340,6 +417,7 @@ export default function StateGraphEditor({
         id: s.id, type: s.type, label: s.label,
         cardinality: s.cardinality, ordered: s.ordered,
         allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+        external: s.external,
       };
     }
     const updatedModel = { ...modelRef.current, slots };
@@ -366,6 +444,7 @@ export default function StateGraphEditor({
           id: s.id, type: s.type, label: s.label,
           cardinality: s.cardinality, ordered: s.ordered,
           allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+          external: s.external,
         };
       }
       const updatedModel: GraphModel = { ...modelRef.current, slots };
@@ -406,9 +485,10 @@ export default function StateGraphEditor({
   }, [handlePluginModelChange, handleScenarioChange, doSave]);
 
   const handleAddNode = useCallback(() => { canvasRef.current?.addNode(); }, []);
-  const handleSelectNode = useCallback(() => {
+  const handleSelectNode = useCallback((nodeId: string) => {
     setViewMode('preview');
     setContentTab('statemachine');
+    requestAnimationFrame(() => canvasRef.current?.focusNode(nodeId));
   }, []);
 
   // Switch to code mode, initialize activeCodeFile from current tab
@@ -542,7 +622,7 @@ export default function StateGraphEditor({
           {!readonly && contentTab === 'statemachine' && viewMode === 'preview' && (
             <>
               {onRepair && (
-                <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('statemachine', errors)}>
+                <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('statemachine', displayErrors)}>
                   {t('selfEvolutionRun.sgeAiRepairBtn')}
                 </Button>
               )}
@@ -589,7 +669,7 @@ export default function StateGraphEditor({
             <div className="sge-content">
               <GraphCanvas
                 model={model}
-                errors={errors}
+                errors={displayErrors}
                 onModelChange={readonly ? () => {} : updateModel}
                 pluginModel={pluginModel}
                 scenarioData={scenarioData}
@@ -619,7 +699,11 @@ export default function StateGraphEditor({
                 />
               )}
             </div>
-            <ValidationPanel errors={errors} onSelectNode={handleSelectNode} />
+            <ValidationPanel
+              errors={displayErrors}
+              getTargetNodeId={(error) => validationTargetNode(error, model)}
+              onSelectNode={handleSelectNode}
+            />
           </div>
         )}
 
@@ -708,7 +792,7 @@ export default function StateGraphEditor({
                     handleScriptsChange(activeCodeFile, text);
                   }
                 }}
-                errors={activeCodeFile === 'state.yml' ? errors : []}
+                errors={activeCodeFile === 'state.yml' ? displayErrors : []}
                 readOnly={readonly || activeCodeFile === 'layout.json'}
                 language={
                   activeCodeFile.endsWith('.md')

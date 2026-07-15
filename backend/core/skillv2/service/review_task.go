@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
-)
 
-const skillReviewStatsStatusRunning = "running"
+	"lazymind/core/common/orm"
+)
 
 func (s *SkillService) HasRunningSkillReviewTask(ctx context.Context, userID string) (bool, error) {
 	userID = strings.TrimSpace(userID)
@@ -23,7 +23,8 @@ func (s *SkillService) HasRunningSkillReviewTask(ctx context.Context, userID str
 	err := s.db.WithContext(ctx).
 		Table("skill_review_stats").
 		Select("id").
-		Where("userid = ? AND status = ?", userID, skillReviewStatsStatusRunning).
+		Where("userid = ?", userID).
+		Scopes(orm.SkillReviewStatsActiveScope).
 		Order("started_at DESC, id DESC").
 		Take(&row).Error
 	if err == nil {

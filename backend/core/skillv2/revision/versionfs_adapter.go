@@ -126,6 +126,8 @@ func (s versionStore) ResetDraftAfterCommit(ctx context.Context, tx *gorm.DB, sk
 	}
 	return tx.WithContext(ctx).Model(&skillDraftRow{}).Where("skill_id = ?", skillID).Updates(map[string]any{
 		"base_revision_id": revisionID,
+		"task_id":          "",
+		"conversation_id":  nil,
 		"version":          draft.Version,
 		"updated_at":       now,
 		"draft_updated_at": nil,
@@ -135,8 +137,12 @@ func (s versionStore) ResetDraftAfterCommit(ctx context.Context, tx *gorm.DB, sk
 func (s versionStore) ResetDraftAfterRollback(ctx context.Context, tx *gorm.DB, skillID string, revisionID string, targetEntries map[string]versionfs.Entry, draft versionfs.DraftState, userID string, now time.Time) error {
 	return tx.WithContext(ctx).Model(&skillDraftRow{}).Where("skill_id = ?", skillID).Updates(map[string]any{
 		"base_revision_id": revisionID,
+		"task_id":          "",
+		"conversation_id":  nil,
+		"updated_by":       nullableString(userID),
 		"version":          draft.Version,
 		"updated_at":       now,
+		"draft_updated_at": nil,
 	}).Error
 }
 
@@ -152,8 +158,8 @@ func (s versionStore) AfterCommit(ctx context.Context, tx *gorm.DB, revision ver
 	return skillsearch.RebuildSkillTx(ctx, tx, revision.ResourceID, revision.CreatedAt)
 }
 
-func (s versionStore) AfterRollback(ctx context.Context, tx *gorm.DB, revision versionfs.RevisionRecord, entries map[string]versionfs.Entry) error {
-	return skillsearch.RebuildSkillTx(ctx, tx, revision.ResourceID, revision.CreatedAt)
+func (s versionStore) AfterRollback(ctx context.Context, tx *gorm.DB, skillID string, revisionID string, entries map[string]versionfs.Entry, now time.Time) error {
+	return skillsearch.RebuildSkillTx(ctx, tx, skillID, now)
 }
 
 func (s versionStore) ListBlobHashes(ctx context.Context, tx *gorm.DB) ([]string, error) {

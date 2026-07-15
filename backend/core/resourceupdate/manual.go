@@ -12,6 +12,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/skillv2/taskguard"
 )
 
 const manualSkillReviewQuantityThreshold = 1
@@ -80,6 +81,17 @@ func createManualSkillReviewTask(ctx context.Context, db *gorm.DB, userID string
 	var outTask orm.ResourceUpdateTask
 	var outSummary skillReviewSummaryResponse
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		decision, err := taskguard.EvaluateSkillOperation(ctx, tx, nil, taskguard.SkillOperationRequest{
+			UserID:        userID,
+			Operation:     taskguard.TriggerSkillReview,
+			TriggerSource: "manual",
+		})
+		if err != nil {
+			return err
+		}
+		if !decision.Allowed {
+			return fmt.Errorf("%w: %s", errReviewConflict, decision.Message)
+		}
 		if task, _, err := findRunningSkillReviewTask(ctx, withUpdateLock(tx), userID); err != nil {
 			return err
 		} else if strings.TrimSpace(task.ID) != "" {
@@ -259,7 +271,7 @@ func findRunningSkillReviewTask(ctx context.Context, db *gorm.DB, userID string)
 }
 
 func newManualSkillGenerateTask(userID string, stats HistoryStats, start, end, now time.Time) (orm.ResourceUpdateTask, string, error) {
-	requestID := common.GenerateID()
+	requestID := newSkillReviewRequestID()
 	request := skillGenerateRequestJSON{
 		RequestID:                      requestID,
 		UserID:                         strings.TrimSpace(userID),

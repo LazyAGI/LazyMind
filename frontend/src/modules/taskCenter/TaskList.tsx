@@ -1,358 +1,113 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Badge, Button, Input, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
+import { Button, Input, Progress, Segmented, Select, Table, Tooltip, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, ReloadOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { debounce } from 'lodash';
-import { cancelTask, listTasks, removeTask } from './api';
-import type { StepInfo, Task } from './api';
+import { listTasks } from './api';
+import type { Task } from './api';
+import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
 import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 
 const PAGE_SIZE = 20;
 
-const STATUS_BADGE: Record<string, 'processing' | 'success' | 'error' | 'default' | 'warning'> = {
-  running: 'processing',
-  waiting: 'warning',
-  completed: 'success',
-  succeeded: 'success',
-  failed: 'error',
-  canceled: 'default',
-  interrupted: 'warning',
-};
-
-const STEP_STATUS_COLOR: Record<string, string> = {
-  completed: 'green',
-  succeeded: 'green',
-  running: 'blue',
-  failed: 'red',
-  canceled: 'default',
-};
-
-function StepsCell({ steps, onOpenGraph }: { steps: StepInfo[]; onOpenGraph?: () => void }) {
-  const { t } = useTranslation();
-  if (!steps || steps.length === 0) return <span style={{ color: '#bbb' }}>—</span>;
-
-  // Show up to 2 step tags inline; rest in tooltip.
-  const visibleSteps = steps.slice(0, 2);
-  const hasMore = steps.length > 2;
-
-  const tooltipContent = (
-    <div style={{ maxWidth: 340 }}>
-      {steps.map((s, i) => (
-        <div key={i} style={{ marginBottom: 6, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-          <Tag
-            color={STEP_STATUS_COLOR[s.status] ?? 'default'}
-            style={{ marginRight: 0, flexShrink: 0, fontSize: 11 }}
-          >
-            {s.status}
-          </Tag>
-          <span style={{ fontSize: 12, wordBreak: 'break-all' }}>{s.step_id}</span>
-          {s.artifact && (
-            <span style={{ fontSize: 11, color: '#aaa', marginLeft: 2, flexShrink: 0 }}>
-              [{s.artifact}]
-            </span>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-
-  return (
-    <Tooltip title={tooltipContent} overlayStyle={{ maxWidth: 380 }}>
-      <div
-        style={{
-          cursor: onOpenGraph ? 'pointer' : 'default',
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 4,
-        }}
-        onClick={onOpenGraph}
-        role={onOpenGraph ? 'button' : undefined}
-        tabIndex={onOpenGraph ? 0 : undefined}
-        onKeyDown={onOpenGraph ? (e) => e.key === 'Enter' && onOpenGraph() : undefined}
-        title={onOpenGraph ? t('taskCenter.viewWorkflowGraph') : undefined}
-      >
-        {visibleSteps.map((s, i) => (
-          <Tag
-            key={i}
-            color={STEP_STATUS_COLOR[s.status] ?? 'default'}
-            style={{ fontSize: 11, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-            title={s.step_id}
-          >
-            {s.step_id || s.status}
-          </Tag>
-        ))}
-        {hasMore && (
-          <Tag style={{ fontSize: 11 }}>+{steps.length - 2}</Tag>
-        )}
-      </div>
-    </Tooltip>
-  );
-}
-
-interface TaskListProps {
-  /** When provided, filters tasks by schedule_id (used when opened from ScheduleList). */
-  scheduleId?: string;
-}
-
-export default function TaskList({ scheduleId }: TaskListProps = {}) {
+export default function TaskList() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
+  const [statusCounts, setStatusCounts] = useState({ all: 0, waiting: 0, running: 0, succeeded: 0, failed: 0 });
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<string>('');
-  const [typeFilter, setTypeFilter] = useState<string>('');
+  const [status, setStatus] = useState('');
+  const [type, setType] = useState('');
   const [keyword, setKeyword] = useState('');
-  const [inputKeyword, setInputKeyword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [stateGraphTarget, setStateGraphTarget] = useState<{ sessionId: string } | null>(null);
+  const [selected, setSelected] = useState<Task | null>(null);
+  const [graphTask, setGraphTask] = useState<Task | null>(null);
 
-  const fetchTasks = useCallback(
-    async (p: number, status: string, kw: string, type: string) => {
-      setLoading(true);
-      try {
-        const resp = await listTasks({
-          status: status || undefined,
-          task_type: scheduleId ? 'scheduled' : (type || undefined),
-          keyword: kw || undefined,
-          page: p,
-          page_size: PAGE_SIZE,
-        });
-        setTasks(resp.items ?? []);
-        setTotal(resp.total ?? 0);
-      } catch {
-        message.error(t('taskCenter.loadError'));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [t, scheduleId],
-  );
-
-  useEffect(() => {
-    void fetchTasks(page, statusFilter, keyword, typeFilter);
-  }, [fetchTasks, page, statusFilter, keyword, typeFilter]);
-
-  const debouncedSetKeyword = useRef(
-    debounce((v: string) => {
-      setKeyword(v);
-      setPage(1);
-    }, 300),
-  ).current;
-
-  const handleInputChange = (v: string) => {
-    setInputKeyword(v);
-    debouncedSetKeyword(v);
-  };
-
-  const handleStop = (id: string) => {
-    Modal.confirm({
-      title: t('taskCenter.stopConfirmTitle'),
-      content: t('taskCenter.stopConfirmContent'),
-      okText: t('taskCenter.cancel'),
-      okButtonProps: { danger: true },
-      cancelText: t('common.cancel'),
-      onOk: async () => {
-        try {
-          await cancelTask(id);
-          message.success(t('taskCenter.cancelSuccess'));
-          void fetchTasks(page, statusFilter, keyword, typeFilter);
-        } catch {
-          message.error(t('taskCenter.cancelError'));
-        }
-      },
-    });
-  };
-
-  const handleRemove = async (id: string, status: string) => {
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      await removeTask(id);
-      if (status === 'running') {
-        message.info(t('taskCenter.removeRunningHint'));
-      } else {
-        message.success(t('taskCenter.taskRemoveSuccess'));
-      }
-      void fetchTasks(page, statusFilter, keyword, typeFilter);
+      const response = await listTasks({ status: status || undefined, task_type: type || undefined, keyword: keyword || undefined, page, page_size: PAGE_SIZE });
+      setTasks(response.items ?? []);
+      setTotal(response.total ?? 0);
+      if (response.status_counts) setStatusCounts(response.status_counts);
     } catch {
-      message.error(t('taskCenter.taskRemoveFailed'));
+      message.error(t('taskCenter.loadError'));
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [keyword, page, status, t, type]);
 
-  const handleOpenConversation = (conversationId: string) => {
-    sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
+  useEffect(() => { void load(); }, [load]);
+
+  const columns: ColumnsType<Task> = [
+    {
+      title: t('taskCenter.tasks'),
+      key: 'task',
+      width: 250,
+      render: (_, task) => {
+        const title = task.conversation_title || task.title || t('taskCenter.noTitle');
+        const description = task.title || task.schedule_name || t('taskCenter.noDescription');
+        return <div className='task-name-cell'><Tooltip title={title}><strong>{truncate(title, 6)}</strong></Tooltip><Tooltip title={description}><span>{truncate(description, 15)}</span></Tooltip></div>;
+      },
+    },
+    { title: t('taskCenter.taskType'), dataIndex: 'task_type', width: 140, render: (value) => <span className='source-tag'>{typeLabel(value, t)}</span> },
+    {
+      title: t('taskCenter.currentProgress'), key: 'progress', width: 190,
+      render: (_, task) => {
+        const done = task.steps?.filter((step) => ['completed', 'succeeded'].includes(step.status)).length ?? 0;
+        const count = task.steps?.length ?? 0;
+        return <div className='progress-cell'><span>{count ? `${done}/${count}` : '—'}</span><Progress percent={count ? Math.round(done / count * 100) : 0} showInfo={false} size='small' /></div>;
+      },
+    },
+    { title: t('taskCenter.statusCol'), dataIndex: 'status', width: 130, render: (value, task) => <StatusTag status={value} onClick={task.plugin_session_id ? () => setGraphTask(task) : undefined} /> },
+    { title: t('taskCenter.createdAt'), dataIndex: 'created_at', width: 190, render: formatDate },
+    { title: t('taskCenter.finishedAt'), dataIndex: 'finished_at', width: 190, render: formatDate },
+    { title: t('common.actions'), width: 110, render: (_, task) => <Button type='link' onClick={(event) => { event.stopPropagation(); setSelected(task); }}>{t('taskCenter.viewDetails')}</Button> },
+  ];
+
+  const statusOptions = [
+    { label: <span className='status-option status-all'><AppstoreOutlined /><span>{t('taskCenter.statusAll')}</span><b>{statusCounts.all}</b></span>, value: '' },
+    { label: <span className='status-option status-waiting'><ClockCircleOutlined /><span>{t('taskCenter.statusWaiting')}</span><b>{statusCounts.waiting}</b></span>, value: 'waiting' },
+    { label: <span className='status-option status-running'><SyncOutlined /><span>{t('taskCenter.statusRunning')}</span><b>{statusCounts.running}</b></span>, value: 'running' },
+    { label: <span className='status-option status-succeeded'><CheckCircleOutlined /><span>{t('taskCenter.statusCompleted')}</span><b>{statusCounts.succeeded}</b></span>, value: 'succeeded' },
+    { label: <span className='status-option status-failed'><CloseCircleOutlined /><span>{t('taskCenter.statusFailed')}</span><b>{statusCounts.failed}</b></span>, value: 'failed' },
+  ];
+
+  const openConversation = (id: string) => {
+    sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, id);
     navigate('/agent/chat/home');
   };
 
-  const columns: ColumnsType<Task> = useMemo(
-    () => [
-      {
-        title: t('taskCenter.taskDescriptionCol'),
-        dataIndex: 'conversation_title',
-        render: (v: string, record: Task) => {
-          const fullTitle = v || record.title || t('taskCenter.noTitle');
-          const truncated = fullTitle.length > 50 ? `${fullTitle.slice(0, 50)}…` : fullTitle;
-          return (
-            <div>
-              <Tooltip title={fullTitle.length > 50 ? fullTitle : undefined}>
-                <Button
-                  type='link'
-                  style={{ padding: 0, textAlign: 'left', height: 'auto', whiteSpace: 'normal' }}
-                  onClick={() => handleOpenConversation(record.conversation_id)}
-                >
-                  {truncated}
-                </Button>
-              </Tooltip>
-              {record.schedule_name && (
-                <Tag color='blue' style={{ marginLeft: 6, fontSize: 11 }}>
-                  {record.schedule_name}
-                </Tag>
-              )}
-            </div>
-          );
-        },
-      },
-      {
-        title: t('taskCenter.taskType'),
-        dataIndex: 'task_type',
-        width: 120,
-        render: (v: string) => {
-          const map: Record<string, string> = {
-            plugin_run: t('taskCenter.typePluginRun'),
-            background_chat: t('taskCenter.typeBackgroundChat'),
-            scheduled: t('taskCenter.typeScheduled'),
-          };
-          return map[v] ?? v;
-        },
-      },
-      {
-        title: t('taskCenter.steps'),
-        dataIndex: 'steps',
-        width: 160,
-        render: (steps: StepInfo[], record: Task) => (
-          <StepsCell
-            steps={steps}
-            onOpenGraph={
-              record.task_type === 'plugin_run' && record.plugin_session_id
-                ? () => setStateGraphTarget({ sessionId: record.plugin_session_id! })
-                : undefined
-            }
-          />
-        ),
-      },
-      {
-        title: t('taskCenter.statusCol'),
-        dataIndex: 'status',
-        width: 110,
-        render: (v: string) => (
-          <Badge status={STATUS_BADGE[v] ?? 'default'} text={t(`taskCenter.status${capitalize(v)}`)} />
-        ),
-      },
-      {
-        title: t('taskCenter.createdAt'),
-        dataIndex: 'created_at',
-        width: 180,
-        render: (v: string) => new Date(v).toLocaleString(),
-      },
-      {
-        title: t('taskCenter.finishedAt'),
-        dataIndex: 'finished_at',
-        width: 180,
-        render: (v?: string) => (v ? new Date(v).toLocaleString() : '—'),
-      },
-      {
-        title: '',
-        key: 'actions',
-        width: 120,
-        render: (_: unknown, record: Task) => {
-          const isStoppable = record.status === 'running' || record.status === 'pending';
-          const isRemovable = record.task_type !== 'scheduled';
-          return (
-            <Space>
-              {isStoppable && (
-                <Button size='small' danger onClick={() => handleStop(record.id)}>
-                  {t('taskCenter.cancel')}
-                </Button>
-              )}
-              {isRemovable && (
-                <Button size='small' onClick={() => handleRemove(record.id, record.status)}>
-                  {t('taskCenter.taskRemoveBtn')}
-                </Button>
-              )}
-            </Space>
-          );
-        },
-      },
-    ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, page, statusFilter, keyword, typeFilter],
-  );
-
   return (
-    <div>
-      {stateGraphTarget && (
-        <StateGraphModal
-          open={true}
-          onClose={() => setStateGraphTarget(null)}
-          sessionId={stateGraphTarget.sessionId}
-          pluginId=''
-          liveRefresh={false}
-        />
-      )}
-      <Space style={{ marginBottom: 12 }}>
-        <Input.Search
-          placeholder={t('taskCenter.searchPlaceholder')}
-          value={inputKeyword}
-          onChange={(e) => handleInputChange(e.target.value)}
-          onSearch={(v) => { setKeyword(v); setPage(1); }}
-          allowClear
-          style={{ width: 220 }}
-        />
-        <Select
-          value={statusFilter}
-          style={{ width: 120 }}
-          onChange={(v) => { setStatusFilter(v); setPage(1); }}
-          options={[
-            { value: '', label: t('taskCenter.statusAll') },
-            { value: 'running', label: t('taskCenter.statusRunning') },
-            { value: 'succeeded', label: t('taskCenter.statusCompleted') },
-            { value: 'failed', label: t('taskCenter.statusFailed') },
-            { value: 'canceled', label: t('taskCenter.statusCanceled') },
-          ]}
-        />
-        {!scheduleId && (
-          <Select
-            value={typeFilter}
-            style={{ width: 120 }}
-            onChange={(v) => { setTypeFilter(v); setPage(1); }}
-            options={[
-              { value: '', label: `${t('taskCenter.taskType')}：${t('taskCenter.taskTypeAll')}` },
-              { value: 'plugin_run', label: t('taskCenter.typePluginRun') },
-              { value: 'background_chat', label: t('taskCenter.typeBackgroundChat') },
-              { value: 'scheduled', label: t('taskCenter.typeScheduled') },
-            ]}
-          />
-        )}
-      </Space>
-      <Table<Task>
-        rowKey='id'
-        loading={loading}
-        dataSource={tasks}
-        columns={columns}
-        pagination={{
-          current: page,
-          pageSize: PAGE_SIZE,
-          total,
-          onChange: (p) => setPage(p),
-          showTotal: (n) => t('taskCenter.taskTotalItems', { total: n }),
-        }}
-      />
+    <div className='all-tasks'>
+      <div className='all-tasks-toolbar'>
+        <Segmented className='task-status-segmented' value={status} onChange={(value) => { setStatus(String(value)); setPage(1); }} options={statusOptions} />
+        <div className='all-tasks-filters'>
+          <Input prefix={<SearchOutlined />} allowClear placeholder={t('taskCenter.searchPlaceholder')} value={keyword} onChange={(event) => { setKeyword(event.target.value); setPage(1); }} />
+          <Select value={type} onChange={(value) => { setType(value); setPage(1); }} options={[
+            { value: '', label: t('taskCenter.triggerAll') },
+            { value: 'plugin_run', label: t('taskCenter.typePluginRun') },
+            { value: 'background_chat', label: t('taskCenter.typeBackgroundChat') },
+            { value: 'scheduled', label: t('taskCenter.typeScheduled') },
+          ]} />
+          <Button icon={<ReloadOutlined />} onClick={() => void load()} aria-label={t('taskCenter.refresh')} />
+        </div>
+      </div>
+      <Table rowKey='id' className='task-table' loading={loading} columns={columns} dataSource={tasks} onRow={(task) => ({ onClick: () => setSelected(task) })} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: setPage, showSizeChanger: false, showTotal: (value) => t('taskCenter.taskTotalItems', { total: value }) }} />
+      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} />
+      {graphTask?.plugin_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.plugin_session_id} pluginId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>
   );
 }
 
-function capitalize(s: string) {
-  if (!s) return '';
-  return s.charAt(0).toUpperCase() + s.slice(1);
+function truncate(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function typeLabel(value: string, t: (key: string) => string) {
+  const labels: Record<string, string> = { plugin_run: t('taskCenter.typePluginRun'), background_chat: t('taskCenter.typeBackgroundChat'), scheduled: t('taskCenter.typeScheduled') };
+  return labels[value] ?? value;
 }

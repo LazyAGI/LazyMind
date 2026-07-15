@@ -617,7 +617,9 @@ func (s *Service) ListRevisions(ctx context.Context, req ListRevisionsRequest) (
 	}
 	items := make([]RevisionSummary, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, revisionSummary(row))
+		item := revisionSummary(row)
+		item.IsHead = resource.HeadRevisionID != nil && row.ID == *resource.HeadRevisionID
+		items = append(items, item)
 	}
 	return RevisionListResponse{Items: items}, nil
 }
@@ -635,7 +637,9 @@ func (s *Service) GetRevision(ctx context.Context, ref ResourceRef, revisionID s
 	if err != nil {
 		return RevisionDetailResponse{}, err
 	}
-	return revisionDetail(row, string(content)), nil
+	detail := revisionDetail(row, string(content))
+	detail.IsHead = resource.HeadRevisionID != nil && row.ID == *resource.HeadRevisionID
+	return detail, nil
 }
 
 func (s *Service) Rollback(ctx context.Context, req RollbackRequest) (RollbackResponse, error) {
@@ -652,6 +656,7 @@ func (s *Service) Rollback(ctx context.Context, req RollbackRequest) (RollbackRe
 		TargetRevisionID:       strings.TrimSpace(req.RevisionID),
 		ExpectedHeadRevisionID: strings.TrimSpace(req.ExpectedHeadRevisionID),
 		Message:                strings.TrimSpace(req.Message),
+		RequireNoDraft:         true,
 	})
 	if err != nil {
 		return RollbackResponse{}, normalizeVersionFSErr(err)
@@ -673,7 +678,7 @@ func (s *Service) Rollback(ctx context.Context, req RollbackRequest) (RollbackRe
 	if err != nil {
 		return RollbackResponse{}, normalizeGormErr(err)
 	}
-	return RollbackResponse{Ref: req.Ref, Path: revision.Path, RevisionID: resp.RevisionID, RevisionNo: resp.RevisionNo, Content: string(content)}, nil
+	return RollbackResponse{Ref: req.Ref, Path: revision.Path, RevisionID: resp.RevisionID, RevisionNo: revision.RevisionNo, Content: string(content)}, nil
 }
 
 func (s *Service) Action(ctx context.Context, req ReviewActionRequest) (ReviewActionResponse, error) {
@@ -1495,7 +1500,7 @@ func normalizeVersionFSErr(err error) error {
 	switch {
 	case errors.Is(err, versionfs.ErrDraftEmpty):
 		return ErrDraftNotFound
-	case errors.Is(err, versionfs.ErrStaleDraftVersion), errors.Is(err, versionfs.ErrHeadRevisionConflict):
+	case errors.Is(err, versionfs.ErrDraftConflict), errors.Is(err, versionfs.ErrStaleDraftVersion), errors.Is(err, versionfs.ErrDraftBaseConflict), errors.Is(err, versionfs.ErrHeadRevisionConflict):
 		return ErrConflict
 	default:
 		return normalizeGormErr(err)

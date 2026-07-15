@@ -251,14 +251,15 @@ const repairStateMachinePath = "/api/chat/generate_plugin/repair"
 
 // RepairStateMachineRequest is the request body for the repair endpoint.
 type RepairStateMachineRequest struct {
-	PluginYAML string            `json:"plugin_yaml"`
-	StateYAML  string            `json:"state_yaml"`
-	RepairHint string            `json:"repair_hint,omitempty"`
-	Warnings   []string          `json:"warnings,omitempty"`
-	Target     string            `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
-	ScenarioMD string            `json:"scenario_md,omitempty"`
-	Scripts    map[string]string `json:"scripts,omitempty"`
-	LLMConfig  map[string]any    `json:"llm_config"`
+	PluginYAML  string            `json:"plugin_yaml"`
+	StateYAML   string            `json:"state_yaml"`
+	RepairHint  string            `json:"repair_hint,omitempty"`
+	Warnings    []string          `json:"warnings,omitempty"`
+	Diagnostics []map[string]any  `json:"diagnostics,omitempty"`
+	Target      string            `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
+	ScenarioMD  string            `json:"scenario_md,omitempty"`
+	Scripts     map[string]string `json:"scripts,omitempty"`
+	LLMConfig   map[string]any    `json:"llm_config"`
 }
 
 // RepairStateMachineResponse is the response body from the repair endpoint.

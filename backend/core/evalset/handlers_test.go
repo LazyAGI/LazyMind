@@ -268,24 +268,32 @@ func TestListEvalSetsFiltersByAnyDatasetID(t *testing.T) {
 	seedEvalSet(t, db, "eval_set_match_b", "user_1", "", "dataset_c,dataset_d", now.Add(-time.Minute))
 	seedEvalSet(t, db, "eval_set_skip", "user_1", "", "dataset_e", now.Add(-2*time.Minute))
 
-	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets?dataset_ids=dataset_b,dataset_d&page=1&page_size=10", "", "user_1")
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets?dataset_ids=dataset_b&dataset_ids=dataset_d&page=1&page_size=1", "", "user_1")
 	ListEvalSets(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	resp := decodeOKData[ListEvalSetsResponse](t, rec)
-	got := make([]string, 0, len(resp.Items))
-	for _, item := range resp.Items {
-		got = append(got, item.ID)
+	if len(resp.Items) != 1 || resp.Items[0].ID != "eval_set_match_a" {
+		t.Fatalf("expected first matching eval set, got %#v", resp.Items)
 	}
-	sort.Strings(got)
-	want := []string{"eval_set_match_a", "eval_set_match_b"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("expected ids %v, got %v", want, got)
+	if resp.Total != 2 {
+		t.Fatalf("expected total 2, got %d", resp.Total)
 	}
-	if resp.Total != int64(len(want)) {
-		t.Fatalf("expected total %d, got %d", len(want), resp.Total)
+
+	rec, req = requestWithUser(http.MethodGet, "/api/core/eval-sets?dataset_ids=dataset_b&dataset_ids=dataset_d&page=2&page_size=1", "", "user_1")
+	ListEvalSets(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp = decodeOKData[ListEvalSetsResponse](t, rec)
+	if len(resp.Items) != 1 || resp.Items[0].ID != "eval_set_match_b" {
+		t.Fatalf("expected second matching eval set, got %#v", resp.Items)
+	}
+	if resp.Total != 2 {
+		t.Fatalf("expected total 2, got %d", resp.Total)
 	}
 }
 

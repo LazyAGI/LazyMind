@@ -16,8 +16,20 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
+	"lazymind/core/plugin/graphengine"
 	"lazymind/core/store"
 )
+
+func repairDiagnosticsPayload(items []repairDiagnostic) []map[string]any {
+	payload := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		encoded, _ := json.Marshal(item)
+		var diagnostic map[string]any
+		_ = json.Unmarshal(encoded, &diagnostic)
+		payload = append(payload, diagnostic)
+	}
+	return payload
+}
 
 const pluginDraftGenerateJobType = "plugin_draft_generate"
 const pluginDraftRepairJobType = "plugin_draft_repair"
@@ -55,16 +67,17 @@ type pluginDraftGeneratePayload struct {
 }
 
 type pluginDraftRepairPayload struct {
-	DraftID      string         `json:"draft_id"`
-	UserID       string         `json:"user_id"`
-	Target       string         `json:"target"`      // 'statemachine' | 'ui' | 'scenario'
-	RepairHint   string         `json:"repair_hint"` // optional
-	Warnings     []string       `json:"warnings,omitempty"`
-	PrevStatus   string         `json:"prev_status"`
-	LLMConfig    map[string]any `json:"llm_config,omitempty"`
-	DraftVersion int            `json:"draft_version"`
-	Mode         string         `json:"mode,omitempty"`
-	RepairRunID  string         `json:"repair_run_id,omitempty"`
+	DraftID      string           `json:"draft_id"`
+	UserID       string           `json:"user_id"`
+	Target       string           `json:"target"`      // 'statemachine' | 'ui' | 'scenario'
+	RepairHint   string           `json:"repair_hint"` // optional
+	Warnings     []string         `json:"warnings,omitempty"`
+	Diagnostics  []map[string]any `json:"diagnostics,omitempty"`
+	PrevStatus   string           `json:"prev_status"`
+	LLMConfig    map[string]any   `json:"llm_config,omitempty"`
+	DraftVersion int              `json:"draft_version"`
+	Mode         string           `json:"mode,omitempty"`
+	RepairRunID  string           `json:"repair_run_id,omitempty"`
 }
 
 // RegisterPluginDraftGenerateJob registers the async job handler.
@@ -232,24 +245,9 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 		LLMConfig:     llmConfig,
 	})
 	if err != nil {
-		// Phase 3 failure is non-fatal: skeleton + state are already saved.
-		// Write to generate_warning (not generate_error) since the plugin is still usable.
-		existingWarning := ""
-		var currentDraft orm.PluginDraft
-		if dbErr := db.WithContext(ctx).Select("generate_warning").Where("id = ?", payload.DraftID).First(&currentDraft).Error; dbErr == nil {
-			existingWarning = currentDraft.GenerateWarning
-		}
-		newWarning := fmt.Sprintf("phase3 scenario_scripts: %s", err)
-		if existingWarning != "" {
-			newWarning = existingWarning + "; " + newWarning
-		}
-		_ = db.WithContext(ctx).Model(&orm.PluginDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
-			"generate_status":  generateStatusDone,
-			"generate_warning": newWarning,
-			"version":          gorm.Expr("version + 1"),
-			"updated_at":       time.Now().UTC(),
-		}).Error
-		return asyncjob.Result{}, nil
+		message := fmt.Sprintf("phase3 scenario_scripts failed: %s", err)
+		_ = markGenerateFailed(db, payload.DraftID, message)
+		return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("%s", message)
 	}
 
 	// Encode scripts map as JSON string for storage.
@@ -259,31 +257,39 @@ func handlePluginDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ async
 			scriptsJSON = string(b)
 		}
 	}
-	finalDiagnostics := diagnosePlugin(finalPluginYAML, stateResp.StateYAML, scenarioResp.ScenarioMD, scriptsJSON)
+	finalDiagnostics := diagnosePluginWithProfile(finalPluginYAML, stateResp.StateYAML, scenarioResp.ScenarioMD, scriptsJSON, graphengine.ProfilePublish)
 	if hasDiagnosticErrors(finalDiagnostics) {
-		// Generation is not complete merely because every phase returned. Run one
-		// automatic repair pass for deterministic validation errors before asking
-		// the user to intervene manually.
 		var issues []string
 		for _, diagnostic := range finalDiagnostics {
 			if diagnostic.Severity == "error" {
 				issues = append(issues, diagnostic.Path+": "+diagnostic.Message)
 			}
 		}
-		repairResp, repairErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{
-			PluginYAML: finalPluginYAML,
-			StateYAML:  stateResp.StateYAML,
-			RepairHint: "Automatically fix all post-generation validation errors. Preserve intended behavior and return a complete valid result.",
-			Warnings:   issues,
-			Target:     "statemachine",
-			LLMConfig:  llmConfig,
-		})
-		if repairErr == nil && repairResp.StateYAML != "" {
-			stateResp.StateYAML = repairResp.StateYAML
+		// UI and graph repair use different prompts, but both consume the same
+		// authoritative Go diagnostics and are revalidated with publish rules.
+		for _, target := range []string{"ui", "statemachine"} {
+			if !hasDiagnosticErrorsForTarget(finalDiagnostics, target) {
+				continue
+			}
+			repairResp, repairErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{
+				PluginYAML:  finalPluginYAML,
+				StateYAML:   stateResp.StateYAML,
+				RepairHint:  "Automatically fix all post-generation validation errors. Preserve intended behavior and return a complete valid result.",
+				Warnings:    issues,
+				Diagnostics: repairDiagnosticsPayload(finalDiagnostics),
+				Target:      target,
+				LLMConfig:   llmConfig,
+			})
+			if repairErr != nil {
+				continue
+			}
+			if repairResp.StateYAML != "" {
+				stateResp.StateYAML = repairResp.StateYAML
+			}
 			if repairResp.PluginYAML != "" {
 				finalPluginYAML = repairResp.PluginYAML
 			}
-			finalDiagnostics = diagnosePlugin(finalPluginYAML, stateResp.StateYAML, scenarioResp.ScenarioMD, scriptsJSON)
+			finalDiagnostics = diagnosePluginWithProfile(finalPluginYAML, stateResp.StateYAML, scenarioResp.ScenarioMD, scriptsJSON, graphengine.ProfilePublish)
 		}
 	}
 	if hasDiagnosticErrors(finalDiagnostics) {
@@ -443,7 +449,7 @@ func handlePluginDraftRepairJob(ctx context.Context, job asyncjob.Job, _ asyncjo
 		pluginYAML, stateYAML, scenarioMD := draft.PluginYAMLContent, draft.StateYAMLContent, draft.ScenarioContent
 		var allWarnings []string
 		if payload.Target == "full" {
-			stateResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{PluginYAML: pluginYAML, StateYAML: stateYAML, RepairHint: payload.RepairHint, Warnings: payload.Warnings, Target: "statemachine", LLMConfig: llmConfig})
+			stateResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{PluginYAML: pluginYAML, StateYAML: stateYAML, RepairHint: payload.RepairHint, Warnings: payload.Warnings, Diagnostics: payload.Diagnostics, Target: "statemachine", LLMConfig: llmConfig})
 			if callErr != nil {
 				restoreStatus(callErr.Error())
 				return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
@@ -478,7 +484,7 @@ func handlePluginDraftRepairJob(ctx context.Context, job asyncjob.Job, _ asyncjo
 		allWarnings = append(allWarnings, scriptResp.RemainingWarnings...)
 		scriptsBytes, _ := json.Marshal(scripts)
 		scriptsJSON := string(scriptsBytes)
-		afterDiagnostics := diagnosePlugin(pluginYAML, stateYAML, scenarioMD, scriptsJSON)
+		afterDiagnostics := diagnosePluginWithProfile(pluginYAML, stateYAML, scenarioMD, scriptsJSON, graphengine.ProfilePublish)
 		if payload.RepairRunID != "" {
 			_ = db.Model(&orm.PluginRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 		}
@@ -556,12 +562,13 @@ func handlePluginDraftRepairJob(ctx context.Context, job asyncjob.Job, _ asyncjo
 	log.Printf("[repair_job/statemachine] calling algo.RepairStateMachine target=%q hint_len=%d warnings=%v",
 		payload.Target, len(payload.RepairHint), payload.Warnings)
 	resp, err := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{
-		PluginYAML: draft.PluginYAMLContent,
-		StateYAML:  draft.StateYAMLContent,
-		RepairHint: payload.RepairHint,
-		Target:     payload.Target,
-		Warnings:   payload.Warnings,
-		LLMConfig:  llmConfig,
+		PluginYAML:  draft.PluginYAMLContent,
+		StateYAML:   draft.StateYAMLContent,
+		RepairHint:  payload.RepairHint,
+		Target:      payload.Target,
+		Warnings:    payload.Warnings,
+		Diagnostics: payload.Diagnostics,
+		LLMConfig:   llmConfig,
 	})
 	if err != nil {
 		log.Printf("[repair_job/statemachine] algo error: %v", err)
@@ -576,7 +583,11 @@ func handlePluginDraftRepairJob(ctx context.Context, job asyncjob.Job, _ asyncjo
 	if resp.PluginYAML != "" {
 		finalPluginYAML = resp.PluginYAML
 	}
-	afterDiagnostics := diagnosePlugin(finalPluginYAML, resp.StateYAML, draft.ScenarioContent, draft.ScriptsContent)
+	profile := graphengine.ProfileEditor
+	if payload.Target == "statemachine" || payload.Target == "full" {
+		profile = graphengine.ProfilePublish
+	}
+	afterDiagnostics := diagnosePluginWithProfile(finalPluginYAML, resp.StateYAML, draft.ScenarioContent, draft.ScriptsContent, profile)
 	if payload.RepairRunID != "" {
 		_ = db.Model(&orm.PluginRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 	}

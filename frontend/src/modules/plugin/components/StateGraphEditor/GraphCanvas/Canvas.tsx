@@ -24,7 +24,12 @@ import {
 import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
 import type { GraphModel, StepNode, NodeLayout } from '../core/model';
-import { VIRTUAL_END, VIRTUAL_START, newHiddenId } from '../core/model';
+import {
+  VIRTUAL_END,
+  VIRTUAL_START,
+  formatExpression,
+  newHiddenId,
+} from '../core/model';
 import type { ValidationError } from '../core/validator';
 import type { PluginModel } from '../core/pluginModel';
 import type { ScenarioData } from '../ScenarioEditor';
@@ -42,6 +47,7 @@ const DEFAULT_SPACING_Y = 100;
 
 export interface CanvasHandle {
   addNode: () => void;
+  focusNode: (nodeId: string) => boolean;
 }
 
 interface Props {
@@ -79,43 +85,6 @@ function buildPredecessorMap(model: GraphModel): Map<string, string[]> {
   return map;
 }
 
-/**
- * V11 guard: returns a rejection message if adding the edge src→tgt would
- * violate the "parallel sub-steps must not have multiple exits" rule, or null
- * if the connection is allowed.
- *
- * Rule: a node that is a direct child of a parallel fork (route:all, >1 exits)
- * must not itself have more than one outgoing transition.
- */
-function v11RejectReason(model: GraphModel, srcId: string, tgtId: string): string | null {
-  // After the new edge is added, src will have (current + 1) outgoing transitions.
-  const srcNode = model.nodes.find((n) => n.id === srcId);
-  if (!srcNode) return null;
-
-  const srcExitsAfter = srcNode.transitions.length + 1; // after adding the new edge
-
-  // Check 1: src's parent is a parallel fork → src must stay at ≤1 exit.
-  if (srcExitsAfter > 1) {
-    for (const n of model.nodes) {
-      const isParallelFork = (n.route === 'all' || !n.route) && n.transitions.length > 1;
-      if (isParallelFork && n.transitions.some((t) => t.to === srcId)) {
-        return `step "${srcId}" is a parallel fork child and cannot have multiple exits`;
-      }
-    }
-  }
-
-  // Check 2: src is itself a parallel fork → tgt must not already have >0 exits.
-  const srcIsParallelForkAfter = (srcNode.route === 'all' || !srcNode.route) && srcExitsAfter > 1;
-  if (srcIsParallelForkAfter) {
-    const tgtNode = model.nodes.find((n) => n.id === tgtId);
-    if (tgtNode && tgtNode.transitions.length > 0) {
-      return `step "${tgtId}" already has exits and cannot be a parallel fork child`;
-    }
-  }
-
-  return null;
-}
-
 function modelToFlowNodes(
   model: GraphModel,
   nodeErrorMap: Map<string, string[]>,
@@ -145,7 +114,7 @@ function modelToFlowNodes(
     // Build output label map: slotId → display label
     const outputLabels: Record<string, string> = {};
     for (const ref of node.outputs) {
-      const slotId = ref.slot;
+      const slotId = ref.material;
       const slot = model.slots[slotId];
       outputLabels[slotId] = slot?.label ?? slotId;
     }
@@ -155,9 +124,8 @@ function modelToFlowNodes(
       position: pos,
       data: {
         ...node,
-        // StepNodeData.inputs/outputs are string[] (slot ids for display); StepNode uses StepInputRef[].
-        inputs: node.inputs.map((r) => r.slot),
-        outputs: node.outputs.map((r) => r.slot),
+        inputs: node.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])]),
+        outputs: node.outputs.map((r) => r.material),
         hasError: errMsgs.length > 0,
         errorMessages: errMsgs,
         predecessorIds: predMap.get(node.id) ?? [],
@@ -185,7 +153,7 @@ function modelToFlowNodes(
   return flowNodes;
 }
 
-function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>, onConditionChange: (src: string, tgt: string, cond: string) => void): Edge[] {
+function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>): Edge[] {
   const edges: Edge[] = [];
   const edgeErrorSet = new Set(
     [...nodeErrorMap.entries()].flatMap(([, msgs]) => msgs.filter((m) => m.includes('->'))),
@@ -200,7 +168,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
       type: 'transition',
       reconnectable: 'target' as const,
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: { condition: t.condition, hasError: false, onConditionChange },
+      data: { condition: t.when || formatExpression(t.condition) || '', hasError: false },
     });
   }
 
@@ -209,7 +177,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
     const isParallel = (node.route === 'all' || !node.route) && isMultiExit;
     for (const t of node.transitions) {
       const edgeKey = `${node.id}->${t.to}`;
-      const hasError = edgeErrorSet.has(edgeKey) || (node.route === 'choice' && !t.condition.trim());
+      const hasError = edgeErrorSet.has(edgeKey) || Boolean(t.condition);
       edges.push({
         id: edgeKey,
         source: node.id,
@@ -218,10 +186,9 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
         reconnectable: 'target' as const,
         markerEnd: { type: MarkerType.ArrowClosed },
         data: {
-          condition: t.condition,
+          condition: t.when || formatExpression(t.condition) || '',
           hasError,
           isParallel,
-          onConditionChange,
         },
       });
     }
@@ -232,7 +199,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
 
 function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, onScenarioChange, readonly = false }: Props, ref: React.Ref<CanvasHandle>) {
   const { t } = useTranslation();
-  const { screenToFlowPosition, zoomIn, zoomOut, getZoom } = useReactFlow();
+  const { screenToFlowPosition, zoomIn, zoomOut, getZoom, setCenter } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
   const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides } = useAlignmentGuides();
 
@@ -275,32 +242,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
 
   // Keep nodeErrorMap in a ref so stable callbacks can always read the latest value.
   const nodeErrorMapRef = useRef(nodeErrorMap);
-  useEffect(() => { nodeErrorMapRef.current = nodeErrorMap; }, [nodeErrorMap]);
-
-  // Stable callback — never changes reference, reads from refs.
-  const handleConditionChange = useCallback(
-    (sourceId: string, targetId: string, condition: string) => {
-      const m = modelRef.current;
-      if (sourceId === VIRTUAL_START) {
-        const updatedTransitions = m.startTransitions.map((t) =>
-          t.to === targetId ? { ...t, condition } : t,
-        );
-        onModelChangeRef.current({ ...m, startTransitions: updatedTransitions });
-        return;
-      }
-      const updatedNodes = m.nodes.map((n) => {
-        if (n.id !== sourceId) return n;
-        return {
-          ...n,
-          transitions: n.transitions.map((t) =>
-            t.to === targetId ? { ...t, condition } : t,
-          ),
-        };
-      });
-      onModelChangeRef.current({ ...m, nodes: updatedNodes });
-    },
-    [], // stable — intentionally no deps
-  );
+  nodeErrorMapRef.current = nodeErrorMap;
 
   const initialNodes = useMemo(
     () => modelToFlowNodes(model, nodeErrorMap, stableResizeEnd, stableResizeDrag, stableGetZoom),
@@ -308,7 +250,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     [],
   );
   const initialEdges = useMemo(
-    () => modelToFlowEdges(model, nodeErrorMap, handleConditionChange),
+    () => modelToFlowEdges(model, nodeErrorMap),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -317,6 +259,11 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const resizeFrameRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (resizeFrameRef.current !== null) cancelAnimationFrame(resizeFrameRef.current);
+  }, []);
 
   // When a canvas-internal operation calls onModelChange, we set this flag so
   // the sync useEffect below knows NOT to re-derive nodes/edges from the model
@@ -366,7 +313,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       skipSyncRef.current = false;
       return;
     }
-    const newNodes = modelToFlowNodes(model, nodeErrorMap, stableResizeEnd, stableResizeDrag, stableGetZoom);
+    const newNodes = modelToFlowNodes(model, nodeErrorMapRef.current, stableResizeEnd, stableResizeDrag, stableGetZoom);
     // Preserve selected state and, importantly, the current rendered width of each
     // node. Width is managed independently via onResizeDrag/onResizeEnd and may
     // have been updated inside a setNodes callback that hasn't propagated back into
@@ -393,17 +340,13 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         };
       });
     });
-    setEdges(modelToFlowEdges(model, nodeErrorMap, handleConditionChange));
-  }, [model, nodeErrorMap, handleConditionChange, setNodes, setEdges]);
+    setEdges(modelToFlowEdges(model, nodeErrorMapRef.current));
+  }, [model, setNodes, setEdges]);
 
   // Propagate error state changes to ReactFlow nodes independently of the main
   // model sync. This runs even when skipSyncRef suppresses the full sync above,
   // so error highlights update immediately after the parent re-validates.
   useEffect(() => {
-    // nodeErrorMapRef is already kept up to date by the effect above; use it to
-    // detect whether the map actually changed before running the update.
-    const prevMap = nodeErrorMapRef.current;
-    if (prevMap === nodeErrorMap) return;
     setNodes((currentNodes) => {
       let changed = false;
       const next = currentNodes.map((n) => {
@@ -420,7 +363,8 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       });
       return changed ? next : currentNodes;
     });
-  }, [nodeErrorMap, setNodes]);
+    setEdges(modelToFlowEdges(modelRef.current, nodeErrorMap));
+  }, [nodeErrorMap, setNodes, setEdges]);
 
   // When a new edge is drawn in the canvas, add a transition to the model
   const onConnect = useCallback(
@@ -433,7 +377,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         // Prevent duplicate edges to the same target
         const target = connection.target;
         if (m.startTransitions.some((t) => t.to === target)) return;
-        const newTransition = { to: target, condition: '' };
+        const newTransition = { to: target };
         const edgeId = `${VIRTUAL_START}->${target}`;
         setEdges((eds) =>
           addEdge(
@@ -442,7 +386,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
               id: edgeId,
               type: 'transition',
               markerEnd: { type: MarkerType.ArrowClosed },
-              data: { condition: '', hasError: false, onConditionChange: handleConditionChange },
+              data: { condition: '', hasError: false },
             },
             eds,
           ),
@@ -455,14 +399,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       const sourceNode = m.nodes.find((n) => n.id === connection.source);
       if (!sourceNode) return;
 
-      // V11 guard: reject if this connection would violate the no-re-fork rule.
-      const reject = v11RejectReason(m, connection.source, connection.target);
-      if (reject) {
-        // Silent rejection — the invalid edge simply doesn't get drawn.
-        return;
-      }
-
-      const newTransition = { to: connection.target, condition: '' };
+      const newTransition = { to: connection.target };
       const updatedNodes = m.nodes.map((n) =>
         n.id === connection.source
           ? { ...n, transitions: [...n.transitions, newTransition] }
@@ -482,9 +419,9 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
             : n,
         ),
       );
-      setEdges((eds) => addEdge({ ...connection, type: 'transition', markerEnd: { type: MarkerType.ArrowClosed }, data: { condition: '', hasError: false, onConditionChange: handleConditionChange } }, eds));
+      setEdges((eds) => addEdge({ ...connection, type: 'transition', markerEnd: { type: MarkerType.ArrowClosed }, data: { condition: '', hasError: false } }, eds));
     },
-    [setEdges, handleConditionChange],
+    [setEdges, setNodes, nodeErrorMap],
   );
 
   // Reconnect: user drags the target end of an existing edge to a new node.
@@ -580,24 +517,29 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   // Persist resize: update layout width when user finishes resizing a node.
   const handleNodeResizeEnd = useCallback(
     (nodeId: string, width: number) => {
-      const m = modelRef.current;
       const w = Math.max(NODE_MIN_WIDTH, width);
-      // Read current node position from the snapshot synchronously before setNodes.
-      // Do NOT call onModelChangeRef or mutate skipSyncRef inside the setNodes updater
-      // (updaters must be pure functions; side effects there are unsafe in concurrent React).
-      const rfNodes = allNodesFromStore;
-      const rfNode = rfNodes.find((n) => n.id === nodeId);
-      const pos = m.layout[nodeId] ?? rfNode?.position ?? { x: 0, y: 0 };
-      const newLayout = { ...m.layout, [nodeId]: { ...pos, width: w } };
-      skipSyncRef.current = true;
-      onModelChangeRef.current({ ...m, layout: newLayout });
+      if (resizeFrameRef.current !== null) {
+        cancelAnimationFrame(resizeFrameRef.current);
+        resizeFrameRef.current = null;
+      }
       setNodes((nds) =>
-        nds.map((n) =>
-          n.id === nodeId
-            ? { ...n, width: w, data: { ...n.data, nodeWidth: w } }
-            : n,
-        ),
+        nds.map((n) => {
+          if (n.id !== nodeId || (n.width === w && (n.data as { nodeWidth?: number }).nodeWidth === w)) return n;
+          return { ...n, width: w, data: { ...n.data, nodeWidth: w } };
+        }),
       );
+      // Persist on the next frame, after ReactFlow has committed the visual width.
+      // Updating the parent model and ReactFlow's controlled node store in the
+      // same resize event can make its internal dimension sync recurse (#185).
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        const m = modelRef.current;
+        const rfNode = allNodesFromStore.find((n) => n.id === nodeId);
+        const pos = m.layout[nodeId] ?? rfNode?.position ?? { x: 0, y: 0 };
+        const newLayout = { ...m.layout, [nodeId]: { ...pos, width: w } };
+        skipSyncRef.current = true;
+        onModelChangeRef.current({ ...m, layout: newLayout });
+      });
     },
     [setNodes, allNodesFromStore],
   );
@@ -608,13 +550,16 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   const handleNodeResizeDrag = useCallback(
     (nodeId: string, width: number) => {
       const w = Math.max(NODE_MIN_WIDTH, width);
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === nodeId
-            ? { ...n, width: w, data: { ...n.data, nodeWidth: w } }
-            : n,
-        ),
-      );
+      if (resizeFrameRef.current !== null) cancelAnimationFrame(resizeFrameRef.current);
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id !== nodeId || (n.width === w && (n.data as { nodeWidth?: number }).nodeWidth === w)) return n;
+            return { ...n, width: w, data: { ...n.data, nodeWidth: w } };
+          }),
+        );
+      });
     },
     [setNodes],
   );
@@ -724,7 +669,22 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     onModelChangeRef.current({ ...m, nodes: [...m.nodes, newNode], layout: newLayout });
   }, [screenToFlowPosition, setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom]);
 
-  useImperativeHandle(ref, () => ({ addNode: addNodeAtCenter }), [addNodeAtCenter]);
+  const focusNode = useCallback((nodeId: string): boolean => {
+    const node = allNodesFromStore.find((candidate) => candidate.id === nodeId);
+    if (!node) return false;
+    const width = node.width ?? (node.data as { nodeWidth?: number }).nodeWidth ?? NODE_WIDTH;
+    const height = node.height ?? NODE_HEIGHT;
+    setSelectedNodeId(nodeId);
+    setSelectedEdgeId(null);
+    void setCenter(
+      node.position.x + width / 2,
+      node.position.y + height / 2,
+      { zoom: Math.max(getZoom(), 1), duration: 350 },
+    );
+    return true;
+  }, [allNodesFromStore, getZoom, setCenter]);
+
+  useImperativeHandle(ref, () => ({ addNode: addNodeAtCenter, focusNode }), [addNodeAtCenter, focusNode]);
 
   // Add a new node on canvas double-click
   const onDoubleClick = useCallback(
@@ -789,17 +749,6 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     return model.nodes.find((n) => n.id === selectedNode.id) ?? null;
   })();
 
-  // Whether the selected node is a direct child of a parallel fork.
-  // If true, "添加分支" must be disabled to prevent V11 violations.
-  const selectedIsParallelChild = selectedNodeId
-    ? model.nodes.some(
-        (n) =>
-          (n.route === 'all' || !n.route) &&
-          n.transitions.length > 1 &&
-          n.transitions.some((t) => t.to === selectedNodeId),
-      )
-    : false;
-
   const handleNodePropertyChange = useCallback((updated: StepNode): boolean => {
     const m = modelRef.current;
 
@@ -838,45 +787,25 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         delete newLayout[currentSelectedNodeId];
       }
       onModelChangeRef.current({ ...m, nodes: remappedNodes, startTransitions: remappedStartTransitions, layout: newLayout });
+      if (scenarioData && onScenarioChange && currentSelectedNodeId) {
+        const stepDescriptions = { ...scenarioData.stepDescriptions };
+        stepDescriptions[remaId] = stepDescriptions[currentSelectedNodeId] ?? '';
+        delete stepDescriptions[currentSelectedNodeId];
+        onScenarioChange({ ...scenarioData, stepDescriptions });
+      }
       setSelectedNodeId(remaId);
     } else {
-      // Same id, only data changed. Set skipSyncRef so the model-sync useEffect
-      // does not run a full RF rebuild (which would cause a position flicker).
-      // Then defer the RF node/edge update to the next microtask so it runs
-      // outside the current React render batch — this prevents Minified React
-      // error #185 caused by two concurrent setState calls in the same batch.
+      // Same id, only data changed. Let the model-sync effect update ReactFlow.
+      // Writing the parent model and the controlled ReactFlow nodes/edges from
+      // the same input event creates two competing sources of truth. React 18
+      // also batches queueMicrotask updates, so deferring the second write does
+      // not isolate it and can make ReactFlow's controlled-store sync recurse
+      // until React raises error #185.
       const newModel = { ...m, nodes: updatedNodes };
-      skipSyncRef.current = true;
       onModelChangeRef.current(newModel);
-      queueMicrotask(() => {
-        const errMap = nodeErrorMapRef.current;
-        setNodes((nds) =>
-          nds.map((n) => {
-            if (n.id !== currentSelectedNodeId) return n;
-            const updatedOutputLabels: Record<string, string> = {};
-            for (const ref of normalised.outputs) {
-              const slot = newModel.slots[ref.slot];
-              updatedOutputLabels[ref.slot] = slot?.label ?? ref.slot;
-            }
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                ...normalised,
-                inputs: normalised.inputs.map((r) => r.slot),
-                outputs: normalised.outputs.map((r) => r.slot),
-                outputLabels: updatedOutputLabels,
-                hasError: (errMap.get(currentSelectedNodeId!) ?? []).length > 0,
-                errorMessages: errMap.get(currentSelectedNodeId!) ?? [],
-              },
-            };
-          }),
-        );
-        setEdges(modelToFlowEdges(newModel, errMap, handleConditionChange));
-      });
     }
     return true;
-  }, [selectedNodeId, setNodes, setEdges]);
+  }, [selectedNodeId, scenarioData, onScenarioChange]);
 
   const handleNodeDelete = (nodeId: string) => {
     const m = modelRef.current;
@@ -953,20 +882,6 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         <Background />
         <Controls />
         <MiniMap />
-        <svg style={{ position: 'absolute', width: 0, height: 0 }}>
-          <defs>
-            <marker
-              id="arrow"
-              markerWidth="10"
-              markerHeight="10"
-              refX="9"
-              refY="3"
-              orient="auto"
-            >
-              <path d="M0,0 L0,6 L9,3 z" fill="#8c8c8c" />
-            </marker>
-          </defs>
-        </svg>
       </ReactFlow>
       <AlignmentGuides guides={guides} />
 
@@ -980,7 +895,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           onClose={() => setSelectedNodeId(null)}
           onChange={handleNodePropertyChange}
           onDelete={handleNodeDelete}
-          disableAddTransition={selectedIsParallelChild}
+          disableAddTransition={false}
           readonly={readonly}
         />
       )}

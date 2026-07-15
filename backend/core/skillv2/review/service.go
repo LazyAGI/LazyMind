@@ -483,8 +483,8 @@ func (s reviewVersionStore) AfterCommit(ctx context.Context, tx *gorm.DB, revisi
 	return skillsearch.RebuildSkillTx(ctx, tx, revision.ResourceID, revision.CreatedAt)
 }
 
-func (s reviewVersionStore) AfterRollback(ctx context.Context, tx *gorm.DB, revision versionfs.RevisionRecord, entries map[string]versionfs.Entry) error {
-	return skillsearch.RebuildSkillTx(ctx, tx, revision.ResourceID, revision.CreatedAt)
+func (s reviewVersionStore) AfterRollback(ctx context.Context, tx *gorm.DB, skillID string, revisionID string, entries map[string]versionfs.Entry, now time.Time) error {
+	return skillsearch.RebuildSkillTx(ctx, tx, skillID, now)
 }
 
 func (s reviewVersionStore) ListBlobHashes(ctx context.Context, tx *gorm.DB) ([]string, error) {
@@ -1281,7 +1281,7 @@ type skillDraftRow struct {
 	SkillID        string     `gorm:"column:skill_id;type:varchar(36);primaryKey"`
 	BaseRevisionID *string    `gorm:"column:base_revision_id;type:varchar(36)"`
 	TaskID         string     `gorm:"column:task_id;type:text"`
-	ConversationID *string    `gorm:"column:conversation_id;type:varchar(36)"`
+	ConversationID *string    `gorm:"column:conversation_id;type:varchar(128)"`
 	UpdatedBy      *string    `gorm:"column:updated_by;type:text"`
 	Version        int64      `gorm:"column:version"`
 	DraftUpdatedAt *time.Time `gorm:"column:draft_updated_at"`

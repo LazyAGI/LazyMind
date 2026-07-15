@@ -31,8 +31,9 @@ func NewHandler(db *gorm.DB) *Handler {
 	return &Handler{
 		db: db,
 		skill: skillremotefs.NewHandler(skillremotefs.HandlerDeps{
-			DB:        db,
-			BlobStore: skillremotefs.NewBlobStore(db, skillremotefs.NewLocalObjectStore(skillObjectRoot())),
+			DB:         db,
+			BlobStore:  skillremotefs.NewBlobStore(db, skillremotefs.NewLocalObjectStore(skillObjectRoot())),
+			StateStore: store.State(),
 		}),
 		fs: resourcefs.NewService(resourcefs.ServiceDeps{DB: db}),
 	}

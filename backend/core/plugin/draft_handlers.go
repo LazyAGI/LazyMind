@@ -17,6 +17,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
+	"lazymind/core/plugin/graphengine"
 	"lazymind/core/store"
 )
 
@@ -527,11 +528,10 @@ func AIGeneratePluginDraft(w http.ResponseWriter, r *http.Request) {
 	reusableScripts := map[string]string(nil)
 	if body.SkillID != "" && !body.Reanalyze {
 		var cached orm.PluginGenerationAnalysis
-		// A rejection is evaluator-dependent rather than a reusable generated artifact.
-		// Re-run it so prompt/model improvements cannot leave a Skill permanently
-		// blocked by an old negative analysis. Positive and confirmation-required
-		// analyses remain reusable for an unchanged Skill revision.
-		cacheErr := db.Where("user_id=? AND source_skill_id=? AND source_skill_revision_id=? AND source_skill_tree_hash=? AND status IN ?", userID, body.SkillID, skillSnapshot.RevisionID, skillSnapshot.TreeHash, []string{"generatable", "needs_confirmation"}).Order("created_at DESC").First(&cached).Error
+		// Only a positive analysis is a reusable generated artifact. Re-run rejected
+		// and confirmation-required results so analyzer improvements cannot leave a
+		// Skill blocked by a stale or non-user-resolvable verdict.
+		cacheErr := db.Where("user_id=? AND source_skill_id=? AND source_skill_revision_id=? AND source_skill_tree_hash=? AND status = ?", userID, body.SkillID, skillSnapshot.RevisionID, skillSnapshot.TreeHash, "generatable").Order("created_at DESC").First(&cached).Error
 		if cacheErr == nil {
 			now := time.Now().UTC()
 			clone := cached
@@ -719,18 +719,20 @@ func AIRepairPluginDraft(w http.ResponseWriter, r *http.Request) {
 		warnings, draft.PluginYAMLContent == "", draft.StateYAMLContent == "")
 
 	prevStatus := draft.GenerateStatus
+	beforeDiagnostics := diagnosePluginWithProfile(draft.PluginYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent, graphengine.ProfilePublish)
 	payload := pluginDraftRepairPayload{
 		DraftID:      draftID,
 		UserID:       userID,
 		Target:       strings.TrimSpace(body.Target),
 		RepairHint:   strings.TrimSpace(body.RepairHint),
 		Warnings:     warnings,
+		Diagnostics:  repairDiagnosticsPayload(beforeDiagnostics),
 		PrevStatus:   prevStatus,
 		LLMConfig:    llmConfig,
 		DraftVersion: draft.Version,
 		Mode:         body.Mode,
 	}
-	repairRun := orm.PluginRepairRun{ID: uuid.NewString(), DraftID: draft.ID, UserID: userID, BasePluginRevisionID: draft.BaseRevisionID, DraftVersionBefore: draft.Version, Target: body.Target, Mode: body.Mode, SourceAnalysisID: body.SourceAnalysisID, SourceSkillRevisionID: draft.SourceSkillRevisionID, RepairHint: body.RepairHint, DiagnosticsBeforeJSON: diagnosticsJSON(diagnosePlugin(draft.PluginYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent)), ChangesJSON: "{}", DiagnosticsAfterJSON: "{}", Status: "queued", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	repairRun := orm.PluginRepairRun{ID: uuid.NewString(), DraftID: draft.ID, UserID: userID, BasePluginRevisionID: draft.BaseRevisionID, DraftVersionBefore: draft.Version, Target: body.Target, Mode: body.Mode, SourceAnalysisID: body.SourceAnalysisID, SourceSkillRevisionID: draft.SourceSkillRevisionID, RepairHint: body.RepairHint, DiagnosticsBeforeJSON: diagnosticsJSON(beforeDiagnostics), ChangesJSON: "{}", DiagnosticsAfterJSON: "{}", Status: "queued", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := db.Create(&repairRun).Error; err != nil {
 		common.ReplyErr(w, "create repair run failed", http.StatusInternalServerError)
 		return

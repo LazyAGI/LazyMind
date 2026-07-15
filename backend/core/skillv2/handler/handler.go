@@ -247,6 +247,9 @@ func Patch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
+		return
+	}
 	var req patchSkillRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -299,6 +302,9 @@ func Patch(w http.ResponseWriter, r *http.Request) {
 func Delete(w http.ResponseWriter, r *http.Request) {
 	db, skillID, userID, ok := requireOwnedSkill(w, r)
 	if !ok {
+		return
+	}
+	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
 		return
 	}
 	if err := newSkillService(db).DeleteSkill(r.Context(), skillservice.DeleteSkillRequest{SkillID: skillID, UserID: userID}); err != nil {
@@ -522,6 +528,9 @@ func DraftWriteText(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
+		return
+	}
 	var req struct {
 		Path                 string `json:"path"`
 		Content              string `json:"content"`
@@ -551,6 +560,9 @@ func DraftWriteText(w http.ResponseWriter, r *http.Request) {
 func DraftUpload(w http.ResponseWriter, r *http.Request) {
 	db, skillID, userID, ok := requireOwnedSkill(w, r)
 	if !ok {
+		return
+	}
+	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
 		return
 	}
 	var req struct {
@@ -602,6 +614,9 @@ func DraftMkdir(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
+		return
+	}
 	var req struct {
 		Path                 string `json:"path"`
 		ExpectedDraftVersion int64  `json:"expected_draft_version"`
@@ -624,6 +639,9 @@ func DraftMkdir(w http.ResponseWriter, r *http.Request) {
 func DraftDeletePath(w http.ResponseWriter, r *http.Request) {
 	db, skillID, userID, ok := requireOwnedSkill(w, r)
 	if !ok {
+		return
+	}
+	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
 		return
 	}
 	var req struct {
@@ -662,6 +680,9 @@ func DraftMove(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
+		return
+	}
 	var req struct {
 		From                 string `json:"from"`
 		To                   string `json:"to"`
@@ -691,6 +712,9 @@ func DraftMove(w http.ResponseWriter, r *http.Request) {
 func Commit(w http.ResponseWriter, r *http.Request) {
 	db, skillID, userID, ok := requireOwnedSkill(w, r)
 	if !ok {
+		return
+	}
+	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
 		return
 	}
 	var req struct {
@@ -1658,7 +1682,7 @@ func newReviewService(db *gorm.DB) *skillreview.Service {
 
 func newRemoteFSHandler() *skillremotefs.Handler {
 	db := store.DB()
-	return skillremotefs.NewHandler(skillremotefs.HandlerDeps{DB: db, BlobStore: skillremotefs.NewBlobStore(db, skillremotefs.NewLocalObjectStore(skillObjectRoot()))})
+	return skillremotefs.NewHandler(skillremotefs.HandlerDeps{DB: db, BlobStore: skillremotefs.NewBlobStore(db, skillremotefs.NewLocalObjectStore(skillObjectRoot())), StateStore: store.State()})
 }
 
 func remoteRequestWithHeaderUser(r *http.Request) *http.Request {
@@ -2121,6 +2145,7 @@ func revisionDTO(item skillrevision.Revision) map[string]any {
 		"created_by":         item.CreatedBy,
 		"created_at":         item.CreatedAt,
 		"file_content":       item.FileContent,
+		"is_head":            item.IsHead,
 	}
 }
 

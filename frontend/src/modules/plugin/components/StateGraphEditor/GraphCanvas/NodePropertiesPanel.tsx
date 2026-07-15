@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Button, Checkbox, Input, Select, Switch, Tooltip } from 'antd';
+import { Button, Checkbox, Input, Select, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import {
   CloseOutlined,
@@ -10,10 +10,16 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons';
 import type { StepNode, GraphModel } from '../core/model';
-import { VIRTUAL_END, VIRTUAL_START, isHiddenId } from '../core/model';
+import {
+  VIRTUAL_END,
+  VIRTUAL_START,
+  isHiddenId,
+} from '../core/model';
 import type { PluginModel } from '../core/pluginModel';
 import type { ScenarioData } from '../ScenarioEditor';
 import PromptEditor from './PromptEditor';
+import InputMaterialsEditor from './InputMaterialsEditor';
+import SkipConditionEditor from './SkipConditionEditor';
 import { listToolAssets } from '@/modules/memory/toolApi';
 import './NodePropertiesPanel.scss';
 
@@ -21,6 +27,32 @@ const STEP_ID_REGEX = /^[a-zA-Z0-9_]+$/;
 
 // Module-level cache so the tool list is fetched once per session.
 let _cachedSystemTools: Array<{ label: string; name: string }> | null = null;
+let _systemToolsRequest: Promise<Array<{ label: string; name: string }>> | null = null;
+let _systemToolsRetryAfter = 0;
+const SYSTEM_TOOLS_RETRY_DELAY_MS = 30_000;
+
+function loadSystemTools(): Promise<Array<{ label: string; name: string }>> {
+  if (_cachedSystemTools) return Promise.resolve(_cachedSystemTools);
+  if (_systemToolsRequest) return _systemToolsRequest;
+  if (Date.now() < _systemToolsRetryAfter) return Promise.resolve([]);
+
+  _systemToolsRequest = listToolAssets({ silentError: true })
+    .then((tools) => {
+      _cachedSystemTools = tools.map((tool) => ({
+        label: tool.name || tool.id,
+        name: tool.id,
+      }));
+      return _cachedSystemTools;
+    })
+    .catch(() => {
+      _systemToolsRetryAfter = Date.now() + SYSTEM_TOOLS_RETRY_DELAY_MS;
+      return [];
+    })
+    .finally(() => {
+      _systemToolsRequest = null;
+    });
+  return _systemToolsRequest;
+}
 
 interface Props {
   node: StepNode;
@@ -81,10 +113,10 @@ function FieldRow({ label, tip, children }: { label: string; tip: string; childr
 
 export default function NodePropertiesPanel({ node, model, pluginModel, scenarioData, onScenarioChange, onClose, onChange, onDelete, disableAddTransition, readonly = false }: Props) {
   const { t } = useTranslation();
-  // Derive allowSkip directly from node.skipif so it stays in sync when node
+  // Derive allowSkip directly from node state so it stays in sync when node
   // prop updates. Using local state here caused the checkbox and model to
   // diverge, leading to crashes on the second toggle.
-  const allowSkip = node.skipif !== undefined;
+  const allowSkip = node.skipIf !== undefined || node.legacySkipIf !== undefined;
   // Display value for the id field: hidden-placeholder ids are shown as empty string.
   const [idDraft, setIdDraft] = useState<string>(isHiddenId(node.id) ? '' : node.id);
   // Set when the upstream rejects the id (e.g. duplicate).
@@ -93,25 +125,24 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
   const [systemTools, setSystemTools] = useState<Array<{ label: string; name: string }>>(_cachedSystemTools ?? []);
 
   useEffect(() => {
-    if (_cachedSystemTools) {
-      setSystemTools(_cachedSystemTools);
-      return;
-    }
-    listToolAssets().then((tools) => {
-      // StructuredAsset: id = tool name (API 'name' field), name = display label
-      _cachedSystemTools = tools.map((tool) => ({ label: tool.name || tool.id, name: tool.id }));
-      setSystemTools(_cachedSystemTools);
-    }).catch(() => {});
+    let active = true;
+    void loadSystemTools().then((tools) => {
+      if (active) setSystemTools(tools);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Keep draft in sync when node.id changes from outside (e.g. undo, external rename),
   // but only when the user isn't actively typing.
   const [idFocused, setIdFocused] = useState(false);
   const displayedNodeId = isHiddenId(node.id) ? '' : node.id;
-  if (!idFocused && idDraft !== displayedNodeId) {
-    setIdDraft(displayedNodeId);
+  useEffect(() => {
+    if (idFocused) return;
+    setIdDraft((current) => current === displayedNodeId ? current : displayedNodeId);
     setIdConflict(false);
-  }
+  }, [displayedNodeId, idFocused]);
 
   // Slot options: all defined slots
   const slotOptions = Object.keys(model.slots).map((id) => ({
@@ -119,12 +150,9 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
     value: id,
   }));
 
-  // Slots already used as inputs by this node
-  const usedInputSlots = new Set(node.inputs.map((r) => r.slot).filter(Boolean));
   // Slots already used as outputs by this node
-  const usedOutputSlots = new Set(node.outputs.map((r) => r.slot).filter(Boolean));
+  const usedOutputSlots = new Set(node.outputs.map((r) => r.material).filter(Boolean));
   // Available (unused) slot options for inputs and outputs
-  const availableInputSlots = slotOptions.filter((o) => !usedInputSlots.has(o.value));
   const availableOutputSlots = slotOptions.filter((o) => !usedOutputSlots.has(o.value));
 
   // Grouped tool options: system tools first, then plugin script functions.
@@ -192,17 +220,19 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                     style={{ flex: 1 }}
                     size="small"
                   />
-                  <Input
-                    value={tr.condition}
-                    onChange={(e) => {
-                      const next = [...node.transitions];
-                      next[idx] = { ...tr, condition: e.target.value };
-                      update({ transitions: next });
-                    }}
-                    style={{ flex: 2, marginLeft: 4 }}
-                    size="small"
-                    placeholder={t('selfEvolutionRun.stateGraphFlowConditionPlaceholder')}
-                  />
+                  <div style={{ flex: 2, marginLeft: 4 }}>
+                    <Input
+                      value={tr.when ?? ''}
+                      disabled={readonly}
+                      size="small"
+                      placeholder={t('selfEvolutionRun.stateGraphFlowConditionPlaceholder')}
+                      onChange={(event) => {
+                        const next = [...node.transitions];
+                        next[idx] = { ...tr, when: event.target.value || undefined, condition: undefined };
+                        update({ transitions: next });
+                      }}
+                    />
+                  </div>
                   <Button
                     type="text"
                     danger
@@ -217,7 +247,7 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                 size="small"
                 icon={<PlusOutlined />}
                 block
-                onClick={() => update({ transitions: [...node.transitions, { to: '', condition: '' }] })}
+                onClick={() => update({ transitions: [...node.transitions, { to: '' }] })}
               >
                 {t('selfEvolutionRun.stateGraphAddBranch')}
               </Button>
@@ -331,79 +361,41 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
         {/* ── 分组二：素材 ── */}
         <Section title={t('selfEvolutionRun.stateGraphSectionMaterials')}>
           <div className="npp-field-block">
-            <LabelWithTip label={t('selfEvolutionRun.stateGraphArtifactInputs')} tip={t('selfEvolutionRun.stateGraphInputsTip')} />
-            {node.inputs.map((ref, idx) => {
-              const slotLabel = slotOptions.find((o) => o.value === ref.slot)?.label ?? ref.slot;
-              return (
-                <div key={idx} className="npp-slot-ref-row">
-                  <Tooltip title={slotLabel} placement="top">
-                    <Select
-                      value={ref.slot}
-                      options={slotOptions}
-                      optionRender={(opt) => (
-                        <Tooltip title={String(opt.label)} placement="left" mouseEnterDelay={0.3}>
-                          <span className="npp-select-option-text">{opt.label}</span>
-                        </Tooltip>
-                      )}
-                      onChange={(val) => {
-                        const next = [...node.inputs];
-                        next[idx] = { ...ref, slot: val };
-                        update({ inputs: next });
-                      }}
-                      placeholder={t('selfEvolutionRun.stateGraphArtifacts')}
-                      size="small"
-                      className="npp-slot-select"
-                    />
-                  </Tooltip>
-                  <Tooltip title={t('selfEvolutionRun.stateGraphSlotRequired')}>
-                    <Switch
-                      size="small"
-                      checked={ref.required}
-                      onChange={(checked) => {
-                        const next = [...node.inputs];
-                        next[idx] = { ...ref, required: checked };
-                        update({ inputs: next });
-                      }}
-                      checkedChildren={t('selfEvolutionRun.stateGraphSlotRequired')}
-                      unCheckedChildren={t('selfEvolutionRun.stateGraphSlotOptional')}
-                    />
-                  </Tooltip>
-                  <Button
-                    type="text"
-                    danger
-                    size="small"
-                    icon={<CloseOutlined />}
-                    disabled={readonly}
-                    onClick={() => { if (!readonly) update({ inputs: node.inputs.filter((_, i) => i !== idx) }); }}
-                  />
-                </div>
-              );
-            })}
-            <Button
-              type="dashed"
-              size="small"
-              icon={<PlusOutlined />}
-              block
-              disabled={readonly || availableInputSlots.length === 0}
-              onClick={() => { if (!readonly) update({ inputs: [...node.inputs, { slot: '', required: false }] }); }}
-              style={{ marginTop: 4 }}
-            >
-              {slotOptions.length === 0
-                ? t('selfEvolutionRun.stateGraphNoMaterial')
-                : availableInputSlots.length === 0
-                ? t('selfEvolutionRun.stateGraphAllMaterialsUsed')
-                : t('selfEvolutionRun.stateGraphAddInputMaterial')}
-            </Button>
+            <InputMaterialsEditor
+              inputs={node.inputs}
+              slots={model.slots}
+              readonly={readonly}
+              label={t('selfEvolutionRun.stateGraphArtifactInputs')}
+              tip={t('selfEvolutionRun.stateGraphInputsTip')}
+              onChange={(inputs) => update({ inputs })}
+            />
           </div>
           <div className="npp-field-block" style={{ marginTop: 10 }}>
-            <LabelWithTip label={t('selfEvolutionRun.stateGraphArtifactOutputs')} tip={t('selfEvolutionRun.stateGraphOutputsTip')} />
+            <div className="npp-material-header">
+              <LabelWithTip label={t('selfEvolutionRun.stateGraphArtifactOutputs')} tip={t('selfEvolutionRun.stateGraphOutputsTip')} />
+              <Tooltip title={slotOptions.length === 0
+                ? t('selfEvolutionRun.stateGraphNoMaterial')
+                : availableOutputSlots.length === 0
+                ? t('selfEvolutionRun.stateGraphAllMaterialsUsed')
+                : t('selfEvolutionRun.stateGraphAddOutputMaterial')}>
+                <Button
+                  type="text"
+                  size="small"
+                  className="npp-material-add-button"
+                  aria-label={t('selfEvolutionRun.stateGraphAddOutputMaterial')}
+                  icon={<PlusOutlined />}
+                  disabled={readonly || availableOutputSlots.length === 0}
+                  onClick={() => { if (!readonly) update({ outputs: [...node.outputs, { material: '', required: true }] }); }}
+                />
+              </Tooltip>
+            </div>
             {node.outputs.map((ref, idx) => {
-              const slotLabel = slotOptions.find((o) => o.value === ref.slot)?.label ?? ref.slot;
+              const slotLabel = slotOptions.find((o) => o.value === ref.material)?.label ?? ref.material;
               return (
-                <div key={idx} className="npp-slot-ref-row">
+                <div key={idx} className="npp-material-row npp-output-material-row">
                   <Tooltip title={slotLabel} placement="top">
                     <Select
-                      value={ref.slot}
+                      value={ref.material}
                       options={slotOptions}
                       optionRender={(opt) => (
                         <Tooltip title={String(opt.label)} placement="left" mouseEnterDelay={0.3}>
@@ -412,7 +404,7 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                       )}
                       onChange={(val) => {
                         const next = [...node.outputs];
-                        next[idx] = { ...ref, slot: val };
+                        next[idx] = { ...ref, material: val };
                         update({ outputs: next });
                       }}
                       placeholder={t('selfEvolutionRun.stateGraphArtifacts')}
@@ -424,6 +416,7 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                     type="text"
                     danger
                     size="small"
+                    className="npp-material-icon-button"
                     icon={<CloseOutlined />}
                     disabled={readonly}
                     onClick={() => { if (!readonly) update({ outputs: node.outputs.filter((_, i) => i !== idx) }); }}
@@ -431,21 +424,6 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                 </div>
               );
             })}
-            <Button
-              type="dashed"
-              size="small"
-              icon={<PlusOutlined />}
-              block
-              disabled={readonly || availableOutputSlots.length === 0}
-              onClick={() => { if (!readonly) update({ outputs: [...node.outputs, { slot: '', required: false }] }); }}
-              style={{ marginTop: 4 }}
-            >
-              {slotOptions.length === 0
-                ? t('selfEvolutionRun.stateGraphNoMaterial')
-                : availableOutputSlots.length === 0
-                ? t('selfEvolutionRun.stateGraphAllMaterialsUsed')
-                : t('selfEvolutionRun.stateGraphAddOutputMaterial')}
-            </Button>
           </div>
         </Section>
 
@@ -483,19 +461,19 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                     size="small"
                     placeholder={t('selfEvolutionRun.stateGraphFlowNextPlaceholder')}
                   />
-                  <Tooltip title={tr.condition || undefined} placement="top" mouseEnterDelay={0.5}>
+                  <div style={{ flex: 2, marginLeft: 4, minWidth: 0 }}>
                     <Input
-                      value={tr.condition}
-                      onChange={(e) => {
-                        const next = [...node.transitions];
-                        next[idx] = { ...tr, condition: e.target.value };
-                        update({ transitions: next });
-                      }}
-                      style={{ flex: 2, marginLeft: 4, minWidth: 0 }}
+                      value={tr.when ?? ''}
+                      disabled={readonly}
                       size="small"
                       placeholder={t('selfEvolutionRun.stateGraphFlowConditionPlaceholder')}
+                      onChange={(event) => {
+                        const next = [...node.transitions];
+                        next[idx] = { ...tr, when: event.target.value || undefined, condition: undefined };
+                        update({ transitions: next });
+                      }}
                     />
-                  </Tooltip>
+                  </div>
                   <Button
                     type="text"
                     danger
@@ -513,7 +491,7 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
                   icon={<PlusOutlined />}
                   block
                   disabled={disableAddTransition}
-                  onClick={() => update({ transitions: [...node.transitions, { to: '', condition: '' }] })}
+                  onClick={() => update({ transitions: [...node.transitions, { to: '' }] })}
                 >
                   {t('selfEvolutionRun.stateGraphAddBranch')}
                 </Button>
@@ -541,9 +519,9 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
               checked={allowSkip}
               onChange={(e) => {
                 if (!e.target.checked) {
-                  update({ skipif: undefined });
+                  update({ skipIf: undefined, legacySkipIf: undefined });
                 } else {
-                  update({ skipif: '' });
+                  update({ skipIf: { all: [{ material: '' }] }, legacySkipIf: undefined });
                 }
               }}
             >
@@ -553,13 +531,17 @@ export default function NodePropertiesPanel({ node, model, pluginModel, scenario
               </Tooltip>
             </Checkbox>
             {allowSkip && (
-              <Input
-                className="npp-skip-input"
-                value={node.skipif ?? ''}
-                onChange={(e) => update({ skipif: e.target.value })}
-                placeholder={t('selfEvolutionRun.stateGraphSkipConditionPlaceholder')}
-                size="small"
-              />
+              <div className="npp-skip-input">
+                <SkipConditionEditor
+                  value={node.skipIf}
+                  slots={model.slots}
+                  readonly={readonly}
+                  onChange={(skipIf) => update({ skipIf, legacySkipIf: undefined })}
+                />
+                {node.legacySkipIf && !node.skipIf && (
+                  <span className="npp-field-error">旧自然语言条件不可执行：{node.legacySkipIf}</span>
+                )}
+              </div>
             )}
           </div>
         </Section>

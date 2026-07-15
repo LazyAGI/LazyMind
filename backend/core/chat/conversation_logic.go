@@ -19,6 +19,7 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/log"
 	"lazymind/core/plugin"
+	"lazymind/core/resourceupdate"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
@@ -992,6 +993,7 @@ func handleNonStreamChat(
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
+	recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, answer, now)
 	common.ReplyOK(w, map[string]any{
 		"conversation_id": convID,
 		"seq":             target.Seq,
@@ -1285,6 +1287,9 @@ func streamSingleAnswer(
 	if persisted && !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
+	if persisted {
+		recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
+	}
 	if reqCtx.Err() == nil {
 		// text：message text，finish_reason text STOP
 		writeSSEChunk(w, flusher, &ChatChunkResponse{
@@ -1527,6 +1532,7 @@ dualPersist:
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
+	recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
 	if reqCtx.Err() == nil {
 		writeSSEChunk(w, flusher, map[string]any{
 			"finish_reason":   "FINISH_REASON_STOP",
@@ -1541,6 +1547,20 @@ dualPersist:
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 	}
+}
+
+func recordSkillEditorConversationActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
+	if db == nil || stateStore == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(historyID) == "" {
+		return
+	}
+	_ = resourceupdate.RecordConversationIdleMessage(ctx, db, stateStore, resourceupdate.ConversationIdleRecord{
+		SessionID:      conversationID,
+		UserID:         userID,
+		LastMessageID:  historyID,
+		LastActivityAt: now,
+		UserContent:    userContent,
+		AssistantText:  assistantText,
+	})
 }
 
 // handleTaskCreated persists a SubAgent task record (allocating seq in a transaction),

@@ -3,7 +3,7 @@ import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { Alert, Breadcrumb, Button, Modal, Input, Spin, Select, Space, Tag, message } from 'antd';
 import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft, publishPluginDraft, listPluginVersions, getPluginVersion, editPluginVersion, getPluginGenerationAnalysis, confirmPluginWorkflow, previewPluginRepair, getPluginRepairRun } from '../../pluginDraftApi';
+import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft, publishPluginDraft, listPluginVersions, getPluginVersion, editPluginVersion, getPluginGenerationAnalysis, confirmPluginWorkflow, previewPluginRepair, getPluginRepairRun, validatePluginDraft } from '../../pluginDraftApi';
 import type { PluginDraftRecord } from '../../pluginDraftApi';
 import type { PluginVersionSummary, PluginVersionContent, PluginGenerationAnalysis, RepairPreview } from '../../pluginDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
@@ -88,6 +88,7 @@ export default function PluginDetailPage() {
   // True while the :ai-repair API call is in-flight (keeps Modal open with a spinner).
   const [repairSubmitting, setRepairSubmitting] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [hasAuthoritativeErrors, setHasAuthoritativeErrors] = useState(false);
   const [versions, setVersions] = useState<PluginVersionSummary[]>([]);
   const [selectedRevision, setSelectedRevision] = useState<string>('draft');
   const [versionContent, setVersionContent] = useState<PluginVersionContent | null>(null);
@@ -389,6 +390,22 @@ export default function PluginDetailPage() {
     [pluginId, t],
   );
 
+  const handleValidate = useCallback(async (): Promise<ValidationError[]> => {
+    if (!pluginId) return [];
+    const result = await validatePluginDraft(pluginId);
+    const diagnostics = result.diagnostics.map((item) => ({
+      code: item.code,
+      message: item.message,
+      severity: item.severity,
+      nodeId: item.node_id,
+      edgeKey: item.edge_id,
+      materialId: item.material_id,
+      details: item.details as Record<string, unknown> | undefined,
+    }));
+    setHasAuthoritativeErrors(result.diagnostics.some((item) => item.severity === 'error'));
+    return diagnostics;
+  }, [pluginId]);
+
   const handlePublish = useCallback(async () => {
     if (!draft) return;
     setPublishing(true);
@@ -671,9 +688,10 @@ export default function PluginDetailPage() {
             topbarActions={viewingHistory ? (
               <Button onClick={() => void handleEditHistoricalVersion()}>编辑此版本</Button>
             ) : editorReady ? (
-              <Button type="primary" loading={publishing} disabled={(draft.published && !draft.draft_dirty) || isRepairing || isStillGenerating} title={draft.published && !draft.draft_dirty ? '草稿相对于基础版本没有变更' : undefined} onClick={handlePublish}>发布插件</Button>
+              <Button type="primary" loading={publishing} disabled={hasAuthoritativeErrors || (draft.published && !draft.draft_dirty) || isRepairing || isStillGenerating} title={hasAuthoritativeErrors ? '请先修复 Go 校验返回的错误' : draft.published && !draft.draft_dirty ? '草稿相对于基础版本没有变更' : undefined} onClick={handlePublish}>发布插件</Button>
             ) : null}
             onSave={handleSave}
+            onValidate={handleValidate}
             onClose={() => navigate('/memory-management/plugins')}
             showEmptyHint={showEmptyHint}
           />

@@ -8,15 +8,18 @@ import (
 // PluginSession represents one plugin workflow execution for a conversation.
 // A conversation may have at most one active session at a time.
 type PluginSession struct {
-	ID               string `gorm:"column:id;type:varchar(36);primaryKey"`
-	ConversationID   string `gorm:"column:conversation_id;type:varchar(36);not null"`
-	PluginID         string `gorm:"column:plugin_id;type:varchar(64);not null"`
-	PluginRef        string `gorm:"column:plugin_ref;type:varchar(512);not null;default:''"`
-	PluginRevisionID string `gorm:"column:plugin_revision_id;type:varchar(36);not null;default:''"`
-	PluginRevisionNo int64  `gorm:"column:plugin_revision_no;not null;default:0"`
-	PluginTreeHash   string `gorm:"column:plugin_tree_hash;type:varchar(64);not null;default:''"`
-	PluginRemoteRoot string `gorm:"column:plugin_remote_root;type:varchar(1024);not null;default:''"`
-	TriggerHistoryID string `gorm:"column:trigger_history_id;type:varchar(36)"`
+	ID                 string `gorm:"column:id;type:varchar(36);primaryKey"`
+	ConversationID     string `gorm:"column:conversation_id;type:varchar(36);not null"`
+	PluginID           string `gorm:"column:plugin_id;type:varchar(64);not null"`
+	PluginRef          string `gorm:"column:plugin_ref;type:varchar(512);not null;default:''"`
+	PluginRevisionID   string `gorm:"column:plugin_revision_id;type:varchar(36);not null;default:''"`
+	PluginRevisionNo   int64  `gorm:"column:plugin_revision_no;not null;default:0"`
+	PluginTreeHash     string `gorm:"column:plugin_tree_hash;type:varchar(64);not null;default:''"`
+	PluginRemoteRoot   string `gorm:"column:plugin_remote_root;type:varchar(1024);not null;default:''"`
+	StateVersion       int64  `gorm:"column:state_version;not null;default:0"`
+	GraphHash          string `gorm:"column:graph_hash;type:varchar(64);not null;default:''"`
+	GraphSchemaVersion string `gorm:"column:graph_schema_version;type:varchar(16);not null;default:''"`
+	TriggerHistoryID   string `gorm:"column:trigger_history_id;type:varchar(36)"`
 	// Status: active | completed | failed | waiting
 	Status        string `gorm:"column:status;type:varchar(16);not null;default:active"`
 	CurrentStepID string `gorm:"column:current_step_id;type:varchar(64)"`
@@ -43,6 +46,7 @@ type PluginSessionStep struct {
 	TaskID    string `gorm:"column:task_id;type:varchar(36);not null"`
 	// Status mirrors sub_agent_tasks.status (synced by Go on each event).
 	Status    string    `gorm:"column:status;type:varchar(16);not null;default:pending"`
+	Validity  string    `gorm:"column:validity;type:varchar(16);not null;default:effective"`
 	CreatedAt time.Time `gorm:"column:created_at;not null"`
 	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
 }
@@ -75,14 +79,73 @@ type PluginSlotRevision struct {
 	// artifact_seq was not yet populated, and pre-human_artifact_id human rows).
 	ContentSnapshot json.RawMessage `gorm:"column:content_snapshot;type:jsonb"`
 	// ChangeSource distinguishes AI-generated ('ai') from human-edited ('human') revisions.
-	ChangeSource string    `gorm:"column:change_source;type:varchar(16);not null;default:'ai'"`
-	Slot         string    `gorm:"column:slot;type:varchar(255);not null"`
-	StepID       string    `gorm:"column:step_id;type:varchar(64);not null"`
-	Attempt      int       `gorm:"column:attempt;not null"`
-	CreatedAt    time.Time `gorm:"column:created_at;not null"`
+	ChangeSource      string    `gorm:"column:change_source;type:varchar(16);not null;default:'ai'"`
+	Slot              string    `gorm:"column:slot;type:varchar(255);not null"`
+	StepID            string    `gorm:"column:step_id;type:varchar(64);not null"`
+	Attempt           int       `gorm:"column:attempt;not null"`
+	Validity          string    `gorm:"column:validity;type:varchar(16);not null;default:effective"`
+	ProducerAttemptID string    `gorm:"column:producer_attempt_id;type:varchar(36);not null;default:''"`
+	CreatedAt         time.Time `gorm:"column:created_at;not null"`
 }
 
 func (PluginSlotRevision) TableName() string { return "plugin_slot_revisions" }
+
+type PluginAttemptInputBinding struct {
+	ID                 string    `gorm:"column:id;type:varchar(36);primaryKey"`
+	SessionID          string    `gorm:"column:session_id;type:varchar(36);not null;index"`
+	AttemptID          string    `gorm:"column:attempt_id;type:varchar(36);not null;index"`
+	MaterialID         string    `gorm:"column:material_id;type:varchar(64);not null"`
+	MaterialRevisionID string    `gorm:"column:material_revision_id;type:varchar(36);not null;index"`
+	BindAs             string    `gorm:"column:bind_as;type:varchar(64);not null;default:''"`
+	CreatedAt          time.Time `gorm:"column:created_at;not null"`
+}
+
+func (PluginAttemptInputBinding) TableName() string { return "plugin_attempt_input_bindings" }
+
+type PluginRouteDecision struct {
+	ID              string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	SessionID       string          `gorm:"column:session_id;type:varchar(36);not null;index"`
+	FromStepID      string          `gorm:"column:from_step_id;type:varchar(64);not null"`
+	SourceAttemptID string          `gorm:"column:source_attempt_id;type:varchar(36);not null;default:''"`
+	ActivatedJSON   json.RawMessage `gorm:"column:activated_json;type:jsonb;not null"`
+	PrunedJSON      json.RawMessage `gorm:"column:pruned_json;type:jsonb;not null"`
+	BypassedJSON    json.RawMessage `gorm:"column:bypassed_json;type:jsonb;not null"`
+	WitnessJSON     json.RawMessage `gorm:"column:witness_json;type:jsonb;not null"`
+	Validity        string          `gorm:"column:validity;type:varchar(16);not null;default:effective"`
+	StateVersion    int64           `gorm:"column:state_version;not null"`
+	CreatedAt       time.Time       `gorm:"column:created_at;not null"`
+}
+
+func (PluginRouteDecision) TableName() string { return "plugin_route_decisions" }
+
+type PluginTransitionCommand struct {
+	CommandID             string          `gorm:"column:command_id;type:varchar(36);primaryKey"`
+	SessionID             string          `gorm:"column:session_id;type:varchar(36);not null;default:'';index"`
+	Operation             string          `gorm:"column:operation;type:varchar(16);not null"`
+	TargetStepID          string          `gorm:"column:target_step_id;type:varchar(64);not null;default:''"`
+	Status                string          `gorm:"column:status;type:varchar(16);not null"`
+	TaskID                string          `gorm:"column:task_id;type:varchar(36);not null;default:''"`
+	ExpectedStateVersion  int64           `gorm:"column:expected_state_version;not null;default:0"`
+	ResultingStateVersion int64           `gorm:"column:resulting_state_version;not null;default:0"`
+	ResponseJSON          json.RawMessage `gorm:"column:response_json;type:jsonb;not null"`
+	CreatedAt             time.Time       `gorm:"column:created_at;not null"`
+	UpdatedAt             time.Time       `gorm:"column:updated_at;not null"`
+}
+
+func (PluginTransitionCommand) TableName() string { return "plugin_transition_commands" }
+
+// PluginRunOutbox makes an accepted Plugin transition durably dispatchable.
+// Payload contains the exact SubAgent RunRequest needed after a process restart.
+type PluginRunOutbox struct {
+	TaskID    string          `gorm:"column:task_id;type:varchar(36);primaryKey"`
+	Payload   json.RawMessage `gorm:"column:payload;type:jsonb;not null"`
+	Status    string          `gorm:"column:status;type:varchar(16);not null;index"`
+	LastError string          `gorm:"column:last_error;type:text;not null;default:''"`
+	CreatedAt time.Time       `gorm:"column:created_at;not null"`
+	UpdatedAt time.Time       `gorm:"column:updated_at;not null"`
+}
+
+func (PluginRunOutbox) TableName() string { return "plugin_run_outbox" }
 
 // PluginSlotOrder tracks the display ordering of list-cardinality slot items.
 // order_list is a JSONB array of list_index values in display order (visible items only).
@@ -227,14 +290,17 @@ type PluginBlob struct {
 func (PluginBlob) TableName() string { return "plugin_blobs" }
 
 type PluginRevision struct {
-	ID               string    `gorm:"column:id;type:varchar(36);primaryKey"`
-	PluginResourceID string    `gorm:"column:plugin_resource_id;type:varchar(36);not null;uniqueIndex:uk_plugin_revisions_resource_no,priority:1;index:idx_plugin_revisions_resource"`
-	ParentRevisionID string    `gorm:"column:parent_revision_id;type:varchar(36)"`
-	RevisionNo       int64     `gorm:"column:revision_no;not null;uniqueIndex:uk_plugin_revisions_resource_no,priority:2"`
-	TreeHash         string    `gorm:"column:tree_hash;type:varchar(64);not null"`
-	Message          string    `gorm:"column:message;type:text;not null;default:''"`
-	CreatedBy        string    `gorm:"column:created_by;type:varchar(255)"`
-	CreatedAt        time.Time `gorm:"column:created_at;not null"`
+	ID                 string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	PluginResourceID   string          `gorm:"column:plugin_resource_id;type:varchar(36);not null;uniqueIndex:uk_plugin_revisions_resource_no,priority:1;index:idx_plugin_revisions_resource"`
+	ParentRevisionID   string          `gorm:"column:parent_revision_id;type:varchar(36)"`
+	RevisionNo         int64           `gorm:"column:revision_no;not null;uniqueIndex:uk_plugin_revisions_resource_no,priority:2"`
+	TreeHash           string          `gorm:"column:tree_hash;type:varchar(64);not null"`
+	CompiledGraph      json.RawMessage `gorm:"column:compiled_graph;type:jsonb"`
+	GraphHash          string          `gorm:"column:graph_hash;type:varchar(64);not null;default:''"`
+	GraphSchemaVersion string          `gorm:"column:graph_schema_version;type:varchar(16);not null;default:''"`
+	Message            string          `gorm:"column:message;type:text;not null;default:''"`
+	CreatedBy          string          `gorm:"column:created_by;type:varchar(255)"`
+	CreatedAt          time.Time       `gorm:"column:created_at;not null"`
 }
 
 func (PluginRevision) TableName() string { return "plugin_revisions" }

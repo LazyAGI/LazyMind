@@ -172,6 +172,9 @@ func Confirm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
+		return
+	}
 	status, err := newRevisionService(db).DraftStatus(r.Context(), skillrevision.DraftStatusRequest{SkillID: skillID, UserID: userID})
 	if err != nil {
 		replyServiceError(w, err)
@@ -200,6 +203,9 @@ func Confirm(w http.ResponseWriter, r *http.Request) {
 func Discard(w http.ResponseWriter, r *http.Request) {
 	db, skillID, userID, ok := requireOwnedSkill(w, r)
 	if !ok {
+		return
+	}
+	if !ensureUserDraftWriteAllowed(w, r, db, userID, skillID) {
 		return
 	}
 	if _, err := newSkillService(db).DiscardDraft(r.Context(), skillservice.DiscardDraftRequest{SkillID: skillID, UserID: userID}); err != nil {

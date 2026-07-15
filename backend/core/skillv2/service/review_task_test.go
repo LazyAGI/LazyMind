@@ -13,10 +13,10 @@ func TestHasRunningSkillReviewTask(t *testing.T) {
 	svc := NewSkillService(SkillServiceDeps{DB: db})
 
 	insertSkillReviewStats(t, db, map[string]any{
-		"id":          "other-running",
+		"id":          "other-preparing",
 		"requestid":   "req-other",
 		"userid":      "user-2",
-		"status":      "running",
+		"status":      "preparing",
 		"started_at":  "2026-07-11T10:00:00Z",
 		"duration_ms": 0,
 		"summary":     "{}",
@@ -30,20 +30,28 @@ func TestHasRunningSkillReviewTask(t *testing.T) {
 		"duration_ms": 1,
 		"summary":     "{}",
 	})
+	insertSkillReviewStats(t, db, map[string]any{
+		"id": "own-skipped", "requestid": "req-skipped", "userid": "user-1", "status": "skipped",
+		"started_at": "2026-07-11T10:01:01Z", "duration_ms": 1, "summary": "{}",
+	})
+	insertSkillReviewStats(t, db, map[string]any{
+		"id": "own-failed", "requestid": "req-failed", "userid": "user-1", "status": "failed",
+		"started_at": "2026-07-11T10:01:02Z", "duration_ms": 1, "summary": "{}",
+	})
 
 	hasRunning, err := svc.HasRunningSkillReviewTask(context.Background(), " user-1 ")
 	if err != nil {
 		t.Fatalf("HasRunningSkillReviewTask returned error: %v", err)
 	}
 	if hasRunning {
-		t.Fatal("HasRunningSkillReviewTask reported running for another user's running row or completed row")
+		t.Fatal("HasRunningSkillReviewTask reported active for another user's row or a terminal row")
 	}
 
 	insertSkillReviewStats(t, db, map[string]any{
-		"id":          "own-running",
-		"requestid":   "req-running",
+		"id":          "own-analyzing",
+		"requestid":   "req-analyzing",
 		"userid":      "user-1",
-		"status":      "running",
+		"status":      "analyzing",
 		"started_at":  "2026-07-11T10:02:00Z",
 		"duration_ms": 0,
 		"summary":     "{}",
@@ -54,7 +62,7 @@ func TestHasRunningSkillReviewTask(t *testing.T) {
 		t.Fatalf("HasRunningSkillReviewTask returned error: %v", err)
 	}
 	if !hasRunning {
-		t.Fatal("HasRunningSkillReviewTask did not report the user's running row")
+		t.Fatal("HasRunningSkillReviewTask did not report the user's non-terminal row")
 	}
 }
 

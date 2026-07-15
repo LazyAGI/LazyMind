@@ -1017,9 +1017,16 @@ export function PluginPanel({
   // A failed step cannot be checkpoint-resumed — the SubAgent exited uncleanly and there is
   // no valid checkpoint to restore. Only "重试" (full restart) is meaningful in this case.
   // Note: "interrupted" steps CAN be resumed via checkpoint, so only "failed" is blocked.
-  const currentStepStatus = session.steps
-    ?.filter((s) => s.step_id === session.current_step_id)
-    ?.sort((a, b) => b.attempt - a.attempt)[0]?.status;
+  const authoritativeCurrent = session.projection?.current ?? [];
+  const currentStepStatus = authoritativeCurrent
+    .map((id) => session.projection?.nodes?.[id]?.execution)
+    .find((status) => status === 'failed')
+    ?? (session.current_step_id
+      ? session.steps
+        ?.filter((s) => s.step_id === session.current_step_id && s.validity !== 'stale')
+        ?.sort((a, b) => b.attempt - a.attempt)[0]?.status
+      : undefined);
+  const effectivePast = new Set(session.projection?.past ?? []);
   const continueDisabled = buttonsDisabled || currentStepStatus === 'failed';
 
   function handleContinue() {
@@ -1244,7 +1251,11 @@ export function PluginPanel({
             <div style={{ flex: '1 1 100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 500 }}>{t('chat.pluginRollbackLabel')}</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {session.steps.map((step) => (
+                {session.steps
+                  .filter((step, index, all) => effectivePast.has(step.step_id)
+                    && step.validity !== 'stale'
+                    && all.findIndex((candidate) => candidate.step_id === step.step_id && candidate.validity !== 'stale') === index)
+                  .map((step) => (
                   <button
                     key={`${step.step_id}-${step.attempt}`}
                     type='button'

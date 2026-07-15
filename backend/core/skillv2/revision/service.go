@@ -124,6 +124,7 @@ type Revision struct {
 	CreatedBy        string
 	CreatedAt        time.Time
 	FileContent      string
+	IsHead           bool
 }
 
 type TreeNode struct {
@@ -215,7 +216,11 @@ func (s *Service) Rollback(ctx context.Context, req RollbackRequest) (RollbackRe
 	if err != nil {
 		return RollbackResponse{}, err
 	}
-	return RollbackResponse{NewHeadRevisionID: resp.RevisionID, RevisionNo: resp.RevisionNo}, nil
+	revision, err := getRevision(ctx, s.db, req.SkillID, resp.RevisionID)
+	if err != nil {
+		return RollbackResponse{}, err
+	}
+	return RollbackResponse{NewHeadRevisionID: resp.RevisionID, RevisionNo: revision.RevisionNo}, nil
 }
 
 func (s *Service) RollbackPreview(ctx context.Context, req RollbackPreviewRequest) (RollbackPreviewResponse, error) {
@@ -272,13 +277,19 @@ func (s *Service) DeleteRevision(ctx context.Context, req DeleteRevisionRequest)
 }
 
 func (s *Service) ListRevisions(ctx context.Context, req ListRevisionsRequest) (ListRevisionsResponse, error) {
+	headID, err := headRevisionID(ctx, s.db, req.SkillID)
+	if err != nil {
+		return ListRevisionsResponse{}, err
+	}
 	var rows []skillRevisionRow
 	if err := s.db.WithContext(ctx).Where("skill_id = ?", req.SkillID).Order("revision_no DESC, created_at DESC").Find(&rows).Error; err != nil {
 		return ListRevisionsResponse{}, err
 	}
 	items := make([]Revision, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, revisionDTO(row))
+		item := revisionDTO(row)
+		item.IsHead = row.ID == headID
+		items = append(items, item)
 	}
 	return ListRevisionsResponse{Items: items}, nil
 }
@@ -288,7 +299,13 @@ func (s *Service) GetRevision(ctx context.Context, req GetRevisionRequest) (Revi
 	if err != nil {
 		return Revision{}, err
 	}
-	return revisionDTO(row), nil
+	headID, err := headRevisionID(ctx, s.db, req.SkillID)
+	if err != nil {
+		return Revision{}, err
+	}
+	out := revisionDTO(row)
+	out.IsHead = row.ID == headID
+	return out, nil
 }
 
 func (s *Service) GetRevisionTree(ctx context.Context, req GetRevisionTreeRequest) (TreeNode, error) {
@@ -573,7 +590,7 @@ type skillDraftRow struct {
 	SkillID        string     `gorm:"column:skill_id;type:varchar(36);primaryKey"`
 	BaseRevisionID *string    `gorm:"column:base_revision_id;type:varchar(36)"`
 	TaskID         string     `gorm:"column:task_id;type:text;not null;default:''"`
-	ConversationID *string    `gorm:"column:conversation_id;type:varchar(36)"`
+	ConversationID *string    `gorm:"column:conversation_id;type:varchar(128)"`
 	UpdatedBy      *string    `gorm:"column:updated_by;type:varchar(36)"`
 	Version        int64      `gorm:"column:version;not null;default:1"`
 	CreatedAt      time.Time  `gorm:"column:created_at;not null"`

@@ -1215,6 +1215,20 @@ type skillOrganizeOpenAPIResponse struct {
 	TaskID    string `json:"taskid"`
 }
 
+type skillMaintenanceTaskOpenAPIResponse struct {
+	ID        string `json:"id"`
+	RequestID string `json:"request_id"`
+	Type      string `json:"type"`
+	Status    string `json:"status"`
+	StartedAt string `json:"started_at"`
+}
+
+type skillMaintenanceStatusOpenAPIResponse struct {
+	HasActiveTask bool                                 `json:"has_active_task"`
+	Task          *skillMaintenanceTaskOpenAPIResponse `json:"task,omitempty"`
+	Message       string                               `json:"message,omitempty"`
+}
+
 type memoryReviewResultOpenAPIResponse struct {
 	ID             string         `json:"id"`
 	UserID         string         `json:"user_id"`
@@ -1589,6 +1603,7 @@ type skillRevisionOpenAPIResponse struct {
 	CreatedBy        string `json:"created_by,omitempty"`
 	CreatedAt        string `json:"created_at"`
 	FileContent      string `json:"file_content,omitempty"`
+	IsHead           bool   `json:"is_head"`
 }
 
 type skillRevisionListOpenAPIResponse struct {
@@ -2563,6 +2578,15 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
+			Path:        "/datasets/{dataset}/uploads:checkHashes",
+			Summary:     "Check reusable file hashes",
+			Tags:        []string{"tasks"},
+			PathParams:  datasetPathParams{},
+			RequestBody: jsonBodyOf(doc.CheckFileHashesRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Missing file hashes", doc.CheckFileHashesResponse{})},
+		},
+		{
+			Method:      "POST",
 			Path:        "/datasets/{dataset}/uploads:initUpload",
 			Summary:     "Initialize dataset upload",
 			Tags:        []string{"tasks"},
@@ -2646,6 +2670,13 @@ func registeredCoreOperations() []openAPIOperation {
 			Summary:   "List skill tags",
 			Tags:      []string{"skills"},
 			Responses: map[int]openAPIResponse{200: resp("Skill tag list", skillTagsOpenAPIResponse{})},
+		},
+		{
+			Method:    "GET",
+			Path:      "/skills/maintenance-task",
+			Summary:   "Get current user's active Skill maintenance task",
+			Tags:      []string{"skills"},
+			Responses: map[int]openAPIResponse{200: resp("Skill maintenance task status", skillMaintenanceStatusOpenAPIResponse{})},
 		},
 		{
 			Method:    "GET",

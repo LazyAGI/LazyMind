@@ -48,13 +48,21 @@
   background: none;
   border: none;
   padding: 0;
-  cursor: pointer;
+  cursor: default;
   color: #5c0011;
   text-align: left;
   font-size: inherit;
   line-height: 1.4;
 
-  &:hover {
+  &.is-locatable {
+    cursor: pointer;
+  }
+
+  &.is-locatable:hover {
     text-decoration: underline;
+  }
+
+  &:disabled {
+    color: inherit;
   }
 }

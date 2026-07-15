@@ -39,9 +39,10 @@ func TestRemoteFSReadView_TaskModes(t *testing.T) {
 	}
 }
 
-func TestRemoteFSReviewWritesExistingDraftWithoutChangingOwner(t *testing.T) {
+func TestRemoteFSReviewWritesExistingDraftAndTakesOwnership(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	seedRunningMaintenanceTask(t, db, "review_123", "user_001")
 	testutil.SeedTextBlob(t, db, "h_draft", "# draft\n")
 	if err := db.Model(&testutil.SkillDraftRow{}).Where("skill_id = ?", "skill1").Update("task_id", "session_a").Error; err != nil {
 		t.Fatalf("seed task_id: %v", err)
@@ -58,8 +59,8 @@ func TestRemoteFSReviewWritesExistingDraftWithoutChangingOwner(t *testing.T) {
 	if err := db.Where("skill_id = ?", "skill1").Take(&draft).Error; err != nil {
 		t.Fatalf("query draft: %v", err)
 	}
-	if draft.TaskID != "session_a" {
-		t.Fatalf("draft task_id = %q, want session_a", draft.TaskID)
+	if draft.TaskID != "review_123" {
+		t.Fatalf("draft task_id = %q, want review_123", draft.TaskID)
 	}
 	read := httptest.NewRecorder()
 	handler.Content(read, httptest.NewRequest(http.MethodGet, remoteContentURL("skills/research/论文精读/references/review.md", "user_001", "review_123", ""), nil))
@@ -71,6 +72,7 @@ func TestRemoteFSReviewWritesExistingDraftWithoutChangingOwner(t *testing.T) {
 func TestRemoteFSReviewCreatesDraftWhenNoneExists(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	seedRunningMaintenanceTask(t, db, "review_123", "user_001")
 	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
 	write := httptest.NewRecorder()
@@ -95,6 +97,7 @@ func TestRemoteFSReviewCreatesDraftWhenNoneExists(t *testing.T) {
 func TestRemoteFSOrgWritesOwnDraftAndBlocksOtherDraft(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	seedRunningMaintenanceTask(t, db, "org_123", "user_001")
 	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
 	write := httptest.NewRecorder()
@@ -117,6 +120,21 @@ func TestRemoteFSOrgWritesOwnDraftAndBlocksOtherDraft(t *testing.T) {
 	handler.Content(blocked, httptest.NewRequest(http.MethodPut, remoteContentURL("skills/research/论文精读/references/other.md", "user_001", "org_456", ""), strings.NewReader("# other\n")))
 	if blocked.Code != http.StatusConflict {
 		t.Fatalf("other org write status=%d body=%s, want 409", blocked.Code, blocked.Body.String())
+	}
+}
+
+func seedRunningMaintenanceTask(t *testing.T, db *testutil.TestDB, taskID, userID string) {
+	t.Helper()
+	if err := db.Table("skill_review_stats").Create(map[string]any{
+		"id":          taskID,
+		"requestid":   taskID,
+		"userid":      userID,
+		"status":      "running",
+		"started_at":  "2026-07-13T10:00:00Z",
+		"duration_ms": 0,
+		"summary":     "{}",
+	}).Error; err != nil {
+		t.Fatalf("seed running maintenance task: %v", err)
 	}
 }
 

@@ -10,8 +10,12 @@ import (
 
 func TestReviewSkillUsesRegisteredChatRoute(t *testing.T) {
 	var gotPath string
+	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 0,
@@ -34,6 +38,15 @@ func TestReviewSkillUsesRegisteredChatRoute(t *testing.T) {
 	}
 	if gotPath != "/api/chat/skill_review" {
 		t.Fatalf("ReviewSkill() path = %q, want %q", gotPath, "/api/chat/skill_review")
+	}
+	if _, ok := gotBody["skill_base_dir"]; ok {
+		t.Fatalf("ReviewSkill() sent non-contract field skill_base_dir: %#v", gotBody)
+	}
+	if _, ok := gotBody["fs_base_url"]; ok {
+		t.Fatalf("ReviewSkill() sent non-contract field fs_base_url: %#v", gotBody)
+	}
+	if modelConfigs, ok := gotBody["model_configs"].(map[string]any); !ok || len(modelConfigs) != 0 {
+		t.Fatalf("ReviewSkill() model_configs = %#v, want empty object", gotBody["model_configs"])
 	}
 	if response == nil || response.Data.RequestID != "request-1" {
 		t.Fatalf("ReviewSkill() response = %#v", response)

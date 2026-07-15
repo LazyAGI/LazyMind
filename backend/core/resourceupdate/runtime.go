@@ -23,7 +23,7 @@ func Start(ctx context.Context, db *gorm.DB, stateStore state.Store, cfg Config)
 		Dur("conversation_idle_seconds", cfg.ConversationIdleSeconds).
 		Msg(logEventRuntimeStarted)
 	scheduler := NewScheduler(db, cfg, workerID+"-scheduler")
-	worker := NewWorker(db, cfg, workerID+"-worker")
+	worker := NewWorker(db, cfg, workerID+"-worker", stateStore)
 	scanner := NewScanner(db, cfg, workerID+"-scanner")
 	go runSchedulerLoop(ctx, scheduler, cfg.SchedulerTickInterval)
 	go runWorkerLoop(ctx, worker, cfg.WorkerInterval)

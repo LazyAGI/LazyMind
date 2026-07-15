@@ -24,6 +24,8 @@ import (
 	"lazymind/core/skillv2/revision"
 	skillsearch "lazymind/core/skillv2/search"
 	skillservice "lazymind/core/skillv2/service"
+	"lazymind/core/skillv2/taskguard"
+	"lazymind/core/state"
 )
 
 type LocalObjectStore struct {
@@ -51,19 +53,21 @@ func NewBlobStore(db *gorm.DB, objects *LocalObjectStore) *BlobStore {
 }
 
 type HandlerDeps struct {
-	DB        *gorm.DB
-	BlobStore *BlobStore
+	DB         *gorm.DB
+	BlobStore  *BlobStore
+	StateStore state.Store
 }
 
 type Handler struct {
-	db        *gorm.DB
-	blobStore *BlobStore
-	clock     clock
+	db         *gorm.DB
+	blobStore  *BlobStore
+	stateStore state.Store
+	clock      clock
 }
 
 func NewHandler(deps HandlerDeps) *Handler {
 	relaxSQLiteFixtureIndexes(deps.DB)
-	return &Handler{db: deps.DB, blobStore: deps.BlobStore, clock: systemClock{}}
+	return &Handler{db: deps.DB, blobStore: deps.BlobStore, stateStore: deps.StateStore, clock: systemClock{}}
 }
 
 type CommitterDeps struct {
@@ -770,29 +774,45 @@ func (h *Handler) createEmptyPackage(ctx context.Context, tx *gorm.DB, userID st
 }
 
 func (h *Handler) claimTask(ctx context.Context, tx *gorm.DB, skillID, userID string, task remoteTask) error {
-	var draft skillDraftRow
-	if err := tx.WithContext(ctx).Where("skill_id = ?", skillID).Take(&draft).Error; err != nil {
-		return err
-	}
-	overlayCount, err := h.draftOverlayCount(ctx, tx, skillID)
+	decision, err := taskguard.EvaluateSkillOperation(ctx, tx, h.stateStore, taskguard.SkillOperationRequest{
+		UserID:        userID,
+		SkillID:       skillID,
+		TaskID:        task.ID,
+		Operation:     taskguard.WriteSkillDraft,
+		TriggerSource: "remote_fs",
+	})
 	if err != nil {
 		return err
 	}
-	if task.Mode != remoteTaskModeReview && overlayCount > 0 && draft.TaskID != task.ID {
-		return conflict("draft belongs to another task")
+	if !decision.Allowed {
+		return conflict(decision.Message)
 	}
+	now := h.clock.Now()
 	updates := map[string]any{
 		"version":          gorm.Expr("version + 1"),
-		"updated_at":       h.clock.Now(),
-		"draft_updated_at": h.clock.Now(),
+		"updated_at":       now,
+		"draft_updated_at": now,
+		"task_id":          task.ID,
+		"conversation_id":  nil,
 	}
-	if task.Mode != remoteTaskModeReview || overlayCount == 0 {
-		updates["task_id"] = task.ID
+	if task.Mode == remoteTaskModeEditor {
+		updates["conversation_id"] = task.ID
 	}
 	if userID != "" {
 		updates["updated_by"] = userID
 	}
-	return tx.WithContext(ctx).Model(&skillDraftRow{}).Where("skill_id = ?", skillID).Updates(updates).Error
+	query := tx.WithContext(ctx).Model(&skillDraftRow{}).Where("skill_id = ?", skillID)
+	if task.Mode != remoteTaskModeReview {
+		query = query.Where("task_id = ? OR NOT EXISTS (SELECT 1 FROM skill_draft_entries WHERE skill_draft_entries.skill_id = skill_drafts.skill_id)", task.ID)
+	}
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return conflict("草稿属于其他 Skill 编辑任务")
+	}
+	return nil
 }
 
 func (h *Handler) entryForPath(ctx context.Context, db *gorm.DB, skillID, relPath string, task remoteTask) (mergedEntry, error) {

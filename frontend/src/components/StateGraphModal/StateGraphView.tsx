@@ -29,6 +29,8 @@ export interface SGNode {
   step_index: number;
   status: string;
   is_current: boolean;
+  /** The node has stale historical attempts even when it is Ready again. */
+  is_stale?: boolean;
   artifact_summary?: string | null; // legacy, unused
   artifact_items?: { slot: string; content_type: string; preview: string }[];
   step_attempts?: SGAttempt[];
@@ -39,7 +41,7 @@ export interface SGEdge {
   to: string;
   condition: string;
   // server-computed
-  edge_type: 'executed' | 'current_direct' | 'current_reachable' | 'skipped';
+  edge_type: 'executed' | 'current_direct' | 'current_reachable' | 'skipped' | 'pruned' | 'bypassed' | 'stale' | 'inactive';
   // legacy — ignored
   is_active_path?: boolean;
 }
@@ -48,7 +50,6 @@ export interface StateGraphData {
   nodes: SGNode[];
   edges: SGEdge[];
   initial: string;
-  current_step_id: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -68,6 +69,11 @@ const S: Record<string, { color: string; dot: string; label: string }> = {
   failed:      { color: '#cf1322', dot: '#ff4d4f', label: '失败' },
   interrupted: { color: '#cf1322', dot: '#ff4d4f', label: '中断' },
   pending:     { color: '#8c8c8c', dot: '#bfbfbf', label: '未执行' },
+  ready:       { color: '#0958d9', dot: '#1677ff', label: '可执行' },
+  blocked:     { color: '#d46b08', dot: '#fa8c16', label: '素材未满足' },
+  stale:       { color: '#722ed1', dot: '#9254de', label: '已失效' },
+  pruned:      { color: '#8c8c8c', dot: '#d9d9d9', label: '未选分支' },
+  bypassed:    { color: '#8c8c8c', dot: '#d9d9d9', label: '已绕过' },
 };
 function sc(status: string) { return S[status] ?? S.pending; }
 
@@ -96,34 +102,27 @@ const EDGE_STYLE: Record<string, { stroke: string; dash?: string; width: number 
   current_direct:    { stroke: '#1677ff', width: 1.5 },
   current_reachable: { stroke: '#1677ff', dash: '6 3', width: 1.2 },
   skipped:           { stroke: '#bfbfbf', dash: '5 3', width: 1.2 },
+  pruned:            { stroke: '#bfbfbf', dash: '2 3', width: 1.2 },
+  bypassed:          { stroke: '#8c8c8c', dash: '5 3', width: 1.2 },
+  stale:             { stroke: '#9254de', dash: '5 3', width: 1.2 },
+  inactive:          { stroke: '#d9d9d9', dash: '5 3', width: 1.0 },
 };
 const ARROW_IDS: Record<string, string> = {
   executed: 'arr-green',
   current_direct: 'arr-blue',
   current_reachable: 'arr-blue',
   skipped: 'arr-gray',
+  pruned: 'arr-gray',
+  bypassed: 'arr-gray',
+  stale: 'arr-gray',
+  inactive: 'arr-gray',
 };
 
-// ─── DAG: remove back-edges via DFS ──────────────────────────────────────────
+// Go rejects cyclic graphs before runtime. The renderer only drops malformed
+// dangling/self edges and never hides a server-provided control edge.
 function toDAGEdges(nodes: SGNode[], edges: SGEdge[]): SGEdge[] {
   const ids = new Set(nodes.map((n) => n.id));
-  const adj = new Map<string, string[]>();
-  for (const e of edges) {
-    if (e.from === e.to || !ids.has(e.from) || !ids.has(e.to)) continue;
-    if (!adj.has(e.from)) adj.set(e.from, []);
-    adj.get(e.from)!.push(e.to);
-  }
-  const visited = new Set<string>(), inStack = new Set<string>(), back = new Set<string>();
-  function dfs(id: string) {
-    visited.add(id); inStack.add(id);
-    for (const nb of adj.get(id) ?? []) {
-      if (inStack.has(nb)) back.add(`${id}→${nb}`);
-      else if (!visited.has(nb)) dfs(nb);
-    }
-    inStack.delete(id);
-  }
-  for (const n of nodes) if (!visited.has(n.id)) dfs(n.id);
-  return edges.filter((e) => e.from !== e.to && !back.has(`${e.from}→${e.to}`));
+  return edges.filter((edge) => edge.from !== edge.to && ids.has(edge.from) && ids.has(edge.to));
 }
 
 // ─── Dagre layout ─────────────────────────────────────────────────────────────
@@ -198,6 +197,7 @@ function NodePopover({ node }: { node: SGNode }) {
           )}
           <span style={{ fontWeight: 600, fontSize: 14, color: '#141414', flex: 1 }}>{node.label}</span>
           <AttemptTag status={node.status} />
+          {node.is_stale && node.status !== 'stale' && <AttemptTag status='stale' />}
         </div>
         <div style={{ display: 'flex', gap: 14, fontSize: 12, color: '#8c8c8c' }}>
           <span>执行 {attempts.length} 次</span>
@@ -242,8 +242,8 @@ function NodePopover({ node }: { node: SGNode }) {
 
 // ─── SVG components ───────────────────────────────────────────────────────────
 function TerminalNode({ pn }: { pn: PosNode }) {
-  // __start__ → blue, __end__ → green
-  const fill = pn.id === '__start__' ? '#1677ff' : '#52c41a';
+	// __start__ is always active; __end__ turns green only when Go reports completion.
+	const fill = pn.id === '__start__' ? '#1677ff' : pn.data.status === 'succeeded' ? '#52c41a' : '#bfbfbf';
   const isEnd = pn.id === '__end__';
   return (
     <g>
@@ -286,6 +286,9 @@ function StepNode({ pn, svgRef }: { pn: PosNode; svgRef: React.RefObject<SVGSVGE
             <span style={{ display: 'inline-block', background: `${c.dot}20`, color: c.color, borderRadius: 6, fontSize: 11, fontWeight: 700, padding: '1px 6px', lineHeight: '18px' }}>
               {String(data.step_index).padStart(2, '0')}
             </span>
+          )}
+          {data.is_stale && data.status !== 'stale' && (
+            <span style={{ float: 'right', color: S.stale.color, fontSize: 10, lineHeight: '18px' }}>历史失效</span>
           )}
         </div>
         {/* Row 2: label */}

@@ -153,6 +153,12 @@ export function PluginSessionApi() {
         options,
       );
     },
+    getProjection(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/projection`,
+        options,
+      );
+    },
     patchSlot(sessionId: string, slotId: string, selectedRevision: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.patch(
         `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}`,

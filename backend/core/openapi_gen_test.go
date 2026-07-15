@@ -65,6 +65,35 @@ func TestOpenAPISpecCoversAllRegisteredRoutes(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecRevisionSchemasIncludeHeadMarker(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	for _, schemaName := range []string{"RevisionSummary", "skillRevisionOpenAPIResponse"} {
+		schema, ok := schemas[schemaName].(map[string]any)
+		if !ok {
+			t.Fatalf("schema %s missing", schemaName)
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("schema %s properties missing", schemaName)
+		}
+		isHead, ok := properties["is_head"].(map[string]any)
+		if !ok || isHead["type"] != "boolean" {
+			t.Fatalf("schema %s is_head property = %#v, want boolean", schemaName, properties["is_head"])
+		}
+	}
+}
+
 func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)

@@ -3,7 +3,14 @@ package orm
 import (
 	"encoding/json"
 	"time"
+
+	"gorm.io/gorm"
 )
+
+// SkillReviewStatsActiveScope treats every non-terminal status as active.
+func SkillReviewStatsActiveScope(db *gorm.DB) *gorm.DB {
+	return db.Where("skill_review_stats.status NOT IN ?", []string{"completed", "skipped", "failed"})
+}
 
 type SkillReviewResult struct {
 	ID           string    `gorm:"column:id;type:text;primaryKey"`

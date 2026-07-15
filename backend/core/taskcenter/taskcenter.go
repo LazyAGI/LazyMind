@@ -312,43 +312,11 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * pageSize
 
-	query := db.WithContext(r.Context()).Where("tct.user_id = ? AND tct.archived_at IS NULL", userID)
-	if status != "" {
-		query = query.Where("tct.status = ?", status)
-	}
-	if taskType != "" {
-		query = query.Where("tct.task_type = ?", taskType)
-	}
-	if keyword != "" {
-		like := "%" + keyword + "%"
-		query = query.Where("tct.title LIKE ? OR c.display_name LIKE ?", like, like)
-	}
-
 	type rawRow struct {
 		orm.TaskCenterTask
 		ConvDisplayName string  `gorm:"column:conv_display_name"`
 		ScheduleName    *string `gorm:"column:schedule_name"`
 	}
-
-	var total int64
-	countQ := db.WithContext(r.Context()).
-		Table("task_center_tasks tct").
-		Joins("LEFT JOIN conversations c ON c.id = tct.conversation_id").
-		Joins("LEFT JOIN user_schedules us ON us.id = tct.schedule_id").
-		Joins("LEFT JOIN plugin_sessions ps ON ps.id = tct.plugin_session_id").
-		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID).
-		Where("tct.plugin_session_id IS NULL OR ps.dismissed = false")
-	if status != "" {
-		countQ = countQ.Where("tct.status = ?", status)
-	}
-	if taskType != "" {
-		countQ = countQ.Where("tct.task_type = ?", taskType)
-	}
-	if keyword != "" {
-		like := "%" + keyword + "%"
-		countQ = countQ.Where("tct.title LIKE ? OR c.display_name LIKE ?", like, like)
-	}
-	_ = countQ.Count(&total)
 
 	var rows []rawRow
 	dataQ := db.WithContext(r.Context()).
@@ -359,9 +327,6 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		Joins("LEFT JOIN plugin_sessions ps ON ps.id = tct.plugin_session_id").
 		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID).
 		Where("tct.plugin_session_id IS NULL OR ps.dismissed = false")
-	if status != "" {
-		dataQ = dataQ.Where("tct.status = ?", status)
-	}
 	if taskType != "" {
 		dataQ = dataQ.Where("tct.task_type = ?", taskType)
 	}
@@ -369,30 +334,64 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		like := "%" + keyword + "%"
 		dataQ = dataQ.Where("tct.title LIKE ? OR c.display_name LIKE ?", like, like)
 	}
-	if err := dataQ.Order("tct.created_at DESC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
+	// Status must be resolved from live plugin/chat state before filtering. The
+	// stored task_center_tasks.status can lag behind and would otherwise exclude
+	// ordinary completed tasks or put waiting plugin tasks under "running".
+	if err := dataQ.Order("tct.created_at DESC").Find(&rows).Error; err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	items := make([]taskResponse, 0, len(rows))
+	type resolvedRow struct {
+		row  rawRow
+		task orm.TaskCenterTask
+	}
+	resolved := make([]resolvedRow, 0, len(rows))
+	statusCounts := map[string]int{
+		"all":       0,
+		"waiting":   0,
+		"running":   0,
+		"succeeded": 0,
+		"failed":    0,
+	}
 	for _, row := range rows {
 		t := row.TaskCenterTask
-		effectiveStatus := resolveTaskStatus(r.Context(), db, t)
-		t.Status = effectiveStatus
+		t.Status = resolveTaskStatus(r.Context(), db, t)
+		statusCounts["all"]++
+		if _, tracked := statusCounts[t.Status]; tracked {
+			statusCounts[t.Status]++
+		}
+		if status != "" && t.Status != status {
+			continue
+		}
+		resolved = append(resolved, resolvedRow{row: row, task: t})
+	}
+	total := len(resolved)
+	if offset > total {
+		offset = total
+	}
+	end := offset + pageSize
+	if end > total {
+		end = total
+	}
 
+	items := make([]taskResponse, 0, end-offset)
+	for _, resolvedItem := range resolved[offset:end] {
+		t := resolvedItem.task
 		var steps []stepInfo
 		if t.PluginSessionID != nil && *t.PluginSessionID != "" {
 			steps = loadStepsForPluginSession(r.Context(), db, *t.PluginSessionID)
 		} else {
 			steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 		}
-		items = append(items, toResponse(t, row.ConvDisplayName, row.ScheduleName, steps))
+		items = append(items, toResponse(t, resolvedItem.row.ConvDisplayName, resolvedItem.row.ScheduleName, steps))
 	}
 	common.ReplyJSON(w, map[string]any{
-		"items":     items,
-		"total":     total,
-		"page":      page,
-		"page_size": pageSize,
+		"items":         items,
+		"total":         total,
+		"page":          page,
+		"page_size":     pageSize,
+		"status_counts": statusCounts,
 	})
 }
 

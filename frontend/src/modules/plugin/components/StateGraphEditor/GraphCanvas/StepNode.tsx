@@ -5,7 +5,8 @@ import { Tag, Tooltip } from 'antd';
 import { RobotOutlined, UserOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ValidationError } from '../core/validator';
-import { isHiddenId } from '../core/model';
+import { formatExpression, isHiddenId } from '../core/model';
+import type { MaterialExpression } from '../core/model';
 
 export const NODE_MIN_WIDTH = 90;  // 148 * ~0.6
 export const NODE_DEFAULT_WIDTH = 148;
@@ -16,9 +17,10 @@ export interface StepNodeData extends Record<string, unknown> {
   mode: 'human' | 'auto';
   inputs: string[];
   outputs: string[];
-  transitions: { to: string; condition: string }[];
+  transitions: { to: string; when?: string; condition?: MaterialExpression }[];
   route?: 'all' | 'choice';
-  skipif?: string;
+  skipIf?: MaterialExpression;
+  legacySkipIf?: string;
   hasError: boolean;
   errorMessages: string[];
   /** IDs of nodes that have a transition pointing to this node (predecessor set) */
@@ -103,12 +105,13 @@ function OutputChips({ outputs, outputLabels, containerWidth }: {
 function StepNodeComponent({ data, selected }: NodeProps) {
   const { t } = useTranslation();
   const nodeData = data as unknown as StepNodeData;
-  const { hasError, errorMessages, mode, label, id, route, skipif, transitions,
+  const { hasError, errorMessages, mode, label, id, route, skipIf, legacySkipIf, transitions,
           outputs, outputLabels, nodeWidth, onResizeEnd, onResizeDrag, getZoom } = nodeData;
 
   const isChoice = route === 'choice';
   const isParallel = (route === 'all' || !route) && transitions.length > 1;
-  const isSkippable = Boolean(skipif?.trim());
+  const skipSummary = skipIf ? formatExpression(skipIf) : legacySkipIf;
+  const isSkippable = Boolean(skipSummary);
 
   // Measure inner content width for chip layout
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -174,7 +177,7 @@ function StepNodeComponent({ data, selected }: NodeProps) {
           type="target"
           position={Position.Left}
           className="step-node-handle"
-          connectableStart={false}
+          isConnectableStart={false}
         />
 
         <div className="step-node-header">
@@ -191,8 +194,8 @@ function StepNodeComponent({ data, selected }: NodeProps) {
               </Tooltip>
             )}
             {isSkippable && (
-              <Tooltip title={t('selfEvolutionRun.stepNodeSkippableTooltip', { skipif })}>
-                <span className="step-node-badge step-node-badge--skip" aria-label={t('selfEvolutionRun.stepNodeSkippableTooltip', { skipif })}>↷</span>
+              <Tooltip title={t('selfEvolutionRun.stepNodeSkippableTooltip', { skipif: skipSummary })}>
+                <span className="step-node-badge step-node-badge--skip" aria-label={t('selfEvolutionRun.stepNodeSkippableTooltip', { skipif: skipSummary })}>↷</span>
               </Tooltip>
             )}
             <Tag

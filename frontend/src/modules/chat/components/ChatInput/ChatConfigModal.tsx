@@ -8,6 +8,11 @@ import {
   parseConversationPluginSettings,
   type ConversationPluginSettings,
 } from '../../utils/request';
+import {
+  listUserPluginSettings,
+  setUserPluginEnabled,
+  type UserPluginSetting,
+} from '@/modules/plugin/pluginDraftApi';
 import './ChatConfigModal.scss';
 
 interface ChatConfigPopoverProps {
@@ -34,8 +39,10 @@ export default function ChatConfigPopover({
   const [settings, setSettings] = useState<ConversationPluginSettings | null>(
     initialSettings ?? null,
   );
+  const [pluginItems, setPluginItems] = useState<UserPluginSetting[]>([]);
   // Track whether we've already fetched defaults to avoid repeated requests.
   const fetchedRef = useRef(false);
+  const pluginsFetchedRef = useRef(false);
 
   // Sync external initialSettings into local state; reset fetch cache on conversation change.
   useEffect(() => {
@@ -79,10 +86,25 @@ export default function ChatConfigPopover({
     }
   }
 
+  async function ensurePluginItems() {
+    if (pluginsFetchedRef.current) {
+      return;
+    }
+    pluginsFetchedRef.current = true;
+    try {
+      setPluginItems(await listUserPluginSettings());
+    } catch {
+      // Plugin defaults are optional configuration. Keep the rest of the
+      // conversation settings usable if this endpoint is unavailable.
+      pluginsFetchedRef.current = false;
+      setPluginItems([]);
+    }
+  }
+
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (next) {
-      ensureSettings();
+      void Promise.all([ensureSettings(), ensurePluginItems()]);
     }
   }
 
@@ -98,6 +120,27 @@ export default function ChatConfigPopover({
     } catch {
       message.error(t('chat.conversationConfigSaveFailed'));
       setSettings(settings);
+    }
+  }
+
+  async function handlePluginToggle(item: UserPluginSetting, enabled: boolean) {
+    setPluginItems((items) =>
+      items.map((current) =>
+        current.plugin_ref === item.plugin_ref ? { ...current, enabled } : current,
+      ),
+    );
+    try {
+      await setUserPluginEnabled(item.plugin_ref, enabled);
+      message.success(t('chat.conversationConfigSaved'));
+    } catch {
+      setPluginItems((items) =>
+        items.map((current) =>
+          current.plugin_ref === item.plugin_ref
+            ? { ...current, enabled: item.enabled }
+            : current,
+        ),
+      );
+      message.error(t('chat.conversationConfigSaveFailed'));
     }
   }
 
@@ -150,7 +193,10 @@ export default function ChatConfigPopover({
           {pluginItems.map((item) => (
             <div className="chat-config-row" key={item.plugin_ref}>
               <span className="chat-config-row-label">{item.name || item.plugin_id}</span>
-              <Switch checked={item.enabled} onChange={(value) => void handlePluginToggle(item, value)} />
+              <Switch
+                checked={item.enabled}
+                onChange={(value) => void handlePluginToggle(item, value)}
+              />
             </div>
           ))}
         </div>

@@ -122,6 +122,132 @@
   gap: 4px;
 }
 
+/* ── 素材输入/输出列表 ── */
+.npp-material-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.npp-material-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+}
+
+.npp-material-title {
+  width: auto;
+}
+
+.npp-material-add-button,
+.npp-material-icon-button {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.npp-material-add-button {
+  color: #1677ff;
+}
+
+.npp-material-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.npp-material-item {
+  min-width: 0;
+}
+
+.npp-material-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 50px 24px 24px;
+  align-items: center;
+  column-gap: 6px;
+  min-height: 28px;
+}
+
+.npp-material-status {
+  width: 50px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 11px;
+  font-size: 12px;
+  line-height: 22px;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &.is-required {
+    color: #1677ff;
+    background: #e6f4ff;
+  }
+
+  &.is-optional {
+    color: #8c8c8c;
+    background: #f0f0f0;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.65;
+  }
+}
+
+.npp-material-alternatives {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding-left: 18px;
+}
+
+.npp-material-alternative-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 24px;
+  align-items: center;
+  column-gap: 6px;
+}
+
+.npp-material-branch-line {
+  width: 10px;
+  height: 14px;
+  border-left: 1px solid #d9d9d9;
+  border-bottom: 1px solid #d9d9d9;
+  border-radius: 0 0 0 3px;
+  align-self: start;
+}
+
+.npp-add-alternative {
+  align-self: flex-start;
+  height: 24px;
+  padding: 0 6px 0 18px;
+}
+
+.npp-output-material-row {
+  margin-top: 4px;
+
+  > .ant-select,
+  > .ant-tooltip-open {
+    grid-column: 1 / 4;
+  }
+
+  > .npp-material-icon-button {
+    grid-column: 4;
+  }
+}
+
+.npp-material-shape-error {
+  color: #ff4d4f;
+  font-size: 11px;
+}
+
 /* ── Tooltip 问号图标 ── */
 .npp-tip-icon {
   font-size: 11px;
@@ -154,6 +280,47 @@
 
 .npp-skip-input {
   margin-left: 24px;
+}
+
+.npp-skip-condition {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 2px;
+}
+
+.npp-skip-sentence {
+  color: #595959;
+  font-size: 12px;
+  line-height: 24px;
+}
+
+.npp-skip-materials {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 12px;
+}
+
+.npp-skip-material-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+
+  .ant-select {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.npp-skip-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  .ant-select {
+    width: 72px;
+  }
 }
 
 /* ── 完成后前往：表头与内容行对齐 ── */

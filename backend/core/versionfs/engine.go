@@ -35,7 +35,7 @@ type Store interface {
 	MarkActiveReviews(ctx context.Context, tx *gorm.DB, resourceID string, status string, userID string, now time.Time) error
 	EnforceRevisionLimit(ctx context.Context, tx *gorm.DB, resourceID string, protected map[string]bool) error
 	AfterCommit(ctx context.Context, tx *gorm.DB, revision RevisionRecord, entries map[string]Entry) error
-	AfterRollback(ctx context.Context, tx *gorm.DB, revision RevisionRecord, entries map[string]Entry) error
+	AfterRollback(ctx context.Context, tx *gorm.DB, resourceID string, revisionID string, entries map[string]Entry, now time.Time) error
 	ListBlobHashes(ctx context.Context, tx *gorm.DB) ([]string, error)
 	BlobReferenced(ctx context.Context, tx *gorm.DB, hash string) (bool, error)
 	DeleteBlob(ctx context.Context, tx *gorm.DB, hash string) error
@@ -111,7 +111,6 @@ type RollbackRequest struct {
 
 type RollbackResponse struct {
 	RevisionID string
-	RevisionNo int64
 }
 
 type EngineDeps struct {
@@ -163,6 +162,9 @@ func (e *Engine) CommitDraft(ctx context.Context, req CommitDraftRequest) (Commi
 		}
 		if baseRevisionID == "" {
 			return fmt.Errorf("resource has no base revision")
+		}
+		if baseRevisionID != head.RevisionID {
+			return ErrDraftBaseConflict
 		}
 		entries, err := e.store.DraftEntries(ctx, tx, req.ResourceID, baseRevisionID)
 		if err != nil {
@@ -271,6 +273,9 @@ func (e *Engine) CommitEntriesTx(ctx context.Context, tx *gorm.DB, req CommitEnt
 	if parentRevisionID == "" {
 		parentRevisionID = head.RevisionID
 	}
+	if parentRevisionID != head.RevisionID {
+		return CommitEntriesResponse{}, ErrDraftBaseConflict
+	}
 	changeSource := req.ChangeSource
 	if changeSource == "" {
 		changeSource = "draft_commit"
@@ -325,6 +330,14 @@ func (e *Engine) Rollback(ctx context.Context, req RollbackRequest) (RollbackRes
 		if head.RevisionID == "" {
 			return fmt.Errorf("resource has no head revision")
 		}
+		entries, err := e.store.RevisionEntries(ctx, tx, req.ResourceID, req.TargetRevisionID)
+		if err != nil {
+			return err
+		}
+		if head.RevisionID == req.TargetRevisionID {
+			out = RollbackResponse{RevisionID: req.TargetRevisionID}
+			return nil
+		}
 		draft, err := e.store.LoadDraft(ctx, tx, req.ResourceID)
 		if err != nil {
 			return err
@@ -335,7 +348,7 @@ func (e *Engine) Rollback(ctx context.Context, req RollbackRequest) (RollbackRes
 				return err
 			}
 			if changed {
-				return fmt.Errorf("cannot rollback while draft overlay exists")
+				return ErrDraftConflict
 			}
 		}
 		now := e.clock.Now()
@@ -343,53 +356,22 @@ func (e *Engine) Rollback(ctx context.Context, req RollbackRequest) (RollbackRes
 		if err != nil {
 			return err
 		}
-		entries, err := e.store.RevisionEntries(ctx, tx, req.ResourceID, req.TargetRevisionID)
-		if err != nil {
-			return err
-		}
 		if err := e.store.EnsureBlobs(ctx, tx, entries); err != nil {
 			return err
 		}
-		nextNo, err := e.store.NextRevisionNo(ctx, tx, req.ResourceID)
-		if err != nil {
+		if err := e.store.UpdateHead(ctx, tx, req.ResourceID, head.RevisionID, req.TargetRevisionID, now); err != nil {
 			return err
 		}
-		revisionID := uuid.NewString()
-		revision := RevisionRecord{
-			ID:               revisionID,
-			ResourceID:       req.ResourceID,
-			ParentRevisionID: head.RevisionID,
-			RevisionNo:       nextNo,
-			TreeHash:         HashTree(entries),
-			Message:          req.Message,
-			ChangeSource:     "rollback",
-			SourceRefType:    "revision",
-			SourceRefID:      req.TargetRevisionID,
-			CreatedBy:        req.UserID,
-			CreatedAt:        now,
-		}
-		if err := e.store.CreateRevision(ctx, tx, revision, entries); err != nil {
+		if err := e.store.ResetDraftAfterRollback(ctx, tx, req.ResourceID, req.TargetRevisionID, entries, draft, req.UserID, now); err != nil {
 			return err
 		}
-		if err := e.store.UpdateHead(ctx, tx, req.ResourceID, head.RevisionID, revisionID, now); err != nil {
+		if err := e.store.MarkActiveReviews(ctx, tx, req.ResourceID, "invalidated", req.UserID, now); err != nil {
 			return err
 		}
-		if err := e.store.ResetDraftAfterRollback(ctx, tx, req.ResourceID, revisionID, entries, draft, req.UserID, now); err != nil {
+		if err := e.store.AfterRollback(ctx, tx, req.ResourceID, req.TargetRevisionID, entries, now); err != nil {
 			return err
 		}
-		if err := e.store.MarkActiveReviews(ctx, tx, req.ResourceID, "committed", req.UserID, now); err != nil {
-			return err
-		}
-		if err := e.store.EnforceRevisionLimit(ctx, tx, req.ResourceID, protectedIDs(revisionID)); err != nil {
-			return err
-		}
-		if err := e.store.AfterRollback(ctx, tx, revision, entries); err != nil {
-			return err
-		}
-		if err := e.CleanupUnreferencedBlobsTx(ctx, tx); err != nil {
-			return err
-		}
-		out = RollbackResponse{RevisionID: revisionID, RevisionNo: nextNo}
+		out = RollbackResponse{RevisionID: req.TargetRevisionID}
 		return nil
 	})
 	return out, err

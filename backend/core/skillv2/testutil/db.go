@@ -7,6 +7,8 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+
+	"lazymind/core/common/orm"
 )
 
 type TestDB struct {
@@ -21,6 +23,7 @@ func NewTestDB(t *testing.T) *TestDB {
 		t.Fatalf("connect sqlite test db: %v", err)
 	}
 	if err := db.AutoMigrate(
+		&orm.ResourceUpdateTask{},
 		&SkillRow{},
 		&SkillBlobRow{},
 		&SkillRevisionRow{},
@@ -36,6 +39,24 @@ func NewTestDB(t *testing.T) *TestDB {
 		&SkillShareItemRow{},
 	); err != nil {
 		t.Fatalf("auto migrate skill v2 test tables: %v", err)
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_skill_maintenance_admission
+		ON resource_update_tasks(user_id)
+		WHERE resource_type = 'skill'
+		  AND task_type IN ('generate_review', 'organize_skill')
+		  AND status IN ('pending', 'running')`).Error; err != nil {
+		t.Fatalf("create active skill maintenance admission index: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE IF NOT EXISTS skill_review_stats (
+		id TEXT NOT NULL PRIMARY KEY,
+		requestid TEXT NOT NULL,
+		userid TEXT NOT NULL,
+		status TEXT NOT NULL,
+		started_at TEXT NOT NULL,
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		summary TEXT NOT NULL DEFAULT '{}'
+	)`).Error; err != nil {
+		t.Fatalf("create skill review stats table: %v", err)
 	}
 	return &TestDB{DB: db}
 }

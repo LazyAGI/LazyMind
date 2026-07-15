@@ -19,6 +19,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/plugin/graphengine"
 	"lazymind/core/store"
 	"lazymind/core/versionfs"
 )
@@ -124,6 +125,11 @@ func PublishPluginDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	compiled := graphengine.Compile(d.PluginYAMLContent, d.StateYAMLContent, d.ScenarioContent, graphengine.ProfilePublish)
+	if !compiled.Valid {
+		common.ReplyErrWithData(w, "plugin validation failed", compiled, http.StatusUnprocessableEntity)
+		return
+	}
 	if !frameworkToolsAvailableForPublish(store.DB(), d) {
 		common.ReplyErr(w, "framework tool unavailable", http.StatusConflict)
 		return
@@ -195,7 +201,7 @@ func PublishPluginDraft(w http.ResponseWriter, r *http.Request) {
 			entries = append(entries, orm.PluginRevisionEntry{RevisionID: revID, Path: p, EntryType: "file", BlobHash: &h, Size: int64(len(body)), Mime: blob.Mime, FileType: blob.FileType, Mode: 420})
 		}
 		treeHash := versionfs.HashTree(versionEntries)
-		if err := tx.Create(&orm.PluginRevision{ID: revID, PluginResourceID: resource.ID, ParentRevisionID: parent, RevisionNo: next, TreeHash: treeHash, Message: "publish plugin draft", CreatedBy: userID, CreatedAt: now}).Error; err != nil {
+		if err := tx.Create(&orm.PluginRevision{ID: revID, PluginResourceID: resource.ID, ParentRevisionID: parent, RevisionNo: next, TreeHash: treeHash, CompiledGraph: compiled.Graph.JSON(), GraphHash: compiled.GraphHash, GraphSchemaVersion: graphengine.SchemaVersion, Message: "publish plugin draft", CreatedBy: userID, CreatedAt: now}).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(&entries).Error; err != nil {

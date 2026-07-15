@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { PluginInfoApi, PluginSessionApi, TempUploadServiceApi } from "@/modules/chat/utils/request";
 import i18n from "@/i18n";
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
+import { extractErrorCode, getLocalizedErrorMessage } from "@/components/request";
 
 export function buildPluginSearchConfig(
   chatConfig?: Pick<ChatConfig, "knowledgeBaseId" | "creators" | "tags">,
@@ -183,6 +184,11 @@ export interface PluginSession {
   slots?: SlotRevision[];
   /** Steps for this session, used in completed/waiting state to render rollback step list. */
   steps?: PluginSessionStep[];
+  /** Go-authoritative runtime projection. Never derive Ready/Past from steps locally. */
+  projection?: PluginRuntimeProjection;
+  /** Fatal runtime error that makes this conversation's pinned plugin graph unusable. */
+  runtime_error_code?: string;
+  runtime_error_message?: string;
   /** UI focus state mirrored onto the session for legacy readers; the source of
    *  truth lives in `focusedTabByConversation` / `focusedSortOrderByConversation`
    *  so it survives `setSession()` refreshes. */
@@ -198,10 +204,29 @@ export interface PluginSessionStep {
   attempt: number;
   task_id: string;
   status: string;
+  validity?: "effective" | "stale";
   /** Step-level intent/constraint, JSON string e.g. {"text":"..."} */
   intent_context?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface PluginRuntimeProjection {
+  past?: string[];
+  current?: string[];
+  reachable?: string[];
+  ready?: string[];
+  blocked?: string[];
+  stale?: string[];
+  pruned?: string[];
+  bypassed?: string[];
+  nodes?: Record<string, {
+    execution: string;
+    validity: string;
+    reachability: string;
+    readiness: string;
+    branch: string;
+  }>;
 }
 
 // UI tab/slot declaration from plugin.yaml.
@@ -403,15 +428,28 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     try {
       const res = await PluginSessionApi().getLatestSession(conversationId);
       const session: PluginSession | null = res?.data?.data?.session ?? null;
-      // Load step records for completed and waiting sessions so the Panel can
-      // render the rollback list and step-status badges correctly.
-      if (session && (session.status === 'completed' || session.status === 'waiting') && session.session_id) {
+      // Runtime controls and rollback candidates come from Go's projection.
+      // Steps are attempt history only; they never define Past/Ready locally.
+      if (session?.session_id) {
         try {
-          const stepsRes = await PluginSessionApi().getSteps(session.session_id);
+          const [stepsRes, projectionRes] = await Promise.all([
+            PluginSessionApi().getSteps(session.session_id),
+            PluginSessionApi().getProjection(
+              session.session_id,
+              { silentError: true } as never,
+            ),
+          ]);
           const rawSteps = stepsRes?.data?.data?.steps ?? [];
           session.steps = rawSteps.filter((s: PluginSessionStep) => s.step_id !== '__end__');
-        } catch {
+          session.projection = projectionRes?.data?.data?.projection ?? {};
+        } catch (error) {
           session.steps = [];
+          session.projection = {};
+          const errorCode = extractErrorCode(error);
+          if (errorCode === "PLUGIN_DEFINITION_CHANGED") {
+            session.runtime_error_code = errorCode;
+            session.runtime_error_message = getLocalizedErrorMessage(error);
+          }
         }
       }
       get().setSession(conversationId, session);

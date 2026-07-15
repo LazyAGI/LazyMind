@@ -30,9 +30,9 @@ func TestRevisionLimit_DeletesOldestWhenCreating51stRevision(t *testing.T) {
 	testutil.AssertHeadRevision(t, db, "skill1", resp.RevisionID)
 }
 
-func TestRevisionLimit_PreservesDraftBaseWhenOldest(t *testing.T) {
+func TestRevisionLimit_PreservesRolledBackHeadAsNewRevisionParent(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	seedFiftyRevisions(t, db, "skill1", "rev50", "rev1")
+	seedFiftyRevisions(t, db, "skill1", "rev1", "rev1")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_skill_rev50")
 	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir())), MaxRevisions: 50})
 

@@ -12,6 +12,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/skillv2/taskguard"
 )
 
 type Scheduler struct {
@@ -240,6 +241,31 @@ func (s *Scheduler) processClaimedState(ctx context.Context, userID string, now 
 				"updated_at":              now,
 			})
 		}
+		decision, guardErr := taskguard.EvaluateSkillOperation(ctx, tx, nil, taskguard.SkillOperationRequest{
+			UserID:        state.UserID,
+			Operation:     taskguard.TriggerSkillReview,
+			TriggerSource: "scheduled",
+		})
+		if guardErr != nil && decision.Disposition != taskguard.DispositionDefer {
+			return guardErr
+		}
+		if !decision.Allowed {
+			retryAfter := decision.RetryAfter
+			if retryAfter <= 0 {
+				retryAfter = s.cfg.SchedulerRetryDelay
+			}
+			nextRunAt := now.Add(retryAfter)
+			return s.updateState(tx, state.UserID, map[string]any{
+				"next_run_at":             nextRunAt,
+				"last_quantity_check_at":  now,
+				"last_preflight_check_at": now,
+				"last_error_code":         decision.ReasonCode,
+				"last_error_message":      decision.Message,
+				"locked_by":               "",
+				"locked_until":            nextRunAt,
+				"updated_at":              now,
+			})
+		}
 
 		reason := "quantity"
 		if staleDue {
@@ -463,7 +489,7 @@ func (s *Scheduler) stageFor(index int) Stage {
 }
 
 func newSkillGenerateTask(userID, triggerReason string, stats HistoryStats, now time.Time) (orm.ResourceUpdateTask, error) {
-	requestID := common.GenerateID()
+	requestID := newSkillReviewRequestID()
 	request := skillGenerateRequestJSON{
 		RequestID:                      requestID,
 		UserID:                         strings.TrimSpace(userID),

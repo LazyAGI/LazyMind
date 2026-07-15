@@ -48,6 +48,13 @@ export interface TaskListResponse {
   total: number;
   page: number;
   page_size: number;
+  status_counts?: {
+    all: number;
+    waiting: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+  };
 }
 
 export interface ScheduleListResponse {

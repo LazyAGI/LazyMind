@@ -2,16 +2,18 @@
 
 ## Scenario
 
-Help users compose structured long-form writing, including articles, reports, technical documents, creative stories, fiction, short stories, and novel-style drafts. The workflow runs in eight steps:
+Help users compose structured long-form writing, including articles, reports, technical documents, creative stories, fiction, short stories, and novel-style drafts. The workflow includes explicit material-based revision decisions:
 
 1. **build_context** — parse the writing intent, target audience, core sub-topics, style, and factual consensus
 2. **generate_outline** — produce a structured outline based on the context
 3. **plan_sections** — generate per-chapter writing instructions from the outline
 4. **generate_draft** — serially draft the full document per the section instructions
-5. **generate_patch** — generate a patch set from the user's modification request and validate it
-6. **apply_patch** — apply the validated patch set, convert the revised DocIR back to a draft, and overwrite the draft with the revised version
-7. **review_document** — review the draft across multiple dimensions, scoring it and surfacing revision suggestions
-8. **finalize_report** — apply the review feedback and produce the final report
+5. **decide_draft_action** — emit a revision decision material only when revision is explicitly requested
+6. **generate_patch** — generate a patch set from the user's modification request and validate it
+7. **decide_patch_action** — emit an acceptance material only when applying the patch is explicitly approved
+8. **apply_patch** — create a new revised draft and revised writing context without overwriting prior materials
+9. **review_document** — review either the revised draft or the original draft through an OR input expression
+10. **finalize_report** — produce the final report from the selected effective draft
 
 Every step supports a full rerun: when the user is unhappy with a step's result, that step can be retriggered.
 
@@ -80,7 +82,7 @@ The AI Writer plugin is a general fallback. If another skill or plugin more prec
 | Unhappy with the outline, regenerate it | generate_outline | `advance_step(step_id='generate_outline', user_input=<note>)` |
 | Re-plan the section instructions | plan_sections | `advance_step(step_id='plan_sections', user_input=<note>)` |
 | Redraft the document | generate_draft | `advance_step(step_id='generate_draft', user_input=<note>)` |
-| Revise the draft | generate_patch | `advance_step(step_id='generate_patch', user_input=<modification request>)` |
+| Revise the draft | decide_draft_action | `advance_step(step_id='decide_draft_action', user_input=<modification request>)` |
 | Abandon the revision after seeing the patch | review_document | `advance_step(step_id='review_document', user_input=<note>)` |
 | Re-review | review_document | `advance_step(step_id='review_document', user_input=<note>)` |
 | Produce the final report again | finalize_report | `advance_step(step_id='finalize_report', user_input=<note>)` |
@@ -96,7 +98,7 @@ When the user or DriverAgent indicates the problem originates from a prior step,
   - Cold start: "Parsing your writing request, please wait…"
   - Regenerating the outline: "Regenerating the outline…"
 - Concrete writing content (section drafts, final report, etc.) is produced by the tools the subagent collaborates with; the main Agent does not need to re-state the body.
-- `generate_patch` / `apply_patch` require a draft to already exist. Pass the user's modification request as `user_input` — it becomes the revise task `query`. `generate_patch` builds the patch artifacts; `apply_patch` applies the validated `patch_set` and overwrites `draft_document` with the revised version. To revise again after applying, rewind to `generate_patch`.
+- `generate_patch` / `apply_patch` require a draft to already exist. The revised result is stored as `revised_draft_document` and `writing_context_after_revision`; the original materials remain immutable. To revise again, rewind to the relevant decision or patch step.
 
 ## Artifact Handoff
 
