@@ -11,7 +11,11 @@ import StateGraphModal from '@/components/StateGraphModal';
 
 const SECTION_LIMIT = 5;
 
-export default function Workbench() {
+interface WorkbenchProps {
+  active: boolean;
+}
+
+export default function Workbench({ active }: WorkbenchProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -33,7 +37,9 @@ export default function Workbench() {
     }
   }, [keyword, type, t]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (active) void load();
+  }, [active, load]);
 
   const waiting = tasks.filter((task) => ['waiting', 'interrupted', 'pending', 'failed'].includes(task.status));
   const running = tasks.filter((task) => task.status === 'running');

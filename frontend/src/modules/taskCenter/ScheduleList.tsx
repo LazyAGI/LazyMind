@@ -328,7 +328,11 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
 /* ────────────────────────────────────────────────
    Main ScheduleList component
 ──────────────────────────────────────────────── */
-export default function ScheduleList() {
+interface ScheduleListProps {
+  active: boolean;
+}
+
+export default function ScheduleList({ active }: ScheduleListProps) {
   const { t } = useTranslation();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
@@ -366,7 +370,9 @@ export default function ScheduleList() {
     }
   }, [t, statusFilter]);
 
-  useEffect(() => { void fetchSchedules(); }, [fetchSchedules]);
+  useEffect(() => {
+    if (active) void fetchSchedules();
+  }, [active, fetchSchedules]);
 
   // Client-side filter: status tab + keyword search
   const displaySchedules = schedules.filter((s) => {
