@@ -1237,6 +1237,13 @@ export default function DefaultModelConfigPanel() {
                   ) : null}
                   <span>{moduleTitle}</span>
                 </label>
+                {shouldShowMaxInputTokens ? (
+                  <span className="model-provider-max-input-tokens">
+                    {t("modelProvider.maxInputTokens", {
+                      value: maxInputTokens,
+                    })}
+                  </span>
+                ) : null}
                 <Tooltip placement="top" title={moduleSubtitle}>
                   <button
                     aria-label={t("modelProvider.moduleHelpAria", {
@@ -1380,13 +1387,6 @@ export default function DefaultModelConfigPanel() {
                   </Select.Option>
                 ))}
               </Select>
-              {shouldShowMaxInputTokens ? (
-                <p className="model-provider-max-input-tokens">
-                  {t("modelProvider.maxInputTokens", {
-                    value: maxInputTokens,
-                  })}
-                </p>
-              ) : null}
             </div>
           );
         })}

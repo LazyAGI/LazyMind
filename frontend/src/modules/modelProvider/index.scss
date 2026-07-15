@@ -267,10 +267,14 @@
 }
 
 .model-provider-max-input-tokens {
-  margin: -2px 0 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
   color: #64748b;
   font-size: 12px;
+  font-weight: 500;
   line-height: 1.4;
+  white-space: nowrap;
 }
 
 .model-provider-model-select .ant-select-selector {
