@@ -599,8 +599,7 @@ async def _handle_chat_impl(
         selected_skills = select_skill_candidates(agent.available_skills, language_query, task_profile)
         skill_config = selected_skills or False
     set_trace_context({
-        'enabled': bool(runtime.trace),
-        'trace_id': conversation.session_id if runtime.trace else None,
+        'trace_id': conversation.session_id,
         'session_id': conversation.session_id,
         'sampled': True,
         'module_trace': {'default': True},
