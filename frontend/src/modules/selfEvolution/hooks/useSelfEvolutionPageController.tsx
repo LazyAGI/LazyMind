@@ -3454,10 +3454,7 @@ export function SelfEvolutionPageController({
       );
     } catch (error) {
       appendSystemMessage(
-        getLocalizedErrorMessage(
-          error,
-          t("selfEvolutionRun.continueFailed"),
-        ) || t("selfEvolutionRun.continueFailed"),
+        getCatalogApiErrorMessage(error),
         activeSessionId,
       );
     } finally {
