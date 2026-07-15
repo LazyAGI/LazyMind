@@ -16,7 +16,7 @@ from lazymind.common.postgres import normalize_postgres_sqlalchemy_url
 from lazymind.review.skill_review.schemas import SkillReviewRunStat
 from lazymind.config import config as _cfg
 
-SKILL_REVIEW_RUN_STATS_TABLE = 'skill_review_run_stats'
+SKILL_REVIEW_RUN_STATS_TABLE = 'skill_review_stats'
 _DB_URL_ENV = 'LAZYMIND_DATABASE_URL'
 _CORE_DB_URL_ENV = 'LAZYMIND_CORE_DATABASE_URL'
 _DB_ENV_HINT = f'{_CORE_DB_URL_ENV} or {_DB_URL_ENV}'
