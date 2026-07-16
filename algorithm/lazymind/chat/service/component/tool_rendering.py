@@ -50,7 +50,7 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'search_provider_get_contents': 'items.title / items.url',
     'search_provider_meta_search': 'query',
     'search_provider_meta_catalog': 'include_sample_values',
-    'url_fetch': 'url',
+    'url_fetch': 'urls / url',
     'memory_editor': 'target',
     'read_memory': 'target',
     'vocab_learn': 'suggestions.word <-> suggestions.synonym',
@@ -109,7 +109,7 @@ _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
     'search_provider_get_contents': 'text',
     'search_provider_meta_search': 'total_count',
     'search_provider_meta_catalog': 'fields',
-    'url_fetch': 'final_url',
+    'url_fetch': 'results.result.final_url / final_url',
     'calculator': 'result',
     'vision_extractor': 'description',
     'skill_editor': 'reason',
@@ -1283,7 +1283,18 @@ def _tool_call_frame_text(tool_call: dict[str, Any], language: str = 'en') -> tu
         'name': tool_name,
         'arguments': arguments if isinstance(arguments, dict) else {},
     }
-    preview = _tool_call_preview(tool_name, preview_value, language)
+    batch_urls = arguments.get('urls') if isinstance(arguments, dict) else None
+    if _tool_name_is(tool_name, 'url_fetch') and isinstance(batch_urls, list) and len(batch_urls) > 1:
+        clean_urls = [str(item).strip() for item in batch_urls if str(item).strip()]
+        sample = ', '.join(clean_urls[:2])
+        if language == 'zh':
+            suffix = f'，另有 {len(clean_urls) - 2} 个' if len(clean_urls) > 2 else ''
+            preview = f'正在并发读取 **{len(clean_urls)}** 个网页：**{sample}**{suffix}。\n'
+        else:
+            suffix = f', plus {len(clean_urls) - 2} more' if len(clean_urls) > 2 else ''
+            preview = f'Fetching **{len(clean_urls)}** web pages concurrently: **{sample}**{suffix}.\n'
+    else:
+        preview = _tool_call_preview(tool_name, preview_value, language)
     text = (
         f'<{_TOOL_PREVIEW_TAG} id="{escape(tool_call_id, quote=True)}">{preview}</{_TOOL_PREVIEW_TAG}>'
         f'<{_TOOL_CALL_TAG}>{json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}</{_TOOL_CALL_TAG}>'

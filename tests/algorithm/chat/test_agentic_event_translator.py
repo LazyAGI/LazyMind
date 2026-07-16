@@ -102,6 +102,44 @@ def test_translator_counts_tool_call_turns_not_individual_calls():
     assert translator.tool_call_turns == 2
 
 
+def test_translator_renders_every_parallel_tool_call_and_result():
+    translator = AgentEventFrameTranslator(query='批量读取这些网页')
+    calls = [
+        {
+            'id': f'call-{index}',
+            'function': {
+                'name': 'url_fetch',
+                'arguments': {'url': f'https://example.test/{index}'},
+            },
+        }
+        for index in range(5)
+    ]
+
+    call_text = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({'tag': 'tool_calls', 'tool_calls': calls})
+    )
+    assert call_text.count('<tp id=') == 5
+    assert call_text.count('<tool_call>') == 5
+    for index in range(5):
+        assert f'https://example.test/{index}' in call_text
+
+    results = [
+        {
+            'id': f'call-{index}',
+            'name': 'url_fetch',
+            'result': {'final_url': f'https://example.test/{index}'},
+        }
+        for index in range(5)
+    ]
+    result_text = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({'tag': 'tool_results', 'tool_results': results})
+    )
+    assert result_text.count('<trp id=') == 5
+    assert result_text.count('<tool_result>') == 5
+
+
 def test_searchbase_tool_rendering_extracts_provider_brand():
     text, preview_value = _tool_call_frame_text({
         'id': 'call-tavily',

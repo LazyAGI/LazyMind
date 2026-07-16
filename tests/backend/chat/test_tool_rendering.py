@@ -74,6 +74,28 @@ def test_nested_cloud_supplier_method_with_class_prefix_uses_supplier_template()
     assert 'Reading Notion content from **/project/spec**.' in call_text
 
 
+def test_url_fetch_batch_preview_shows_count_and_sample_urls():
+    tool_call = {
+        'id': 'call-batch',
+        'function': {
+            'name': 'url_fetch',
+            'arguments': json.dumps({
+                'urls': [
+                    'https://example.test/1',
+                    'https://example.test/2',
+                    'https://example.test/3',
+                ],
+            }),
+        },
+    }
+
+    call_text, _ = _tool_call_frame_text(tool_call, 'zh')
+
+    assert '正在并发读取 **3** 个网页' in call_text
+    assert 'https://example.test/1' in call_text
+    assert '另有 1 个' in call_text
+
+
 def test_plugin_preflight_result_renders_outcome_and_reason_in_chinese():
     reason = 'The request can be answered directly without a multi-stage workflow.'
     result_text = _tool_result_frame_text(

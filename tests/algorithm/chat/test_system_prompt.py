@@ -52,3 +52,17 @@ def test_system_prompt_does_not_embed_tool_specific_web_guidance() -> None:
 
     assert '# Tool use policy' in prompt
     assert 'one search intent' not in prompt
+
+
+def test_long_url_does_not_override_chinese_request_language() -> None:
+    prompt = build_system_prompt(
+        True,
+        current_query=(
+            '帮我看看这个计划 '
+            'https://sensetime.feishu.cn/wiki/CTxvwpohviXgZiklv36cEJVwnac '
+            '有什么问题，有哪些改进意见'
+        ),
+        environment_context={'locale': 'en-US'},
+    )
+
+    assert 'Selected response language for this turn: Chinese' in prompt

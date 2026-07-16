@@ -89,9 +89,12 @@ class WikipediaToolkit(WikipediaSearch):
 _CLOUD_FILE_TOOLKIT = {
     'name': 'CloudFileToolkit',
     'desc': (
-        'Cloud file systems. Expand this Toolkit, choose the supplier that owns '
-        'the requested file or URL, then expand that supplier Toolkit to use its '
-        'browse, search, read, or write tools.'
+        'Authenticated cloud files and documents. Use this Toolkit for Feishu/Lark '
+        'Wiki or Docs links (including *.feishu.cn/wiki/*), Notion links, and paths '
+        'inside connected cloud services; do not send those URLs to url_fetch. '
+        'Expand this Toolkit, choose the supplier that owns the URL or path, then '
+        'expand that supplier Toolkit and select its resolve, read, search, browse, '
+        'or write tool.'
     ),
     'tools': [
         FeishuFS(space_id='dynamic', dynamic_auth=True),
@@ -309,7 +312,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         name='cloud_files', label='云文件', description='浏览、搜索和管理已连接的云文件系统',
         tool=_CLOUD_FILE_TOOLKIT,
         module='data', label_en='Cloud Files',
-        description_en='Browse, search, and manage connected cloud file systems.',
+        description_en='Read and manage authenticated Feishu Wiki, Feishu Docs, Notion, and other cloud files.',
     ),
     ToolConfig(
         name='schedule', label='定时任务', description='创建、查询、修改、取消和立即触发定时任务',

@@ -12,6 +12,7 @@ from .guidance import (
 _DEFAULT_UI_LOCALE = 'zh-CN'
 _CJK_PATTERN = re.compile(r'[\u3400-\u9fff]')
 _LATIN_PATTERN = re.compile(r'[A-Za-z]')
+_URL_PATTERN = re.compile(r'https?://\S+|www\.\S+', re.IGNORECASE)
 _EXPLICIT_LANGUAGE_PATTERNS = (
     (
         'Chinese',
@@ -61,7 +62,9 @@ def _explicit_language(text: object) -> str:
 
 
 def _dominant_language(text: object) -> str:
-    value = str(text or '')[:2000]
+    # URLs are identifiers, not natural-language evidence. In particular, long
+    # Feishu/Notion links must not make a Chinese request look English.
+    value = _URL_PATTERN.sub(' ', str(text or '')[:2000])
     cjk_count = len(_CJK_PATTERN.findall(value))
     latin_count = len(_LATIN_PATTERN.findall(value))
     if cjk_count >= 2 and cjk_count * 2 >= latin_count:
