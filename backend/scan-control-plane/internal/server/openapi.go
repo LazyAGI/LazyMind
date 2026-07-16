@@ -99,6 +99,12 @@ func openAPIPaths() map[string]any {
 			"put":    pathOperation("updateSourceBinding", "SourceBindingRequest", "BindingMutationResponse", "source_id", "binding_id"),
 			"delete": pathOperation("deleteSourceBinding", "", "DeleteBindingResponse", "source_id", "binding_id"),
 		},
+		"/api/scan/bindings/chat-settings": map[string]any{
+			"get": operation("listBindingChatSettings", "", "BindingChatSettingsResponse"),
+		},
+		"/api/scan/bindings/{binding_id}/chat-settings": map[string]any{
+			"put": pathOperation("updateBindingChatSetting", "UpdateBindingChatSettingRequest", "UpdateBindingChatSettingResponse", "binding_id"),
+		},
 		"/api/scan/sources/{source_id}/sync": map[string]any{
 			"post": pathOperation("triggerSourceSync", "TriggerSourceSyncRequest", "TriggerSourceSyncResponse", "source_id"),
 		},
@@ -259,10 +265,15 @@ func openAPISchemas() map[string]any {
 		"AuthConnectionStatus":          authConnectionStatusSchema(),
 		"GetSourceResponse":             object([]string{"source"}, props("source", schemaRef("SourceResponse"), "bindings", arrayOf("SourceBindingResponse"), "summary", objectSchema())),
 		"UpdateSourceRequest":           updateSourceRequestSchema(),
-		"UpdateSourceResponse":          object([]string{"source", "bindings"}, props("source", schemaRef("SourceResponse"), "bindings", arrayOf("SourceBindingResponse"), "created_binding_ids", stringArray(), "updated_binding_ids", stringArray(), "removed_binding_ids", stringArray(), "job_ids", stringArray())),
+		"UpdateSourceResponse":          object([]string{"source", "bindings"}, props("source", schemaRef("SourceResponse"), "bindings", arrayOf("SourceBindingResponse"), "created_binding_ids", stringArray(), "updated_binding_ids", stringArray(), "removed_binding_ids", stringArray(), "job_ids", stringArray(), "job_errors", arrayOf("JobError"))),
 		"DeleteSourceResponse":          object([]string{"deleted", "source_id"}, props("deleted", boolSchema(), "source_id", stringSchema(), "removed_binding_ids", stringArray(), "removed_dataset_id", stringSchema())),
 		"SourceBindingRequest":          sourceBindingRequestSchema(),
+		"SourceChatSettingEntry":         sourceChatSettingEntrySchema(),
+		"BindingChatSettingEntry":       bindingChatSettingEntrySchema(),
 		"SourceBindingResponse":         sourceBindingResponseSchema(),
+		"BindingChatSettingsResponse":   bindingChatSettingsResponseSchema(),
+		"UpdateBindingChatSettingRequest":  updateBindingChatSettingRequestSchema(),
+		"UpdateBindingChatSettingResponse": updateBindingChatSettingResponseSchema(),
 		"SchedulePolicy":                schedulePolicySchema(),
 		"ScheduleRule":                  scheduleRuleSchema(),
 		"BindingMutationResponse":       object([]string{"binding"}, props("binding", schemaRef("SourceBindingResponse"), "old_generation", integerSchema(), "new_generation", integerSchema(), "job_ids", stringArray())),
@@ -307,6 +318,7 @@ func openAPISchemas() map[string]any {
 		"ParseTaskStatus":               enumSchema("PENDING", "RUNNING", "SUBMITTED", "SUCCEEDED", "FAILED", "SUPERSEDED"),
 	}
 }
+
 
 func connectorSpecSchema() map[string]any {
 	return object([]string{"connector_type", "target_types", "supports_search", "supports_delta", "supports_dual_role_object", "supports_export_formats", "max_page_size"}, props(
@@ -385,10 +397,18 @@ func updateSourceRequestSchema() map[string]any {
 func sourceResponseSchema() map[string]any {
 	return object([]string{"source_id", "name", "dataset_id", "status", "config_version"}, props(
 		"source_id", stringSchema(),
+		"tenant_id", stringSchema(),
+		"created_by", stringSchema(),
 		"name", stringSchema(),
 		"dataset_id", stringSchema(),
 		"status", schemaRef("SourceStatus"),
+		"source_options", objectSchema(),
+		"include_extensions", stringArray(),
+		"exclude_extensions", stringArray(),
 		"config_version", integerSchema(),
+		"deleted_at", stringSchema(),
+		"created_at", stringSchema(),
+		"updated_at", stringSchema(),
 	))
 }
 
@@ -420,6 +440,47 @@ func authConnectionStatusSchema() map[string]any {
 	))
 }
 
+func bindingChatSettingsResponseSchema() map[string]any {
+	return object([]string{"sources"}, props(
+		"sources", arrayOf("SourceChatSettingEntry"),
+	))
+}
+
+func sourceChatSettingEntrySchema() map[string]any {
+	return object([]string{"source_id", "name", "dataset_id", "tenant_id", "bindings"}, props(
+		"source_id", stringSchema(),
+		"name", stringSchema(),
+		"dataset_id", stringSchema(),
+		"tenant_id", stringSchema(),
+		"bindings", arrayOf("BindingChatSettingEntry"),
+	))
+}
+
+func bindingChatSettingEntrySchema() map[string]any {
+	return object([]string{"binding_id", "target_ref", "connector_type", "target_type", "status", "chat_enabled"}, props(
+		"binding_id", stringSchema(),
+		"target_ref", stringSchema(),
+		"connector_type", stringSchema(),
+		"target_type", stringSchema(),
+		"status", stringSchema(),
+		"chat_enabled", boolSchema(),
+		"include_extensions", stringArray(),
+	))
+}
+
+func updateBindingChatSettingRequestSchema() map[string]any {
+	return object([]string{"chat_enabled"}, props(
+		"chat_enabled", boolSchema(),
+	))
+}
+
+func updateBindingChatSettingResponseSchema() map[string]any {
+	return object([]string{"binding_id", "chat_enabled"}, props(
+		"binding_id", stringSchema(),
+		"chat_enabled", boolSchema(),
+	))
+}
+
 func sourceBindingRequestSchema() map[string]any {
 	return object([]string{"connector_type", "target_type", "target_ref", "sync_mode"}, props(
 		"binding_id", stringSchema(),
@@ -434,6 +495,7 @@ func sourceBindingRequestSchema() map[string]any {
 		"schedule_policy", schemaRef("SchedulePolicy"),
 		"include_extensions", stringArray(),
 		"exclude_extensions", stringArray(),
+		"chat_enabled", boolSchema(),
 	))
 }
 
@@ -452,6 +514,9 @@ func sourceBindingResponseSchema() map[string]any {
 		"schedule_policy", schemaRef("SchedulePolicy"),
 		"next_sync_at", stringSchema(),
 		"status", schemaRef("BindingStatus"),
+		"chat_enabled", boolSchema(),
+		"include_extensions", stringArray(),
+		"exclude_extensions", stringArray(),
 	))
 }
 

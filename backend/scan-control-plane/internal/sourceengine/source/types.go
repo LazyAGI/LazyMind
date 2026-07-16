@@ -35,6 +35,8 @@ type Engine interface {
 	ListSources(ctx context.Context, req ListSourcesRequest) (ListSourcesResponse, error)
 	GetSource(ctx context.Context, req GetSourceRequest) (GetSourceResponse, error)
 	GetSourceByDatasetID(ctx context.Context, datasetID string) (GetSourceResponse, error)
+	BatchGetSourcesByDatasetIDs(ctx context.Context, datasetIDs []string) (map[string]bool, error)
+
 	GetSourceSummary(ctx context.Context, req SourceSummaryRequest) (SourceSummaryResponse, error)
 	TriggerSourceSync(ctx context.Context, req TriggerSourceSyncRequest) (TriggerSourceSyncResponse, error)
 	UpdateSource(ctx context.Context, callerID, sourceID string, req UpdateSourceRequest) (UpdateSourceResponse, error)
@@ -43,6 +45,7 @@ type Engine interface {
 	AddBinding(ctx context.Context, callerID, sourceID string, input BindingInput) (BindingMutationResponse, error)
 	UpdateBinding(ctx context.Context, callerID, sourceID, bindingID string, input BindingInput) (BindingMutationResponse, error)
 	DeleteBinding(ctx context.Context, sourceID, bindingID string) (DeleteBindingResponse, error)
+	UpdateBindingChatEnabled(ctx context.Context, bindingID string, chatEnabled bool) error
 }
 
 type CreateSourceRequest struct {
@@ -53,6 +56,7 @@ type CreateSourceRequest struct {
 	Bindings          []BindingInput `json:"bindings"`
 	IncludeExtensions []string       `json:"include_extensions,omitempty"`
 	ExcludeExtensions []string       `json:"exclude_extensions,omitempty"`
+	ChatEnabled            *bool                      `json:"chat_enabled,omitempty"`
 	SourceOptions     map[string]any `json:"source_options,omitempty"`
 }
 
@@ -63,6 +67,7 @@ type UpdateSourceRequest struct {
 	BindingsProvided  bool           `json:"-"`
 	IncludeExtensions []string       `json:"include_extensions,omitempty"`
 	ExcludeExtensions []string       `json:"exclude_extensions,omitempty"`
+	ChatEnabled            *bool                      `json:"chat_enabled,omitempty"`
 	SourceOptions     map[string]any `json:"source_options,omitempty"`
 }
 
@@ -79,6 +84,7 @@ type BindingInput struct {
 	SchedulePolicy    store.JSON              `json:"schedule_policy,omitempty"`
 	IncludeExtensions []string                `json:"include_extensions,omitempty"`
 	ExcludeExtensions []string                `json:"exclude_extensions,omitempty"`
+	ChatEnabled            *bool                      `json:"chat_enabled,omitempty"`
 	Status            string                  `json:"status,omitempty"`
 }
 
@@ -127,6 +133,7 @@ type SourceResponse struct {
 	SourceOptions     map[string]any `json:"source_options,omitempty"`
 	IncludeExtensions []string       `json:"include_extensions,omitempty"`
 	ExcludeExtensions []string       `json:"exclude_extensions,omitempty"`
+	ChatEnabled            *bool                      `json:"chat_enabled,omitempty"`
 	ConfigVersion     int64          `json:"config_version"`
 	DeletedAt         *time.Time     `json:"deleted_at,omitempty"`
 	CreatedAt         time.Time      `json:"created_at"`
@@ -152,6 +159,7 @@ type SourceBindingResponse struct {
 	NextSyncAt             *time.Time     `json:"next_sync_at,omitempty"`
 	IncludeExtensions      []string       `json:"include_extensions,omitempty"`
 	ExcludeExtensions      []string       `json:"exclude_extensions,omitempty"`
+	ChatEnabled            bool           `json:"chat_enabled"`
 	Status                 string         `json:"status"`
 	LastError              map[string]any `json:"last_error,omitempty"`
 	DeletedAt              *time.Time     `json:"deleted_at,omitempty"`
@@ -307,6 +315,8 @@ type SourceRepository interface {
 	ListSources(ctx context.Context, req store.SourceListRequest) ([]store.SourceListRecord, int, error)
 	GetSource(ctx context.Context, sourceID string) (store.Source, error)
 	GetSourceByDatasetID(ctx context.Context, datasetID string) (store.Source, error)
+	ListSourcesByDatasetIDs(ctx context.Context, datasetIDs []string) ([]store.Source, error)
+
 	UpdateSource(ctx context.Context, source store.Source) error
 	UpdateSourceWithBindings(ctx context.Context, mutation store.SourceUpdateMutation) (store.SourceUpdateResult, error)
 	DeleteSource(ctx context.Context, sourceID string, deletedAt time.Time) (store.SourceDeleteResult, error)
@@ -318,6 +328,7 @@ type SourceRepository interface {
 	UpdateBinding(ctx context.Context, binding store.Binding, checkpoint store.SyncCheckpoint, cleanup store.BindingUpdateCleanup) error
 	RecordSyncJobError(ctx context.Context, sourceID, bindingID string, generation int64, lastError store.JSON, now time.Time) error
 	DeleteBinding(ctx context.Context, sourceID, bindingID string, deletedAt time.Time) (store.BindingDeleteResult, error)
+	UpdateBindingChatEnabled(ctx context.Context, bindingID string, chatEnabled bool) error
 	GetSourceSummary(ctx context.Context, req store.SourceSummaryRequest) (store.SourceSummary, error)
 	CreateAgentCommand(ctx context.Context, command store.AgentCommand) error
 }
@@ -331,3 +342,5 @@ type ScheduleEngine interface {
 	TriggerInitialSync(ctx context.Context, binding store.Binding) ([]string, error)
 	EnqueueManualSync(ctx context.Context, req scheduleengine.ManualSyncRequest) (scheduleengine.SyncRunIntent, error)
 }
+
+

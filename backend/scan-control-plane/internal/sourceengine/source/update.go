@@ -2,8 +2,10 @@ package source
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"github.com/lazymind/scan_control_plane/internal/coreclient"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
@@ -16,9 +18,30 @@ func (e *DefaultEngine) UpdateSource(ctx context.Context, callerID, sourceID str
 		return UpdateSourceResponse{}, NewError(ErrCodeSourceVersionConflict, "source config_version does not match")
 	}
 	now := e.clock().UTC()
+
+	// Save the original name; skip core sync if the name hasn't actually changed.
+	originalName := src.Name
+
 	if req.Name != nil {
+		// Check for duplicate name at the source level (before DB transaction).
+		if *req.Name != originalName {
+			if err := e.ensureSourceNameUnique(ctx, src.TenantID, src.SourceID, *req.Name); err != nil {
+				return UpdateSourceResponse{}, err
+			}
+		}
+
 		if err := validateSourceName(*req.Name); err != nil {
 			return UpdateSourceResponse{}, err
+		}
+		// Name has actually changed: sync to Core first (before DB transaction); roll back entirely if Core fails.
+		if *req.Name != originalName {
+			if err := e.core.UpdateDataset(ctx, coreclient.UpdateDatasetRequest{
+				DatasetID:   src.DatasetID,
+				DisplayName: *req.Name,
+				UserID:      callerID,
+			}); err != nil {
+				return UpdateSourceResponse{}, err
+			}
 		}
 		src.Name = *req.Name
 	}
@@ -59,23 +82,24 @@ func (e *DefaultEngine) UpdateSource(ctx context.Context, callerID, sourceID str
 		return UpdateSourceResponse{}, mapStoreError(err)
 	}
 	result.Bindings = bindingsToResponse(bindings)
+
 	return result, nil
 }
 
 type bindingListChanges struct {
-	callerID        string
-	datasetID       string
-	tenantID        string
-	created         []string
-	updated         []string
-	removed         []string
-	createdBindings []preparedBinding
-	updatedBindings []store.BindingUpdateMutation
-	deletedBindings []store.BindingDeleteMutation
-	startWatchers   []store.Binding
-	stopWatchers    []store.Binding
-	reloadWatchers  []store.Binding
-	oldFolderIDs    []string
+	callerID               string
+	datasetID              string
+	tenantID               string
+	created                []string
+	updated                []string
+	removed                []string
+	createdBindings        []preparedBinding
+	updatedBindings        []store.BindingUpdateMutation
+	deletedBindings        []store.BindingDeleteMutation
+	startWatchers          []store.Binding
+	stopWatchers           []store.Binding
+	reloadWatchers         []store.Binding
+	oldFolderIDs           []string
 }
 
 func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string, src store.Source, inputs []BindingInput, now time.Time) (bindingListChanges, error) {
@@ -197,6 +221,30 @@ func compensatePreparedMutations(ctx context.Context, e *DefaultEngine, changes 
 		}
 	}
 }
+
+// ensureSourceNameUnique checks whether a source with the same name already exists under the same tenant (excluding itself).
+func (e *DefaultEngine) ensureSourceNameUnique(ctx context.Context, tenantID, sourceID, name string) error {
+	records, _, err := e.repo.ListSources(ctx, store.SourceListRequest{
+		TenantID: tenantID,
+		Keyword:  name,
+		Page:     1,
+		PageSize: 100,
+	})
+	if err != nil {
+		return err
+	}
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for _, r := range records {
+		if r.Source.SourceID == sourceID {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(r.Source.Name)) == lower {
+			return NewError(ErrCodeInvalidRequest, "a data source with this name already exists")
+		}
+	}
+	return nil
+}
+
 
 func ensureFinalTargetsUnique(existing []store.Binding, changes bindingListChanges) error {
 	final := make([]store.Binding, 0, len(existing)+len(changes.createdBindings))

@@ -1,0 +1,1 @@
+ALTER TABLE public.source_bindings ADD COLUMN IF NOT EXISTS chat_enabled BOOLEAN NOT NULL DEFAULT TRUE;

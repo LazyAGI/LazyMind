@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"time"
 
@@ -343,4 +344,21 @@ func ormUpsertCheckpoint(db *gorm.DB, checkpoint SyncCheckpoint) error {
 		"updated_at":         checkpoint.UpdatedAt,
 	}).Error
 	return mapSQLConstraint(err)
+}
+
+func (r *SQLRepository) UpdateBindingChatEnabled(ctx context.Context, bindingID string, chatEnabled bool) error {
+	log.Printf("[BINDING_CHAT_REPO] updating binding_id=%s chat_enabled=%v", bindingID, chatEnabled)
+	result := r.orm.WithContext(ctx).
+		Model(&ormBinding{}).
+		Where("binding_id = ?", bindingID).
+		Updates(map[string]any{"chat_enabled": chatEnabled})
+	if result.Error != nil {
+		log.Printf("[BINDING_CHAT_REPO] update error: %v", result.Error)
+		return result.Error
+	}
+	log.Printf("[BINDING_CHAT_REPO] rows_affected=%d", result.RowsAffected)
+	if result.RowsAffected == 0 {
+		return NewStoreError(ErrCodeBindingNotFound, "binding not found")
+	}
+	return nil
 }
