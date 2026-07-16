@@ -1,4 +1,4 @@
-import { Alert, Form, Input, Modal, Tag, Tooltip } from "antd";
+import { Alert, Form, Input, Modal, Skeleton, Tag } from "antd";
 import { ArrowRightOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import { FeishuCredentialHintAlertFromForm } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 import { formatValidFeishuAccountNames } from "@/modules/dataSource/utils/feishuAccount";
@@ -20,13 +20,10 @@ function getProviderTitle(type: "feishu" | "notion" | "local", t: CloudDocumentP
 }
 
 function getProviderDescription(
-  type: "feishu" | "notion" | "local",
+  type: "feishu" | "notion",
   t: CloudDocumentProvidersVm["t"],
   vm: CloudDocumentProvidersVm,
 ) {
-  if (type === "local") {
-    return t("modelProvider.cloudDocuments.localDesc", { count: vm.localSourceCount });
-  }
   if (type === "feishu") {
     if (vm.isFeishuAuthValid) {
       return t("modelProvider.cloudDocuments.feishuConnectedHint", {
@@ -66,32 +63,42 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
     handleOpenNotionSetup,
   } = vm;
 
+  if (vm.loading) {
+    return (
+      <div
+        className="model-provider-cloud-doc-grid"
+        aria-busy="true"
+      >
+        {Array.from({ length: canCreateLocalSource ? 3 : 2 }, (_, index) => (
+          <div className="model-provider-cloud-doc-skeleton" key={index}>
+            <Skeleton active avatar={{ shape: "square", size: 44 }} paragraph={{ rows: 1 }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="model-provider-cloud-doc-grid">
       {canCreateLocalSource ? (
         <button
           type="button"
-          className="model-provider-service-card"
+          className="model-provider-cloud-doc-resource-row"
           onClick={handleManageLocalSource}
         >
-          <span className="model-provider-service-logo model-provider-service-logo-blue">
-            <FolderOpenOutlined className="model-provider-service-logo-icon" />
+          <span className="model-provider-cloud-doc-resource-logo">
+            <FolderOpenOutlined />
           </span>
-          <div className="model-provider-service-card-copy">
-            <div>
-              <div className="model-provider-service-title-row">
-                <h4>{getProviderTitle("local", t)}</h4>
-              </div>
-              <Tooltip placement="topLeft" title={getProviderDescription("local", t, vm)}>
-                <span className="model-provider-service-summary-wrap">
-                  <p className="model-provider-service-summary">
-                    {getProviderDescription("local", t, vm)}
-                  </p>
-                </span>
-              </Tooltip>
-            </div>
+          <div className="model-provider-cloud-doc-resource-copy">
+            <h2>{getProviderTitle("local", t)}</h2>
+            <p>{t("modelProvider.cloudDocuments.localDetailSubtitle")}</p>
           </div>
-          <span className="model-provider-service-card-arrow" aria-hidden="true">
+          <div className="model-provider-cloud-doc-directory-count">
+            <strong>{vm.localSourceCount}</strong>
+            <span>{t("modelProvider.cloudDocuments.directoryCountUnit")}</span>
+          </div>
+          <span className="model-provider-cloud-doc-resource-action">
+            {t("modelProvider.cloudDocuments.manageLocal")}
             <ArrowRightOutlined />
           </span>
         </button>
@@ -112,7 +119,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           <button
             key={item.type}
             type="button"
-            className={`model-provider-service-card${isProviderLocked ? " is-locked" : ""}`}
+            className={`model-provider-cloud-doc-resource-row${isProviderLocked ? " is-locked" : ""}`}
             onClick={() => {
               if (isFeishu) {
                 handleManageFeishuAuth();
@@ -121,7 +128,10 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
               handleOpenNotionSetup();
             }}
           >
-            <span className="model-provider-service-logo model-provider-service-logo-blue">
+            <span className="model-provider-cloud-doc-resource-logo">
+              <span className="model-provider-cloud-doc-resource-fallback-icon">
+                {item.icon}
+              </span>
               {item.logoUrl ? (
                 <img
                   alt=""
@@ -135,36 +145,24 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
                     event.currentTarget.style.display = "none";
                   }}
                 />
-              ) : (
-                item.icon
-              )}
+              ) : null}
             </span>
-            <div className="model-provider-service-card-copy">
-              <div>
-                <div className="model-provider-service-title-row">
-                  <h4>{getProviderTitle(item.type, t)}</h4>
-                  <Tag
-                    className="model-provider-service-status"
-                    color={
-                      isAuthValid ? "success" : isProviderLocked ? "default" : "processing"
-                    }
-                  >
-                    {authStatusText}
-                  </Tag>
-                </div>
-                <Tooltip
-                  placement="topLeft"
-                  title={getProviderDescription(item.type, t, vm)}
-                >
-                  <span className="model-provider-service-summary-wrap">
-                    <p className="model-provider-service-summary">
-                      {getProviderDescription(item.type, t, vm)}
-                    </p>
-                  </span>
-                </Tooltip>
-              </div>
+            <div className="model-provider-cloud-doc-resource-copy">
+              <h2>{getProviderTitle(item.type, t)}</h2>
+              <p>{getProviderDescription(isFeishu ? "feishu" : "notion", t, vm)}</p>
             </div>
-            <span className="model-provider-service-card-arrow" aria-hidden="true">
+            <Tag
+              className="model-provider-cloud-doc-resource-status"
+              color={
+                isAuthValid ? "success" : isProviderLocked ? "default" : "processing"
+              }
+            >
+              {authStatusText}
+            </Tag>
+            <span className="model-provider-cloud-doc-resource-action">
+              {isAuthValid
+                ? t("modelProvider.cloudDocuments.manageAccount")
+                : t("modelProvider.cloudDocuments.configureConnection")}
               <ArrowRightOutlined />
             </span>
           </button>

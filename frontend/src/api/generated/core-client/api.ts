@@ -290,6 +290,12 @@ export interface CheckDatabaseConnectionResponse {
     'table_count': number;
     'tables'?: Array<string>;
 }
+export interface CheckFileHashesRequest {
+    'hashes': Array<string>;
+}
+export interface CheckFileHashesResponse {
+    'missing_hashes'?: Array<string>;
+}
 export interface CheckModelProviderData {
     'message'?: string;
     'success': boolean;
@@ -324,6 +330,7 @@ export interface CompleteUploadRequest {
     'idempotency_key'?: string;
 }
 export interface CompleteUploadResponse {
+    'content_hash'?: string;
     'content_url'?: string;
     'convert_error'?: string;
     'convert_status'?: string;
@@ -29767,6 +29774,45 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
         },
         /**
          * 
+         * @summary Check reusable file hashes
+         * @param {string} dataset 
+         * @param {CheckFileHashesRequest} checkFileHashesRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetUploadsCheckHashesPost: async (dataset: string, checkFileHashesRequest: CheckFileHashesRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetUploadsCheckHashesPost', 'dataset', dataset)
+            // verify required parameter 'checkFileHashesRequest' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetUploadsCheckHashesPost', 'checkFileHashesRequest', checkFileHashesRequest)
+            const localVarPath = `/api/core/datasets/{dataset}/uploads:checkHashes`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(checkFileHashesRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Initialize dataset upload
          * @param {string} dataset 
          * @param {InitUploadRequest} initUploadRequest 
@@ -30063,6 +30109,20 @@ export const TasksApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Check reusable file hashes
+         * @param {string} dataset 
+         * @param {CheckFileHashesRequest} checkFileHashesRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetUploadsCheckHashesPost(dataset: string, checkFileHashesRequest: CheckFileHashesRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CheckFileHashesResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetUploadsCheckHashesPost(dataset, checkFileHashesRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TasksApi.apiCoreDatasetsDatasetUploadsCheckHashesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @summary Initialize dataset upload
          * @param {string} dataset 
          * @param {InitUploadRequest} initUploadRequest 
@@ -30212,6 +30272,16 @@ export const TasksApiFactory = function (configuration?: Configuration, basePath
         },
         /**
          * 
+         * @summary Check reusable file hashes
+         * @param {TasksApiApiCoreDatasetsDatasetUploadsCheckHashesPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetUploadsCheckHashesPost(requestParameters: TasksApiApiCoreDatasetsDatasetUploadsCheckHashesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CheckFileHashesResponse> {
+            return localVarFp.apiCoreDatasetsDatasetUploadsCheckHashesPost(requestParameters.dataset, requestParameters.checkFileHashesRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @summary Initialize dataset upload
          * @param {TasksApiApiCoreDatasetsDatasetUploadsInitUploadPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -30337,6 +30407,15 @@ export interface TasksApiApiCoreDatasetsDatasetTasksTaskSuspendPostRequest {
     readonly task: string
 
     readonly suspendJobRequest: SuspendJobRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetUploadsCheckHashesPost operation in TasksApi.
+ */
+export interface TasksApiApiCoreDatasetsDatasetUploadsCheckHashesPostRequest {
+    readonly dataset: string
+
+    readonly checkFileHashesRequest: CheckFileHashesRequest
 }
 
 /**
@@ -30473,6 +30552,17 @@ export class TasksApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetTasksTaskSuspendPost(requestParameters: TasksApiApiCoreDatasetsDatasetTasksTaskSuspendPostRequest, options?: RawAxiosRequestConfig) {
         return TasksApiFp(this.configuration).apiCoreDatasetsDatasetTasksTaskSuspendPost(requestParameters.dataset, requestParameters.task, requestParameters.suspendJobRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Check reusable file hashes
+     * @param {TasksApiApiCoreDatasetsDatasetUploadsCheckHashesPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetUploadsCheckHashesPost(requestParameters: TasksApiApiCoreDatasetsDatasetUploadsCheckHashesPostRequest, options?: RawAxiosRequestConfig) {
+        return TasksApiFp(this.configuration).apiCoreDatasetsDatasetUploadsCheckHashesPost(requestParameters.dataset, requestParameters.checkFileHashesRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

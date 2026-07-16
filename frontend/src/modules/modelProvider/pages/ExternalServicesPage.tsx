@@ -62,10 +62,6 @@ interface BaseUrlPreset {
   value: string;
 }
 
-interface ExternalServicesPageProps {
-  section?: "parsing" | "tools";
-}
-
 interface ApiExternalProvider {
   base_url?: string;
   base_url_presets?: Array<{
@@ -527,7 +523,7 @@ function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
   );
 }
 
-export default function ExternalServicesPage({ section = "parsing" }: ExternalServicesPageProps) {
+export default function ExternalServicesPage() {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
@@ -1086,16 +1082,13 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
             </div>
           ) : null}
 
-          {section === "tools" ? (
-            <div className="model-provider-tools-substack">
-              {renderServiceCategory("search")}
-              {renderServiceCategory("academic")}
-              {isDeveloperModeActive() ? <ToolManagementSection view="builtin" /> : null}
-              <ToolManagementSection view="mcp" />
-            </div>
-          ) : (
-            renderServiceCategory("parsing")
-          )}
+          <div className="model-provider-tools-substack">
+            {renderServiceCategory("parsing")}
+            {renderServiceCategory("search")}
+            {renderServiceCategory("academic")}
+            {isDeveloperModeActive() ? <ToolManagementSection view="builtin" /> : null}
+            <ToolManagementSection view="mcp" />
+          </div>
         </div>
       </Spin>
 

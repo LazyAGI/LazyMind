@@ -439,6 +439,22 @@ components:
                 - success
                 - table_count
             type: object
+        CheckFileHashesRequest:
+            properties:
+                hashes:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - hashes
+            type: object
+        CheckFileHashesResponse:
+            properties:
+                missing_hashes:
+                    items:
+                        type: string
+                    type: array
+            type: object
         CheckModelProviderData:
             properties:
                 message:
@@ -508,6 +524,8 @@ components:
             type: object
         CompleteUploadResponse:
             properties:
+                content_hash:
+                    type: string
                 content_url:
                     type: string
                 convert_error:
@@ -7516,6 +7534,30 @@ paths:
                                 $ref: '#/components/schemas/CompleteUploadResponse'
                     description: Complete uploadtext
             summary: Complete upload
+            tags:
+                - tasks
+    /api/core/datasets/{dataset}/uploads:checkHashes:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CheckFileHashesRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CheckFileHashesResponse'
+                    description: Missing file hashes
+            summary: Check reusable file hashes
             tags:
                 - tasks
     /api/core/datasets/{dataset}/uploads:initUpload:
