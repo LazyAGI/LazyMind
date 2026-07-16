@@ -11,7 +11,6 @@ import {
   Modal,
   Segmented,
   Select,
-  Slider,
   Space,
   Spin,
   Table,
@@ -31,7 +30,6 @@ import {
   DeleteOutlined,
   MoreOutlined,
   PauseCircleOutlined,
-  PlusOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
   ThunderboltOutlined,
@@ -40,18 +38,13 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import {
   deleteRouterAlgorithm,
-  fetchRouterABStrategy,
   fetchRouterAlgorithms,
-  fetchRouterStatus,
   getRouterApiErrorMessage,
-  putRouterABStrategy,
   registerRouterAlgorithm,
   runRouterAlgorithmAction,
   type RegisterRouterAlgorithmPayload,
-  type RouterABStrategy,
   type RouterAlgorithm,
   type RouterAlgorithmAction,
-  type RouterStatus,
 } from "../shared/routerApi";
 import "../index.scss";
 
@@ -61,12 +54,6 @@ type AlgorithmFilters = {
   threadId: string;
   algorithmId: string;
   status: string;
-};
-
-type WeightRow = {
-  key: string;
-  algorithmId: string;
-  weight: number | null;
 };
 
 type RegisterFormValues = {
@@ -97,20 +84,6 @@ function statusColor(status: string) {
   return "default";
 }
 
-function createWeightRows(weights: Record<string, number>): WeightRow[] {
-  const entries = Object.entries(weights);
-  if (!entries.length) {
-    return [{ key: "row-0", algorithmId: "", weight: 100 }];
-  }
-
-  const total = entries.reduce((sum, [_, w]) => sum + w, 0);
-  return entries.map(([algorithmId, weight], index) => ({
-    key: `row-${index}-${algorithmId}`,
-    algorithmId,
-    weight: total > 0 ? Math.round((weight / total) * 100) : 0,
-  })).slice(0, 2);
-}
-
 export function AlgorithmVersionManagementPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -123,8 +96,6 @@ export function AlgorithmVersionManagementPage() {
   });
   const [filters, setFilters] = useState<AlgorithmFilters>(draftFilters);
   const [algorithms, setAlgorithms] = useState<RouterAlgorithm[]>([]);
-  const [routerStatus, setRouterStatus] = useState<RouterStatus | null>(null);
-  const [abStrategy, setAbStrategy] = useState<RouterABStrategy | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState("");
   const [detail, setDetail] = useState<RouterAlgorithm | null>(null);
@@ -132,26 +103,16 @@ export function AlgorithmVersionManagementPage() {
   const [viewMode, setViewMode] = useState<"table" | "card">("card");
   const [registerOpen, setRegisterOpen] = useState(false);
   const [registerSubmitting, setRegisterSubmitting] = useState(false);
-  const [abModalOpen, setAbModalOpen] = useState(false);
-  const [abSubmitting, setAbSubmitting] = useState(false);
-  const [abReason, setAbReason] = useState("");
-  const [weightRows, setWeightRows] = useState<WeightRow[]>([{ key: "row-0", algorithmId: "", weight: 1 }]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [status, items, strategy] = await Promise.all([
-        fetchRouterStatus(),
-        fetchRouterAlgorithms({
-          threadId: filters.threadId,
-          algorithmId: filters.algorithmId,
-          status: filters.status,
-        }),
-        fetchRouterABStrategy(),
-      ]);
-      setRouterStatus(status);
+      const items = await fetchRouterAlgorithms({
+        threadId: filters.threadId,
+        algorithmId: filters.algorithmId,
+        status: filters.status,
+      });
       setAlgorithms(items);
-      setAbStrategy(strategy);
     } catch (error) {
       message.error(
         getRouterApiErrorMessage(error, t("selfEvolutionRun.algorithmManagementLoadFailed")),
@@ -269,75 +230,6 @@ export function AlgorithmVersionManagementPage() {
     }
   }, [loadAll, registerForm, t]);
 
-  const openAbModal = useCallback(() => {
-    setWeightRows(createWeightRows(abStrategy?.weights ?? {}));
-    setAbReason(abStrategy?.updated_by?.reason || "");
-    setAbModalOpen(true);
-  }, [abStrategy]);
-
-  const submitAbStrategy = useCallback(async () => {
-    const weights: Record<string, number> = {};
-    for (const row of weightRows) {
-      const algorithmId = row.algorithmId.trim();
-      if (!algorithmId) {
-        continue;
-      }
-      if (typeof row.weight !== "number" || !Number.isFinite(row.weight) || row.weight <= 0) {
-        message.error(t("selfEvolutionRun.algorithmManagementAbWeightInvalid"));
-        return;
-      }
-      weights[algorithmId] = Math.floor(row.weight);
-    }
-    if (!Object.keys(weights).length) {
-      message.error(t("selfEvolutionRun.algorithmManagementAbWeightsRequired"));
-      return;
-    }
-    setAbSubmitting(true);
-    try {
-      const next = await putRouterABStrategy({
-        weights,
-        reason: abReason.trim() || undefined,
-      });
-      setAbStrategy(next);
-      message.success(t("selfEvolutionRun.algorithmManagementAbUpdateSuccess"));
-      setAbModalOpen(false);
-      await loadAll();
-    } catch (error) {
-      message.error(
-        getRouterApiErrorMessage(error, t("selfEvolutionRun.algorithmManagementAbUpdateFailed")),
-      );
-    } finally {
-      setAbSubmitting(false);
-    }
-  }, [abReason, loadAll, t, weightRows]);
-
-  const clearAbStrategy = useCallback(() => {
-    Modal.confirm({
-      title: t("selfEvolutionRun.algorithmManagementAbClearTitle"),
-      content: t("selfEvolutionRun.algorithmManagementAbClearContent"),
-      okText: t("common.confirm"),
-      cancelText: t("common.cancel"),
-      onOk: async () => {
-        try {
-          const next = await putRouterABStrategy({ weights: null });
-          setAbStrategy(next);
-          message.success(t("selfEvolutionRun.algorithmManagementAbClearSuccess"));
-          await loadAll();
-        } catch (error) {
-          message.error(
-            getRouterApiErrorMessage(error, t("selfEvolutionRun.algorithmManagementAbClearFailed")),
-          );
-          throw error;
-        }
-      },
-    });
-  }, [loadAll, t]);
-
-  const abWeightEntries = useMemo(
-    () => Object.entries(abStrategy?.weights ?? {}),
-    [abStrategy?.weights],
-  );
-
   const columns = useMemo<ColumnsType<RouterAlgorithm>>(() => [
     {
       title: t("selfEvolutionRun.algorithmManagementAlgorithmId"),
@@ -429,70 +321,6 @@ export function AlgorithmVersionManagementPage() {
           </div>
         </header>
 
-        <section className="self-evolution-algorithm-overview">
-          <div className="self-evolution-algorithm-metrics">
-            <div className="self-evolution-algorithm-metric">
-              <span className="self-evolution-algorithm-metric-label">
-                {t("selfEvolutionRun.algorithmManagementStatOwned")}
-              </span>
-              <strong>{routerStatus?.algorithms.evo_owned ?? "-"}</strong>
-            </div>
-            <div className="self-evolution-algorithm-metric">
-              <span className="self-evolution-algorithm-metric-label">
-                {t("selfEvolutionRun.algorithmManagementStatActive")}
-              </span>
-              <strong>{routerStatus?.algorithms.active ?? "-"}</strong>
-            </div>
-          </div>
-
-          <div className="self-evolution-algorithm-ab-strip">
-            <div className="self-evolution-algorithm-ab-main">
-              <div className="self-evolution-algorithm-ab-title-row">
-                <Text strong>{t("selfEvolutionRun.algorithmManagementAbTitle")}</Text>
-                <Tag color={abStrategy?.active ? "success" : "default"}>
-                  {abStrategy?.active
-                    ? t("selfEvolutionRun.algorithmManagementAbActive")
-                    : t("selfEvolutionRun.algorithmManagementAbInactive")}
-                </Tag>
-              </div>
-              {abWeightEntries.length ? (
-                <div className="self-evolution-algorithm-ab-chips">
-                  {abWeightEntries.map(([id, weight]) => (
-                    <Tag key={id} className="self-evolution-algorithm-ab-chip">
-                      <span className="self-evolution-algorithm-mono">{id}</span>
-                      <span className="self-evolution-algorithm-ab-chip-weight">×{weight}</span>
-                    </Tag>
-                  ))}
-                </div>
-              ) : (
-                <Text type="secondary" className="self-evolution-algorithm-ab-empty">
-                  {t("selfEvolutionRun.algorithmManagementAbNoWeights")}
-                </Text>
-              )}
-              {abStrategy?.updated_by?.reason ? (
-                <Text type="secondary" className="self-evolution-algorithm-ab-reason">
-                  {t("selfEvolutionRun.algorithmManagementAbReason", {
-                    reason: abStrategy.updated_by.reason,
-                  })}
-                </Text>
-              ) : null}
-            </div>
-            <Space size={8} wrap>
-              <Button size="small" icon={<ThunderboltOutlined />} onClick={openAbModal}>
-                {t("selfEvolutionRun.algorithmManagementAbUpdate")}
-              </Button>
-              <Button
-                size="small"
-                danger
-                disabled={!abStrategy?.active}
-                onClick={clearAbStrategy}
-              >
-                {t("selfEvolutionRun.algorithmManagementAbClear")}
-              </Button>
-            </Space>
-          </div>
-        </section>
-
         <section className="self-evolution-algorithm-panel">
           <div className="self-evolution-algorithm-toolbar">
             <div className="self-evolution-algorithm-filterbar">
@@ -527,6 +355,12 @@ export function AlgorithmVersionManagementPage() {
               />
               <Button type="primary" onClick={applyFilters}>{t("common.search")}</Button>
               <Button onClick={resetFilters}>{t("common.reset")}</Button>
+              <Button
+                icon={<ThunderboltOutlined />}
+                onClick={() => navigate("/self-evolution/algorithms/routing-strategy")}
+              >
+                {t("selfEvolutionRun.algorithmManagementAbTitle")}
+              </Button>
             </div>
             <Space size={16} align="center" className="self-evolution-algorithm-toolbar-right">
               <Text type="secondary" className="self-evolution-algorithm-count">
@@ -766,126 +600,6 @@ export function AlgorithmVersionManagementPage() {
         </Form>
       </Modal>
 
-      <Modal
-        open={abModalOpen}
-        title={t("selfEvolutionRun.algorithmManagementAbUpdate")}
-        onCancel={() => setAbModalOpen(false)}
-        onOk={() => void submitAbStrategy()}
-        confirmLoading={abSubmitting}
-        destroyOnClose
-        width={640}
-      >
-        <div className="self-evolution-algorithm-ab-editor">
-          {weightRows.map((row, index) => (
-            <div key={row.key} className="self-evolution-algorithm-ab-row-slider">
-              <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
-                <Select
-                  showSearch
-                  className="self-evolution-algorithm-ab-select"
-                  placeholder={t("selfEvolutionRun.algorithmManagementAlgorithmId")}
-                  value={row.algorithmId || undefined}
-                  onChange={(value: string) => {
-                    setWeightRows((prev) => prev.map((item, itemIndex) => (
-                      itemIndex === index ? { ...item, algorithmId: value } : item
-                    )));
-                  }}
-                  options={algorithms.map(a => ({
-                    label: a.algorithm_id,
-                    value: a.algorithm_id,
-                  }))}
-                  optionRender={(option) => (
-                    <span className="self-evolution-algorithm-mono">{option.value}</span>
-                  )}
-                />
-                <Slider
-                  min={0}
-                  max={100}
-                  value={row.weight ?? 0}
-                  onChange={(val) => {
-                    setWeightRows((prev) => {
-                      const next = [...prev];
-                      next[index] = { ...next[index], weight: val };
-                      if (next.length === 2) {
-                        const otherIndex = index === 0 ? 1 : 0;
-                        next[otherIndex] = { ...next[otherIndex], weight: 100 - val };
-                      } else if (next.length === 1) {
-                        next[index].weight = 100;
-                      }
-                      return next;
-                    });
-                  }}
-                  style={{ flex: 1, margin: "0 8px" }}
-                  disabled={weightRows.length === 1}
-                />
-                <InputNumber
-                  min={0}
-                  max={100}
-                  value={row.weight ?? 0}
-                  formatter={(value) => `${value}%`}
-                  parser={(value) => Number(value?.replace("%", ""))}
-                  onChange={(val) => {
-                    const numVal = typeof val === "number" ? val : 0;
-                    setWeightRows((prev) => {
-                      const next = [...prev];
-                      next[index] = { ...next[index], weight: numVal };
-                      if (next.length === 2) {
-                        const otherIndex = index === 0 ? 1 : 0;
-                        next[otherIndex] = { ...next[otherIndex], weight: 100 - numVal };
-                      } else if (next.length === 1) {
-                        next[index].weight = 100;
-                      }
-                      return next;
-                    });
-                  }}
-                  style={{ width: 72, flexShrink: 0 }}
-                  disabled={weightRows.length === 1}
-                />
-                <Button
-                  danger
-                  type="text"
-                  icon={<DeleteOutlined />}
-                  disabled={weightRows.length <= 1}
-                  onClick={() => {
-                    setWeightRows((prev) => {
-                      const next = prev.filter((_, itemIndex) => itemIndex !== index);
-                      if (next.length === 1) {
-                        next[0].weight = 100;
-                      }
-                      return next;
-                    });
-                  }}
-                  style={{ flexShrink: 0 }}
-                />
-              </div>
-            </div>
-          ))}
-
-          {weightRows.length < 2 && (
-            <Button
-              type="dashed"
-              block
-              icon={<PlusOutlined />}
-              onClick={() => setWeightRows((prev) => {
-                if (prev.length === 0) return [{ key: `row-${Date.now()}`, algorithmId: "", weight: 100 }];
-                return [
-                  { ...prev[0], weight: 50 },
-                  { key: `row-${Date.now()}`, algorithmId: "", weight: 50 },
-                ];
-              })}
-            >
-              {t("selfEvolutionRun.algorithmManagementAbAddWeight")}
-            </Button>
-          )}
-
-          <Input.TextArea
-            rows={2}
-            placeholder={t("selfEvolutionRun.algorithmManagementAbReasonPlaceholder")}
-            value={abReason}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setAbReason(event.target.value)}
-            style={{ marginTop: 8 }}
-          />
-        </div>
-      </Modal>
     </div>
   );
 }

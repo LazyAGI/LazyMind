@@ -1813,10 +1813,6 @@ export function SelfEvolutionPageController({
   }, [activeThreadId, workflowResults["eval-reports"].data]);
 
   useEffect(() => {
-    if (view === "detail" && routeThreadId && !isNewSessionConfigOpen) {
-      setIsKnowledgeBaseLoading(false);
-      return;
-    }
     const controller = new AbortController();
     fetchKnowledgeBaseOptions(controller.signal);
 
