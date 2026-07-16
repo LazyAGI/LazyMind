@@ -33,6 +33,7 @@ import lazyllm
 from lazyllm.tools.agent.base import _write_agent_data
 
 from lazymind.chat.plugin import plugin_loader
+from lazymind.chat.engine.subagent import SUBAGENT_CORE_TOOL_NAMES
 from lazymind.model_config import is_model_role_available
 
 LOG = logging.getLogger(__name__)
@@ -343,24 +344,11 @@ _COLD_START_PLUGIN_PROMPT = (
 # the plugin's state.yml declares.
 # ---------------------------------------------------------------------------
 
-_FRAMEWORK_TOOLS: List[str] = [
-    'save_artifact',
-    'get_artifact',
-    'list_artifacts',
-    'list_knowledge_bases',
-    'read_user_attachment',
-    'find_user_attachment',
-    'find_artifact',
-    'patch_artifact',
-    'discard_draft',
-]
-
-
 def _merge_tools(declared: List[str]) -> List[str]:
     """Return a deduplicated tool list with framework tools prepended."""
     seen = set()
     merged: List[str] = []
-    for t in _FRAMEWORK_TOOLS + list(declared):
+    for t in (*SUBAGENT_CORE_TOOL_NAMES, *declared):
         if t not in seen:
             seen.add(t)
             merged.append(t)

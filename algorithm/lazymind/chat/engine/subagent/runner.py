@@ -20,6 +20,7 @@ from lazymind.chat.service.component.tool_registry import (
     ATTACHED_FILES_TOOL_POLICY_APPENDIX,
     IMAGE_MARKDOWN_OUTPUT_APPENDIX,
     collect_system_prompt_appendices,
+    filter_tools,
     tool_is_active,
 )
 from lazyllm.tools.tool_config_inject import inject_tool_config
@@ -27,6 +28,7 @@ from lazyllm.tools.tool_config_inject import inject_tool_config
 from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
 from .db import SubAgentDB
 from . import tools as subagent_tools
+from . import SUBAGENT_CORE_TOOL_NAMES
 
 
 def _build_artifact_context_section(
@@ -103,11 +105,12 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
     of this list — they are injected as mandatory base tools in _build_subagent_tools.
     Names of base tools in the explicit list are silently ignored (already present).
     """
-    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts',
-                        'list_knowledge_bases', 'read_user_attachment', 'find_user_attachment',
-                        'find_artifact', 'patch_artifact', 'discard_draft'}
     if explicit:
-        name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
+        core_tool_names = set(SUBAGENT_CORE_TOOL_NAMES)
+        name_list = [
+            name for item in explicit
+            if (name := str(item).strip()) and name not in core_tool_names
+        ]
         # Build lookup from DEFAULT_TOOLS
         default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
         # Build lookup from plugin script tools
@@ -131,7 +134,7 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
             else:
                 LOG.warning('[SubAgent] tool %r not found in plugin scripts or DEFAULT_TOOLS — skipped', name)
         return result
-    return [cfg.tool for cfg in DEFAULT_TOOLS if tool_is_active(cfg)]
+    return [cfg.tool for cfg in filter_tools(DEFAULT_TOOLS)]
 
 
 def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:

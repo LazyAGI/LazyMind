@@ -165,15 +165,3 @@ def test_tool_catalog_localizes_display_fields_without_changing_runtime_descript
     for group_config in [*DEFAULT_TOOLS, SKILL_TOOL_CONFIG]:
         assert group_config.label_en.strip()
         assert group_config.description_en.strip()
-
-
-def test_pick_first_valid_requires_provider_toolkit_dict():
-    with pytest.raises(TypeError, match='pick_first_valid'):
-        ToolConfig(
-            name='broken',
-            label='Broken',
-            description='Broken pick-first-valid group',
-            tool=None,
-            module='retrieval',
-            pick_first_valid=True,
-        )

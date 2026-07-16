@@ -26,7 +26,7 @@ from lazymind.config import config as _cfg
 
 def tool_registration_name(tool: Any) -> str:
     """Return a stable identity for a callable, Toolkit, or wrapped registration."""
-    if isinstance(tool, (tuple, list)) and len(tool) == 2:
+    if isinstance(tool, tuple) and len(tool) == 2:
         return tool_registration_name(tool[0])
     if isinstance(tool, dict):
         return str(tool.get('name') or '')

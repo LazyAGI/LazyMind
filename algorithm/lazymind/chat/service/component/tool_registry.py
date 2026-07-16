@@ -163,8 +163,6 @@ class ToolConfig:
     label_en: str = ''
     description_en: str = ''
     model_role: str | None = None
-    key_source: Callable[[], Any] | None = None
-    pick_first_valid: bool = False
     capability_id: str = ''
     equivalence_scope: str = 'infrastructure'
     provider_id: str = ''
@@ -175,11 +173,6 @@ class ToolConfig:
     appendix_system_prompt: SystemPromptAppendix | None = None
 
     def __post_init__(self) -> None:
-        if self.pick_first_valid and not isinstance(self.tool, dict):
-            raise TypeError(
-                'tool must be a provider toolkit dict when pick_first_valid is True, '
-                f'got {type(self.tool).__name__}'
-            )
         for section, values in (self.appendix_system_prompt or {}).items():
             if section not in SYSTEM_PROMPT_APPENDIX_SECTIONS:
                 raise ValueError(
@@ -268,7 +261,6 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=(kb_tmp_search, _temp_kb_key_source), module='retrieval',
         label_en='Temporary File Search',
         description_en='Search relevant content in temporary files uploaded by the user.',
-        key_source=_temp_kb_key_source,
         appendix_system_prompt={
             'tool_policy': KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy'],
             'output_contract': KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
@@ -331,7 +323,6 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         module='retrieval',
         label_en='Web Search',
         description_en='Search the internet using the first available search provider.',
-        pick_first_valid=True,
         capability_id='web_search',
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['search_provider'],
@@ -354,7 +345,6 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         module='retrieval',
         label_en='Academic Search',
         description_en='Search academic papers and scientific literature using the first available provider.',
-        pick_first_valid=True,
         capability_id='academic_search',
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'papers': 'list'}, required_config=['academic_search_provider'],
@@ -458,10 +448,12 @@ DEFAULT_TOOLS: list[ToolConfig] = [
 ]
 
 
-def _resolve_method_name(instance: Any, method_name: str) -> str:
-    if method_name == '__call__':
-        return instance.__class__.__name__
-    return method_name
+def _tool_summary(tool: Any) -> str:
+    try:
+        doc = inspect.getdoc(tool)
+        return docstring_parser.parse(doc).short_description if doc else ''
+    except Exception:
+        return ''
 
 
 def _extract_methods(instance: Any) -> list[dict]:
@@ -471,27 +463,14 @@ def _extract_methods(instance: Any) -> list[dict]:
     if public_apis is not None:
         methods = []
         for method_name in public_apis:
-            resolved_name = _resolve_method_name(instance, method_name)
+            resolved_name = instance.__class__.__name__ if method_name == '__call__' else method_name
             method = getattr(instance, method_name, None)
-            if method is None:
-                methods.append({'name': resolved_name, 'summary': ''})
-                continue
-            try:
-                doc = inspect.getdoc(method)
-                summary = docstring_parser.parse(doc).short_description if doc else ''
-            except Exception:
-                summary = ''
-            methods.append({'name': resolved_name, 'summary': summary})
+            methods.append({'name': resolved_name, 'summary': _tool_summary(method) if method else ''})
         return methods
 
     if callable(instance):
         name = getattr(instance, '__name__', '')
-        try:
-            doc = inspect.getdoc(instance)
-            summary = docstring_parser.parse(doc).short_description if doc else ''
-        except Exception:
-            summary = ''
-        return [{'name': name, 'summary': summary}]
+        return [{'name': name, 'summary': _tool_summary(instance)}]
 
     return []
 
@@ -499,15 +478,9 @@ def _extract_methods(instance: Any) -> list[dict]:
 def _extract_group_methods(instances: list) -> list[dict]:
     methods = []
     for inst in instances:
-        name = inst.__class__.__name__
-        try:
-            doc = inspect.getdoc(inst)
-            summary = docstring_parser.parse(doc).short_description if doc else ''
-        except Exception:
-            summary = ''
         methods.append({
-            'name': name,
-            'summary': summary,
+            'name': inst.__class__.__name__,
+            'summary': _tool_summary(inst),
             'active': _instance_is_active(inst),
         })
     return methods
@@ -535,18 +508,23 @@ def _key_source_is_active(key_source: Callable[[], Any]) -> bool:
 
 
 def _registration_target(tool: Any) -> Any:
-    if isinstance(tool, (tuple, list)) and len(tool) == 2:
+    if isinstance(tool, tuple) and len(tool) == 2:
         return tool[0]
     return tool
+
+
+def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
+    if isinstance(tool, tuple) and len(tool) == 2 and callable(tool[1]):
+        return tool[1]
+    return None
 
 
 def tool_is_active(cfg: ToolConfig) -> bool:
     if cfg.model_role and not is_model_role_available(cfg.model_role):
         return False
-    if cfg.key_source and not _key_source_is_active(cfg.key_source):
+    key_source = _registration_key_source(cfg.tool)
+    if key_source and not _key_source_is_active(key_source):
         return False
-    if cfg.pick_first_valid:
-        return any(_instance_is_active(inst) for inst in cfg.tool.get('tools', []))
     target = _registration_target(cfg.tool)
     if target is None:
         return True
@@ -569,15 +547,11 @@ def get_all_tool_groups(locale: str | None = None) -> list[dict]:
     use_english = normalize_tool_locale(locale) == 'en-US'
     result = []
     for cfg in DEFAULT_TOOLS:
-        if cfg.pick_first_valid:
-            methods = _extract_group_methods(cfg.tool.get('tools', []))
-        else:
-            methods = _extract_methods(_registration_target(cfg.tool))
         result.append({
             'name': cfg.name,
             'label': cfg.label_en or cfg.label if use_english else cfg.label,
             'description': cfg.description_en or cfg.description if use_english else cfg.description,
-            'methods': methods,
+            'methods': _extract_methods(_registration_target(cfg.tool)),
             'can_disable': True,
             'active': tool_is_active(cfg),
             'module': cfg.module,
