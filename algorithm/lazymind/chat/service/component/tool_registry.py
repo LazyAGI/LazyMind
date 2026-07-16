@@ -1,3 +1,4 @@
+# flake8: noqa: Q000
 from __future__ import annotations
 
 import inspect
@@ -44,10 +45,18 @@ SYSTEM_PROMPT_APPENDIX_SECTIONS = ('tool_policy', 'safety', 'output_contract', '
 
 IMAGE_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
-        'When showing an image, copy `image_markdown` from the tool result verbatim when available. '
-        'Otherwise use the returned `image_url` or signed `/static-files/` text exactly with Markdown '
-        'image syntax. Never invent a host, URL prefix, CDN/tool-output URL, or rewrite a signed '
-        '`/static-files/` path as an HTTP URL. Never expose a bare local filesystem path.',
+        '# Image path formatting (mandatory)\n'
+        'When showing images in your answer, you MUST copy the `image_markdown` field from '
+        'tool results verbatim when it is available. \n'
+        'If `image_markdown` is absent, copy the `image_url` or signed `text` field that '
+        'starts with `/static-files/` exactly.\n'
+        'Rules:\n'
+        '- Use Markdown image syntax only: `![alt](/static-files/...?expires=...&sig=...)`.\n'
+        '- NEVER invent hosts or prefixes (`https://ext.lazymind.ai`, `agent-cdn.minimax.io`, '
+        'OCR ports, CDN tool_output URLs, etc.).\n'
+        '- NEVER rewrite `/static-files/` paths into `http://` or `https://` URLs.\n'
+        '- Do not use MiniMax/agent CDN links for local images; they are invalid for this UI.\n'
+        '- Do not paste bare filesystem paths (`/var/lib/lazymind/uploads/...`) in answers.',
     ),
 }
 VIDEO_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
@@ -58,10 +67,88 @@ VIDEO_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
 }
 KNOWLEDGE_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
-        'When the answer uses evidence returned by a knowledge-base tool, preserve its citation '
-        'markers exactly and cite the supporting evidence in the answer. Never invent, rewrite, or '
-        'fabricate a knowledge-base citation marker. For web, URL-fetch, or academic evidence, cite '
-        'the source title or URL plainly instead of fabricating a knowledge-base marker.',
+        '# Knowledge evidence citation rules\n'
+        'When answering with evidence retrieved from a knowledge base or uploaded '
+        'document index, cite using the original `[[document.chunk]]` markers present '
+        'in the retrieved evidence. Do not invent, rewrite, or fabricate citation markers.',
+    ),
+}
+ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Attached file rules\n'
+        'Attachments are listed for reference only — do NOT parse or read them automatically.\n'
+        '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, plugins, '
+        '`vision_extractor`, or `save_plugin_artifact`. Prefer this for images when the task is '
+        'visual (edit, generate, plugin) or you only need the file location.\n'
+        '- `read_user_attachment(filename, turn=N)`: extract TEXT — OCR for pdf/doc/docx/pptx, or a '
+        'text description via vision for images. Use only when you need document text or a textual '
+        'answer about image content (e.g. "what does this document say", "describe this diagram").\n'
+        'Supported uploads: png, jpg, jpeg, pdf, doc, docx, pptx.\n'
+        '- Default to the current turn (marked 当前轮次) when the user says '
+        '"this image / 这张图 / 这个文件" without naming a turn.\n'
+        '- For knowledge-base questions about indexed documents, you may also use '
+        '`kb_tmp_search` or other `kb_*` tools when appropriate.',
+    ),
+}
+KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        "# Search Tool Rules (CRITICAL — follow strictly)\n"
+        "If `KBToolkit` is available, you MUST activate it first by calling "
+        "its activation tool (e.g. `get_KBToolkit_methods`) before using any of its search methods. "
+        "Then use the returned knowledge-base search method FIRST for every retrieval "
+        "need — no exceptions. Do not skip it because you think the web might have "
+        "better information, or because the topic seems general, popular, or common "
+        "knowledge. The knowledge base is your primary evidence source.\n\n"
+        "Only after the knowledge-base search returns zero results or explicitly irrelevant results "
+        "may you fall back to provider-specific search tools. "
+        "You MUST NOT use any non-knowledge-base retrieval tool before trying knowledge-base tools.\n\n"
+        "**Keyword search vs semantic search — which one to use:**\n"
+        "When the user mentions a specific document name (e.g., 'xxx.pdf', 'report.docx', "
+        "'slides.pptx') and asks about particular terms, phrases, or content within that "
+        "document, prefer `kb_keyword_search` with `target=<document name>`, "
+        "`target_type='file_name'`, and `keyword=<specific terms>`. This is faster and more precise "
+        "for document-scoped exact matching.\n"
+        "For `keyword`, extract the core term(s) the user is asking about (e.g., a single "
+        "word or short phrase like 'file1' or 'Redis timeout'), not the entire query "
+        "sentence. If the first attempt returns zero results, try a shorter or alternative "
+        "keyword before considering fallback.\n"
+        "When the keyword search returns results, answer directly from them — do not "
+        "follow up with semantic search unless the returned content is clearly irrelevant "
+        "or empty.\n"
+        "Use semantic search only for open-ended queries where no specific document "
+        "is named. If keyword search returns zero results after trying alternative "
+        "keywords, fall back to semantic search.\n\n"
+        "When the user gives a concrete URL or asks you to inspect a specific page, "
+        "still try the knowledge-base search first; use `url_fetch` only when the knowledge base has "
+        "no relevant result.\n\n"
+        "For papers, research topics, arXiv ids, abstracts, or author-related questions, "
+        "still try the knowledge-base search first; after knowledge-base evidence is unavailable or "
+        "insufficient, prefer `AcademicSearchToolkit` over general web search tools. "
+        "When answering with knowledge-base evidence, cite with the original `[[document.chunk]]` "
+        "markers. When answering with web search tools, `url_fetch`, "
+        "or `AcademicSearchToolkit`, do not "
+        "fabricate `[[document.chunk]]`; instead, mention the source title or URL plainly.\n"
+    ),
+}
+WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Web Search Tool Rules\n'
+        'When using `web_search`, the `query` must represent one search intent. '
+        'If the user asks to search multiple unrelated keywords or topics, call '
+        '`web_search` separately for each keyword/topic. Do not combine unrelated '
+        'terms into one `query` with spaces, commas, punctuation, or list-like text.',
+    ),
+}
+CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Cloud document link rules\n'
+        'When the user provides a Feishu/Lark document URL, use the Feishu file-system tools '
+        'to resolve the link and read the document before summarizing or analyzing it.\n'
+        'When the user provides a Notion URL (`notion.so`, `notion.site`, `notion.com`, or '
+        '`app.notion.com`), use the Notion file-system tools first. Prefer resolving the '
+        'link, then reading with references when the task asks for analysis, summary, or '
+        'linked-page context. Do not fall back to generic URL fetching for private Notion '
+        'pages unless Notion tools are unavailable or unauthorized.',
     ),
 }
 
@@ -167,6 +254,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         capability_id='knowledge_base_search',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['knowledge_base'],
         appendix_system_prompt={
+            'tool_policy': KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy'],
             'output_contract': (
                 *IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract'],
                 *KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
@@ -181,7 +269,10 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         label_en='Temporary File Search',
         description_en='Search relevant content in temporary files uploaded by the user.',
         key_source=_temp_kb_key_source,
-        appendix_system_prompt=KNOWLEDGE_CITATION_OUTPUT_APPENDIX,
+        appendix_system_prompt={
+            'tool_policy': KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy'],
+            'output_contract': KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
+        },
     ),
     ToolConfig(
         name='data_sources', label='数据源查询', description='查询已配置的数据源服务',
@@ -244,6 +335,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         capability_id='web_search',
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['search_provider'],
+        appendix_system_prompt=WEB_SEARCH_TOOL_POLICY_APPENDIX,
     ),
     ToolConfig(
         name='academic_search',
@@ -356,6 +448,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=_CLOUD_FILE_TOOLKIT,
         module='data', label_en='Cloud Files',
         description_en='Read and manage authenticated Feishu Wiki, Feishu Docs, Notion, and other cloud files.',
+        appendix_system_prompt=CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX,
     ),
     ToolConfig(
         name='schedule', label='定时任务', description='创建、查询、修改、取消和立即触发定时任务',

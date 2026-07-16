@@ -17,6 +17,7 @@ from lazymind.chat.service.component.event_translator import AgentEventFrameTran
 
 from lazymind.chat.service.component.tool_registry import (
     DEFAULT_TOOLS,
+    ATTACHED_FILES_TOOL_POLICY_APPENDIX,
     IMAGE_MARKDOWN_OUTPUT_APPENDIX,
     collect_system_prompt_appendices,
     tool_is_active,
@@ -562,7 +563,10 @@ async def run_subagent_stream(
             current_query=ctx.objective,
             tool_prompt_appendices=collect_system_prompt_appendices(
                 runtime_configs,
-                extra_appendices=(IMAGE_MARKDOWN_OUTPUT_APPENDIX,)
+                extra_appendices=(
+                    IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+                    ATTACHED_FILES_TOOL_POLICY_APPENDIX,
+                )
                 if agentic_config.get('files') else (),
             ),
         )

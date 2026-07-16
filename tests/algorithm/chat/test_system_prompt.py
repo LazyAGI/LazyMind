@@ -78,9 +78,9 @@ def test_system_prompt_appends_partitioned_active_tool_contracts() -> None:
     )
 
     assert '## Tool-specific safety constraints' in prompt
-    assert '- Confirm before deleting remote data.' in prompt
+    assert 'Confirm before deleting remote data.' in prompt
     assert '## Tool output contracts' in prompt
-    assert '- Preserve the returned citation markers.' in prompt
+    assert 'Preserve the returned citation markers.' in prompt
     assert prompt.index('## Tool-specific safety constraints') < prompt.index('## Tool output contracts')
 
 
@@ -102,10 +102,9 @@ def test_tool_output_contract_keeps_detailed_image_and_citation_guards() -> None
         ),
     )
 
-    assert 'Never invent a host, URL prefix' in prompt
-    assert 'Never expose a bare local filesystem path' in prompt
-    assert 'Never invent, rewrite, or fabricate a knowledge-base citation marker' in prompt
-    assert 'cite the source title or URL plainly' in prompt
+    assert 'NEVER invent hosts or prefixes' in prompt
+    assert 'Do not paste bare filesystem paths' in prompt
+    assert 'Do not invent, rewrite, or fabricate citation markers' in prompt
 
 
 def test_system_prompt_ignores_tool_appendices_when_no_tools_are_registered() -> None:

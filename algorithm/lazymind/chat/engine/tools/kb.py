@@ -602,10 +602,7 @@ class KBToolkit:
 
         Use this method only when the user names a specific document and asks for
         an exact term or phrase inside that document. For open-ended semantic
-        questions, use kb_search instead. If the first keyword attempt returns no
-        results, retry with a shorter core term or a relevant alternative before
-        falling back to semantic search. When keyword results are relevant, answer
-        from them without an unnecessary semantic-search call.
+        questions, use kb_search instead.
 
         Args:
             keyword: Keyword or phrase to search in ``content``.
