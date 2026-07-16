@@ -672,8 +672,8 @@ type agentRouterOwnerInput struct {
 }
 
 type agentRouterActionRequest struct {
-	Action           string  `json:"action" required:"true" enum:"healthcheck,restart,stop"`
-	WaitReadySeconds float64 `json:"wait_ready_seconds,omitempty" desc:"Restart readiness timeout in seconds; default 180, maximum 900."`
+	Action           string  `json:"action" required:"true" enum:"healthcheck,start,restart,stop"`
+	WaitReadySeconds float64 `json:"wait_ready_seconds,omitempty" desc:"Start or restart readiness timeout in seconds; default 180, maximum 900."`
 }
 
 type agentRouterABStrategyRequest struct {
@@ -735,7 +735,7 @@ type agentRouterAlgorithmListResponse struct {
 type agentRouterActionResponse struct {
 	Status      string            `json:"status" enum:"passed,failed,stopped"`
 	AlgorithmID string            `json:"algorithm_id"`
-	Action      string            `json:"action" enum:"healthcheck,restart,stop"`
+	Action      string            `json:"action" enum:"healthcheck,start,restart,stop"`
 	Healthcheck agentRouterHealth `json:"healthcheck"`
 }
 
@@ -3919,7 +3919,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/agent/router/algorithms/{algorithm_id}/action",
 			Summary:     "Run Evo router algorithm action",
-			Description: "Runs healthcheck, restart, or stop for an Evo-owned algorithm. Restart also reactivates a stopped algorithm; stop keeps its Evo ledger record.",
+			Description: "Runs healthcheck, start, restart, or stop for an Evo-owned algorithm. Start reactivates a stopped algorithm; restart may restart or reactivate it; stop keeps its Evo ledger record.",
 			Tags:        []string{"agent"},
 			PathParams:  agentRouterAlgorithmPathParams{},
 			QueryParams: agentRouterQueryParams{},

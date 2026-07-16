@@ -217,6 +217,51 @@ class RouterManager:
         except RouterManagerError as exc:
             raise RouterManagerError('algorithm_restart_failed', str(exc), exc.status_code) from exc
 
+    def start_algorithm(
+        self,
+        algorithm_id: str,
+        *,
+        timeout_s: float,
+        instance_count: int,
+    ) -> dict[str, Any]:
+        detail = self.get_algorithm(algorithm_id)
+        if detail is None:
+            raise RouterManagerError('algorithm_not_found', f'algorithm not found: {algorithm_id}', 404)
+        if detail.get('status') != 'disabled':
+            raise RouterManagerError(
+                'algorithm_start_conflict',
+                f'algorithm {algorithm_id} is not disabled in Router',
+                409,
+            )
+        if self.in_ab_strategy(algorithm_id):
+            raise RouterManagerError(
+                'algorithm_in_ab_strategy',
+                f'algorithm {algorithm_id} is referenced by active AB strategy',
+                409,
+            )
+        spec = RouterAlgorithmSpec(
+            id=algorithm_id,
+            name=str(detail.get('name') or algorithm_id),
+            code_path=str(detail.get('code_path') or ''),
+            instance_count=instance_count,
+            config=dict(detail.get('config') or {}),
+        )
+        if not spec.code_path:
+            raise RouterManagerError(
+                'algorithm_start_conflict',
+                f'algorithm {algorithm_id} has no stored code path',
+                409,
+            )
+        try:
+            self.register_algorithm(spec, timeout_s=timeout_s)
+            return self.wait_ready(
+                algorithm_id,
+                timeout_s=timeout_s,
+                instance_count=instance_count,
+            )
+        except RouterManagerError as exc:
+            raise RouterManagerError('algorithm_start_failed', str(exc), exc.status_code) from exc
+
     def stop_algorithm(self, algorithm_id: str) -> dict[str, Any]:
         if self.in_ab_strategy(algorithm_id):
             raise RouterManagerError(

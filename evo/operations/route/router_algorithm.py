@@ -182,7 +182,28 @@ def manage_owned_algorithm(
     with ledger.router_mutation():
         claim, previous_state = ledger.begin_manage(algorithm_id)
         claimed_at = float(claim['updated_at'])
-        if action == 'restart':
+        if action == 'start':
+            if previous_state != 'stopped':
+                ledger.resolve_manage(algorithm_id, claimed_at, previous_state)
+                raise RouterLedgerError(f'algorithm is not expected stopped: {algorithm_id}')
+            if claim['instance_count'] is None:
+                ledger.resolve_manage(algorithm_id, claimed_at, previous_state)
+                raise RouterLedgerError(f'algorithm instance count is not registered: {algorithm_id}')
+            start_complete = False
+            try:
+                manager.start_algorithm(
+                    algorithm_id,
+                    timeout_s=timeout_s,
+                    instance_count=int(claim['instance_count']),
+                )
+                start_complete = True
+                health = manager.healthcheck(algorithm_id)
+            except RouterManagerError as exc:
+                state = 'orphaned' if start_complete or exc.kind == 'algorithm_start_failed' else previous_state
+                ledger.resolve_manage(algorithm_id, claimed_at, state)
+                raise
+            next_state = 'active'
+        elif action == 'restart':
             if previous_state not in {'active', 'stopped'}:
                 ledger.resolve_manage(algorithm_id, claimed_at, previous_state)
                 raise RouterLedgerError(f'algorithm cannot be restarted from {previous_state}: {algorithm_id}')

@@ -36,7 +36,7 @@ class AlgorithmOwner(StrictModel):
 
 
 class AlgorithmActionBody(StrictModel):
-    action: Literal['healthcheck', 'restart', 'stop']
+    action: Literal['healthcheck', 'start', 'restart', 'stop']
     wait_ready_seconds: float = Field(default=180.0, gt=0, le=900)
 
 
@@ -345,6 +345,8 @@ def _raise_router_error(exc: RouterManagerError) -> None:
         'algorithm_reactivation_failed': 503,
         'algorithm_unhealthy': 409,
         'algorithm_not_found': 404,
+        'algorithm_start_conflict': 409,
+        'algorithm_start_failed': 503,
         'router_timeout': 504,
         'router_transport_error': 503,
         'router_protocol_error': 502,
