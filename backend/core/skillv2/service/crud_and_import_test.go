@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -330,6 +331,9 @@ func TestListAndGetSkill_ReturnsMetadataAndDraftSummary(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	seedSkillWithHeadRevision(t, db, "skill1", "rev1")
 	seedSkillWithHeadRevision(t, db, "skill2", "rev2")
+	if err := db.Model(&testSkillV2SkillRow{}).Where("id = ?", "skill2").Update("created_at", fixedClock().Now().Add(time.Hour)).Error; err != nil {
+		t.Fatalf("update skill2 created_at: %v", err)
+	}
 	if err := db.Model(&testSkillV2DraftRow{}).Where("skill_id = ?", "skill1").Updates(map[string]any{
 		"task_id": "task1",
 		"version": 3,
@@ -353,6 +357,9 @@ func TestListAndGetSkill_ReturnsMetadataAndDraftSummary(t *testing.T) {
 	}
 	if len(list.Items) != 2 {
 		t.Fatalf("ListSkills returned %d items, want 2", len(list.Items))
+	}
+	if list.Items[0].ID != "skill2" || list.Items[1].ID != "skill1" {
+		t.Fatalf("ListSkills order = [%s, %s], want [skill2, skill1]", list.Items[0].ID, list.Items[1].ID)
 	}
 	for _, item := range list.Items {
 		if item.FileContent != "" {

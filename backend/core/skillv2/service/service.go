@@ -577,7 +577,7 @@ func skillBlobReferenced(tx *gorm.DB, hash string) (bool, error) {
 
 func (s *SkillService) ListSkills(ctx context.Context, req ListSkillsRequest) (ListSkillsResponse, error) {
 	var rows []skillRow
-	if err := s.db.WithContext(ctx).Where("owner_user_id = ? AND deleted_at IS NULL", req.UserID).Order("created_at ASC, id ASC").Find(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("owner_user_id = ? AND deleted_at IS NULL", req.UserID).Order("created_at DESC, id DESC").Find(&rows).Error; err != nil {
 		return ListSkillsResponse{}, err
 	}
 	items := make([]SkillSummary, 0, len(rows))
