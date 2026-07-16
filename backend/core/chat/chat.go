@@ -165,10 +165,11 @@ type AskPendingEvent struct {
 // Go writes the intent to DB and pushes an intent_updated convEvent so the frontend refreshes
 // the session immediately without requiring a manual page reload.
 type IntentUpdatedEvent struct {
-	SessionID  string            `json:"session_id,omitempty"`
-	Scope      string            `json:"scope"`
-	Operations []IntentOperation `json:"operations"`
-	StepID     string            `json:"step_id,omitempty"`
+	SessionID     string            `json:"session_id,omitempty"`
+	Scope         string            `json:"scope"`
+	Operations    []IntentOperation `json:"operations,omitempty"`
+	StepID        string            `json:"step_id,omitempty"`
+	IntentContext map[string]any    `json:"intent_context,omitempty"`
 }
 
 type IntentOperation struct {

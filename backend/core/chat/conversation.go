@@ -573,6 +573,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		return nil
 	}
 	var fullDelta, fullReasoning string
+	var intentUpdated *IntentUpdatedEvent
 	last := chunks[len(chunks)-1]
 	for _, ch := range chunks {
 		if ch == nil {
@@ -580,6 +581,9 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		}
 		fullDelta += ch.Delta
 		fullReasoning += ch.ReasoningContent
+		if ch.IntentUpdated != nil {
+			intentUpdated = ch.IntentUpdated
+		}
 	}
 	if last == nil {
 		return nil
@@ -592,6 +596,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		ReasoningContent: fullReasoning,
 		Sources:          last.Sources,
 		FinishReason:     last.FinishReason,
+		IntentUpdated:    intentUpdated,
 	}
 }
 
@@ -975,6 +980,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var askPending any
 	var askAnswered bool
 	var askSavedAnswers any
+	var intentUpdated any
 	if len(h.Ext) > 0 {
 		var ext struct {
 			Input           any  `json:"input"`
@@ -982,6 +988,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 			AskPending      any  `json:"ask_pending"`
 			AskAnswered     bool `json:"ask_answered"`
 			AskSavedAnswers any  `json:"ask_saved_answers"`
+			IntentUpdated   any  `json:"intent_updated"`
 		}
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
@@ -989,6 +996,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 			askPending = ext.AskPending
 			askAnswered = ext.AskAnswered
 			askSavedAnswers = ext.AskSavedAnswers
+			intentUpdated = ext.IntentUpdated
 		}
 	}
 	item := map[string]any{
@@ -1013,6 +1021,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		if askSavedAnswers != nil && !askAnswered {
 			item["ask_saved_answers"] = askSavedAnswers
 		}
+	}
+	if intentUpdated != nil {
+		item["intent_updated"] = intentUpdated
 	}
 	return item
 }

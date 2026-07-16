@@ -1108,6 +1108,7 @@ func streamSingleAnswer(
 	var toolCallTurns int
 	var sources []any
 	var pendingAskPending any
+	var pendingConversationIntent *IntentUpdatedEvent
 	thinkStart := time.Now()
 	// text：textConversation/text，finish_reason text UNSPECIFIED
 	writeSSEChunk(w, flusher, &ChatChunkResponse{
@@ -1192,7 +1193,17 @@ func streamSingleAnswer(
 			continue
 		}
 		if d.IntentUpdated != nil {
-			handleIntentUpdated(chatCtx, db, stateStore, convID, d.IntentUpdated)
+			updated := handleIntentUpdated(chatCtx, db, stateStore, convID, d.IntentUpdated)
+			if updated != nil {
+				pendingConversationIntent = updated
+				intentChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, FinishReason: "FINISH_REASON_UNSPECIFIED", IntentUpdated: updated}
+				if reqCtx.Err() == nil {
+					writeSSEChunk(w, flusher, intentChunk)
+				}
+				if stateStore != nil {
+					_ = appendChatChunk(chatCtx, stateStore, convID, historyID, intentChunk)
+				}
+			}
 			continue
 		}
 		if d.PluginPreflightUpdated != nil {
@@ -1249,6 +1260,9 @@ func streamSingleAnswer(
 	// Persist ask_pending into ext so the ask card survives page reload.
 	if pendingAskPending != nil {
 		historyExt = mergeAskPendingIntoExt(historyExt, pendingAskPending)
+	}
+	if pendingConversationIntent != nil {
+		historyExt = mergeIntentUpdatedIntoExt(historyExt, pendingConversationIntent)
 	}
 	persisted := false
 	if target.IsRegeneration && target.Existing != nil {
@@ -2001,10 +2015,11 @@ func applyIntentOperations(doc map[string]any, operations []IntentOperation) (ma
 
 // handleIntentUpdated writes the patch emitted by intentwrite to DB,
 // then pushes an intent_updated convEvent so the frontend can refresh immediately.
-func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, ev *IntentUpdatedEvent) {
+func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, ev *IntentUpdatedEvent) *IntentUpdatedEvent {
 	if ev == nil || len(ev.Operations) == 0 {
-		return
+		return nil
 	}
+	var conversationUpdate *IntentUpdatedEvent
 	if db != nil {
 		now := time.Now().UTC()
 		if ev.Scope == "conversation" && strings.TrimSpace(convID) != "" {
@@ -2016,7 +2031,9 @@ func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Stor
 				if updated, err := applyIntentOperations(doc, ev.Operations); err == nil {
 					ext["intent_context"] = updated
 					raw, _ := json.Marshal(ext)
-					_ = db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
+					if db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error == nil {
+						conversationUpdate = &IntentUpdatedEvent{Scope: "conversation", IntentContext: updated}
+					}
 				}
 			}
 		} else if ev.Scope == "plugin_session" && ev.SessionID != "" {
@@ -2061,6 +2078,20 @@ func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Stor
 			},
 		})
 	}
+	return conversationUpdate
+}
+
+func mergeIntentUpdatedIntoExt(ext json.RawMessage, intent *IntentUpdatedEvent) json.RawMessage {
+	m := make(map[string]any)
+	if len(ext) > 0 {
+		_ = json.Unmarshal(ext, &m)
+	}
+	m["intent_updated"] = intent
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ext
+	}
+	return b
 }
 
 func mergeAskPendingIntoExt(ext json.RawMessage, askPending any) json.RawMessage {

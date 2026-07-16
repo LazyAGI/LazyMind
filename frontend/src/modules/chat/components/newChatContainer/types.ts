@@ -94,4 +94,8 @@ export interface ChatMessage {
   cite_messages?: string[];
   tool_call_turns?: number;
   mentions?: ChatMention[];
+  intent_updated?: {
+    scope: "conversation";
+    intent_context: Record<string, unknown>;
+  };
 }

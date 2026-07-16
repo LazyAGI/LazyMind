@@ -326,9 +326,13 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         },
     ),
     ToolConfig(
-        name='data_sources', label='数据源查询', description='查询已配置的数据源服务',
+        name='data_sources', label='数据源查询',
+        description='仅查询已配置的数据源提供方；不用于查询可用工具或通用能力',
         tool=list_data_sources, module='data', label_en='Data Sources',
-        description_en='List configured data-source provider services.',
+        description_en=(
+            'List configured data-source providers only; not a catalog of '
+            'available tools or general capabilities.'
+        ),
     ),
     ToolConfig(
         name='external_db',
