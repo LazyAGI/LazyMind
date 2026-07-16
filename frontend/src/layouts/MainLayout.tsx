@@ -19,6 +19,7 @@ import {
   UnorderedListOutlined,
   HistoryOutlined,
   BookOutlined,
+  CloudOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -129,6 +130,11 @@ export default function MainLayout() {
   const pathname = location.pathname || "/agent/chat";
 
   const settingsMenuItems = [
+    {
+      key: "/model-providers/default-services",
+      label: t("layout.modelProviderManagement"),
+      icon: <ApiOutlined className="settings-popover-icon" />,
+    },
     ...(!runtimeFeatures.hideCloudAdmin
       ? [
           {
@@ -162,9 +168,14 @@ export default function MainLayout() {
       icon: <DatabaseOutlined />,
     },
     {
-      key: "/model-providers/default-services",
-      label: t("layout.modelProviderManagement"),
-      icon: <ApiOutlined />,
+      key: "/cloud-documents",
+      label: t("layout.cloudDocuments"),
+      icon: <CloudOutlined />,
+    },
+    {
+      key: "/databases",
+      label: t("layout.database"),
+      icon: <DatabaseOutlined />,
     },
   ];
   const hideEvo = runtimeFeatures.hideEvo;
@@ -174,6 +185,7 @@ export default function MainLayout() {
       .VITE_APP_LOGO || "";
   const needsRestoreButtonSafeArea =
     pathname.startsWith("/model-providers") ||
+    pathname.startsWith("/cloud-documents") ||
     pathname.startsWith("/lib/knowledge/detail") ||
     pathname.startsWith("/memory-management") ||
     pathname.startsWith("/self-evolution");
