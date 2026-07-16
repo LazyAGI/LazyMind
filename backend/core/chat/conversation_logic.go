@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -1113,31 +1112,10 @@ func streamSingleAnswer(
 	})
 	for d := range ch {
 		if d.ArtifactCreated != nil {
-			userIDForArtifact := userIDFromChatRequestBody(reqBody)
-			if userIDForArtifact == "" {
-				userIDForArtifact = "0"
-			}
-			notice, artifactErr := persistConversationArtifact(
-				chatCtx, db, convID, historyID, userIDForArtifact, d.ArtifactCreated,
+			persistAndPublishConversationArtifact(
+				chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
+				convID, historyID, seq, d.ArtifactCreated,
 			)
-			if artifactErr != nil {
-				log.Logger.Error().Err(artifactErr).Str("conversation_id", convID).
-					Str("history_id", historyID).Msg("persist main chat artifact failed")
-				continue
-			}
-			artifactChunk := &ChatChunkResponse{
-				ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
-				FinishReason: "FINISH_REASON_UNSPECIFIED", ArtifactCreated: notice,
-			}
-			if reqCtx.Err() == nil {
-				writeSSEChunk(w, flusher, artifactChunk)
-			}
-			if stateStore != nil {
-				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, artifactChunk)
-				_ = AppendConvEvent(chatCtx, stateStore, convID, &ConvEvent{
-					Type: "artifact_created", Payload: notice,
-				})
-			}
 			continue
 		}
 		if d.TaskCreated != nil {
@@ -1311,6 +1289,50 @@ func streamSingleAnswer(
 	}
 }
 
+// persistAndPublishConversationArtifact is the shared main-Agent artifact path
+// for single-answer and multi-answer streams. Persist first so every client
+// notification refers to an artifact that is already queryable after refresh.
+func persistAndPublishConversationArtifact(
+	chatCtx, reqCtx context.Context,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	db *gorm.DB,
+	stateStore state.Store,
+	reqBody map[string]any,
+	convID, historyID string,
+	seq int,
+	event *ArtifactCreatedEvent,
+) {
+	userID := userIDFromChatRequestBody(reqBody)
+	if userID == "" {
+		userID = "0"
+	}
+	notice, err := persistConversationArtifact(
+		chatCtx, db, convID, historyID, userID, event,
+	)
+	if err != nil {
+		log.Logger.Error().Err(err).Str("conversation_id", convID).
+			Str("history_id", historyID).Msg("persist main chat artifact failed")
+		return
+	}
+	chunk := &ChatChunkResponse{
+		ConversationID:  convID,
+		Seq:             int32(seq),
+		HistoryID:       historyID,
+		FinishReason:    "FINISH_REASON_UNSPECIFIED",
+		ArtifactCreated: notice,
+	}
+	if reqCtx.Err() == nil {
+		writeSSEChunk(w, flusher, chunk)
+	}
+	if stateStore != nil {
+		_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
+		_ = AppendConvEvent(chatCtx, stateStore, convID, &ConvEvent{
+			Type: "artifact_created", Payload: notice,
+		})
+	}
+}
+
 func streamDualAnswer(
 	chatCtx, reqCtx context.Context,
 	w http.ResponseWriter,
@@ -1356,7 +1378,6 @@ func streamDualAnswer(
 	var primaryToolCallTurns, secondaryToolCallTurns int
 	primaryDone := primaryCh == nil
 	secondaryDone := secondaryCh == nil
-	var writeMu sync.Mutex
 	appendPrimary := func(delta, reasoning string, sources []any) {
 		if reasoning != "" {
 			primaryPendingThink += reasoning
@@ -1373,12 +1394,10 @@ func streamDualAnswer(
 			return
 		}
 		if reqCtx.Err() == nil {
-			writeMu.Lock()
 			writeSSEChunk(w, flusher, map[string]any{
 				"conversation_id": convID, "seq": seq, "delta": delta, "history_id": historyID,
 				"sources": sources,
 			})
-			writeMu.Unlock()
 		}
 		if stateStore != nil {
 			_ = appendChatChunk(chatCtx, stateStore, convID, historyID, &ChatChunkResponse{
@@ -1403,12 +1422,10 @@ func streamDualAnswer(
 			return
 		}
 		if reqCtx.Err() == nil {
-			writeMu.Lock()
 			writeSSEChunk(w, flusher, map[string]any{
 				"conversation_id": convID, "seq": seq, "delta": delta, "history_id": secondaryHistoryID,
 				"sources": sources,
 			})
-			writeMu.Unlock()
 		}
 		if stateStore != nil {
 			_ = appendChatChunk(chatCtx, stateStore, convID, secondaryHistoryID, &ChatChunkResponse{
@@ -1424,6 +1441,13 @@ func streamDualAnswer(
 				primaryDone = true
 				continue
 			}
+			if d.ArtifactCreated != nil {
+				persistAndPublishConversationArtifact(
+					chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
+					convID, historyID, seq, d.ArtifactCreated,
+				)
+				continue
+			}
 			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > primaryToolCallTurns {
 				primaryToolCallTurns = next
 			}
@@ -1431,6 +1455,13 @@ func streamDualAnswer(
 		case d, ok := <-secondaryCh:
 			if !ok {
 				secondaryDone = true
+				continue
+			}
+			if d.ArtifactCreated != nil {
+				persistAndPublishConversationArtifact(
+					chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
+					convID, secondaryHistoryID, seq, d.ArtifactCreated,
+				)
 				continue
 			}
 			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > secondaryToolCallTurns {
@@ -1446,6 +1477,13 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
+						if d.ArtifactCreated != nil {
+							persistAndPublishConversationArtifact(
+								bg, reqCtx, w, flusher, db, stateStore, reqBody,
+								convID, historyID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
 						if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > primaryToolCallTurns {
 							primaryToolCallTurns = next
 						}
@@ -1475,6 +1513,13 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
+						if d.ArtifactCreated != nil {
+							persistAndPublishConversationArtifact(
+								bg, reqCtx, w, flusher, db, stateStore, reqBody,
+								convID, secondaryHistoryID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
 						if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > secondaryToolCallTurns {
 							secondaryToolCallTurns = next
 						}

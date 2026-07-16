@@ -148,7 +148,6 @@ type TaskCreatedEvent struct {
 type ArtifactCreatedEvent struct {
 	ArtifactID  string          `json:"artifact_id"`
 	Filename    string          `json:"filename"`
-	Slot        string          `json:"slot"`
 	ContentType string          `json:"content_type"`
 	Value       json.RawMessage `json:"value"`
 	Caption     *string         `json:"caption,omitempty"`

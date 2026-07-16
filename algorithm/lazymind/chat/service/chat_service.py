@@ -58,6 +58,8 @@ _CITE_MESSAGE_PATTERN = re.compile(
     r'<cite_message>([\s\S]*?)</cite_message>\s*',
     re.IGNORECASE,
 )
+
+
 def _normalize_cite_message_query_for_agent(query: str) -> tuple[str, str]:
     cite_messages: list[str] = []
 

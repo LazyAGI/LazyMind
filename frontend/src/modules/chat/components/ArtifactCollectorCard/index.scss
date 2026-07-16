@@ -7,25 +7,6 @@
   box-shadow: 0 12px 32px rgb(35 55 90 / 14%), 0 2px 8px rgb(35 55 90 / 8%);
   overflow: hidden;
 
-  &--loading {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 24px;
-    font-size: 13px;
-    color: #6b7a99;
-  }
-
-  &--empty {
-    .artifact-collector__empty-text {
-      text-align: center;
-      color: #8c98a8;
-      font-size: 13px;
-      padding: 24px 0;
-      margin: 0;
-    }
-  }
-
   // ── Header ──────────────────────────────────────────────
   &__header {
     background: linear-gradient(135deg, #f8faff 0%, #f4f7ff 100%);
@@ -114,16 +95,6 @@
     .ant-tabs-content-holder {
       display: none;
     }
-  }
-
-  &__loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 86px;
-    color: #6b7a99;
-    font-size: 13px;
   }
 
   // ── Body (file list) ────────────────────────────────────
@@ -251,4 +222,8 @@
   .ant-popover-inner-content {
     padding: 0;
   }
+}
+
+.artifact-download-trigger {
+  display: inline-flex;
 }

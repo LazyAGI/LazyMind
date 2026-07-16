@@ -25,8 +25,8 @@ func TestSignArtifactFileValueAddsSignedURL(t *testing.T) {
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("unmarshal signed artifact: %v", err)
 	}
-	if got["path"] != fullPath {
-		t.Fatalf("expected original path preserved, got %#v", got["path"])
+	if _, exposed := got["path"]; exposed {
+		t.Fatalf("server path must not be exposed, got %#v", got["path"])
 	}
 	url, _ := got["url"].(string)
 	if !strings.HasPrefix(url, "/static-files/subagent/user-1/task-1/writing_task.json?") {
@@ -46,9 +46,8 @@ func TestSignArtifactValueResolvesLegacyRelativePath(t *testing.T) {
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("unmarshal signed artifact: %v", err)
 	}
-	wantPath := filepath.Join(workspace, "large", "output.txt")
-	if got["path"] != wantPath {
-		t.Fatalf("expected resolved path %q, got %#v", wantPath, got["path"])
+	if _, exposed := got["path"]; exposed {
+		t.Fatalf("resolved server path must not be exposed, got %#v", got["path"])
 	}
 	url, _ := got["url"].(string)
 	if !strings.HasPrefix(url, "/static-files/subagent/user-1/task-1/large/output.txt?") {
@@ -66,7 +65,33 @@ func TestSignArtifactValueRejectsLegacyPathOutsideWorkspace(t *testing.T) {
 	if got["url"] != nil {
 		t.Fatalf("path outside workspace must not receive a signed URL: %v", got["url"])
 	}
-	if got["path"] != "" {
-		t.Fatalf("path outside workspace should be cleared, got %v", got["path"])
+	if _, exposed := got["path"]; exposed {
+		t.Fatalf("path outside workspace should be removed, got %v", got["path"])
+	}
+}
+
+func TestSignArtifactValueRejectsAbsolutePathOutsideWorkspace(t *testing.T) {
+	raw := json.RawMessage(`{"filename":"secret.txt","path":"/tmp/other/secret.txt"}`)
+	signed := SignArtifactValue("file", raw, "/tmp/subagent/task-1")
+	var got map[string]any
+	if err := json.Unmarshal(signed, &got); err != nil {
+		t.Fatalf("unmarshal signed artifact: %v", err)
+	}
+	_, pathExposed := got["path"]
+	if got["url"] != nil || pathExposed {
+		t.Fatalf("absolute path outside workspace must be cleared: %#v", got)
+	}
+}
+
+func TestSignArtifactFileListOmitsUnsignableServerPaths(t *testing.T) {
+	raw := json.RawMessage(`{"paths":["/private/server/secret.txt","https://example.com/public.txt"]}`)
+	signed := SignArtifactValue("file_list", raw, "")
+	var got map[string]any
+	if err := json.Unmarshal(signed, &got); err != nil {
+		t.Fatalf("unmarshal signed artifact: %v", err)
+	}
+	paths, _ := got["paths"].([]any)
+	if len(paths) != 1 || paths[0] != "https://example.com/public.txt" {
+		t.Fatalf("only public paths should be returned: %#v", paths)
 	}
 }

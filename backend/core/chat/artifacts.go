@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -40,7 +42,7 @@ type ConversationArtifactDTO struct {
 
 func validArtifactFilename(name string) bool {
 	name = strings.TrimSpace(name)
-	if name == "" || name == "." || name == ".." || len(name) > 255 ||
+	if name == "" || name == "." || name == ".." || utf8.RuneCountInString(name) > 255 ||
 		strings.ContainsAny(name, "/\\") {
 		return false
 	}
@@ -60,7 +62,10 @@ func persistConversationArtifact(
 		return nil, errors.New("artifact event is required")
 	}
 	artifactID := strings.TrimSpace(event.ArtifactID)
-	if artifactID == "" || len(artifactID) > 36 ||
+	if _, err := uuid.Parse(artifactID); err != nil {
+		return nil, errors.New("invalid artifact id")
+	}
+	if len(artifactID) > 36 ||
 		conversationID == "" || historyID == "" || userID == "" ||
 		!validArtifactFilename(event.Filename) {
 		return nil, errors.New("invalid artifact metadata")
@@ -83,7 +88,7 @@ func persistConversationArtifact(
 	} else if _, ok := value["data"]; !ok {
 		return nil, errors.New("json artifact value must contain data")
 	}
-	if event.Caption != nil && len(*event.Caption) > 2000 {
+	if event.Caption != nil && utf8.RuneCountInString(*event.Caption) > 2000 {
 		return nil, errors.New("artifact caption is too long")
 	}
 	now := time.Now().UTC()
@@ -134,7 +139,11 @@ func ListConversationArtifacts(w http.ResponseWriter, r *http.Request) {
 	if err := db.WithContext(r.Context()).Where(
 		"id = ? AND create_user_id = ?", conversationID, userID,
 	).First(&conversation).Error; err != nil {
-		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+		} else {
+			common.ReplyErr(w, "query conversation failed", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -155,30 +164,29 @@ func ListConversationArtifacts(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	tasks, err := subagent.ListTasksByConversationForUser(r.Context(), db, conversationID, userID)
+	subagentArtifacts, err := subagent.ListArtifactsByConversationForUser(
+		r.Context(), db, conversationID, userID,
+	)
 	if err != nil {
-		common.ReplyErr(w, "query subagent tasks failed", http.StatusInternalServerError)
+		common.ReplyErr(w, "query subagent artifacts failed", http.StatusInternalServerError)
 		return
 	}
-	for _, task := range tasks {
-		artifacts, loadErr := subagent.LoadArtifacts(r.Context(), db, task.ID)
-		if loadErr != nil {
-			common.ReplyErr(w, "query subagent artifacts failed", http.StatusInternalServerError)
-			return
-		}
-		for _, artifact := range artifacts {
-			if artifact.Hidden {
-				continue
-			}
-			out = append(out, ConversationArtifactDTO{
-				ArtifactID: artifact.ID, ConversationID: conversationID,
-				HistoryID: task.TriggerHistoryID, ProducerType: "subagent", ProducerID: task.ID,
-				Slot: artifact.Slot, ContentType: artifact.ContentType, Seq: artifact.Seq,
-				Value:   subagent.SignArtifactValue(artifact.ContentType, artifact.Value, task.WorkspacePath),
-				Caption: artifact.Caption, CreatedAt: artifact.CreatedAt,
-			})
-		}
+	for _, artifact := range subagentArtifacts {
+		out = append(out, ConversationArtifactDTO{
+			ArtifactID: artifact.ArtifactID, ConversationID: conversationID,
+			HistoryID: artifact.TriggerHistoryID, ProducerType: "subagent", ProducerID: artifact.TaskID,
+			Slot: artifact.Slot, ContentType: artifact.ContentType, Seq: artifact.Seq,
+			Value: subagent.SignArtifactValue(
+				artifact.ContentType, artifact.Value, artifact.WorkspacePath,
+			),
+			Caption: artifact.Caption, CreatedAt: artifact.CreatedAt,
+		})
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ArtifactID < out[j].ArtifactID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
 	common.ReplyOK(w, map[string]any{"artifacts": out})
 }

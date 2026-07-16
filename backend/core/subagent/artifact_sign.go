@@ -52,12 +52,15 @@ func resolveArtifactPaths(raw json.RawMessage, workspacePath string) json.RawMes
 	}
 	resolve := func(path string) string {
 		path = strings.TrimSpace(path)
-		if path == "" || filepath.IsAbs(path) || strings.HasPrefix(path, "/static-files/") ||
+		if path == "" || strings.HasPrefix(path, "/static-files/") ||
 			strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") ||
 			strings.HasPrefix(path, "data:") {
 			return path
 		}
-		resolved := filepath.Clean(filepath.Join(workspaceRoot, filepath.FromSlash(path)))
+		resolved := filepath.Clean(filepath.FromSlash(path))
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Clean(filepath.Join(workspaceRoot, resolved))
+		}
 		relative, err := filepath.Rel(workspaceRoot, resolved)
 		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 			return ""
@@ -103,13 +106,19 @@ func signImageArtifactValue(raw json.RawMessage) json.RawMessage {
 	}
 	pathVal, _ := m["path"].(string)
 	if pathVal == "" {
-		return raw
+		delete(m, "path")
+		out, err := json.Marshal(m)
+		if err != nil {
+			return raw
+		}
+		return out
 	}
 	if strings.HasPrefix(pathVal, "http://") || strings.HasPrefix(pathVal, "https://") ||
 		strings.HasPrefix(pathVal, "data:") {
 		if strings.Contains(pathVal, "/static-files/") {
 			if signed := doc.StaticFileURLFromAnyStoragePath(pathVal); signed != "" {
 				m["url"] = signed
+				delete(m, "path")
 				out, err := json.Marshal(m)
 				if err == nil {
 					return out
@@ -126,9 +135,14 @@ func signImageArtifactValue(raw json.RawMessage) json.RawMessage {
 	}
 	signed := doc.StaticFileURLFromAnyStoragePath(pathVal)
 	if signed == "" {
-		return raw
+		delete(m, "path")
+		out, err := json.Marshal(m)
+		if err != nil {
+			return raw
+		}
+		return out
 	}
-	delete(m, "url")
+	delete(m, "path")
 	m["url"] = signed
 	out, err := json.Marshal(m)
 	if err != nil {
@@ -154,12 +168,10 @@ func signFileListArtifactValue(raw json.RawMessage) json.RawMessage {
 		}
 		if signed := doc.StaticFileURLFromAnyStoragePath(p); signed != "" {
 			paths = append(paths, signed)
-		} else {
+		} else if strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://") ||
+			strings.HasPrefix(p, "data:") || strings.HasPrefix(p, "/static-files/") {
 			paths = append(paths, p)
 		}
-	}
-	if len(paths) == 0 {
-		return raw
 	}
 	m["paths"] = paths
 	out, err := json.Marshal(m)
@@ -179,12 +191,18 @@ func signFileArtifactValue(raw json.RawMessage) json.RawMessage {
 		pathVal, _ = m["url"].(string)
 	}
 	if pathVal == "" {
-		return raw
+		delete(m, "path")
+		out, err := json.Marshal(m)
+		if err != nil {
+			return raw
+		}
+		return out
 	}
 	if strings.HasPrefix(pathVal, "http://") || strings.HasPrefix(pathVal, "https://") ||
 		strings.HasPrefix(pathVal, "data:") {
 		if !strings.Contains(pathVal, "/static-files/") {
 			m["url"] = pathVal
+			delete(m, "path")
 			out, err := json.Marshal(m)
 			if err == nil {
 				return out
@@ -194,8 +212,14 @@ func signFileArtifactValue(raw json.RawMessage) json.RawMessage {
 	}
 	signed := doc.StaticFileURLFromAnyStoragePath(pathVal)
 	if signed == "" {
-		return raw
+		delete(m, "path")
+		out, err := json.Marshal(m)
+		if err != nil {
+			return raw
+		}
+		return out
 	}
+	delete(m, "path")
 	m["url"] = signed
 	out, err := json.Marshal(m)
 	if err != nil {

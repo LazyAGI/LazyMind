@@ -27,6 +27,7 @@ import {
   basenameFromPath,
   resolveCoreAssetUrl,
 } from "@/modules/knowledge/utils/imageUrl";
+import { downloadStream } from "@/modules/chat/utils/download";
 import "./index.scss";
 
 interface Props {
@@ -73,20 +74,6 @@ function extractTextContent(artifact: TaskArtifact): string {
     }
   }
   return v.text ?? "";
-}
-
-// Trigger a browser download from a text blob.
-function downloadTextBlob(filename: string, content: string) {
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 // Strip lazyllm tool-call/result XML tags from think content, keeping only the pure reasoning text.
@@ -310,7 +297,7 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
                     href={img.src}
                     download={img.filename}
                     className="task-artifact-preview-download"
-                    title={`下载 ${img.filename}`}
+                    title={`${t("taskCenter.download")} ${img.filename}`}
                     onClick={(event) => event.stopPropagation()}
                   >
                     <DownloadOutlined />
@@ -329,7 +316,7 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
                     href={img.src}
                     download={img.filename}
                     className="task-artifact-preview-download"
-                    title={`下载 ${img.filename}`}
+                    title={`${t("taskCenter.download")} ${img.filename}`}
                     onClick={(event) => event.stopPropagation()}
                   >
                     <DownloadOutlined />
@@ -346,7 +333,7 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
               href={file.src}
               download={file.filename}
               className="task-artifact-file-name task-artifact-file-link"
-              title={`下载 ${file.filename}`}
+              title={`${t("taskCenter.download")} ${file.filename}`}
               onClick={(event) => event.stopPropagation()}
             >
               {file.filename}
@@ -369,7 +356,7 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
                   href={downloadUrl}
                   download={fileName}
                   className="task-artifact-file-name task-artifact-file-link"
-                  title={`下载 ${fileName}`}
+                  title={`${t("taskCenter.download")} ${fileName}`}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {fileName}
@@ -396,14 +383,17 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
                 <button
                   type="button"
                   className="task-artifact-download-btn"
-                  title={`下载 ${textFileName}`}
-                  aria-label={`下载 ${textFileName}`}
+                  title={`${t("taskCenter.download")} ${textFileName}`}
+                  aria-label={`${t("taskCenter.download")} ${textFileName}`}
                   onClick={() =>
-                    downloadTextBlob(textFileName, textContent)
+                    downloadStream(
+                      new Blob([textContent], { type: "text/plain;charset=utf-8" }),
+                      textFileName,
+                    )
                   }
                 >
                   <DownloadOutlined />
-                  下载
+                  {t("taskCenter.download")}
                 </button>
               </div>
               <div className="task-artifact-text-body">

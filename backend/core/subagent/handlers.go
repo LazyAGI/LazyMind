@@ -175,7 +175,15 @@ func GetTaskArtifacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task, err := GetTask(r.Context(), db, taskID)
-	if err != nil || task.CreateUserID != requestUserID(r) {
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "task not found", http.StatusNotFound)
+		} else {
+			common.ReplyErr(w, "query task failed", http.StatusInternalServerError)
+		}
+		return
+	}
+	if task.CreateUserID != requestUserID(r) {
 		common.ReplyErr(w, "task not found", http.StatusNotFound)
 		return
 	}

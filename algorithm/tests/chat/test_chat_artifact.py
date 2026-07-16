@@ -20,7 +20,10 @@ def test_save_chat_artifact_emits_downloadable_event(monkeypatch):
     assert emitted[0]['value'] == {'text': '你好'}
 
 
-@pytest.mark.parametrize('filename', ['../escape.txt', 'dir/file.txt', '', '..'])
+@pytest.mark.parametrize(
+    'filename',
+    ['../escape.txt', 'dir/file.txt', r'dir\file.txt', 'bad\u0085.txt', '', '..'],
+)
 def test_save_chat_artifact_rejects_unsafe_filename(filename):
     with pytest.raises(ValueError):
         chat_artifact.save_chat_artifact(filename, 'x')

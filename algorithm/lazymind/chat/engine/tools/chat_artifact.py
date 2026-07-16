@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-import re
+import unicodedata
 import uuid
 from typing import Any, Dict, Optional
 
@@ -11,14 +11,12 @@ from lazyllm.tools.agent.base import _write_agent_data
 from lazymind.chat.engine.tools.infra import tool_success
 
 _MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
-_CONTROL_CHARS = re.compile(r'[\x00-\x1f\x7f]')
-
-
 def _safe_filename(filename: str, content_type: str) -> str:
     name = str(filename or '').strip()
-    if not name or name in {'.', '..'} or os.path.basename(name) != name:
+    if (not name or name in {'.', '..'} or '/' in name or '\\' in name
+            or os.path.basename(name) != name):
         raise ValueError('filename must be a plain file name without a directory path')
-    if len(name) > 255 or _CONTROL_CHARS.search(name):
+    if len(name) > 255 or any(unicodedata.category(char) == 'Cc' for char in name):
         raise ValueError('filename is invalid or too long')
     if '.' not in name:
         name += '.json' if content_type == 'json' else '.txt'
@@ -47,14 +45,20 @@ def save_chat_artifact(
     if normalized_type not in {'text', 'json'}:
         raise ValueError("content_type must be 'text' or 'json'")
     safe_name = _safe_filename(filename, normalized_type)
+    normalized_caption = str(caption).strip() if caption else None
+    if normalized_caption and len(normalized_caption) > 2000:
+        raise ValueError('caption exceeds the 2000 character limit')
     if normalized_type == 'json':
-        encoded = json.dumps(content, ensure_ascii=False).encode('utf-8')
         value = {'data': content}
     else:
         text = str(content if content is not None else '')
-        encoded = text.encode('utf-8')
         value = {'text': text}
-    if len(encoded) > _MAX_ARTIFACT_BYTES:
+    # Measure the actual event value rather than only the raw content: JSON escaping
+    # can make the persisted payload larger than its source string.
+    encoded_value = json.dumps(
+        value, ensure_ascii=False, separators=(',', ':'),
+    ).encode('utf-8')
+    if len(encoded_value) > _MAX_ARTIFACT_BYTES:
         raise ValueError('artifact content exceeds the 2 MiB limit')
 
     artifact_id = str(uuid.uuid4())
@@ -62,10 +66,9 @@ def save_chat_artifact(
         'artifact_created',
         artifact_id=artifact_id,
         filename=safe_name,
-        slot=safe_name,
         content_type=normalized_type,
         value=value,
-        caption=str(caption).strip() if caption else None,
+        caption=normalized_caption,
     )
     return tool_success('save_chat_artifact', {
         'artifact_id': artifact_id,

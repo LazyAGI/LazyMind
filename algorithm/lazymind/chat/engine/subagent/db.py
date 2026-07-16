@@ -115,24 +115,6 @@ class SubAgentDB:
             ).mappings().first()
         return (int(row['m']) if row else 0) + 1
 
-    def save_artifact(self, task_id: str, key: str, content_type: str, value: Dict[str, Any], seq: int) -> None:
-        with self._conn() as conn:
-            conn.execute(
-                text(
-                    'INSERT INTO sub_agent_artifacts (id, task_id, slot, content_type, value, seq, created_at) '
-                    'VALUES (:id, :task_id, :key, :ct, :value, :seq, :created_at)'
-                ),
-                {
-                    'id': _new_id('saa_'),
-                    'task_id': task_id,
-                    'key': key,
-                    'ct': content_type,
-                    'value': json.dumps(value, ensure_ascii=False, default=str),
-                    'seq': seq,
-                    'created_at': _utcnow(),
-                },
-            )
-
     def load_artifacts(self, task_id: str, keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         sql = (
             'SELECT slot, content_type, value, seq FROM sub_agent_artifacts '

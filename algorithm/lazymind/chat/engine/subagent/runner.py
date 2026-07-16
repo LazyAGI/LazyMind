@@ -704,15 +704,6 @@ async def run_subagent_stream(
             db.dispose()
 
 
-def _parse_draft_stem(stem: str) -> tuple:
-    """Split a draft filename stem into (artifact_key, list_index_or_none)."""
-    if '_' in stem:
-        prefix, suffix = stem.rsplit('_', 1)
-        if suffix.isdigit():
-            return prefix, int(suffix)
-    return stem, None
-
-
 def _make_cancel_stop_condition():
     """Return a stop_condition function that raises CancelledError when a cancel signal is detected.
 
@@ -748,18 +739,17 @@ def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
     from . import tools as subagent_tools
     required = set(_coerce_str_list((ctx.params or {}).get('required_output_artifact_keys')))
     saved = set(ctx.saved_keys())
-    for draft_key, original_type, content in ctx.list_pending_drafts():
-        base_key, list_index = _parse_draft_stem(draft_key)
+    for base_key, list_index, original_type, content in ctx.list_pending_drafts():
         if required:
             if base_key not in required and base_key not in saved:
-                ctx.delete_draft(draft_key)
+                ctx.delete_draft(base_key, list_index)
                 LOG.info(
                     '[SubAgent] discarded optional draft key=%r for task=%s',
                     base_key, ctx.task_id,
                 )
                 continue
         elif base_key not in saved:
-            ctx.delete_draft(draft_key)
+            ctx.delete_draft(base_key, list_index)
             LOG.info(
                 '[SubAgent] discarded draft for unsaved key=%r for task=%s',
                 base_key, ctx.task_id,
@@ -770,7 +760,7 @@ def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
             subagent_tools.save_artifact(
                 base_key, content, content_type=original_type, sort_order=sort_order,
             )
-            ctx.delete_draft(draft_key)
+            ctx.delete_draft(base_key, list_index)
             LOG.info('[SubAgent] auto-flushed draft key=%r for task=%s', base_key, ctx.task_id)
         except Exception as exc:
             LOG.warning('[SubAgent] auto-flush draft key=%r failed: %s', base_key, exc)
@@ -909,7 +899,9 @@ def _evaluate_completion(
                 try:
                     seq = ctx.next_artifact_seq(key)
                     ctx.record_local_artifact(key, 'text', {'text': content}, seq)
-                    ctx.db.save_artifact(ctx.task_id, key, 'text', {'text': content}, seq)
+                    # Go Core is the sole persistence owner. Writing through the
+                    # Python DB here and also emitting would create two rows once
+                    # the trailing event queue is drained.
                     ctx.emit({'type': 'artifact', 'slot': key,
                               'content_type': 'text', 'seq': seq, 'value': {'text': content}})
                     LOG.info(f'[SubAgent] auto-saved missing artifact key={key!r} for task={ctx.task_id}')

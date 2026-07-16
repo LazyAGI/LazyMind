@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Button, Checkbox, Spin, Tabs, message } from "antd";
+import { Button, Checkbox, Tabs, message } from "antd";
 import {
   DownloadOutlined,
   FileTextOutlined,
@@ -7,7 +7,6 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import JSZip from "@progress/jszip-esm";
-import { TaskServiceApi } from "@/modules/chat/utils/request";
 import { downloadStream } from "@/modules/chat/utils/download";
 import {
   useTaskCenterStore,
@@ -22,10 +21,8 @@ import "./index.scss";
 const encoder = new TextEncoder();
 
 interface ArtifactFile {
-  taskId: string;
+  id: string;
   triggerHistoryId?: string;
-  slot: string;
-  seq: number;
   filename: string;
   size?: number;
   url?: string;
@@ -63,7 +60,71 @@ function extractTextContent(a: ConversationArtifact): string {
 }
 
 function artifactFileKey(file: ArtifactFile): string {
-  return `${file.taskId}:${file.slot}:${file.seq}`;
+  return file.id;
+}
+
+function toArtifactFiles(artifacts: ConversationArtifact[]): ArtifactFile[] {
+  return artifacts.flatMap<ArtifactFile>((artifact): ArtifactFile[] => {
+    const common = {
+      id: artifact.artifact_id,
+      triggerHistoryId: artifact.history_id,
+      artifact,
+    };
+    if (artifact.content_type === "file") {
+      const url = resolveCoreAssetUrl(artifact.value?.url || "");
+      return url
+        ? [{
+            ...common,
+            filename:
+              artifact.filename || artifact.value?.filename || artifact.slot || "file",
+            size: artifact.value?.size,
+            url,
+          }]
+        : [];
+    }
+    if (artifact.content_type === "image") {
+      const source = artifact.value?.url || artifact.value?.path || "";
+      const url = resolveCoreAssetUrl(source);
+      return url
+        ? [{
+            ...common,
+            filename: basenameFromPath(source || artifact.slot),
+            url,
+          }]
+        : [];
+    }
+    if (artifact.content_type === "file_list") {
+      const paths: string[] = Array.isArray(artifact.value?.paths)
+        ? artifact.value.paths.filter(
+            (path: unknown): path is string => typeof path === "string",
+          )
+        : [];
+      return paths.flatMap((path, pathIndex) => {
+        const url = resolveCoreAssetUrl(path);
+        return url
+          ? [{
+              ...common,
+              id: `${artifact.artifact_id}:${pathIndex}`,
+              filename: basenameFromPath(path),
+              url,
+            }]
+          : [];
+      });
+    }
+    if (artifact.content_type === "text" || artifact.content_type === "json") {
+      const filename = artifact.filename || (
+        artifact.slot?.includes(".")
+          ? artifact.slot
+          : `${artifact.slot || "artifact"}.txt`
+      );
+      return [{
+        ...common,
+        filename,
+        size: new Blob([extractTextContent(artifact)]).size,
+      }];
+    }
+    return [];
+  });
 }
 
 export default function ArtifactCollectorCard({
@@ -75,16 +136,16 @@ export default function ArtifactCollectorCard({
   const { t } = useTranslation();
   const title = t("chat.artifactCollectorTitle");
   const description = t("chat.artifactCollectorDescription");
-  const [loading, setLoading] = useState(true);
   const [scope, setScope] = useState<ArtifactScope>("turn");
-  const [allFiles, setAllFiles] = useState<ArtifactFile[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
-  const artifactVersion = useTaskCenterStore((state) =>
-    (state.artifactsByConversation[sessionId] ?? [])
-      .map((artifact) => artifact.artifact_id)
-      .join("|"),
+  const artifacts = useTaskCenterStore(
+    (state) => state.artifactsByConversation[sessionId] ?? [],
   );
+  const loadConversationArtifacts = useTaskCenterStore(
+    (state) => state.loadConversationArtifacts,
+  );
+  const allFiles = useMemo(() => toArtifactFiles(artifacts), [artifacts]);
 
   const turnFiles = useMemo(
     () => allFiles.filter((file) => file.triggerHistoryId === historyId),
@@ -105,101 +166,13 @@ export default function ArtifactCollectorCard({
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => onLayoutChange?.());
     return () => window.cancelAnimationFrame(frame);
-  }, [scope, files.length, loading, onLayoutChange]);
+  }, [scope, files.length, onLayoutChange]);
 
-  // Fetch all conversation artifacts once; tabs filter them locally by turn.
+  // Refresh signed URLs when the card opens; render the existing store snapshot
+  // immediately so opening the popup never causes a second loading state.
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await TaskServiceApi().listConversationArtifacts(sessionId);
-        const artifacts: ConversationArtifact[] =
-          res?.data?.data?.artifacts ?? res?.data?.artifacts ?? [];
-        const allFiles: ArtifactFile[] = [];
-        for (const art of artifacts) {
-            const producerId = art.producer_id || art.artifact_id;
-            if (art.content_type === "file") {
-              const url = resolveCoreAssetUrl(art.value?.url || "");
-              if (!url) continue;
-              allFiles.push({
-                taskId: producerId,
-                triggerHistoryId: art.history_id,
-                slot: art.slot,
-                seq: art.seq,
-                filename: art.filename || art.value?.filename || art.slot || "file",
-                size: art.value?.size,
-                url,
-                artifact: art,
-              });
-            } else if (art.content_type === "image") {
-              const url = resolveCoreAssetUrl(
-                art.value?.url || art.value?.path || "",
-              );
-              if (!url) continue;
-              allFiles.push({
-                taskId: producerId,
-                triggerHistoryId: art.history_id,
-                slot: art.slot,
-                seq: art.seq,
-                filename: basenameFromPath(
-                  art.value?.url || art.value?.path || art.slot,
-                ),
-                url,
-                artifact: art,
-              });
-            } else if (art.content_type === "file_list") {
-              const paths = Array.isArray(art.value?.paths)
-                ? art.value.paths
-                : [];
-              paths.forEach((path: string, pathIndex: number) => {
-                const url = resolveCoreAssetUrl(path);
-                if (!url) return;
-                allFiles.push({
-                  taskId: producerId,
-                  triggerHistoryId: art.history_id,
-                  slot: art.slot,
-                  seq: art.seq * 1000 + pathIndex,
-                  filename: basenameFromPath(path),
-                  url,
-                  artifact: art,
-                });
-              });
-            } else if (
-              art.content_type === "text" ||
-              art.content_type === "json"
-            ) {
-              const name = art.filename || (
-                art.slot && art.slot.includes(".")
-                  ? art.slot
-                  : `${art.slot || "artifact"}.txt`
-              );
-              allFiles.push({
-                taskId: producerId,
-                triggerHistoryId: art.history_id,
-                slot: art.slot,
-                seq: art.seq,
-                filename: name,
-                size: new Blob([extractTextContent(art)]).size,
-                artifact: art,
-              });
-            }
-        }
-        if (!cancelled) {
-          setAllFiles(allFiles);
-        }
-      } catch {
-        if (!cancelled) {
-          message.error(t("chat.artifactCollectorLoadFailed"));
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, artifactVersion, t]);
+    void loadConversationArtifacts(sessionId);
+  }, [sessionId, loadConversationArtifacts]);
 
   const toggleSelect = useCallback((idx: string) => {
     setSelected((prev) => {
@@ -353,12 +326,7 @@ export default function ArtifactCollectorCard({
         ]}
       />
 
-      {loading ? (
-        <div className="artifact-collector__loading">
-          <Spin size="small" />
-          <span>{t("chat.artifactCollectorLoading")}</span>
-        </div>
-      ) : files.length === 0 ? (
+      {files.length === 0 ? (
         <div className="artifact-collector__body">
           <p className="artifact-collector__empty-text">
             {t(

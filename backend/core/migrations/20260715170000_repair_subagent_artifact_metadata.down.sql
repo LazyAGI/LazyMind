@@ -1,3 +1,3 @@
--- Intentionally keep the repaired columns on rollback: older migrations and
--- the current ORM may already own and depend on them.
-SELECT 1;
+DROP INDEX IF EXISTS idx_saa_task_visible;
+
+-- Keep the repaired columns: migration 20260618100000 owns their lifecycle.

@@ -1,13 +1,12 @@
-import { Avatar, Button, Divider, Flex, message, Popover, Spin, Tooltip } from "antd";
+import { Avatar, Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./index.scss";
 import {
   CopyOutlined,
-  DownloadOutlined,
   DislikeFilled,
   DislikeOutlined,
   ExclamationCircleOutlined,
@@ -23,12 +22,11 @@ import {
 import { AgentAppsAuth } from "@/components/auth";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { usePluginStore } from "@/modules/chat/store/pluginPanel";
-import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import { PluginPanel } from "@/modules/chat/components/PluginPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
-import ArtifactCollectorCard from "@/modules/chat/components/ArtifactCollectorCard";
+import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
 
 const BotAvatarIcon = new URL(
   "../../assets/images/bot_avatar.png",
@@ -208,10 +206,6 @@ const AssistantMessage = (props: any) => {
   } = props;
   const citeButtonRef = useRef<HTMLButtonElement | null>(null);
   const citeSelectionTextRef = useRef("");
-  const artifactPopoverRef = useRef<any>(null);
-  const [artifactPopoverHistoryId, setArtifactPopoverHistoryId] = useState<
-    string | null
-  >(null);
   // Debounced backend persistence for ask-card answers. Created once per component
   // instance with useRef so it is stable across re-renders.
   const persistAskAnswersRef = useRef(
@@ -238,11 +232,6 @@ const AssistantMessage = (props: any) => {
 
   const pluginSession = usePluginStore((s) =>
     sessionId ? s.sessionByConversation[sessionId] ?? null : null,
-  );
-  const totalArtifactCount = useTaskCenterStore((state) =>
-    sessionId
-      ? (state.artifactsByConversation[sessionId] ?? []).length
-      : 0,
   );
 
   useEffect(() => {
@@ -739,7 +728,10 @@ const AssistantMessage = (props: any) => {
                 onClick={() => handleCopy(answer.content)}
               />
             </Tooltip>
-            {renderArtifactButton(answerHistoryId)}
+            <ArtifactDownloadButton
+              sessionId={sessionId}
+              historyId={answerHistoryId}
+            />
             {showFullToolbar && index === length - 1 && (
               <Tooltip title={t("chat.regenerate")}>
                 <Button
@@ -808,7 +800,10 @@ const AssistantMessage = (props: any) => {
                 onClick={() => handleCopy(item.delta)}
               />
             </Tooltip>
-            {renderArtifactButton(item.history_id)}
+            <ArtifactDownloadButton
+              sessionId={sessionId}
+              historyId={item.history_id}
+            />
             {index === length - 1 && (
               <Tooltip title={t("chat.regenerate")}>
                 <Button
@@ -917,47 +912,6 @@ const AssistantMessage = (props: any) => {
       );
     }
     return null;
-  }
-
-  function renderArtifactButton(historyId?: string) {
-    const resolvedHistoryId = historyId || item?.history_id;
-    if (!sessionId || !resolvedHistoryId || totalArtifactCount === 0) {
-      return null;
-    }
-
-    const open = artifactPopoverHistoryId === resolvedHistoryId;
-    const realignArtifactPopover = () => {
-      window.requestAnimationFrame(() => artifactPopoverRef.current?.forceAlign?.());
-    };
-    return (
-      <Popover
-        ref={artifactPopoverRef}
-        trigger="click"
-        placement="topLeft"
-        autoAdjustOverflow
-        open={open}
-        onOpenChange={(nextOpen) =>
-          setArtifactPopoverHistoryId(nextOpen ? resolvedHistoryId : null)
-        }
-        destroyTooltipOnHide
-        overlayClassName="artifact-collector-popover"
-        content={
-          <ArtifactCollectorCard
-            key={`artifact-collector-${sessionId}-${resolvedHistoryId}`}
-            sessionId={sessionId}
-            historyId={resolvedHistoryId}
-            onClose={() => setArtifactPopoverHistoryId(null)}
-            onLayoutChange={realignArtifactPopover}
-          />
-        }
-      >
-        <span className="artifact-download-trigger">
-          <Tooltip title={t("chat.artifactDownloadButton")}>
-            <Button className="tool-btn" icon={<DownloadOutlined />} />
-          </Tooltip>
-        </span>
-      </Popover>
-    );
   }
 
   const hasMultipleAnswers =

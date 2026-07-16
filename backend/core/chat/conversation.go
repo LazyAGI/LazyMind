@@ -1132,6 +1132,7 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	db.Where("conversation_id = ?", convID).Delete(&orm.ChatHistory{})
 	db.Where("conversation_id = ?", convID).Delete(&orm.MultiAnswersChatHistory{})
+	db.Where("conversation_id = ?", convID).Delete(&orm.ConversationArtifact{})
 	// Cascade-delete task center entries for this conversation.
 	db.Where("conversation_id = ?", convID).Delete(&orm.TaskCenterTask{})
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
@@ -1195,6 +1196,9 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.MultiAnswersChatHistory{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ConversationArtifact{}).Error; err != nil {
 			return err
 		}
 		return tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.TaskCenterTask{}).Error
