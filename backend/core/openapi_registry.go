@@ -661,7 +661,7 @@ type agentRouterQueryParams struct {
 type agentRouterAlgorithmQueryParams struct {
 	ThreadID       string `query:"thread_id" desc:"Filter by owning Evo thread."`
 	AlgorithmID    string `query:"algorithm_id" desc:"Filter by exact algorithm id."`
-	Status         string `query:"status" enum:"starting,active,disabled,missing" desc:"Filter by live Router status."`
+	Status         string `query:"status" enum:"all,starting,active,disabled,missing" desc:"Filter by live Router status; defaults to all."`
 	RouterAdminURL string `query:"router_admin_url" desc:"Optional Router admin origin override."`
 	RouterChatURL  string `query:"router_chat_url" desc:"Optional Router chat stream URL override."`
 }
@@ -702,7 +702,7 @@ type agentRouterHealth struct {
 type agentRouterStrategyView struct {
 	Active  bool           `json:"active"`
 	ID      *int64         `json:"id" required:"true" nullable:"true" desc:"Router strategy id; null when inactive."`
-	Weights map[string]int `json:"weights" required:"true"`
+	Weights map[string]int `json:"weights" required:"true" desc:"Effective routing weights; {default: 100} when AB routing is inactive."`
 }
 
 type agentRouterStatusCounts struct {
@@ -3949,7 +3949,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/agent/router/ab-strategy",
 			Summary:     "Get Evo router AB strategy",
-			Description: "Returns the active Router weights and the latest Evo AB audit metadata.",
+			Description: "Returns the effective Router weights and the latest Evo AB audit metadata. When AB routing is inactive, weights is {default: 100}.",
 			Tags:        []string{"agent"},
 			QueryParams: agentRouterQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Router AB strategy", agentRouterABStrategyResponse{})},

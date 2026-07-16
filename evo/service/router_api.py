@@ -86,7 +86,7 @@ def build_router_api(service: Any) -> APIRouter:
     def algorithms(
         thread_id: str = '',
         algorithm_id: str = '',
-        status: str = '',
+        status: Literal['all', 'starting', 'active', 'disabled', 'missing'] = 'all',
         router_admin_url: str = '',
         router_chat_url: str = '',
     ) -> dict[str, Any]:
@@ -102,7 +102,7 @@ def build_router_api(service: Any) -> APIRouter:
                 items.insert(0, _default_live_item(manager))
         except RouterManagerError as exc:
             _raise_router_error(exc)
-        if status:
+        if status != 'all':
             items = [item for item in items if item['status'] == status]
         return {'items': items}
 
@@ -326,7 +326,7 @@ def _strategy_view(strategy: Mapping[str, Any]) -> dict[str, Any]:
     return {
         'active': raw is not None,
         'id': None if raw is None else raw.get('id'),
-        'weights': {} if raw is None else dict(raw.get('weights') or {}),
+        'weights': {'default': 100} if raw is None else dict(raw.get('weights') or {}),
     }
 
 
