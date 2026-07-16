@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"gorm.io/gorm"
 	"io"
 	"lazymind/core/common"
 	"lazymind/core/datasource"
@@ -14,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -190,7 +191,9 @@ func doScanControlPlaneJSON(ctx context.Context, original *http.Request, userID,
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-User-ID", strings.TrimSpace(userID))
 	req.Header.Set("X-Tenant-ID", scanTenantIDFromRequest(original))
-	req.Header.Set("X-User-Role", "admin")
+	if role := strings.TrimSpace(original.Header.Get("X-User-Role")); role != "" {
+		req.Header.Set("X-User-Role", role)
+	}
 	if auth := strings.TrimSpace(original.Header.Get("Authorization")); auth != "" {
 		req.Header.Set("Authorization", auth)
 	}

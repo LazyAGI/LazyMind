@@ -354,3 +354,13 @@ func normalizeSQLPageSize(pageSize int) int {
 	}
 	return pageSize
 }
+
+// Migrate 执行基线迁移未涵盖的增量 schema 变更（幂等，可重复执行）。
+func (r *SQLRepository) Migrate(ctx context.Context) error {
+	if r.orm == nil {
+		return nil
+	}
+	return r.orm.WithContext(ctx).Exec(
+		"ALTER TABLE source_bindings ADD COLUMN IF NOT EXISTS chat_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+	).Error
+}
