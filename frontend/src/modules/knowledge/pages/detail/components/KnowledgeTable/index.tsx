@@ -18,6 +18,7 @@ import {
   JobServiceApi,
   normalizeProxyableUrl,
 } from "@/modules/knowledge/utils/request";
+import { localizeErrorCode } from "@/components/request";
 import {
   Button,
   Checkbox,
@@ -314,9 +315,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
             getDocumentData({ pId: "", level: 0, page: 1 });
             getDetail();
           })
-          .catch(() => {
-            message.error(t("knowledge.deleteDocFailed"));
-          });
+          .catch(() => {});
       },
     });
   };
@@ -620,7 +619,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
       });
 
       if (!response.ok) {
-        throw new Error(`下载失败: ${response.status}`);
+        throw new Error(localizeErrorCode("2000509"));
       }
 
       const blob = await response.blob();
@@ -639,8 +638,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     } catch (error) {
       console.error("下载失败:", error);
       message.error({
-        content:
-          error instanceof Error ? error.message : t("knowledge.downloadFailedRetry"),
+        content: localizeErrorCode("2000509"),
         key: loadingKey,
       });
     }

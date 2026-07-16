@@ -57,7 +57,6 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
   const {
     t,
     canCreateLocalSource,
-    localScanChatEnabled,
     isFeishuAuthValid,
     isNotionAuthValid,
     isFeishuSetupReady,
@@ -82,14 +81,6 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             <div>
               <div className="model-provider-service-title-row">
                 <h4>{getProviderTitle("local", t)}</h4>
-                <Tag
-                  className="model-provider-service-status"
-                  color={localScanChatEnabled ? "success" : "default"}
-                >
-                  {localScanChatEnabled
-                    ? t("modelProvider.cloudDocuments.localScanChatEnabledTag")
-                    : t("modelProvider.cloudDocuments.localScanChatDisabledTag")}
-                </Tag>
               </div>
               <Tooltip placement="topLeft" title={getProviderDescription("local", t, vm)}>
                 <span className="model-provider-service-summary-wrap">

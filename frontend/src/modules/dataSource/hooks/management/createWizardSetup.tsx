@@ -1,6 +1,5 @@
 import { Modal, message } from "antd";
 import { WarningFilled } from "@ant-design/icons";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { dataSourceScanApi } from "../../api/clients";
 import {
   clearFeishuAppSetup,
@@ -221,11 +220,7 @@ export function createWizardSetup(ctx: ManagementContext) {
         current.map((item) => (item.id === record.id ? latestRecord : item)),
       );
       applyEditRecord(latestRecord);
-    } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-          t("common.requestFailed"),
-      );
+    } catch {
     }
   };
 

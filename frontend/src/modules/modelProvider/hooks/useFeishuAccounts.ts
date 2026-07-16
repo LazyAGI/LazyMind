@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Form, Modal, message } from "antd";
 import { useTranslation } from "react-i18next";
 import type { CloudConnectionUpdateBody } from "@/api/generated/auth-client";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
@@ -49,11 +48,7 @@ export function useFeishuAccounts() {
           mapCloudConnectionToFeishuAccount(item, currentAccounts),
         ),
       );
-    } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-          t("common.requestFailed"),
-      );
+    } catch {
     } finally {
       setAccountsLoading(false);
     }
@@ -256,10 +251,6 @@ export function useFeishuAccounts() {
               },
             );
           } catch (error: any) {
-            message.error(
-              getLocalizedErrorMessage(error, t("admin.dataSourceDeleteFailed")) ||
-                t("admin.dataSourceDeleteFailed"),
-            );
             throw error;
           }
         }
@@ -308,12 +299,8 @@ export function useFeishuAccounts() {
               }),
         );
       })
-      .catch((error: any) => {
+      .catch(() => {
         persistAccounts(previousAccounts);
-        message.error(
-          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-            t("common.requestFailed"),
-        );
       });
   };
 

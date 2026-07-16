@@ -67,10 +67,7 @@ const CreateGroupModal = ({
     } catch (error: any) {
       console.error("Operation failed:", error);
       if (!error?.response && !error?.request) {
-        message.error(
-          getLocalizedErrorMessage(error, t("common.failed")) ||
-            t("common.failed"),
-        );
+        message.error(getLocalizedErrorMessage(error));
       }
     } finally {
       setLoading(false);

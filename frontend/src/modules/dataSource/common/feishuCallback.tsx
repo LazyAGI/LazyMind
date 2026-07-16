@@ -2,6 +2,10 @@ import { Button, Result, Spin, Typography } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
+import {
+  getLocalizedErrorMessage,
+  localizeErrorCode,
+} from "@/components/request";
 
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
@@ -76,16 +80,12 @@ export default function FeishuDataSourceCallback({
       const code = searchParams.get("code");
       const state = searchParams.get("state");
       const error = searchParams.get("error");
-      const errorDescription = searchParams.get("error_description");
 
       if (error) {
-        const message =
-          errorDescription ||
-          t("admin.dataSourceCallbackErrorWithCode", { code: error });
+        const message = localizeErrorCode("2000509");
         setViewState({
           status: "error",
-          title: t("admin.dataSourceCallbackErrorTitle"),
-          subtitle: message,
+          title: message,
         });
         finalize({
           channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
@@ -98,11 +98,10 @@ export default function FeishuDataSourceCallback({
       }
 
       if (!code || !state) {
-        const message = t("admin.dataSourceCallbackMissingParams");
+        const message = localizeErrorCode("2000509");
         setViewState({
           status: "error",
-          title: t("admin.dataSourceCallbackErrorTitle"),
-          subtitle: message,
+          title: message,
         });
         finalize({
           channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
@@ -133,12 +132,11 @@ export default function FeishuDataSourceCallback({
         });
 
         returnToDataSourcePage(returnUrl);
-      } catch (error: any) {
-        const message = error?.message || t("admin.dataSourceOauthFailedRetry");
+      } catch (error) {
+        const message = getLocalizedErrorMessage(error);
         setViewState({
           status: "error",
-          title: t("admin.dataSourceCallbackErrorTitle"),
-          subtitle: message,
+          title: message,
         });
         finalize({
           channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,

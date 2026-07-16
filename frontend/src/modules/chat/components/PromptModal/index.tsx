@@ -47,6 +47,7 @@ import type {
 import { PromptServiceApi } from "@/modules/chat/utils/request";
 import { useTranslation } from "react-i18next";
 import { canManagePrompt, setPromptFavorite } from "./promptLibrary";
+import { localizeErrorCode } from "@/components/request";
 import "./index.scss";
 
 interface ForwardProps {
@@ -242,7 +243,7 @@ function PromptModalComponent(
       setRefreshKey((value) => value + 1);
       message.success(t("chat.promptCategoryCreateSuccess"));
     } catch {
-      message.error(t("chat.promptCategoryCreateFailed"));
+      // API errors are reported by the shared request interceptor.
     } finally {
       setCategorySaving(false);
     }
@@ -263,9 +264,8 @@ function PromptModalComponent(
           if (category === promptCategory.id) setCategory("");
           setRefreshKey((value) => value + 1);
           message.success(t("chat.promptCategoryDeleteSuccess"));
-        } catch {
-          message.error(t("chat.promptCategoryDeleteFailed"));
-          throw new Error("prompt category delete failed");
+        } catch (error) {
+          throw error;
         }
       },
     });
@@ -304,7 +304,7 @@ function PromptModalComponent(
       form.resetFields();
       setRefreshKey((value) => value + 1);
     } catch {
-      message.error(t("chat.promptSaveFailed"));
+      // API errors are reported by the shared request interceptor.
     } finally {
       setSaving(false);
     }
@@ -323,9 +323,8 @@ function PromptModalComponent(
           await PromptServiceApi().deletePrompt(prompt.id!);
           message.success(t("chat.deletePromptSuccess"));
           setRefreshKey((value) => value + 1);
-        } catch {
-          message.error(t("chat.promptDeleteFailed"));
-          throw new Error("prompt delete failed");
+        } catch (error) {
+          throw error;
         }
       },
     });
@@ -344,7 +343,6 @@ function PromptModalComponent(
       setRefreshKey((value) => value + 1);
     } catch {
       setPrompts((items) => setPromptFavorite(items, prompt.id!, !nextFavorite));
-      message.error(t("chat.promptFavoriteFailed"));
     }
   }
 
@@ -354,9 +352,7 @@ function PromptModalComponent(
     setVisible(false);
     onSelectPrompt(content);
     if (prompt.id) {
-      void PromptServiceApi()
-        .usePrompt(prompt.id)
-        .catch(() => message.warning(t("chat.promptUsageRecordFailed")));
+      void PromptServiceApi().usePrompt(prompt.id).catch(() => {});
     }
   }
 
@@ -598,7 +594,7 @@ function PromptModalComponent(
                   <Alert
                     type="error"
                     showIcon
-                    message={t("chat.promptLoadFailed")}
+                    message={localizeErrorCode("2000509")}
                     action={
                       <Button size="small" onClick={() => setRefreshKey((value) => value + 1)}>
                         {t("common.retry")}

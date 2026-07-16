@@ -1,5 +1,6 @@
 import { FC, type ReactNode, useRef, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { localizeErrorCode } from "@/components/request";
 import { message } from "antd";
 import { AgentAppsAuth } from "@/components/auth";
 import {
@@ -603,7 +604,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   function parseErrorData(data: string) {
     const dataObject = UIUtils.jsonParser(data) || {};
-    return dataObject.message;
+    return localizeErrorCode(
+      `${dataObject.error_code || dataObject.code || ""}`,
+      localizeErrorCode("2000509"),
+    );
   }
 
   const isFileTypeSupported = (file: File): boolean => {

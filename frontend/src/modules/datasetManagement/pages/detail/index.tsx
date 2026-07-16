@@ -34,6 +34,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { getLocalizedErrorMessage } from "@/components/request";
 import {
   batchDeleteDatasetItems,
   createDatasetItem,
@@ -930,7 +931,6 @@ export default function DatasetDetailPage() {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [total, setTotal] = useState(0);
   const [questionTypeOptions, setQuestionTypeOptions] = useState<string[]>([]);
-  const [questionTypeFilterOptions, setQuestionTypeFilterOptions] = useState<string[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DatasetItemFormValues>>({});
   const [dirtyItemIds, setDirtyItemIds] = useState<string[]>([]);
@@ -1125,7 +1125,7 @@ export default function DatasetDetailPage() {
     loadDetailRequestIdRef.current = requestId;
     setLoading(true);
     try {
-      const [datasetDetail, itemList, remoteQuestionTypes, remoteFilterQuestionTypes] = await Promise.all([
+      const [datasetDetail, itemList, remoteQuestionTypes] = await Promise.all([
         getDataset(datasetId),
         listDatasetItems(datasetId, {
           keyword: appliedFilters.keyword,
@@ -1135,10 +1135,6 @@ export default function DatasetDetailPage() {
           pageSize: pagination.pageSize,
         }),
         listDatasetQuestionTypes(datasetId).catch(() => []),
-        listDatasetQuestionTypes(datasetId, {
-          keyword: appliedFilters.keyword,
-          source: appliedFilters.source,
-        }).catch(() => []),
       ]);
       if (loadDetailRequestIdRef.current !== requestId) {
         return;
@@ -1147,12 +1143,10 @@ export default function DatasetDetailPage() {
       setItems(itemList.items);
       setTotal(itemList.total);
       setQuestionTypeOptions(remoteQuestionTypes);
-      setQuestionTypeFilterOptions(remoteFilterQuestionTypes);
-    } catch (error: any) {
+    } catch {
       if (loadDetailRequestIdRef.current !== requestId) {
         return;
       }
-      message.error(error?.message || t("datasetManagement.detail.loadFailed"));
     } finally {
       if (loadDetailRequestIdRef.current === requestId) {
         setLoading(false);
@@ -1329,8 +1323,7 @@ export default function DatasetDetailPage() {
         setDirtyItemIds((current) => current.filter((id) => id !== itemId));
         await loadDetail();
         return true;
-      } catch (error: any) {
-        message.error(error?.message || t("datasetManagement.detail.saveFailed"));
+      } catch {
         return false;
       } finally {
         setSaving(false);
@@ -1753,14 +1746,14 @@ export default function DatasetDetailPage() {
           previewSegment,
           error: chunks.length === 0 ? t("datasetManagement.detail.reference.noChunks") : "",
         }));
-      } catch (error: any) {
+      } catch (error) {
         if (referenceChunkSelectorRequestRef.current !== selectorRequestId) {
           return;
         }
         setReferenceChunkSelector((current) => ({
           ...current,
           loading: false,
-          error: error?.message || t("datasetManagement.detail.reference.docLoadFailed"),
+          error: getLocalizedErrorMessage(error),
         }));
       }
     },
@@ -2635,7 +2628,8 @@ export default function DatasetDetailPage() {
               value={questionType}
               onChange={setQuestionType}
               placeholder={t("datasetManagement.detail.questionTypePlaceholder")}
-              options={questionTypeFilterOptions}
+              options={questionTypeOptions}
+              showAllOptions
             />
             <Select
               allowClear

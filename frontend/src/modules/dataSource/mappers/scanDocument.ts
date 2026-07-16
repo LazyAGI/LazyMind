@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { localizeErrorCode } from "@/components/request";
 import type { DataSourceSummary, DocumentStatusRow } from "../constants/types";
 import { formatBytes, formatDateTime } from "../utils/format";
 import {
@@ -35,14 +36,15 @@ export function mapScanSyncDetail(
 
 export function stringifyScanError(value: unknown) {
   if (!value) return undefined;
-  if (typeof value === "string") return value;
-  if (typeof value === "object" && value !== null) {
-    const message =
-      (value as { message?: string; error?: string }).message ||
-      (value as { message?: string; error?: string }).error;
-    return message || JSON.stringify(value);
+  if (typeof value === "string") {
+    return localizeErrorCode(value, localizeErrorCode("2000509"));
   }
-  return `${value}`;
+  if (typeof value === "object" && value !== null) {
+    const code = (value as { code?: string; error_code?: string }).code ||
+      (value as { code?: string; error_code?: string }).error_code;
+    return localizeErrorCode(code, localizeErrorCode("2000509"));
+  }
+  return undefined;
 }
 
 export function mapScanDocumentToDetail(

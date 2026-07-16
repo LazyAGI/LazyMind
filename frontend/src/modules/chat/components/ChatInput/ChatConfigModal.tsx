@@ -118,7 +118,6 @@ export default function ChatConfigPopover({
       }
       onSave?.(next);
     } catch {
-      message.error(t('chat.conversationConfigSaveFailed'));
       setSettings(settings);
     }
   }
@@ -140,7 +139,6 @@ export default function ChatConfigPopover({
             : current,
         ),
       );
-      message.error(t('chat.conversationConfigSaveFailed'));
     }
   }
 
@@ -188,7 +186,7 @@ export default function ChatConfigPopover({
       </div>
 
       {pluginEnabled && pluginItems.length > 0 && (
-        <div className="chat-config-section">
+        <div className="chat-config-section chat-config-default-plugins">
           <div className="chat-config-label">{t('chat.conversationConfigDefaultPlugins')}</div>
           {pluginItems.map((item) => (
             <div className="chat-config-row" key={item.plugin_ref}>

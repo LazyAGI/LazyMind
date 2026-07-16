@@ -15,7 +15,7 @@ from lazymind.chat.api import (
 )
 from lazymind.chat.service.utils.trace_archive import start_local_trace_maintenance
 from lazymind.rewrite.api import rewrite_routes
-from lazymind.review.api import memory_review_routes, skill_review_routes
+from lazymind.review.api import memory_review_routes, skill_organize_routes, skill_review_routes
 
 
 def register_chat_routers(app: FastAPI) -> FastAPI:
@@ -34,6 +34,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
         app.include_router(generate_plugin_routes.router)
         app.include_router(generate_plugin_staged_routes.router)
         app.include_router(memory_review_routes.router)
+        app.include_router(skill_organize_routes.router)
         app.include_router(skill_review_routes.router)
         app.include_router(model_features_routes.router)
         app.include_router(model_check_routes.router)

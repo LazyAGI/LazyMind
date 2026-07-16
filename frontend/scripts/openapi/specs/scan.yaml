@@ -1,5 +1,79 @@
 components:
     schemas:
+        AppendSourceRequest:
+            properties:
+                bindings:
+                    items:
+                        $ref: '#/components/schemas/SourceAppendBindingRequest'
+                    type: array
+            required:
+                - bindings
+            type: object
+        AppendSourceResponse:
+            properties:
+                new_binding_ids:
+                    items:
+                        type: string
+                    type: array
+                new_bindings:
+                    items:
+                        $ref: '#/components/schemas/SourceBindingResponse'
+                    type: array
+                sync_job_errors:
+                    items:
+                        $ref: '#/components/schemas/JobError'
+                    type: array
+            required:
+                - new_binding_ids
+                - new_bindings
+            type: object
+        AuthConnectionStatus:
+            properties:
+                connection_ids:
+                    items:
+                        type: string
+                    type: array
+                status:
+                    $ref: '#/components/schemas/CloudAuthConnectionStatus'
+            required:
+                - status
+                - connection_ids
+            type: object
+        BindingChatSettingEntry:
+            properties:
+                binding_id:
+                    type: string
+                chat_enabled:
+                    type: boolean
+                connector_type:
+                    type: string
+                include_extensions:
+                    items:
+                        type: string
+                    type: array
+                status:
+                    type: string
+                target_ref:
+                    type: string
+                target_type:
+                    type: string
+            required:
+                - binding_id
+                - target_ref
+                - connector_type
+                - target_type
+                - status
+                - chat_enabled
+            type: object
+        BindingChatSettingsResponse:
+            properties:
+                sources:
+                    items:
+                        $ref: '#/components/schemas/SourceChatSettingEntry'
+                    type: array
+            required:
+                - sources
+            type: object
         BindingMutationResponse:
             properties:
                 binding:
@@ -91,6 +165,14 @@ components:
                 - connector_type
                 - keyword
             type: object
+        CloudAuthConnectionStatus:
+            enum:
+                - ACTIVE
+                - EXPIRED
+                - REVOKED
+                - ERROR
+                - PENDING
+            type: string
         Compensation:
             properties:
                 compensation_error:
@@ -490,6 +572,19 @@ components:
             required:
                 - source
             type: object
+        JobError:
+            properties:
+                code:
+                    type: string
+                details:
+                    additionalProperties: true
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
         ListMode:
             enum:
                 - page
@@ -667,6 +762,13 @@ components:
                 - days
                 - time
             type: object
+        SourceAppendBindingRequest:
+            properties:
+                display_name:
+                    type: string
+                target_ref:
+                    type: string
+            type: object
         SourceBindingRequest:
             properties:
                 agent_id:
@@ -675,6 +777,8 @@ components:
                     type: string
                 binding_id:
                     type: string
+                chat_enabled:
+                    type: boolean
                 connector_type:
                     type: string
                 display_name:
@@ -711,12 +815,20 @@ components:
                     type: integer
                 binding_id:
                     type: string
+                chat_enabled:
+                    type: boolean
                 connector_type:
                     type: string
                 core_parent_document_id:
                     type: string
-                core_parent_document_name:
-                    type: string
+                exclude_extensions:
+                    items:
+                        type: string
+                    type: array
+                include_extensions:
+                    items:
+                        type: string
+                    type: array
                 next_sync_at:
                     type: string
                 schedule_policy:
@@ -743,6 +855,27 @@ components:
                 - binding_generation
                 - core_parent_document_id
             type: object
+        SourceChatSettingEntry:
+            properties:
+                bindings:
+                    items:
+                        $ref: '#/components/schemas/BindingChatSettingEntry'
+                    type: array
+                dataset_id:
+                    type: string
+                name:
+                    type: string
+                source_id:
+                    type: string
+                tenant_id:
+                    type: string
+            required:
+                - source_id
+                - name
+                - dataset_id
+                - tenant_id
+                - bindings
+            type: object
         SourceDocumentItem:
             properties:
                 baseline_version:
@@ -756,6 +889,8 @@ components:
                 display_name:
                     type: string
                 document_id:
+                    type: string
+                effective_parse_status:
                     type: string
                 file_type:
                     type: string
@@ -786,6 +921,8 @@ components:
                     format: int64
                     type: integer
                 source_id:
+                    type: string
+                source_modified_at:
                     type: string
                 source_state:
                     $ref: '#/components/schemas/SourceState'
@@ -824,6 +961,8 @@ components:
             type: object
         SourceListItem:
             properties:
+                auth_connection_status:
+                    $ref: '#/components/schemas/AuthConnectionStatus'
                 binding_count:
                     format: int64
                     type: integer
@@ -889,14 +1028,35 @@ components:
                 config_version:
                     format: int64
                     type: integer
+                created_at:
+                    type: string
+                created_by:
+                    type: string
                 dataset_id:
                     type: string
+                deleted_at:
+                    type: string
+                exclude_extensions:
+                    items:
+                        type: string
+                    type: array
+                include_extensions:
+                    items:
+                        type: string
+                    type: array
                 name:
                     type: string
                 source_id:
                     type: string
+                source_options:
+                    additionalProperties: true
+                    type: object
                 status:
                     $ref: '#/components/schemas/SourceStatus'
+                tenant_id:
+                    type: string
+                updated_at:
+                    type: string
             required:
                 - source_id
                 - name
@@ -910,6 +1070,8 @@ components:
                 - MODIFIED
                 - DELETED
                 - UNCHANGED
+                - OUT_OF_SCOPE
+                - PENDING_DELETION
             type: string
         SourceStatus:
             enum:
@@ -990,6 +1152,8 @@ components:
                     type: integer
                 parent_key:
                     type: string
+                refresh_state:
+                    type: boolean
                 state_filter:
                     items:
                         type: string
@@ -1021,6 +1185,8 @@ components:
                     type: integer
                 parent_key:
                     type: string
+                refresh_state:
+                    type: boolean
                 state_filter:
                     items:
                         type: string
@@ -1200,11 +1366,17 @@ components:
             properties:
                 binding_id:
                     type: string
+                children:
+                    items:
+                        $ref: '#/components/schemas/TreeNode'
+                    type: array
                 connector_type:
                     type: string
                 display_name:
                     type: string
                 has_children:
+                    type: boolean
+                has_update:
                     type: boolean
                 is_container:
                     type: boolean
@@ -1220,6 +1392,8 @@ components:
                     type: string
                 parse_queue_state:
                     type: string
+                pending_action:
+                    type: string
                 provider_meta:
                     additionalProperties: true
                     type: object
@@ -1228,14 +1402,18 @@ components:
                 source_id:
                     type: string
                 source_state:
-                    type: string
+                    $ref: '#/components/schemas/SourceState'
                 sync_state:
-                    type: string
+                    $ref: '#/components/schemas/SyncState'
                 target_ref:
                     type: string
                 target_type:
                     type: string
                 tree_key:
+                    type: string
+                update_desc:
+                    type: string
+                update_type:
                     type: string
             required:
                 - key
@@ -1298,6 +1476,23 @@ components:
                 - run_ids
                 - job_ids
             type: object
+        UpdateBindingChatSettingRequest:
+            properties:
+                chat_enabled:
+                    type: boolean
+            required:
+                - chat_enabled
+            type: object
+        UpdateBindingChatSettingResponse:
+            properties:
+                binding_id:
+                    type: string
+                chat_enabled:
+                    type: boolean
+            required:
+                - binding_id
+                - chat_enabled
+            type: object
         UpdateSourceRequest:
             properties:
                 bindings:
@@ -1332,6 +1527,10 @@ components:
                 created_binding_ids:
                     items:
                         type: string
+                    type: array
+                job_errors:
+                    items:
+                        $ref: '#/components/schemas/JobError'
                     type: array
                 job_ids:
                     items:
@@ -1727,6 +1926,69 @@ paths:
                                     value: {}
                             schema:
                                 $ref: '#/components/schemas/ValidateBindingTargetResponse'
+                    description: ok
+                default:
+                    content:
+                        application/json:
+                            examples:
+                                default:
+                                    value: {}
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: standard error
+            tags:
+                - scan
+    /api/scan/bindings/{binding_id}/chat-settings:
+        put:
+            operationId: updateBindingChatSetting
+            parameters:
+                - in: path
+                  name: binding_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        examples:
+                            default:
+                                value: {}
+                        schema:
+                            $ref: '#/components/schemas/UpdateBindingChatSettingRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            examples:
+                                default:
+                                    value: {}
+                            schema:
+                                $ref: '#/components/schemas/UpdateBindingChatSettingResponse'
+                    description: ok
+                default:
+                    content:
+                        application/json:
+                            examples:
+                                default:
+                                    value: {}
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: standard error
+            tags:
+                - scan
+    /api/scan/bindings/chat-settings:
+        get:
+            operationId: listBindingChatSettings
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            examples:
+                                default:
+                                    value: {}
+                            schema:
+                                $ref: '#/components/schemas/BindingChatSettingsResponse'
                     description: ok
                 default:
                     content:
@@ -2246,6 +2508,10 @@ paths:
                     items:
                         type: string
                     type: array
+                - in: query
+                  name: refresh_state
+                  schema:
+                    type: boolean
                 - in: query
                   name: page
                   schema:

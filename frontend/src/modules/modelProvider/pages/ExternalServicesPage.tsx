@@ -17,7 +17,10 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getLocalizedErrorMessage } from "@/components/request";
+import {
+  getLocalizedErrorMessage,
+  localizeErrorCode,
+} from "@/components/request";
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,
@@ -258,18 +261,6 @@ function isFormValidationError(error: unknown) {
     typeof error === "object" &&
     Array.isArray((error as { errorFields?: unknown[] }).errorFields)
   );
-}
-
-function getCheckFailureMessage(checkResult?: CheckExternalServiceResult): string | undefined {
-  if (!checkResult || typeof checkResult !== "object") {
-    return undefined;
-  }
-
-  if (typeof checkResult.message === "string" && checkResult.message.trim()) {
-    return checkResult.message.trim();
-  }
-
-  return undefined;
 }
 
 function isGoogleCustomSearch(service?: ExternalServiceConfig | null) {
@@ -582,7 +573,7 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
           return;
         }
         setServices([]);
-        setLoadError(getLocalizedErrorMessage(error, t("modelProvider.external.loadFailed")) || t("modelProvider.external.loadFailed"));
+        setLoadError(getLocalizedErrorMessage(error));
       })
       .finally(() => {
         if (requestIdRef.current === requestId) {
@@ -709,7 +700,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
           await updateProviderGroup(activeService, groupForActiveService, currentUrl);
           message.success(t("modelProvider.external.baseUrlChanged"));
         } catch (error) {
-          message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
           return;
         }
       }
@@ -724,7 +714,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
         message.success(t("modelProvider.external.baseUrlChanged"));
         originalBaseUrlRef.current = currentUrl;
       } catch (error) {
-        message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
       }
       return;
     }
@@ -750,7 +739,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
           void loadExternalServices(normalizedSearchValue);
           closeConfigModal();
         } catch (error) {
-          message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
         }
       },
       onCancel: () => {
@@ -790,7 +778,7 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
           payload as { name: string; base_url: string; api_key?: string; verify: boolean },
         );
         if (savedGroup.check && savedGroup.check.success !== true) {
-          message.error(getCheckFailureMessage(savedGroup.check) || t("modelProvider.external.checkFailed"));
+          message.error(localizeErrorCode("2000509"));
           return;
         }
         setGroupForActiveService(savedGroup);
@@ -816,7 +804,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
       setNewKeyEngineId("");
       void loadExternalServices(normalizedSearchValue);
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     } finally {
       setAddingKey(false);
     }
@@ -861,7 +848,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
       if (isFormValidationError(error)) {
         return;
       }
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     } finally {
       setSavingServiceConfig(false);
     }
@@ -882,7 +868,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
       setKeyList((prev) => prev.filter((k) => k !== targetKey));
       void loadExternalServices(normalizedSearchValue);
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     }
   }
 

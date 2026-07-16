@@ -32,7 +32,7 @@ import { cancelSchedule, createSchedule, enableSchedule, listSchedules, listSche
 import type { Schedule, Task, TaskListResponse } from './api';
 import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
-import { axiosInstance, BASE_URL } from '@/components/request';
+import { axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
 import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
 
 /* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */
@@ -328,7 +328,11 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
 /* ────────────────────────────────────────────────
    Main ScheduleList component
 ──────────────────────────────────────────────── */
-export default function ScheduleList() {
+interface ScheduleListProps {
+  active: boolean;
+}
+
+export default function ScheduleList({ active }: ScheduleListProps) {
   const { t } = useTranslation();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
@@ -360,13 +364,15 @@ export default function ScheduleList() {
       const resp = await listSchedules(statusFilter === 'all' || statusFilter === 'disabled');
       setSchedules(resp.items ?? []);
     } catch {
-      message.error(t('taskCenter.loadError'));
+      // API errors are reported by the shared request interceptor.
     } finally {
       setLoading(false);
     }
   }, [t, statusFilter]);
 
-  useEffect(() => { void fetchSchedules(); }, [fetchSchedules]);
+  useEffect(() => {
+    if (active) void fetchSchedules();
+  }, [active, fetchSchedules]);
 
   // Client-side filter: status tab + keyword search
   const displaySchedules = schedules.filter((s) => {
@@ -405,9 +411,7 @@ export default function ScheduleList() {
       await cancelSchedule(id);
       message.success(t('taskCenter.cancelSuccess'));
       void fetchSchedules();
-    } catch {
-      message.error(t('taskCenter.cancelError'));
-    }
+    } catch {}
   };
 
   const handleEnable = async (id: string) => {
@@ -415,9 +419,7 @@ export default function ScheduleList() {
       await enableSchedule(id);
       message.success(t('taskCenter.scheduleEnableSuccess'));
       void fetchSchedules();
-    } catch {
-      message.error(t('taskCenter.scheduleEnableFailed'));
-    }
+    } catch {}
   };
 
   const handleRunNow = async (id: string) => {
@@ -425,9 +427,7 @@ export default function ScheduleList() {
       await runScheduleNow(id);
       message.success(t('taskCenter.scheduleRunNowSuccess'));
       void fetchSchedules();
-    } catch {
-      message.error(t('taskCenter.scheduleRunNowFailed'));
-    }
+    } catch {}
   };
 
   const handleOpenEdit = (record: Schedule) => {
@@ -472,11 +472,8 @@ export default function ScheduleList() {
       setFileList([]);
       setUploadedPaths([]);
       void fetchSchedules();
-    } catch (err: unknown) {
-      const isValidation = err != null && typeof err === 'object' && 'errorFields' in err;
-      if (!isValidation) {
-        message.error(editTarget ? t('taskCenter.scheduleUpdateFailed') : t('taskCenter.createError'));
-      }
+    } catch {
+      // Form validation stays local; API errors use the shared interceptor.
     } finally {
       setSubmitting(false);
     }
@@ -603,7 +600,9 @@ export default function ScheduleList() {
                   setUploadedPaths((prev) => [...prev, path]);
                   onSuccess?.(path);
                 } catch (err) {
-                  message.error(t('taskCenter.attachmentUploadFailed'));
+                  if (!(err as { isAxiosError?: boolean })?.isAxiosError) {
+                    message.error(localizeErrorCode('2000509'));
+                  }
                   onError?.(err as Error);
                 } finally {
                   setUploading(false);

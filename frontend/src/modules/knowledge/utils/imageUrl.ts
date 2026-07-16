@@ -1,5 +1,5 @@
 import { AgentAppsAuth } from '@/components/auth';
-import { BASE_URL } from '@/components/request';
+import { BASE_URL, localizeErrorCode } from '@/components/request';
 import { normalizeProxyableUrl } from '@/modules/knowledge/utils/request';
 
 const IMAGE_MD_RE = /!\[(.*?)\]\((.*?)\)/g;
@@ -128,7 +128,7 @@ async function signUploadPaths(paths: string[]): Promise<Record<string, string>>
   });
 
   if (!response.ok) {
-    throw new Error(`sign static files failed: ${response.status}`);
+    throw new Error(localizeErrorCode('2000509'));
   }
 
   const data = (await response.json()) as { urls?: Record<string, string> };

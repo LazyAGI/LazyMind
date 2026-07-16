@@ -130,7 +130,6 @@ func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 		{"get", "/api/core/agent/candidates/{candidate_id:.*}"},
 		{"get", "/api/core/agent/router/status"},
 		{"get", "/api/core/agent/router/algorithms"},
-		{"post", "/api/core/agent/router/algorithms"},
 		{"post", "/api/core/agent/router/algorithms/{algorithm_id}/action"},
 		{"delete", "/api/core/agent/router/algorithms/{algorithm_id}"},
 		{"get", "/api/core/agent/router/ab-strategy"},

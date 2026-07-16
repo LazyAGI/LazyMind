@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Empty, Input, Progress, Select, Spin, Tooltip, message } from 'antd';
+import { Button, Empty, Input, Progress, Select, Spin, Tooltip } from 'antd';
 import { CheckCircleFilled, ClockCircleOutlined, DownOutlined, ReloadOutlined, SearchOutlined, UpOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,11 @@ import StateGraphModal from '@/components/StateGraphModal';
 
 const SECTION_LIMIT = 5;
 
-export default function Workbench() {
+interface WorkbenchProps {
+  active: boolean;
+}
+
+export default function Workbench({ active }: WorkbenchProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -27,13 +31,15 @@ export default function Workbench() {
       const response = await listTasks({ keyword: keyword || undefined, task_type: type || undefined, page: 1, page_size: 60 });
       setTasks(response.items ?? []);
     } catch {
-      message.error(t('taskCenter.loadError'));
+      // API errors are reported by the shared request interceptor.
     } finally {
       setLoading(false);
     }
   }, [keyword, type, t]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (active) void load();
+  }, [active, load]);
 
   const waiting = tasks.filter((task) => ['waiting', 'interrupted', 'pending', 'failed'].includes(task.status));
   const running = tasks.filter((task) => task.status === 'running');

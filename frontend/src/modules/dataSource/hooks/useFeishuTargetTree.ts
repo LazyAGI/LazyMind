@@ -198,10 +198,7 @@ export function useFeishuTargetTree({
       }
       setFeishuTargetTreeData([
         buildFeishuHelperNode(
-          getLocalizedErrorMessage(
-            error,
-            t("admin.dataSourceFeishuDirectoryListFailedManual"),
-          ) || t("admin.dataSourceFeishuDirectoryListFailedManual"),
+          getLocalizedErrorMessage(error),
         ),
       ]);
     } finally {

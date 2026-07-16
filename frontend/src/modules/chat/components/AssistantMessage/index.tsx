@@ -65,7 +65,7 @@ async function copyTextToClipboard(text: string) {
   try {
     const copied = document.execCommand("copy");
     if (!copied) {
-      throw new Error("Copy command failed");
+      throw new Error();
     }
   } finally {
     document.body.removeChild(textarea);
@@ -546,7 +546,6 @@ const AssistantMessage = (props: any) => {
         });
       })
       .catch(() => {
-        message.error(t("chat.feedbackFailedRetry"));
         dispatch({ type: "SUBMIT_FAIL" });
       });
   }
@@ -625,7 +624,6 @@ const AssistantMessage = (props: any) => {
         message.success(t("chat.thanksFeedback"));
       })
       .catch(() => {
-        message.error(t("chat.feedbackSubmitFailedRetry"));
         dispatch({ type: "SUBMIT_FAIL" });
       });
   }
@@ -663,9 +661,7 @@ const AssistantMessage = (props: any) => {
         updateMessage(item);
         onPreferenceSelect?.(preference, sessionId);
       })
-      .catch(() => {
-        message.error(t("chat.feedbackFailedRetry"));
-      });
+      .catch(() => {});
   }
 
   function renderAnswerKnowledgeBase(answerIndex: number) {

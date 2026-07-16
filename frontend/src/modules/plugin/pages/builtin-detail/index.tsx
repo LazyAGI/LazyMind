@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { getBuiltinPlugin } from '../../pluginDraftApi';
 import type { BuiltinPlugin } from '../../pluginDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
+import { localizeErrorCode } from '@/components/request';
 
 export default function BuiltinPluginDetailPage() {
   const { pluginId } = useParams<{ pluginId: string }>();
@@ -25,7 +26,7 @@ export default function BuiltinPluginDetailPage() {
     setError(null);
     getBuiltinPlugin(pluginId)
       .then((data) => setPlugin(data))
-      .catch(() => setError(t('selfEvolutionRun.builtinPluginLoadFailed')))
+      .catch(() => setError(localizeErrorCode('2000509')))
       .finally(() => setLoading(false));
   }, [pluginId]);
 

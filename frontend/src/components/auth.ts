@@ -4,6 +4,7 @@
  */
 import axios from "axios";
 import { authServiceApiUrl } from "@/runtime/apiBase";
+import i18n from "@/i18n";
 
 const STORAGE_KEY = "lazymind:user";
 export const AUTH_USER_CHANGE_EVENT = "lazymind:user-change";
@@ -189,7 +190,7 @@ export const AgentAppsAuth = {
     const loginData = responseData.data || responseData;
     
     if (!loginData.access_token) {
-      throw new Error("刷新失败，未获取到新的 access_token");
+      throw new Error(i18n.t("errors.2000509"));
     }
 
     this.updateUserInfo({

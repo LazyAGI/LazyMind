@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { message, Popconfirm } from 'antd';
+import { Popconfirm } from 'antd';
 import { usePluginSession } from '@/modules/chat/hooks/usePlugin';
 import { usePluginStore } from '@/modules/chat/store/pluginPanel';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
@@ -974,7 +974,6 @@ export function PluginPanel({
       onDismissed?.();
       refresh();
     } catch {
-      message.error(t('chat.pluginDismissFailed'));
       setDismissing(false);
     }
   }, [session, dismissing, refresh, t, onDismissed, bumpDismissedRefresh, conversationId]);

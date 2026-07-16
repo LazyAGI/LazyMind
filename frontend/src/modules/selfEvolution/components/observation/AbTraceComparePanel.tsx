@@ -16,6 +16,7 @@ import {
   getTraceMode,
   isFiniteNumber,
 } from "./traceUtils";
+import { localizeErrorCode } from "@/components/request";
 
 const { Text, Title } = Typography;
 
@@ -25,6 +26,13 @@ function getRawDisplayText(value: unknown): string {
   }
   const text = getDisplayText(value);
   return text === "-" ? "" : text;
+}
+
+function getCatalogErrorOrValue(errorMessage: unknown, value: unknown): string {
+  if (errorMessage) {
+    return localizeErrorCode("2000509");
+  }
+  return getRawDisplayText(value);
 }
 
 function EllipsisLine({
@@ -144,8 +152,9 @@ function AbTraceColumn({
       </div>
       <div className={`self-evolution-abtest-column-note is-${variant === "a" ? "danger" : "warning"}`}>
         <EllipsisLine
-          text={getRawDisplayText(
-            detail.root.metadata?.error_message || detail.root.output?.summary || "",
+          text={getCatalogErrorOrValue(
+            detail.root.metadata?.error_message,
+            detail.root.output?.summary,
           )}
         />
       </div>
@@ -163,17 +172,13 @@ function AbDiffPanel({
   const bNode = getSearchNode(observation.b);
   const aScore = getAbMaxScore(aNode);
   const bScore = getAbMaxScore(bNode);
-  const aJudge = getRawDisplayText(
-    aNode?.metadata?.error_message ??
-      aNode?.output?.summary ??
-      aNode?.input?.summary ??
-      "",
+  const aJudge = getCatalogErrorOrValue(
+    aNode?.metadata?.error_message,
+    aNode?.output?.summary ?? aNode?.input?.summary,
   );
-  const bJudge = getRawDisplayText(
-    bNode?.metadata?.error_message ??
-      bNode?.output?.summary ??
-      bNode?.input?.summary ??
-      "",
+  const bJudge = getCatalogErrorOrValue(
+    bNode?.metadata?.error_message,
+    bNode?.output?.summary ?? bNode?.input?.summary,
   );
   return (
     <section className="self-evolution-abtest-diff-panel" aria-label={t("selfEvolutionRun.observation.abDiffPanelAria")}>
@@ -223,12 +228,11 @@ export function AbTraceComparePanel({
 }) {
   const { t } = useTranslation();
   const reportIdLabel = abtestId && abtestId.length > 16 ? `${abtestId.slice(0, 8)}...${abtestId.slice(-4)}` : abtestId || "";
-  const finalConclusion = getRawDisplayText(
+  const finalConclusion = getCatalogErrorOrValue(
     observation?.b.root.metadata?.error_message ||
-      observation?.b.root.output?.summary ||
-      observation?.a.root.metadata?.error_message ||
-      observation?.a.root.output?.summary ||
-      "",
+      observation?.a.root.metadata?.error_message,
+    observation?.b.root.output?.summary ||
+      observation?.a.root.output?.summary,
   );
 
   if (loading) {

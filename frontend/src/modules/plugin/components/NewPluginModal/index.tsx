@@ -161,7 +161,6 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
       reset();
       onCreated(draft.id);
     } catch {
-      message.error(t('selfEvolutionRun.newPluginCreateFailed'));
       if (draftId) {
         deletePluginDraft(draftId).catch(() => {});
       }

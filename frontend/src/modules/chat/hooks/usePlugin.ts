@@ -19,7 +19,7 @@ export function usePluginSession(conversationId: string) {
   // This is important for detecting when the session transitions from 'active' to
   // 'waiting'/'completed' even if the SSE push event was missed.
   const refresh = useCallback(() => {
-    loadActiveSession(conversationId);
+    loadActiveSession(conversationId, { silentError: true });
   }, [conversationId, loadActiveSession]);
 
   const selectRevision = useCallback(

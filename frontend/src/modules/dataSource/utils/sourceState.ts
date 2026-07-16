@@ -11,6 +11,7 @@ import type {
 } from "../constants/types";
 import { formatDateTime } from "./format";
 import { normalizeDataSourceFileUpdateState } from "./status";
+import { localizeErrorCode } from "@/components/request";
 
 const VALID_SOURCE_STATES: ReadonlyArray<SourceStateValue> = [
   "UNCHANGED",
@@ -116,7 +117,12 @@ export function getSyncStateMeta(
     return { color: "processing", text: t("admin.dataSourceSyncStateRunning") };
   }
   if (state === "FAILED") {
-    const error = `${options.lastError || ""}`.trim();
+    const error = options.lastError
+      ? localizeErrorCode(
+          `${options.lastError}`,
+          localizeErrorCode("2000509"),
+        )
+      : "";
     return {
       color: "error",
       text: error
@@ -156,7 +162,12 @@ export function buildDocumentStatusDetail(
     return t("admin.dataSourceFileUpdateDeletedPendingDetail");
   }
   if (syncState === "FAILED" && input.last_error) {
-    return t("admin.dataSourceSyncStateFailedWithError", { error: input.last_error });
+    return t("admin.dataSourceSyncStateFailedWithError", {
+      error: localizeErrorCode(
+        input.last_error,
+        localizeErrorCode("2000509"),
+      ),
+    });
   }
   if (syncState === "SCHEDULED" && input.next_sync_at) {
     return t("admin.dataSourceSyncStateScheduledAt", {

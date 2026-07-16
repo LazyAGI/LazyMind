@@ -385,10 +385,6 @@ func ListRouterAlgorithms(w http.ResponseWriter, r *http.Request) {
 	proxyEvoResponse(w, r, http.MethodGet, "/router/algorithms", cloneURLValues(r.URL.Query()), nil, "application/json")
 }
 
-func RegisterRouterAlgorithm(w http.ResponseWriter, r *http.Request) {
-	proxyEvoResponse(w, r, http.MethodPost, "/router/algorithms", cloneURLValues(r.URL.Query()), r.Body, "application/json")
-}
-
 func PostRouterAlgorithmAction(w http.ResponseWriter, r *http.Request) {
 	algorithmID := strings.TrimSpace(mux.Vars(r)["algorithm_id"])
 	if algorithmID == "" {

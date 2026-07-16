@@ -53,7 +53,7 @@ export async function uploadFileInChunks(
     const { upload_id, part_size, total_parts } = initResponse.data;
 
     if (!upload_id) {
-      throw new Error(i18n.t("chat.chunkUploadInitFailedNoUploadId"));
+      throw new Error(i18n.t("errors.2000509"));
     }
 
     const actualPartSize = part_size || chunkSize;
@@ -101,7 +101,7 @@ export async function uploadFileInChunks(
 
     const storedPath = completeResponse.data.stored_path;
     if (!storedPath) {
-      throw new Error(i18n.t("chat.chunkUploadCompleteFailedNoStoredPath"));
+      throw new Error(i18n.t("errors.2000509"));
     }
 
     return storedPath;

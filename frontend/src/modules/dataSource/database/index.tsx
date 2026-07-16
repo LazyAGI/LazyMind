@@ -24,7 +24,7 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { getLocalizedErrorMessage } from "@/components/request";
+import { localizeErrorCode } from "@/components/request";
 import {
   checkDatabaseConnection,
   createDatabaseConnection,
@@ -56,7 +56,6 @@ export default function DatabaseConnectionsPage() {
       const result = await listDatabaseConnections();
       setItems(result.connections || []);
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseLoadFailed")));
     } finally {
       setLoading(false);
     }
@@ -88,7 +87,6 @@ export default function DatabaseConnectionsPage() {
       setModalOpen(false);
       await refresh();
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseSaveFailed")));
     } finally {
       setSaving(false);
     }
@@ -101,11 +99,10 @@ export default function DatabaseConnectionsPage() {
       if (result.success) {
         message.success(t("admin.dataSourceDatabaseCheckSuccess", { count: result.table_count }));
       } else {
-        message.error(result.message || t("admin.dataSourceDatabaseCheckFailed"));
+        message.error(localizeErrorCode("2000509"));
       }
       await refresh();
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseCheckFailed")));
     } finally {
       setCheckingId("");
     }
@@ -124,7 +121,6 @@ export default function DatabaseConnectionsPage() {
           message.success(t("admin.dataSourceDatabaseDeleted"));
           await refresh();
         } catch (error) {
-          message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseDeleteFailed")));
           throw error;
         }
       },

@@ -1,6 +1,7 @@
 import { Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import {
+  ApartmentOutlined,
   BellOutlined,
   ClockCircleOutlined,
   DownOutlined,
@@ -18,6 +19,9 @@ interface SkillManagementToolbarProps {
   installedCount: number;
   trashCount?: number;
   onCreateSkill: (source: SkillCreateSource) => void;
+  organizeMode: boolean;
+  organizeDisabled: boolean;
+  onOrganizeSkills: () => void;
   manualSkillReviewCount: number;
   manualSkillReviewLoading: boolean;
   manualSkillReviewRunning: boolean;
@@ -31,6 +35,9 @@ interface SkillManagementToolbarProps {
 }
 
 function InsightCount({ count }: { count: number }) {
+  if (count <= 0) {
+    return null;
+  }
   return <span className="memory-skill-insight-card__count">{count}</span>;
 }
 
@@ -41,6 +48,9 @@ export default function SkillManagementToolbar({
   installedCount,
   trashCount = 0,
   onCreateSkill,
+  organizeMode,
+  organizeDisabled,
+  onOrganizeSkills,
   manualSkillReviewCount,
   manualSkillReviewLoading,
   manualSkillReviewRunning,
@@ -89,48 +99,54 @@ export default function SkillManagementToolbar({
 
   const renderInstalledActions = () => (
     <>
-      <div className="memory-skill-create-split">
+      <Dropdown
+        menu={{ items: createMenuItems, onClick: handleCreateMenuClick }}
+        trigger={["click"]}
+        placement="bottomRight"
+        overlayClassName="memory-skill-create-dropdown"
+      >
         <button
           type="button"
-          className="memory-skill-create-split__main"
-          onClick={() => onCreateSkill("manual")}
+          className="memory-skill-create-split is-single"
+          aria-haspopup="menu"
         >
-          <PlusOutlined />
-          {t("admin.memorySkillCreateButton")}
-        </button>
-        <Dropdown
-          menu={{ items: createMenuItems, onClick: handleCreateMenuClick }}
-          trigger={["click"]}
-          placement="bottomRight"
-          overlayClassName="memory-skill-create-dropdown"
-        >
-          <button
-            type="button"
-            className="memory-skill-create-split__trigger"
-            aria-label={t("admin.memorySkillCreateButton")}
-          >
+          <span className="memory-skill-create-split__main">
+            <PlusOutlined />
+            {t("admin.memorySkillCreateButton")}
             <DownOutlined />
-          </button>
-        </Dropdown>
-      </div>
+          </span>
+        </button>
+      </Dropdown>
+
+      <button
+        type="button"
+        className={`memory-skill-insight-card is-organize ${organizeMode ? "is-active" : ""}`}
+        onClick={onOrganizeSkills}
+        disabled={organizeDisabled || organizeMode}
+        aria-pressed={organizeMode}
+        title={t("admin.memorySkillOrganizeHint")}
+      >
+        <span className="memory-skill-insight-card__icon">
+          <ApartmentOutlined />
+        </span>
+        <span className="memory-skill-insight-card__title">
+          {t("admin.memorySkillOrganizeTitle")}
+        </span>
+      </button>
 
       <button
         type="button"
         className="memory-skill-insight-card is-review"
         onClick={onSkillReviewClick}
         disabled={manualSkillReviewLoading || manualSkillReviewRunning}
+        title={t("admin.memorySkillReviewCardHint")}
       >
         <span className="memory-skill-insight-card__icon">
           <ClockCircleOutlined />
           <InsightCount count={manualSkillReviewCount} />
         </span>
-        <span className="memory-skill-insight-card__body">
-          <span className="memory-skill-insight-card__title">
-            {t("admin.memorySkillReviewCardTitle")}
-          </span>
-          <span className="memory-skill-insight-card__hint">
-            {t("admin.memorySkillReviewCardHint")}
-          </span>
+        <span className="memory-skill-insight-card__title">
+          {t("admin.memorySkillReviewCardTitle")}
         </span>
       </button>
 
@@ -139,18 +155,14 @@ export default function SkillManagementToolbar({
           type="button"
           className="memory-skill-insight-card is-message"
           onClick={onMessageCenterClick}
+          title={t("admin.memorySkillMessageCenterHint")}
         >
           <span className="memory-skill-insight-card__icon">
             <BellOutlined />
             <InsightCount count={messageCenterCount} />
           </span>
-          <span className="memory-skill-insight-card__body">
-            <span className="memory-skill-insight-card__title">
-              {t("admin.memorySkillMessageCenterTitle")}
-            </span>
-            <span className="memory-skill-insight-card__hint">
-              {t("admin.memorySkillMessageCenterHint")}
-            </span>
+          <span className="memory-skill-insight-card__title">
+            {t("admin.memorySkillMessageCenterTitle")}
           </span>
         </button>
       ) : null}
