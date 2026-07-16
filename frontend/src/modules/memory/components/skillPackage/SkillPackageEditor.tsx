@@ -257,10 +257,7 @@ export default function SkillPackageEditor({
       }
     } catch (error) {
       console.error("Load skill package failed:", error);
-      setErrorMessage(
-        getLocalizedErrorMessage(error, t("admin.memorySkillPackageLoadFailed")) ||
-          t("admin.memorySkillPackageLoadFailed"),
-      );
+      setErrorMessage(getLocalizedErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -346,10 +343,6 @@ export default function SkillPackageEditor({
         setFileBinary(file.binary);
       } catch (error) {
         console.error("Load skill file failed:", error);
-        message.error(
-          getLocalizedErrorMessage(error, t("admin.memorySkillPackageFileLoadFailed")) ||
-            t("admin.memorySkillPackageFileLoadFailed"),
-        );
       } finally {
         setFileLoading(false);
       }
@@ -417,9 +410,6 @@ export default function SkillPackageEditor({
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Save skill file failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.saveFailed")) || t("common.saveFailed"),
-      );
     } finally {
       setSaving(false);
     }
@@ -437,10 +427,6 @@ export default function SkillPackageEditor({
       await onSkillUpdated?.();
     } catch (error) {
       console.error("Commit skill draft failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memorySkillDraftCommitFailed")) ||
-          t("admin.memorySkillDraftCommitFailed"),
-      );
     } finally {
       setCommitting(false);
     }
@@ -488,10 +474,6 @@ export default function SkillPackageEditor({
       await refreshCurrentFileDiff();
     } catch (error) {
       console.error("Submit skill draft review action failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memorySkillHunkActionFailed")) ||
-          t("admin.memorySkillHunkActionFailed"),
-      );
     } finally {
       setHunkSubmitting((previous) => {
         const next = { ...previous };
@@ -533,10 +515,6 @@ export default function SkillPackageEditor({
       }
     } catch (error) {
       console.error("Undo skill draft review failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memorySkillDraftReviewUndoFailed")) ||
-          t("admin.memorySkillDraftReviewUndoFailed"),
-      );
     } finally {
       setUndoing(false);
     }
@@ -566,10 +544,6 @@ export default function SkillPackageEditor({
       await onSkillUpdated?.();
     } catch (error) {
       console.error("Confirm skill draft failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memorySkillDraftConfirmFailed")) ||
-          t("admin.memorySkillDraftConfirmFailed"),
-      );
     } finally {
       setCommitting(false);
     }
@@ -594,10 +568,6 @@ export default function SkillPackageEditor({
           await onSkillUpdated?.();
         } catch (error) {
           console.error("Discard skill draft failed:", error);
-          message.error(
-            getLocalizedErrorMessage(error, t("admin.memorySkillDraftDiscardFailed")) ||
-              t("admin.memorySkillDraftDiscardFailed"),
-          );
         }
       },
     });
@@ -648,9 +618,6 @@ export default function SkillPackageEditor({
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Create skill path failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.saveFailed")) || t("common.saveFailed"),
-      );
     }
   };
 
@@ -714,10 +681,6 @@ export default function SkillPackageEditor({
           message.success(t("admin.memorySkillPackageDeleteSuccess"));
         } catch (error) {
           console.error("Delete skill file failed:", error);
-          message.error(
-            getLocalizedErrorMessage(error, t("admin.memorySkillPackageDeleteFailed")) ||
-              t("admin.memorySkillPackageDeleteFailed"),
-          );
         }
       },
     });
@@ -752,9 +715,6 @@ export default function SkillPackageEditor({
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Upload skill file failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.saveFailed")) || t("common.saveFailed"),
-      );
     }
     return false;
   };

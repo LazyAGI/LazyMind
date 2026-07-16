@@ -130,7 +130,6 @@ func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 		{"get", "/api/core/agent/candidates/{candidate_id:.*}"},
 		{"get", "/api/core/agent/router/status"},
 		{"get", "/api/core/agent/router/algorithms"},
-		{"post", "/api/core/agent/router/algorithms"},
 		{"post", "/api/core/agent/router/algorithms/{algorithm_id}/action"},
 		{"delete", "/api/core/agent/router/algorithms/{algorithm_id}"},
 		{"get", "/api/core/agent/router/ab-strategy"},
@@ -720,6 +719,65 @@ func TestOpenAPISpecMarksUIPreferencesPatchFieldsOptional(t *testing.T) {
 	}
 	if required, ok := schema["required"].([]any); ok && len(required) > 0 {
 		t.Fatalf("userUIPreferencesPatchOpenAPIRequest fields should all be optional, got required=%v", required)
+	}
+}
+
+func TestOpenAPISpecIncludesLLMAndVLMMaxInputTokens(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing in openapi spec")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing in openapi spec")
+	}
+	itemSchema, ok := schemas["listModelProviderGroupModelsOpenAPIItem"].(map[string]any)
+	if !ok {
+		t.Fatalf("listModelProviderGroupModelsOpenAPIItem schema missing")
+	}
+	properties, ok := itemSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("listModelProviderGroupModelsOpenAPIItem properties missing")
+	}
+	maxInputTokens, ok := properties["max_input_tokens"].(map[string]any)
+	if !ok {
+		t.Fatalf("max_input_tokens property missing")
+	}
+	if got := maxInputTokens["type"]; got != "string" {
+		t.Fatalf("max_input_tokens type = %v, want string", got)
+	}
+	if got := maxInputTokens["nullable"]; got != true {
+		t.Fatalf("max_input_tokens nullable = %v, want true", got)
+	}
+
+	selectedItemSchema, ok := schemas["selectedModelOpenAPIItem"].(map[string]any)
+	if !ok {
+		t.Fatalf("selectedModelOpenAPIItem schema missing")
+	}
+	selectedProperties, ok := selectedItemSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("selectedModelOpenAPIItem properties missing")
+	}
+	selectedMaxInputTokens, ok := selectedProperties["max_input_tokens"].(map[string]any)
+	if !ok {
+		t.Fatalf("selected models max_input_tokens property missing")
+	}
+	if got := selectedMaxInputTokens["type"]; got != "string" {
+		t.Fatalf("selected models max_input_tokens type = %v, want string", got)
+	}
+	if got := selectedMaxInputTokens["nullable"]; got != true {
+		t.Fatalf("selected models max_input_tokens nullable = %v, want true", got)
 	}
 }
 

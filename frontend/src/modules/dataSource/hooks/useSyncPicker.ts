@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { message } from "antd";
 import type { DataNode } from "antd/es/tree";
 import type { TFunction } from "i18next";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { dataSourceScanApi } from "../api/clients";
 import type {
   DataSourceDetailState,
@@ -165,14 +164,10 @@ export function useSyncPicker({
         setSyncSelectedDocIds((prev) =>
           options.selectAll ? nextSelectableKeys : prev,
         );
-      } catch (error) {
+      } catch {
         if (syncTreeRequestSeqRef.current !== requestSeq) {
           return;
         }
-        message.error(
-          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-            t("common.requestFailed"),
-        );
         if (options.closeOnError) {
           setSyncPickerOpen(false);
         }
@@ -248,11 +243,7 @@ export function useSyncPicker({
             Array.from(new Set([...current, ...selectableKeys])),
           );
         }
-      } catch (error) {
-        message.error(
-          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-            t("common.requestFailed"),
-        );
+      } catch {
       }
     },
     [detailSource, syncKeyword, syncSelectedDocIds, t],
@@ -444,12 +435,8 @@ export function useSyncPicker({
       startSyncPolling(refreshedDocuments);
 
       return true;
-    } catch (error) {
+    } catch {
       stopSyncPolling();
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-          t("common.requestFailed"),
-      );
       return false;
     } finally {
       setSyncSubmitting(false);

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,8 +19,9 @@ import (
 )
 
 type catalogModel struct {
-	Name string `yaml:"name"`
-	Type string `yaml:"type"`
+	Name           string  `yaml:"name"`
+	Type           string  `yaml:"type"`
+	MaxInputTokens *string `yaml:"max_input_tokens"`
 }
 
 type catalogSupplier struct {
@@ -39,6 +41,8 @@ type catalogSection struct {
 type modelCatalog map[string]catalogSection
 
 var endpointPathMarkers = []string{"/embeddings", "/rerank", "/embed"}
+
+var maxInputTokensPattern = regexp.MustCompile(`^[1-9][0-9]*(K|M)$`)
 
 // normalizeBaseURL appends a trailing slash to generic API roots; endpoint-specific URLs are kept as-is.
 func normalizeBaseURL(raw string) string {
@@ -130,6 +134,16 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	if name == "" || modelType == "" {
 		return errors.New("model name and type are required")
 	}
+	if item.MaxInputTokens != nil {
+		if modelType != "llm" && modelType != "vlm" {
+			return errors.New("model max_input_tokens is only supported for llm or vlm models")
+		}
+		maxInputTokens := strings.ToUpper(strings.TrimSpace(*item.MaxInputTokens))
+		if !maxInputTokensPattern.MatchString(maxInputTokens) {
+			return errors.New("model max_input_tokens must use a positive K or M value, for example 128K or 1M")
+		}
+		item.MaxInputTokens = &maxInputTokens
+	}
 
 	var row orm.DefaultModel
 	err := tx.Where("default_model_provider_id = ? AND name = ?", providerID, name).Take(&row).Error
@@ -140,23 +154,53 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 			ProviderName:           providerName,
 			Name:                   name,
 			ModelType:              modelType,
+			MaxInputTokens:         item.MaxInputTokens,
 			CreatedAt:              now,
 			UpdatedAt:              now,
 		}
-		return tx.Create(&row).Error
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		return syncDefaultModelMaxInputTokens(tx, now, providerID, name, item.MaxInputTokens)
 	}
 	if err != nil {
 		return err
 	}
 
-	return tx.Model(&orm.DefaultModel{}).
+	if err := tx.Model(&orm.DefaultModel{}).
 		Where("id = ?", row.ID).
 		Updates(map[string]any{
-			"provider_name": providerName,
-			"model_type":    modelType,
-			"updated_at":    now,
-			"deleted_at":    nil,
-		}).Error
+			"provider_name":    providerName,
+			"model_type":       modelType,
+			"max_input_tokens": item.MaxInputTokens,
+			"updated_at":       now,
+			"deleted_at":       nil,
+		}).Error; err != nil {
+		return err
+	}
+	return syncDefaultModelMaxInputTokens(tx, now, providerID, name, item.MaxInputTokens)
+}
+
+// syncDefaultModelMaxInputTokens mirrors catalog metadata into default models already
+// copied to user groups. Custom user-added models are intentionally left untouched.
+func syncDefaultModelMaxInputTokens(tx *gorm.DB, now time.Time, providerID, modelName string, maxInputTokens *string) error {
+	providerIDs := tx.Model(&orm.UserModelProvider{}).
+		Select("id").
+		Where("default_model_provider_id = ? AND deleted_at IS NULL", providerID)
+	query := tx.Model(&orm.UserModelProviderGroupModel{}).
+		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
+		Where("max_input_tokens IS NOT NULL")
+	updates := map[string]any{
+		"max_input_tokens": nil,
+		"updated_at":       now,
+	}
+	if maxInputTokens != nil {
+		query = tx.Model(&orm.UserModelProviderGroupModel{}).
+			Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
+			Where("max_input_tokens IS NULL OR max_input_tokens <> ?", *maxInputTokens)
+		updates["max_input_tokens"] = maxInputTokens
+	}
+	return query.Updates(updates).Error
 }
 
 // SeedModelCatalog upserts default_model_providers and default_models from the YAML catalog file.

@@ -8,6 +8,7 @@ import {
 } from "@/modules/signin/utils/request";
 import { AgentAppsAuth } from "@/components/auth";
 import { useTranslation } from "react-i18next";
+import { localizeErrorCode } from "@/components/request";
 import { runtimeFeatures } from "@/runtime/features";
 
 interface LoginForm {
@@ -84,7 +85,7 @@ const Login = () => {
       navigate("/agent/chat", { replace: true });
     } catch (error: any) {
       if (!error?.response && !error?.request) {
-        message.error(error?.message || t("auth.loginFailed"));
+        message.error(localizeErrorCode("2000509"));
       }
     } finally {
       setLoading(false);

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Spin } from 'antd';
 import { axiosInstance, BASE_URL } from '@/components/request';
+import { localizeErrorCode } from '@/components/request';
 import StateGraphView, { type StateGraphData } from './StateGraphView';
 import './index.scss';
 
@@ -173,7 +174,7 @@ export default function StateGraphModal({
         setData(fallback);
         setError(null);
       } else {
-        setError('加载工作流图失败');
+        setError(localizeErrorCode('2000509'));
       }
     } finally {
       setLoading(false);

@@ -66,7 +66,6 @@ const GroupDetail = () => {
       setGroup(data);
     } catch (error) {
       console.error("Failed to fetch group detail:", error);
-      message.error(t("admin.fetchGroupDetailFailed"));
     } finally {
       setLoading(false);
     }
@@ -83,7 +82,6 @@ const GroupDetail = () => {
       setMembers(memberList);
     } catch (error) {
       console.error("Failed to fetch group members:", error);
-      message.error(t("admin.fetchMembersFailed"));
     } finally {
       setMemberLoading(false);
     }
@@ -112,7 +110,6 @@ const GroupDetail = () => {
       fetchMembers();
     } catch (error) {
       console.error("Failed to remove member:", error);
-      message.error(t("admin.removeMemberFailed"));
     }
   };
 

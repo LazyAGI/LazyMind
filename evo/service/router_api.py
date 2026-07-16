@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -9,20 +11,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from evo.operations.route.router_algorithm import (
     delete_owned_algorithm,
-    ensure_owned_algorithm,
+    discard_unpublished_algorithms,
     manage_owned_algorithm,
 )
 from evo.operations.route.router_ledger import RouterAlgorithmLedger, RouterLedgerError
 from evo.operations.route.router_manager import (
     DEFAULT_ROUTER_CHAT_URL,
-    RouterAlgorithmSpec,
     RouterManager,
     RouterManagerError,
     admin_url_from_chat_url,
 )
 
 
-EVO_ALGORITHM_PREFIX = 'evo_'
+logger = logging.getLogger(__name__)
 
 
 class StrictModel(BaseModel):
@@ -31,25 +32,11 @@ class StrictModel(BaseModel):
 
 class AlgorithmOwner(StrictModel):
     thread_id: str = Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')
-    run_id: str = ''
     candidate_ref: str = ''
 
 
-class RegisterAlgorithmBody(StrictModel):
-    algorithm_id: str = Field(min_length=1)
-    name: str = ''
-    code_path: str = Field(min_length=1)
-    instance_count: int = Field(default=1, ge=1, le=4)
-    config: dict[str, Any] = Field(default_factory=dict)
-    owner: AlgorithmOwner
-    wait_ready_seconds: float = Field(default=180.0, gt=0, le=900)
-    cleanup_policy: Literal['thread_delete', 'manual'] = 'thread_delete'
-    router_admin_url: str = ''
-    router_chat_url: str = ''
-
-
 class AlgorithmActionBody(StrictModel):
-    action: Literal['healthcheck', 'restart', 'stop']
+    action: Literal['healthcheck', 'start', 'restart', 'stop']
     wait_ready_seconds: float = Field(default=180.0, gt=0, le=900)
 
 
@@ -64,13 +51,18 @@ class AbStrategyBody(StrictModel):
 def build_router_api(service: Any) -> APIRouter:
     api = APIRouter(prefix='/router', tags=['router-management'])
     ledger = RouterAlgorithmLedger(service.threads.runtime.store_root)
+    for thread_id in {str(row['thread_id']) for row in ledger.list_algorithms(published=False)}:
+        try:
+            discard_unpublished_algorithms(ledger, thread_id)
+        except Exception:
+            logger.exception('failed to discard unpublished router algorithms for thread %s', thread_id)
 
     @api.get('/status')
     def status(
         router_admin_url: str = '',
         router_chat_url: str = '',
     ) -> dict[str, Any]:
-        rows = ledger.list_algorithms()
+        rows = ledger.list_algorithms(published=True)
         manager = _ledger_manager(ledger, router_admin_url, router_chat_url)
         try:
             manager.status()
@@ -94,66 +86,25 @@ def build_router_api(service: Any) -> APIRouter:
     def algorithms(
         thread_id: str = '',
         algorithm_id: str = '',
-        status: str = '',
+        status: Literal['all', 'starting', 'active', 'disabled', 'missing'] = 'all',
         router_admin_url: str = '',
         router_chat_url: str = '',
     ) -> dict[str, Any]:
-        rows = ledger.list_algorithms(thread_id=thread_id, algorithm_id=algorithm_id)
+        rows = ledger.list_algorithms(
+            thread_id=thread_id,
+            algorithm_id=algorithm_id,
+            published=True,
+        )
         manager = _ledger_manager(ledger, router_admin_url, router_chat_url)
         try:
             items = [_owned_live_item(manager, ledger, row) for row in rows]
+            if not thread_id and algorithm_id in {'', 'default'}:
+                items.insert(0, _default_live_item(manager))
         except RouterManagerError as exc:
             _raise_router_error(exc)
-        if status:
+        if status != 'all':
             items = [item for item in items if item['status'] == status]
         return {'items': items}
-
-    @api.post('/algorithms')
-    def register(payload: RegisterAlgorithmBody) -> dict[str, Any]:
-        _require_evo_algorithm(payload.algorithm_id)
-        manager = _ledger_manager(ledger, payload.router_admin_url, payload.router_chat_url)
-        owner = payload.owner
-        if owner.run_id and owner.run_id != owner.thread_id:
-            raise HTTPException(422, _error('owner_invalid', 'owner.run_id must match owner.thread_id'))
-        spec = RouterAlgorithmSpec(
-            id=payload.algorithm_id,
-            name=payload.name or payload.algorithm_id,
-            code_path=payload.code_path,
-            instance_count=payload.instance_count,
-            config=dict(payload.config),
-        )
-        with service.threads.exclusive_operation(owner.thread_id):
-            service.threads.public_thread(owner.thread_id, include_inputs=False)
-            try:
-                register_response, detail = ensure_owned_algorithm(
-                    manager,
-                    ledger,
-                    spec,
-                    {
-                        'thread_id': owner.thread_id,
-                        'run_id': owner.run_id,
-                        'candidate_ref': owner.candidate_ref,
-                        'cleanup_policy': payload.cleanup_policy,
-                    },
-                    timeout_s=payload.wait_ready_seconds,
-                )
-                health = manager.healthcheck_from_detail(detail)
-                return {
-                    'status': 'ready',
-                    'algorithm_id': spec.id,
-                    'router_chat_url': manager.router_chat_url,
-                    'router_admin_url': manager.router_admin_url,
-                    'register_response': {
-                        key: value for key, value in register_response.items() if key != 'ports'
-                    },
-                    'healthcheck': health,
-                }
-            except RouterManagerError as exc:
-                _raise_router_error(exc)
-            except RouterLedgerError as exc:
-                raise HTTPException(409, _error('algorithm_conflict', str(exc))) from exc
-            except Exception as exc:
-                raise HTTPException(500, _error('ledger_error', str(exc))) from exc
 
     @api.post('/algorithms/{algorithm_id}/action')
     def action(
@@ -310,18 +261,31 @@ def _owned_live_item(
     ledger.record_router_status(str(row['algorithm_id']), health)
     return {
         'algorithm_id': row['algorithm_id'],
+        'name': str((detail or {}).get('name') or row['algorithm_id']),
         'status': status,
-        'expected_state': row['expected_state'],
         'healthy_instances': health['healthy_instances'],
         'instance_count': len(health['instances']),
-        'owner': {
-            'thread_id': row['thread_id'],
-            'run_id': row['run_id'],
-            'candidate_ref': row['candidate_ref'],
-        },
-        'router_chat_url': row['service_url'],
-        'router_admin_url': row['router_admin_url'],
+        'thread_id': row['thread_id'],
+        'created_at': str((detail or {}).get('created_at') or _iso_time(row['created_at'])),
     }
+
+
+def _default_live_item(manager: RouterManager) -> dict[str, Any]:
+    detail = manager.get_algorithm('default')
+    health = manager.healthcheck_from_detail(detail)
+    return {
+        'algorithm_id': 'default',
+        'name': str((detail or {}).get('name') or 'default'),
+        'status': str((detail or {}).get('status') or 'missing'),
+        'healthy_instances': health['healthy_instances'],
+        'instance_count': len(health['instances']),
+        'thread_id': None,
+        'created_at': (detail or {}).get('created_at'),
+    }
+
+
+def _iso_time(value: object) -> str:
+    return datetime.fromtimestamp(float(value), timezone.utc).isoformat()
 
 
 def _validate_strategy_algorithms(
@@ -336,6 +300,8 @@ def _validate_strategy_algorithms(
             raise HTTPException(422, _error('ab_strategy_invalid', 'weights must be positive integers'))
         if algorithm_id != 'default':
             row = _owned_row(ledger, algorithm_id)
+            if row.get('published_at') is None:
+                raise HTTPException(409, _error('ab_strategy_invalid', f'{algorithm_id} has not passed ABTest'))
             if row.get('expected_state') != 'active':
                 raise HTTPException(409, _error('ab_strategy_invalid', f'{algorithm_id} is not expected active'))
         health = manager.healthcheck(algorithm_id)
@@ -360,7 +326,7 @@ def _strategy_view(strategy: Mapping[str, Any]) -> dict[str, Any]:
     return {
         'active': raw is not None,
         'id': None if raw is None else raw.get('id'),
-        'weights': {} if raw is None else dict(raw.get('weights') or {}),
+        'weights': {'default': 100} if raw is None else dict(raw.get('weights') or {}),
     }
 
 
@@ -368,11 +334,6 @@ def _strategy_weights(strategy: Mapping[str, Any]) -> dict[str, int]:
     raw = strategy.get('strategy') if isinstance(strategy.get('strategy'), Mapping) else None
     weights = raw.get('weights') if isinstance(raw, Mapping) else {}
     return dict(weights or {})
-
-
-def _require_evo_algorithm(algorithm_id: str) -> None:
-    if not algorithm_id.startswith(EVO_ALGORITHM_PREFIX):
-        raise HTTPException(422, _error('algorithm_not_owned', 'algorithm_id must start with evo_'))
 
 
 def _raise_router_error(exc: RouterManagerError) -> None:
@@ -384,6 +345,8 @@ def _raise_router_error(exc: RouterManagerError) -> None:
         'algorithm_reactivation_failed': 503,
         'algorithm_unhealthy': 409,
         'algorithm_not_found': 404,
+        'algorithm_start_conflict': 409,
+        'algorithm_start_failed': 503,
         'router_timeout': 504,
         'router_transport_error': 503,
         'router_protocol_error': 502,

@@ -1,6 +1,7 @@
 import { AgentAppsAuth, type UserInfo } from "@/components/auth";
 import { apiUrl } from "./apiBase";
 import { runtimeFeatures } from "./features";
+import i18n from "@/i18n";
 
 let localSessionPromise: Promise<UserInfo | null> | null = null;
 export let localSessionInitialized = false;
@@ -33,7 +34,7 @@ export async function ensureLocalSession(
     localSessionPromise = (async () => {
       const session = await requestLocalAdminSession(Boolean(options?.force));
       if (!session?.token) {
-        throw new Error("Local admin session did not return an access token");
+        throw new Error(i18n.t("errors.2000509"));
       }
       AgentAppsAuth.setUserInfo(session);
       localSessionInitialized = true;
@@ -50,7 +51,7 @@ export async function restoreLocalSessionAndGetToken(): Promise<string> {
   const userInfo = await ensureLocalSession({ force: true });
   const token = userInfo?.token || "";
   if (!token) {
-    throw new Error("Local admin session did not return an access token");
+    throw new Error(i18n.t("errors.2000509"));
   }
   return token;
 }
@@ -67,12 +68,7 @@ async function requestLocalAdminSession(force: boolean): Promise<UserInfo> {
   });
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    const detail =
-      payload?.detail ||
-      payload?.message ||
-      payload?.error ||
-      response.statusText;
-    throw new Error(`Local admin session request failed (${response.status}): ${detail}`);
+    throw new Error(i18n.t("errors.2000509"));
   }
   return payload?.data || payload;
 }

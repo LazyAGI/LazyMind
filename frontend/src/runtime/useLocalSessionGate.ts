@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import i18n from "@/i18n";
 import { ensureLocalSession, isLocalSessionEnabled } from "./localSession";
 
 export interface LocalSessionGateState {
@@ -24,7 +25,7 @@ export function useLocalSessionGate(
         await refreshLayoutUser();
       } catch (restoreError: any) {
         console.error("Failed to restore local admin session:", restoreError);
-        setError(restoreError?.message || "Local session could not be restored.");
+        setError(i18n.t("errors.2000509"));
       } finally {
         setLoading(false);
       }
@@ -51,7 +52,7 @@ export function useLocalSessionGate(
       .catch((restoreError: any) => {
         if (!cancelled) {
           console.error("Failed to restore local admin session:", restoreError);
-          setError(restoreError?.message || "Local session could not be restored.");
+          setError(i18n.t("errors.2000509"));
         }
       })
       .finally(() => {

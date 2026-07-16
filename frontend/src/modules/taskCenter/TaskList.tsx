@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Input, Progress, Segmented, Select, Table, Tooltip, message } from 'antd';
+import { Button, Input, Progress, Segmented, Select, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, ReloadOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -11,8 +11,13 @@ import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 
 const PAGE_SIZE = 20;
+const POLL_INTERVAL_MS = 5_000;
 
-export default function TaskList() {
+interface TaskListProps {
+  active: boolean;
+}
+
+export default function TaskList({ active }: TaskListProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -25,22 +30,42 @@ export default function TaskList() {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Task | null>(null);
   const [graphTask, setGraphTask] = useState<Task | null>(null);
+  const hasRunningTask = statusCounts.running > 0 || tasks.some((task) => task.status === 'running');
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const response = await listTasks({ status: status || undefined, task_type: type || undefined, keyword: keyword || undefined, page, page_size: PAGE_SIZE });
       setTasks(response.items ?? []);
       setTotal(response.total ?? 0);
       if (response.status_counts) setStatusCounts(response.status_counts);
     } catch {
-      message.error(t('taskCenter.loadError'));
+      // API errors are reported by the shared request interceptor.
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [keyword, page, status, t, type]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (active) void load();
+  }, [active, load]);
+
+  useEffect(() => {
+    if (!active || !hasRunningTask) return;
+
+    let cancelled = false;
+    let timerId = window.setTimeout(poll, POLL_INTERVAL_MS);
+
+    async function poll() {
+      await load(true);
+      if (!cancelled) timerId = window.setTimeout(poll, POLL_INTERVAL_MS);
+    }
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+  }, [active, hasRunningTask, load]);
 
   const columns: ColumnsType<Task> = [
     {

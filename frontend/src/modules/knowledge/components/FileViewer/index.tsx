@@ -9,6 +9,7 @@ import {
 import { Spin, message, Empty } from "antd";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
+import { localizeErrorCode } from "@/components/request";
 import FileUtils from "@/modules/knowledge/utils/file";
 import { Segment } from "@/api/generated/knowledge-client";
 import {
@@ -93,7 +94,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
         const parsedMeta = JSON.parse(segment.meta);
         setMeta(parsedMeta);
       } catch {
-        const uiMessage = t("knowledge.loadingFailedReload");
+        const uiMessage = localizeErrorCode("2000509");
         message.error(uiMessage);
         setMeta(null);
       }
@@ -171,15 +172,13 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             signal: FileUtils.timeoutSignal(5 * 60 * 1000),
           });
           if (!response.ok) {
-            throw new Error(`Network response was not ok: ${response.status}`);
+            throw new Error(localizeErrorCode("2000509"));
           }
           return await response.arrayBuffer();
         }
         throw new Error("Unsupported file input type");
       } catch (err) {
-        throw new Error(
-          `Failed to read file: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        throw new Error(localizeErrorCode("2000509"));
       }
     },
     [],
@@ -199,7 +198,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
         setLoading(false);
       })
       .catch(() => {
-        const uiMessage = t("knowledge.loadingFailedReload");
+        const uiMessage = localizeErrorCode("2000509");
         message.error(uiMessage);
         setPreviewError(uiMessage);
         setLoading(false);

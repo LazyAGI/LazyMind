@@ -1,5 +1,8 @@
 import { message } from "antd";
-import { getLocalizedErrorMessage } from "@/components/request";
+import {
+  getLocalizedErrorMessage,
+  localizeErrorCode,
+} from "@/components/request";
 import { dataSourceScanApi } from "../../api/clients";
 import {
   FEISHU_EXCLUDE_PATTERNS,
@@ -9,7 +12,10 @@ import type { SourceFormValues } from "../../constants/types";
 import { getSourceTypeTitle } from "../../utils/status";
 import {
   createScanRequestId,
+  getScanBindingId,
+  getScanBindingTarget,
   getScanSourceConfigVersion,
+  type ScanV2Binding,
 } from "../../utils/scanAccessors";
 import { buildSchedulePolicy } from "../../utils/schedule";
 import {
@@ -34,10 +40,23 @@ import type { DataSourceSaveMode, ManagementContext } from "./context";
 
 const resolveBindingIdByTargetRef = (
   targetRef: string,
+  detailBindings: ScanV2Binding[],
+  submittedBindingCount: number,
   existingTargetRefs: string[] | undefined,
   bindingIds: string[] | undefined,
   fallbackBindingId?: string,
 ) => {
+  const detailBinding = detailBindings.find(
+    (binding) => getScanBindingTarget(binding) === targetRef,
+  );
+  const detailBindingId = getScanBindingId(detailBinding);
+  if (detailBindingId) {
+    return detailBindingId;
+  }
+  if (detailBindings.length === 1 && submittedBindingCount === 1) {
+    return getScanBindingId(detailBindings[0]) || fallbackBindingId;
+  }
+
   const refs = existingTargetRefs || [];
   const matchedIndex = refs.findIndex((item) => item === targetRef);
   if (matchedIndex >= 0) {
@@ -46,10 +65,13 @@ const resolveBindingIdByTargetRef = (
   return undefined;
 };
 
-/** Fetch the latest config_version from source detail before update. */
-const fetchSourceConfigVersion = async (sourceId: string) => {
+/** Fetch edit identity fields together so the update uses the latest bindings. */
+const fetchSourceEditState = async (sourceId: string) => {
   const response = await dataSourceScanApi.getSource({ sourceId });
-  return getScanSourceConfigVersion(response.data.source);
+  return {
+    bindings: (response.data.bindings || []) as ScanV2Binding[],
+    configVersion: getScanSourceConfigVersion(response.data.source),
+  };
 };
 
 export function createSaveActions(ctx: ManagementContext) {
@@ -120,16 +142,18 @@ export function createSaveActions(ctx: ManagementContext) {
 
     try {
       if (isEditing) {
-        const configVersion = await fetchSourceConfigVersion(editingSourceId);
+        const editState = await fetchSourceEditState(editingSourceId);
         await client.updateSource({
           sourceId: editingSourceId,
           updateSourceRequest: {
             name: sourceName,
-            config_version: configVersion,
+            config_version: editState.configVersion,
             bindings: rootPaths.map((pathValue) => ({
               ...buildBindingRequest(pathValue),
               binding_id: resolveBindingIdByTargetRef(
                 pathValue,
+                editState.bindings,
+                rootPaths.length,
                 currentLocalSource?.targetRefs,
                 currentLocalSource?.bindingIds,
                 currentLocalSource?.bindingId,
@@ -175,11 +199,9 @@ export function createSaveActions(ctx: ManagementContext) {
         markKnowledgeBaseNameDuplicated();
         return;
       }
-
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-        t("common.requestFailed"),
-      );
+      if (!(error as { isAxiosError?: boolean })?.isAxiosError) {
+        message.error(getLocalizedErrorMessage(error));
+      }
     }
   };
 
@@ -258,18 +280,20 @@ export function createSaveActions(ctx: ManagementContext) {
       };
 
       if (isEditing) {
-        const configVersion = await fetchSourceConfigVersion(editingSourceId);
+        const editState = await fetchSourceEditState(editingSourceId);
         await client.updateSource({
           sourceId: editingSourceId,
           updateSourceRequest: {
             name: sourceName,
-            config_version: configVersion,
+            config_version: editState.configVersion,
             bindings: targets.map(({ targetRef, targetType }) => ({
               ...bindingRequest,
               target_type: toScanFeishuTargetType(targetType),
               target_ref: targetRef,
               binding_id: resolveBindingIdByTargetRef(
                 targetRef,
+                editState.bindings,
+                targets.length,
                 currentFeishuSource?.targetRefs,
                 currentFeishuSource?.bindingIds,
                 currentFeishuSource?.bindingId,
@@ -302,7 +326,7 @@ export function createSaveActions(ctx: ManagementContext) {
       }
 
       if (!sourceId) {
-        message.error(t("admin.dataSourceCreateMissingSourceId"));
+        message.error(localizeErrorCode("2000509"));
         return;
       }
 
@@ -329,10 +353,6 @@ export function createSaveActions(ctx: ManagementContext) {
         return;
       }
 
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-        t("common.requestFailed"),
-      );
     }
   };
 
@@ -394,18 +414,20 @@ export function createSaveActions(ctx: ManagementContext) {
       };
 
       if (isEditing) {
-        const configVersion = await fetchSourceConfigVersion(editingSourceId);
+        const editState = await fetchSourceEditState(editingSourceId);
         await client.updateSource({
           sourceId: editingSourceId,
           updateSourceRequest: {
             name: sourceName,
-            config_version: configVersion,
+            config_version: editState.configVersion,
             bindings: targetRefs.map((targetRef) => ({
               ...bindingRequest,
               target_type: targetType,
               target_ref: targetRef,
               binding_id: resolveBindingIdByTargetRef(
                 targetRef,
+                editState.bindings,
+                targetRefs.length,
                 currentNotionSource?.targetRefs,
                 currentNotionSource?.bindingIds,
                 currentNotionSource?.bindingId,
@@ -437,7 +459,7 @@ export function createSaveActions(ctx: ManagementContext) {
       }
 
       if (!sourceId) {
-        message.error(t("admin.dataSourceNotionSourceCreationFailed"));
+        message.error(localizeErrorCode("2000509"));
         return;
       }
 
@@ -459,10 +481,9 @@ export function createSaveActions(ctx: ManagementContext) {
       message.success(getSaveSuccessMessage());
       ctx.handleCloseWizard();
     } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-        t("common.requestFailed"),
-      );
+      if (!(error as { isAxiosError?: boolean })?.isAxiosError) {
+        message.error(getLocalizedErrorMessage(error));
+      }
     }
   };
 

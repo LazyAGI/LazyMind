@@ -96,7 +96,6 @@ const UserManagement = () => {
       });
     } catch (error) {
       console.error("Failed to fetch users:", error);
-      message.error(t("admin.fetchUsersFailed"));
     } finally {
       setLoading(false);
     }
@@ -154,9 +153,6 @@ const UserManagement = () => {
       fetchUsers(pagination.current, pagination.pageSize, searchTerm);
     } catch (error) {
       console.error("Toggle user status failed:", error);
-      message.error(
-        disabled ? t("admin.disableFailed") : t("admin.enableFailed"),
-      );
     }
   };
 
@@ -207,7 +203,6 @@ const UserManagement = () => {
           resetPasswordForm.resetFields();
         } catch (error) {
           console.error("Reset password failed:", error);
-          message.error(t("admin.resetPasswordFailed"));
           return Promise.reject();
         }
       },

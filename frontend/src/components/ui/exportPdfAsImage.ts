@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import { pdfjs } from "react-pdf";
+import i18n from "@/i18n";
 
 if (!pdfjs.GlobalWorkerOptions.workerSrc) {
   pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -42,7 +43,7 @@ async function fetchPdfBuffer(
 ): Promise<ArrayBuffer> {
   const response = await fetch(url, { headers });
   if (!response.ok) {
-    throw new Error(`Network response was not ok: ${response.status}`);
+    throw new Error(i18n.t("errors.2000509"));
   }
   return response.arrayBuffer();
 }

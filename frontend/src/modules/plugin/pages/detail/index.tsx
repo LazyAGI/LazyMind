@@ -3,6 +3,7 @@ import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { Alert, Breadcrumb, Button, Modal, Input, Spin, Select, Space, Tag, message } from 'antd';
 import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { localizeErrorCode } from '@/components/request';
 import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft, publishPluginDraft, listPluginVersions, getPluginVersion, editPluginVersion, getPluginGenerationAnalysis, confirmPluginWorkflow, previewPluginRepair, getPluginRepairRun, validatePluginDraft } from '../../pluginDraftApi';
 import type { PluginDraftRecord } from '../../pluginDraftApi';
 import type { PluginVersionSummary, PluginVersionContent, PluginGenerationAnalysis, RepairPreview } from '../../pluginDraftApi';
@@ -151,7 +152,7 @@ export default function PluginDetailPage() {
       setDraft(data);
       setNameValue(data.name);
     } catch {
-      message.error(t('selfEvolutionRun.pluginDetailLoadFailed'));
+      // API errors are reported by the shared request interceptor.
     } finally {
       setLoading(false);
     }
@@ -179,7 +180,10 @@ export default function PluginDetailPage() {
     pollRef.current = setInterval(async () => {
       if (!pluginId) return;
       try {
-        const data = await getPluginDraft(pluginId);
+        const data = await getPluginDraft(
+          pluginId,
+          { silentError: true } as never,
+        );
         setDraft(data);
         if (!GENERATING_STATUSES.has(data.generate_status)) {
           if (pollRef.current) clearInterval(pollRef.current);
@@ -198,7 +202,7 @@ export default function PluginDetailPage() {
                   const details = Array.isArray(run.diagnostics_after)
                     ? run.diagnostics_after
                       .filter((item) => item.severity === 'error')
-                      .map((item) => `${item.path}: ${item.message}`)
+                      .map((item) => `${item.path}: ${localizeErrorCode(item.code, localizeErrorCode('2000509'))}`)
                     : [];
                   setRepairFailureDetails([...new Set(details)]);
                 }).catch(() => setRepairFailureDetails([]));
@@ -215,7 +219,6 @@ export default function PluginDetailPage() {
                 });
                 void warningKey; // used only for type-check
               }
-              message.error(t('selfEvolutionRun.pluginDetailRepairValidationFailed'));
             } else {
               setRepairFailureDetails([]);
               message.success(t('selfEvolutionRun.pluginDetailRepairSuccess'));
@@ -257,7 +260,7 @@ export default function PluginDetailPage() {
       }
       startPolling();
     } catch {
-      message.error(t('selfEvolutionRun.pluginDetailRegenerateFailed'));
+      // API errors are reported by the shared request interceptor.
     } finally {
       setIsRegenerating(false);
     }
@@ -292,7 +295,6 @@ export default function PluginDetailPage() {
       setDraft(updated);
       startPolling();
     } catch {
-      message.error(t('selfEvolutionRun.pluginDetailRepairRequestFailed'));
       setRepairSubmitting(false);
       // Reset prevStatusRef since we never entered repairing state.
       prevStatusRef.current = '';
@@ -315,7 +317,7 @@ export default function PluginDetailPage() {
     try {
       await confirmPluginWorkflow(pluginId,{analysis_id:generationAnalysis.analysis_id,candidate_id:candidateId,source_skill_revision_id:generationAnalysis.source_skill_revision_id,draft_version:draft.version});
       setDraft(await getPluginDraft(pluginId)); startPolling();
-    } catch { message.error(t('selfEvolutionRun.pluginWorkflowConfirmFailed')); }
+    } catch {}
     finally { setConfirmingCandidate(''); }
   },[pluginId,draft,generationAnalysis,startPolling]);
 
@@ -368,12 +370,10 @@ export default function PluginDetailPage() {
           const response = (err as { response?: { status?: number; data?: { message?: string } } })?.response;
           if (response?.status === 409) {
             if (response.data?.message?.includes('plugin id already exists')) {
-              message.error(t('selfEvolutionRun.pluginDetailPluginIdDuplicate'));
               throw err;
             }
             if (response.data?.message === 'conflict') {
               saveConflictRef.current = true;
-              message.warning(t('selfEvolutionRun.pluginDetailSaveConflict'));
               throw asSaveConflictError(err);
             }
           }
@@ -395,7 +395,7 @@ export default function PluginDetailPage() {
     const result = await validatePluginDraft(pluginId);
     const diagnostics = result.diagnostics.map((item) => ({
       code: item.code,
-      message: item.message,
+      message: localizeErrorCode(item.code, localizeErrorCode('2000509')),
       severity: item.severity,
       nodeId: item.node_id,
       edgeKey: item.edge_id,
@@ -414,8 +414,8 @@ export default function PluginDetailPage() {
       message.success(`Plugin 已发布为版本 ${result.revision_no}，默认关闭`);
       setVersions(await listPluginVersions(result.plugin_ref));
       setDraft(await getPluginDraft(draft.id));
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Plugin 发布失败');
+    } catch {
+      // API errors are reported by the shared request interceptor.
     } finally {
       setPublishing(false);
     }
@@ -432,7 +432,7 @@ export default function PluginDetailPage() {
     const loadVersion = async () => {
       setSelectedRevision(value); setSwitchingVersion(true);
       try { setVersionContent(await getPluginVersion(draft.published_plugin_ref, value)); }
-      catch { message.error('历史版本加载失败'); setSelectedRevision('draft'); }
+      catch { setSelectedRevision('draft'); }
       finally { setSwitchingVersion(false); }
     };
     if (draft.draft_dirty) {
@@ -518,7 +518,7 @@ export default function PluginDetailPage() {
         <Alert className="plugin-detail-banner" type="warning" showIcon message={t('selfEvolutionRun.pluginWorkflowChoose')} description={<Space direction="vertical"><span>{generationAnalysis.message}</span>{Object.entries(generationAnalysis.scripts).filter(([,report])=>report.classification==='unsupported').map(([path,report])=><span key={path}>{t('selfEvolutionRun.pluginUnsafeScriptIgnored',{path,reason:report.reason || t('selfEvolutionRun.pluginUnsafeScriptReason')})}</span>)}{generationAnalysis.candidates.map(candidate => <Button key={candidate.id} loading={confirmingCandidate===candidate.id} onClick={()=>handleConfirmCandidate(candidate.id)}>{candidate.name || candidate.goal || candidate.id}</Button>)}</Space>} />
       )}
       {draft.generate_status === 'rejected' && (
-        <Alert className="plugin-detail-banner" type="error" showIcon message={t('selfEvolutionRun.pluginWorkflowRejected')} description={draft.generate_error} />
+        <Alert className="plugin-detail-banner" type="error" showIcon message={t('selfEvolutionRun.pluginWorkflowRejected')} description={localizeErrorCode('2000509')} />
       )}
       {/* Generation progress banner — shown while Phase 3 is still running (editor already ready) */}
       {isPhase3Running && !repairModalOpen && (
@@ -540,7 +540,7 @@ export default function PluginDetailPage() {
           closable
           onClose={() => dismissBanner('failed')}
           message={t('selfEvolutionRun.pluginDetailFailedBanner')}
-          description={draft.generate_error || undefined}
+          description={localizeErrorCode('2000509')}
           action={
             <Button size="small" loading={isRegenerating} disabled={isRepairing} onClick={handleRegenerate}>
               {t('selfEvolutionRun.pluginDetailRegenerate')}
@@ -557,7 +557,7 @@ export default function PluginDetailPage() {
           closable
           onClose={() => dismissBanner('generate_error')}
           message={t('selfEvolutionRun.pluginDetailGenerateWarningBanner')}
-          description={draft.generate_error}
+          description={localizeErrorCode('2000509')}
         />
       )}
 
@@ -570,8 +570,8 @@ export default function PluginDetailPage() {
           onClose={() => dismissBanner(`generate_warning:${contentKey(draft.generate_warning)}`)}
           message={draft.generate_warning.startsWith('[修复失败]') ? t('selfEvolutionRun.pluginDetailRepairFailedBanner') : t('selfEvolutionRun.pluginDetailPartialContentBanner')}
           description={repairFailureDetails.length > 0
-            ? <><div>{draft.generate_warning}</div><ul>{repairFailureDetails.map((detail) => <li key={detail}>{detail}</li>)}</ul></>
-            : draft.generate_warning}
+            ? <ul>{repairFailureDetails.map((detail) => <li key={detail}>{detail}</li>)}</ul>
+            : localizeErrorCode('2000509')}
         />
       )}
 
@@ -732,12 +732,12 @@ export default function PluginDetailPage() {
                 <p style={{ marginBottom: 6 }}>{t('selfEvolutionRun.pluginDetailRepairValidationBasis')}</p>
                 <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, fontSize: 13, color: 'var(--color-text-secondary, #888)' }}>
                   {repairValidationErrors.map((e, i) => (
-                    <li key={i}>{e.message}</li>
+                    <li key={i}>{localizeErrorCode(e.code, localizeErrorCode('2000509'))}</li>
                   ))}
                 </ul>
               </>
             )}
-            {repairPreview && <Alert type="info" showIcon message={t('selfEvolutionRun.pluginRepairPreview')} description={<><div>{(repairPreview.planned_files ?? []).join(', ')}</div>{(repairPreview.diagnostics ?? []).map(item=><div key={`${item.code}:${item.path}`}>{(item.severity || 'error').toUpperCase()} {item.path}: {item.message}</div>)}</>} />}
+            {repairPreview && <Alert type="info" showIcon message={t('selfEvolutionRun.pluginRepairPreview')} description={<><div>{(repairPreview.planned_files ?? []).join(', ')}</div>{(repairPreview.diagnostics ?? []).map(item=><div key={`${item.code}:${item.path}`}>{(item.severity || 'error').toUpperCase()} {item.path}: {localizeErrorCode(item.code, localizeErrorCode('2000509'))}</div>)}</>} />}
             <p style={{ marginBottom: 8 }}>{t('selfEvolutionRun.pluginDetailRepairHintLabel')}</p>
             <Input.TextArea
               placeholder={repairTarget === 'scenario' ? t('selfEvolutionRun.pluginDetailRepairScenarioPlaceholder') : t('selfEvolutionRun.pluginDetailRepairStatePlaceholder')}

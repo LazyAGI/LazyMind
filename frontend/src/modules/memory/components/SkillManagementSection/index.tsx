@@ -4,10 +4,10 @@ import { InfoCircleOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import PluginInstalledView from "./PluginInstalledView";
 import { AgentAppsAuth } from "@/components/auth";
-import { getLocalizedErrorMessage } from "@/components/request";
+import { localizeErrorCode } from "@/components/request";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
 import { useMemoryManagementOutletContext } from "../../context";
-import type { StructuredAsset } from "../../shared";
+import type { SkillViewMode, StructuredAsset } from "../../shared";
 import type { MarketSkillAsset } from "./skillMarketMockData";
 import {
   getSkillMarketItem,
@@ -15,6 +15,7 @@ import {
   listBuiltinSkills,
   listSkillMarketPage,
   listTrashedSkillAssetsPage,
+  organizeSkills,
   emptySkillTrash,
   purgeSkillAsset,
   restoreSkillAsset,
@@ -35,12 +36,18 @@ import { shouldShowSkillMessageCenter } from "./collaborationVisibility";
 import "./index.scss";
 
 const DEFAULT_MARKET_PAGE_SIZE = 8;
+const MAX_SKILL_ORGANIZE_SELECTION = 20;
 
 export default function SkillManagementSection() {
   const listContentRef = useRef<HTMLDivElement>(null);
   const marketRequestIdRef = useRef(0);
   const navigate = useNavigate();
   const [newPluginOpen, setNewPluginOpen] = useState(false);
+  const [organizeMode, setOrganizeMode] = useState(false);
+  const [organizeSubmitting, setOrganizeSubmitting] = useState(false);
+  const [selectedOrganizeSkills, setSelectedOrganizeSkills] = useState<
+    Map<string, StructuredAsset>
+  >(new Map());
   const [memoryTableBodyHeight, setMemoryTableBodyHeight] = useState<number>();
   const [marketKeyword, setMarketKeyword] = useState("");
   const [debouncedMarketKeyword, setDebouncedMarketKeyword] = useState("");
@@ -223,10 +230,6 @@ export default function SkillManagementSection() {
       console.error("Load skill plaza catalog failed:", error);
       setMarketCatalogAssets([]);
       setMarketListTotal(0);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memorySkillMarketLoadFailed")) ||
-          t("admin.memorySkillMarketLoadFailed"),
-      );
     } finally {
       if (requestId === marketRequestIdRef.current) {
         setMarketCatalogLoading(false);
@@ -257,10 +260,6 @@ export default function SkillManagementSection() {
       console.error("Load trashed skills failed:", error);
       setTrashAssets([]);
       setTrashListTotal(0);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memorySkillTrashLoadFailed")) ||
-          t("admin.memorySkillTrashLoadFailed"),
-      );
     } finally {
       setTrashLoading(false);
     }
@@ -398,7 +397,6 @@ export default function SkillManagementSection() {
     actionKey: string,
     action: () => Promise<void>,
     successMessage: string,
-    failureMessage: string,
   ) => {
     setTrashActionLoading((previous) => new Set(previous).add(actionKey));
     try {
@@ -410,7 +408,9 @@ export default function SkillManagementSection() {
       message.success(successMessage);
     } catch (error) {
       console.error("Skill trash action failed:", error);
-      message.error(getLocalizedErrorMessage(error, failureMessage) || failureMessage);
+      if (!(error as { isAxiosError?: boolean })?.isAxiosError) {
+        message.error(localizeErrorCode("2000509"));
+      }
     } finally {
       setTrashActionLoading((previous) => {
         const next = new Set(previous);
@@ -430,7 +430,6 @@ export default function SkillManagementSection() {
         }
       },
       t("admin.memorySkillTrashRestoreSuccess"),
-      t("admin.memorySkillTrashRestoreFailed"),
     );
   };
 
@@ -451,7 +450,6 @@ export default function SkillManagementSection() {
             }
           },
           t("admin.memorySkillTrashPurgeSuccess"),
-          t("admin.memorySkillTrashPurgeFailed"),
         );
       },
     });
@@ -470,10 +468,6 @@ export default function SkillManagementSection() {
       );
     } catch (error) {
       console.error("Empty skill trash failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memorySkillTrashEmptyFailed")) ||
-          t("admin.memorySkillTrashEmptyFailed"),
-      );
     } finally {
       setEmptyTrashLoading(false);
     }
@@ -489,6 +483,92 @@ export default function SkillManagementSection() {
 
   const handleSkillMessageCenter = () => {
     openSkillShareCenter("incoming");
+  };
+
+  const cancelSkillOrganize = () => {
+    setOrganizeMode(false);
+    setSelectedOrganizeSkills(new Map());
+  };
+
+  const handleSkillViewChange = (
+    nextView: SkillViewMode | "plugins",
+  ) => {
+    if (nextView !== "installed") {
+      cancelSkillOrganize();
+    }
+    setSkillView(nextView);
+  };
+
+  const handleOrganizeSelectionChange = (
+    records: StructuredAsset[],
+    selected: boolean,
+  ) => {
+    const next = new Map(selectedOrganizeSkills);
+    if (!selected) {
+      records.forEach((record) => next.delete(record.id));
+      setSelectedOrganizeSkills(next);
+      return;
+    }
+
+    const additions = records.filter((record) => !next.has(record.id));
+    const availableSlots = Math.max(
+      0,
+      MAX_SKILL_ORGANIZE_SELECTION - next.size,
+    );
+    additions.slice(0, availableSlots).forEach((record) => {
+      next.set(record.id, record);
+    });
+    setSelectedOrganizeSkills(next);
+
+    if (additions.length > availableSlots) {
+      message.warning(t("admin.memorySkillOrganizeLimitWarning"));
+    }
+  };
+
+  const handleOrganizeSubmit = () => {
+    const skills = [...selectedOrganizeSkills.values()];
+    if (skills.length === 0 || organizeSubmitting) {
+      return;
+    }
+
+    Modal.confirm({
+      title: t("admin.memorySkillOrganizeConfirmTitle", {
+        count: skills.length,
+      }),
+      content: t("admin.memorySkillOrganizeConfirmContent"),
+      okText: t("admin.memorySkillOrganizeConfirmSubmit"),
+      cancelText: t("common.cancel"),
+      onOk: async () => {
+        setOrganizeSubmitting(true);
+        try {
+          const result = await organizeSkills(
+            skills.map((skill) => skill.id),
+          );
+          if (!result.taskId || result.status !== "running") {
+            throw new Error("Skill organize task was not accepted");
+          }
+          message.success(
+            t("admin.memorySkillOrganizeSuccess", { count: skills.length }),
+          );
+          cancelSkillOrganize();
+        } catch (error) {
+          console.error("Submit skill organize task failed:", error);
+          const reasonCode = String(
+            (error as { response?: { data?: { data?: { code?: unknown } } } })
+              ?.response?.data?.data?.code ?? "",
+          );
+          if (reasonCode === "skill_organize_draft_conflict") {
+            message.error(t("admin.memorySkillOrganizeDraftConflict"));
+          } else if (reasonCode === "skill_maintenance_task_running") {
+            message.error(t("admin.memorySkillOrganizeTaskRunning"));
+          } else {
+            message.error(t("admin.memorySkillOrganizeFailed"));
+          }
+        } finally {
+          setOrganizeSubmitting(false);
+        }
+      },
+    });
   };
 
   const handleMarketInstall = (item: StructuredAsset) => {
@@ -529,10 +609,6 @@ export default function SkillManagementSection() {
         message.success(t("admin.memoryBuiltinSkillEnableSuccess"));
       } catch (error) {
         console.error("Install market skill failed:", error);
-        message.error(
-          getLocalizedErrorMessage(error, t("admin.memoryBuiltinSkillEnableFailed")) ||
-            t("admin.memoryBuiltinSkillEnableFailed"),
-        );
       } finally {
         setMarketInstallingId(undefined);
       }
@@ -575,10 +651,18 @@ export default function SkillManagementSection() {
       <SkillManagementToolbar
         t={t}
         skillView={skillView}
-        onSkillViewChange={setSkillView}
+        onSkillViewChange={handleSkillViewChange}
         installedCount={skillListTotal}
         trashCount={trashListTotal}
         onCreateSkill={openSkillCreateModal}
+        organizeMode={organizeMode}
+        organizeDisabled={
+          skillLoading || manualSkillReviewButtonBusy || skillListTotal <= 0
+        }
+        onOrganizeSkills={() => {
+          setSelectedOrganizeSkills(new Map());
+          setOrganizeMode(true);
+        }}
         manualSkillReviewCount={manualSkillReviewCount}
         manualSkillReviewLoading={manualSkillReviewLoading}
         manualSkillReviewRunning={manualSkillReviewButtonBusy}
@@ -610,6 +694,12 @@ export default function SkillManagementSection() {
           source={installedSkillSource}
           onSourceChange={setInstalledSkillSource}
           onReset={handleInstalledReset}
+          organizeMode={organizeMode}
+          organizeLoading={organizeSubmitting}
+          selectedOrganizeSkillIds={[...selectedOrganizeSkills.keys()]}
+          onOrganizeSelectionChange={handleOrganizeSelectionChange}
+          onOrganizeCancel={cancelSkillOrganize}
+          onOrganizeSubmit={handleOrganizeSubmit}
           columns={genericColumns}
           page={skillListPage}
           pageSize={skillListPageSize}
@@ -640,6 +730,12 @@ export default function SkillManagementSection() {
             installedSkills={skillAssets}
             keyword={marketKeyword}
             onKeywordChange={setMarketKeyword}
+            onSearch={(value) => {
+              const nextKeyword = value.trim();
+              setMarketKeyword(value);
+              setDebouncedMarketKeyword(nextKeyword);
+              setMarketListPage(1);
+            }}
             source={marketSkillSource}
             onSourceChange={(value) => {
               setMarketSkillSource(value);

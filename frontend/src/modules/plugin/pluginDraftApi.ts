@@ -1,4 +1,5 @@
 import { axiosInstance, BASE_URL } from '@/components/request';
+import type { RawAxiosRequestConfig } from 'axios';
 
 const coreBasePath = `${BASE_URL}/api/core`;
 
@@ -124,8 +125,14 @@ export async function createPluginDraft(payload: { name: string; content?: strin
   return resp.data.data;
 }
 
-export async function getPluginDraft(id: string): Promise<PluginDraftRecord> {
-  const resp = await axiosInstance.get<CoreResponse<PluginDraftRecord>>(`${coreBasePath}/plugin-drafts/${id}`);
+export async function getPluginDraft(
+  id: string,
+  options?: RawAxiosRequestConfig,
+): Promise<PluginDraftRecord> {
+  const resp = await axiosInstance.get<CoreResponse<PluginDraftRecord>>(
+    `${coreBasePath}/plugin-drafts/${id}`,
+    options,
+  );
   return resp.data.data;
 }
 

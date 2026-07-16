@@ -267,15 +267,19 @@ export function createWizardFlow(ctx: ManagementContext) {
       });
       setManualOauthModalOpen(false);
       setManualOauthCallbackValue("");
-    } catch (error: any) {
-      const errorMessage =
-        error?.message || t("admin.dataSourceOauthFailedRetry");
-      ctx.applyOauthResult({
-        channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
-        source: "feishu-data-source",
-        status: "error",
-        message: errorMessage,
-      });
+    } catch (error) {
+      const requestError = error as { response?: unknown; request?: unknown };
+      if (requestError?.response || requestError?.request) {
+        ctx.restorePreviousOauthState();
+      } else {
+        const errorMessage = getLocalizedErrorMessage(error);
+        ctx.applyOauthResult({
+          channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
+          source: "feishu-data-source",
+          status: "error",
+          message: errorMessage,
+        });
+      }
     } finally {
       setManualOauthSubmitting(false);
     }
@@ -366,13 +370,7 @@ export function createWizardFlow(ctx: ManagementContext) {
       message.success(t("admin.dataSourceDatabaseUpdated"));
       ctx.setDatabaseEditingConnection(null);
       await ctx.refreshSources(false, { page: ctx.sourceListPage });
-    } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(
-          error,
-          t("admin.dataSourceDatabaseSaveFailed"),
-        ) || t("admin.dataSourceDatabaseSaveFailed"),
-      );
+    } catch {
     } finally {
       ctx.setDatabaseEditSaving(false);
     }
@@ -384,12 +382,6 @@ export function createWizardFlow(ctx: ManagementContext) {
       message.success(t("admin.dataSourceDatabaseDeleted"));
       await ctx.refreshSources(false, { page: ctx.sourceListPage });
     } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(
-          error,
-          t("admin.dataSourceDatabaseDeleteFailed"),
-        ) || t("admin.dataSourceDatabaseDeleteFailed"),
-      );
       throw error;
     }
   };
@@ -404,10 +396,6 @@ export function createWizardFlow(ctx: ManagementContext) {
           : ctx.sourceListPage;
       await Promise.all([ctx.refreshSources(false, { page: nextPage })]);
     } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.dataSourceDeleteFailed")) ||
-          t("admin.dataSourceDeleteFailed"),
-      );
       throw error;
     }
   };

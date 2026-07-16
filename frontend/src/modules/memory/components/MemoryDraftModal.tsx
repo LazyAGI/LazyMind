@@ -17,7 +17,7 @@ import {
   SKILL_TAG_MAX_COUNT,
 } from "../shared";
 
-export type SkillCreateSource = "zip" | "url" | "manual";
+export type SkillCreateSource = "zip" | "url";
 
 interface MemoryDraftModalProps {
   t: any;

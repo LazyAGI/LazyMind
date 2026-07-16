@@ -9,7 +9,7 @@ import {
   PlusOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getLocalizedErrorMessage } from "@/components/request";
+import { localizeErrorCode } from "@/components/request";
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,
@@ -99,16 +99,6 @@ function getServiceProviderCategory(service: ExternalServiceConfigModalService):
     return service.providerCategory;
   }
   return service.category === "parsing" ? "ocr" : "search";
-}
-
-function getCheckFailureMessage(checkResult?: CheckExternalServiceResult): string | undefined {
-  if (!checkResult || typeof checkResult !== "object") {
-    return undefined;
-  }
-  if (typeof checkResult.message === "string" && checkResult.message.trim()) {
-    return checkResult.message.trim();
-  }
-  return undefined;
 }
 
 function maskAPIKey(raw: string) {
@@ -276,7 +266,7 @@ export default function ExternalServiceConfigModal({
           { timeout: 3 * 60 * 1000 },
         )).data);
         if (savedGroup.check && savedGroup.check.success !== true) {
-          message.error(getCheckFailureMessage(savedGroup.check) || t("modelProvider.external.checkFailed"));
+          message.error(localizeErrorCode("2000509"));
           return;
         }
         setGroup(savedGroup);
@@ -306,7 +296,6 @@ export default function ExternalServiceConfigModal({
       if (isFormValidationError(error)) {
         return;
       }
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     } finally {
       setAddingKey(false);
     }
@@ -325,7 +314,6 @@ export default function ExternalServiceConfigModal({
       setKeyList((prev) => prev.filter((key) => key !== targetKey));
       onChanged?.();
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     }
   }
 

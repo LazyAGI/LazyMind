@@ -391,6 +391,7 @@ export function JobServiceApi() {
 
 export interface UploadFileResponse {
   upload_file_id: string;
+  content_hash?: string;
   filename: string;
   relative_path: string;
   stored_name: string;
@@ -422,6 +423,7 @@ export interface TaskPayload {
   document_ids?: string[];
   document_pid?: string;
   document_tags?: string[];
+  relative_path?: string;
   files?: TaskFile[];
   reparse_groups?: string[];
   reparse_mode?: string;
@@ -431,9 +433,12 @@ export interface TaskPayload {
 }
 
 export interface CreateTaskItem {
-  upload_file_id: string;
+  /** Mutually exclusive with content_hash. */
+  upload_file_id?: string;
+  /** Reuse an already-uploaded blob by SHA-256. Mutually exclusive with upload_file_id. */
+  content_hash?: string;
   task_id?: string;
-  task?: TaskPayload;
+  task: TaskPayload;
   cross_dataset?: boolean;
 }
 
@@ -511,6 +516,19 @@ export function TaskServiceApi() {
       );
     },
 
+    checkHashes(
+      dataset: string,
+      hashes: string[],
+      options?: RawAxiosRequestConfig,
+    ) {
+      return coreClient.apiCoreDatasetsDatasetUploadsCheckHashesPost(
+        {
+          dataset,
+          checkFileHashesRequest: { hashes },
+        },
+        withJsonOptions(options),
+      );
+    },
 
     createTasks(
       dataset: string,
@@ -653,11 +671,16 @@ export interface LargeFileUploadOptions {
 }
 
 
+export type LargeFileUploadResult = {
+  uploadFileId: string;
+  contentHash?: string;
+};
+
 export async function uploadLargeFileToDataset(
   dataset: string,
   file: File,
   options?: LargeFileUploadOptions,
-): Promise<string> {
+): Promise<LargeFileUploadResult> {
   const coreClient = CoreTasksApiFactory(CoreConfig, BASE_URL, axiosInstance);
 
   const initRes = await coreClient.apiCoreDatasetsDatasetUploadsInitUploadPost({
@@ -711,7 +734,10 @@ export async function uploadLargeFileToDataset(
       throw new Error("large file upload complete did not return upload_file_id");
     }
 
-    return uploadFileId;
+    return {
+      uploadFileId,
+      contentHash: completeRes.data.content_hash,
+    };
   } catch (err) {
     try {
       await coreClient.apiCoreDatasetsDatasetUploadsUploadIdAbortPost({

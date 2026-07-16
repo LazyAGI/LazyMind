@@ -113,10 +113,7 @@ export default function PersonalResourceContentEditor({
       setIsEditing(false);
     } catch (error) {
       console.error("Load personal resource content failed:", error);
-      setErrorMessage(
-        getLocalizedErrorMessage(error, t("admin.memoryExperienceContentLoadFailed")) ||
-          t("admin.memoryExperienceContentLoadFailed"),
-      );
+      setErrorMessage(getLocalizedErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -171,9 +168,6 @@ export default function PersonalResourceContentEditor({
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Save personal resource draft failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.saveFailed")) || t("common.saveFailed"),
-      );
     } finally {
       setSaving(false);
     }
@@ -200,17 +194,6 @@ export default function PersonalResourceContentEditor({
       await onUpdated?.();
     } catch (error) {
       console.error("Commit personal resource draft failed:", error);
-      message.error(
-        getLocalizedErrorMessage(
-          error,
-          reviewMode
-            ? t("admin.memorySkillDraftConfirmFailed")
-            : t("admin.memorySkillDraftCommitFailed"),
-        ) ||
-          (reviewMode
-            ? t("admin.memorySkillDraftConfirmFailed")
-            : t("admin.memorySkillDraftCommitFailed")),
-      );
     } finally {
       setCommitting(false);
     }
@@ -247,10 +230,6 @@ export default function PersonalResourceContentEditor({
       );
     } catch (error) {
       console.error("Submit personal resource draft hunk decision failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memoryDraftHunkActionFailed")) ||
-          t("admin.memoryDraftHunkActionFailed"),
-      );
     } finally {
       setHunkSubmitting({});
     }
@@ -301,10 +280,6 @@ export default function PersonalResourceContentEditor({
       );
     } catch (error) {
       console.error("Submit bulk personal resource draft hunk decision failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memoryDraftHunkActionFailed")) ||
-          t("admin.memoryDraftHunkActionFailed"),
-      );
     } finally {
       setBulkDecisionSubmitting(null);
     }
@@ -331,10 +306,6 @@ export default function PersonalResourceContentEditor({
       message.success(t("admin.memoryDraftReviewUndoSuccess"));
     } catch (error) {
       console.error("Undo personal resource draft review failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memoryDraftReviewUndoFailed")) ||
-          t("admin.memoryDraftReviewUndoFailed"),
-      );
     } finally {
       setReviewUndoing(false);
     }
@@ -355,10 +326,6 @@ export default function PersonalResourceContentEditor({
           await onUpdated?.();
         } catch (error) {
           console.error("Discard personal resource draft failed:", error);
-          message.error(
-            getLocalizedErrorMessage(error, t("admin.memorySkillDraftDiscardFailed")) ||
-              t("admin.memorySkillDraftDiscardFailed"),
-          );
         }
       },
     });

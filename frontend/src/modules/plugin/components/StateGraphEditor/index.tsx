@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, message, Tooltip } from 'antd';
+import { Button, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
 import { isDeveloperModeActive } from '@/utils/developerMode';
@@ -300,9 +300,6 @@ export default function StateGraphEditor({
       await runAuthoritativeValidation();
     } catch (error: unknown) {
       setSaveStatus('error');
-      if (!(error as { isSaveConflict?: boolean })?.isSaveConflict) {
-        message.error(t('selfEvolutionRun.sgeSaveFailed'));
-      }
     }
   }, [buildPayload, runAuthoritativeValidation]);
 

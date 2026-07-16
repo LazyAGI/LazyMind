@@ -82,7 +82,15 @@ const ImportTaskList = (props: IProps) => {
     const updateTableData = ({ data = {} }: { data?: { tasks?: any[]; total_size?: number; next_page_token?: string } }) => {
       const tasks: any[] = data.tasks || [];
       setTotal(data.total_size ?? 0);
-      setDataSource(tasks as any);
+      setDataSource(
+        tasks.map((task) => ({
+          ...task,
+          localized_error: localizeErrorCode(
+            task.err_msg,
+            localizeErrorCode("2000509"),
+          ),
+        })) as any,
+      );
 
       // Store the next page token so the user can navigate forward.
       if (data.next_page_token) {
@@ -99,7 +107,13 @@ const ImportTaskList = (props: IProps) => {
     };
 
     const requestFn = () =>
-      TaskServiceApi().listTasks(datasetId, { taskStatus, pageSize: size, pageToken });
+      TaskServiceApi().listTasks(
+        datasetId,
+        { taskStatus, pageSize: size, pageToken },
+        currentTab === TaskTab.Running
+          ? ({ silentError: true } as never)
+          : undefined,
+      );
 
     if (currentTab !== TaskTab.Running) {
       requestFn()
@@ -249,10 +263,9 @@ const ImportTaskList = (props: IProps) => {
       ? [
           {
             title: t("knowledge.parseTaskError"),
-            dataIndex: "err_msg",
+            dataIndex: "localized_error",
             width: 200,
-            render: (text: string) => {
-              const display = localizeErrorCode(text, "-");
+            render: (display: string) => {
               return (
                 <Tooltip title={display}>
                   <div className="ellipsis-text">{display}</div>

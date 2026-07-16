@@ -102,10 +102,7 @@ export default function MemorySkillDetailPage() {
           return;
         }
         console.error("Load skill detail failed:", error);
-        setErrorMessage(
-          getLocalizedErrorMessage(error, t("admin.memorySkillDetailLoadFailed")) ||
-            t("admin.memorySkillDetailLoadFailed"),
-        );
+        setErrorMessage(getLocalizedErrorMessage(error));
       } finally {
         if (!ignore) {
           setLoading(false);
@@ -160,9 +157,6 @@ export default function MemorySkillDetailPage() {
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Save skill title failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.saveFailed")) || t("common.saveFailed"),
-      );
     } finally {
       setTitleSaving(false);
     }
@@ -189,9 +183,6 @@ export default function MemorySkillDetailPage() {
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Save skill description failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.saveFailed")) || t("common.saveFailed"),
-      );
     } finally {
       setDescriptionSaving(false);
     }

@@ -3,9 +3,9 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Empty, Spin, Tag, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
-import { getLocalizedErrorMessage } from "@/components/request";
 import {
   fetchThreadGateContent,
+  getCatalogApiErrorMessage,
   isCanceledRequest,
   isEmptyResultPayload,
   stringifyResultPayload,
@@ -71,20 +71,12 @@ export function SelfEvolutionObservationPage() {
         if (isCanceledRequest(error) || controller.signal.aborted) {
           return;
         }
-        const errorMessage = getLocalizedErrorMessage(
-          error,
-          t("selfEvolutionRun.observation.observationLoadFailed"),
-        );
+        const errorMessage = getCatalogApiErrorMessage(error);
         setState({
           loading: false,
           loaded: true,
           data: undefined,
-          notice:
-            resultKind === "eval-reports"
-              ? errorMessage
-              : t("selfEvolutionRun.observation.observationUnavailable", {
-                  error: errorMessage,
-                }),
+          notice: errorMessage,
         });
       });
 

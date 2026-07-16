@@ -870,12 +870,14 @@ func decodeFeishuHTTPErrorBody(statusCode int, status string, body []byte) error
 }
 
 func mapFeishuOpenAPIError(code, message string, statusCode int) error {
+	code = strings.ToLower(strings.TrimSpace(code))
 	if strings.TrimSpace(message) == "" {
 		message = "feishu api request failed"
 	}
 	if statusCode == http.StatusTooManyRequests || isFeishuRateLimitMessage(message) {
 		return connector.NewError(connector.ErrorCodeRateLimited, message)
 	}
+
 	switch code {
 	case "connection_not_found", "token_expired", "refresh_failed", "auth_invalid":
 		return connector.NewError(ErrorCodeAuthInvalid, message)
@@ -885,18 +887,89 @@ func mapFeishuOpenAPIError(code, message string, statusCode int) error {
 		return connector.NewError(connector.ErrorCodeRateLimited, message)
 	case "unsupported_export":
 		return connector.NewError(ErrorCodeExportDenied, message)
+	}
+
+	if isFeishuAuthInvalidMessage(message) {
+		return connector.NewError(ErrorCodeAuthInvalid, message)
+	}
+	if isFeishuPermissionDeniedMessage(message) {
+		return connector.NewError(connector.ErrorCodePermissionDenied, message)
+	}
+	if isFeishuUnsupportedExportMessage(message) {
+		return connector.NewError(ErrorCodeExportDenied, message)
+	}
+
+	switch statusCode {
+	case http.StatusUnauthorized:
+		return connector.NewError(ErrorCodeAuthInvalid, message)
+	case http.StatusNotFound:
+		return connector.NewError(connector.ErrorCodeNotFound, message)
+	case http.StatusForbidden:
+		return connector.NewError(connector.ErrorCodePermissionDenied, message)
 	default:
-		if statusCode == http.StatusUnauthorized {
-			return connector.NewError(ErrorCodeAuthInvalid, message)
-		}
-		if statusCode == http.StatusNotFound {
-			return connector.NewError(connector.ErrorCodeNotFound, message)
-		}
-		if statusCode == http.StatusForbidden {
-			return connector.NewError(connector.ErrorCodePermissionDenied, message)
-		}
 		return connector.NewError(connector.ErrorCodeTransient, message)
 	}
+}
+
+func isFeishuAuthInvalidMessage(message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	if message == "" {
+		return false
+	}
+	for _, keyword := range []string{
+		"auth_connection_invalid",
+		"connection_not_found",
+		"token_expired",
+		"refresh_failed",
+		"auth invalid",
+		"authentication failed",
+		"access token invalid",
+		"invalid access token",
+		"invalid token",
+		"token invalid",
+		"token expired",
+		"unauthorized",
+	} {
+		if strings.Contains(message, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isFeishuPermissionDeniedMessage(message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	if message == "" {
+		return false
+	}
+	for _, keyword := range []string{
+		"permission_denied",
+		"scope_missing",
+		"scope missing",
+		"missing scope",
+		"permission denied",
+		"permission missing",
+		"permission required",
+		"no permission",
+		"access denied",
+		"forbidden",
+		"not allowed",
+		"download permission",
+		"export permission",
+	} {
+		if strings.Contains(message, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isFeishuUnsupportedExportMessage(message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(message, "unsupported_export") ||
+		strings.Contains(message, "unsupported export") ||
+		strings.Contains(message, "export not supported") ||
+		strings.Contains(message, "not support export")
 }
 
 func isFeishuRateLimitMessage(message string) bool {

@@ -8,18 +8,15 @@ from decimal import Decimal
 from typing import Any, Dict, Iterable, Optional
 from uuid import UUID
 
-from lazyllm import LOG
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from lazymind.chat.service.component.history import normalize_history_for_agent
-from lazymind.chat.engine.tools.infra.skill_validation import parse_skill_frontmatter
 from lazymind.common.postgres import normalize_postgres_sqlalchemy_url
-from lazymind.review.skill_review.schemas import SkillReviewResolution, SkillReviewRunStat
+from lazymind.review.skill_review.schemas import SkillReviewRunStat
 from lazymind.config import config as _cfg
 
-SKILL_REVIEW_TABLE = 'skill_review_results'
-SKILL_REVIEW_RUN_STATS_TABLE = 'skill_review_run_stats'
+SKILL_REVIEW_RUN_STATS_TABLE = 'skill_review_stats'
 _DB_URL_ENV = 'LAZYMIND_DATABASE_URL'
 _CORE_DB_URL_ENV = 'LAZYMIND_CORE_DATABASE_URL'
 _DB_ENV_HINT = f'{_CORE_DB_URL_ENV} or {_DB_URL_ENV}'
@@ -67,53 +64,6 @@ def read_session(
     return _convert_history([_jsonable_value(dict(row)) for row in rows])
 
 
-def insert_skill_review_records(
-    records: SkillReviewResolution | Iterable[SkillReviewResolution],
-) -> int:
-    """Insert one or many skill review resolutions into ``skill_review``."""
-    normalized = _normalize_records(records)
-    if not normalized:
-        return 0
-    payload = [
-        {
-            'id': item.id,
-            'skill_name': item.skill_name,
-            'category': _parse_skill_category(item.skill_content),
-            'type': item.type,
-            'review_status': item.review_status,
-            'userid': item.userid,
-            'requestid': item.requestid,
-            'skill_content': item.skill_content,
-            'summary': item.summary if item.summary is not None else '',
-            'time': item.time,
-        }
-        for item in normalized
-    ]
-    with _get_app_conn().begin() as conn:
-        conn.execute(
-            text(
-                f"""INSERT INTO {SKILL_REVIEW_TABLE}
-                       (id, skill_name, category, "type", review_status, userid, requestid,
-                        skill_content, summary, "time")
-                    VALUES
-                       (:id, :skill_name, :category, :type, :review_status, :userid, :requestid,
-                        :skill_content, COALESCE(:summary, ''),
-                        COALESCE(CAST(NULLIF(:time, '') AS TIMESTAMPTZ), CURRENT_TIMESTAMP))
-                    ON CONFLICT (id) DO UPDATE SET
-                       skill_name = EXCLUDED.skill_name,
-                       category = EXCLUDED.category,
-                       "type" = EXCLUDED."type",
-                       userid = EXCLUDED.userid,
-                       requestid = EXCLUDED.requestid,
-                       skill_content = EXCLUDED.skill_content,
-                       summary = EXCLUDED.summary,
-                       "time" = EXCLUDED."time" """
-            ),
-            payload,
-        )
-    return len(payload)
-
-
 def insert_skill_review_run_stats(
     records: SkillReviewRunStat | Iterable[SkillReviewRunStat],
 ) -> int:
@@ -152,59 +102,6 @@ def insert_skill_review_run_stats(
             payload,
         )
     return len(payload)
-
-
-def read_skill_review_records_by_ids(ids: list[str]) -> list[dict[str, Any]]:
-    normalized_ids = [str(item).strip() for item in ids or [] if str(item).strip()]
-    if not normalized_ids:
-        return []
-    with _get_app_conn().connect() as conn:
-        rows = conn.execute(
-            text(
-                f"""SELECT id, skill_name, "type", review_status, userid, requestid,
-                          skill_content, summary, "time"
-                       FROM {SKILL_REVIEW_TABLE}
-                      WHERE id = ANY(:ids)"""
-            ),
-            {'ids': normalized_ids},
-        ).mappings().all()
-    by_id = {str(row.get('id') or '').strip(): _jsonable_row(dict(row)) for row in rows}
-    return [by_id[item_id] for item_id in normalized_ids if item_id in by_id]
-
-
-def add_skill_review_records(
-    records: SkillReviewResolution | Iterable[SkillReviewResolution],
-) -> int:
-    return insert_skill_review_records(records)
-
-
-def fetch_all_skill_review_records() -> list[dict[str, Any]]:
-    """Return all rows from ``skill_review`` ordered by insertion time."""
-    with _get_app_conn().connect() as conn:
-        rows = conn.execute(
-            text(
-                f"""SELECT id, skill_name, "type", review_status, userid, requestid,
-                          skill_content, summary, "time"
-                       FROM {SKILL_REVIEW_TABLE}
-                      ORDER BY "time" ASC, id ASC"""
-            )
-        ).mappings().all()
-    return [_jsonable_row(dict(row)) for row in rows]
-
-
-def delete_all_skill_review_records() -> int:
-    """Delete all rows from ``skill_review``."""
-    with _get_app_conn().begin() as conn:
-        result = conn.execute(
-            text(f'DELETE FROM {SKILL_REVIEW_TABLE}')
-        )
-    deleted_count = int(result.rowcount or 0)
-    LOG.info(f'[SkillReview] deleted {deleted_count} rows from {SKILL_REVIEW_TABLE}.')
-    return deleted_count
-
-
-def read_all_skill_review_records() -> list[dict[str, Any]]:
-    return fetch_all_skill_review_records()
 
 
 def _convert_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -291,19 +188,6 @@ def _normalize_raw_message(raw: Any) -> dict[str, Any] | None:
     return None
 
 
-def _parse_skill_category(skill_content: str) -> str:
-    frontmatter, _ = parse_skill_frontmatter(skill_content)
-    return str(frontmatter.get('category') or '').strip()
-
-
-def _normalize_records(
-    records: SkillReviewResolution | Iterable[SkillReviewResolution],
-) -> list[SkillReviewResolution]:
-    if isinstance(records, SkillReviewResolution):
-        return [records]
-    return [SkillReviewResolution.model_validate(item) for item in records]
-
-
 def _normalize_run_stats(
     records: SkillReviewRunStat | Iterable[SkillReviewRunStat],
 ) -> list[SkillReviewRunStat]:
@@ -350,16 +234,6 @@ def _postgres_url(url: str) -> str:
         return normalize_postgres_sqlalchemy_url(url)
     except RuntimeError as exc:
         raise RuntimeError(f'[SkillReviewDB] {exc}') from exc
-
-
-def _jsonable_row(row: dict[str, Any]) -> dict[str, Any]:
-    content = row.get('skill_content')
-    if isinstance(content, str):
-        try:
-            row['skill_content'] = json.loads(content)
-        except json.JSONDecodeError:
-            pass
-    return {key: _jsonable_value(value) for key, value in row.items()}
 
 
 def _jsonable_value(value: Any) -> Any:

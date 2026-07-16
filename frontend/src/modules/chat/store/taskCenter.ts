@@ -4,6 +4,7 @@ import { Method, SSE } from "@/modules/chat/utils/sse";
 import { TaskServiceApi, taskStreamUrl, convEventsUrl } from "@/modules/chat/utils/request";
 import UIUtils from "@/modules/chat/utils/ui";
 import { PLUGIN_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
+import { localizeErrorCode } from "@/components/request";
 
 export type TaskStatus =
   | "pending"
@@ -226,7 +227,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           break;
         case "error":
           task.status = (event.status as TaskStatus) ?? "failed";
-          task.summary = event.message ?? task.summary;
+          task.summary = localizeErrorCode(
+            event.error_code ?? event.errorCode ?? event.code,
+            localizeErrorCode("2000509"),
+          );
           break;
         case "text": {
           const textContent = event.text ?? "";

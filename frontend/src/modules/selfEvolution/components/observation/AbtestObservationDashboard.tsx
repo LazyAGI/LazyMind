@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Spin, Tag, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
+import { axiosInstance } from "@/components/request";
 import {
   AGENT_API_BASE,
+  getCatalogApiErrorMessage,
   buildAbSummaryFromComparisonArtifact,
   buildAbSummaryReports,
   buildAbCaseTraceMapFromComparisonArtifact,
@@ -210,10 +211,7 @@ export function AbtestObservationDashboard({
           abtestId,
           loading: false,
           loaded: true,
-          error: getLocalizedErrorMessage(
-            error,
-            t("selfEvolutionRun.observation.abCaseDetailLoadFailed"),
-          ),
+          error: getCatalogApiErrorMessage(error),
         }));
       });
 
@@ -297,10 +295,7 @@ export function AbtestObservationDashboard({
           caseId: selectedCase.caseId,
           loading: false,
           loaded: true,
-          error: getLocalizedErrorMessage(
-            error,
-            t("selfEvolutionRun.observation.abTraceCompareLoadFailed"),
-          ),
+          error: getCatalogApiErrorMessage(error),
           aTraceId,
           bTraceId,
         });
