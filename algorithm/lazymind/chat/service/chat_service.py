@@ -19,10 +19,9 @@ from lazymind.chat.engine.prompts import build_system_prompt
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
-    ASK_USER_TOOL_POLICY_APPENDIX,
-    ATTACHED_FILES_TOOL_POLICY_APPENDIX,
+    ASK_USER_TOOL_CONFIG,
     DEFAULT_TOOLS,
-    IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+    USER_ATTACHMENT_TOOL_CONFIGS,
     collect_system_prompt_appendices,
     filter_tools,
     normalize_history_for_agent,
@@ -480,12 +479,14 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     mcp_tools = _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
     # User attachment tools are only meaningful when the user has uploaded files.
     attachment_tools = _build_user_attachment_tools(bool(files_map))
+    attachment_configs = list(USER_ATTACHMENT_TOOL_CONFIGS) if attachment_tools else []
     # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
     # Auto plugin mode is non-interactive by contract: ask_user must be absent,
     # not merely discouraged by prompt text.
     allow_ask_user = _should_register_ask_user(agentic_config)
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
+    ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
     all_tools = (agent_tools + subagent_tools + attachment_tools
                  + ask_user_tools + plugin_tools + mcp_tools)
     set_trace_context({
@@ -506,13 +507,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         current_query=language_query,
         conversation_history=agent_history,
         tool_prompt_appendices=collect_system_prompt_appendices(
-            active_configs,
-            extra_appendices=(
-                (
-                    IMAGE_MARKDOWN_OUTPUT_APPENDIX,
-                    ATTACHED_FILES_TOOL_POLICY_APPENDIX,
-                ) if attachment_tools else ()
-            ) + ((ASK_USER_TOOL_POLICY_APPENDIX,) if allow_ask_user else ()),
+            active_configs + attachment_configs + ask_user_configs,
         ),
     )
     if plugin_system_prompt:

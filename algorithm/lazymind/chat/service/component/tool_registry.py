@@ -39,6 +39,8 @@ from lazymind.chat.engine.tools import (
     vocab_learn,
 )
 from lazymind.model_config import is_model_role_available
+from lazymind.chat.engine.tools.ask_user import ask_user
+from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
 
 SystemPromptAppendix = dict[str, str | tuple[str, ...]]
 SYSTEM_PROMPT_APPENDIX_SECTIONS = ('tool_policy', 'safety', 'output_contract', 'response_policy')
@@ -98,8 +100,7 @@ ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'information—you MUST call `ask_user`. Never ask a question that requires a user response '
         'as plain assistant text, in a status update, or in the final answer. If you can proceed '
         'safely with a reasonable assumption and do not actually need a response, do not ask. '
-        '`ask_user` may be called even when another tool is required to run first; after the user '
-        'answers, the outstanding required-tool policy still applies.',
+        'Calling `ask_user` ends the current turn; continue only after the user answers.',
     ),
 }
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -252,6 +253,37 @@ SKILL_TOOL_CONFIG = ToolConfig(
     module='personalization',
     label_en='Skills',
     description_en='Use installed skills to search, read files, and run scripts.',
+)
+
+ASK_USER_TOOL_CONFIG = ToolConfig(
+    name='ask_user',
+    label='向用户提问',
+    description='通过结构化交互卡片向用户澄清或确认信息',
+    tool=ask_user,
+    module='interaction',
+    appendix_system_prompt=ASK_USER_TOOL_POLICY_APPENDIX,
+)
+
+USER_ATTACHMENT_TOOL_CONFIGS = (
+    ToolConfig(
+        name='read_user_attachment',
+        label='读取用户附件',
+        description='按需提取用户附件内容',
+        tool=read_user_attachment,
+        module='attachment',
+        appendix_system_prompt=ATTACHED_FILES_TOOL_POLICY_APPENDIX,
+    ),
+    ToolConfig(
+        name='find_user_attachment',
+        label='查找用户附件',
+        description='查找用户附件路径而不解析内容',
+        tool=find_user_attachment,
+        module='attachment',
+        appendix_system_prompt={
+            'tool_policy': ATTACHED_FILES_TOOL_POLICY_APPENDIX['tool_policy'],
+            'output_contract': IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract'],
+        },
+    ),
 )
 
 DEFAULT_TOOLS: list[ToolConfig] = [

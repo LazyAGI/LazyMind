@@ -4,6 +4,8 @@ from .event_translator import AgentEventFrameTranslator
 from .history import normalize_history_for_agent
 from .tool_registry import (
     DEFAULT_TOOLS,
+    ASK_USER_TOOL_CONFIG,
+    USER_ATTACHMENT_TOOL_CONFIGS,
     ATTACHED_FILES_TOOL_POLICY_APPENDIX,
     ASK_USER_TOOL_POLICY_APPENDIX,
     IMAGE_MARKDOWN_OUTPUT_APPENDIX,
@@ -19,6 +21,8 @@ from .tool_registry import (
 __all__ = [
     'AgentEventFrameTranslator',
     'DEFAULT_TOOLS',
+    'ASK_USER_TOOL_CONFIG',
+    'USER_ATTACHMENT_TOOL_CONFIGS',
     'ATTACHED_FILES_TOOL_POLICY_APPENDIX',
     'ASK_USER_TOOL_POLICY_APPENDIX',
     'IMAGE_MARKDOWN_OUTPUT_APPENDIX',
