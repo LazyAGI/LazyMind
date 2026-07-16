@@ -100,6 +100,15 @@ ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'information—you MUST call `ask_user`. Never ask a question that requires a user response '
         'as plain assistant text, in a status update, or in the final answer. If you can proceed '
         'safely with a reasonable assumption and do not actually need a response, do not ask. '
+        'Treat all of these as requiring `ask_user`: asking the user to choose A or B; asking what '
+        'they want to do next; collecting goals, preferences, constraints, or missing details; '
+        'requesting confirmation, approval, or permission; giving a quiz, exercise, interview, or '
+        'knowledge check; and ending with an invitation that expects a reply. Examples include '
+        '"Do you want the answer now or time to think?", "Are you asking for A or B?", '
+        '"Which option should we use?", "Would you like me to continue?", and "Please tell me your '
+        'specific intent." A question mark is not required: imperatives such as "Choose one", '
+        '"Tell me your preference", and "Confirm before I continue" also require `ask_user`. '
+        'Rhetorical questions that expect no answer do not require it. '
         'Calling `ask_user` ends the current turn; continue only after the user answers.',
     ),
 }
