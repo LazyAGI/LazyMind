@@ -51,8 +51,6 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'search_provider_meta_search': 'query',
     'search_provider_meta_catalog': 'include_sample_values',
     'url_fetch': 'urls / url',
-    'memory_editor': 'target',
-    'read_memory': 'target',
     'vocab_learn': 'suggestions.word <-> suggestions.synonym',
     'vision_extractor': 'url',
     'skill_editor': 'category/name',
@@ -168,8 +166,6 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'search_provider_meta_catalog': 'Loading {brand} metadata fields.',
     'url_fetch': 'Reading page content from {value}.',
     'vision_extractor': 'Extracting information from the image.',
-    'memory_editor': 'Saving long-term memory to {value} now.',
-    'read_memory': 'Reading {value} now.',
     'vocab_learn': 'Updating vocabulary entries for {value} now.',
     'skill_editor': 'Updating reusable skill notes related to {value} now.',
     'SkillManagementToolkit_create_skill': 'Creating reusable skill {value} now.',
@@ -237,8 +233,6 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'search_provider_meta_catalog': '正在加载 {brand} 元数据字段目录。',
     'url_fetch': '正在读取网页 {value} 。',
     'vision_extractor': '正在提取图像信息。',
-    'memory_editor': '正在将长期记忆保存到 {value}。',
-    'read_memory': '正在读取{value}。',
     'vocab_learn': '正在更新与 {value} 相关的词汇表。',
     'skill_editor': '正在更新与 {value} 相关的技能。',
     'SkillManagementToolkit_create_skill': '正在创建 {value} 技能。',
@@ -306,8 +300,6 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'search_provider_meta_catalog': '{brand} metadata fields were loaded successfully.',
     'url_fetch': 'Page content from {value} was loaded successfully.',
     'vision_extractor': 'Image information has been extracted.',
-    'memory_editor': 'Memory changes for {value} were submitted and are pending review.',
-    'read_memory': '{value} was read successfully.',
     'vocab_learn': 'Vocabulary entries for {value} were updated successfully.',
     'skill_editor': 'Skill operation for {value} completed successfully.',
     'SkillManagementToolkit_create_skill': 'Skill {value} was created successfully.',
@@ -378,8 +370,6 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'search_provider_meta_catalog': '已成功加载 {brand} 元数据字段目录。',
     'url_fetch': '已成功加载 {value} 的网页内容。',
     'vision_extractor': '已成功提取图像信息。',
-    'memory_editor': '{value} 的记忆修改已提交，等待审核。',
-    'read_memory': '{value}已成功读取。',
     'vocab_learn': '已成功更新 {value} 的词汇表。',
     'skill_editor': '{value} 技能操作已完成。',
     'SkillManagementToolkit_create_skill': '已成功创建 {value} 技能。',
@@ -448,8 +438,6 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'search_provider_meta_catalog': '{brand} metadata fields could not be loaded.',
     'url_fetch': 'Page content from {value} could not be loaded.',
     'vision_extractor': 'Vision extraction for {value} could not be completed.',
-    'memory_editor': 'Long-term memory could not be saved to {value}.',
-    'read_memory': '{value} could not be read.',
     'vocab_learn': 'Vocabulary entries for {value} could not be updated.',
     'skill_editor': 'Reusable skill notes for {value} could not be updated.',
     'SkillManagementToolkit_create_skill': 'Skill {value} could not be created.',
@@ -517,8 +505,6 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'search_provider_meta_catalog': '未能加载 {brand} 元数据字段目录。',
     'url_fetch': '未能加载网页 {value} 的内容。',
     'vision_extractor': '未能完成 {value} 的图像信息提取。',
-    'memory_editor': '未能将长期记忆保存到 {value}。',
-    'read_memory': '{value}未能读取。',
     'vocab_learn': '未能更新 {value} 的词汇表。',
     'skill_editor': '未能更新 {value} 的技能。',
     'SkillManagementToolkit_create_skill': '未能创建 {value} 技能。',
@@ -1066,11 +1052,6 @@ def _tool_preview_value(value: Any) -> str:
 
 def _tool_call_preview_value(tool_name: str, arguments: Any, language: str = 'en') -> str:
     preview = _tool_preview_value(_representative_tool_argument(tool_name, arguments))
-    if _tool_name_is(tool_name, 'memory_editor') or _tool_name_is(tool_name, 'read_memory'):
-        if language == 'zh' and preview in ('memory', 'user_preference'):
-            preview = '工作记忆' if preview == 'memory' else '用户偏好'
-        elif not preview:
-            return '待保存内容' if language == 'zh' else 'memory update'
     return preview
 
 

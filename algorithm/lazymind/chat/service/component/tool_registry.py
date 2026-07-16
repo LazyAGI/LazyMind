@@ -22,7 +22,6 @@ from lazymind.chat.engine.tools import (
     KBToolkit,
     ExternalDatabaseToolkit,
     LocalFileToolkit,
-    MemoryToolkit,
     WriterCreateToolkit,
     WriterRevisionToolkit,
     calculator,
@@ -39,6 +38,32 @@ from lazymind.chat.engine.tools import (
     vocab_learn,
 )
 from lazymind.model_config import is_model_role_available
+
+SystemPromptAppendix = dict[str, str | tuple[str, ...]]
+SYSTEM_PROMPT_APPENDIX_SECTIONS = ('tool_policy', 'safety', 'output_contract', 'response_policy')
+
+IMAGE_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
+    'output_contract': (
+        'When showing an image, copy `image_markdown` from the tool result verbatim when available. '
+        'Otherwise use the returned `image_url` or signed `/static-files/` text exactly with Markdown '
+        'image syntax. Never invent a host, URL prefix, CDN/tool-output URL, or rewrite a signed '
+        '`/static-files/` path as an HTTP URL. Never expose a bare local filesystem path.',
+    ),
+}
+VIDEO_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
+    'output_contract': (
+        'When a tool result contains `video_markdown`, copy it verbatim into the final answer '
+        '(or use `video_url` when markdown is absent). Do not invent or rewrite signed URLs.',
+    ),
+}
+KNOWLEDGE_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
+    'output_contract': (
+        'When the answer uses evidence returned by a knowledge-base tool, preserve its citation '
+        'markers exactly and cite the supporting evidence in the answer. Never invent, rewrite, or '
+        'fabricate a knowledge-base citation marker. For web, URL-fetch, or academic evidence, cite '
+        'the source title or URL plainly instead of fabricating a knowledge-base marker.',
+    ),
+}
 
 
 @dataclass
@@ -60,6 +85,7 @@ class ToolConfig:
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     required_config: list[str] | None = None
+    appendix_system_prompt: SystemPromptAppendix | None = None
 
     def __post_init__(self) -> None:
         if self.pick_first_valid and not isinstance(self.tool, dict):
@@ -67,6 +93,17 @@ class ToolConfig:
                 'tool must be a provider toolkit dict when pick_first_valid is True, '
                 f'got {type(self.tool).__name__}'
             )
+        for section, values in (self.appendix_system_prompt or {}).items():
+            if section not in SYSTEM_PROMPT_APPENDIX_SECTIONS:
+                raise ValueError(
+                    f'unsupported appendix_system_prompt section {section!r}; '
+                    f'expected one of {SYSTEM_PROMPT_APPENDIX_SECTIONS}'
+                )
+            entries = (values,) if isinstance(values, str) else values
+            if not isinstance(entries, tuple) or not all(isinstance(item, str) for item in entries):
+                raise TypeError(
+                    'appendix_system_prompt values must be a string or tuple of strings'
+                )
 
 
 _WEB_SEARCH_ENGINE_INSTANCES: list = [
@@ -129,6 +166,12 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description_en='Discover knowledge bases, inspect documents and statistics, and retrieve their content.',
         capability_id='knowledge_base_search',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['knowledge_base'],
+        appendix_system_prompt={
+            'output_contract': (
+                *IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract'],
+                *KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
+            ),
+        },
     ),
     ToolConfig(
         name='temp_kb',
@@ -138,6 +181,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         label_en='Temporary File Search',
         description_en='Search relevant content in temporary files uploaded by the user.',
         key_source=_temp_kb_key_source,
+        appendix_system_prompt=KNOWLEDGE_CITATION_OUTPUT_APPENDIX,
     ),
     ToolConfig(
         name='data_sources', label='数据源查询', description='查询已配置的数据源服务',
@@ -250,6 +294,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         model_role='image_generator',
         capability_id='image_generation',
         input_schema={'prompt': 'string'}, output_schema={'image': 'file'}, required_config=['image_generator_model'],
+        appendix_system_prompt=IMAGE_MARKDOWN_OUTPUT_APPENDIX,
     ),
     ToolConfig(
         name='image_editor',
@@ -260,6 +305,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description_en='Edit reference images using text instructions.',
         model_role='image_editor',
         capability_id='image_editing',
+        appendix_system_prompt=IMAGE_MARKDOWN_OUTPUT_APPENDIX,
     ),
     ToolConfig(
         name='video_generator',
@@ -270,6 +316,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         capability_id='video_generation',
         input_schema={'prompt': 'string'}, output_schema={'video': 'file'},
         required_config=['video_generator_model'],
+        appendix_system_prompt=VIDEO_MARKDOWN_OUTPUT_APPENDIX,
     ),
     ToolConfig(
         name='video_to_gif',
@@ -278,6 +325,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=video_to_gif, module='content',
         capability_id='video_to_gif',
         input_schema={'url': 'string'}, output_schema={'image': 'file'},
+        appendix_system_prompt=IMAGE_MARKDOWN_OUTPUT_APPENDIX,
     ),
     ToolConfig(
         name='vocab_learn',
@@ -286,11 +334,6 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=vocab_learn, module='personalization',
         label_en='Vocabulary Learning',
         description_en='Learn user-specific vocabulary mappings and synonyms.',
-    ),
-    ToolConfig(
-        name='memory', label='记忆', description='读取和编辑跨会话的记忆与用户偏好',
-        tool=MemoryToolkit(), module='personalization', label_en='Memory',
-        description_en='Read and edit durable memory and user preferences.',
     ),
     ToolConfig(
         name='skill_editor',
@@ -480,3 +523,28 @@ def filter_tools(
             continue
         result.append(cfg)
     return result
+
+
+def collect_system_prompt_appendices(
+    configs: list[ToolConfig],
+    extra_appendices: tuple[SystemPromptAppendix, ...] = (),
+) -> dict[str, list[str]]:
+    """Collect active tool prompt appendices with stable per-section deduplication."""
+    collected: dict[str, list[str]] = {}
+    seen: dict[str, set[str]] = {}
+    appendices = [cfg.appendix_system_prompt for cfg in configs if cfg.appendix_system_prompt]
+    appendices.extend(extra_appendices)
+    for appendix in appendices:
+        for section, values in appendix.items():
+            entries = (values,) if isinstance(values, str) else values
+            for content in entries:
+                original = content.strip()
+                if not original:
+                    continue
+                dedupe_key = ' '.join(original.split())
+                section_seen = seen.setdefault(section, set())
+                if dedupe_key in section_seen:
+                    continue
+                section_seen.add(dedupe_key)
+                collected.setdefault(section, []).append(original)
+    return collected

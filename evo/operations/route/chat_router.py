@@ -19,7 +19,7 @@ from tenacity import AsyncRetrying, retry_if_result, stop_after_attempt, wait_ra
 
 DEFAULT_DISABLED_TOOLS = tuple(
     'temp_kb calculator wikipedia web_search academic_search url_fetch multimodal image_generator image_editor '
-    'vocab_learn read_memory memory_editor skill_editor local_fs feishu notion '
+    'vocab_learn skill_editor local_fs feishu notion '
     'schedule create_schedule list_schedules cancel_schedule update_schedule trigger_schedule '
     'ask_user create_subagent list_subagents read_user_attachment find_user_attachment mcp plugin'.split()
 )

@@ -8,7 +8,8 @@ from lazyllm import AutoModel, LOG
 from lazyllm.tools.fs.client import FS
 from pydantic import BaseModel, ConfigDict
 
-from lazymind.chat.engine.tools import memory_editor, read_memory
+from lazymind.chat.engine.tools.memory_editor import memory_editor
+from lazymind.chat.engine.tools.memory_reader import read_memory
 from lazymind.chat.engine.tools.infra import MemoryRemoteStore
 from lazymind.chat.service.component.history import normalize_history_for_agent
 from lazymind.config import config as _cfg

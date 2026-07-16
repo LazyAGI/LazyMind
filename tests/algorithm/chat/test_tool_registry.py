@@ -3,8 +3,10 @@ import pytest
 import lazyllm
 from lazymind.chat.service.component.tool_registry import (
     DEFAULT_TOOLS,
+    IMAGE_MARKDOWN_OUTPUT_APPENDIX,
     SKILL_TOOL_CONFIG,
     ToolConfig,
+    collect_system_prompt_appendices,
     filter_tools,
     get_all_tool_groups,
 )
@@ -81,6 +83,41 @@ def test_catalog_exposes_modules_without_registering_module_gateways():
     names = {item['function']['name'] for item in manager.tools_description}
     assert names == {'calculator'}
     assert not any('utility' in name for name in names)
+
+
+def test_shared_prompt_appendix_is_reused_and_deduplicated():
+    configs = [
+        cfg for cfg in DEFAULT_TOOLS
+        if cfg.name in {'image_generator', 'image_editor', 'video_to_gif'}
+    ]
+
+    assert len(configs) == 3
+    assert all(cfg.appendix_system_prompt is IMAGE_MARKDOWN_OUTPUT_APPENDIX for cfg in configs)
+    collected = collect_system_prompt_appendices(configs)
+    assert collected['output_contract'] == list(
+        IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract']
+    )
+
+    with_dynamic_attachment = collect_system_prompt_appendices(
+        configs,
+        extra_appendices=(IMAGE_MARKDOWN_OUTPUT_APPENDIX,),
+    )
+    assert with_dynamic_attachment == collected
+
+
+def test_prompt_appendix_deduplication_normalizes_whitespace():
+    first = ToolConfig(
+        name='first', label='first', description='first', tool=lambda: None, module='utility',
+        appendix_system_prompt={'safety': 'Confirm before writing external data.'},
+    )
+    second = ToolConfig(
+        name='second', label='second', description='second', tool=lambda: None, module='utility',
+        appendix_system_prompt={'safety': ' Confirm  before\nwriting external data. '},
+    )
+
+    assert collect_system_prompt_appendices([first, second]) == {
+        'safety': ['Confirm before writing external data.'],
+    }
 
 
 def test_cloud_files_use_nested_supplier_toolkits():

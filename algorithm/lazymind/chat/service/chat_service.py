@@ -20,6 +20,8 @@ from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     DEFAULT_TOOLS,
+    IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+    collect_system_prompt_appendices,
     filter_tools,
     normalize_history_for_agent,
 )
@@ -501,6 +503,10 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         files=display_files,
         current_query=language_query,
         conversation_history=agent_history,
+        tool_prompt_appendices=collect_system_prompt_appendices(
+            active_configs,
+            extra_appendices=(IMAGE_MARKDOWN_OUTPUT_APPENDIX,) if attachment_tools else (),
+        ),
     )
     if plugin_system_prompt:
         runtime_prompt = runtime_prompt + '\n\n' + plugin_system_prompt

@@ -188,6 +188,23 @@ def _build_attached_files_prompt(files: list | None = None) -> str:
     return '\n'.join(lines)
 
 
+_TOOL_APPENDIX_SECTION_TITLES = {
+    'tool_policy': 'Tool-specific policies',
+    'safety': 'Tool-specific safety constraints',
+    'output_contract': 'Tool output contracts',
+    'response_policy': 'Tool-specific response policies',
+}
+
+
+def _build_tool_appendix_prompt(appendices: dict[str, list[str]] | None = None) -> str:
+    blocks = []
+    for section, title in _TOOL_APPENDIX_SECTION_TITLES.items():
+        entries = [item.strip() for item in (appendices or {}).get(section, []) if item.strip()]
+        if entries:
+            blocks.append(f'## {title}\n' + '\n'.join(f'- {item}' for item in entries))
+    return '\n\n'.join(blocks)
+
+
 def build_system_prompt(
     has_tools: bool,
     *,
@@ -198,6 +215,7 @@ def build_system_prompt(
     files: list | None = None,
     current_query: str | None = None,
     conversation_history: list[dict] | None = None,
+    tool_prompt_appendices: dict[str, list[str]] | None = None,
 ) -> str:
     prompt_parts = [
         DEFAULT_SYSTEM_PROMPT,
@@ -250,15 +268,18 @@ def build_system_prompt(
             '# Tool call status\n'
             'Before calling a tool, write one concise, user-visible sentence explaining '
             'what you are about to do, then make the tool call in the same response. '
+            'Keep it action-oriented and do not reveal hidden reasoning. '
             'Never claim to be calling a tool unless an actual tool call immediately follows.\n\n'
             '# Tool use policy\n'
             'First decide whether tools are needed. A tool named get_*Toolkit_methods '
             'is a Toolkit gateway: call it before using that Toolkit. Prefer private '
             'knowledge-base evidence when relevant; use academic search for scholarly '
             'sources and web search for current or otherwise unavailable information. '
-            'Preserve citation and media-rendering fields exactly as tool results specify. '
             'Confirm before destructive or externally visible actions unless the user '
             'already requested that exact action.'
         )
+        appendix_prompt = _build_tool_appendix_prompt(tool_prompt_appendices)
+        if appendix_prompt:
+            prompt_parts.append(appendix_prompt)
 
     return '\n\n'.join(prompt_parts)

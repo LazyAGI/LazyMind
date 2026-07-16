@@ -66,3 +66,52 @@ def test_long_url_does_not_override_chinese_request_language() -> None:
     )
 
     assert 'Selected response language for this turn: Chinese' in prompt
+
+
+def test_system_prompt_appends_partitioned_active_tool_contracts() -> None:
+    prompt = build_system_prompt(
+        True,
+        tool_prompt_appendices={
+            'output_contract': ['Preserve the returned citation markers.'],
+            'safety': ['Confirm before deleting remote data.'],
+        },
+    )
+
+    assert '## Tool-specific safety constraints' in prompt
+    assert '- Confirm before deleting remote data.' in prompt
+    assert '## Tool output contracts' in prompt
+    assert '- Preserve the returned citation markers.' in prompt
+    assert prompt.index('## Tool-specific safety constraints') < prompt.index('## Tool output contracts')
+
+
+def test_tool_output_contract_keeps_detailed_image_and_citation_guards() -> None:
+    from lazymind.chat.service.component.tool_registry import (
+        IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+        KNOWLEDGE_CITATION_OUTPUT_APPENDIX,
+        collect_system_prompt_appendices,
+    )
+
+    prompt = build_system_prompt(
+        True,
+        tool_prompt_appendices=collect_system_prompt_appendices(
+            [],
+            extra_appendices=(
+                IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+                KNOWLEDGE_CITATION_OUTPUT_APPENDIX,
+            ),
+        ),
+    )
+
+    assert 'Never invent a host, URL prefix' in prompt
+    assert 'Never expose a bare local filesystem path' in prompt
+    assert 'Never invent, rewrite, or fabricate a knowledge-base citation marker' in prompt
+    assert 'cite the source title or URL plainly' in prompt
+
+
+def test_system_prompt_ignores_tool_appendices_when_no_tools_are_registered() -> None:
+    prompt = build_system_prompt(
+        False,
+        tool_prompt_appendices={'output_contract': ['Must not be injected.']},
+    )
+
+    assert 'Must not be injected.' not in prompt

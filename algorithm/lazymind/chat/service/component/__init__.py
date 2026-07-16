@@ -4,7 +4,11 @@ from .event_translator import AgentEventFrameTranslator
 from .history import normalize_history_for_agent
 from .tool_registry import (
     DEFAULT_TOOLS,
+    IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+    KNOWLEDGE_CITATION_OUTPUT_APPENDIX,
     ToolConfig,
+    VIDEO_MARKDOWN_OUTPUT_APPENDIX,
+    collect_system_prompt_appendices,
     filter_tools,
     get_all_tool_groups,
     normalize_tool_locale,
@@ -13,7 +17,11 @@ from .tool_registry import (
 __all__ = [
     'AgentEventFrameTranslator',
     'DEFAULT_TOOLS',
+    'IMAGE_MARKDOWN_OUTPUT_APPENDIX',
+    'KNOWLEDGE_CITATION_OUTPUT_APPENDIX',
     'ToolConfig',
+    'VIDEO_MARKDOWN_OUTPUT_APPENDIX',
+    'collect_system_prompt_appendices',
     'filter_tools',
     'get_all_tool_groups',
     'normalize_tool_locale',

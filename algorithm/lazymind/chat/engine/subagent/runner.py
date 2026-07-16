@@ -12,9 +12,15 @@ from lazyllm import LOG, AutoModel
 
 from lazymind.model_config import inject_model_config
 from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
+from lazymind.chat.engine.prompts import build_system_prompt
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
-from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, tool_is_active
+from lazymind.chat.service.component.tool_registry import (
+    DEFAULT_TOOLS,
+    IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+    collect_system_prompt_appendices,
+    tool_is_active,
+)
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
 from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
@@ -149,6 +155,11 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
     if extra_tools:
         base.extend(extra_tools)
     return base
+
+
+def _tool_configs_for_runtime_tools(runtime_tools: List[Any]) -> list:
+    runtime_ids = {id(tool) for tool in runtime_tools}
+    return [cfg for cfg in DEFAULT_TOOLS if id(cfg.tool) in runtime_ids]
 
 
 _ZH_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
@@ -543,9 +554,22 @@ async def run_subagent_stream(
 
         llm = AutoModel(model='llm')
         runtime_tools = _resolve_runtime_tools(tools, plugin_id=params.get('plugin_id') or None)
+        subagent_tools_all = _build_subagent_tools(runtime_tools)
+        runtime_configs = _tool_configs_for_runtime_tools(runtime_tools)
+        runtime_prompt = build_system_prompt(
+            bool(subagent_tools_all),
+            use_memory=False,
+            current_query=ctx.objective,
+            tool_prompt_appendices=collect_system_prompt_appendices(
+                runtime_configs,
+                extra_appendices=(IMAGE_MARKDOWN_OUTPUT_APPENDIX,)
+                if agentic_config.get('files') else (),
+            ),
+        )
         agent = build_react_agent(
             llm=llm,
-            tools=_build_subagent_tools(runtime_tools),
+            tools=subagent_tools_all,
+            prompt=runtime_prompt,
             force_summarize_context=ctx.objective,
             extra_stop_condition=_make_cancel_stop_condition(),
         )
