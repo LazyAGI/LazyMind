@@ -484,7 +484,6 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		sourceFilter = ""
 	}
 
-
 	pageSize := 20
 	if pageSizeStr != "" {
 		if v, err := strconv.Atoi(pageSizeStr); err == nil && v > 0 {
@@ -548,8 +547,6 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	candidates := make([]orm.Dataset, 0, pageSize)
 	pageSourceMap := make(map[string]bool, pageSize)
 
-
-
 	for hasMoreRows && len(page) < pageSize {
 		var rows []orm.Dataset
 		query := base.
@@ -608,7 +605,6 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 
 	}
 
-
 	end := offset + len(page)
 
 	out := make([]Dataset, 0, len(page))
@@ -618,7 +614,6 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	}
 	statsMap := calcDatasetStatsBatch(r.Context(), dsIDs)
 	parserCache := map[string][]ParserConfig{}
-
 
 	for _, ds := range page {
 		datasetACL := datasetACLForUserWithGroups(&ds, userID, groupIDs)
@@ -633,28 +628,28 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		createdByDataSource := pageSourceMap[ds.ID]
 
 		out = append(out, Dataset{
-			Name:           "datasets/" + ds.ID,
-			DatasetID:      ds.ID,
-			DisplayName:    ds.DisplayName,
-			Desc:           ds.Desc,
-			CoverImage:     ds.CoverImage,
-			State:          stateToPB(ds.DatasetState),
-			IsEmpty:        stats.DocumentCount == 0,
-			DocumentCount:  stats.DocumentCount,
-			DocumentSize:   stats.DocumentSize,
-			SegmentCount:   0,
-			TokenCount:     0,
-			Parsers:        parsers,
-			Algo:           algo,
-			Creator:        ds.CreateUserName,
-			IsOwner:        ds.CreateUserID == userID,
-			CreateTime:     ds.CreatedAt,
-			UpdateTime:     ds.UpdatedAt,
-			Acl:            datasetACL,
-			ShareType:      shareTypeToPB(ds.ShareType),
-			Type:           datasetTypeToPB(ds.Type),
-			Tags:           parseDatasetTags(ds.Ext),
-			DefaultDataset: isDefaultDatasetForUser(r.Context(), userID, ds.ID),
+			Name:                "datasets/" + ds.ID,
+			DatasetID:           ds.ID,
+			DisplayName:         ds.DisplayName,
+			Desc:                ds.Desc,
+			CoverImage:          ds.CoverImage,
+			State:               stateToPB(ds.DatasetState),
+			IsEmpty:             stats.DocumentCount == 0,
+			DocumentCount:       stats.DocumentCount,
+			DocumentSize:        stats.DocumentSize,
+			SegmentCount:        0,
+			TokenCount:          0,
+			Parsers:             parsers,
+			Algo:                algo,
+			Creator:             ds.CreateUserName,
+			IsOwner:             ds.CreateUserID == userID,
+			CreateTime:          ds.CreatedAt,
+			UpdateTime:          ds.UpdatedAt,
+			Acl:                 datasetACL,
+			ShareType:           shareTypeToPB(ds.ShareType),
+			Type:                datasetTypeToPB(ds.Type),
+			Tags:                parseDatasetTags(ds.Ext),
+			DefaultDataset:      isDefaultDatasetForUser(r.Context(), userID, ds.ID),
 			CreatedByDataSource: &createdByDataSource,
 		})
 	}
@@ -851,7 +846,6 @@ func batchCheckDatasetsHaveSource(ctx context.Context, datasetIDs []string) map[
 	}
 	return resp.SourceMap
 }
-
 
 func algoDatasetDisplayName(userID, displayName string) string {
 	return fmt.Sprintf("user@%s@%s", strings.TrimSpace(userID), strings.TrimSpace(displayName))
