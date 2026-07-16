@@ -42,6 +42,7 @@ import {
 } from "@/utils/developerMode";
 import RecordList from "@/modules/chat/components/RecordList";
 import {
+  CHAT_NEW_RUN_IN_BACKGROUND_KEY,
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
 } from "@/modules/chat/constants/chat";
@@ -322,22 +323,29 @@ export default function MainLayout() {
     setIsMenuCollapsed((prev) => !prev);
   };
 
-  const emitConversationSelection = (conversationId: string) => {
+  const emitConversationSelection = (
+    conversationId: string,
+    runInBackground = false,
+  ) => {
     window.dispatchEvent(
       new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
-        detail: { conversationId, source: "sidebar" },
+        detail: { conversationId, runInBackground, source: "sidebar" },
       }),
     );
   };
 
-  const handleNewChat = () => {
+  const handleNewChat = (runInBackground = false) => {
     try {
       sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
+      sessionStorage.setItem(
+        CHAT_NEW_RUN_IN_BACKGROUND_KEY,
+        runInBackground ? "1" : "0",
+      );
     } catch {
       // ignore storage errors
     }
     setCurrentSidebarConversationId("");
-    emitConversationSelection("");
+    emitConversationSelection("", runInBackground);
     navigate("/agent/chat/home");
   };
 
@@ -685,7 +693,7 @@ export default function MainLayout() {
             <button
               type="button"
               className="sider-brand"
-              onClick={handleNewChat}
+              onClick={() => handleNewChat(false)}
               aria-label="LazyMind"
               title="LazyMind"
             >
@@ -712,9 +720,17 @@ export default function MainLayout() {
                   type="text"
                   className="sider-new-chat-button"
                   icon={<PlusOutlined />}
-                  onClick={handleNewChat}
+                  onClick={() => handleNewChat(false)}
                 >
                   {t("layout.newChat")}
+                </Button>
+                <Button
+                  type="primary"
+                  className="sider-new-chat-button sider-new-task-button"
+                  icon={<PlusOutlined />}
+                  onClick={() => handleNewChat(true)}
+                >
+                  {t("layout.newTask")}
                 </Button>
               </div>
               <div className="sider-module-actions">
