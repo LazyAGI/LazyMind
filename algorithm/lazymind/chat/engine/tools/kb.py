@@ -322,6 +322,11 @@ class KBToolkit:
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
     ]
 
+    def __lazy_source__(self) -> bool:
+        """Stay lazy only while the request has no explicit knowledge-base scope."""
+        agentic_config = lazyllm.globals.get('agentic_config') or {}
+        return not bool((agentic_config.get('filters') or {}).get('kb_id'))
+
     @handle_tool_errors
     def list_knowledge_bases(
         self,

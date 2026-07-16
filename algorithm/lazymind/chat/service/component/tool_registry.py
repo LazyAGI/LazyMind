@@ -90,12 +90,30 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '`kb_tmp_search` or other `kb_*` tools when appropriate.',
     ),
 }
+ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# User clarification and confirmation rules (mandatory)\n'
+        'Whenever you need the user to answer a question before you can continue—including '
+        'clarification, confirmation, approval, choosing among options, or supplying missing '
+        'information—you MUST call `ask_user`. Never ask a question that requires a user response '
+        'as plain assistant text, in a status update, or in the final answer. If you can proceed '
+        'safely with a reasonable assumption and do not actually need a response, do not ask. '
+        '`ask_user` may be called even when another tool is required to run first; after the user '
+        'answers, the outstanding required-tool policy still applies.',
+    ),
+}
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         "# Search Tool Rules (CRITICAL — follow strictly)\n"
-        "If `KBToolkit` is available, you MUST activate it first by calling "
-        "its activation tool (e.g. `get_KBToolkit_methods`) before using any of its search methods. "
-        "Then use the returned knowledge-base search method FIRST for every retrieval "
+        "If only the `KBToolkit` gateway is available, you MUST activate it first by calling "
+        "its activation tool (e.g. `get_KBToolkit_methods`). If concrete methods such as "
+        "`KBToolkit_kb_search` are already available, call the appropriate search method directly. "
+        "A selected knowledge base is an explicit user instruction to search it, not merely permission "
+        "to search it. The presence of concrete `KBToolkit_kb_search` or "
+        "`KBToolkit_kb_keyword_search` methods means a knowledge base is selected. In that case, "
+        "your first substantive action for the turn MUST be one of those searches. Do not answer "
+        "from memory, announce that you could search later, ask whether you should search, or start "
+        "a plugin before searching. Use the knowledge-base search method FIRST for every retrieval "
         "need — no exceptions. Do not skip it because you think the web might have "
         "better information, or because the topic seems general, popular, or common "
         "knowledge. The knowledge base is your primary evidence source.\n\n"

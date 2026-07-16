@@ -91,7 +91,10 @@ x-ocr-env: &ocr-env
   LAZYMIND_MINERU_BACKEND: ${LAZYMIND_MINERU_BACKEND:-pipeline}
   LAZYLLM_MINERU_BACKEND: ${LAZYMIND_MINERU_BACKEND:-pipeline}
   LAZYLLM_MINERU_API_KEY: ${LAZYLLM_MINERU_API_KEY:-}
-  LAZYLLM_MINERU_SSL_VERIFY: ${LAZYLLM_MINERU_SSL_VERIFY:-true}
+  # mineru.net currently resolves to a mixed pool where some endpoints present
+  # a certificate for *.mineru.org.cn. Keep the documented workaround enabled
+  # by default so online OCR is not intermittently broken by DNS selection.
+  LAZYLLM_MINERU_SSL_VERIFY: ${LAZYLLM_MINERU_SSL_VERIFY:-false}
   LAZYMIND_RUNTIME_MODE: ${LAZYMIND_RUNTIME_MODE:-cloud}
   LAZYLLM_PADDLE_API_KEY: ${LAZYLLM_PADDLE_API_KEY:-}
 
