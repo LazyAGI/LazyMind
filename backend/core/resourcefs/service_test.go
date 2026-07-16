@@ -120,7 +120,7 @@ func TestServiceDraftCommitRevisionRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Rollback returned error: %v", err)
 	}
-	if rollback.Content != "initial memory" || rollback.RevisionNo != 3 {
+	if rollback.Content != "initial memory" || rollback.RevisionID != initialRevisionID || rollback.RevisionNo != 1 {
 		t.Fatalf("unexpected rollback: %#v", rollback)
 	}
 	if err := db.Take(&resource, "id = ?", state.ID).Error; err != nil {
@@ -134,8 +134,163 @@ func TestServiceDraftCommitRevisionRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile rolled back head returned error: %v", err)
 	}
-	if rolledBackHead.Content != "initial memory" || rolledBackHead.RevisionNo != 3 {
+	if rolledBackHead.Content != "initial memory" || rolledBackHead.RevisionNo != 1 {
 		t.Fatalf("unexpected rolled back head: %#v", rolledBackHead)
+	}
+
+	revisions, err = service.ListRevisions(context.Background(), ListRevisionsRequest{Ref: ref})
+	if err != nil {
+		t.Fatalf("ListRevisions after rollback returned error: %v", err)
+	}
+	if len(revisions.Items) != 2 || revisions.Items[0].RevisionNo != 2 || revisions.Items[0].IsHead || revisions.Items[1].RevisionNo != 1 || !revisions.Items[1].IsHead {
+		t.Fatalf("unexpected revisions after rollback: %#v", revisions.Items)
+	}
+
+	currentDraft, err := service.ReadFile(context.Background(), ReadFileRequest{Ref: ref, RefType: FileRefDraft})
+	if err != nil {
+		t.Fatalf("ReadFile draft after rollback returned error: %v", err)
+	}
+	branchDraft, err := service.WriteDraft(context.Background(), WriteDraftRequest{Ref: ref, Content: "branched memory", ExpectedDraftVersion: currentDraft.DraftVersion, UpdatedBy: "u1"})
+	if err != nil {
+		t.Fatalf("WriteDraft after rollback returned error: %v", err)
+	}
+	branchCommit, err := service.CommitDraft(context.Background(), CommitDraftRequest{Ref: ref, ExpectedDraftVersion: branchDraft.DraftVersion, CreatedBy: "u1"})
+	if err != nil {
+		t.Fatalf("CommitDraft after rollback returned error: %v", err)
+	}
+	if branchCommit.RevisionNo != 3 {
+		t.Fatalf("branch RevisionNo = %d, want 3", branchCommit.RevisionNo)
+	}
+	var branchRevision orm.PersonalResourceRevision
+	if err := db.Where("id = ?", branchCommit.RevisionID).Take(&branchRevision).Error; err != nil {
+		t.Fatalf("read branch revision: %v", err)
+	}
+	if branchRevision.ParentRevisionID == nil || *branchRevision.ParentRevisionID != initialRevisionID {
+		t.Fatalf("branch parent_revision_id = %v, want %s", branchRevision.ParentRevisionID, initialRevisionID)
+	}
+}
+
+func TestRollbackRejectsPendingDraft(t *testing.T) {
+	for _, resourceType := range []ResourceType{ResourceTypeMemory, ResourceTypeUserPreference} {
+		t.Run(string(resourceType), func(t *testing.T) {
+			db := newResourceFSTestDB(t)
+			service := NewService(ServiceDeps{DB: db.DB})
+			ref := ResourceRef{UserID: "u1", ResourceType: resourceType}
+			state, err := service.EnsureResource(context.Background(), ref, "v1")
+			if err != nil {
+				t.Fatalf("EnsureResource returned error: %v", err)
+			}
+			draft, err := service.WriteDraft(context.Background(), WriteDraftRequest{Ref: ref, Content: "v2", ExpectedDraftVersion: state.DraftVersion})
+			if err != nil {
+				t.Fatalf("WriteDraft returned error: %v", err)
+			}
+			commit, err := service.CommitDraft(context.Background(), CommitDraftRequest{Ref: ref, ExpectedDraftVersion: draft.DraftVersion})
+			if err != nil {
+				t.Fatalf("CommitDraft returned error: %v", err)
+			}
+			pending, err := service.WriteDraft(context.Background(), WriteDraftRequest{Ref: ref, Content: "pending", ExpectedDraftVersion: draft.DraftVersion + 1})
+			if err != nil {
+				t.Fatalf("WriteDraft pending returned error: %v", err)
+			}
+			if pending.DraftStatus == "" {
+				t.Fatal("pending draft status is empty")
+			}
+
+			if _, err := service.Rollback(context.Background(), RollbackRequest{Ref: ref, RevisionID: state.HeadRevisionID, ExpectedHeadRevisionID: commit.RevisionID}); !errors.Is(err, ErrConflict) {
+				t.Fatalf("Rollback error = %v, want ErrConflict", err)
+			}
+			head, err := service.ReadFile(context.Background(), ReadFileRequest{Ref: ref, RefType: FileRefHead})
+			if err != nil {
+				t.Fatalf("ReadFile head returned error: %v", err)
+			}
+			if head.RevisionID != commit.RevisionID || head.Content != "v2" {
+				t.Fatalf("head changed after rejected rollback: %#v", head)
+			}
+		})
+	}
+}
+
+func TestUpdateMetadataEnableAutoEvoMarksPendingDraftAuto(t *testing.T) {
+	db := newResourceFSTestDB(t)
+	service := NewService(ServiceDeps{DB: db.DB})
+	ref := ResourceRef{UserID: "u1", ResourceType: ResourceTypeMemory}
+	ctx := context.Background()
+
+	state, err := service.EnsureResource(ctx, ref, "v1")
+	if err != nil {
+		t.Fatalf("EnsureResource returned error: %v", err)
+	}
+	if err := db.Model(&orm.PersonalResource{}).Where("id = ?", state.ID).Update("auto_evo", false).Error; err != nil {
+		t.Fatalf("disable auto_evo: %v", err)
+	}
+	draft, err := service.WriteDraft(ctx, WriteDraftRequest{
+		Ref:                  ref,
+		Content:              "v2",
+		ExpectedDraftVersion: state.DraftVersion,
+		UpdatedBy:            "u1",
+	})
+	if err != nil {
+		t.Fatalf("WriteDraft returned error: %v", err)
+	}
+	preview, err := service.DraftPreview(ctx, DraftPreviewRequest{Ref: ref})
+	if err != nil {
+		t.Fatalf("DraftPreview returned error: %v", err)
+	}
+	if preview.ReviewID == "" {
+		t.Fatal("expected active review session")
+	}
+
+	autoEvo := true
+	resp, err := service.UpdateMetadata(ctx, UpdateMetadataRequest{
+		Ref:       ref,
+		AutoEvo:   &autoEvo,
+		UpdatedBy: "u1",
+	})
+	if err != nil {
+		t.Fatalf("UpdateMetadata returned error: %v", err)
+	}
+	if !resp.EnabledFromOff || !resp.AutoEvo {
+		t.Fatalf("unexpected metadata response: %#v", resp)
+	}
+	nextDraft, err := service.ReadFile(ctx, ReadFileRequest{Ref: ref, RefType: FileRefDraft})
+	if err != nil {
+		t.Fatalf("ReadFile draft returned error: %v", err)
+	}
+	if nextDraft.DraftVersion != draft.DraftVersion || nextDraft.DraftStatus != draftStatusAutoPending {
+		t.Fatalf("draft after auto_evo = version %d status %q, want version %d status %q", nextDraft.DraftVersion, nextDraft.DraftStatus, draft.DraftVersion, draftStatusAutoPending)
+	}
+	var review orm.PersonalResourceReviewSession
+	if err := db.Where("id = ?", preview.ReviewID).Take(&review).Error; err != nil {
+		t.Fatalf("query review session: %v", err)
+	}
+	if review.Status != reviewStatusInvalidated {
+		t.Fatalf("review status = %q, want %q", review.Status, reviewStatusInvalidated)
+	}
+}
+
+func TestUpdateMetadataEnableAutoEvoKeepsEmptyDraftStatus(t *testing.T) {
+	db := newResourceFSTestDB(t)
+	service := NewService(ServiceDeps{DB: db.DB})
+	ref := ResourceRef{UserID: "u1", ResourceType: ResourceTypeMemory}
+	ctx := context.Background()
+
+	state, err := service.EnsureResource(ctx, ref, "v1")
+	if err != nil {
+		t.Fatalf("EnsureResource returned error: %v", err)
+	}
+	if err := db.Model(&orm.PersonalResource{}).Where("id = ?", state.ID).Update("auto_evo", false).Error; err != nil {
+		t.Fatalf("disable auto_evo: %v", err)
+	}
+	autoEvo := true
+	if _, err := service.UpdateMetadata(ctx, UpdateMetadataRequest{Ref: ref, AutoEvo: &autoEvo}); err != nil {
+		t.Fatalf("UpdateMetadata returned error: %v", err)
+	}
+	draft, err := service.ReadFile(ctx, ReadFileRequest{Ref: ref, RefType: FileRefDraft})
+	if err != nil {
+		t.Fatalf("ReadFile draft returned error: %v", err)
+	}
+	if draft.DraftStatus != "" {
+		t.Fatalf("draft status = %q, want empty", draft.DraftStatus)
 	}
 }
 

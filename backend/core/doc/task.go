@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -177,6 +179,102 @@ func SearchTasks(w http.ResponseWriter, r *http.Request) {
 	common.ReplyJSON(w, ListTasksResponse{Tasks: resp, TotalSize: int32(len(resp))})
 }
 
+const maxCheckFileHashes = 500
+
+func CheckFileHashes(w http.ResponseWriter, r *http.Request) {
+	datasetID := datasetIDFromPath(r)
+	if datasetID == "" {
+		common.ReplyErr(w, "missing dataset", http.StatusBadRequest)
+		return
+	}
+	_, userID, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetUpload)
+	if !ok {
+		if userID == "" {
+			common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		} else {
+			replyDatasetForbidden(w)
+		}
+		return
+	}
+
+	var req CheckFileHashesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
+		return
+	}
+	hashes, err := normalizeFileHashes(req.Hashes)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	available, err := findAvailableUploadedFilesByHash(r.Context(), userID, hashes)
+	if err != nil {
+		common.ReplyErr(w, "query uploaded files failed", http.StatusInternalServerError)
+		return
+	}
+	missing := make([]string, 0, len(hashes))
+	for _, hash := range hashes {
+		if _, ok := available[hash]; !ok {
+			missing = append(missing, hash)
+		}
+	}
+	common.ReplyJSON(w, CheckFileHashesResponse{MissingHashes: missing})
+}
+
+func normalizeFileHashes(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, fmt.Errorf("hashes is required")
+	}
+	if len(values) > maxCheckFileHashes {
+		return nil, fmt.Errorf("hashes must contain at most %d items", maxCheckFileHashes)
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		hash := strings.ToLower(strings.TrimSpace(value))
+		decoded, err := hex.DecodeString(hash)
+		if err != nil || len(decoded) != sha256.Size {
+			return nil, fmt.Errorf("invalid SHA-256 hash: %q", value)
+		}
+		if _, ok := seen[hash]; ok {
+			continue
+		}
+		seen[hash] = struct{}{}
+		out = append(out, hash)
+	}
+	return out, nil
+}
+
+func findAvailableUploadedFilesByHash(ctx context.Context, userID string, hashes []string) (map[string]orm.UploadedFile, error) {
+	available := make(map[string]orm.UploadedFile, len(hashes))
+	if len(hashes) == 0 {
+		return available, nil
+	}
+	var rows []orm.UploadedFile
+	err := store.DB().WithContext(ctx).
+		Where("create_user_id = ? AND content_hash IN ? AND status IN ? AND deleted_at IS NULL", userID, hashes, []string{UploadedFileStateUploaded, UploadedFileStateBound}).
+		Order("created_at ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		hash := strings.ToLower(strings.TrimSpace(row.ContentHash))
+		if _, ok := available[hash]; ok {
+			continue
+		}
+		var ext uploadedFileExt
+		_ = json.Unmarshal(row.Ext, &ext)
+		info, err := os.Lstat(strings.TrimSpace(ext.StoredPath))
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		available[hash] = row
+	}
+	return available, nil
+}
+
 func parseDocumentPIDFromParentName(parent string) string {
 	parent = strings.TrimSpace(parent)
 	if parent == "" {
@@ -307,6 +405,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = append(resp, UploadFileResponse{
 			UploadFileID: row.UploadFileID,
+			ContentHash:  row.ContentHash,
 			DatasetID:    row.DatasetID,
 			Filename:     ext.OriginalFilename,
 			StoredName:   ext.StoredName,
@@ -546,7 +645,8 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		return
 	}
-	if _, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetUpload); !ok {
+	ds, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetUpload)
+	if !ok {
 		replyDatasetForbidden(w)
 		return
 	}
@@ -572,7 +672,7 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 	folderByPrefix := make(map[string]string) // prefix -> folderID
 	for i := range req.Items {
 		item := &req.Items[i]
-		if item.UploadFileID == "" {
+		if item.UploadFileID == "" && item.ContentHash == "" {
 			continue
 		}
 		relPath := strings.TrimSpace(item.Task.RelativePath)
@@ -589,7 +689,9 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 			folderByPrefix[prefix] = createTopLevelFolder(r.Context(), datasetID, userID, userName, relPath)
 		}
 		item.Task.DocumentPID = folderByPrefix[prefix]
-		item.Task.RelativePath = "" // consumed — no need to re-derive in createTaskFromUploadedFile
+		if item.UploadFileID != "" {
+			item.Task.RelativePath = "" // upload metadata already retains the relative path
+		}
 	}
 
 	for _, item := range req.Items {
@@ -606,6 +708,15 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		for _, expandedItem := range expandedItems {
 			if strings.TrimSpace(expandedItem.UploadFileID) != "" {
 				taskRows, err := createTaskFromUploadedFile(r, datasetID, userID, userName, expandedItem, tType)
+				if err != nil {
+					common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid request", err), http.StatusBadRequest)
+					return
+				}
+				for _, t := range taskRows {
+					resp = append(resp, buildTaskResponse(r, t))
+				}
+			} else if strings.TrimSpace(expandedItem.ContentHash) != "" {
+				taskRows, err := createTaskFromContentHash(r, ds, datasetID, userID, userName, expandedItem, tType)
 				if err != nil {
 					common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid request", err), http.StatusBadRequest)
 					return
@@ -1096,6 +1207,7 @@ func completeUploadInternal(ctx context.Context, session orm.UploadSession, args
 		return CompleteUploadResponse{}, http.StatusInternalServerError, fmt.Errorf("create merged file failed")
 	}
 	var totalSize int64
+	contentHasher := sha256.New()
 	for _, part := range meta.UploadedParts {
 		p := filepath.Join(dir, "parts", fmt.Sprintf("%06d.part", part))
 		in, openErr := os.Open(p)
@@ -1103,7 +1215,7 @@ func completeUploadInternal(ctx context.Context, session orm.UploadSession, args
 			_ = merged.Close()
 			return CompleteUploadResponse{}, http.StatusBadRequest, fmt.Errorf("part not found")
 		}
-		n, copyErr := io.Copy(merged, in)
+		n, copyErr := io.Copy(io.MultiWriter(merged, contentHasher), in)
 		_ = in.Close()
 		if copyErr != nil {
 			_ = merged.Close()
@@ -1166,6 +1278,7 @@ func completeUploadInternal(ctx context.Context, session orm.UploadSession, args
 		}
 		uploaded := orm.UploadedFile{
 			UploadFileID: uploadFileID,
+			ContentHash:  hex.EncodeToString(contentHasher.Sum(nil)),
 			DatasetID:    session.DatasetID,
 			TenantID:     args.Dataset.TenantID,
 			TaskID:       "",
@@ -1185,6 +1298,7 @@ func completeUploadInternal(ctx context.Context, session orm.UploadSession, args
 		return CompleteUploadResponse{
 			UploadID:     session.UploadID,
 			UploadFileID: uploadFileID,
+			ContentHash:  uploaded.ContentHash,
 			DatasetID:    session.DatasetID,
 			StoredPath:   finalPath,
 			ContentURL:   uploadedFileContentPath(session.DatasetID, uploadFileID),
@@ -1885,13 +1999,26 @@ func validateCreateTaskItem(item CreateTaskItem, datasetID, taskType string) err
 		return fmt.Errorf("target_dataset_id is required for copy/move task")
 	}
 	// target_pid can be empty for copy/move, which means moving/copying into dataset root.
-	if strings.TrimSpace(item.UploadFileID) != "" {
+	uploadFileID := strings.TrimSpace(item.UploadFileID)
+	contentHash := strings.ToLower(strings.TrimSpace(item.ContentHash))
+	if uploadFileID != "" && contentHash != "" {
+		return fmt.Errorf("upload_file_id and content_hash cannot be set together")
+	}
+	if uploadFileID != "" || contentHash != "" {
 		if strings.TrimSpace(item.Task.DocumentID) != "" || len(item.Task.DocumentIDs) > 0 {
-			return fmt.Errorf("document_id/document_ids cannot be set when upload_file_id is used")
+			return fmt.Errorf("document_id/document_ids cannot be set when an uploaded file is used")
 		}
 		for _, f := range item.Task.Files {
 			if strings.TrimSpace(f.StoredPath) != "" {
-				return fmt.Errorf("stored_path must not be provided when upload_file_id is used")
+				return fmt.Errorf("stored_path must not be provided when an uploaded file is used")
+			}
+		}
+		if contentHash != "" {
+			if TaskType(taskType) != TaskTypeParse && TaskType(taskType) != TaskTypeParseUploaded {
+				return fmt.Errorf("content_hash is only supported for parse tasks")
+			}
+			if _, err := normalizeFileHashes([]string{contentHash}); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -2155,7 +2282,7 @@ func createUploadedFileRecord(r *http.Request, ds *orm.Dataset, datasetID, userI
 	if err != nil {
 		return orm.UploadedFile{}, uploadedFileExt{}, fmt.Errorf("create upload target failed")
 	}
-	size, err := io.Copy(out, file)
+	size, contentHash, err := copyWithSHA256(out, file)
 	_ = out.Close()
 	if err != nil {
 		return orm.UploadedFile{}, uploadedFileExt{}, fmt.Errorf("save upload file failed")
@@ -2165,11 +2292,99 @@ func createUploadedFileRecord(r *http.Request, ds *orm.Dataset, datasetID, userI
 		return orm.UploadedFile{}, uploadedFileExt{}, fmt.Errorf("normalize upload text encoding failed: %w", err)
 	}
 	ext := uploadedFileExt{StoredPath: finalPath, StoredName: storedName, OriginalFilename: fh.Filename, FileSize: size, ContentType: fh.Header.Get("Content-Type"), RelativePath: relativePath, DocumentPID: documentPID, DocumentTags: tags}
-	row := orm.UploadedFile{UploadFileID: uploadFileID, DatasetID: datasetID, TenantID: ds.TenantID, TaskID: "", DocumentID: "", Status: UploadedFileStateUploaded, Ext: mustJSON(ext), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
+	row := orm.UploadedFile{UploadFileID: uploadFileID, ContentHash: contentHash, DatasetID: datasetID, TenantID: ds.TenantID, TaskID: "", DocumentID: "", Status: UploadedFileStateUploaded, Ext: mustJSON(ext), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 	if err := store.DB().WithContext(r.Context()).Create(&row).Error; err != nil {
 		return orm.UploadedFile{}, uploadedFileExt{}, fmt.Errorf("create uploaded file failed")
 	}
 	return row, ext, nil
+}
+
+func copyWithSHA256(dst io.Writer, src io.Reader) (int64, string, error) {
+	hasher := sha256.New()
+	size, err := io.Copy(io.MultiWriter(dst, hasher), src)
+	if err != nil {
+		return size, "", err
+	}
+	return size, hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func createTaskFromContentHash(r *http.Request, ds *orm.Dataset, datasetID, userID, userName string, item CreateTaskItem, tType string) ([]orm.Task, error) {
+	hashes, err := normalizeFileHashes([]string{item.ContentHash})
+	if err != nil || len(hashes) != 1 {
+		return nil, fmt.Errorf("invalid content_hash")
+	}
+	available, err := findAvailableUploadedFilesByHash(r.Context(), userID, hashes)
+	if err != nil {
+		return nil, fmt.Errorf("query reusable file failed")
+	}
+	source, ok := available[hashes[0]]
+	if !ok {
+		return nil, fmt.Errorf("reusable file not found")
+	}
+
+	var sourceExt uploadedFileExt
+	if err := json.Unmarshal(source.Ext, &sourceExt); err != nil {
+		return nil, fmt.Errorf("reusable file metadata is invalid")
+	}
+	sourcePath := strings.TrimSpace(sourceExt.StoredPath)
+	info, err := os.Lstat(sourcePath)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("reusable file is not available")
+	}
+
+	displayName := firstNonEmpty(strings.TrimSpace(item.Task.DisplayName), strings.TrimSpace(sourceExt.OriginalFilename), filepath.Base(sourcePath))
+	uploadFileID := newUploadID()
+	relativePath := strings.TrimSpace(item.Task.RelativePath)
+	finalDir := buildDatasetDocFileDir(ds.TenantID, datasetID, relativePath, uploadFileID)
+	if err := os.MkdirAll(finalDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create reusable file dir failed")
+	}
+	storedName := storedFileName(displayName, uploadFileID)
+	finalPath := filepath.Join(finalDir, storedName)
+	if err := os.Link(sourcePath, finalPath); err != nil {
+		_ = os.RemoveAll(finalDir)
+		return nil, fmt.Errorf("link reusable file failed: %w", err)
+	}
+
+	now := time.Now().UTC()
+	tags := append([]string(nil), item.Task.DocumentTags...)
+	ext := uploadedFileExt{
+		StoredPath:       finalPath,
+		StoredName:       storedName,
+		OriginalFilename: displayName,
+		FileSize:         info.Size(),
+		ContentType:      sourceExt.ContentType,
+		RelativePath:     relativePath,
+		DocumentPID:      strings.TrimSpace(item.Task.DocumentPID),
+		DocumentTags:     tags,
+	}
+	row := orm.UploadedFile{
+		UploadFileID: uploadFileID,
+		ContentHash:  hashes[0],
+		DatasetID:    datasetID,
+		TenantID:     ds.TenantID,
+		Status:       UploadedFileStateUploaded,
+		Ext:          mustJSON(ext),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   userID,
+			CreateUserName: userName,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	if err := store.DB().WithContext(r.Context()).Create(&row).Error; err != nil {
+		_ = os.RemoveAll(finalDir)
+		return nil, fmt.Errorf("create reusable upload record failed")
+	}
+
+	next := item
+	next.ContentHash = ""
+	next.UploadFileID = uploadFileID
+	tasks, err := createTaskFromUploadedFile(r, datasetID, userID, userName, next, tType)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
 }
 
 func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName string, item CreateTaskItem, tType string) ([]orm.Task, error) {

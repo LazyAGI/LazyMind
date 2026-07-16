@@ -204,7 +204,7 @@ export interface ManagementContext {
 
   // Wizard setup handlers (createWizardSetup)
   resetWizard: () => void;
-  openEditWizard: (record: DataSourceItem) => void;
+  openEditWizard: (record: DataSourceItem) => Promise<void>;
   handleCloseWizard: () => void;
   applySourceType: (type: SourceType) => void;
   openCloudSetupModal: (

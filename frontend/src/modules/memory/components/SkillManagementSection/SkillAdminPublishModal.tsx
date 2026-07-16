@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Button, Input, Modal, Upload, message } from "antd";
-import { InboxOutlined } from "@ant-design/icons";
-import { getLocalizedErrorMessage } from "@/components/request";
+import { DeleteOutlined, InboxOutlined, PaperClipOutlined } from "@ant-design/icons";
 import { publishSkillToMarket } from "../../skillApi";
 import { uploadSkillTempFile } from "../../skillUpload";
 
@@ -30,6 +29,10 @@ export default function SkillAdminPublishModal({
   const handleClose = () => {
     resetForm();
     onClose();
+  };
+
+  const handleClearFile = () => {
+    setSelectedFile(null);
   };
 
   const handleSubmit = async () => {
@@ -65,10 +68,6 @@ export default function SkillAdminPublishModal({
       handleClose();
     } catch (error) {
       console.error("Admin publish skill failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memorySkillAdminPublishFailed")) ||
-          t("admin.memorySkillAdminPublishFailed"),
-      );
     } finally {
       setSubmitting(false);
     }
@@ -104,14 +103,21 @@ export default function SkillAdminPublishModal({
         <Upload.Dragger
           accept=".zip,.tgz,.tar,.gz"
           multiple={false}
-          showUploadList={Boolean(selectedFile)}
+          showUploadList={false}
           beforeUpload={(file) => {
+            const name = file.name.toLowerCase();
+            const valid =
+              name.endsWith(".zip") ||
+              name.endsWith(".tgz") ||
+              name.endsWith(".tar") ||
+              name.endsWith(".gz");
+            if (!valid) {
+              message.warning(t("admin.memorySkillUploadPackageTypeError"));
+              return false;
+            }
             setSelectedFile(file);
             setRepoUrl("");
             return false;
-          }}
-          onRemove={() => {
-            setSelectedFile(null);
           }}
           className="memory-skill-file-drop"
         >
@@ -123,6 +129,22 @@ export default function SkillAdminPublishModal({
           </p>
           <p className="ant-upload-hint">{t("admin.memorySkillUploadFileHint")}</p>
         </Upload.Dragger>
+        {selectedFile ? (
+          <div className="memory-skill-selected-file">
+            <span className="memory-skill-selected-file-name">
+              <PaperClipOutlined />
+              <span title={selectedFile.name}>{selectedFile.name}</span>
+            </span>
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={t("common.delete")}
+              onClick={handleClearFile}
+            />
+          </div>
+        ) : null}
       </div>
     </Modal>
   );

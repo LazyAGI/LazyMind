@@ -58,13 +58,42 @@ func (r *Repository) List(ctx context.Context, userID string, groupIDs []string,
 		like := containsLikePattern(strings.ToLower(filter.Keyword))
 		q = q.Where("(LOWER(name) LIKE ? ESCAPE '!' OR LOWER(description) LIKE ? ESCAPE '!')", like, like)
 	}
+	filterDatasetIDsInMemory := len(filter.DatasetIDs) > 0
+	if filterDatasetIDsInMemory {
+		switch r.db.Dialector.Name() {
+		case "postgres":
+			predicates := make([]string, 0, len(filter.DatasetIDs))
+			args := make([]any, 0, len(filter.DatasetIDs))
+			for _, datasetID := range filter.DatasetIDs {
+				predicates = append(predicates, "dataset_ids @> ?::jsonb")
+				args = append(args, string(datasetIDsJSON([]string{datasetID})))
+			}
+			q = q.Where("("+strings.Join(predicates, " OR ")+")", args...)
+			filterDatasetIDsInMemory = false
+		case "sqlite":
+			q = q.Where("EXISTS (SELECT 1 FROM json_each(eval_sets.dataset_ids) WHERE json_each.value IN ?)", filter.DatasetIDs)
+			filterDatasetIDsInMemory = false
+		}
+	}
+
+	if !filterDatasetIDsInMemory {
+		var total int64
+		if err := q.Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		var rows []orm.EvalSet
+		offset := (filter.Page - 1) * filter.PageSize
+		if err := q.Order("updated_at DESC").Offset(offset).Limit(filter.PageSize).Find(&rows).Error; err != nil {
+			return nil, 0, err
+		}
+		return rows, total, nil
+	}
+
 	var rows []orm.EvalSet
 	if err := q.Order("updated_at DESC").Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
-	if len(filter.DatasetIDs) > 0 {
-		rows = filterRowsByDatasetIDs(rows, filter.DatasetIDs)
-	}
+	rows = filterRowsByDatasetIDs(rows, filter.DatasetIDs)
 	total := int64(len(rows))
 	start := (filter.Page - 1) * filter.PageSize
 	if start >= len(rows) {

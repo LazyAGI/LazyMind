@@ -13,7 +13,6 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
-  ArrowLeftOutlined,
   CheckCircleOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -23,8 +22,7 @@ import {
   SyncOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
-import { getLocalizedErrorMessage } from "@/components/request";
+import { localizeErrorCode } from "@/components/request";
 import {
   checkDatabaseConnection,
   createDatabaseConnection,
@@ -41,7 +39,6 @@ const { Paragraph, Text } = Typography;
 
 export default function DatabaseConnectionsPage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [items, setItems] = useState<DatabaseConnectionItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -56,7 +53,6 @@ export default function DatabaseConnectionsPage() {
       const result = await listDatabaseConnections();
       setItems(result.connections || []);
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseLoadFailed")));
     } finally {
       setLoading(false);
     }
@@ -88,7 +84,6 @@ export default function DatabaseConnectionsPage() {
       setModalOpen(false);
       await refresh();
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseSaveFailed")));
     } finally {
       setSaving(false);
     }
@@ -101,11 +96,10 @@ export default function DatabaseConnectionsPage() {
       if (result.success) {
         message.success(t("admin.dataSourceDatabaseCheckSuccess", { count: result.table_count }));
       } else {
-        message.error(result.message || t("admin.dataSourceDatabaseCheckFailed"));
+        message.error(localizeErrorCode("2000509"));
       }
       await refresh();
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseCheckFailed")));
     } finally {
       setCheckingId("");
     }
@@ -124,7 +118,6 @@ export default function DatabaseConnectionsPage() {
           message.success(t("admin.dataSourceDatabaseDeleted"));
           await refresh();
         } catch (error) {
-          message.error(getLocalizedErrorMessage(error, t("admin.dataSourceDatabaseDeleteFailed")));
           throw error;
         }
       },
@@ -211,14 +204,6 @@ export default function DatabaseConnectionsPage() {
       <div className="admin-page-toolbar data-source-page-toolbar">
         <div className="admin-page-toolbar-left data-source-page-toolbar-left">
           <div>
-            <Button
-              type="link"
-              icon={<ArrowLeftOutlined />}
-              className="data-source-provider-back-button"
-              onClick={() => navigate("/model-providers/cloud-documents")}
-            >
-              {t("modelProvider.cloudDocuments.backToProviders")}
-            </Button>
             <h2 className="admin-page-title">{t("admin.dataSourceDatabaseTitle")}</h2>
             <Paragraph className="data-source-page-subtitle">
               {t("admin.dataSourceDatabaseSubtitle")}

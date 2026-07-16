@@ -3,6 +3,10 @@ import type { Dispatch, SetStateAction } from "react";
 import { message } from "antd";
 import type { TFunction } from "i18next";
 import {
+  getLocalizedErrorMessage,
+  localizeErrorCode,
+} from "@/components/request";
+import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   consumeFeishuDataSourceOAuthResult,
   finishFeishuDataSourceOAuth,
@@ -43,6 +47,11 @@ export function useFeishuOAuthFlow({
       window.clearInterval(oauthAttemptRef.current.timerId);
     }
     oauthAttemptRef.current = null;
+  };
+
+  const isRequestError = (error: unknown) => {
+    const candidate = error as { response?: unknown; request?: unknown };
+    return Boolean(candidate?.response || candidate?.request);
   };
 
   const restorePreviousOauthState = (
@@ -129,9 +138,7 @@ export function useFeishuOAuthFlow({
 
     if (attempt?.previousConnection) {
       restorePreviousOauthState(
-        t("admin.dataSourceOauthReconnectFailed", {
-          message: payload.message ? ` ${payload.message}` : "",
-        }),
+        localizeErrorCode("2000509"),
         "error",
       );
       return;
@@ -157,7 +164,7 @@ export function useFeishuOAuthFlow({
           : item,
       );
     });
-    message.error(payload.message || t("admin.dataSourceOauthFailedRetry"));
+    message.error(localizeErrorCode("2000509"));
   };
 
   const startFeishuOAuth = async (
@@ -247,10 +254,12 @@ export function useFeishuOAuthFlow({
 
       window.location.assign(authorizeUrl);
       return true;
-    } catch (error: any) {
+    } catch (error) {
       restorePreviousOauthState(
-        error?.message || t("admin.dataSourceAuthorizeUrlFailed"),
-        "error",
+        isRequestError(error)
+          ? undefined
+          : getLocalizedErrorMessage(error),
+        isRequestError(error) ? "warning" : "error",
       );
       return false;
     }
@@ -274,13 +283,17 @@ export function useFeishuOAuthFlow({
       });
       setManualOauthModalOpen(false);
       setManualOauthCallbackValue("");
-    } catch (error: any) {
-      applyOauthResult({
-        channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
-        source: "feishu-data-source",
-        status: "error",
-        message: error?.message || t("admin.dataSourceOauthFailedRetry"),
-      });
+    } catch (error) {
+      if (isRequestError(error)) {
+        restorePreviousOauthState();
+      } else {
+        applyOauthResult({
+          channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
+          source: "feishu-data-source",
+          status: "error",
+          message: getLocalizedErrorMessage(error),
+        });
+      }
     } finally {
       setManualOauthSubmitting(false);
     }

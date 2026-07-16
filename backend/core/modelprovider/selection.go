@@ -21,6 +21,7 @@ var allowedSelectionModelTypes = map[string]struct{}{
 	"evo_llm":       {},
 	"vlm":           {},
 	"text2image":    {},
+	"text2video":    {},
 	"embed_main":    {},
 	"tts":           {},
 	"image_editing": {},
@@ -45,15 +46,16 @@ type setSelectedModelsRequest struct {
 }
 
 type selectedModelItem struct {
-	ModelKey                 string `json:"model_key" gorm:"column:model_type"`
-	ModelID                  string `json:"model_id" gorm:"column:model_id"`
-	UserModelProviderID      string `json:"user_model_provider_id" gorm:"column:user_model_provider_id"`
-	UserModelProviderGroupID string `json:"user_model_provider_group_id" gorm:"column:user_model_provider_group_id"`
-	Name                     string `json:"name" gorm:"column:name"`
-	ProviderName             string `json:"provider_name" gorm:"column:provider_name"`
-	GroupName                string `json:"group_name" gorm:"column:group_name"`
-	BaseURL                  string `json:"base_url" gorm:"column:base_url"`
-	Share                    bool   `json:"share" gorm:"column:share"`
+	ModelKey                 string  `json:"model_key" gorm:"column:model_type"`
+	ModelID                  string  `json:"model_id" gorm:"column:model_id"`
+	UserModelProviderID      string  `json:"user_model_provider_id" gorm:"column:user_model_provider_id"`
+	UserModelProviderGroupID string  `json:"user_model_provider_group_id" gorm:"column:user_model_provider_group_id"`
+	Name                     string  `json:"name" gorm:"column:name"`
+	ProviderName             string  `json:"provider_name" gorm:"column:provider_name"`
+	GroupName                string  `json:"group_name" gorm:"column:group_name"`
+	BaseURL                  string  `json:"base_url" gorm:"column:base_url"`
+	Share                    bool    `json:"share" gorm:"column:share"`
+	MaxInputTokens           *string `json:"max_input_tokens" gorm:"column:max_input_tokens"`
 }
 
 type selectedModelsResponse struct {
@@ -311,6 +313,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 				"m.user_model_provider_group_id, "+
 				"m.name, "+
 				"m.provider_name, "+
+				"m.max_input_tokens, "+
 				"g.name AS group_name, "+
 				"g.base_url",
 		).

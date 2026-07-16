@@ -39,6 +39,7 @@ func TestRuntimeConfigUsesPlatformUserPathsByDefault(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	t.Setenv(localHostHomeEnvVar, home)
 	t.Setenv("HOME", home)
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 	t.Setenv(runtimeRootEnvVar, "")
 	t.Setenv(localSQLiteDirEnvVar, "")
 	t.Setenv(localMilvusLiteDBPathEnvVar, "")
@@ -176,6 +177,7 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	}
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 		Profile:       "desktop",
+		OwnerToken:    "desktop-test-owner",
 		RepoRoot:      repo,
 		RuntimeRoot:   runtimeRoot,
 		ResourcesRoot: resources,
@@ -201,13 +203,17 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	if paths.LocalProxyBin != filepath.Join(resources, "bin", "local-proxy") {
 		t.Fatalf("local-proxy bin = %q", paths.LocalProxyBin)
 	}
-	if paths.AlgorithmPython != filepath.Join(resources, "python", "algorithm", "bin", "python") {
+	if paths.AlgorithmPython != venvExecutable(filepath.Join(resources, "python", "algorithm"), "python") {
 		t.Fatalf("algorithm python = %q", paths.AlgorithmPython)
 	}
 	if paths.FileWatcherBaseRoot != filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher") {
 		t.Fatalf("file watcher base root = %q", paths.FileWatcherBaseRoot)
 	}
-	if !strings.HasSuffix(paths.LogsDir, filepath.Join("LazyMind")) {
+	wantLogSuffix := filepath.Join("LazyMind")
+	if runtime.GOOS == "windows" {
+		wantLogSuffix = filepath.Join("LazyMind", "Logs")
+	}
+	if !strings.HasSuffix(paths.LogsDir, wantLogSuffix) {
 		t.Fatalf("desktop logs dir should use platform log root, got %q", paths.LogsDir)
 	}
 	if strings.HasPrefix(paths.FileWatcherBaseRoot, repo+string(os.PathSeparator)) {
@@ -255,7 +261,7 @@ func TestEnsurePathUnderRootResolvesSymlinks(t *testing.T) {
 	if err := os.WriteFile(python, []byte("python"), 0o755); err != nil {
 		t.Fatalf("write python: %v", err)
 	}
-	if err := os.Symlink(realRoot, linkRoot); err != nil {
+	if err := createDirectoryLink(realRoot, linkRoot); err != nil {
 		t.Fatalf("symlink runtime root: %v", err)
 	}
 	linkPython := filepath.Join(linkRoot, "runtimes", "python", "bin", "python3")
@@ -322,6 +328,23 @@ func TestEnsureAllDirsCreatesRuntimeDataDirs(t *testing.T) {
 	}
 }
 
+func TestEnsureRuntimeDirsCreatesDocumentScanDirectory(t *testing.T) {
+	repo := t.TempDir()
+	watchDir := filepath.Join(t.TempDir(), "Documents", "LazyMind")
+	t.Setenv("LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR", watchDir)
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("desktop", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := ensureRuntimeDirs(cfg, paths); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	if info, err := os.Stat(watchDir); err != nil || !info.IsDir() {
+		t.Fatalf("expected document scan directory %s: info=%v err=%v", watchDir, info, err)
+	}
+}
+
 func TestEnsureAllDirsUsesOnlyApprovedTopLevelDirs(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -350,7 +373,7 @@ func TestEnsureAllDirsUsesOnlyApprovedTopLevelDirs(t *testing.T) {
 		if !entry.IsDir() {
 			continue
 		}
-		if !allowed[entry.Name()] {
+		if !allowed[strings.ToLower(entry.Name())] {
 			t.Fatalf("unexpected top-level runtime dir %q", entry.Name())
 		}
 	}
@@ -492,6 +515,119 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 		}
 		if proc.Namespace != "host" {
 			t.Fatalf("process %s namespace = %q, want host", name, proc.Namespace)
+		}
+		if len(proc.Environment) == 0 {
+			t.Fatalf("process %s has no explicit environment", name)
+		}
+		if strings.HasPrefix(proc.Command, "env ") {
+			t.Fatalf("process %s uses POSIX env command: %q", name, proc.Command)
+		}
+		if runtime.GOOS == "windows" && strings.Contains(proc.Command, "'") {
+			t.Fatalf("process %s command is not cmd-compatible: %q", name, proc.Command)
+		}
+	}
+}
+
+func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:         defaultProfileValue(),
+		RepoRoot:        repo,
+		MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local", ".bin", "local-runtime-manager"))
+	var out strings.Builder
+	if err := manager.processCompose.WriteGeneratedConfig(&out, repo, paths, cfg, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
+		t.Fatalf("write generated config: %v", err)
+	}
+	var parsed processComposeConfig
+	if err := yaml.Unmarshal([]byte(out.String()), &parsed); err != nil {
+		t.Fatalf("generated config invalid yaml: %v\n%s", err, out.String())
+	}
+	for _, name := range []string{
+		localProxyProcessName,
+		authServiceProcessName,
+		coreProcessName,
+		frontendProcessName,
+		milvusLiteProcessName,
+		processorServerProcessName,
+		algoProcessName,
+		docServerProcessName,
+		chatProcessName,
+	} {
+		if _, ok := parsed.Processes[name]; !ok {
+			t.Fatalf("warmup graph missing process %s", name)
+		}
+	}
+	for _, name := range []string{fileWatcherProcessName, scanControlPlaneProcessName, processorWorkerProcessName} {
+		if _, ok := parsed.Processes[name]; ok {
+			t.Fatalf("warmup graph unexpectedly contains process %s", name)
+		}
+	}
+	for name, process := range parsed.Processes {
+		for _, item := range process.Environment {
+			if strings.HasPrefix(item, "LAZYMIND_MAINTENANCE_MODE=") {
+				t.Fatalf("process %s received installer scenario environment: %s", name, item)
+			}
+		}
+	}
+}
+
+func TestInstallerWarmupDoesNotCreateFileWatcherImportDirectory(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:         defaultProfileValue(),
+		RepoRoot:        repo,
+		MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	cfg.FileWatcher.WatchHostDir = filepath.Join(t.TempDir(), "Documents", "LazyMind")
+	if err := ensureRuntimeDirs(cfg, paths); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	if _, err := os.Stat(cfg.FileWatcher.WatchHostDir); !os.IsNotExist(err) {
+		t.Fatalf("warmup touched file watcher import directory %q: %v", cfg.FileWatcher.WatchHostDir, err)
+	}
+}
+
+func TestProcessComposeDesktopUsesHiddenWindowsShellWrapper(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific process-compose shell")
+	}
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	cfg.Profile = "desktop"
+	execPath := filepath.Join(repo, "local-runtime-manager.exe")
+	manager := NewRuntimeManager(&fakeRunner{t: t}, execPath)
+	var out strings.Builder
+	if err := manager.processCompose.WriteGeneratedConfig(&out, repo, paths, cfg, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
+		t.Fatalf("write generated config: %v", err)
+	}
+
+	var parsed processComposeConfig
+	if err := yaml.Unmarshal([]byte(out.String()), &parsed); err != nil {
+		t.Fatalf("generated config invalid yaml: %v", err)
+	}
+	if parsed.Shell == nil {
+		t.Fatal("Desktop config has no Windows shell wrapper")
+	}
+	if parsed.Shell.Command != execPath || parsed.Shell.Argument != "shell" {
+		t.Fatalf("shell = %#v, want command %q argument shell", parsed.Shell, execPath)
+	}
+	for name, process := range parsed.Processes {
+		if !strings.HasPrefix(process.Command, "internal ") {
+			t.Fatalf("Desktop process %s command = %q, want internal sidecar command", name, process.Command)
 		}
 	}
 }
@@ -729,6 +865,7 @@ func TestRuntimeManagerUpRequiresBundledLazyLLMSourceInDesktopProfile(t *testing
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 		Profile:       "desktop",
+		OwnerToken:    "desktop-test-owner",
 		RepoRoot:      repo,
 		RuntimeRoot:   filepath.Join(t.TempDir(), "runtime"),
 		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),
@@ -834,6 +971,7 @@ func TestGoToolEnvUsesHostCacheOutsideRuntimeRoot(t *testing.T) {
 	}
 	hostHome := filepath.Join(t.TempDir(), "host-home")
 	t.Setenv(localHostHomeEnvVar, hostHome)
+	t.Setenv("LOCALAPPDATA", filepath.Join(hostHome, "AppData", "Local"))
 	t.Setenv("HOME", paths.ServiceHome)
 	t.Setenv("GOCACHE", filepath.Join(paths.BuildRoot, "cache", "go-build"))
 	t.Setenv("GOMODCACHE", filepath.Join(paths.RuntimeRoot, "go", "pkg", "mod"))
@@ -876,7 +1014,7 @@ func TestPrepareFrontendNodeModulesLinksSourceTreeToRuntimeRoot(t *testing.T) {
 	if err := prepareFrontendNodeModules(paths, frontendDir); err != nil {
 		t.Fatalf("prepare frontend node_modules: %v", err)
 	}
-	target, ok := symlinkTarget(nodeModules)
+	target, ok := directoryLinkTarget(nodeModules)
 	if !ok {
 		t.Fatalf("node_modules should be a symlink into runtime root")
 	}
@@ -906,7 +1044,7 @@ func TestPrepareFrontendNodeModulesKeepsRuntimeRootSymlink(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(runtimeNodeModules, ".modules.yaml"), []byte(frontendModulesYAML(t, paths, runtimeNodeModules)), 0o644); err != nil {
 		t.Fatalf("write pnpm metadata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(runtimeNodeModules, ".bin", "vite"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(frontendToolPath(runtimeNodeModules, "vite"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write vite bin: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(runtimeNodeModules, "vite", "bin", "vite.js"), []byte("console.log('vite')\n"), 0o644); err != nil {
@@ -915,13 +1053,13 @@ func TestPrepareFrontendNodeModulesKeepsRuntimeRootSymlink(t *testing.T) {
 	if err := os.MkdirAll(frontendDir, 0o755); err != nil {
 		t.Fatalf("mkdir frontend dir: %v", err)
 	}
-	if err := os.Symlink(runtimeNodeModules, nodeModules); err != nil {
+	if err := createDirectoryLink(runtimeNodeModules, nodeModules); err != nil {
 		t.Fatalf("link node_modules: %v", err)
 	}
 	if err := prepareFrontendNodeModules(paths, frontendDir); err != nil {
 		t.Fatalf("prepare frontend node_modules: %v", err)
 	}
-	target, ok := symlinkTarget(nodeModules)
+	target, ok := directoryLinkTarget(nodeModules)
 	if !ok || target != runtimeNodeModules {
 		t.Fatalf("node_modules symlink = %q ok=%v, want %q", target, ok, runtimeNodeModules)
 	}

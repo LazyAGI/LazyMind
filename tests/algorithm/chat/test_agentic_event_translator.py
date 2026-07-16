@@ -102,6 +102,44 @@ def test_translator_counts_tool_call_turns_not_individual_calls():
     assert translator.tool_call_turns == 2
 
 
+def test_translator_renders_every_parallel_tool_call_and_result():
+    translator = AgentEventFrameTranslator(query='批量读取这些网页')
+    calls = [
+        {
+            'id': f'call-{index}',
+            'function': {
+                'name': 'url_fetch',
+                'arguments': {'url': f'https://example.test/{index}'},
+            },
+        }
+        for index in range(5)
+    ]
+
+    call_text = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({'tag': 'tool_calls', 'tool_calls': calls})
+    )
+    assert call_text.count('<tp id=') == 5
+    assert call_text.count('<tool_call>') == 5
+    for index in range(5):
+        assert f'https://example.test/{index}' in call_text
+
+    results = [
+        {
+            'id': f'call-{index}',
+            'name': 'url_fetch',
+            'result': {'final_url': f'https://example.test/{index}'},
+        }
+        for index in range(5)
+    ]
+    result_text = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({'tag': 'tool_results', 'tool_results': results})
+    )
+    assert result_text.count('<trp id=') == 5
+    assert result_text.count('<tool_result>') == 5
+
+
 def test_searchbase_tool_rendering_extracts_provider_brand():
     text, preview_value = _tool_call_frame_text({
         'id': 'call-tavily',
@@ -172,3 +210,23 @@ def test_searchbase_tool_rendering_supports_zh_and_content_methods():
     }, language='zh', preview_value=preview_value)
 
     assert '已成功读取 **Sciverse** 搜索结果 **论文标题/https://example.test/paper** 的内容。' in result_text
+
+
+def test_skill_reference_rendering_does_not_treat_content_error_words_as_failure():
+    result_text = _tool_result_frame_text({
+        'id': 'call-reference',
+        'name': 'read_reference',
+        'result': 'Error handling for failed PDF operations is documented here.',
+    }, language='zh', preview_value='reference.md')
+
+    assert '已成功加载 **reference.md** 技能的参考资料。' in result_text
+
+
+def test_skill_reference_rendering_preserves_explicit_tool_failure():
+    result_text = _tool_result_frame_text({
+        'id': 'call-reference',
+        'name': 'read_reference',
+        'result': '[Tool Error] FileNotFoundError: reference.md',
+    }, language='zh', preview_value='reference.md')
+
+    assert '未能读取 **reference.md** 技能参考资料。' in result_text

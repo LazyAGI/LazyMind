@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { RcFile } from "antd/es/upload";
-import { Badge, Button, Input, message, Spin, Tooltip } from "antd";
+import { Badge, Button, message, Spin, Tooltip } from "antd";
 import {
   BulbOutlined,
   CloseOutlined,
@@ -39,11 +39,16 @@ import "./index.scss";
 import { ChatConfig } from "../ChatConfigs";
 import ChatSelector from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
+import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
 import type { ConversationPluginSettings } from "../../utils/request";
 import { PluginSessionApi } from "../../utils/request";
 import { usePluginStore } from "@/modules/chat/store/pluginPanel";
 import BatchChatComponent, { BatchChatImperativeProps } from "../BatchChat";
+import MentionEditor, {
+  type ChatMention,
+  type MentionEditorRef,
+} from "./MentionEditor";
 
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
@@ -53,11 +58,8 @@ import { formatFileSize } from "@/modules/chat/utils";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
 import { Popover, Tag } from "antd";
-
-const { TextArea } = Input;
 
 /**
  * Shows a button in the toolbar when there are dismissed plugin sessions.
@@ -107,11 +109,8 @@ function DismissedPluginRestoreButton({
       // Reload active session so PluginPanel re-appears immediately without needing a page refresh.
       usePluginStore.getState().loadActiveSession(conversationId);
       setOpen(false);
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { error?: string } } };
-      message.error(
-        err?.response?.data?.error ?? t("chat.pluginRestoreFailed"),
-      );
+    } catch {
+      // API errors are reported by the shared request interceptor.
     } finally {
       setRestoring(null);
     }
@@ -286,6 +285,7 @@ function preprocessUpload(
 
 export interface SendMessageParams {
   text: string;
+  mentions?: ChatMention[];
   citeMessage?: string;
   citeMessages?: string[];
   clearInput?: boolean;
@@ -448,7 +448,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const promptRef = useRef<PromptImperativeProps>(null);
     const batchChatRef = useRef<BatchChatImperativeProps | null>(null);
     const innerRef = useRef<HTMLDivElement>(null);
-    const textAreaRef = useRef<any>(null);
+    const textAreaRef = useRef<MentionEditorRef>(null);
     const isComposingRef = useRef(false);
     const [isUploading, setIsUploading] = useState(false);
     const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<
@@ -458,6 +458,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
     const [text, setText] = useState("");
+    const [mentions, setMentions] = useState<ChatMention[]>([]);
     const disabledNoticeId = useId();
     const previousSessionIdRef = useRef<string | undefined>(undefined);
     const hasSentMessageRef = useRef(false);
@@ -741,6 +742,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setNewMessage(false);
       const sendParams = {
         text: normalizedText,
+        mentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
         fileList,
@@ -764,6 +766,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         clearInputContent(sessionId);
       }
       onChange("");
+      setMentions([]);
       setText("");
       onClearCiteMessage?.();
     };
@@ -809,18 +812,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           debouncedSaveInput(sessionId, nextPrompt);
         }
         setTimeout(() => onHeightChange?.(), 0);
-      } catch (error) {
-        message.error(
-          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-            t("common.requestFailed"),
-        );
+      } catch {
+        // API errors are reported by the shared request interceptor.
       } finally {
         setPolishingSuggestionKey(null);
       }
     };
 
     const handlePaste = useCallback(
-      (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      (e: React.ClipboardEvent<HTMLDivElement>) => {
         const clipboardData = e.clipboardData;
         if (disabled) {
           e.preventDefault();
@@ -888,37 +888,19 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           if (files.length > 0) {
             fileListRef.current?.uploadFiles(files);
           }
+        } else {
+          // Keep the structured editor plain-text only; pasted HTML must not be
+          // able to manufacture trusted mention nodes.
+          e.preventDefault();
+          document.execCommand(
+            "insertText",
+            false,
+            clipboardData.getData("text/plain"),
+          );
         }
       },
       [disabled, disabledReason, fileList.length, t],
     );
-
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (
-        e.key !== "Enter" ||
-        e.shiftKey ||
-        isUploading ||
-        disabled ||
-        isPromptPolishing ||
-        isStreaming
-      ) {
-        return;
-      }
-
-      // IME candidate confirmation also uses Enter, and some browsers only
-      // expose the composition state through the native event / keyCode 229.
-      if (
-        isComposingRef.current ||
-        e.nativeEvent.isComposing ||
-        e.nativeEvent.keyCode === 229
-      ) {
-        return;
-      }
-
-      e.preventDefault();
-      handleSend();
-      setNewMessage(false);
-    };
 
     return (
       <div
@@ -1003,27 +985,28 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   )}
                 </div>
               )}
-              <TextArea
+              <MentionEditor
                 ref={textAreaRef}
-                autoSize={{ minRows: 2, maxRows: 5 }}
-                className="message-input"
                 placeholder={placeholder || t("chat.inputPlaceholder")}
                 value={value}
-                onChange={(e) => handleInputChange(e.target.value)}
+                onChange={handleInputChange}
+                onMentionsChange={setMentions}
                 onPaste={handlePaste}
-                onCompositionStart={() => {
-                  isComposingRef.current = true;
+                onCompositionChange={(composing) => {
+                  isComposingRef.current = composing;
                 }}
-                onCompositionEnd={() => {
-                  isComposingRef.current = false;
+                onSend={() => {
+                  if (
+                    isComposingRef.current ||
+                    isUploading ||
+                    disabled ||
+                    isPromptPolishing ||
+                    isStreaming
+                  ) return;
+                  handleSend();
+                  setNewMessage(false);
                 }}
-                onKeyDown={handleKeyDown}
                 disabled={disabled || isPromptPolishing}
-                aria-describedby={
-                  disabled && (disabledReason || disabledDescription)
-                    ? disabledNoticeId
-                    : undefined
-                }
               />
 
               <div className="input-bottom-actions">
@@ -1082,30 +1065,32 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   >
                     {t("chat.promptTemplate")}
                   </div>
-                  <Tooltip title={skillDepositTooltip}>
-                    <div
-                      className={`input-bottom-actions-left-item skill-deposit-action${
-                        isSkillDepositDisabled ? " is-disabled" : ""
-                      }`}
-                      aria-disabled={isSkillDepositDisabled}
-                      role="button"
-                      tabIndex={isSkillDepositDisabled ? -1 : 0}
-                      onClick={handleSkillDeposit}
-                      onKeyDown={(event) => {
-                        if (
-                          isSkillDepositDisabled ||
-                          (event.key !== "Enter" && event.key !== " ")
-                        ) {
-                          return;
-                        }
-                        event.preventDefault();
-                        handleSkillDeposit();
-                      }}
-                    >
-                      <BulbOutlined />
-                      {t("chat.skillDeposit")}
-                    </div>
-                  </Tooltip>
+                  {isChatContent && (
+                    <Tooltip title={skillDepositTooltip}>
+                      <div
+                        className={`input-bottom-actions-left-item skill-deposit-action${
+                          isSkillDepositDisabled ? " is-disabled" : ""
+                        }`}
+                        aria-disabled={isSkillDepositDisabled}
+                        role="button"
+                        tabIndex={isSkillDepositDisabled ? -1 : 0}
+                        onClick={handleSkillDeposit}
+                        onKeyDown={(event) => {
+                          if (
+                            isSkillDepositDisabled ||
+                            (event.key !== "Enter" && event.key !== " ")
+                          ) {
+                            return;
+                          }
+                          event.preventDefault();
+                          handleSkillDeposit();
+                        }}
+                      >
+                        <BulbOutlined />
+                        {t("chat.skillDeposit")}
+                      </div>
+                    </Tooltip>
+                  )}
                   <ChatConfigModal
                     key={
                       configResetKey != null
@@ -1176,6 +1161,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           setNewMessage(false);
                           const sendParams: SendMessageParams = {
                             text: normalizedText,
+                            mentions,
                             citeMessage: normalizedCiteMessages.join("\n\n"),
                             citeMessages: normalizedCiteMessages,
                             fileList,
@@ -1192,6 +1178,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                             clearMultiData();
                           }
                           onChange("");
+                          setMentions([]);
                           setText("");
                           onClearCiteMessage?.();
                         }}
@@ -1258,7 +1245,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         </div>
         <PromptModal
           ref={promptRef}
-          onSelectPrompt={(prompt) => onChange(text + " " + prompt)}
+          onSelectPrompt={(prompt) => onChange(appendPromptToDraft(text, prompt))}
         />
         <BatchChatComponent ref={batchChatRef} cancelFn={() => {}} />
       </div>

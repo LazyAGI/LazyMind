@@ -1,10 +1,12 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -21,7 +23,12 @@ import (
 	"lazymind/core/store"
 )
 
-const chatToolsPath = "/api/chat/tools"
+const (
+	chatToolsPath           = "/api/chat/tools"
+	chatToolsRequestTimeout = 30 * time.Second
+)
+
+var chatToolsHTTPClient = &http.Client{Timeout: chatToolsRequestTimeout}
 
 type chatToolGroup map[string]any
 
@@ -37,6 +44,7 @@ type toolListQuery struct {
 }
 
 func ListTools(w http.ResponseWriter, r *http.Request) {
+	common.SetLanguageResponseHeaders(w, common.NormalizeLocale(r.Header.Get("Accept-Language")))
 	userID := store.UserID(r)
 	if strings.TrimSpace(userID) == "" {
 		userID = "0"
@@ -47,7 +55,7 @@ func ListTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	toolsResp, err := fetchChatTools(r.Context(), db, userID)
+	toolsResp, err := fetchChatTools(r.Context(), db, userID, r.Header.Get("Accept-Language"))
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", err), http.StatusBadGateway)
 		return
@@ -88,7 +96,7 @@ func setToolDisabled(w http.ResponseWriter, r *http.Request, disabled bool) {
 	}
 
 	if disabled {
-		toolsResp, err := fetchChatTools(r.Context(), db, userID)
+		toolsResp, err := fetchChatTools(r.Context(), db, userID, r.Header.Get("Accept-Language"))
 		if err != nil {
 			common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", err), http.StatusBadGateway)
 			return
@@ -118,7 +126,7 @@ func setToolDisabled(w http.ResponseWriter, r *http.Request, disabled bool) {
 	})
 }
 
-func fetchChatTools(ctx context.Context, db *gorm.DB, userID string) (*chatToolsResponse, error) {
+func fetchChatTools(ctx context.Context, db *gorm.DB, userID, acceptLanguage string) (*chatToolsResponse, error) {
 	reqBody := map[string]any{}
 	if err := applyChatRuntimeConfigs(ctx, db, userID, reqBody); err != nil {
 		return nil, err
@@ -127,12 +135,30 @@ func fetchChatTools(ctx context.Context, db *gorm.DB, userID string) (*chatTools
 	if err != nil {
 		return nil, err
 	}
-	respBytes, statusCode, err := common.HTTPPost(ctx, common.JoinURL(chatServiceURL(), chatToolsPath), "application/json", bodyBytes)
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		common.JoinURL(chatServiceURL(), chatToolsPath),
+		bytes.NewReader(bodyBytes),
+	)
 	if err != nil {
 		return nil, err
 	}
-	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("upstream %s returned %d", chatToolsPath, statusCode)
+	req.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(acceptLanguage) != "" {
+		req.Header.Set("Accept-Language", acceptLanguage)
+	}
+	resp, err := chatToolsHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("upstream %s returned %d", chatToolsPath, resp.StatusCode)
 	}
 	var out chatToolsResponse
 	if err := json.Unmarshal(respBytes, &out); err != nil {

@@ -17,13 +17,13 @@ import (
 	"lazymind/core/common/orm"
 )
 
-// Session status constants. Only three states are valid in the new state machine:
-// active (SubAgent running), waiting (awaiting user input), completed (session ended).
-// The "failed" and "interrupted" statuses are retired — they are now attributes of
-// individual sub_agent_tasks, not of the session itself.
+// Session status constants. Interrupted attempts remain resumable as waiting, while
+// a failed attempt is reflected at session level so the UI does not present it as an
+// approval checkpoint.
 const (
 	SessionStatusActive    = "active"
 	SessionStatusCompleted = "completed"
+	SessionStatusFailed    = "failed"
 	SessionStatusWaiting   = "waiting"
 )
 
@@ -38,17 +38,19 @@ const (
 
 // CreateSessionInput holds fields required to insert a new plugin_sessions row.
 type CreateSessionInput struct {
-	SessionID        string
-	ConversationID   string
-	PluginID         string
-	PluginRef        string
-	PluginRevisionID string
-	PluginRevisionNo int64
-	PluginTreeHash   string
-	PluginRemoteRoot string
-	TriggerHistoryID string
-	CurrentStepID    string
-	CreateUserID     string
+	SessionID          string
+	ConversationID     string
+	PluginID           string
+	PluginRef          string
+	PluginRevisionID   string
+	PluginRevisionNo   int64
+	PluginTreeHash     string
+	PluginRemoteRoot   string
+	GraphHash          string
+	GraphSchemaVersion string
+	TriggerHistoryID   string
+	CurrentStepID      string
+	CreateUserID       string
 }
 
 // CreateSession inserts a new plugin_sessions record.
@@ -71,6 +73,7 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 		ConversationID: in.ConversationID,
 		PluginID:       in.PluginID,
 		PluginRef:      in.PluginRef, PluginRevisionID: in.PluginRevisionID, PluginRevisionNo: in.PluginRevisionNo, PluginTreeHash: in.PluginTreeHash, PluginRemoteRoot: in.PluginRemoteRoot,
+		GraphHash: in.GraphHash, GraphSchemaVersion: in.GraphSchemaVersion,
 		TriggerHistoryID: in.TriggerHistoryID,
 		Status:           SessionStatusActive,
 		CurrentStepID:    in.CurrentStepID,
@@ -132,10 +135,10 @@ func DismissSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 			}
 			return err
 		}
-		// If active, mark running steps interrupted before dismissing.
+		// If active, mark queued/running steps interrupted before dismissing.
 		if s.Status == SessionStatusActive {
 			if err := tx.Model(&orm.PluginSessionStep{}).
-				Where("session_id = ? AND status = ?", sessionID, StepStatusRunning).
+				Where("session_id = ? AND status IN ?", sessionID, []string{StepStatusPending, StepStatusRunning}).
 				Updates(map[string]any{"status": StepStatusInterrupted, "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
@@ -304,6 +307,7 @@ func CreateSessionStep(ctx context.Context, db *gorm.DB, sessionID, stepID, task
 		Attempt:   attempt,
 		TaskID:    taskID,
 		Status:    StepStatusPending,
+		Validity:  "effective",
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -314,14 +318,15 @@ func CreateSessionStep(ctx context.Context, db *gorm.DB, sessionID, stepID, task
 }
 
 // UpdateStepStatus mirrors sub_agent_tasks.status changes into plugin_session_steps.
-// Terminal states (succeeded, interrupted) are never downgraded: once a step has been
-// interrupted by the user, a late EOF from the SubAgent stream must not reset it to failed.
+// Terminal states are first-writer-wins: once a step has been interrupted by the
+// user, delayed start/done/error frames from the SubAgent stream cannot revive it.
 func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) error {
 	q := db.WithContext(ctx).Model(&orm.PluginSessionStep{}).
 		Where("task_id = ?", taskID)
-	if status == StepStatusFailed {
-		// Only write failed if the step is not already in a terminal state.
-		q = q.Where("status NOT IN ?", []string{StepStatusSucceeded, StepStatusInterrupted})
+	terminal := []string{StepStatusSucceeded, StepStatusFailed, StepStatusInterrupted}
+	if status == StepStatusRunning || status == StepStatusSucceeded ||
+		status == StepStatusFailed || status == StepStatusInterrupted {
+		q = q.Where("status NOT IN ? OR status = ?", terminal, status)
 	}
 	return q.Updates(map[string]any{
 		"status":     status,
@@ -385,22 +390,6 @@ func ListStepIntents(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.
 		return nil, err
 	}
 	return rows, nil
-}
-
-// IsEndStepLatest reports whether the most recently created step in the session has
-// step_id == "__end__". This is the canonical way to decide whether a session should be
-// considered completed vs. waiting: if the user rolls back by triggering a new step after
-// __end__, the __end__ record remains but is no longer the latest, so this returns false.
-func IsEndStepLatest(ctx context.Context, db *gorm.DB, sessionID string) (bool, error) {
-	var step orm.PluginSessionStep
-	err := db.WithContext(ctx).
-		Where("session_id = ?", sessionID).
-		Order("created_at DESC").
-		First(&step).Error
-	if err != nil {
-		return false, err
-	}
-	return step.StepID == "__end__", nil
 }
 
 // WriteSlotRevision inserts a new AI slot revision and manages the selected flag.
@@ -495,18 +484,19 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 		}
 
 		row := &orm.PluginSlotRevision{
-			ID:           "psr_" + common.GenerateID(),
-			SessionID:    sessionID,
-			SlotID:       slotID,
-			Revision:     revision,
-			ListIndex:    finalListIndex,
-			Selected:     true,
-			ChangeSource: "ai",
-			ArtifactSeq:  artifactSeq,
-			Slot:         artifactKey,
-			StepID:       stepID,
-			Attempt:      attempt,
-			CreatedAt:    now,
+			ID:                "psr_" + common.GenerateID(),
+			SessionID:         sessionID,
+			SlotID:            slotID,
+			Revision:          revision,
+			ListIndex:         finalListIndex,
+			Selected:          true,
+			ChangeSource:      "ai",
+			ArtifactSeq:       artifactSeq,
+			Slot:              artifactKey,
+			StepID:            stepID,
+			Attempt:           attempt,
+			ProducerAttemptID: step.ID,
+			CreatedAt:         now,
 		}
 		if err := tx.Create(row).Error; err != nil {
 			return err

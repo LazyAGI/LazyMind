@@ -9,10 +9,10 @@ describing what was produced and whether it meets the criteria below.
 - `subject_analysis` must NOT contain WORKFLOW:/NEXT_STEPS:/SKIP_STEPS: lines or step-id routing lists.
 - `workflow_routing` must be saved with WORKFLOW, NEXT_STEPS, and SKIP_STEPS on separate lines.
 - Analyze step is text-only planning. Do NOT call kb_search/web_search/image_search_tool here.
-- For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE, next step is always `collect_materials`.
+- For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE / CREATE_ANIMATED / ANIMATE_UPLOAD, next step is always `collect_materials`.
 - For REFERENCE_GENERATE, missing material_images at this step is expected; next step is `collect_materials`.
-- For FIND_AND_EDIT or EDIT_UPLOAD, missing raw source image or edit prompt is expected; next step is `collect_materials`.
-- Not acceptable when `material_images`, `image_output`, or `prompt_used` were saved here (they belong in later steps).
+- For FIND_AND_EDIT, EDIT_UPLOAD, or ANIMATE_UPLOAD, missing raw source image or edit/motion prompt is expected; next step is `collect_materials`.
+- Not acceptable when `material_images`, `raw_source_image`, `image_output`, or `prompt_used` were saved here (they belong in later steps).
 - Not acceptable when the artifact is missing, too short, or routing metadata is missing from `workflow_routing`.
 - Not acceptable when filters.kb_id was set but subject_analysis omits KB style findings from kb_search.
 - After 2+ consecutive failures for this step, state that the step should not be retried again.
@@ -23,7 +23,12 @@ describing what was produced and whether it meets the criteria below.
 - For REFERENCE_GENERATE, 1–3 validated `material_images` must be saved (never more than 3); next step is `optimize_prompt`.
 - For FIND_AND_EDIT, 1–3 validated `material_images` must be saved (never more than 3); each URL must have passed `validate_image_ref`.
 - For CREATE_NEW / KB_STYLE, collecting 1–3 useful references is recommended before optimize_prompt.
-- For FIND_AND_EDIT or EDIT_UPLOAD, `image_output` must be saved; `prompt_used` is optional here — next step is `optimize_prompt` (or `enhance_image` if prompt_used was already saved).
+- For CREATE_ANIMATED, material_images are optional (0–3) when the text description is already clear.
+  If the user asked to find a photo first, save that photo as `image_output` (plus material_images).
+- For FIND_AND_EDIT / EDIT_UPLOAD, `raw_source_image` must be saved;
+  EDIT_UPLOAD must also save the same upload as `material_images`.
+- For ANIMATE_UPLOAD, `image_output` must be saved and the same upload as `material_images`.
+  `prompt_used` is optional here — next step is `optimize_prompt`.
 - `material_summary` should be saved with a brief Chinese summary of search/selection (what was found, which image was chosen, gaps).
 - Not acceptable when every candidate URL fails validation, no required artifacts were saved, or web tools are unavailable when they are required.
 - After 2+ consecutive failures, state that the step should not be retried again.
@@ -31,14 +36,24 @@ describing what was produced and whether it meets the criteria below.
 ### optimize_prompt
 - Acceptable when `prompt_used` is saved in English.
 - For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: generation prompt of at least 30 words; next step is `generate_image`.
-- For FIND_AND_EDIT / EDIT_UPLOAD: clear edit instruction when `image_output` is available; next step is `enhance_image`.
+- For FIND_AND_EDIT / EDIT_UPLOAD: clear edit instruction when `raw_source_image` is available; next step is `enhance_image`.
+- For CREATE_ANIMATED / ANIMATE_UPLOAD: clear English **video motion** prompt; next step is `generate_image`.
 - Not acceptable when the artifact is missing, too short, or not in English.
 - After 2+ consecutive failures, state that the step should not be retried again.
 
 ### generate_image
-- Acceptable when `image_output` is saved with a valid local path or http(s) URL.
-- For CREATE_NEW or KB_STYLE, this is usually the final image unless the user explicitly asked for editing.
-- Not acceptable when image_generator failed, only text was produced, or no image was saved.
+- Acceptable when required outputs for the workflow are saved.
+- For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: still image via `image_generator` into `generated_image_output` (sort_order=1).
+- For CREATE_ANIMATED / ANIMATE_UPLOAD: in one turn emit N parallel `video_generator`
+  tool_calls (each prompt marked "Sticker i of N"; video side capped at 3 concurrent),
+  then in the next turn emit N parallel `video_to_gif` tool_calls; afterward
+  **sequentially** append artifacts in i-order (**omit sort_order** on first full run;
+  use sort_order=k only on partial retry to overwrite row k). Save GIF as `gif_output`;
+  when an origin exists append the same origin into `image_output` in the same order
+  (never put GIF into image_output). Use caption='Sticker i' on saves.
+- N comes from the user request (e.g. 三个→3), default 1.
+- `video_output` is optional; when saved it may appear in the Result tab (empty columns are hidden).
+- Not acceptable when generation/tools failed, GIF was saved into `image_output`, or animated flow produced no `gif_output`.
 
 ### enhance_image
 - Acceptable when `enhanced_image_output` is saved with a valid local path or http(s) URL.
@@ -59,9 +74,10 @@ Name the **earliest upstream step** that should be re-run so ChatAgent can call
 | collect_materials | Wrong WORKFLOW or subject routing | `analyze_subject` |
 | optimize_prompt | Prompt misses KB style or subject details | `analyze_subject` |
 | optimize_prompt | Prompt wording/style only, subject is fine | `optimize_prompt` (retry) |
-| generate_image | Image off-topic or wrong subject | `analyze_subject` |
-| generate_image | Composition/style wrong but subject OK | `optimize_prompt` |
-| generate_image | Same prompt, just regenerate | `generate_image` (retry) |
+| generate_image | Image/GIF off-topic or wrong subject | `analyze_subject` |
+| generate_image | Composition/style/motion wrong but subject OK | `optimize_prompt` |
+| generate_image | Same prompt, just regenerate (still or sticker) | `generate_image` (retry) |
+| generate_image | ANIMATE_UPLOAD wrong first-frame upload | `collect_materials` |
 | enhance_image | Wrong source photo or edit target | `collect_materials` |
 | enhance_image | Edit instruction wrong, source photo OK | `optimize_prompt` or `collect_materials` |
 | enhance_image | Minor edit issue, same source/instruction OK | `enhance_image` (retry) |

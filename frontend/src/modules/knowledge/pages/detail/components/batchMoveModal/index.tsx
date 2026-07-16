@@ -8,6 +8,7 @@ import {
 } from "@/modules/knowledge/utils/request";
 import { DocTypeEnum } from "@/api/generated/knowledge-client";
 import type { BatchMoveDocument } from "../KnowledgeTable";
+import { localizeErrorCode } from "@/components/request";
 
 type TreeOption = Omit<DefaultOptionType, "label"> & {
   title: string;
@@ -130,7 +131,7 @@ const BatchMoveModal = ({
       const tasks = createRes.data.tasks || [];
       const taskIds = tasks.map((t) => t.task_id).filter(Boolean);
       if (!taskIds.length) {
-        message.error(t("knowledge.createMoveTaskFailed"));
+        message.error(localizeErrorCode("2000509"));
         return;
       }
 
@@ -140,7 +141,6 @@ const BatchMoveModal = ({
       onCancel();
     } catch (error) {
       console.error("Failed to create batch move task:", error);
-      message.error(t("knowledge.moveFailedRetry"));
     } finally {
       setLoading(false);
     }

@@ -24,6 +24,30 @@ import lazyllm.tools.agent as _agent_mod
 from lazymind.config import config as _cfg
 
 
+def tool_registration_name(tool: Any) -> str:
+    """Return a stable identity for a callable, Toolkit, or wrapped registration."""
+    if isinstance(tool, tuple) and len(tool) == 2:
+        return tool_registration_name(tool[0])
+    if isinstance(tool, dict):
+        return str(tool.get('name') or '')
+    name = str(getattr(tool, '__name__', '') or '')
+    return name or tool.__class__.__name__
+
+
+def deduplicate_tools(tools: List[Any]) -> List[Any]:
+    """Stably remove duplicate tool registrations by public registration identity."""
+    result: List[Any] = []
+    seen: set[str] = set()
+    for tool in tools:
+        name = tool_registration_name(tool)
+        if name and name in seen:
+            continue
+        if name:
+            seen.add(name)
+        result.append(tool)
+    return result
+
+
 def build_react_agent(
     llm: Any,
     tools: List[Any],
@@ -66,7 +90,7 @@ def build_react_agent(
     if extra_stop_condition is not None:
         kwargs['extra_stop_condition'] = extra_stop_condition
 
-    return _agent_mod.ReactAgent(llm=llm, tools=tools, **kwargs)
+    return _agent_mod.ReactAgent(llm=llm, tools=deduplicate_tools(tools), **kwargs)
 
 
 async def drive_agent(

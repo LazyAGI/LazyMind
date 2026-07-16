@@ -1,6 +1,10 @@
 import type { CloudConnectionResponse } from "@/api/generated/auth-client";
 import type { FeishuAuthAccount } from "../common/feishuAccounts";
-import type { FeishuConnectionStatus } from "../oauth/types";
+import type {
+  CloudDataSourceProvider,
+  FeishuConnectionStatus,
+  FeishuDataSourceConnection,
+} from "../oauth/types";
 
 export function isFeishuAppId(value?: string | null) {
   return /^cli_[a-z0-9]+$/i.test(`${value || ""}`.trim());
@@ -41,6 +45,42 @@ export function normalizeFeishuAccountStatus(status?: string): FeishuConnectionS
 
 export function isFeishuAccountAuthValid(account: FeishuAuthAccount) {
   return account.status === "connected" && Boolean(account.connection?.connectionId?.trim());
+}
+
+/**
+ * Resolve a usable OAuth connection for browse/save.
+ * List API usually drops the hydrated oauthConnection object and only keeps authConnectionId.
+ */
+export function resolveCloudAuthConnection(
+  preferred: FeishuDataSourceConnection | null | undefined,
+  authConnectionId: string | null | undefined,
+  accounts: FeishuAuthAccount[],
+  provider: CloudDataSourceProvider,
+): FeishuDataSourceConnection | null {
+  const preferredId = `${preferred?.connectionId || ""}`.trim();
+  if (preferredId) {
+    return preferred!;
+  }
+
+  const connectionId = `${authConnectionId || ""}`.trim();
+  if (!connectionId) {
+    return null;
+  }
+
+  const matched = accounts.find(
+    (account) => `${account.connection?.connectionId || ""}`.trim() === connectionId,
+  )?.connection;
+  if (matched) {
+    return matched;
+  }
+
+  return {
+    provider,
+    connectionId,
+    status: "connected",
+    accountName: connectionId,
+    grantedScopes: [],
+  };
 }
 
 export function formatValidFeishuAccountNames(

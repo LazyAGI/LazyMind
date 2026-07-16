@@ -74,6 +74,7 @@ type CreateTaskItem struct {
 	TaskID       string      `json:"task_id,omitempty"`
 	CrossDataset bool        `json:"cross_dataset,omitempty"`
 	UploadFileID string      `json:"upload_file_id,omitempty"`
+	ContentHash  string      `json:"content_hash,omitempty"`
 }
 
 type CreateTaskRequest struct {
@@ -157,6 +158,7 @@ type CompleteUploadResponse struct {
 	UploadID        string `json:"upload_id"`
 	DocumentID      string `json:"document_id,omitempty"`
 	UploadFileID    string `json:"upload_file_id,omitempty"`
+	ContentHash     string `json:"content_hash,omitempty"`
 	DatasetID       string `json:"dataset_id,omitempty"`
 	StoredPath      string `json:"stored_path"`
 	ParseStoredPath string `json:"parse_stored_path,omitempty"`
@@ -183,6 +185,7 @@ type UploadFileRequest struct {
 
 type UploadFileResponse struct {
 	UploadFileID string   `json:"upload_file_id"`
+	ContentHash  string   `json:"content_hash,omitempty"`
 	DatasetID    string   `json:"dataset_id,omitempty"`
 	Filename     string   `json:"filename"`
 	StoredName   string   `json:"stored_name"`
@@ -201,6 +204,14 @@ type UploadFileResponse struct {
 
 type UploadFilesResponse struct {
 	Files []UploadFileResponse `json:"files"`
+}
+
+type CheckFileHashesRequest struct {
+	Hashes []string `json:"hashes"`
+}
+
+type CheckFileHashesResponse struct {
+	MissingHashes []string `json:"missing_hashes"`
 }
 
 type uploadedFileExt struct {

@@ -254,7 +254,7 @@ const Detail = () => {
         TaskServiceApi().listTasks(id, {
           taskStatus: "running",
           pageSize: 1000,
-        }),
+        }, { silentError: true } as never),
       onSuccess: ({ data = {} }) => {
         const newTaskList = data.tasks || [];
         // Tasks in WORKING state are actively being parsed by the algorithm service.
@@ -443,7 +443,11 @@ const Detail = () => {
                 <Tooltip title={t("knowledge.authorize")}>
                   <Button
                     icon={<SettingOutlined />}
-                    style={{ marginLeft: "12px", width: "24px", height: "24px" }}
+                    style={{
+                      marginLeft: "12px",
+                      width: "24px",
+                      height: "24px",
+                    }}
                     onClick={() =>
                       navigate({
                         pathname: `/lib/knowledge/auth/${id}`,

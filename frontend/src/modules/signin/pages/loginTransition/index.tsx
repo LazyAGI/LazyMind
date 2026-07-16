@@ -1,7 +1,11 @@
 import { Button, message, Spin } from "antd";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { BASE_URL, getLocalizedErrorMessage } from "@/components/request";
+import {
+  BASE_URL,
+  getLocalizedErrorMessage,
+  localizeErrorCode,
+} from "@/components/request";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
 
@@ -43,12 +47,12 @@ const LoginTransition = () => {
       setLoading(false);
       if (!res.ok) {
         message.error(
-          getLocalizedErrorMessage(data, t("auth.loginRetryHint")) ||
-            t("auth.loginRetryHint"),
+          getLocalizedErrorMessage({ response: { data, status: res.status } }) ||
+            localizeErrorCode("2000509"),
         );
       }
     } catch {
-      message.error(t("auth.loginRetryHint"));
+      message.error(localizeErrorCode("2000509"));
       setLoading(false);
     }
   };

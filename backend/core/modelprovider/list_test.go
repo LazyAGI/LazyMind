@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
@@ -30,6 +30,7 @@ func setupListProviderTestDB(t *testing.T) *gorm.DB {
 		&orm.DefaultModel{},
 		&orm.UserModelProvider{},
 		&orm.UserModelProviderGroup{},
+		&orm.UserModelProviderGroupModel{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -93,6 +94,126 @@ func TestListUserProvidersKeywordIsCaseInsensitive(t *testing.T) {
 	provider, ok := providers[0].(map[string]any)
 	if !ok || provider["name"] != "Qwen" {
 		t.Fatalf("expected Qwen provider, got %#v", providers[0])
+	}
+}
+
+func TestListUserProvidersReturnsCatalogDescriptionForRequestedLanguage(t *testing.T) {
+	db := setupListProviderTestDB(t)
+	if err := SeedModelCatalog(t.Context(), db, "../config/model_catalog.yaml"); err != nil {
+		t.Fatalf("seed model catalog: %v", err)
+	}
+	if err := SeedDatasourceCatalog(t.Context(), db, "../config/datasource_catalog.yaml"); err != nil {
+		t.Fatalf("seed datasource catalog: %v", err)
+	}
+	var providerCount int64
+	if err := db.Model(&orm.DefaultModelProvider{}).Count(&providerCount).Error; err != nil {
+		t.Fatalf("count default providers: %v", err)
+	}
+	if providerCount != 18 {
+		t.Fatalf("expected 18 catalog providers, got %d", providerCount)
+	}
+
+	var defaultProvider orm.DefaultModelProvider
+	if err := db.Where("name = ?", "Qwen").Take(&defaultProvider).Error; err != nil {
+		t.Fatalf("load default provider: %v", err)
+	}
+	var descriptions map[string]string
+	if err := json.Unmarshal(defaultProvider.DescriptionI18n, &descriptions); err != nil {
+		t.Fatalf("decode catalog descriptions: %v", err)
+	}
+	if strings.TrimSpace(descriptions[common.LocaleZhCN]) == "" || strings.TrimSpace(descriptions[common.LocaleEnUS]) == "" {
+		t.Fatalf("expected complete catalog descriptions, got %#v", descriptions)
+	}
+
+	now := time.Now()
+	userProvider := orm.UserModelProvider{
+		ID:                     "user-qwen",
+		DefaultModelProviderID: defaultProvider.ID,
+		Name:                   defaultProvider.Name,
+		Description:            "legacy user description",
+		BaseURL:                defaultProvider.BaseURL,
+		Category:               defaultProvider.Category,
+		Capabilities:           defaultProvider.Capabilities,
+		BaseModel: orm.BaseModel{
+			CreateUserID: "user-1",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}
+	if err := db.Create(&userProvider).Error; err != nil {
+		t.Fatalf("create user provider: %v", err)
+	}
+	if err := db.Create(&orm.UserModelProviderGroup{
+		ID:                  "qwen-group",
+		UserModelProviderID: userProvider.ID,
+		Name:                "Qwen",
+		BaseURL:             defaultProvider.BaseURL,
+		APIKey:              "secret",
+		IsVerified:          true,
+		BaseModel: orm.BaseModel{
+			CreateUserID: "user-1",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create provider group: %v", err)
+	}
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	assertDescription := func(t *testing.T, path, header, want string, handler http.HandlerFunc) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-User-Id", "user-1")
+		if header != "" {
+			req.Header.Set("Accept-Language", header)
+		}
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get("Content-Language"); got != common.NormalizeLocale(header) {
+			t.Fatalf("unexpected Content-Language %q", got)
+		}
+		var payload struct {
+			Data listResponse `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if len(payload.Data.Providers) != 1 || payload.Data.Providers[0].Description != want {
+			t.Fatalf("expected description %q, got %#v", want, payload.Data.Providers)
+		}
+	}
+
+	assertDescription(
+		t,
+		"/api/core/model_providers?category=model&keyword=Qwen",
+		"en-US",
+		descriptions[common.LocaleEnUS],
+		ListUserProviders,
+	)
+	assertDescription(
+		t,
+		"/api/core/model_providers?category=model&keyword=Qwen",
+		"fr-FR",
+		descriptions[common.LocaleZhCN],
+		ListUserProviders,
+	)
+	assertDescription(
+		t,
+		"/api/core/model_providers:with_groups",
+		"en",
+		descriptions[common.LocaleEnUS],
+		ListUserProvidersWithGroups,
+	)
+	var unchangedUserProvider orm.UserModelProvider
+	if err := db.Where("id = ?", userProvider.ID).Take(&unchangedUserProvider).Error; err != nil {
+		t.Fatalf("reload user provider: %v", err)
+	}
+	if unchangedUserProvider.Description != "legacy user description" {
+		t.Fatalf("user provider description should not be backfilled, got %q", unchangedUserProvider.Description)
 	}
 }
 
@@ -161,7 +282,7 @@ func TestBuildListItemsReturnsConfigurationFlagFromVerifiedGroups(t *testing.T) 
 		t.Fatalf("create unverified group: %v", err)
 	}
 
-	items := buildListItems(t.Context(), db, rows)
+	items := buildListItems(t.Context(), db, rows, common.LocaleZhCN)
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
@@ -249,7 +370,7 @@ func TestBuildListItemsAllowsVerifiedCustomBaseURLWithoutAPIKey(t *testing.T) {
 		t.Fatalf("create custom verified group: %v", err)
 	}
 
-	items := buildListItems(t.Context(), db, rows)
+	items := buildListItems(t.Context(), db, rows, common.LocaleZhCN)
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
@@ -274,7 +395,7 @@ func TestBuildListItemsAddsMinerULocalPresetWhenConfigured(t *testing.T) {
 			BaseURL:                "https://mineru.net/api/v4/",
 			Category:               "ocr",
 		},
-	})
+	}, common.LocaleZhCN)
 
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
@@ -300,7 +421,7 @@ func TestBuildListItemsOmitsMinerULocalPresetWithoutConfiguredURL(t *testing.T) 
 			BaseURL:                "https://mineru.net/api/v4/",
 			Category:               "ocr",
 		},
-	})
+	}, common.LocaleZhCN)
 
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))

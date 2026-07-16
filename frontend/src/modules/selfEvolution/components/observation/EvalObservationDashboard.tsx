@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Empty, Spin, Tag } from "antd";
 import { useTranslation } from "react-i18next";
-import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
+import { axiosInstance } from "@/components/request";
 import {
   AGENT_API_BASE,
+  getCatalogApiErrorMessage,
   hasEmbeddedGateEvalCases,
   isCanceledRequest,
   isEmptyResultPayload,
@@ -101,7 +102,7 @@ export function EvalObservationDashboard({
           reportId: summary.reportId,
           loading: false,
           loaded: true,
-          error: getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.badcaseLoadFailed")),
+          error: getCatalogApiErrorMessage(error),
         }));
       });
 
@@ -152,7 +153,7 @@ export function EvalObservationDashboard({
         setTraceState({
           loading: false,
           data: undefined,
-          error: getLocalizedErrorMessage(error, t("selfEvolutionRun.observation.observationDetailLoadFailed")),
+          error: getCatalogApiErrorMessage(error),
           traceId,
         });
       });

@@ -2,6 +2,7 @@ package remotefs
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,7 @@ import (
 	"lazymind/core/skillv2/testutil"
 )
 
-func TestRemoteFSDir_CreatesEmptyPackage(t *testing.T) {
+func TestRemoteFSDir_CreatesDraftPackage(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
@@ -32,11 +33,21 @@ func TestRemoteFSDir_CreatesEmptyPackage(t *testing.T) {
 	if skill.IsEnabled {
 		t.Fatal("remote-fs empty package is_enabled = true, want false")
 	}
-	if got := testutil.CountRows(t, db, "skill_revisions", "skill_id = ?", skill.ID); got != 1 {
-		t.Fatalf("empty head revision count = %d, want 1", got)
+	if skill.HeadRevisionID != nil {
+		t.Fatalf("remote-fs draft package head_revision_id = %v, want nil", skill.HeadRevisionID)
+	}
+	if got := testutil.CountRows(t, db, "skill_revisions", "skill_id = ?", skill.ID); got != 0 {
+		t.Fatalf("draft package revision count = %d, want 0", got)
 	}
 	if got := testutil.CountRows(t, db, "skill_drafts", "skill_id = ?", skill.ID); got != 1 {
 		t.Fatalf("draft count = %d, want 1", got)
+	}
+	var draft testutil.SkillDraftRow
+	if err := db.Where("skill_id = ?", skill.ID).Take(&draft).Error; err != nil {
+		t.Fatalf("query created draft: %v", err)
+	}
+	if draft.BaseRevisionID != nil || draft.TaskID != "task1" || draft.DraftStatus != "pending_confirm" {
+		t.Fatalf("created draft = %#v, want create draft without base", draft)
 	}
 
 	list := httptest.NewRecorder()
@@ -44,6 +55,83 @@ func TestRemoteFSDir_CreatesEmptyPackage(t *testing.T) {
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "new-skill") {
 		t.Fatalf("list category status=%d body=%s", list.Code, list.Body.String())
 	}
+}
+
+func TestRemoteFSDir_AutoModeMarksDraftForAutoCommit(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	body, _ := json.Marshal(map[string]any{"path": "skills/research/auto-skill", "recursive": true})
+	rec := httptest.NewRecorder()
+	handler.Dir(rec, httptest.NewRequest(http.MethodPost, remoteDirURL("user_001", "session-auto")+"&mode=auto", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mkdir auto package status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var skill testutil.SkillRow
+	if err := db.Where("relative_root = ?", "research/auto-skill").Take(&skill).Error; err != nil {
+		t.Fatalf("query auto skill: %v", err)
+	}
+	if !skill.AutoEvo || skill.HeadRevisionID != nil {
+		t.Fatalf("auto skill = %#v, want auto_evo draft without head", skill)
+	}
+	var draft testutil.SkillDraftRow
+	if err := db.Where("skill_id = ?", skill.ID).Take(&draft).Error; err != nil {
+		t.Fatalf("query auto draft: %v", err)
+	}
+	if draft.DraftStatus != "auto_pending" || draft.TaskID != "session-auto" {
+		t.Fatalf("auto draft = %#v", draft)
+	}
+}
+
+func TestRemoteFSNewPackage_FirstCommitCreatesRevisionOne(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	objects := NewLocalObjectStore(t.TempDir())
+	blobs := NewBlobStore(db.DB, objects)
+	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: blobs})
+	committer := NewCommitter(CommitterDeps{DB: db.DB, BlobStore: blobs})
+
+	createPackage(t, handler, "skills/research/new-skill")
+	write := httptest.NewRecorder()
+	handler.Content(write, httptest.NewRequest(
+		http.MethodPut,
+		remoteContentURL("skills/research/new-skill/SKILL.md", "user_001", "task-mkdir", ""),
+		strings.NewReader("# New Skill\n"),
+	))
+	if write.Code != http.StatusOK {
+		t.Fatalf("write SKILL.md status=%d body=%s", write.Code, write.Body.String())
+	}
+
+	var skill testutil.SkillRow
+	if err := db.Where("relative_root = ?", "research/new-skill").Take(&skill).Error; err != nil {
+		t.Fatalf("query created skill: %v", err)
+	}
+	if got := testutil.CountRows(t, db, "skill_revisions", "skill_id = ?", skill.ID); got != 0 {
+		t.Fatalf("revision count before commit = %d, want 0", got)
+	}
+	var draft testutil.SkillDraftRow
+	if err := db.Where("skill_id = ?", skill.ID).Take(&draft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+
+	resp, err := committer.CommitDraft(context.Background(), CommitDraftRequest{
+		SkillID:      skill.ID,
+		UserID:       "user_001",
+		DraftVersion: draft.Version,
+	})
+	if err != nil {
+		t.Fatalf("commit initial draft: %v", err)
+	}
+	if resp.RevisionNo != 1 {
+		t.Fatalf("revision_no = %d, want 1", resp.RevisionNo)
+	}
+	testutil.AssertHeadRevision(t, db, skill.ID, resp.RevisionID)
+	if got := testutil.CountRows(t, db, "skill_revisions", "skill_id = ? AND parent_revision_id IS NULL", skill.ID); got != 1 {
+		t.Fatalf("initial revision count = %d, want 1", got)
+	}
+	testutil.AssertRevisionEntries(t, db, resp.RevisionID, []testutil.ExpectedEntry{
+		{Path: "SKILL.md", EntryType: "file", FileType: "markdown", HasBlob: true},
+	})
+	testutil.AssertNoDraftEntries(t, db, skill.ID)
 }
 
 func TestRemoteFSDirAndWrite_MaterializeParents(t *testing.T) {

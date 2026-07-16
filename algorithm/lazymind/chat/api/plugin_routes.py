@@ -2,16 +2,12 @@
 
 Routes:
     POST /api/plugin/driver              DriverAgent evaluation endpoint (called by Go EventLoop).
-    POST /api/plugin/step-cancel         Enqueue cancel signal into the step_done FileSystemQueue (called by Go :stop).
-    POST /api/plugin/step-started        Enqueue step-started signal to acknowledge advance_step launch.
-    POST /api/plugin/step-done           Enqueue step-done signal to unblock advance_step (called by Go notifyStepDone).
     GET  /api/plugin/slot-binding        Slot binding lookup (called by Go OnArtifactEvent).
     GET  /api/plugins                    List all loaded plugins.
     GET  /api/plugins/{plugin_id}        Get plugin spec (supports Accept-Language for i18n labels).
 """
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -21,7 +17,6 @@ from lazymind.chat.plugin import plugin_loader
 from lazymind.chat.plugin.driver_agent import DriverEvaluationError, evaluate_step
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 
 class DriverRequest(BaseModel):
@@ -38,46 +33,12 @@ class DriverResponse(BaseModel):
     message: str  # Natural-language assessment passed verbatim to ChatAgent as user input
 
 
-class StepCancelRequest(BaseModel):
-    session_id: str
-    step_id: str
-
-
-class StepCancelResponse(BaseModel):
-    ok: bool
-
-
 class TaskCancelRequest(BaseModel):
     task_id: Optional[str] = None
     conversation_id: Optional[str] = None
 
 
 class TaskCancelResponse(BaseModel):
-    ok: bool
-
-
-class StepDoneRequest(BaseModel):
-    conversation_id: str
-    session_id: str
-    step_id: str
-    status: str
-    summary: str = ''
-    chat_session_id: str = ''
-
-
-class StepDoneResponse(BaseModel):
-    ok: bool
-
-
-class StepStartedRequest(BaseModel):
-    conversation_id: str
-    session_id: str
-    step_id: str
-    task_id: str = ''
-    chat_session_id: str = ''
-
-
-class StepStartedResponse(BaseModel):
     ok: bool
 
 
@@ -103,108 +64,6 @@ async def plugin_driver(req: DriverRequest) -> DriverResponse:
     except DriverEvaluationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return DriverResponse(message=result.get('message', ''))
-
-
-@router.post('/api/plugin/step-cancel', response_model=StepCancelResponse, summary='Cancel a running plugin step')
-async def step_cancel(req: StepCancelRequest) -> StepCancelResponse:
-    """Enqueue a cancel signal for a running plugin step.
-
-    Called by the Go EventLoop when the user stops chat generation.
-    The signal is written into the FileSystemQueue that _wait_for_step_done polls,
-    causing the dynamic-mode advance_step tool to unblock and return immediately.
-    """
-    import json
-    try:
-        from lazyllm.common.queue import FileSystemQueue
-        queue_key = f'step_done_{req.session_id}_{req.step_id}'
-        fsq = FileSystemQueue(klass=queue_key)
-        fsq.enqueue(json.dumps({'tag': 'cancel'}))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-    return StepCancelResponse(ok=True)
-
-
-@router.post(
-    '/api/plugin/step-started',
-    response_model=StepStartedResponse,
-    summary='Notify step launch to acknowledge advance_step',
-)
-async def step_started_notify(req: StepStartedRequest) -> StepStartedResponse:
-    """Enqueue a step-started signal so that advance_step knows Go accepted the step.
-
-    Dynamic-mode advance_step is still triggered through the normal streaming
-    task_created event. This ack closes the protocol gap: ChatAgent waits for Go
-    to persist and launch the plugin_step before it starts waiting for step-done.
-    """
-    import json
-    import lazyllm
-    try:
-        from lazyllm.common.queue import FileSystemQueue
-        from lazymind.chat.service.chat_service import _active_sessions
-        sid = req.chat_session_id or _active_sessions.get(req.conversation_id)
-        if not sid:
-            logger.warning(
-                '[plugin.signal] step_started missing chat sid conv=%s session=%s step=%s task=%s',
-                req.conversation_id, req.session_id, req.step_id, req.task_id,
-            )
-            return StepStartedResponse(ok=False)
-        queue_key = f'step_started_{req.session_id}_{req.step_id}'
-        msg = json.dumps({'tag': 'step_started', 'task_id': req.task_id}, ensure_ascii=False)
-        lazyllm.globals._init_sid(sid=sid)
-        FileSystemQueue(klass=queue_key).enqueue(msg)
-        logger.info(
-            '[plugin.signal] step_started enqueued conv=%s session=%s chat_sid=%s step=%s task=%s queue=%s',
-            req.conversation_id, req.session_id, sid, req.step_id, req.task_id, queue_key,
-        )
-    except Exception as exc:
-        logger.exception(
-            '[plugin.signal] step_started failed conv=%s session=%s step=%s task=%s',
-            req.conversation_id, req.session_id, req.step_id, req.task_id,
-        )
-        raise HTTPException(status_code=500, detail=str(exc))
-    return StepStartedResponse(ok=True)
-
-
-@router.post(
-    '/api/plugin/step-done',
-    response_model=StepDoneResponse,
-    summary='Notify step completion to unblock advance_step',
-)
-async def step_done_notify(req: StepDoneRequest) -> StepDoneResponse:
-    """Enqueue a step-done signal so that advance_step's _wait_for_step_done unblocks.
-
-    Called by the Go EventLoop (notifyStepDone) when a dynamic-mode SubAgent reaches
-    terminal status.  Looks up the ChatAgent's sid via _active_sessions so the signal
-    is written under the correct FileSystemQueue key.
-    """
-    import json
-    import lazyllm
-    try:
-        from lazyllm.common.queue import FileSystemQueue
-        from lazymind.chat.service.chat_service import _active_sessions
-        sid = req.chat_session_id or _active_sessions.get(req.conversation_id)
-        if not sid:
-            logger.warning(
-                '[plugin.signal] step_done missing chat sid conv=%s session=%s step=%s status=%s',
-                req.conversation_id, req.session_id, req.step_id, req.status,
-            )
-            return StepDoneResponse(ok=False)
-        queue_key = f'step_done_{req.session_id}_{req.step_id}'
-        msg = json.dumps({'status': req.status, 'summary': req.summary}, ensure_ascii=False)
-        lazyllm.globals._init_sid(sid=sid)
-        FileSystemQueue(klass=queue_key).enqueue(msg)
-        logger.info(
-            '[plugin.signal] step_done enqueued conv=%s session=%s chat_sid=%s '
-            'step=%s status=%s summary_len=%d queue=%s',
-            req.conversation_id, req.session_id, sid, req.step_id, req.status, len(req.summary or ''), queue_key,
-        )
-    except Exception as exc:
-        logger.exception(
-            '[plugin.signal] step_done failed conv=%s session=%s step=%s status=%s',
-            req.conversation_id, req.session_id, req.step_id, req.status,
-        )
-        raise HTTPException(status_code=500, detail=str(exc))
-    return StepDoneResponse(ok=True)
 
 
 @router.post('/api/plugin/task-cancel', response_model=TaskCancelResponse, summary='Cancel a running SubAgent task')

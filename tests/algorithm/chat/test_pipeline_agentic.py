@@ -50,7 +50,6 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
                     'url_fetch',
                     'multimodal',
                     'vocab_learn',
-                    'memory_editor',
                     'skill_editor',
                     'feishu',
                 ],

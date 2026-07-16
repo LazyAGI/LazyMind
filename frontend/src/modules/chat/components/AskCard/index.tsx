@@ -50,8 +50,6 @@ interface AskCardProps {
   onAnswerChange?: (index: number, ans: AnswerState) => void;
 }
 
-const OTHER_OPTION = "其他";
-
 export type AnswerState =
   | { type: "boolean"; value: string | null }
   | { type: "single"; value: string | null; otherText: string }
@@ -71,16 +69,16 @@ function initAnswer(q: AskQuestion): AnswerState {
   }
 }
 
-function isAnswered(ans: AnswerState): boolean {
+function isAnswered(ans: AnswerState, otherOption: string): boolean {
   switch (ans.type) {
     case "boolean":
       return ans.value !== null;
     case "single":
       if (!ans.value) return false;
-      return ans.value !== OTHER_OPTION || ans.otherText.trim().length > 0;
+      return ans.value !== otherOption || ans.otherText.trim().length > 0;
     case "multiple":
       if (ans.value.length === 0) return false;
-      if (ans.value.includes(OTHER_OPTION))
+      if (ans.value.includes(otherOption))
         return ans.otherText.trim().length > 0;
       return true;
     case "text":
@@ -92,6 +90,8 @@ function formatAnswer(
   q: AskQuestion,
   ans: AnswerState,
   choices: string[],
+  otherOption: string,
+  answerSeparator: string,
 ): string {
   switch (ans.type) {
     case "boolean":
@@ -102,17 +102,17 @@ function formatAnswer(
       const origChoices = q.choices ?? [];
       const origIdx = origChoices.indexOf(raw);
       const label = origIdx >= 0 ? (choices[origIdx] ?? raw) : raw;
-      const val = raw === OTHER_OPTION ? ans.otherText.trim() : label;
+      const val = raw === otherOption ? ans.otherText.trim() : label;
       return `${q.text}: ${val}`;
     }
     case "multiple": {
       const origChoices = q.choices ?? [];
       const parts = ans.value.map((v) => {
-        if (v === OTHER_OPTION) return ans.otherText.trim();
+        if (v === otherOption) return ans.otherText.trim();
         const origIdx = origChoices.indexOf(v);
         return origIdx >= 0 ? (choices[origIdx] ?? v) : v;
       });
-      return `${q.text}: ${parts.join("、")}`;
+      return `${q.text}: ${parts.join(answerSeparator)}`;
     }
     case "text":
       return `${q.text}: ${ans.value.trim()}`;
@@ -129,6 +129,7 @@ function EditableChoice({
   disabled: boolean;
   onChange: (next: string) => void;
 }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<any>(null);
@@ -174,7 +175,7 @@ function EditableChoice({
         <EditOutlined
           className="ask-wizard__choice-edit-icon"
           onClick={startEdit}
-          title="Edit option"
+          title={t("chat.askCardEditOption")}
         />
       )}
     </span>
@@ -189,6 +190,8 @@ export default function AskCard({
   onAnswerChange,
 }: AskCardProps) {
   const { t } = useTranslation();
+  const otherOption = t("chat.askCardOtherOption");
+  const answerSeparator = t("chat.askCardAnswerSeparator");
   const { questions, title, description } = askPending;
   const total = questions.length;
 
@@ -206,12 +209,12 @@ export default function AskCard({
 
   const currentQ = questions[currentIndex]!;
   const currentAns = answers[currentIndex]!;
-  const currentAnswered = isAnswered(currentAns);
-  const allAnswered = answers.every(isAnswered);
+  const currentAnswered = isAnswered(currentAns, otherOption);
+  const allAnswered = answers.every((answer) => isAnswered(answer, otherOption));
   const currentChoices = customChoices[currentIndex] ?? currentQ.choices ?? [];
 
   const progressPercent = Math.round(
-    (answers.filter(isAnswered).length / total) * 100,
+    (answers.filter((answer) => isAnswered(answer, otherOption)).length / total) * 100,
   );
 
   const updateAnswer = (
@@ -242,7 +245,13 @@ export default function AskCard({
   const handleSubmit = () => {
     if (disabled || !allAnswered) return;
     const lines = questions.map((q, i) =>
-      formatAnswer(q, answers[i]!, customChoices[i] ?? q.choices ?? []),
+      formatAnswer(
+        q,
+        answers[i]!,
+        customChoices[i] ?? q.choices ?? [],
+        otherOption,
+        answerSeparator,
+      ),
     );
     const structured: AskAnswersStructured = {
       ask_id: askPending.ask_id,
@@ -267,7 +276,7 @@ export default function AskCard({
   return (
     <div
       className={`ask-wizard${disabled ? " ask-wizard--disabled" : ""}`}
-      aria-label="Ask card"
+      aria-label={t("chat.askCardAria")}
     >
       {/* Header */}
       <div className="ask-wizard__header">
@@ -307,7 +316,10 @@ export default function AskCard({
         <div className="ask-wizard__answer-area">
           {currentQ.type === "boolean" && (
             <div className="ask-wizard__boolean-buttons">
-              {(currentChoices.length > 0 ? currentChoices : ["是", "否"]).map(
+              {(currentChoices.length > 0
+                ? currentChoices
+                : [t("common.yes"), t("common.no")]
+              ).map(
                 (c, ci) => (
                   <Button
                     key={ci}
@@ -350,7 +362,7 @@ export default function AskCard({
                           ? currentAns.otherText
                           : "",
                     },
-                    chosen !== OTHER_OPTION,
+                    chosen !== otherOption,
                   );
                 }}
                 disabled={disabled}
@@ -370,13 +382,13 @@ export default function AskCard({
                 ))}
               </Radio.Group>
               {currentAns.type === "single" &&
-                currentAns.value === OTHER_OPTION && (
+                currentAns.value === otherOption && (
                   <Input
                     value={currentAns.otherText}
                     onChange={(e) =>
                       updateAnswer(currentIndex, {
                         type: "single",
-                        value: OTHER_OPTION,
+                        value: otherOption,
                         otherText: e.target.value,
                       })
                     }
@@ -419,7 +431,7 @@ export default function AskCard({
                 ))}
               </Checkbox.Group>
               {currentAns.type === "multiple" &&
-                currentAns.value.includes(OTHER_OPTION) && (
+                currentAns.value.includes(otherOption) && (
                   <Input
                     value={
                       currentAns.type === "multiple" ? currentAns.otherText : ""
@@ -501,7 +513,7 @@ export default function AskCard({
             <button
               key={idx}
               type="button"
-              className={`ask-wizard__jump-item${idx === currentIndex ? " is-current" : ""}${isAnswered(answers[idx]!) ? " is-done" : ""}`}
+              className={`ask-wizard__jump-item${idx === currentIndex ? " is-current" : ""}${isAnswered(answers[idx]!, otherOption) ? " is-done" : ""}`}
               onClick={() => goTo(idx)}
               disabled={disabled}
               aria-label={`Go to question ${idx + 1}`}

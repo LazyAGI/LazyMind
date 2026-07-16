@@ -3,22 +3,22 @@ name: AI Writer
 description: >
   Compose structured long-form writing, including articles, reports, technical
   documents, creative stories, fiction, short stories, and novel-style drafts.
-  The workflow runs in six steps: parse the writing intent and scope, generate
-  an outline, plan per-chapter writing instructions, draft the full text,
-  review the draft and surface revision feedback, then produce the final
-  document. Each step supports a full rerun via the state machine self-loop.
+  The workflow parses the writing intent and scope, generates
+  an outline, plan per-chapter writing instructions, draft the full text, revise
+  the draft on user request, review the draft and surface revision feedback,
+  then produces the final document. Revision decisions are represented by
+  material-based choice routes; retry and rewind are runtime commands.
 
 when_to_use: >
-  Invoke this plugin when the user wants to write, draft, or generate a long
-  article, report, technical document, survey, expository piece, story, short
-  story, fiction piece, novel chapter, or any other structured long-form text.
-  Typical requests include "write a report on X", "help me draft a technical
-  article on Y", "write a survey", "generate an introduction to Z", "write a
-  short story", "write a novel chapter", or "写一篇小说". If the writing request
-  lacks details such as length, style, audience, or plot constraints, still
-  trigger this plugin with the user's exact original request so the workflow
-  can infer sensible defaults or collect context during the writing steps. Not
-  suitable for single-paragraph rewrites or translations.
+  Use this plugin only when the user explicitly requests it, or when the user
+  requests a complete, complex writing deliverable that depends materially on
+  existing knowledge or source materials and requires a multi-stage workflow
+  such as context building, outlining, section planning, drafting, and review.
+  Do not invoke it for everyday conversation, simple document generation,
+  short-form writing, rewriting, summarization, translation, brainstorming,
+  outlining alone, or tasks that can be answered directly. This is a fallback
+  writing plugin: if a more specific skill or plugin matches the task, such as
+  proposal, academic, or product-document writing, use that instead.
 
 tool_scripts:
   - path: scripts/tools.py
@@ -33,12 +33,20 @@ tool_scripts:
       - writer_update_writing_context
       - writer_check_consistency
       - writer_generate_writing_output
+      - writer_build_revise_task
+      - writer_generate_patch_set
+      - writer_validate_patch_set
+      - writer_apply_patch
 
 steps:
   - id: build_context
   - id: generate_outline
   - id: plan_sections
   - id: generate_draft
+  - id: decide_draft_action
+  - id: generate_patch
+  - id: decide_patch_action
+  - id: apply_patch
   - id: review_document
   - id: finalize_report
 
@@ -53,6 +61,16 @@ slots:
     cardinality: single
   - id: writing_context
     label: Writing Context
+    type: text
+    cardinality: single
+    summary_max_chars: 600
+  - id: writing_context_after_outline
+    label: Writing Context After Outline
+    type: text
+    cardinality: single
+    summary_max_chars: 600
+  - id: writing_context_after_draft
+    label: Writing Context After Draft
     type: text
     cardinality: single
     summary_max_chars: 600
@@ -71,6 +89,46 @@ slots:
     ordered: true
   - id: draft_document
     label: Full Draft
+    type: text
+    cardinality: single
+  - id: revise_task
+    label: Revise Task
+    type: text
+    cardinality: single
+  - id: doc_ir
+    label: Doc IR
+    type: text
+    cardinality: single
+  - id: patch_set
+    label: Patch Set
+    type: text
+    cardinality: single
+  - id: patch_set_review
+    label: Patch Set Review
+    type: text
+    cardinality: single
+  - id: patch_set_review_summary
+    label: Patch Set Review Summary
+    type: text
+    cardinality: single
+  - id: patch_result
+    label: Patch Result
+    type: text
+    cardinality: single
+  - id: revision_requested
+    label: Revision Requested
+    type: text
+    cardinality: single
+  - id: patch_accepted
+    label: Patch Accepted
+    type: text
+    cardinality: single
+  - id: revised_draft_document
+    label: Revised Draft
+    type: text
+    cardinality: single
+  - id: writing_context_after_revision
+    label: Writing Context After Revision
     type: text
     cardinality: single
   - id: review_report
@@ -107,7 +165,7 @@ ui:
       layout: list
       slots:
         - id: outline
-        - id: writing_context
+        - id: writing_context_after_outline
 
     - id: plan_sections
       step_id: plan_sections
@@ -123,7 +181,26 @@ ui:
       slots:
         - id: draft_sections
         - id: draft_document
-        - id: writing_context
+        - id: writing_context_after_draft
+
+    - id: generate_patch
+      step_id: generate_patch
+      label: Generate Patch
+      layout: list
+      slots:
+        - id: revise_task
+        - id: patch_set
+        - id: patch_set_review
+        - id: patch_set_review_summary
+
+    - id: apply_patch
+      step_id: apply_patch
+      label: Apply Patch
+      layout: list
+      slots:
+        - id: patch_result
+        - id: revised_draft_document
+        - id: writing_context_after_revision
 
     - id: review
       step_id: review_document
@@ -149,6 +226,10 @@ i18n:
       generate_outline: {label: 生成大纲}
       plan_sections: {label: 规划章节}
       generate_draft: {label: 撰写初稿}
+      decide_draft_action: {label: 决定是否修订}
+      generate_patch: {label: 生成补丁}
+      decide_patch_action: {label: 决定是否应用补丁}
+      apply_patch: {label: 应用补丁}
       review_document: {label: 审阅初稿}
       finalize_report: {label: 最终成稿}
     tabs:
@@ -156,6 +237,8 @@ i18n:
       outline: {label: 生成大纲}
       plan_sections: {label: 规划章节}
       draft: {label: 生成初稿}
+      generate_patch: {label: 生成补丁}
+      apply_patch: {label: 应用补丁}
       review: {label: 审阅初稿}
       result: {label: 最终成稿}
     slots:
@@ -166,6 +249,16 @@ i18n:
       section_instructions: {label: 章节规划}
       draft_sections: {label: 章节草稿}
       draft_document: {label: 完整初稿}
+      revise_task: {label: 修订任务}
+      doc_ir: {label: 文档 IR}
+      patch_set: {label: 补丁集}
+      patch_set_review: {label: 补丁校验}
+      patch_set_review_summary: {label: 补丁校验摘要}
+      patch_result: {label: 补丁应用}
+      revision_requested: {label: 请求修订}
+      patch_accepted: {label: 接受补丁}
+      revised_draft_document: {label: 修订后初稿}
+      writing_context_after_revision: {label: 修订后写作上下文}
       review_report: {label: 审阅报告}
       review_summary: {label: 审阅摘要}
       writing_output: {label: 最终成稿}

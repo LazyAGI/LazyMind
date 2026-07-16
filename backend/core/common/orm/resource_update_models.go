@@ -6,8 +6,10 @@ import (
 )
 
 const (
-	ResourceUpdateTaskTypeGenerateReview  = "generate_review"
-	ResourceUpdateTaskTypeAutoApplyReview = "auto_apply_review"
+	ResourceUpdateTaskTypeGenerateReview       = "generate_review"
+	ResourceUpdateTaskTypeAutoApplyReview      = "auto_apply_review"
+	ResourceUpdateTaskTypeAutoCommitSkillDraft = "auto_commit_skill_draft"
+	ResourceUpdateTaskTypeOrganizeSkill        = "organize_skill"
 
 	ResourceUpdateResourceTypeSkill          = "skill"
 	ResourceUpdateResourceTypeMemory         = "memory"

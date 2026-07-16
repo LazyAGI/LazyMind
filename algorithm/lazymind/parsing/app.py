@@ -1,7 +1,8 @@
 import time
-import requests
 import urllib.error
 import urllib.request
+
+import requests
 
 from lazymind.config import config as _cfg
 from lazymind.parsing.service.build_document import (

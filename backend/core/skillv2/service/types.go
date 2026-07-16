@@ -159,6 +159,8 @@ type DraftSummary struct {
 	HasUncommittedDraft bool
 	TaskID              string
 	Version             int64
+	Type                string
+	Status              string
 }
 
 type TreeRef struct {
@@ -298,7 +300,7 @@ type skillDraftRow struct {
 	DraftStatus    string     `gorm:"column:draft_status;type:text;not null;default:''"`
 	DraftUpdatedAt *time.Time `gorm:"column:draft_updated_at"`
 	TaskID         string     `gorm:"column:task_id;type:text;not null;default:''"`
-	ConversationID *string    `gorm:"column:conversation_id;type:varchar(36)"`
+	ConversationID *string    `gorm:"column:conversation_id;type:varchar(128)"`
 	UpdatedBy      *string    `gorm:"column:updated_by;type:varchar(36)"`
 	Version        int64      `gorm:"column:version;not null;default:1"`
 	CreatedAt      time.Time  `gorm:"column:created_at;not null"`

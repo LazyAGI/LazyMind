@@ -7,6 +7,7 @@ import { getEventCaseId, getEventPayloadData, getNumberField, getOperationRunId,
 import { buildCheckpointWaitPrompt, buildFailureRetryPrompt } from "./checkpoint";
 import { buildAbtestEventDisplayText, buildAnalysisEventDisplayText, buildApplyEventDisplayText, buildDatasetEventDisplayText, buildEvalEventDisplayText, compactPayloadForDisplay } from "./eventDisplay";
 import { getEvalPayloadPhase, getWorkflowProgressSnapshot } from "./progress";
+import { localizeErrorCode } from "@/components/request";
 
 const THREAD_EVENT_STAGE_ORDER: ThreadEventStage[] = [
   "dataset",
@@ -425,7 +426,14 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
   }
 
   if (isFailedThreadEvent(frame.eventName) || isFailedThreadEvent(type)) {
-    const errorText = content || t("selfEvolutionRun.messageProcessFailed");
+    const eventData = getEventPayloadData(payload);
+    const errorCode =
+      getStringField(eventData, ["error_code", "code"]) ||
+      getStringField(payload, ["error_code", "code"]);
+    const errorText = localizeErrorCode(
+      errorCode,
+      localizeErrorCode("2000509"),
+    );
     return {
       key,
       timestamp,

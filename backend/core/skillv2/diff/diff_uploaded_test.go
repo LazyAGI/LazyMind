@@ -132,3 +132,47 @@ func TestDiffDraftRef_MergesDraftOverlay(t *testing.T) {
 	}
 	assertLineTypes(t, file.DiffEntryLines, "DELETION", "ADDITION")
 }
+
+func TestDiffCreateDraft_UsesEmptyHead(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	now := testutil.TimeFixture()
+	testutil.MustCreate(t, db, &testutil.SkillRow{
+		ID:                 "skill-create",
+		OwnerUserID:        "user_001",
+		CreateUserID:       "user_001",
+		Category:           "research",
+		SkillName:          "new-skill",
+		Tags:               []byte("[]"),
+		RelativeRoot:       "research/new-skill",
+		SkillMDPath:        "SKILL.md",
+		AutoEvoApplyStatus: "idle",
+		UpdateStatus:       "up_to_date",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	})
+	testutil.MustCreate(t, db, &testutil.SkillDraftRow{
+		SkillID:     "skill-create",
+		DraftStatus: "pending_confirm",
+		TaskID:      "session-1",
+		Version:     1,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	testutil.SeedTextBlob(t, db, "h_create", "# New Skill\n")
+	testutil.SeedDraftEntry(t, db, "skill-create", "SKILL.md", "upsert", "file", "h_create")
+
+	resolver := NewRefResolver(RefResolverDeps{DB: db.DB})
+	oldFS, newFS, err := resolver.ResolvePair(context.Background(), ResolvePairRequest{
+		UserID: "user_001",
+		Old:    DiffRef{Type: "head", SkillID: "skill-create"},
+		New:    DiffRef{Type: "draft", SkillID: "skill-create"},
+	})
+	if err != nil {
+		t.Fatalf("ResolvePair returned error: %v", err)
+	}
+	result, err := NewService(ServiceDeps{}).Compare(context.Background(), oldFS, newFS, DiffOptions{})
+	if err != nil {
+		t.Fatalf("Compare returned error: %v", err)
+	}
+	assertDiffStatus(t, result, "SKILL.md", "added")
+}

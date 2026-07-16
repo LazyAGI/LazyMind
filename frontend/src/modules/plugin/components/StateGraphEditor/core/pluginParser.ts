@@ -1,5 +1,5 @@
 import jsYaml from 'js-yaml';
-import type { PluginModel, PluginSlotDef, PluginToolScript, PluginUiTab, WidgetConfig, CompositePanelNode, CompositeTab } from './pluginModel';
+import type { PluginModel, PluginSlotDef, PluginToolScript, PluginUiTab, WidgetConfig, CompositePanelNode, CompositeTab, CompositeBehavior } from './pluginModel';
 
 interface RawPluginYaml {
   id?: unknown;
@@ -81,6 +81,9 @@ function parseSlots(raw: unknown): PluginSlotDef[] {
       if (typeof entry.summary_max_chars === 'number' && entry.summary_max_chars > 0) {
         slot.summary_max_chars = entry.summary_max_chars;
       }
+      if (entry.external === true || entry.external === 'true' || entry.producer === 'external') {
+        slot.external = true;
+      }
       return [slot];
     });
   }
@@ -101,6 +104,9 @@ function parseSlots(raw: unknown): PluginSlotDef[] {
       }
       if (typeof entry.summary_max_chars === 'number' && entry.summary_max_chars > 0) {
         slot.summary_max_chars = entry.summary_max_chars;
+      }
+      if (entry.external === true || entry.external === 'true' || entry.producer === 'external') {
+        slot.external = true;
       }
       return [slot];
     });
@@ -183,6 +189,31 @@ function parseUiTabs(raw: unknown): { tabs: PluginUiTab[]; slots?: Record<string
       ? (rawTabPos as PluginUiTab['composite_tab_position'])
       : undefined;
 
+    let compositeBehavior: CompositeBehavior | undefined;
+    if (t.composite_behavior && typeof t.composite_behavior === 'object' && !Array.isArray(t.composite_behavior)) {
+      const rawBehavior = t.composite_behavior as Record<string, unknown>;
+      const mutuallyExclusive = Array.isArray(rawBehavior.mutually_exclusive)
+        ? rawBehavior.mutually_exclusive.flatMap((item): NonNullable<CompositeBehavior['mutually_exclusive']> => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+          const group = item as Record<string, unknown>;
+          const slots = Array.isArray(group.slots)
+            ? group.slots.map((s) => String(s ?? '').trim()).filter(Boolean)
+            : [];
+          if (!slots.length) return [];
+          const prefer = Array.isArray(group.prefer)
+            ? group.prefer.map((s) => String(s ?? '').trim()).filter(Boolean)
+            : undefined;
+          return [{ slots, prefer }];
+        })
+        : undefined;
+      const scope = String(rawBehavior.empty_column_scope ?? '');
+      compositeBehavior = {
+        hide_empty_columns: Boolean(rawBehavior.hide_empty_columns),
+        empty_column_scope: scope === 'tab' || scope === 'selected' ? scope : undefined,
+        mutually_exclusive: mutuallyExclusive?.length ? mutuallyExclusive : undefined,
+      };
+    }
+
     return [{
       id,
       label: t.label !== undefined ? String(t.label) : undefined,
@@ -191,6 +222,7 @@ function parseUiTabs(raw: unknown): { tabs: PluginUiTab[]; slots?: Record<string
       slots,
       composite_layout: compositeLayout,
       composite_tab_position: compositeTabPosition,
+      composite_behavior: compositeBehavior,
     }];
   });
 

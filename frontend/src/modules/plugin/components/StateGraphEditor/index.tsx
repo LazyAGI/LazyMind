@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, message, Tooltip } from 'antd';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
 import { isDeveloperModeActive } from '@/utils/developerMode';
@@ -13,9 +13,10 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import type { GraphModel } from './core/model';
-import { createEmptyModel } from './core/model';
+import { createEmptyModel, expressionMaterials, VIRTUAL_START } from './core/model';
 import { parseYaml } from './core/parser';
 import { serializeModel } from './core/serializer';
+import { serializeLayout } from './core/layout';
 import { validateStateGraph } from './core/validator';
 import type { ValidationError } from './core/validator';
 import { parsePluginYaml } from './core/pluginParser';
@@ -39,6 +40,12 @@ type ContentTab = 'statemachine' | 'ui' | 'scenario';
 type ViewMode = 'preview' | 'code' | 'brief';
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
+export interface SkillConversionReport {
+  coverage: unknown;
+  toolMappings: unknown;
+  scripts: unknown;
+}
+
 // code file derived from tab
 type CodeFile = 'plugin.yaml' | 'state.yml' | 'scenario.md' | string;
 
@@ -51,7 +58,7 @@ function codeFileForTab(tab: ContentTab): CodeFile {
 
 const AUTO_SAVE_DELAY_MS = 1500;
 
-export type RepairTarget = 'statemachine' | 'ui' | 'scenario';
+export type RepairTarget = 'statemachine' | 'ui' | 'scenario' | 'scripts' | 'full';
 
 export interface SavePayload {
   stateYaml: string;
@@ -74,6 +81,8 @@ interface Props {
   topbarActions?: React.ReactNode;
   /** Called automatically when any file changes (auto-save). */
   onSave?: (payload: SavePayload) => Promise<void>;
+  /** Runs Go's authoritative editor-profile validation after a successful save. */
+  onValidate?: () => Promise<ValidationError[]>;
   onClose?: () => void;
   /** When false, the empty-canvas hint is suppressed (user already has experience). */
   showEmptyHint?: boolean;
@@ -92,11 +101,10 @@ interface Props {
    * `validationErrors` carries the current graph validation errors (only for 'statemachine' target).
    */
   onRepair?: (target: RepairTarget, validationErrors?: ValidationError[]) => void;
-  /**
-   * When provided, a "草稿" button appears in the view-mode capsule.
-   * Clicking it shows the design brief content rendered as pre-formatted text.
-   */
+  /** Design draft used as reference while converting a Skill into a Plugin. */
   designBriefContent?: string;
+  /** Analysis produced by Skill-to-Plugin conversion. */
+  skillConversionReport?: SkillConversionReport;
 }
 
 function parseScriptFiles(raw: string): Record<string, string> {
@@ -105,6 +113,28 @@ function parseScriptFiles(raw: string): Record<string, string> {
     if (typeof parsed === 'object' && parsed !== null) return parsed as Record<string, string>;
   } catch {}
   return {};
+}
+
+function validationTargetNode(error: ValidationError, model: GraphModel): string | null {
+  if (error.nodeId && (error.nodeId === VIRTUAL_START || model.nodes.some((node) => node.id === error.nodeId))) {
+    return error.nodeId;
+  }
+  if (error.edgeKey) {
+    const source = error.edgeKey.split('->')[0];
+    if (source === VIRTUAL_START || model.nodes.some((node) => node.id === source)) return source;
+  }
+  if (error.materialId) {
+    const related = model.nodes.find((node) => {
+      const materials = [
+        ...node.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])]),
+        ...node.outputs.map((output) => output.material),
+        ...expressionMaterials(node.skipIf),
+      ];
+      return materials.includes(error.materialId!);
+    });
+    return related?.id ?? null;
+  }
+  return null;
 }
 
 /**
@@ -123,6 +153,7 @@ function initGraphModel(stateYaml: string | undefined, pluginYaml: string | unde
           id: s.id, type: s.type, label: s.label,
           cardinality: s.cardinality, ordered: s.ordered,
           allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+          external: s.external,
         };
       }
     }
@@ -139,6 +170,7 @@ export default function StateGraphEditor({
   topbarExtra,
   topbarActions,
   onSave,
+  onValidate,
   onClose,
   showEmptyHint = true,
   readonly = false,
@@ -146,6 +178,7 @@ export default function StateGraphEditor({
   onRepair,
   onArtifactsChange,
   designBriefContent,
+  skillConversionReport,
 }: Props) {
   const { t } = useTranslation();
   const [contentTab, setContentTab] = useState<ContentTab>('statemachine');
@@ -154,6 +187,7 @@ export default function StateGraphEditor({
   const [activeCodeFile, setActiveCodeFile] = useState<CodeFile>('state.yml');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [showArtifacts, setShowArtifacts] = useState(defaultShowArtifacts);
+  const [artifactAddRequest, setArtifactAddRequest] = useState(0);
   const toggleArtifacts = useCallback(() => {
     setShowArtifacts((v) => {
       const next = !v;
@@ -175,14 +209,28 @@ export default function StateGraphEditor({
   const editorRootRef = useRef<HTMLDivElement>(null);
 
   // plugin.yaml model — must be initialized before GraphModel so we can back-fill slots.
-  const [pluginModel, setPluginModel] = useState<PluginModel>(() =>
-    initialPluginYaml ? (parsePluginYaml(initialPluginYaml) ?? createEmptyPluginModel()) : createEmptyPluginModel(),
-  );
+  const [pluginModel, setPluginModel] = useState<PluginModel>(() => {
+    const parsedPlugin = initialPluginYaml
+      ? (parsePluginYaml(initialPluginYaml) ?? createEmptyPluginModel())
+      : createEmptyPluginModel();
+    // state.yml is authoritative for the editable step list. Older/generated
+    // drafts can have a populated state machine but no plugin.yaml `steps`
+    // block; do not let the next auto-save serialize that omission back to disk.
+    const graph = initialStateYaml ? parseYaml(initialStateYaml) : null;
+    return graph
+      ? { ...parsedPlugin, steps: graph.nodes.map((node) => ({ id: node.id, label: node.label })) }
+      : parsedPlugin;
+  });
 
   // state.yml model — back-fill slots from plugin.yaml when state.yml has none (post-migration drafts).
   const modelRef = useRef<GraphModel>(initGraphModel(initialStateYaml, initialPluginYaml));
   const [model, setModelState] = useState<GraphModel>(modelRef.current);
   const [errors, setErrors] = useState<ValidationError[]>(() => validateStateGraph(modelRef.current));
+  const [authoritativeErrors, setAuthoritativeErrors] = useState<ValidationError[]>([]);
+  const displayErrors = useMemo(() => [
+    ...errors.filter((local) => !authoritativeErrors.some((server) => server.code === local.code)),
+    ...authoritativeErrors,
+  ], [errors, authoritativeErrors]);
 
   // scenario data
   const [scenarioData, setScenarioData] = useState<ScenarioData>(() =>
@@ -202,13 +250,40 @@ export default function StateGraphEditor({
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
+  const onValidateRef = useRef(onValidate);
+  useEffect(() => { onValidateRef.current = onValidate; }, [onValidate]);
+  const validationRequestRef = useRef(0);
+
+  const runAuthoritativeValidation = useCallback(async () => {
+    const validate = onValidateRef.current;
+    if (!validate) return;
+    const requestId = ++validationRequestRef.current;
+    try {
+      const nextErrors = await validate();
+      if (validationRequestRef.current === requestId) {
+        setAuthoritativeErrors(nextErrors);
+      }
+    } catch {
+      // A validation transport failure must not turn a successful save into a
+      // save failure or erase the last known diagnostics.
+    }
+  }, []);
+
+  // The Go validator is authoritative. Load its diagnostics as soon as an
+  // editable draft opens instead of waiting for the first user modification.
+  useEffect(() => {
+    if (!readonly) void runAuthoritativeValidation();
+    return () => {
+      validationRequestRef.current += 1;
+    };
+  }, [readonly, runAuthoritativeValidation]);
 
   const buildPayload = useCallback((m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string): SavePayload => ({
     stateYaml: serializeModel(m, false),
     pluginYaml: serializePluginModel(pm, m),
     scenarioContent: serializeScenario(m.nodes, sd),
     scriptsContent: sc,
-    stateLayoutContent: JSON.stringify(m.layout),
+    stateLayoutContent: serializeLayout(m),
   }), []);
 
   const doSave = useCallback(async (m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string) => {
@@ -222,11 +297,11 @@ export default function StateGraphEditor({
     try {
       await fn(buildPayload(m, pm, sd, sc));
       setSaveStatus('saved');
-    } catch {
+      await runAuthoritativeValidation();
+    } catch (error: unknown) {
       setSaveStatus('error');
-      message.error(t('selfEvolutionRun.sgeSaveFailed'));
     }
-  }, [buildPayload]);
+  }, [buildPayload, runAuthoritativeValidation]);
 
   const triggerAutoSave = useCallback((m: GraphModel, pm: PluginModel, sd: ScenarioData, sc: string) => {
     if (!onSaveRef.current) return;
@@ -277,16 +352,25 @@ export default function StateGraphEditor({
     setModelState(nextModel);
     setErrors(validateStateGraph(nextModel));
 
-    // Keep pluginModel.slots in sync with graphModel.slots.
+    // Keep pluginModel step metadata and slots in sync with GraphModel.
+    // A node rename must update plugin.yaml in the same auto-save; otherwise
+    // the server correctly reports that the renamed state step is undeclared.
     // ArtifactPanel writes new slots only into GraphModel; syncing back here
     // ensures handlePluginModelChange never overwrites them with stale data.
-    if (nextModel.slots !== prev.slots) {
+    const stepsChanged = nextModel.nodes !== prev.nodes;
+    const slotsChanged = nextModel.slots !== prev.slots;
+    if (stepsChanged || slotsChanged) {
       const syncedSlots: import('./core/pluginModel').PluginSlotDef[] = Object.values(nextModel.slots).map((s) => ({
         id: s.id, type: s.type as import('./core/pluginModel').PluginSlotDef['type'],
         label: s.label, cardinality: s.cardinality, ordered: s.ordered,
         allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+        external: s.external,
       }));
-      const syncedPm = { ...pluginModelRef.current, slots: syncedSlots };
+      const syncedPm = {
+        ...pluginModelRef.current,
+        steps: nextModel.nodes.map((node) => ({ id: node.id, label: node.label })),
+        slots: syncedSlots,
+      };
       pluginModelRef.current = syncedPm;
       setPluginModel(syncedPm);
     }
@@ -312,6 +396,7 @@ export default function StateGraphEditor({
         const mergedModel: GraphModel = {
           ...parsed,
           layout: { ...parsed.layout, ...modelRef.current.layout },
+          edgeLayout: { ...parsed.edgeLayout, ...modelRef.current.edgeLayout },
           // parseYaml always returns slots:{} — slot definitions live in plugin.yaml.
           // Preserve the current slots so editing state.yml never wipes them.
           slots: modelRef.current.slots,
@@ -338,6 +423,7 @@ export default function StateGraphEditor({
         id: s.id, type: s.type, label: s.label,
         cardinality: s.cardinality, ordered: s.ordered,
         allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+        external: s.external,
       };
     }
     const updatedModel = { ...modelRef.current, slots };
@@ -364,6 +450,7 @@ export default function StateGraphEditor({
           id: s.id, type: s.type, label: s.label,
           cardinality: s.cardinality, ordered: s.ordered,
           allow_manual_add: s.allow_manual_add, summary_max_chars: s.summary_max_chars,
+          external: s.external,
         };
       }
       const updatedModel: GraphModel = { ...modelRef.current, slots };
@@ -404,9 +491,10 @@ export default function StateGraphEditor({
   }, [handlePluginModelChange, handleScenarioChange, doSave]);
 
   const handleAddNode = useCallback(() => { canvasRef.current?.addNode(); }, []);
-  const handleSelectNode = useCallback(() => {
+  const handleSelectNode = useCallback((nodeId: string) => {
     setViewMode('preview');
     setContentTab('statemachine');
+    requestAnimationFrame(() => canvasRef.current?.focusNode(nodeId));
   }, []);
 
   // Switch to code mode, initialize activeCodeFile from current tab
@@ -453,7 +541,7 @@ export default function StateGraphEditor({
     if (file === 'plugin.yaml') return pluginYamlForCode;
     if (file === 'state.yml') return stateYamlForCode;
     if (file === 'scenario.md') return scenarioMdForCode;
-    if (file === 'layout.json') return JSON.stringify(model.layout, null, 2);
+    if (file === 'layout.json') return JSON.stringify(JSON.parse(serializeLayout(model)), null, 2);
     return scriptFiles[file] ?? '';
   };
 
@@ -526,7 +614,7 @@ export default function StateGraphEditor({
             >
               {t('selfEvolutionRun.sgeViewCode')}
             </button>
-            {designBriefContent && (
+            {(designBriefContent || skillConversionReport) && (
               <button
                 className={`sge-seg-btn${viewMode === 'brief' ? ' sge-seg-btn--active' : ''}`}
                 onClick={() => setViewMode('brief')}
@@ -540,7 +628,7 @@ export default function StateGraphEditor({
           {!readonly && contentTab === 'statemachine' && viewMode === 'preview' && (
             <>
               {onRepair && (
-                <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('statemachine', errors)}>
+                <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('statemachine', displayErrors)}>
                   {t('selfEvolutionRun.sgeAiRepairBtn')}
                 </Button>
               )}
@@ -587,13 +675,14 @@ export default function StateGraphEditor({
             <div className="sge-content">
               <GraphCanvas
                 model={model}
-                errors={errors}
+                errors={displayErrors}
                 onModelChange={readonly ? () => {} : updateModel}
                 pluginModel={pluginModel}
                 scenarioData={scenarioData}
                 onScenarioChange={readonly ? undefined : handleScenarioChange}
                 canvasRef={canvasRef}
                 readonly={readonly}
+                onCreateArtifact={() => { setShowArtifacts(true); setArtifactAddRequest((value) => value + 1); }}
               />
               {model.nodes.length === 0 && showEmptyHint && (
                 <div className="sge-empty-state" aria-hidden="true">
@@ -614,10 +703,15 @@ export default function StateGraphEditor({
                   onClose={() => closeArtifacts()}
                   onModelChange={readonly ? () => {} : updateModelFromUpdater}
                   readonly={readonly}
+                  startAddingToken={artifactAddRequest}
                 />
               )}
             </div>
-            <ValidationPanel errors={errors} onSelectNode={handleSelectNode} />
+            <ValidationPanel
+              errors={displayErrors}
+              getTargetNodeId={(error) => validationTargetNode(error, model)}
+              onSelectNode={handleSelectNode}
+            />
           </div>
         )}
 
@@ -691,7 +785,7 @@ export default function StateGraphEditor({
             {/* Right: editor */}
             <div className="sge-code-editor">
               <YamlEditor
-                key={activeCodeFile === 'layout.json' ? `layout.json-${JSON.stringify(model.layout)}` : activeCodeFile}
+                key={activeCodeFile === 'layout.json' ? `layout.json-${serializeLayout(model)}` : activeCodeFile}
                 value={getCodeFileContent(activeCodeFile)}
                 onChange={(text) => {
                   if (readonly) return;
@@ -706,7 +800,7 @@ export default function StateGraphEditor({
                     handleScriptsChange(activeCodeFile, text);
                   }
                 }}
-                errors={activeCodeFile === 'state.yml' ? errors : []}
+                errors={activeCodeFile === 'state.yml' ? displayErrors : []}
                 readOnly={readonly || activeCodeFile === 'layout.json'}
                 language={
                   activeCodeFile.endsWith('.md')
@@ -720,9 +814,35 @@ export default function StateGraphEditor({
           </div>
         )}
 
-        {viewMode === 'brief' && designBriefContent && (
+        {viewMode === 'brief' && (designBriefContent || skillConversionReport) && (
           <div className="sge-brief-preview">
-            <pre className="sge-brief-content">{designBriefContent}</pre>
+            {designBriefContent && (
+              <section className="sge-log-section">
+                <h2>{t('selfEvolutionRun.sgeConversionDraftTitle')}</h2>
+                <p className="sge-log-description">{t('selfEvolutionRun.sgeConversionDraftDescription')}</p>
+                <pre className="sge-brief-content">{designBriefContent}</pre>
+              </section>
+            )}
+            {skillConversionReport && (
+              <section className="sge-log-section">
+                <h2>{t('selfEvolutionRun.sgeConversionReportTitle')}</h2>
+                <p className="sge-log-description">{t('selfEvolutionRun.sgeConversionReportDescription')}</p>
+                <div className="sge-log-report-grid">
+                  <div>
+                    <h3>{t('selfEvolutionRun.pluginCoverageReport')}</h3>
+                    <pre className="sge-brief-content">{JSON.stringify(skillConversionReport.coverage, null, 2)}</pre>
+                  </div>
+                  <div>
+                    <h3>{t('selfEvolutionRun.pluginToolMappingReport')}</h3>
+                    <pre className="sge-brief-content">{JSON.stringify(skillConversionReport.toolMappings, null, 2)}</pre>
+                  </div>
+                  <div>
+                    <h3>{t('selfEvolutionRun.pluginScriptReport')}</h3>
+                    <pre className="sge-brief-content">{JSON.stringify(skillConversionReport.scripts, null, 2)}</pre>
+                  </div>
+                </div>
+              </section>
+            )}
           </div>
         )}
       </div>

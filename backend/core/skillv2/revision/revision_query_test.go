@@ -23,6 +23,9 @@ func TestRevisionListDetailAndTree(t *testing.T) {
 	if len(list.Items) != 2 {
 		t.Fatalf("ListRevisions returned %d items, want 2", len(list.Items))
 	}
+	if !list.Items[0].IsHead || list.Items[0].RevisionID != "rev2" || list.Items[1].IsHead {
+		t.Fatalf("revision list head markers are incorrect: %#v", list.Items)
+	}
 	for _, item := range list.Items {
 		if item.RevisionNo == 0 || item.ChangeSource == "" || item.CreatedAt.IsZero() {
 			t.Fatalf("revision list item missing metadata: %#v", item)
@@ -36,7 +39,7 @@ func TestRevisionListDetailAndTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRevision returned error: %v", err)
 	}
-	if detail.ID != "rev1" || detail.FileContent != "" {
+	if detail.ID != "rev1" || detail.FileContent != "" || detail.IsHead {
 		t.Fatalf("unexpected revision detail: %#v", detail)
 	}
 	tree, err := service.GetRevisionTree(context.Background(), GetRevisionTreeRequest{SkillID: "skill1", UserID: "user_001", RevisionID: "rev1"})

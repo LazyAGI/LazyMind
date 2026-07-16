@@ -191,7 +191,6 @@ const ManageMembersModal = ({
       setCurrentMembers(members);
     } catch (error) {
       console.error("Failed to fetch members:", error);
-      AntdMessage.error(t("admin.fetchMembersFailed"));
     } finally {
       setLoading(false);
     }
@@ -263,10 +262,7 @@ const ManageMembersModal = ({
     } catch (error: any) {
       console.error("Add members failed:", error);
       if (!error?.response && !error?.request) {
-        AntdMessage.error(
-          getLocalizedErrorMessage(error, t("admin.addMembersFailed")) ||
-            t("admin.addMembersFailed"),
-        );
+        AntdMessage.error(getLocalizedErrorMessage(error));
       }
     } finally {
       setSaving(false);

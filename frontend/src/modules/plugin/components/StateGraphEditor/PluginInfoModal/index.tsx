@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Modal, Input, Button, Tooltip, message, Spin } from 'antd';
+import { Modal, Input, Button, Tooltip, Spin } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { PluginModel } from '../core/pluginModel';
@@ -88,7 +88,6 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
       const result = await polishPluginInfo({ fields: currentFields, target_fields: [field] });
       if (result[field]) setFieldValue(field, result[field]!);
     } catch {
-      message.error(t('selfEvolutionRun.pluginInfoPolishFailed'));
     } finally {
       setPolishingFields(prev => {
         const next = new Set(prev);
@@ -112,7 +111,6 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
         if (result[field]) setFieldValue(field, result[field]!);
       }
     } catch {
-      message.error(t('selfEvolutionRun.pluginInfoPolishAllFailed'));
     } finally {
       setPolishingAll(false);
     }
@@ -141,7 +139,6 @@ export default function PluginInfoModal({ open, onCancel, pluginModel, scenarioD
       if (onSave) await onSave(newPm, newSd);
       onCancel();
     } catch {
-      message.error(t('selfEvolutionRun.pluginInfoSaveFailed'));
     } finally {
       setSaving(false);
     }

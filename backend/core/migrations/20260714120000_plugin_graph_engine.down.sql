@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS plugin_transition_commands;
+DROP TABLE IF EXISTS plugin_route_decisions;
+DROP TABLE IF EXISTS plugin_attempt_input_bindings;
+ALTER TABLE plugin_revisions DROP COLUMN IF EXISTS graph_schema_version;
+ALTER TABLE plugin_revisions DROP COLUMN IF EXISTS graph_hash;
+ALTER TABLE plugin_revisions DROP COLUMN IF EXISTS compiled_graph;
+ALTER TABLE plugin_slot_revisions DROP COLUMN IF EXISTS producer_attempt_id;
+ALTER TABLE plugin_slot_revisions DROP COLUMN IF EXISTS validity;
+ALTER TABLE plugin_session_steps DROP COLUMN IF EXISTS validity;
+ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS graph_schema_version;
+ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS graph_hash;
+ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS state_version;

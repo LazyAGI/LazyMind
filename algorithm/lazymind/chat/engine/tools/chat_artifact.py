@@ -11,6 +11,8 @@ from lazyllm.tools.agent.base import _write_agent_data
 from lazymind.chat.engine.tools.infra import tool_success
 
 _MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
+
+
 def _safe_filename(filename: str, content_type: str) -> str:
     name = str(filename or '').strip()
     if (not name or name in {'.', '..'} or '/' in name or '\\' in name

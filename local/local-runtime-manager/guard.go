@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"syscall"
 	"time"
 )
 
@@ -15,6 +14,9 @@ const defaultGuardPollInterval = time.Second
 func runRuntimeGuard(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, ownerPID int, pollInterval time.Duration, ownerAlive ownerAliveFunc, down runtimeDownFunc) error {
 	if ownerPID <= 0 {
 		return fmt.Errorf("--owner-pid must be positive")
+	}
+	if err := validateRequestedRuntimeOwner(cfg); err != nil {
+		return err
 	}
 	if pollInterval <= 0 {
 		pollInterval = defaultGuardPollInterval
@@ -40,9 +42,5 @@ func runRuntimeGuard(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths,
 }
 
 func ownerProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
+	return processAlive(pid)
 }

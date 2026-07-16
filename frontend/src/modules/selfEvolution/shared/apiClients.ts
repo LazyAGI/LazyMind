@@ -1,5 +1,10 @@
 import { AgentApi as CoreAgentApi, Configuration as CoreConfiguration, DefaultApi as CoreDefaultApi, type Dataset } from "@/api/generated/core-client";
-import { BASE_URL, axiosInstance } from "@/components/request";
+import {
+  BASE_URL,
+  axiosInstance,
+  extractErrorCode,
+  localizeErrorCode,
+} from "@/components/request";
 import { t } from "./i18n";
 
 export function getSelfEvolutionWorkflowImageSrc(language?: string) {
@@ -55,3 +60,11 @@ export const isCanceledRequest = (error: unknown) => {
     messageText.includes("aborted")
   );
 };
+
+export const getCatalogApiErrorMessage = (
+  error: unknown,
+) =>
+  localizeErrorCode(
+    extractErrorCode(error),
+    localizeErrorCode("2000509"),
+  );

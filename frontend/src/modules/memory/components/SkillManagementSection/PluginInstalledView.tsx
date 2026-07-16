@@ -25,6 +25,8 @@ import type { ScenarioData } from '@/modules/plugin/components/StateGraphEditor/
 interface PluginInstalledViewProps {
   t: (key: string, options?: Record<string, unknown>) => string;
   onNewPlugin: () => void;
+  tableScroll?: { x?: number; y?: number };
+  listContentRef?: React.RefObject<HTMLDivElement>;
 }
 
 // Unified row type for the combined table.
@@ -36,7 +38,12 @@ type TypeFilter = 'all' | 'builtin' | 'draft';
 
 const PAGE_SIZE = 10;
 
-export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledViewProps) {
+export default function PluginInstalledView({
+  t,
+  onNewPlugin,
+  tableScroll,
+  listContentRef,
+}: PluginInstalledViewProps) {
   const navigate = useNavigate();
   const [draftRecords, setDraftRecords] = useState<PluginDraftRecord[]>([]);
   const [builtinPlugins, setBuiltinPlugins] = useState<BuiltinPlugin[]>([]);
@@ -62,7 +69,6 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
       setBuiltinPlugins(builtins);
       setEnabledByRef(Object.fromEntries(pluginSettings.map((item) => [item.plugin_ref, item.enabled])));
     } catch {
-      message.error(t('admin.memoryPluginLoadFailed'));
     } finally {
       setLoading(false);
     }
@@ -78,7 +84,6 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
       message.success(t('admin.memoryPluginDeleteSuccess'));
       void loadList();
     } catch {
-      message.error(t('admin.memoryPluginDeleteFailed'));
     }
   };
 
@@ -98,7 +103,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
     const previous = enabledByRef[pluginRef] ?? false;
     setEnabledByRef((current) => ({ ...current, [pluginRef]: enabled }));
     try { await setUserPluginEnabled(pluginRef, enabled); message.success(enabled ? 'Plugin 已默认启用' : 'Plugin 已默认关闭'); }
-    catch { setEnabledByRef((current) => ({ ...current, [pluginRef]: previous })); message.error('Plugin 默认启用状态保存失败'); }
+    catch { setEnabledByRef((current) => ({ ...current, [pluginRef]: previous })); }
   };
 
   const openInfoModal = (record: PluginDraftRecord) => {
@@ -118,6 +123,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
     await updatePluginDraftContent(infoModalRecord.id, {
       plugin_yaml_content: pluginYaml,
       scenario_content: scenarioContent,
+      version: infoModalRecord.version,
     });
     message.success(t('admin.memoryPluginSaveSuccess'));
     void loadList();
@@ -337,7 +343,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
         <Button onClick={handleReset}>{t('admin.memoryReset')}</Button>
       </div>
 
-      <div className="memory-list-content">
+      <div className="memory-list-content" ref={listContentRef}>
         {filteredRows.length === 0 && !loading ? (
           <Empty
             description={t('admin.memoryPluginEmptyDesc')}
@@ -356,6 +362,7 @@ export default function PluginInstalledView({ t, onNewPlugin }: PluginInstalledV
             columns={columns}
             pagination={pagination}
             tableLayout="fixed"
+            scroll={tableScroll}
             locale={{
               emptyText: (
                 <Empty

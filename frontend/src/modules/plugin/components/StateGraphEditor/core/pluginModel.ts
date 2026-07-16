@@ -9,6 +9,7 @@ export interface PluginSlotDef {
   ordered?: boolean;
   allow_manual_add?: boolean;
   summary_max_chars?: number;
+  external?: boolean;
 }
 
 // ── Widget type system ────────────────────────────────────────────────────────
@@ -139,6 +140,20 @@ export interface PluginUiTab {
   composite_tab_position?: 'top' | 'bottom' | 'left' | 'right';
   /** Composite mode: layout tree (format C). */
   composite_layout?: CompositePanelNode;
+  /** Generic composite display rules (hide empty columns, mutually exclusive groups). */
+  composite_behavior?: CompositeBehavior;
+}
+
+/** Mutually exclusive column group for composite tabs. */
+export interface CompositeMutuallyExclusiveGroup {
+  slots: string[];
+  prefer?: string[];
+}
+
+export interface CompositeBehavior {
+  hide_empty_columns?: boolean;
+  empty_column_scope?: 'selected' | 'tab';
+  mutually_exclusive?: CompositeMutuallyExclusiveGroup[];
 }
 
 export interface PluginToolScript {

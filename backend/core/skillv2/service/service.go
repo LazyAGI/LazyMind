@@ -22,6 +22,12 @@ import (
 	skillsearch "lazymind/core/skillv2/search"
 )
 
+const (
+	skillDraftStatusPendingConfirm = "pending_confirm"
+	skillDraftStatusPending        = "pending"
+	skillDraftStatusAutoPending    = "auto_pending"
+)
+
 func NewSkillService(deps SkillServiceDeps) *SkillService {
 	clock := deps.Clock
 	if clock == nil {
@@ -149,6 +155,44 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 				headRevisionID = *skill.HeadRevisionID
 			}
 			committedDraftRevisionID := ""
+			metadataChanged :=
+				(req.Name != nil && *req.Name != skill.SkillName) ||
+					(req.Category != nil && *req.Category != skill.Category) ||
+					(req.Description != nil && *req.Description != skill.Description)
+			if metadataChanged {
+				var draftEntries int64
+				if err := tx.Model(&skillDraftEntryRow{}).Where("skill_id = ?", req.SkillID).Count(&draftEntries).Error; err != nil {
+					return err
+				}
+				if draftEntries > 0 {
+					return fmt.Errorf("cannot update skill metadata while draft overlay exists")
+				}
+				if skill.HeadRevisionID == nil {
+					return fmt.Errorf("skill has no head revision")
+				}
+				files, err := s.filesForRevision(ctx, tx, *skill.HeadRevisionID)
+				if err != nil {
+					return err
+				}
+				content, ok := files["SKILL.md"]
+				if !ok {
+					return fmt.Errorf("skill package must contain SKILL.md")
+				}
+				nextName := valueOr(req.Name, skill.SkillName)
+				nextCategory := valueOr(req.Category, skill.Category)
+				nextDescription := valueOr(req.Description, skill.Description)
+				files = map[string][]byte{
+					"SKILL.md": []byte(rewriteSkillMDFrontmatter(string(content), nextName, nextCategory, nextDescription)),
+				}
+				revisionID, err := s.commitFilesAsNewHead(ctx, tx, req.SkillID, req.UserID, "metadata_update", files)
+				if err != nil {
+					return err
+				}
+				headRevisionID = revisionID
+				if err := s.resetDraft(tx, req.SkillID, revisionID); err != nil {
+					return err
+				}
+			}
 			if req.Name != nil {
 				updates["skill_name"] = *req.Name
 				updates["relative_root"] = path.Join(valueOr(req.Category, skill.Category), *req.Name)
@@ -174,6 +218,11 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 				} else {
 					updates["auto_evo_started_at"] = nil
 					updates["auto_evo_finished_at"] = s.clock.Now()
+				}
+			}
+			if req.AutoEvo != nil && !skill.AutoEvo && *req.AutoEvo {
+				if err := markPendingSkillDraftAuto(ctx, tx, req.SkillID, s.clock.Now()); err != nil {
+					return err
 				}
 			}
 			if req.IsEnabled != nil {
@@ -372,6 +421,15 @@ func (s *SkillService) RestoreSkill(ctx context.Context, req RestoreSkillRequest
 		if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NOT NULL", req.SkillID, req.UserID).Take(&skill).Error; err != nil {
 			return err
 		}
+		var conflicts int64
+		if err := tx.Model(&skillRow{}).
+			Where("owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL AND id <> ?", req.UserID, skill.RelativeRoot, req.SkillID).
+			Count(&conflicts).Error; err != nil {
+			return err
+		}
+		if conflicts > 0 {
+			return fmt.Errorf("skill package already exists")
+		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NOT NULL", req.SkillID).Updates(map[string]any{
 			"deleted_at": nil,
 			"deleted_by": nil,
@@ -412,8 +470,12 @@ func (s *SkillService) purgeSkillTx(ctx context.Context, tx *gorm.DB, req PurgeS
 	if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NOT NULL", req.SkillID, req.UserID).Take(&skill).Error; err != nil {
 		return err
 	}
+	return s.deleteSkillGraphTx(ctx, tx, req.SkillID, req.UserID)
+}
+
+func (s *SkillService) deleteSkillGraphTx(ctx context.Context, tx *gorm.DB, skillID, userID string) error {
 	var revisions []string
-	if err := tx.Model(&skillRevisionRow{}).Where("skill_id = ?", req.SkillID).Pluck("id", &revisions).Error; err != nil {
+	if err := tx.Model(&skillRevisionRow{}).Where("skill_id = ?", skillID).Pluck("id", &revisions).Error; err != nil {
 		return err
 	}
 	if len(revisions) > 0 {
@@ -424,15 +486,15 @@ func (s *SkillService) purgeSkillTx(ctx context.Context, tx *gorm.DB, req PurgeS
 			return err
 		}
 	}
-	if err := tx.Where("skill_id = ?", req.SkillID).Delete(&skillDraftEntryRow{}).Error; err != nil {
+	if err := tx.Where("skill_id = ?", skillID).Delete(&skillDraftEntryRow{}).Error; err != nil {
 		return err
 	}
-	if err := tx.Where("skill_id = ?", req.SkillID).Delete(&skillDraftRow{}).Error; err != nil {
+	if err := tx.Where("skill_id = ?", skillID).Delete(&skillDraftRow{}).Error; err != nil {
 		return err
 	}
 	if tx.Migrator().HasTable("skill_draft_review_sessions") {
 		var reviewIDs []string
-		if err := tx.Table("skill_draft_review_sessions").Where("skill_id = ?", req.SkillID).Pluck("id", &reviewIDs).Error; err != nil {
+		if err := tx.Table("skill_draft_review_sessions").Where("skill_id = ?", skillID).Pluck("id", &reviewIDs).Error; err != nil {
 			return err
 		}
 		if len(reviewIDs) > 0 {
@@ -452,14 +514,14 @@ func (s *SkillService) purgeSkillTx(ctx context.Context, tx *gorm.DB, req PurgeS
 		}
 	}
 	if tx.Migrator().HasTable(&skillSearchIndexRow{}) {
-		if err := tx.Where("skill_id = ?", req.SkillID).Delete(&skillSearchIndexRow{}).Error; err != nil {
+		if err := tx.Where("skill_id = ?", skillID).Delete(&skillSearchIndexRow{}).Error; err != nil {
 			return err
 		}
 	}
-	if err := deleteMarketInstallTx(tx, req.SkillID, req.UserID); err != nil {
+	if err := deleteMarketInstallTx(tx, skillID, userID); err != nil {
 		return err
 	}
-	if err := tx.Where("id = ?", req.SkillID).Delete(&skillRow{}).Error; err != nil {
+	if err := tx.Where("id = ?", skillID).Delete(&skillRow{}).Error; err != nil {
 		return err
 	}
 	return s.cleanupUnreferencedBlobs(ctx, tx)
@@ -515,7 +577,7 @@ func skillBlobReferenced(tx *gorm.DB, hash string) (bool, error) {
 
 func (s *SkillService) ListSkills(ctx context.Context, req ListSkillsRequest) (ListSkillsResponse, error) {
 	var rows []skillRow
-	if err := s.db.WithContext(ctx).Where("owner_user_id = ? AND deleted_at IS NULL", req.UserID).Order("created_at ASC, id ASC").Find(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("owner_user_id = ? AND deleted_at IS NULL", req.UserID).Order("created_at DESC, id DESC").Find(&rows).Error; err != nil {
 		return ListSkillsResponse{}, err
 	}
 	items := make([]SkillSummary, 0, len(rows))
@@ -599,7 +661,7 @@ func (s *SkillService) DiscardDraft(ctx context.Context, req DiscardDraftRequest
 			return err
 		}
 		if skill.HeadRevisionID == nil {
-			return fmt.Errorf("skill has no head revision")
+			return s.deleteSkillGraphTx(ctx, tx, req.SkillID, req.UserID)
 		}
 		if err := tx.Where("skill_id = ?", req.SkillID).Delete(&skillDraftEntryRow{}).Error; err != nil {
 			return err
@@ -1026,6 +1088,27 @@ func parseSkillMDMetadata(content string) (skillMDMetadata, bool, error) {
 	return meta, true, nil
 }
 
+func rewriteSkillMDFrontmatter(content, name, category, description string) string {
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	body := normalized
+	metadata := map[string]any{}
+	if strings.HasPrefix(normalized, "---\n") {
+		rest := strings.TrimPrefix(normalized, "---\n")
+		if idx := strings.Index(rest, "\n---"); idx >= 0 {
+			_ = yaml.Unmarshal([]byte(rest[:idx]), &metadata)
+			body = strings.TrimPrefix(rest[idx+len("\n---"):], "\n")
+		}
+	}
+	metadata["name"] = strings.TrimSpace(name)
+	metadata["category"] = strings.TrimSpace(category)
+	metadata["description"] = strings.TrimSpace(description)
+	frontmatter, err := yaml.Marshal(metadata)
+	if err != nil {
+		return content
+	}
+	return fmt.Sprintf("---\n%s---\n%s", string(frontmatter), body)
+}
+
 func (s *SkillService) nextRevisionNo(tx *gorm.DB, skillID string) (int64, error) {
 	var maxNo int64
 	if err := tx.Model(&skillRevisionRow{}).Where("skill_id = ?", skillID).Select("COALESCE(MAX(revision_no), 0)").Scan(&maxNo).Error; err != nil {
@@ -1364,6 +1447,13 @@ func (s *SkillService) entriesForHead(ctx context.Context, skillID string) ([]sk
 func (s *SkillService) entriesForRef(ctx context.Context, skillID, refType string) ([]skillRevisionEntryRow, error) {
 	switch strings.ToLower(strings.TrimSpace(refType)) {
 	case "", "head":
+		var skill skillRow
+		if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", skillID).Take(&skill).Error; err != nil {
+			return nil, err
+		}
+		if skill.HeadRevisionID == nil {
+			return s.entriesForDraft(ctx, skillID)
+		}
 		return s.entriesForHead(ctx, skillID)
 	case "draft":
 		return s.entriesForDraft(ctx, skillID)
@@ -1373,9 +1463,15 @@ func (s *SkillService) entriesForRef(ctx context.Context, skillID, refType strin
 }
 
 func (s *SkillService) entriesForDraft(ctx context.Context, skillID string) ([]skillRevisionEntryRow, error) {
-	headEntries, err := s.entriesForHead(ctx, skillID)
-	if err != nil {
+	var skill skillRow
+	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", skillID).Take(&skill).Error; err != nil {
 		return nil, err
+	}
+	headEntries := []skillRevisionEntryRow{}
+	if skill.HeadRevisionID != nil {
+		if err := s.db.WithContext(ctx).Where("revision_id = ?", *skill.HeadRevisionID).Order("path ASC").Find(&headEntries).Error; err != nil {
+			return nil, err
+		}
 	}
 	entriesByPath := make(map[string]skillRevisionEntryRow, len(headEntries))
 	for _, entry := range headEntries {
@@ -1420,6 +1516,12 @@ func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSumma
 	if row.HeadRevisionID != nil {
 		head = *row.HeadRevisionID
 	}
+	if head == "" {
+		draft.Type = "create"
+	}
+	if row.AutoEvo && strings.TrimSpace(draft.Status) == skillDraftStatusAutoPending {
+		draft.HasUncommittedDraft = false
+	}
 	return SkillSummary{
 		ID:             row.ID,
 		SkillID:        row.ID,
@@ -1437,6 +1539,45 @@ func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSumma
 	}, nil
 }
 
+func markPendingSkillDraftAuto(ctx context.Context, tx *gorm.DB, skillID string, now time.Time) error {
+	var draft skillDraftRow
+	if err := tx.WithContext(ctx).Where("skill_id = ?", skillID).Take(&draft).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil
+		}
+		return err
+	}
+	if !isPendingSkillDraftStatus(draft.DraftStatus) {
+		return nil
+	}
+	var count int64
+	if err := tx.WithContext(ctx).Model(&skillDraftEntryRow{}).Where("skill_id = ?", skillID).Count(&count).Error; err != nil {
+		return err
+	}
+	nextStatus := ""
+	if count > 0 {
+		nextStatus = skillDraftStatusAutoPending
+	}
+	if strings.TrimSpace(draft.DraftStatus) == nextStatus {
+		return nil
+	}
+	return tx.WithContext(ctx).Model(&skillDraftRow{}).
+		Where("skill_id = ? AND version = ?", skillID, draft.Version).
+		Updates(map[string]any{
+			"draft_status": nextStatus,
+			"updated_at":   now,
+		}).Error
+}
+
+func isPendingSkillDraftStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case skillDraftStatusPendingConfirm, skillDraftStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *SkillService) draftSummary(ctx context.Context, skillID string) (DraftSummary, error) {
 	var draft skillDraftRow
 	err := s.db.WithContext(ctx).Where("skill_id = ?", skillID).Take(&draft).Error
@@ -1447,7 +1588,12 @@ func (s *SkillService) draftSummary(ctx context.Context, skillID string) (DraftS
 	if err := s.db.WithContext(ctx).Model(&skillDraftEntryRow{}).Where("skill_id = ?", skillID).Count(&count).Error; err != nil {
 		return DraftSummary{}, err
 	}
-	return DraftSummary{HasUncommittedDraft: count > 0, TaskID: draft.TaskID, Version: draft.Version}, nil
+	return DraftSummary{
+		HasUncommittedDraft: count > 0,
+		TaskID:              draft.TaskID,
+		Version:             draft.Version,
+		Status:              draft.DraftStatus,
+	}, nil
 }
 
 func buildTree(entries []skillRevisionEntryRow) TreeNode {

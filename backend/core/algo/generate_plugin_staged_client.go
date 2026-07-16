@@ -2,6 +2,7 @@ package algo
 
 import (
 	"context"
+	"encoding/json"
 
 	"lazymind/core/common"
 )
@@ -9,11 +10,45 @@ import (
 // Staged plugin generation — four sequential phases, each writes to DB independently.
 
 const (
+	generateAnalyzeSkillPath = "/api/chat/generate_plugin/analyze_skill"
 	generateDesignBriefPath  = "/api/chat/generate_plugin/design_brief"
 	generateSkeletonPath     = "/api/chat/generate_plugin/skeleton"
 	generateStateMachinePath = "/api/chat/generate_plugin/state_machine"
 	generateScenarioPath     = "/api/chat/generate_plugin/scenario_scripts"
 )
+
+type AnalyzeSkillRequest struct {
+	Name         string         `json:"name"`
+	SkillPackage map[string]any `json:"skill_package"`
+	LLMConfig    map[string]any `json:"llm_config"`
+}
+
+type AnalyzeSkillResponse struct {
+	Verdict      string           `json:"verdict"`
+	VerdictCode  string           `json:"verdict_code"`
+	Message      string           `json:"message"`
+	Candidates   []map[string]any `json:"candidates"`
+	Coverage     map[string]any   `json:"coverage"`
+	ToolMappings map[string]any   `json:"tool_mappings"`
+	Scripts      map[string]any   `json:"scripts"`
+}
+
+func AnalyzeSkill(ctx context.Context, req AnalyzeSkillRequest) (*AnalyzeSkillResponse, error) {
+	req.LLMConfig = ensureLLMConfig(req.LLMConfig)
+	var raw map[string]any
+	if err := common.ApiPost(ctx, generateURL(generateAnalyzeSkillPath), req, nil, &raw, generateTimeout); err != nil {
+		return nil, err
+	}
+	if data, ok := raw["data"].(map[string]any); ok {
+		raw = data
+	}
+	b, _ := json.Marshal(raw)
+	var resp AnalyzeSkillResponse
+	if err := json.Unmarshal(b, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
 
 // ---------------------------------------------------------------------------
 // Phase 0: Design Brief
@@ -21,10 +56,12 @@ const (
 
 // DesignBriefRequest is the request body for Phase 0.
 type DesignBriefRequest struct {
-	Name         string         `json:"name"`
-	Description  string         `json:"description,omitempty"`
-	SkillContent string         `json:"skill_content,omitempty"`
-	LLMConfig    map[string]any `json:"llm_config"`
+	Name             string         `json:"name"`
+	Description      string         `json:"description,omitempty"`
+	SkillContent     string         `json:"skill_content,omitempty"`
+	SkillPackage     map[string]any `json:"skill_package,omitempty"`
+	WorkflowAnalysis string         `json:"workflow_analysis,omitempty"`
+	LLMConfig        map[string]any `json:"llm_config"`
 }
 
 // DesignBriefResponse is the response body from Phase 0.
@@ -50,11 +87,13 @@ func DesignBrief(ctx context.Context, req DesignBriefRequest) (*DesignBriefRespo
 
 // GenerateSkeletonRequest is the request body for Phase 1.
 type GenerateSkeletonRequest struct {
-	Name         string         `json:"name"`
-	Description  string         `json:"description,omitempty"`
-	SkillContent string         `json:"skill_content,omitempty"`
-	DesignBrief  string         `json:"design_brief,omitempty"`
-	LLMConfig    map[string]any `json:"llm_config"`
+	Name             string         `json:"name"`
+	Description      string         `json:"description,omitempty"`
+	SkillContent     string         `json:"skill_content,omitempty"`
+	SkillPackage     map[string]any `json:"skill_package,omitempty"`
+	WorkflowAnalysis string         `json:"workflow_analysis,omitempty"`
+	DesignBrief      string         `json:"design_brief,omitempty"`
+	LLMConfig        map[string]any `json:"llm_config"`
 }
 
 // GenerateSkeletonResponse is the response body from Phase 1.
@@ -64,10 +103,11 @@ type GenerateSkeletonResponse struct {
 
 // GenerateStateMachineRequest is the request body for Phase 2.
 type GenerateStateMachineRequest struct {
-	Name        string         `json:"name"`
-	PluginYAML  string         `json:"plugin_yaml"`
-	DesignBrief string         `json:"design_brief,omitempty"`
-	LLMConfig   map[string]any `json:"llm_config"`
+	Name             string         `json:"name"`
+	PluginYAML       string         `json:"plugin_yaml"`
+	DesignBrief      string         `json:"design_brief,omitempty"`
+	WorkflowAnalysis string         `json:"workflow_analysis,omitempty"`
+	LLMConfig        map[string]any `json:"llm_config"`
 }
 
 // GenerateStateMachineResponse is the response body from Phase 2.
@@ -79,17 +119,19 @@ type GenerateStateMachineResponse struct {
 
 // GenerateScenarioScriptsRequest is the request body for Phase 3.
 type GenerateScenarioScriptsRequest struct {
-	Name        string         `json:"name"`
-	PluginYAML  string         `json:"plugin_yaml"`
-	StateYAML   string         `json:"state_yaml"`
-	DesignBrief string         `json:"design_brief,omitempty"`
-	LLMConfig   map[string]any `json:"llm_config"`
+	Name          string            `json:"name"`
+	PluginYAML    string            `json:"plugin_yaml"`
+	StateYAML     string            `json:"state_yaml"`
+	DesignBrief   string            `json:"design_brief,omitempty"`
+	SourceScripts map[string]string `json:"source_scripts,omitempty"`
+	LLMConfig     map[string]any    `json:"llm_config"`
 }
 
 // GenerateScenarioScriptsResponse is the response body from Phase 3.
 type GenerateScenarioScriptsResponse struct {
 	ScenarioMD string            `json:"scenario_md"`
 	Scripts    map[string]string `json:"scripts"`
+	Warnings   []string          `json:"warnings"`
 }
 
 func ensureLLMConfig(c map[string]any) map[string]any {
@@ -188,6 +230,16 @@ func GenerateScenarioScripts(ctx context.Context, req GenerateScenarioScriptsReq
 		ScenarioMD: extractStringField(raw, "scenario_md"),
 		Scripts:    extractScripts(raw),
 	}
+	if data, ok := raw["data"].(map[string]any); ok {
+		raw = data
+	}
+	if values, ok := raw["warnings"].([]any); ok {
+		for _, value := range values {
+			if warning, ok := value.(string); ok {
+				resp.Warnings = append(resp.Warnings, warning)
+			}
+		}
+	}
 	return resp, nil
 }
 
@@ -199,19 +251,24 @@ const repairStateMachinePath = "/api/chat/generate_plugin/repair"
 
 // RepairStateMachineRequest is the request body for the repair endpoint.
 type RepairStateMachineRequest struct {
-	PluginYAML string         `json:"plugin_yaml"`
-	StateYAML  string         `json:"state_yaml"`
-	RepairHint string         `json:"repair_hint,omitempty"`
-	Warnings   []string       `json:"warnings,omitempty"`
-	Target     string         `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
-	LLMConfig  map[string]any `json:"llm_config"`
+	PluginYAML  string            `json:"plugin_yaml"`
+	StateYAML   string            `json:"state_yaml"`
+	RepairHint  string            `json:"repair_hint,omitempty"`
+	Warnings    []string          `json:"warnings,omitempty"`
+	Diagnostics []map[string]any  `json:"diagnostics,omitempty"`
+	Target      string            `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
+	ScenarioMD  string            `json:"scenario_md,omitempty"`
+	Scripts     map[string]string `json:"scripts,omitempty"`
+	LLMConfig   map[string]any    `json:"llm_config"`
 }
 
 // RepairStateMachineResponse is the response body from the repair endpoint.
 type RepairStateMachineResponse struct {
-	StateYAML         string   `json:"state_yaml"`
-	PluginYAML        string   `json:"plugin_yaml"` // may be updated when slot repair was applied
-	RemainingWarnings []string `json:"remaining_warnings"`
+	StateYAML         string            `json:"state_yaml"`
+	PluginYAML        string            `json:"plugin_yaml"` // may be updated when slot repair was applied
+	RemainingWarnings []string          `json:"remaining_warnings"`
+	ScenarioMD        string            `json:"scenario_md"`
+	Scripts           map[string]string `json:"scripts"`
 }
 
 // RepairStateMachine calls the repair endpoint to fix an incomplete state.yml.
@@ -228,6 +285,8 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 	resp := &RepairStateMachineResponse{
 		StateYAML:  extractStringField(raw, "state_yaml"),
 		PluginYAML: extractStringField(raw, "plugin_yaml"),
+		ScenarioMD: extractStringField(raw, "scenario_md"),
+		Scripts:    extractScripts(raw),
 	}
 	if warnRaw, ok := raw["remaining_warnings"].([]any); ok {
 		for _, w := range warnRaw {

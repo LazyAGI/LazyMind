@@ -57,6 +57,14 @@ services:
   - name: evo-service
     url: http://evo-api:8047
     routes:
+      - name: evo-router-internal-only
+        paths:
+          - "~/api/evo/router(?:/|%2[fF]|$)"
+        strip_path: false
+        plugins:
+          - name: request-termination
+            config:
+              status_code: 404
       - name: evo-route
         paths:
           - /api/evo

@@ -2,6 +2,7 @@ package modelprovider
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -43,6 +44,8 @@ const defaultProviderCategory = "model"
 // Query params: category (default model when omitted), exclude_category,
 // keyword — case-insensitive substring match on name.
 func ListUserProviders(w http.ResponseWriter, r *http.Request) {
+	locale := common.NormalizeLocale(r.Header.Get("Accept-Language"))
+	common.SetLanguageResponseHeaders(w, locale)
 	db := store.DB()
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
@@ -88,13 +91,15 @@ func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := buildListItems(r.Context(), db, rows)
+	out := buildListItems(r.Context(), db, rows, locale)
 	common.ReplyOK(w, listResponse{Providers: out})
 }
 
 // ListUserProvidersWithGroups returns user_model_providers rows that have at least one non-deleted
 // user_model_provider_groups row for the current user (distinct parent ids from groups, then load providers).
 func ListUserProvidersWithGroups(w http.ResponseWriter, r *http.Request) {
+	locale := common.NormalizeLocale(r.Header.Get("Accept-Language"))
+	common.SetLanguageResponseHeaders(w, locale)
 	db := store.DB()
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
@@ -127,13 +132,13 @@ func ListUserProvidersWithGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := buildListItems(r.Context(), db, rows)
+	out := buildListItems(r.Context(), db, rows, locale)
 	common.ReplyOK(w, listResponse{Providers: out})
 }
 
 // buildListItems converts UserModelProvider rows to listItems and batch-loads
 // distinct model_types from default_models for each provider.
-func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvider) []listItem {
+func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvider, locale string) []listItem {
 	out := make([]listItem, 0, len(rows))
 	for i := range rows {
 		row := rows[i]
@@ -163,6 +168,28 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	for i := range out {
 		providerIDs = append(providerIDs, out[i].ID)
 		defaultProviderIDs = append(defaultProviderIDs, out[i].DefaultModelProviderID)
+	}
+	type localizedDescriptionRow struct {
+		ID              string      `gorm:"column:id"`
+		DescriptionI18n orm.RawJSON `gorm:"column:description_i18n"`
+	}
+	var descriptionRows []localizedDescriptionRow
+	if err := db.WithContext(ctx).
+		Model(&orm.DefaultModelProvider{}).
+		Select("id, description_i18n").
+		Where("id IN ? AND deleted_at IS NULL", defaultProviderIDs).
+		Find(&descriptionRows).Error; err == nil {
+		descriptionByID := make(map[string][]byte, len(descriptionRows))
+		for _, row := range descriptionRows {
+			descriptionByID[row.ID] = []byte(row.DescriptionI18n)
+		}
+		for i := range out {
+			out[i].Description = selectLocalizedDescription(
+				descriptionByID[out[i].DefaultModelProviderID],
+				locale,
+				out[i].Description,
+			)
+		}
 	}
 	type configuredProviderRow struct {
 		UserModelProviderID string `gorm:"column:user_model_provider_id"`
@@ -213,6 +240,19 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		}
 	}
 	return out
+}
+
+func selectLocalizedDescription(raw []byte, locale, fallback string) string {
+	descriptions := map[string]string{}
+	if len(raw) > 0 && json.Unmarshal(raw, &descriptions) == nil {
+		if value := strings.TrimSpace(descriptions[common.NormalizeLocale(locale)]); value != "" {
+			return value
+		}
+		if value := strings.TrimSpace(descriptions[common.LocaleZhCN]); value != "" {
+			return value
+		}
+	}
+	return fallback
 }
 
 // syncUserProvidersFromDefaults copies missing default_model_providers rows into

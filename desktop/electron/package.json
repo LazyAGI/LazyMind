@@ -8,37 +8,12 @@
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
-    "pack:mac:arm64": "electron-builder --mac --arm64 --dir"
+    "pack:mac:arm64": "electron-builder --config electron-builder.config.cjs --mac --arm64 --dir",
+    "pack:win:x64": "electron-builder --config electron-builder.config.cjs --win zip --x64",
+    "pack:win:x64:installer": "electron-builder --config electron-builder.config.cjs --win nsis --x64"
   },
   "devDependencies": {
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3"
-  },
-  "build": {
-    "appId": "ai.lazymind.desktop",
-    "productName": "LazyMind",
-    "artifactName": "LazyMind-${os}-${arch}.${ext}",
-    "asar": true,
-    "directories": {
-      "output": "../dist"
-    },
-    "files": [
-      "src/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "../dist/runtime",
-        "to": "runtime"
-      }
-    ],
-    "mac": {
-      "category": "public.app-category.productivity",
-      "icon": "assets/LazyMind.icns",
-      "target": [
-        "dir"
-      ],
-      "identity": null
-    }
   }
 }

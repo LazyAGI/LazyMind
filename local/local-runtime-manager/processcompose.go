@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -31,7 +31,13 @@ type processComposeConfig struct {
 	Version         string                           `yaml:"version"`
 	IsStrict        bool                             `yaml:"is_strict"`
 	OrderedShutdown bool                             `yaml:"ordered_shutdown"`
+	Shell           *processComposeShell             `yaml:"shell,omitempty"`
 	Processes       map[string]processComposeProcess `yaml:"processes"`
+}
+
+type processComposeShell struct {
+	Command  string `yaml:"shell_command"`
+	Argument string `yaml:"shell_argument"`
 }
 
 type processComposeProcess struct {
@@ -40,6 +46,7 @@ type processComposeProcess struct {
 	Shutdown    processComposeShutdown `yaml:"shutdown"`
 	LogLocation string                 `yaml:"log_location"`
 	Namespace   string                 `yaml:"namespace"`
+	Environment []string               `yaml:"environment,omitempty"`
 }
 
 type processComposeShutdown struct {
@@ -49,20 +56,29 @@ type processComposeShutdown struct {
 
 func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, paths RuntimePaths, cfg RuntimeConfig, tokenPath string, apiPort int) error {
 	commandEnv := runtimeCommandEnv(paths, cfg)
-	commandForLocalProxyRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-run")
-	commandForLocalProxyDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-down")
-	commandForAuthServiceRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-run")
-	commandForAuthServiceDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-down")
-	commandForCoreRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-run")
-	commandForCoreDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-down")
-	commandForScanControlPlaneRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-run")
-	commandForScanControlPlaneDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-down")
-	commandForFileWatcherRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-run")
-	commandForFileWatcherDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-down")
-	commandForFrontendRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-run")
-	commandForFrontendDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-down")
-	commandForMilvusLiteRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-run")
-	commandForMilvusLiteDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal milvus-lite-down")
+	plan := buildRuntimeProcessPlan(cfg)
+	windowsDesktopShell := runtime.GOOS == "windows" && cfg.Profile == "desktop"
+	commandPrefix := quoteShellArg(m.execPath) + " "
+	if windowsDesktopShell {
+		// The custom shell already runs this executable. Omitting the absolute
+		// path also avoids nested Windows quoting when the ZIP is extracted into
+		// a directory containing spaces.
+		commandPrefix = ""
+	}
+	commandForLocalProxyRun := commandWithEnv(commandEnv, commandPrefix+"internal local-proxy-run")
+	commandForLocalProxyDown := commandWithEnv(commandEnv, commandPrefix+"internal local-proxy-down")
+	commandForAuthServiceRun := commandWithEnv(commandEnv, commandPrefix+"internal auth-service-run")
+	commandForAuthServiceDown := commandWithEnv(commandEnv, commandPrefix+"internal auth-service-down")
+	commandForCoreRun := commandWithEnv(commandEnv, commandPrefix+"internal core-run")
+	commandForCoreDown := commandWithEnv(commandEnv, commandPrefix+"internal core-down")
+	commandForScanControlPlaneRun := commandWithEnv(commandEnv, commandPrefix+"internal scan-control-plane-run")
+	commandForScanControlPlaneDown := commandWithEnv(commandEnv, commandPrefix+"internal scan-control-plane-down")
+	commandForFileWatcherRun := commandWithEnv(commandEnv, commandPrefix+"internal file-watcher-run")
+	commandForFileWatcherDown := commandWithEnv(commandEnv, commandPrefix+"internal file-watcher-down")
+	commandForFrontendRun := commandWithEnv(commandEnv, commandPrefix+"internal frontend-run")
+	commandForFrontendDown := commandWithEnv(commandEnv, commandPrefix+"internal frontend-down")
+	commandForMilvusLiteRun := commandWithEnv(commandEnv, commandPrefix+"internal milvus-lite-run")
+	commandForMilvusLiteDown := commandWithEnv(commandEnv, commandPrefix+"internal milvus-lite-down")
 
 	pcCfg := processComposeConfig{
 		Version:         "0.5",
@@ -131,6 +147,20 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 			},
 		},
 	}
+	if !plan.includes(scanControlPlaneProcessName) {
+		delete(pcCfg.Processes, scanControlPlaneProcessName)
+	}
+	if !plan.includes(fileWatcherProcessName) {
+		delete(pcCfg.Processes, fileWatcherProcessName)
+	}
+	if windowsDesktopShell {
+		// process-compose normally starts every command through cmd.exe. A GUI
+		// application has no inherited console, so those shells each allocate a
+		// visible terminal window. Route commands through our GUI-subsystem
+		// sidecar, which directly launches a restricted internal subcommand with
+		// CREATE_NO_WINDOW instead.
+		pcCfg.Shell = &processComposeShell{Command: m.execPath, Argument: "shell"}
+	}
 	if cfg.ModeProfile.VectorStore.ManagedProcess {
 		pcCfg.Processes[milvusLiteProcessName] = processComposeProcess{
 			WorkingDir: repoRoot,
@@ -143,9 +173,9 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 			Namespace:   "host",
 		}
 	}
-	for _, svc := range algorithmProcessSpecs(cfg.Algorithm) {
-		run := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-run --service "+svc.Name)
-		down := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-down --service "+svc.Name)
+	for _, svc := range plan.AlgorithmServices {
+		run := commandWithEnv(commandEnv, commandPrefix+"internal algorithm-run --service "+svc.Name)
+		down := commandWithEnv(commandEnv, commandPrefix+"internal algorithm-down --service "+svc.Name)
 		pcCfg.Processes[svc.Name] = processComposeProcess{
 			WorkingDir: repoRoot,
 			Command:    run,
@@ -156,6 +186,10 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 			LogLocation: algorithmLogPath(paths, svc.Name),
 			Namespace:   "host",
 		}
+	}
+	for name, process := range pcCfg.Processes {
+		process.Environment = runtimeProcessEnvironment(commandEnv, cfg, plan, name)
+		pcCfg.Processes[name] = process
 	}
 	_ = tokenPath
 	_ = apiPort
@@ -168,16 +202,8 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 }
 
 func commandWithEnv(env []string, command string) string {
-	if len(env) == 0 {
-		return command
-	}
-	parts := make([]string, 0, len(env)+2)
-	parts = append(parts, "env")
-	for _, item := range env {
-		parts = append(parts, quoteShellArg(item))
-	}
-	parts = append(parts, command)
-	return strings.Join(parts, " ")
+	_ = env
+	return command
 }
 
 func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
@@ -207,12 +233,62 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		localChatPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.ChatPort),
 		localEvoPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.EvoPort),
 		localMilvusPortEnvVar+"="+strconv.Itoa(cfg.ModeProfile.VectorStore.Port),
-		localMilvusLiteDBPathEnvVar+"="+cfg.ModeProfile.VectorStore.DBPath,
+		localMilvusLiteDataDirEnvVar+"="+cfg.ModeProfile.VectorStore.DBPath,
 		localOpenSearchPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.OpenSearchPort),
 		routerPortPoolStartEnvVar+"="+strconv.Itoa(routerPoolStart),
 		routerPortPoolEndEnvVar+"="+strconv.Itoa(routerPoolEnd),
 		routerPortsPerInstanceEnvVar+"="+strconv.Itoa(defaultRouterPortsPerInstance),
 	)
+	return env
+}
+
+func runtimeProcessEnvironment(base []string, cfg RuntimeConfig, plan runtimeProcessPlan, processName string) []string {
+	env := append([]string(nil), base...)
+	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
+		return env
+	}
+	overrides := []string{}
+	if processName == authServiceProcessName || plan.isAlgorithmProcess(processName) {
+		overrides = append(overrides,
+			"HF_HUB_OFFLINE=1",
+			"TRANSFORMERS_OFFLINE=1",
+			"PIP_NO_INDEX=1",
+			"PYTHONDONTWRITEBYTECODE=0",
+		)
+	}
+	switch processName {
+	case authServiceProcessName:
+		overrides = append(overrides, "LAZYMIND_CLOUD_AUTH_HEALTH_CHECK_ENABLED=false")
+	case coreProcessName:
+		overrides = append(overrides, "LAZYMIND_BACKGROUND_JOBS_ENABLED=false")
+	case chatProcessName:
+		overrides = append(overrides,
+			"LAZYMIND_BACKGROUND_JOBS_ENABLED=false",
+			"LAZYMIND_ROUTER_CHILD_PROCESSES_ENABLED=false",
+		)
+	}
+	return withEnvOverrides(env, overrides...)
+}
+
+func withEnvOverrides(env []string, overrides ...string) []string {
+	for _, override := range overrides {
+		key, _, ok := strings.Cut(override, "=")
+		if !ok {
+			continue
+		}
+		prefix := key + "="
+		replaced := false
+		for i := range env {
+			if strings.HasPrefix(env[i], prefix) {
+				env[i] = override
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			env = append(env, override)
+		}
+	}
 	return env
 }
 
@@ -238,7 +314,7 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 		cmd.Env = append(os.Environ(), processComposeRuntimeEnv(paths)...)
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		configureChildProcess(cmd, true)
 		if err := cmd.Start(); err != nil {
 			_ = logFile.Close()
 			return fmt.Errorf("process-compose up failed: %w", err)
@@ -347,6 +423,16 @@ func processComposeGOBIN(paths RuntimePaths) (string, error) {
 }
 
 func quoteShellArg(value string) string {
+	if runtime.GOOS == "windows" {
+		if value == "" {
+			return `""`
+		}
+		escaped := strings.ReplaceAll(value, "%", "%%")
+		if strings.IndexAny(escaped, " \t&|<>^()!\"") == -1 {
+			return escaped
+		}
+		return `"` + strings.ReplaceAll(escaped, `"`, `\"`) + `"`
+	}
 	if value == "" {
 		return "''"
 	}

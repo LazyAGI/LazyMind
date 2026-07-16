@@ -7,8 +7,9 @@ type UploadedFile struct {
 	ID           int64  `gorm:"column:id;primaryKey;autoIncrement"`
 	UploadFileID string `gorm:"column:upload_file_id;type:varchar(128);not null;uniqueIndex"`
 
-	DatasetID string `gorm:"column:dataset_id;type:varchar(255);not null;index"`
-	TenantID  string `gorm:"column:tenant_id;type:varchar(36);not null;index"`
+	DatasetID   string `gorm:"column:dataset_id;type:varchar(255);not null;index"`
+	TenantID    string `gorm:"column:tenant_id;type:varchar(36);not null;index"`
+	ContentHash string `gorm:"column:content_hash;type:varchar(64);not null;default:''"`
 
 	TaskID     string          `gorm:"column:task_id;type:varchar(128);not null;default:'';index"`
 	DocumentID string          `gorm:"column:document_id;type:varchar(128);not null;default:'';index"`

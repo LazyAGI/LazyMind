@@ -35,6 +35,7 @@ export default function MemorySkillDetailPage() {
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [descriptionSaving, setDescriptionSaving] = useState(false);
   const [versionDrawerOpen, setVersionDrawerOpen] = useState(false);
+  const [packageReloadKey, setPackageReloadKey] = useState(0);
 
   const cachedSkill = useMemo(
     () => skillAssets.find((item: StructuredAsset) => item.id === itemId) || null,
@@ -101,10 +102,7 @@ export default function MemorySkillDetailPage() {
           return;
         }
         console.error("Load skill detail failed:", error);
-        setErrorMessage(
-          getLocalizedErrorMessage(error, t("admin.memorySkillDetailLoadFailed")) ||
-            t("admin.memorySkillDetailLoadFailed"),
-        );
+        setErrorMessage(getLocalizedErrorMessage(error));
       } finally {
         if (!ignore) {
           setLoading(false);
@@ -126,6 +124,11 @@ export default function MemorySkillDetailPage() {
       setDetail(nextDetail);
     }
     await refreshSkillAssets();
+  };
+
+  const handleSkillRolledBack = async () => {
+    setPackageReloadKey((value) => value + 1);
+    await handleSkillUpdated();
   };
 
   if ((loading || !skillsInitialized) && !skill && !errorMessage) {
@@ -154,9 +157,6 @@ export default function MemorySkillDetailPage() {
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Save skill title failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.saveFailed")) || t("common.saveFailed"),
-      );
     } finally {
       setTitleSaving(false);
     }
@@ -183,9 +183,6 @@ export default function MemorySkillDetailPage() {
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Save skill description failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.saveFailed")) || t("common.saveFailed"),
-      );
     } finally {
       setDescriptionSaving(false);
     }
@@ -327,6 +324,7 @@ export default function MemorySkillDetailPage() {
       ) : skill ? (
         <div className="memory-skill-detail-card memory-skill-package-card">
           <SkillPackageEditor
+            key={packageReloadKey}
             skillId={skill.id}
             canEdit={canEditSkillDetail}
             t={t}
@@ -342,6 +340,7 @@ export default function MemorySkillDetailPage() {
         resourceType="skill"
         t={t}
         onClose={() => setVersionDrawerOpen(false)}
+        onRolledBack={handleSkillRolledBack}
       />
     </div>
   );

@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -23,6 +23,9 @@ GO ?= go
 LOCAL_BUILD_DIR := $(CURDIR)/local/build
 override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)
 override LOCAL_RUNTIME_MANAGER_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager
+override LOCAL_RUNTIME_MANAGER_WIN_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager.exe
+LOCAL_WIN_SCRIPT := $(CURDIR)/local/scripts/local-win.ps1
+DESKTOP_WIN_SCRIPT := $(CURDIR)/desktop/scripts/build-windows-x64.ps1
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
 comma := ,
 
@@ -40,19 +43,21 @@ comma := ,
 # Usage without Makefile (docker compose directly):
 #   docker compose --env-file .env.mirrors.intl up -d
 # ---------------------------------------------------------------------------
-# Read MIRROR_PROFILE from .env via shell before any include, so that setting
-# MIRROR_PROFILE=intl in .env correctly selects the intl profile file.
-MIRROR_PROFILE ?= $(or $(shell grep -m1 '^MIRROR_PROFILE=' .env 2>/dev/null | cut -d= -f2-),cn)
+# Load .env once to discover MIRROR_PROFILE without requiring POSIX utilities.
+ifneq (,$(wildcard .env))
+include .env
+endif
+MIRROR_PROFILE ?= cn
 _MIRROR_ENV_FILE := .env.mirrors.$(MIRROR_PROFILE)
 ifneq (,$(wildcard $(_MIRROR_ENV_FILE)))
 include $(_MIRROR_ENV_FILE)
-export $(shell sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' $(_MIRROR_ENV_FILE))
 endif
 # Load .env after the profile so individual variable overrides in .env win.
 ifneq (,$(wildcard .env))
 include .env
-export $(shell sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' .env)
 endif
+_ENV_EXPORT_VARS := $(filter MIRROR_PROFILE LAZYMIND_% LAZYLLM_% LANGFUSE_% OTEL_% PIP_% UV_% NPM_% DOCKER_% APT_% ALPINE_% GOPROXY GOSUMDB GITHUB_% MILVUS_% MINIO_% POSTGRES_% REDIS_% OPENSEARCH_%,$(.VARIABLES))
+export $(_ENV_EXPORT_VARS)
 
 # ---------------------------------------------------------------------------
 # Compose project (optional). Pass -p only when COMPOSE_PROJECT is set.
@@ -189,9 +194,14 @@ help:
 	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
 	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
 	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
+	@echo "  make desktop-windows-x64 - Build Windows x64 Desktop portable ZIP"
+	@echo "  make desktop-windows-x64-installer - Build Windows x64 per-user installer"
+	@echo "  make desktop-windows-x64-clean - Remove Windows x64 Desktop build outputs"
 	@echo "  make desktop-cache-clean - Remove repo-local Desktop caches, if any"
 	@echo "  make desktop-clean - Remove all Desktop generated outputs"
 	@echo "  make local-down - Stop local LazyMind runtime"
+	@echo "  make local-win-up / local-win-down - Start/stop local LazyMind from PowerShell on Windows"
+	@echo "  make local-win-doctor - Check native Windows local-runtime prerequisites"
 	@echo "  make local-clean - Remove repo-local local/build application artifacts"
 	@echo "  make local-reset - Stop local runtime, clear user-path runtime data, and remove local/build"
 	@echo "  make down       - Stop Cloud/Kong compose services"
@@ -435,14 +445,23 @@ desktop-darwin-arm64-clean:
 	@echo "🧹 Removing Darwin arm64 Desktop generated outputs..."
 	@for path in \
 		"$(CURDIR)/desktop/build/darwin-arm64" \
-		"$(CURDIR)/desktop/dist" \
-		"$(CURDIR)/desktop/electron/node_modules"; do \
+		"$(CURDIR)/desktop/dist/mac-arm64" \
+		"$(CURDIR)/desktop/dist/LazyMind-darwin-arm64.zip"; do \
 		if [ -e "$$path" ]; then \
 			chflags -R nouchg "$$path" 2>/dev/null || true; \
 			chmod -R u+rwX "$$path" 2>/dev/null || true; \
 			rm -rf "$$path"; \
 		fi; \
 	done
+
+desktop-windows-x64:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(DESKTOP_WIN_SCRIPT)" build
+
+desktop-windows-x64-installer:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(DESKTOP_WIN_SCRIPT)" installer
+
+desktop-windows-x64-clean:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(DESKTOP_WIN_SCRIPT)" clean
 
 desktop-cache-clean:
 	@echo "🧹 Removing repo-local Desktop caches, if any..."
@@ -455,6 +474,10 @@ desktop-cache-clean:
 		fi; \
 	done
 
+ifeq ($(OS),Windows_NT)
+desktop-clean:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(DESKTOP_WIN_SCRIPT)" clean-all
+else
 desktop-clean:
 	@echo "🧹 Removing Desktop generated outputs..."
 	@for path in \
@@ -468,6 +491,7 @@ desktop-clean:
 			rm -rf "$$path"; \
 		fi; \
 	done
+endif
 
 local-up: local-runtime-manager-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
@@ -499,6 +523,32 @@ local-reset: local-runtime-manager-build
 	fi
 	@$(MAKE) --no-print-directory local-clean
 	@echo "✅ Local runtime reset. Run 'make local-up' to rebuild it."
+
+# Native Windows lifecycle. Keep PowerShell semantics isolated from the POSIX
+# local-* recipes so quoting, process control, and executable discovery do not mix.
+local-win-doctor:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(LOCAL_WIN_SCRIPT)" doctor
+
+local-win-build:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(LOCAL_WIN_SCRIPT)" build
+
+local-win-up:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(LOCAL_WIN_SCRIPT)" up
+
+local-win-up-lan:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(LOCAL_WIN_SCRIPT)" up-lan
+
+local-win-down:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(LOCAL_WIN_SCRIPT)" down
+
+local-win-status:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(LOCAL_WIN_SCRIPT)" status
+
+local-win-clean:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(LOCAL_WIN_SCRIPT)" clean
+
+local-win-reset:
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(LOCAL_WIN_SCRIPT)" reset
 
 clear:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \

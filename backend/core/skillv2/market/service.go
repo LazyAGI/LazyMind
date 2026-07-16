@@ -303,11 +303,6 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishRespo
 		if err := skillsearch.RebuildSkillTx(ctx, tx, sourceSkillID, now); err != nil {
 			return err
 		}
-		if strings.TrimSpace(req.AdminUserID) != "" {
-			if err := recordMarketInstall(ctx, tx, marketItemID, req.AdminUserID, sourceSkillID, now); err != nil {
-				return err
-			}
-		}
 		out = PublishResponse{MarketItemID: marketItemID, SourceSkillID: sourceSkillID}
 		return nil
 	})
@@ -779,7 +774,7 @@ type skillDraftRow struct {
 	DraftStatus    string     `gorm:"column:draft_status;type:text;not null;default:''"`
 	DraftUpdatedAt *time.Time `gorm:"column:draft_updated_at"`
 	TaskID         string     `gorm:"column:task_id;type:text;not null;default:''"`
-	ConversationID *string    `gorm:"column:conversation_id;type:varchar(36)"`
+	ConversationID *string    `gorm:"column:conversation_id;type:varchar(128)"`
 	UpdatedBy      *string    `gorm:"column:updated_by;type:varchar(36)"`
 	Version        int64      `gorm:"column:version;not null;default:1"`
 	CreatedAt      time.Time  `gorm:"column:created_at;not null"`

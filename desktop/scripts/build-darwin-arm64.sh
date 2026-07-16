@@ -2,10 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_ROOT="${ROOT}/local/build"
-RUNTIME_ROOT="${BUILD_ROOT}"
+BUILD_ROOT="${ROOT}/desktop/build/darwin-arm64"
+RUNTIME_ROOT="${BUILD_ROOT}/runtime"
 DIST_ROOT="${ROOT}/desktop/dist"
-APP_RUNTIME_ROOT="${DIST_ROOT}/runtime"
 APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
 
 GO_BIN="${GO:-go}"
@@ -126,6 +125,7 @@ rm -rf "${RUNTIME_ROOT}/deps/python/algorithm"
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict 'setuptools<81' lazyllm
 "${RUNTIME_ROOT}/deps/python/algorithm/bin/lazyllm" install rag
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
+"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements-local.txt"
 make_internal_symlinks_relative "${RUNTIME_ROOT}"
 echo "==> Pruning Python runtime bytecode and test packages"
 prune_python_runtime "${RUNTIME_ROOT}/runtimes/python"
@@ -156,12 +156,8 @@ rsync -a --delete \
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
 assert_desktop_runtime_app "${RUNTIME_ROOT}/app"
-node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" "${RUNTIME_ROOT}"
-
-echo "==> Copying runtime into Electron resources staging"
-remove_generated_path "${APP_RUNTIME_ROOT}"
-mkdir -p "${DIST_ROOT}"
-rsync -a --delete "${RUNTIME_ROOT}/" "${APP_RUNTIME_ROOT}/"
+node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" \
+  "${RUNTIME_ROOT}" --platform darwin --arch arm64
 
 echo "==> Packaging Electron app"
 if [[ ! -f "${APP_ICON}" ]]; then
@@ -173,6 +169,8 @@ if ! (cd "${ROOT}/desktop/electron" && node -e 'require("electron")' >/dev/null 
   (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" rebuild electron)
 fi
 remove_generated_path "${DIST_ROOT}/mac-arm64/LazyMind.app"
+export LAZYMIND_DESKTOP_RUNTIME_STAGE="${RUNTIME_ROOT}"
+export LAZYMIND_DESKTOP_OUTPUT_DIR="${DIST_ROOT}"
 (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run pack:mac:arm64)
 
 APP_PATH="${DIST_ROOT}/mac-arm64/LazyMind.app"

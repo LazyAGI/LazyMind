@@ -167,6 +167,7 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 		&orm.Dataset{},
 		&orm.Document{},
 		&orm.Task{},
+		&orm.UploadedFile{},
 		&orm.DefaultDataset{},
 		&orm.EvalSet{},
 		&readonlyorm.LazyLLMDocRow{},

@@ -3,11 +3,12 @@ module lazymind/core
 go 1.25.0
 
 require (
+	github.com/glebarez/go-sqlite v1.21.2
+	github.com/glebarez/sqlite v1.11.0
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/jackc/pgx/v5 v5.6.0
-	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/rs/zerolog v1.34.0
@@ -16,9 +17,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.0
-	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
-	modernc.org/sqlite v1.52.0
 )
 
 require (
@@ -51,4 +50,5 @@ require (
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
+	modernc.org/sqlite v1.52.0 // indirect
 )

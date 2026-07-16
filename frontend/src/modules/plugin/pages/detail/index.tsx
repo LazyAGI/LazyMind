@@ -3,9 +3,10 @@ import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { Alert, Breadcrumb, Button, Modal, Input, Spin, Select, Space, Tag, message } from 'antd';
 import { SyncOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft, publishPluginDraft, listPluginVersions, getPluginVersion, editPluginVersion } from '../../pluginDraftApi';
+import { localizeErrorCode } from '@/components/request';
+import { getPluginDraft, listPluginDrafts, updatePluginDraftContent, aiGeneratePluginDraft, repairPluginDraft, publishPluginDraft, listPluginVersions, getPluginVersion, editPluginVersion, getPluginGenerationAnalysis, confirmPluginWorkflow, previewPluginRepair, getPluginRepairRun, validatePluginDraft } from '../../pluginDraftApi';
 import type { PluginDraftRecord } from '../../pluginDraftApi';
-import type { PluginVersionSummary, PluginVersionContent } from '../../pluginDraftApi';
+import type { PluginVersionSummary, PluginVersionContent, PluginGenerationAnalysis, RepairPreview } from '../../pluginDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
 import type { SavePayload, RepairTarget } from '../../components/StateGraphEditor';
 import type { ValidationError } from '../../components/StateGraphEditor/core/validator';
@@ -14,7 +15,7 @@ import './index.scss';
 const POLL_INTERVAL_MS = 3000;
 
 // generate_status values that indicate AI generation is still in progress.
-const GENERATING_STATUSES = new Set(['generating', 'brief_done', 'skeleton_done', 'state_done', 'repairing']);
+const GENERATING_STATUSES = new Set(['analyzing', 'generating', 'brief_done', 'skeleton_done', 'state_done', 'repairing']);
 
 // generate_status values where enough content is available to render the editor.
 // state_done means plugin.yaml + state.yml are ready even though Phase 3 is still running.
@@ -42,8 +43,10 @@ function resolvePhase(status: string): GeneratePhase {
   }
 }
 
-
-
+function asSaveConflictError(error?: unknown): Error & { isSaveConflict: true } {
+  const conflict = error instanceof Error ? error : new Error('plugin draft version conflict');
+  return Object.assign(conflict, { isSaveConflict: true as const });
+}
 
 export default function PluginDetailPage() {
   const { pluginId } = useParams<{ pluginId: string }>();
@@ -71,6 +74,12 @@ export default function PluginDetailPage() {
   const draftRef = useRef<PluginDraftRecord | null>(null);
   // Keep ref in sync for use in handleSave (avoids stale closure over version).
   useEffect(() => { draftRef.current = draft; }, [draft]);
+  // Auto-saves must be applied in order: each successful write advances the
+  // optimistic-lock version used by the next write.
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // Once another editor/background job wins the optimistic lock, keep the
+  // local canvas intact but stop sending writes until the user reloads.
+  const saveConflictRef = useRef(false);
   // Persist artifacts panel open/close state across version remounts.
   // Default false — user explicitly opens the panel by clicking the 素材 button.
   const showArtifactsRef = useRef(false);
@@ -80,6 +89,7 @@ export default function PluginDetailPage() {
   // True while the :ai-repair API call is in-flight (keeps Modal open with a spinner).
   const [repairSubmitting, setRepairSubmitting] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [hasAuthoritativeErrors, setHasAuthoritativeErrors] = useState(false);
   const [versions, setVersions] = useState<PluginVersionSummary[]>([]);
   const [selectedRevision, setSelectedRevision] = useState<string>('draft');
   const [versionContent, setVersionContent] = useState<PluginVersionContent | null>(null);
@@ -87,6 +97,11 @@ export default function PluginDetailPage() {
   const [repairHint, setRepairHint] = useState('');
   const [repairTarget, setRepairTarget] = useState<RepairTarget>('statemachine');
   const [repairValidationErrors, setRepairValidationErrors] = useState<ValidationError[]>([]);
+  const [generationAnalysis, setGenerationAnalysis] = useState<PluginGenerationAnalysis | null>(null);
+  const [confirmingCandidate, setConfirmingCandidate] = useState('');
+  const [repairPreview, setRepairPreview] = useState<RepairPreview | null>(null);
+  const [repairFailureDetails, setRepairFailureDetails] = useState<string[]>([]);
+  const repairPreviewRequestRef = useRef(0);
   const prevStatusRef = useRef<string>('');
   // Per-banner dismissed state. Each banner has a unique key; dismissed keys are stored
   // as a JSON array in localStorage so they survive page refresh.
@@ -137,7 +152,7 @@ export default function PluginDetailPage() {
       setDraft(data);
       setNameValue(data.name);
     } catch {
-      message.error(t('selfEvolutionRun.pluginDetailLoadFailed'));
+      // API errors are reported by the shared request interceptor.
     } finally {
       setLoading(false);
     }
@@ -165,7 +180,10 @@ export default function PluginDetailPage() {
     pollRef.current = setInterval(async () => {
       if (!pluginId) return;
       try {
-        const data = await getPluginDraft(pluginId);
+        const data = await getPluginDraft(
+          pluginId,
+          { silentError: true } as never,
+        );
         setDraft(data);
         if (!GENERATING_STATUSES.has(data.generate_status)) {
           if (pollRef.current) clearInterval(pollRef.current);
@@ -179,6 +197,16 @@ export default function PluginDetailPage() {
             setRepairValidationErrors([]);
             setRepairSubmitting(false);
             if (repairFailed) {
+              if (data.last_repair_run_id) {
+                void getPluginRepairRun(pluginId, data.last_repair_run_id).then((run) => {
+                  const details = Array.isArray(run.diagnostics_after)
+                    ? run.diagnostics_after
+                      .filter((item) => item.severity === 'error')
+                      .map((item) => `${item.path}: ${localizeErrorCode(item.code, localizeErrorCode('2000509'))}`)
+                    : [];
+                  setRepairFailureDetails([...new Set(details)]);
+                }).catch(() => setRepairFailureDetails([]));
+              }
               // Clear only the generate_warning banner so it reappears with the new failure message.
               if (pluginId) {
                 const warningKey = `generate_warning:${contentKey(data.generate_warning ?? '')}`;
@@ -191,8 +219,8 @@ export default function PluginDetailPage() {
                 });
                 void warningKey; // used only for type-check
               }
-              message.error(t('selfEvolutionRun.pluginDetailRepairValidationFailed'));
             } else {
+              setRepairFailureDetails([]);
               message.success(t('selfEvolutionRun.pluginDetailRepairSuccess'));
             }
           }
@@ -232,7 +260,7 @@ export default function PluginDetailPage() {
       }
       startPolling();
     } catch {
-      message.error(t('selfEvolutionRun.pluginDetailRegenerateFailed'));
+      // API errors are reported by the shared request interceptor.
     } finally {
       setIsRegenerating(false);
     }
@@ -260,11 +288,13 @@ export default function PluginDetailPage() {
       const updated = await repairPluginDraft(pluginId, {
         repair_hint: fullHint,
         target: targetSnapshot,
+        mode: draftRef.current?.source_analysis_id ? 'source_aware' : 'plugin_local',
+        draft_version: draftRef.current?.version || 0,
+        source_analysis_id: draftRef.current?.source_analysis_id || undefined,
       });
       setDraft(updated);
       startPolling();
     } catch {
-      message.error(t('selfEvolutionRun.pluginDetailRepairRequestFailed'));
       setRepairSubmitting(false);
       // Reset prevStatusRef since we never entered repairing state.
       prevStatusRef.current = '';
@@ -276,48 +306,105 @@ export default function PluginDetailPage() {
     // repairSubmitting stays true until polling ends (handled in startPolling callback)
   }, [pluginId, repairHint, repairValidationErrors, repairTarget, startPolling]);
 
+  useEffect(() => {
+    if (!pluginId || !draft?.source_analysis_id) return;
+    getPluginGenerationAnalysis(pluginId).then(setGenerationAnalysis).catch(() => setGenerationAnalysis(null));
+  }, [pluginId, draft?.source_analysis_id, draft?.generate_status]);
+
+  const handleConfirmCandidate = useCallback(async (candidateId: string) => {
+    if (!pluginId || !draft || !generationAnalysis) return;
+    setConfirmingCandidate(candidateId);
+    try {
+      await confirmPluginWorkflow(pluginId,{analysis_id:generationAnalysis.analysis_id,candidate_id:candidateId,source_skill_revision_id:generationAnalysis.source_skill_revision_id,draft_version:draft.version});
+      setDraft(await getPluginDraft(pluginId)); startPolling();
+    } catch {}
+    finally { setConfirmingCandidate(''); }
+  },[pluginId,draft,generationAnalysis,startPolling]);
+
+  useEffect(() => {
+    if (!pluginId || !repairModalOpen) return;
+    const requestId = ++repairPreviewRequestRef.current;
+    setRepairPreview(null);
+    previewPluginRepair(pluginId, {
+      target: repairTarget,
+      mode: draft?.source_analysis_id ? 'source_aware' : 'plugin_local',
+    }).then((preview) => {
+      if (repairPreviewRequestRef.current === requestId) setRepairPreview(preview);
+    }).catch(() => {
+      if (repairPreviewRequestRef.current === requestId) setRepairPreview(null);
+    });
+    return () => {
+      if (repairPreviewRequestRef.current === requestId) repairPreviewRequestRef.current += 1;
+    };
+  }, [pluginId, repairModalOpen, repairTarget, draft?.source_analysis_id]);
+
   const handleOpenRepair = useCallback((target: RepairTarget, validationErrors?: ValidationError[]) => {
+    setRepairPreview(null);
     setRepairTarget(target);
     setRepairValidationErrors(validationErrors ?? []);
     setRepairModalOpen(true);
   }, []);
 
   const handleSave = useCallback(
-    async (payload: SavePayload) => {
-      if (!pluginId) return;
-      const currentVersion = draftRef.current?.version ?? 1;
-      let updated: PluginDraftRecord;
-      try {
-        updated = await updatePluginDraftContent(pluginId, {
-          state_yaml_content: payload.stateYaml,
-          state_layout_content: payload.stateLayoutContent,
-          plugin_yaml_content: payload.pluginYaml,
-          scenario_content: payload.scenarioContent,
-          scripts_content: payload.scriptsContent,
-          version: currentVersion,
-        });
-      } catch (err: unknown) {
-        // 409 Conflict: two sub-cases.
-        // 1. Version conflict: AI write bumped the version — refresh draft and rethrow.
-        // 2. Plugin id duplicate: another draft by this user already uses the same plugin id.
-        const status = (err as { response?: { status?: number; data?: { message?: string; data?: PluginDraftRecord } } })?.response?.status;
-        if (status === 409) {
-          const body = (err as { response: { data: { message?: string; data?: PluginDraftRecord } } }).response?.data;
-          if (body?.message && body.message.includes('plugin id already exists')) {
-            message.error(t('selfEvolutionRun.pluginDetailPluginIdDuplicate'));
-            throw err;
-          }
-          // Version conflict: update local version and let editor retry.
-          const latest = body?.data;
-          if (latest) setDraft(latest);
-          message.warning(t('selfEvolutionRun.pluginDetailAiUpdatedRetrying'));
+    (payload: SavePayload) => {
+      if (!pluginId) return Promise.resolve();
+      const save = saveQueueRef.current.catch(() => undefined).then(async () => {
+        if (saveConflictRef.current) {
+          throw asSaveConflictError();
         }
-        throw err;
-      }
-      setDraft(updated);
+        const currentVersion = draftRef.current?.version ?? 0;
+        let updated: PluginDraftRecord;
+        try {
+          updated = await updatePluginDraftContent(pluginId, {
+            state_yaml_content: payload.stateYaml,
+            state_layout_content: payload.stateLayoutContent,
+            plugin_yaml_content: payload.pluginYaml,
+            scenario_content: payload.scenarioContent,
+            scripts_content: payload.scriptsContent,
+            version: currentVersion,
+          });
+        } catch (err: unknown) {
+          // A stale version means another window or a background job changed
+          // the draft. Never adopt its version and retry the whole local
+          // snapshot: that would silently overwrite the other writer.
+          const response = (err as { response?: { status?: number; data?: { message?: string } } })?.response;
+          if (response?.status === 409) {
+            if (response.data?.message?.includes('plugin id already exists')) {
+              throw err;
+            }
+            if (response.data?.message === 'conflict') {
+              saveConflictRef.current = true;
+              throw asSaveConflictError(err);
+            }
+          }
+          throw err;
+        }
+        // Update the ref synchronously so the next queued save uses this
+        // response's version even before React commits setDraft.
+        draftRef.current = updated;
+        setDraft(updated);
+      });
+      saveQueueRef.current = save;
+      return save;
     },
-    [pluginId],
+    [pluginId, t],
   );
+
+  const handleValidate = useCallback(async (): Promise<ValidationError[]> => {
+    if (!pluginId) return [];
+    const result = await validatePluginDraft(pluginId);
+    const diagnostics = result.diagnostics.map((item) => ({
+      code: item.code,
+      message: localizeErrorCode(item.code, localizeErrorCode('2000509')),
+      severity: item.severity,
+      nodeId: item.node_id,
+      edgeKey: item.edge_id,
+      materialId: item.material_id,
+      details: item.details as Record<string, unknown> | undefined,
+    }));
+    setHasAuthoritativeErrors(result.diagnostics.some((item) => item.severity === 'error'));
+    return diagnostics;
+  }, [pluginId]);
 
   const handlePublish = useCallback(async () => {
     if (!draft) return;
@@ -327,8 +414,8 @@ export default function PluginDetailPage() {
       message.success(`Plugin 已发布为版本 ${result.revision_no}，默认关闭`);
       setVersions(await listPluginVersions(result.plugin_ref));
       setDraft(await getPluginDraft(draft.id));
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Plugin 发布失败');
+    } catch {
+      // API errors are reported by the shared request interceptor.
     } finally {
       setPublishing(false);
     }
@@ -345,7 +432,7 @@ export default function PluginDetailPage() {
     const loadVersion = async () => {
       setSelectedRevision(value); setSwitchingVersion(true);
       try { setVersionContent(await getPluginVersion(draft.published_plugin_ref, value)); }
-      catch { message.error('历史版本加载失败'); setSelectedRevision('draft'); }
+      catch { setSelectedRevision('draft'); }
       finally { setSwitchingVersion(false); }
     };
     if (draft.draft_dirty) {
@@ -399,15 +486,12 @@ export default function PluginDetailPage() {
   let stateYaml = rawStateYaml;
   if (!viewingHistory && rawStateYaml && draft.state_layout_content) {
     try {
-      const layoutObj = JSON.parse(draft.state_layout_content) as Record<string, { x: number; y: number; w?: number; width?: number }>;
+      const layoutObj = JSON.parse(draft.state_layout_content) as Record<string, unknown>;
       if (Object.keys(layoutObj).length > 0) {
         // Prepend x-layout block to state YAML so the parser picks it up.
         // Support both 'w' (legacy) and 'width' (current NodeLayout field name).
         const layoutYaml = `x-layout:\n${Object.entries(layoutObj)
-          .map(([id, pos]) => {
-            const w = pos.w ?? pos.width;
-            return `  ${id}: { x: ${pos.x}, y: ${pos.y}${w != null ? `, w: ${w}` : ''} }`;
-          })
+          .map(([id, value]) => `  ${JSON.stringify(id)}: ${JSON.stringify(value)}`)
           .join('\n')}\n`;
         stateYaml = layoutYaml + rawStateYaml;
       }
@@ -430,6 +514,12 @@ export default function PluginDetailPage() {
       <div className="plugin-editor-mask" />
       <div className="plugin-editor-panel">
     <div className="plugin-detail-page">
+      {draft.generate_status === 'needs_confirmation' && generationAnalysis && (
+        <Alert className="plugin-detail-banner" type="warning" showIcon message={t('selfEvolutionRun.pluginWorkflowChoose')} description={<Space direction="vertical"><span>{generationAnalysis.message}</span>{Object.entries(generationAnalysis.scripts).filter(([,report])=>report.classification==='unsupported').map(([path,report])=><span key={path}>{t('selfEvolutionRun.pluginUnsafeScriptIgnored',{path,reason:report.reason || t('selfEvolutionRun.pluginUnsafeScriptReason')})}</span>)}{generationAnalysis.candidates.map(candidate => <Button key={candidate.id} loading={confirmingCandidate===candidate.id} onClick={()=>handleConfirmCandidate(candidate.id)}>{candidate.name || candidate.goal || candidate.id}</Button>)}</Space>} />
+      )}
+      {draft.generate_status === 'rejected' && (
+        <Alert className="plugin-detail-banner" type="error" showIcon message={t('selfEvolutionRun.pluginWorkflowRejected')} description={localizeErrorCode('2000509')} />
+      )}
       {/* Generation progress banner — shown while Phase 3 is still running (editor already ready) */}
       {isPhase3Running && !repairModalOpen && (
         <Alert
@@ -450,7 +540,7 @@ export default function PluginDetailPage() {
           closable
           onClose={() => dismissBanner('failed')}
           message={t('selfEvolutionRun.pluginDetailFailedBanner')}
-          description={draft.generate_error || undefined}
+          description={localizeErrorCode('2000509')}
           action={
             <Button size="small" loading={isRegenerating} disabled={isRepairing} onClick={handleRegenerate}>
               {t('selfEvolutionRun.pluginDetailRegenerate')}
@@ -467,7 +557,7 @@ export default function PluginDetailPage() {
           closable
           onClose={() => dismissBanner('generate_error')}
           message={t('selfEvolutionRun.pluginDetailGenerateWarningBanner')}
-          description={draft.generate_error}
+          description={localizeErrorCode('2000509')}
         />
       )}
 
@@ -479,7 +569,9 @@ export default function PluginDetailPage() {
           closable
           onClose={() => dismissBanner(`generate_warning:${contentKey(draft.generate_warning)}`)}
           message={draft.generate_warning.startsWith('[修复失败]') ? t('selfEvolutionRun.pluginDetailRepairFailedBanner') : t('selfEvolutionRun.pluginDetailPartialContentBanner')}
-          description={draft.generate_warning}
+          description={repairFailureDetails.length > 0
+            ? <ul>{repairFailureDetails.map((detail) => <li key={detail}>{detail}</li>)}</ul>
+            : localizeErrorCode('2000509')}
         />
       )}
 
@@ -535,7 +627,7 @@ export default function PluginDetailPage() {
             </div>
           )}
           <StateGraphEditor
-            key={`${draft.version}:${selectedRevision}`}
+            key={`${draft.generate_status}:${selectedRevision}`}
             initialStateYaml={stateYaml}
             initialPluginYaml={pluginYaml}
             initialScenarioContent={(viewingHistory ? versionContent.scenario_content : draft.scenario_content) || undefined}
@@ -545,6 +637,11 @@ export default function PluginDetailPage() {
             defaultShowArtifacts={showArtifactsRef.current}
             onArtifactsChange={(show) => { showArtifactsRef.current = show; }}
             designBriefContent={draft.design_brief_content || undefined}
+            skillConversionReport={generationAnalysis && draft.generate_status !== 'needs_confirmation' ? {
+              coverage: generationAnalysis.coverage,
+              toolMappings: generationAnalysis.tool_mappings,
+              scripts: generationAnalysis.scripts,
+            } : undefined}
             pluginName={
               <Space size={8}>
                 <Breadcrumb items={[
@@ -590,9 +687,10 @@ export default function PluginDetailPage() {
             topbarActions={viewingHistory ? (
               <Button onClick={() => void handleEditHistoricalVersion()}>编辑此版本</Button>
             ) : editorReady ? (
-              <Button type="primary" loading={publishing} disabled={(draft.published && !draft.draft_dirty) || isRepairing || isStillGenerating} title={draft.published && !draft.draft_dirty ? '草稿相对于基础版本没有变更' : undefined} onClick={handlePublish}>发布插件</Button>
+              <Button type="primary" loading={publishing} disabled={hasAuthoritativeErrors || (draft.published && !draft.draft_dirty) || isRepairing || isStillGenerating} title={hasAuthoritativeErrors ? '请先修复 Go 校验返回的错误' : draft.published && !draft.draft_dirty ? '草稿相对于基础版本没有变更' : undefined} onClick={handlePublish}>发布插件</Button>
             ) : null}
             onSave={handleSave}
+            onValidate={handleValidate}
             onClose={() => navigate('/memory-management/plugins')}
             showEmptyHint={showEmptyHint}
           />
@@ -600,10 +698,11 @@ export default function PluginDetailPage() {
       {/* AI Repair Modal */}
       <Modal
         open={repairModalOpen}
-        title={`${t('selfEvolutionRun.pluginDetailRepairModalTitle')} — ${repairTarget === 'scenario' ? t('selfEvolutionRun.pluginDetailRepairTargetScenario') : repairTarget === 'ui' ? t('selfEvolutionRun.pluginDetailRepairTargetUi') : t('selfEvolutionRun.pluginDetailRepairTargetStatemachine')}`}
+        title={t('selfEvolutionRun.pluginDetailRepairModalTitle')}
         onCancel={() => {
           if (repairSubmitting || isRepairing) return;
           setRepairModalOpen(false);
+          setRepairPreview(null);
           setRepairHint('');
           setRepairValidationErrors([]);
         }}
@@ -627,16 +726,18 @@ export default function PluginDetailPage() {
           </div>
         ) : (
           <>
-            {repairValidationErrors.length > 0 && (
+            <Select value={repairTarget} onChange={(value)=>setRepairTarget(value)} style={{width:'100%',marginBottom:12}} options={[{value:'statemachine',label:t('selfEvolutionRun.pluginDetailRepairTargetStatemachine')},{value:'ui',label:t('selfEvolutionRun.pluginDetailRepairTargetUi')},{value:'scenario',label:t('selfEvolutionRun.pluginDetailRepairTargetScenario')},{value:'scripts',label:t('selfEvolutionRun.pluginDetailRepairTargetScripts')},{value:'full',label:t('selfEvolutionRun.pluginDetailRepairTargetFull')}]} />
+            {(repairTarget === 'statemachine' || repairTarget === 'full') && repairValidationErrors.length > 0 && (
               <>
                 <p style={{ marginBottom: 6 }}>{t('selfEvolutionRun.pluginDetailRepairValidationBasis')}</p>
                 <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, fontSize: 13, color: 'var(--color-text-secondary, #888)' }}>
                   {repairValidationErrors.map((e, i) => (
-                    <li key={i}>{e.message}</li>
+                    <li key={i}>{localizeErrorCode(e.code, localizeErrorCode('2000509'))}</li>
                   ))}
                 </ul>
               </>
             )}
+            {repairPreview && <Alert type="info" showIcon message={t('selfEvolutionRun.pluginRepairPreview')} description={<><div>{(repairPreview.planned_files ?? []).join(', ')}</div>{(repairPreview.diagnostics ?? []).map(item=><div key={`${item.code}:${item.path}`}>{(item.severity || 'error').toUpperCase()} {item.path}: {localizeErrorCode(item.code, localizeErrorCode('2000509'))}</div>)}</>} />}
             <p style={{ marginBottom: 8 }}>{t('selfEvolutionRun.pluginDetailRepairHintLabel')}</p>
             <Input.TextArea
               placeholder={repairTarget === 'scenario' ? t('selfEvolutionRun.pluginDetailRepairScenarioPlaceholder') : t('selfEvolutionRun.pluginDetailRepairStatePlaceholder')}

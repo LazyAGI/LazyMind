@@ -19,6 +19,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/plugin/graphengine"
 	"lazymind/core/store"
 	"lazymind/core/versionfs"
 )
@@ -124,7 +125,16 @@ func PublishPluginDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if len(files) > 3 {
+	compiled := graphengine.Compile(d.PluginYAMLContent, d.StateYAMLContent, d.ScenarioContent, graphengine.ProfilePublish)
+	if !compiled.Valid {
+		common.ReplyErrWithData(w, "plugin validation failed", compiled, http.StatusUnprocessableEntity)
+		return
+	}
+	if !frameworkToolsAvailableForPublish(store.DB(), d) {
+		common.ReplyErr(w, "framework tool unavailable", http.StatusConflict)
+		return
+	}
+	if len(files) > 3 && !scriptsApprovedForPublish(store.DB(), d) {
 		common.ReplyErr(w, "custom plugin scripts require the administrator publishing workflow", http.StatusForbidden)
 		return
 	}
@@ -191,7 +201,7 @@ func PublishPluginDraft(w http.ResponseWriter, r *http.Request) {
 			entries = append(entries, orm.PluginRevisionEntry{RevisionID: revID, Path: p, EntryType: "file", BlobHash: &h, Size: int64(len(body)), Mime: blob.Mime, FileType: blob.FileType, Mode: 420})
 		}
 		treeHash := versionfs.HashTree(versionEntries)
-		if err := tx.Create(&orm.PluginRevision{ID: revID, PluginResourceID: resource.ID, ParentRevisionID: parent, RevisionNo: next, TreeHash: treeHash, Message: "publish plugin draft", CreatedBy: userID, CreatedAt: now}).Error; err != nil {
+		if err := tx.Create(&orm.PluginRevision{ID: revID, PluginResourceID: resource.ID, ParentRevisionID: parent, RevisionNo: next, TreeHash: treeHash, CompiledGraph: compiled.Graph.JSON(), GraphHash: compiled.GraphHash, GraphSchemaVersion: graphengine.SchemaVersion, Message: "publish plugin draft", CreatedBy: userID, CreatedAt: now}).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(&entries).Error; err != nil {
@@ -218,6 +228,58 @@ func PublishPluginDraft(w http.ResponseWriter, r *http.Request) {
 	var setting orm.UserPluginSetting
 	enabled := store.DB().Where("user_id=? AND plugin_ref=?", userID, out.PluginRef).First(&setting).Error == nil && setting.Enabled
 	common.ReplyOK(w, map[string]any{"plugin_ref": out.PluginRef, "revision_id": out.HeadRevisionID, "revision_no": out.Version, "remote_root": "remote://" + out.RelativeRoot, "enabled": enabled})
+}
+
+func scriptsApprovedForPublish(db *gorm.DB, draft orm.PluginDraft) bool {
+	if draft.SourceAnalysisID == "" {
+		return false
+	}
+	var analysis orm.PluginGenerationAnalysis
+	if db.Where("id=? AND draft_id=?", draft.SourceAnalysisID, draft.ID).First(&analysis).Error != nil {
+		return false
+	}
+	var report map[string]struct {
+		Classification string `json:"classification"`
+		SHA256         string `json:"sha256"`
+	}
+	var scripts map[string]string
+	if json.Unmarshal([]byte(analysis.ScriptReportJSON), &report) != nil || json.Unmarshal([]byte(draft.ScriptsContent), &scripts) != nil {
+		return false
+	}
+	for path, source := range scripts {
+		item, ok := report[path]
+		if !ok || (item.Classification != "importable_tool" && item.Classification != "wrappable_command") {
+			return false
+		}
+		hash := sha256.Sum256([]byte(source))
+		if hex.EncodeToString(hash[:]) != item.SHA256 {
+			return false
+		}
+	}
+	return len(scripts) > 0
+}
+
+func frameworkToolsAvailableForPublish(db *gorm.DB, draft orm.PluginDraft) bool {
+	if draft.SourceAnalysisID == "" {
+		return true
+	}
+	var analysis orm.PluginGenerationAnalysis
+	if db.Where("id=? AND draft_id=?", draft.SourceAnalysisID, draft.ID).First(&analysis).Error != nil {
+		return false
+	}
+	var mappings map[string]map[string]any
+	if json.Unmarshal([]byte(analysis.ToolMappingReportJSON), &mappings) != nil {
+		return false
+	}
+	for _, mapping := range mappings {
+		if mapping["action"] == "replace" {
+			available, ok := mapping["available"].(bool)
+			if !ok || !available {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func RollbackPlugin(w http.ResponseWriter, r *http.Request) {

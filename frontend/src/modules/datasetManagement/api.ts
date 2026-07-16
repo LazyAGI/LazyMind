@@ -15,7 +15,11 @@ import {
   type UpdateEvalSetRequest,
 } from "@/api/generated/core-client";
 import { AgentAppsAuth } from "@/components/auth";
-import { axiosInstance, BASE_URL } from "@/components/request";
+import {
+  axiosInstance,
+  BASE_URL,
+  localizeErrorCode,
+} from "@/components/request";
 import i18n from "@/i18n";
 import {
   KnowledgeBaseServiceApi,
@@ -385,7 +389,7 @@ async function waitForImportTask(taskId: string): Promise<EvalSetImportTaskRespo
   }
 
   if (!latestTask) {
-    throw new Error(i18n.t("datasetManagement.import.importFailed"));
+    throw new Error(localizeErrorCode("2000509"));
   }
 
   return latestTask;
@@ -626,8 +630,12 @@ export async function importDatasetItems(
     const appendPayload = unwrapPayload(appendResponse.data);
     const task = await waitForImportTask(appendPayload.task_id);
     const status = `${task.status || ""}`.trim().toLowerCase();
-    if (!IMPORT_TASK_SUCCESS_STATUSES.has(status) && task.error_message) {
-      throw new Error(task.error_message);
+    if (!IMPORT_TASK_SUCCESS_STATUSES.has(status)) {
+      const taskError = new Error("Dataset import task failed") as Error & {
+        error_code: string;
+      };
+      taskError.error_code = `${task.error_code || "2000509"}`;
+      throw taskError;
     }
 
     return task;

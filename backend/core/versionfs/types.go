@@ -19,7 +19,9 @@ const (
 
 var (
 	ErrDraftEmpty           = errors.New("versionfs draft is empty")
+	ErrDraftConflict        = errors.New("cannot rollback while draft overlay exists")
 	ErrStaleDraftVersion    = errors.New("versionfs stale draft version")
+	ErrDraftBaseConflict    = errors.New("versionfs draft base revision conflict")
 	ErrHeadRevisionConflict = errors.New("versionfs head revision conflict")
 )
 

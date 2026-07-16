@@ -35,7 +35,10 @@ import type { Dataset } from "@/api/generated/core-client";
 import { AgentAppsAuth } from "@/components/auth";
 import MarkdownViewer from "@/modules/knowledge/components/MarkdownViewer";
 import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
-import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
+import {
+  axiosInstance,
+  localizeErrorCode,
+} from "@/components/request";
 import type { AxiosError } from "axios";
 import { type HistorySessionModalProps } from "../components/HistorySessions";
 import { type SelfEvolutionHomeViewProps } from "../components/LaunchViews";
@@ -93,6 +96,7 @@ import {
   AbSummaryReport,
   getPxMetricMeta,
   getKnowledgeBaseName,
+  getCatalogApiErrorMessage,
   isCanceledRequest,
   getExistingEvalSetOptions,
   evalSetPreviewData,
@@ -435,10 +439,7 @@ export function SelfEvolutionPageController({
             return;
           }
 
-          const fallback = t("selfEvolutionRun.error.knowledgeBaseLoadFailed");
-          setKnowledgeBaseError(
-            getLocalizedErrorMessage(error, fallback) || fallback,
-          );
+          setKnowledgeBaseError(getCatalogApiErrorMessage(error));
         })
         .finally(() => {
           if (!signal?.aborted) {
@@ -1359,10 +1360,7 @@ export function SelfEvolutionPageController({
           loading: false,
           key: diffArtifactKey,
           content: "",
-          error: getLocalizedErrorMessage(
-            error,
-            t("selfEvolutionRun.diffLoadFailed"),
-          ),
+          error: getCatalogApiErrorMessage(error),
         });
       });
 
@@ -1510,10 +1508,7 @@ export function SelfEvolutionPageController({
           reportId,
           loading: false,
           loaded: true,
-          error: getLocalizedErrorMessage(
-            error,
-            t("selfEvolutionRun.dataListLoadFailed"),
-          ),
+          error: getCatalogApiErrorMessage(error),
         }));
         return undefined;
       }
@@ -1584,12 +1579,7 @@ export function SelfEvolutionPageController({
             ...prev[kind],
             loading: false,
             loaded: true,
-            error: getLocalizedErrorMessage(
-              error,
-              t("selfEvolutionRun.workflowResultLoadFailed", {
-                label: getWorkflowResultLabels()[kind],
-              }),
-            ),
+            error: getCatalogApiErrorMessage(error),
           },
         }));
         return undefined;
@@ -1771,10 +1761,7 @@ export function SelfEvolutionPageController({
           caseId,
           title,
           loading: false,
-          error: getLocalizedErrorMessage(
-            error,
-            t("selfEvolutionRun.caseArtifactLoadFailed", { title }),
-          ),
+          error: getCatalogApiErrorMessage(error),
         });
       }
     },
@@ -1826,10 +1813,6 @@ export function SelfEvolutionPageController({
   }, [activeThreadId, workflowResults["eval-reports"].data]);
 
   useEffect(() => {
-    if (view === "detail" && routeThreadId && !isNewSessionConfigOpen) {
-      setIsKnowledgeBaseLoading(false);
-      return;
-    }
     const controller = new AbortController();
     fetchKnowledgeBaseOptions(controller.signal);
 
@@ -2034,12 +2017,12 @@ export function SelfEvolutionPageController({
 
   const showLocalErrorWhenNotHandledByAxios = (
     error: unknown,
-    fallback: string,
+    _fallback: string,
   ) => {
     if ((error as { isAxiosError?: boolean })?.isAxiosError) {
       return;
     }
-    message.error(getLocalizedErrorMessage(error, fallback) || fallback, 2);
+    message.error(getCatalogApiErrorMessage(error), 2);
   };
 
   const createAndStartThread = async (config?: {
@@ -2695,13 +2678,7 @@ export function SelfEvolutionPageController({
         activeSessionId,
       );
     } catch (error) {
-      message.error(
-        getLocalizedErrorMessage(
-          error,
-          t("selfEvolutionRun.sseConnectionError"),
-        ) || t("selfEvolutionRun.sseConnectionError"),
-        2,
-      );
+      message.error(getCatalogApiErrorMessage(error), 2);
     } finally {
       if (loadingThreadStepIdRef.current === step.stepId) {
         loadingThreadStepIdRef.current = undefined;
@@ -2833,12 +2810,10 @@ export function SelfEvolutionPageController({
       );
 
       if (!response.ok) {
-        throw new Error(`SSE connection failed: HTTP ${response.status}`);
+        throw new Error(localizeErrorCode("2000509"));
       }
       if (!response.body) {
-        throw new Error(
-          "SSE connection failed: no readable stream returned by browser",
-        );
+        throw new Error(localizeErrorCode("2000509"));
       }
 
       options?.onStreamConnected?.();
@@ -2923,13 +2898,7 @@ export function SelfEvolutionPageController({
       if (controller.signal.aborted) {
         return;
       }
-      message.error(
-        getLocalizedErrorMessage(
-          error,
-          t("selfEvolutionRun.sseConnectionError"),
-        ),
-        2,
-      );
+      message.error(getCatalogApiErrorMessage(error), 2);
     } finally {
       if (threadEventsAbortRef.current === subscription) {
         threadEventsAbortRef.current = null;
@@ -3224,22 +3193,14 @@ export function SelfEvolutionPageController({
       }
       const responseStatus = (error as AxiosError | undefined)?.response
         ?.status;
-      const errorTextRaw =
-        getLocalizedErrorMessage(
-          error,
-          t("selfEvolutionRun.threadDetailRestoreFailed"),
-        ) || "";
-      const isThreadNotFound =
-        responseStatus === 404 &&
-        errorTextRaw.toLowerCase().includes("thread not found");
+      const errorTextRaw = getCatalogApiErrorMessage(error);
+      const isThreadNotFound = responseStatus === 404;
       if (isThreadNotFound) {
         setWorkflowRuntimeState(createThreadRestoreWorkflowRuntimeState());
         setWorkflowResults(createInitialWorkflowResultsState());
         setCaseArtifact(undefined);
       }
-      const errorText = isThreadNotFound
-        ? t("selfEvolutionRun.threadNotFoundFull")
-        : errorTextRaw || t("selfEvolutionRun.threadDetailRestoreFailed");
+      const errorText = errorTextRaw;
       setThreadRestoreError(errorText);
       setChatSessions([
         {
@@ -3379,7 +3340,7 @@ export function SelfEvolutionPageController({
         );
 
         if (!response.ok) {
-          throw new Error(`Message send failed: HTTP ${response.status}`);
+          throw new Error(localizeErrorCode("2000509"));
         }
 
         const contentType = response.headers.get("content-type") || "";
@@ -3424,10 +3385,7 @@ export function SelfEvolutionPageController({
         );
       } catch (error) {
         appendSystemMessage(
-          getLocalizedErrorMessage(
-            error,
-            t("selfEvolutionRun.messageSendFailed"),
-          ) || t("selfEvolutionRun.messageSendFailed"),
+          getCatalogApiErrorMessage(error),
           activeSessionId,
         );
       } finally {
@@ -3496,10 +3454,7 @@ export function SelfEvolutionPageController({
       );
     } catch (error) {
       appendSystemMessage(
-        getLocalizedErrorMessage(
-          error,
-          t("selfEvolutionRun.continueFailed"),
-        ) || t("selfEvolutionRun.continueFailed"),
+        getCatalogApiErrorMessage(error),
         activeSessionId,
       );
     } finally {
@@ -3826,13 +3781,8 @@ export function SelfEvolutionPageController({
           message.info(t("selfEvolutionRun.noHistorySessions"), 1.2);
         }
       } catch (error) {
-        const errorText =
-          getLocalizedErrorMessage(
-            error,
-            t("selfEvolutionRun.historyListLoadFailed"),
-          ) || t("selfEvolutionRun.historyListLoadFailed");
+        const errorText = getCatalogApiErrorMessage(error);
         setThreadHistoryListError(errorText);
-        message.error(errorText, 2);
       } finally {
         isThreadHistoryListFetchingRef.current = false;
         setIsLoadingThreadHistoryList(false);
@@ -3964,9 +3914,8 @@ export function SelfEvolutionPageController({
       }
 
       message.success(t("selfEvolutionRun.message.historyDeleted"), 1.2);
-    } catch (error) {
-      const fallback = t("selfEvolutionRun.error.deleteHistoryFailed");
-      message.error(getLocalizedErrorMessage(error, fallback) || fallback, 2);
+    } catch {
+      // API errors are reported by the shared request interceptor.
     } finally {
       setDeletingHistoryKeys((prev) => prev.filter((key) => key !== entry.key));
     }

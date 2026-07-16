@@ -63,6 +63,23 @@ func TestPlan2CodeDoesNotDependOnLegacyAsyncJobSuggestionOrGenerateContracts(t *
 	}
 }
 
+func TestCoreStartsResourceUpdateRuntime(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "main.go"))
+	if err != nil {
+		t.Fatalf("read core main: %v", err)
+	}
+	content := string(body)
+	for _, token := range []string{
+		"resourceupdate.EnabledFromEnv()",
+		"resourceupdate.LogStartup(resourceUpdateEnabled)",
+		"resourceupdate.Start(context.Background(), store.DB(), store.State(), resourceupdate.DefaultConfig())",
+	} {
+		if !strings.Contains(content, token) {
+			t.Fatalf("core main must wire resource update runtime: missing %q", token)
+		}
+	}
+}
+
 func allowedLegacyCleanupReference(file, term, content string) bool {
 	return file == "results.go" &&
 		(term == "suggestion_ids" || term == "draft_suggestion_ids") &&

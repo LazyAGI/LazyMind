@@ -1,5 +1,5 @@
 import { CommonModal } from "@/components/ui";
-import { getLocalizedErrorMessage } from "@/components/request";
+import { localizeErrorCode } from "@/components/request";
 import { Switch, Space, message } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -53,10 +53,7 @@ function ConversationSettingModal(props: ConversationSettingModalProps) {
       cancelFn();
     } catch (error: any) {
       if (!error?.response && !error?.request) {
-        message.error(
-          getLocalizedErrorMessage(error, t("chat.settingSaveFailed")) ||
-            t("chat.settingSaveFailed"),
-        );
+        message.error(localizeErrorCode("2000509"));
       }
     }
   }

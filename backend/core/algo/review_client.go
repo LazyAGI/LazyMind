@@ -9,8 +9,11 @@ import (
 )
 
 func ReviewSkill(ctx context.Context, req SkillReviewRequest) (*SkillReviewResponse, int, error) {
+	if req.ModelConfigs == nil {
+		req.ModelConfigs = map[string]any{}
+	}
 	var out SkillReviewResponse
-	status, err := postReviewJSON(ctx, "/api/chat/skill-review", req, &out)
+	status, err := postReviewJSON(ctx, "/api/chat/skill_review", req, &out)
 	if err != nil {
 		return nil, status, err
 	}

@@ -4,7 +4,8 @@ import { QuestionCircleOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
 import type { ParserConfig } from "@/api/generated/knowledge-client";
-import { TaskServiceApi, type StartTaskResult } from "@/modules/knowledge/utils/request";
+import { TaskServiceApi } from "@/modules/knowledge/utils/request";
+import { localizeErrorCode } from "@/components/request";
 
 export const DOC_SUMMARY_GROUP = "doc-summary";
 
@@ -119,18 +120,14 @@ const RestartKnowledgeModal = (
         .map((task: { task_id?: string }) => task.task_id)
         .filter((taskId: string | undefined): taskId is string => !!taskId);
       if (!taskIds.length) {
-        message.error(t("knowledge.createReparseTaskFailed"));
+        message.error(localizeErrorCode("2000509"));
         return;
       }
 
       const startRes = await TaskServiceApi().startTasks(dataset, { task_ids: taskIds });
       const startedCount = startRes.data.started_count ?? 0;
       if (startedCount <= 0) {
-        const failedTasks = (startRes.data.tasks || []) as StartTaskResult[];
-        const errMsg =
-          failedTasks.find((task: StartTaskResult) => task.message)?.message ||
-          t("knowledge.createReparseTaskFailed");
-        message.error(errMsg);
+        message.error(localizeErrorCode("2000509"));
         return;
       }
       message.success(t("knowledge.createReparseTaskSuccess"));
@@ -138,7 +135,6 @@ const RestartKnowledgeModal = (
       onCancel();
     } catch (error) {
       console.log(error);
-      message.error(t("knowledge.createReparseTaskFailed"));
     } finally {
       setLoading(false);
     }

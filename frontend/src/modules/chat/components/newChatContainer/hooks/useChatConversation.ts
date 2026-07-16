@@ -755,6 +755,7 @@ export function useChatConversation({
         ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       create_time,
       model_mode: "value_engineering",
+      mentions: params.mentions || [],
     };
     const assistantMessage = {
       role: RoleTypes.ASSISTANT,
@@ -774,6 +775,7 @@ export function useChatConversation({
     scroll.scrollToEnd();
     openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
       ...(params.run_in_background ? { run_in_background: true } : {}),
+      ...(params.mentions?.length ? { mentions: params.mentions } : {}),
     });
 
     const currentId = currentConversationIdRef.current;

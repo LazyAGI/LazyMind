@@ -20,16 +20,24 @@ import {
   type NodeChange,
   type EdgeChange,
   MarkerType,
+  SelectionMode,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
 import type { GraphModel, StepNode, NodeLayout } from '../core/model';
-import { VIRTUAL_END, VIRTUAL_START, newHiddenId } from '../core/model';
+import {
+  VIRTUAL_END,
+  VIRTUAL_START,
+  formatExpression,
+  newHiddenId,
+} from '../core/model';
 import type { ValidationError } from '../core/validator';
 import type { PluginModel } from '../core/pluginModel';
 import type { ScenarioData } from '../ScenarioEditor';
 import { StepNodeRenderer, TerminalNode, buildNodeErrorMap, NODE_DEFAULT_WIDTH, NODE_MIN_WIDTH, type StepNodeData } from './StepNode';
 import { TransitionEdge } from './TransitionEdge';
+import { EdgeVisualPanel, NodeVisualPanel } from './VisualPropertiesPanel';
+import { deleteLayoutNode, edgeId, reconnectEdgeLayout, renameLayoutNode, NODE_MIN_HEIGHT } from '../core/layout';
 import NodePropertiesPanel from './NodePropertiesPanel';
 import { useAlignmentGuides } from './useAlignmentGuides';
 import { AlignmentGuides } from './AlignmentGuides';
@@ -42,6 +50,7 @@ const DEFAULT_SPACING_Y = 100;
 
 export interface CanvasHandle {
   addNode: () => void;
+  focusNode: (nodeId: string) => boolean;
 }
 
 interface Props {
@@ -53,6 +62,7 @@ interface Props {
   onScenarioChange?: (data: ScenarioData) => void;
   canvasRef?: React.Ref<CanvasHandle>;
   readonly?: boolean;
+  onCreateArtifact?: () => void;
 }
 
 const nodeTypes: NodeTypes = {
@@ -79,48 +89,11 @@ function buildPredecessorMap(model: GraphModel): Map<string, string[]> {
   return map;
 }
 
-/**
- * V11 guard: returns a rejection message if adding the edge src→tgt would
- * violate the "parallel sub-steps must not have multiple exits" rule, or null
- * if the connection is allowed.
- *
- * Rule: a node that is a direct child of a parallel fork (route:all, >1 exits)
- * must not itself have more than one outgoing transition.
- */
-function v11RejectReason(model: GraphModel, srcId: string, tgtId: string): string | null {
-  // After the new edge is added, src will have (current + 1) outgoing transitions.
-  const srcNode = model.nodes.find((n) => n.id === srcId);
-  if (!srcNode) return null;
-
-  const srcExitsAfter = srcNode.transitions.length + 1; // after adding the new edge
-
-  // Check 1: src's parent is a parallel fork → src must stay at ≤1 exit.
-  if (srcExitsAfter > 1) {
-    for (const n of model.nodes) {
-      const isParallelFork = (n.route === 'all' || !n.route) && n.transitions.length > 1;
-      if (isParallelFork && n.transitions.some((t) => t.to === srcId)) {
-        return `step "${srcId}" is a parallel fork child and cannot have multiple exits`;
-      }
-    }
-  }
-
-  // Check 2: src is itself a parallel fork → tgt must not already have >0 exits.
-  const srcIsParallelForkAfter = (srcNode.route === 'all' || !srcNode.route) && srcExitsAfter > 1;
-  if (srcIsParallelForkAfter) {
-    const tgtNode = model.nodes.find((n) => n.id === tgtId);
-    if (tgtNode && tgtNode.transitions.length > 0) {
-      return `step "${tgtId}" already has exits and cannot be a parallel fork child`;
-    }
-  }
-
-  return null;
-}
-
 function modelToFlowNodes(
   model: GraphModel,
   nodeErrorMap: Map<string, string[]>,
-  onResizeEnd: (nodeId: string, width: number) => void,
-  onResizeDrag: (nodeId: string, width: number) => void,
+  onResizeEnd: (nodeId: string, width: number, height?: number) => void,
+  onResizeDrag: (nodeId: string, width: number, height?: number) => { width: number; height?: number },
   getZoom: () => number,
 ): Node[] {
   const flowNodes: Node[] = [];
@@ -128,11 +101,13 @@ function modelToFlowNodes(
   const predMap = buildPredecessorMap(model);
 
   // __start__ virtual node
+  const startVisual=model.layout[VIRTUAL_START]??{x:autoX,y:200};
   flowNodes.push({
     id: VIRTUAL_START,
     type: 'terminal',
-    position: model.layout[VIRTUAL_START] ?? { x: autoX, y: 200 },
-    data: { type: 'start', label: 'START' },
+    position: startVisual,
+    data: { type: 'start', label: 'START', visual:startVisual },
+    ...(startVisual.width != null ? {width:startVisual.width}:{}),
     draggable: true,
   });
 
@@ -145,7 +120,7 @@ function modelToFlowNodes(
     // Build output label map: slotId → display label
     const outputLabels: Record<string, string> = {};
     for (const ref of node.outputs) {
-      const slotId = ref.slot;
+      const slotId = ref.material;
       const slot = model.slots[slotId];
       outputLabels[slotId] = slot?.label ?? slotId;
     }
@@ -155,14 +130,15 @@ function modelToFlowNodes(
       position: pos,
       data: {
         ...node,
-        // StepNodeData.inputs/outputs are string[] (slot ids for display); StepNode uses StepInputRef[].
-        inputs: node.inputs.map((r) => r.slot),
-        outputs: node.outputs.map((r) => r.slot),
+        inputs: node.inputs.flatMap((input) => [input.material, ...(input.alternatives ?? [])]),
+        outputs: node.outputs.map((r) => r.material),
         hasError: errMsgs.length > 0,
         errorMessages: errMsgs,
         predecessorIds: predMap.get(node.id) ?? [],
         outputLabels,
         nodeWidth,
+        nodeHeight: pos.height,
+        visual: pos,
         onResizeEnd,
         onResizeDrag,
         getZoom,
@@ -174,18 +150,20 @@ function modelToFlowNodes(
   }
 
   // __end__ virtual node
+  const endVisual=model.layout[VIRTUAL_END]??{x:autoX,y:200};
   flowNodes.push({
     id: VIRTUAL_END,
     type: 'terminal',
-    position: model.layout[VIRTUAL_END] ?? { x: autoX, y: 200 },
-    data: { type: 'end', label: 'END' },
+    position: endVisual,
+    data: { type: 'end', label: 'END', visual:endVisual },
+    ...(endVisual.width != null ? {width:endVisual.width}:{}),
     draggable: true,
   });
 
   return flowNodes;
 }
 
-function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>, onConditionChange: (src: string, tgt: string, cond: string) => void): Edge[] {
+function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>): Edge[] {
   const edges: Edge[] = [];
   const edgeErrorSet = new Set(
     [...nodeErrorMap.entries()].flatMap(([, msgs]) => msgs.filter((m) => m.includes('->'))),
@@ -200,7 +178,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
       type: 'transition',
       reconnectable: 'target' as const,
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: { condition: t.condition, hasError: false, onConditionChange },
+      data: { condition: t.when || formatExpression(t.condition) || '', hasError: false, visual: model.edgeLayout[`${VIRTUAL_START}->${t.to}`] },
     });
   }
 
@@ -209,7 +187,7 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
     const isParallel = (node.route === 'all' || !node.route) && isMultiExit;
     for (const t of node.transitions) {
       const edgeKey = `${node.id}->${t.to}`;
-      const hasError = edgeErrorSet.has(edgeKey) || (node.route === 'choice' && !t.condition.trim());
+      const hasError = edgeErrorSet.has(edgeKey) || Boolean(t.condition);
       edges.push({
         id: edgeKey,
         source: node.id,
@@ -218,10 +196,10 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
         reconnectable: 'target' as const,
         markerEnd: { type: MarkerType.ArrowClosed },
         data: {
-          condition: t.condition,
+          condition: t.when || formatExpression(t.condition) || '',
           hasError,
           isParallel,
-          onConditionChange,
+          visual: model.edgeLayout[edgeKey],
         },
       });
     }
@@ -230,23 +208,23 @@ function modelToFlowEdges(model: GraphModel, nodeErrorMap: Map<string, string[]>
   return edges;
 }
 
-function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, onScenarioChange, readonly = false }: Props, ref: React.Ref<CanvasHandle>) {
+function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, onScenarioChange, readonly = false, onCreateArtifact }: Props, ref: React.Ref<CanvasHandle>) {
   const { t } = useTranslation();
-  const { screenToFlowPosition, zoomIn, zoomOut, getZoom } = useReactFlow();
+  const { screenToFlowPosition, zoomIn, zoomOut, getZoom, setCenter } = useReactFlow();
   const nodeErrorMap = useMemo(() => buildNodeErrorMap(errors), [errors]);
-  const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides } = useAlignmentGuides();
+  const { guides, onNodeDrag: computeGuides, onNodeDragStop: clearGuides, onNodeResize } = useAlignmentGuides();
 
   // Stable resize callback used both by initialNodes (useMemo) and runtime.
   // Defined as a ref so it's available before setNodes is initialized.
-  const handleNodeResizeEndRef = useRef<(nodeId: string, width: number) => void>(() => {});
-  const stableResizeEnd = useCallback((nodeId: string, width: number) => {
-    handleNodeResizeEndRef.current(nodeId, width);
+  const handleNodeResizeEndRef = useRef<(nodeId: string, width: number, height?: number) => void>(() => {});
+  const stableResizeEnd = useCallback((nodeId: string, width: number, height?: number) => {
+    handleNodeResizeEndRef.current(nodeId, width, height);
   }, []);
 
   // Live resize drag: updates ReactFlow node width in real time without persisting to model.
-  const handleNodeResizeDragRef = useRef<(nodeId: string, width: number) => void>(() => {});
-  const stableResizeDrag = useCallback((nodeId: string, width: number) => {
-    handleNodeResizeDragRef.current(nodeId, width);
+  const handleNodeResizeDragRef = useRef<(nodeId: string, width: number, height?: number) => {width:number;height?:number}>((_id,width,height) => ({width,height}));
+  const stableResizeDrag = useCallback((nodeId: string, width: number, height?: number) => {
+    return handleNodeResizeDragRef.current(nodeId, width, height);
   }, []);
 
   // Stable zoom getter passed into StepNode so the resize handle can do correct
@@ -275,32 +253,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
 
   // Keep nodeErrorMap in a ref so stable callbacks can always read the latest value.
   const nodeErrorMapRef = useRef(nodeErrorMap);
-  useEffect(() => { nodeErrorMapRef.current = nodeErrorMap; }, [nodeErrorMap]);
-
-  // Stable callback — never changes reference, reads from refs.
-  const handleConditionChange = useCallback(
-    (sourceId: string, targetId: string, condition: string) => {
-      const m = modelRef.current;
-      if (sourceId === VIRTUAL_START) {
-        const updatedTransitions = m.startTransitions.map((t) =>
-          t.to === targetId ? { ...t, condition } : t,
-        );
-        onModelChangeRef.current({ ...m, startTransitions: updatedTransitions });
-        return;
-      }
-      const updatedNodes = m.nodes.map((n) => {
-        if (n.id !== sourceId) return n;
-        return {
-          ...n,
-          transitions: n.transitions.map((t) =>
-            t.to === targetId ? { ...t, condition } : t,
-          ),
-        };
-      });
-      onModelChangeRef.current({ ...m, nodes: updatedNodes });
-    },
-    [], // stable — intentionally no deps
-  );
+  nodeErrorMapRef.current = nodeErrorMap;
 
   const initialNodes = useMemo(
     () => modelToFlowNodes(model, nodeErrorMap, stableResizeEnd, stableResizeDrag, stableGetZoom),
@@ -308,7 +261,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     [],
   );
   const initialEdges = useMemo(
-    () => modelToFlowEdges(model, nodeErrorMap, handleConditionChange),
+    () => modelToFlowEdges(model, nodeErrorMap),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -316,7 +269,15 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [createAt, setCreateAt] = useState<{flowX:number;flowY:number;left:number;top:number}|null>(null);
+  const resizeFrameRef = useRef<number | null>(null);
+  const visualClipboardRef = useRef<{type:'node'; value:Pick<NodeLayout,'visible'|'fill'|'border'>}|{type:'edge';value:GraphModel['edgeLayout'][string]}|null>(null);
+
+  useEffect(() => () => {
+    if (resizeFrameRef.current !== null) cancelAnimationFrame(resizeFrameRef.current);
+  }, []);
 
   // When a canvas-internal operation calls onModelChange, we set this flag so
   // the sync useEffect below knows NOT to re-derive nodes/edges from the model
@@ -326,12 +287,18 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   // Track node selection purely via click events — one clear entry point,
   // no stale-closure or race-condition issues.
   const handleNodeClick = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
-      if (node.id === VIRTUAL_END) return;
+    (event: React.MouseEvent, node: Node) => {
+      const multi=event.shiftKey||event.metaKey||event.ctrlKey;
+      setSelectedNodeIds((current)=>{
+        const next=multi?new Set(current):new Set<string>();
+        if(multi&&next.has(node.id))next.delete(node.id);else next.add(node.id);
+        setNodes((items)=>items.map(item=>({...item,selected:next.has(item.id)})));
+        return next;
+      });
       setSelectedNodeId(node.id);
       setSelectedEdgeId(null);
     },
-    [],
+    [setNodes],
   );
 
   const handleNodesChange = useCallback(
@@ -340,6 +307,10 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     },
     [onNodesChange],
   );
+  const handleSelectionChange=useCallback(({nodes:selected=[],edges:selectedEdges=[]}: {nodes?:Node[];edges?:Edge[]})=>{
+    if(selected.length>0){const ids=new Set(selected.map(node=>node.id));setSelectedNodeIds(ids);setSelectedNodeId(selected.length===1?selected[0].id:null);setSelectedEdgeId(null);return;}
+    if(selectedEdges.length>0){setSelectedEdgeId(selectedEdges[0].id);setSelectedNodeId(null);setSelectedNodeIds(new Set());}
+  },[]);
 
   const handleEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
@@ -349,14 +320,17 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           if (change.selected) {
             setSelectedEdgeId(change.id);
             setSelectedNodeId(null);
-          } else if (change.id === selectedEdgeId) {
-            setSelectedEdgeId(null);
+            setSelectedNodeIds(new Set());
           }
         }
       }
     },
-    [onEdgesChange, selectedEdgeId],
+    [onEdgesChange],
   );
+  const handleEdgeClick=useCallback((_event:React.MouseEvent,edge:Edge)=>{
+    setSelectedEdgeId(edge.id);setSelectedNodeId(null);setSelectedNodeIds(new Set());
+    setEdges(items=>items.map(item=>({...item,selected:item.id===edge.id})));
+  },[setEdges]);
 
   // Keep nodes/edges in sync when model changes from OUTSIDE the canvas
   // (e.g. YAML editor, undo). Internal canvas operations use skipSyncRef to
@@ -366,7 +340,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       skipSyncRef.current = false;
       return;
     }
-    const newNodes = modelToFlowNodes(model, nodeErrorMap, stableResizeEnd, stableResizeDrag, stableGetZoom);
+    const newNodes = modelToFlowNodes(model, nodeErrorMapRef.current, stableResizeEnd, stableResizeDrag, stableGetZoom);
     // Preserve selected state and, importantly, the current rendered width of each
     // node. Width is managed independently via onResizeDrag/onResizeEnd and may
     // have been updated inside a setNodes callback that hasn't propagated back into
@@ -383,27 +357,21 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         const preservedNodeWidth = (current?.data as { nodeWidth?: number } | undefined)?.nodeWidth
           ?? (n.data as { nodeWidth?: number }).nodeWidth;
         const preservedWidth = preservedNodeWidth ?? current?.width ?? n.width;
-        const preservedHeight = current?.height; // undefined → ReactFlow measures from DOM
         return {
           ...n,
           width: preservedWidth,
-          ...(preservedHeight != null ? { height: preservedHeight } : {}),
           data: { ...n.data, nodeWidth: preservedNodeWidth },
           selected: selectedSet.has(n.id) ? true : n.selected,
         };
       });
     });
-    setEdges(modelToFlowEdges(model, nodeErrorMap, handleConditionChange));
-  }, [model, nodeErrorMap, handleConditionChange, setNodes, setEdges]);
+    setEdges(modelToFlowEdges(model, nodeErrorMapRef.current));
+  }, [model, setNodes, setEdges]);
 
   // Propagate error state changes to ReactFlow nodes independently of the main
   // model sync. This runs even when skipSyncRef suppresses the full sync above,
   // so error highlights update immediately after the parent re-validates.
   useEffect(() => {
-    // nodeErrorMapRef is already kept up to date by the effect above; use it to
-    // detect whether the map actually changed before running the update.
-    const prevMap = nodeErrorMapRef.current;
-    if (prevMap === nodeErrorMap) return;
     setNodes((currentNodes) => {
       let changed = false;
       const next = currentNodes.map((n) => {
@@ -420,7 +388,8 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       });
       return changed ? next : currentNodes;
     });
-  }, [nodeErrorMap, setNodes]);
+    setEdges(modelToFlowEdges(modelRef.current, nodeErrorMap));
+  }, [nodeErrorMap, setNodes, setEdges]);
 
   // When a new edge is drawn in the canvas, add a transition to the model
   const onConnect = useCallback(
@@ -428,21 +397,24 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       if (!connection.source || !connection.target) return;
 
       const m = modelRef.current;
+      if (connection.source === VIRTUAL_START
+        ? m.startTransitions.some((t) => t.to === connection.target)
+        : m.nodes.find((n) => n.id === connection.source)?.transitions.some((t) => t.to === connection.target)) return;
 
       if (connection.source === VIRTUAL_START) {
         // Prevent duplicate edges to the same target
         const target = connection.target;
         if (m.startTransitions.some((t) => t.to === target)) return;
-        const newTransition = { to: target, condition: '' };
-        const edgeId = `${VIRTUAL_START}->${target}`;
+        const newTransition = { to: target };
+        const newStartEdgeId = edgeId(VIRTUAL_START, target);
         setEdges((eds) =>
           addEdge(
             {
               ...connection,
-              id: edgeId,
+              id: newStartEdgeId,
               type: 'transition',
               markerEnd: { type: MarkerType.ArrowClosed },
-              data: { condition: '', hasError: false, onConditionChange: handleConditionChange },
+              data: { condition: '', hasError: false },
             },
             eds,
           ),
@@ -455,14 +427,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       const sourceNode = m.nodes.find((n) => n.id === connection.source);
       if (!sourceNode) return;
 
-      // V11 guard: reject if this connection would violate the no-re-fork rule.
-      const reject = v11RejectReason(m, connection.source, connection.target);
-      if (reject) {
-        // Silent rejection — the invalid edge simply doesn't get drawn.
-        return;
-      }
-
-      const newTransition = { to: connection.target, condition: '' };
+      const newTransition = { to: connection.target };
       const updatedNodes = m.nodes.map((n) =>
         n.id === connection.source
           ? { ...n, transitions: [...n.transitions, newTransition] }
@@ -482,9 +447,9 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
             : n,
         ),
       );
-      setEdges((eds) => addEdge({ ...connection, type: 'transition', markerEnd: { type: MarkerType.ArrowClosed }, data: { condition: '', hasError: false, onConditionChange: handleConditionChange } }, eds));
+      setEdges((eds) => addEdge({ ...connection, type: 'transition', markerEnd: { type: MarkerType.ArrowClosed }, data: { condition: '', hasError: false } }, eds));
     },
-    [setEdges, handleConditionChange],
+    [setEdges, setNodes, nodeErrorMap],
   );
 
   // Reconnect: user drags the target end of an existing edge to a new node.
@@ -498,6 +463,8 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       if (oldTgt === newTgt) return;
 
       const m = modelRef.current;
+      const candidateId = edgeId(oldSrc, newTgt);
+      if (edges.some((edge) => edge.id === candidateId && edge.id !== oldEdge.id)) return;
 
       if (oldSrc === VIRTUAL_START) {
         const newStartTransitions = m.startTransitions.map((t) =>
@@ -507,7 +474,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           e.id === oldEdge.id ? { ...e, id: `${VIRTUAL_START}->${newTgt}`, target: newTgt } : e,
         ));
         skipSyncRef.current = true;
-        onModelChangeRef.current({ ...m, startTransitions: newStartTransitions });
+        onModelChangeRef.current({ ...m, startTransitions: newStartTransitions, edgeLayout: reconnectEdgeLayout(m.edgeLayout, oldEdge.id, candidateId) });
         return;
       }
 
@@ -525,9 +492,9 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         e.id === oldEdge.id ? { ...e, id: newEdgeId, target: newTgt } : e,
       ));
       skipSyncRef.current = true;
-      onModelChangeRef.current({ ...m, nodes: newNodes });
+      onModelChangeRef.current({ ...m, nodes: newNodes, edgeLayout: reconnectEdgeLayout(m.edgeLayout, oldEdge.id, newEdgeId) });
     },
-    [setEdges],
+    [setEdges, edges],
   );
 
   // Sync drag-stop positions back to the model layout
@@ -579,44 +546,53 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
 
   // Persist resize: update layout width when user finishes resizing a node.
   const handleNodeResizeEnd = useCallback(
-    (nodeId: string, width: number) => {
-      const m = modelRef.current;
-      const w = Math.max(NODE_MIN_WIDTH, width);
-      // Read current node position from the snapshot synchronously before setNodes.
-      // Do NOT call onModelChangeRef or mutate skipSyncRef inside the setNodes updater
-      // (updaters must be pure functions; side effects there are unsafe in concurrent React).
-      const rfNodes = allNodesFromStore;
-      const rfNode = rfNodes.find((n) => n.id === nodeId);
-      const pos = m.layout[nodeId] ?? rfNode?.position ?? { x: 0, y: 0 };
-      const newLayout = { ...m.layout, [nodeId]: { ...pos, width: w } };
-      skipSyncRef.current = true;
-      onModelChangeRef.current({ ...m, layout: newLayout });
+    (nodeId: string, width: number, height?: number) => {
+      const w = Math.max(NODE_MIN_WIDTH, width);clearGuides();
+      if (resizeFrameRef.current !== null) {
+        cancelAnimationFrame(resizeFrameRef.current);
+        resizeFrameRef.current = null;
+      }
       setNodes((nds) =>
-        nds.map((n) =>
-          n.id === nodeId
-            ? { ...n, width: w, data: { ...n.data, nodeWidth: w } }
-            : n,
-        ),
+        nds.map((n) => {
+          if (n.id !== nodeId) return n;
+          return { ...n, width: w, data: { ...n.data, nodeWidth: w, ...(height != null ? { nodeHeight: height } : {}) } };
+        }),
       );
+      // Persist on the next frame, after ReactFlow has committed the visual width.
+      // Updating the parent model and ReactFlow's controlled node store in the
+      // same resize event can make its internal dimension sync recurse (#185).
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        const m = modelRef.current;
+        const rfNode = allNodesFromStore.find((n) => n.id === nodeId);
+        const pos = m.layout[nodeId] ?? rfNode?.position ?? { x: 0, y: 0 };
+        const newLayout = { ...m.layout, [nodeId]: { ...pos, width: w, ...(height != null ? { height: Math.max(NODE_MIN_HEIGHT, height) } : {}) } };
+        skipSyncRef.current = true;
+        onModelChangeRef.current({ ...m, layout: newLayout });
+      });
     },
-    [setNodes, allNodesFromStore],
+    [setNodes, allNodesFromStore, clearGuides],
   );
   // Wire the stable ref to the real implementation now that setNodes is available.
   handleNodeResizeEndRef.current = handleNodeResizeEnd;
 
   // Live resize drag: update ReactFlow node width in real time (no model persist).
   const handleNodeResizeDrag = useCallback(
-    (nodeId: string, width: number) => {
-      const w = Math.max(NODE_MIN_WIDTH, width);
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === nodeId
-            ? { ...n, width: w, data: { ...n.data, nodeWidth: w } }
-            : n,
-        ),
-      );
+    (nodeId: string, width: number, height?: number) => {
+      const snapped=onNodeResize(nodeId,width,height,allNodesFromStore);const w = Math.max(NODE_MIN_WIDTH, snapped.width);height=snapped.height;
+      if (resizeFrameRef.current !== null) cancelAnimationFrame(resizeFrameRef.current);
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id !== nodeId) return n;
+            return { ...n, width: w, data: { ...n.data, nodeWidth: w, ...(height != null ? { nodeHeight: height } : {}) } };
+          }),
+        );
+      });
+      return snapped;
     },
-    [setNodes],
+    [setNodes,onNodeResize,allNodesFromStore],
   );
   handleNodeResizeDragRef.current = handleNodeResizeDrag;
 
@@ -624,6 +600,14 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   // and Cmd+/- zoom within the canvas (prevents browser zoom).
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      if (event.key === 'Escape' && createAt) {
+        event.preventDefault();
+        setCreateAt(null);
+        return;
+      }
+      // Property panels live inside the canvas container, but their editing keys
+      // must never be interpreted as canvas-level delete/zoom shortcuts.
+      if ((event.target as HTMLElement).closest('.node-props-panel')) return;
       // Cmd/Ctrl + '=' (Plus) or '-' (Minus) — zoom canvas, block browser zoom
       if (event.metaKey || event.ctrlKey) {
         if (event.key === '+' || event.key === '=' || event.key === '-') {
@@ -654,6 +638,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           onModelChangeRef.current({
             ...m,
             startTransitions: m.startTransitions.filter((t) => t.to !== tgtId),
+            edgeLayout: Object.fromEntries(Object.entries(m.edgeLayout).filter(([id]) => id !== selectedEdgeId)),
           });
           setSelectedEdgeId(null);
           return;
@@ -664,7 +649,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         });
         setEdges((eds) => eds.filter((e) => e.id !== selectedEdgeId));
         skipSyncRef.current = true;
-        onModelChangeRef.current({ ...m, nodes: updatedNodes });
+        onModelChangeRef.current({ ...m, nodes: updatedNodes, edgeLayout: Object.fromEntries(Object.entries(m.edgeLayout).filter(([id]) => id !== selectedEdgeId)) });
         setSelectedEdgeId(null);
         return;
       }
@@ -677,17 +662,16 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         ...n,
         transitions: n.transitions.filter((t) => t.to !== selectedNodeId),
       }));
-      const newLayout = { ...m.layout };
-      delete newLayout[selectedNodeId];
+      const cleaned = deleteLayoutNode(m.layout, m.edgeLayout, selectedNodeId);
       const removedId = selectedNodeId;
       const newStartTransitions = m.startTransitions.filter((t) => t.to !== removedId);
       setNodes((nds) => nds.filter((n) => n.id !== removedId));
       setEdges((eds) => eds.filter((e) => e.source !== removedId && e.target !== removedId));
       skipSyncRef.current = true;
-      onModelChangeRef.current({ ...m, nodes: updatedNodesWithEdges, layout: newLayout, startTransitions: newStartTransitions });
+      onModelChangeRef.current({ ...m, nodes: updatedNodesWithEdges, ...cleaned, startTransitions: newStartTransitions });
       setSelectedNodeId(null);
     },
-    [selectedEdgeId, selectedNodeId, setEdges, setNodes, zoomIn, zoomOut],
+    [createAt, selectedEdgeId, selectedNodeId, setEdges, setNodes, zoomIn, zoomOut],
   );
 
   // Add a new node — places it at the current viewport center
@@ -716,7 +700,7 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         id: newId,
         type: 'step',
         position: flowPos,
-        data: { ...newNode, hasError: false, errorMessages: [], predecessorIds: [], outputLabels: {}, nodeWidth: NODE_WIDTH, onResizeEnd: stableResizeEnd, onResizeDrag: stableResizeDrag, getZoom: stableGetZoom },
+        data: { ...newNode, hasError: false, errorMessages: [], predecessorIds: [], outputLabels: {}, nodeWidth: NODE_WIDTH, visual: { ...flowPos }, onResizeEnd: stableResizeEnd, onResizeDrag: stableResizeDrag, getZoom: stableGetZoom },
         width: NODE_WIDTH,
       },
     ]);
@@ -724,15 +708,25 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     onModelChangeRef.current({ ...m, nodes: [...m.nodes, newNode], layout: newLayout });
   }, [screenToFlowPosition, setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom]);
 
-  useImperativeHandle(ref, () => ({ addNode: addNodeAtCenter }), [addNodeAtCenter]);
+  const focusNode = useCallback((nodeId: string): boolean => {
+    const node = allNodesFromStore.find((candidate) => candidate.id === nodeId);
+    if (!node) return false;
+    const width = node.width ?? (node.data as { nodeWidth?: number }).nodeWidth ?? NODE_WIDTH;
+    const height = node.height ?? NODE_HEIGHT;
+    setSelectedNodeId(nodeId);
+    setSelectedEdgeId(null);
+    void setCenter(
+      node.position.x + width / 2,
+      node.position.y + height / 2,
+      { zoom: Math.max(getZoom(), 1), duration: 350 },
+    );
+    return true;
+  }, [allNodesFromStore, getZoom, setCenter]);
 
-  // Add a new node on canvas double-click
-  const onDoubleClick = useCallback(
-    (event: React.MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (target.closest('.react-flow__node')) return;
-      const pos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+  useImperativeHandle(ref, () => ({ addNode: addNodeAtCenter, focusNode }), [addNodeAtCenter, focusNode]);
 
+  const addNodeAtPosition = useCallback(
+    (pos: {x:number;y:number}) => {
       const newId = `step_${uuidv4().slice(0, 6)}`;
       const newNode: StepNode = {
         id: newId,
@@ -751,15 +745,36 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           id: newId,
           type: 'step',
           position: flowPos,
-          data: { ...newNode, hasError: false, errorMessages: [], predecessorIds: [], outputLabels: {}, nodeWidth: NODE_WIDTH, onResizeEnd: stableResizeEnd, onResizeDrag: stableResizeDrag, getZoom: stableGetZoom },
+          data: { ...newNode, hasError: false, errorMessages: [], predecessorIds: [], outputLabels: {}, nodeWidth: NODE_WIDTH, visual: { ...flowPos }, onResizeEnd: stableResizeEnd, onResizeDrag: stableResizeDrag, getZoom: stableGetZoom },
           width: NODE_WIDTH,
         },
       ]);
       skipSyncRef.current = true;
       onModelChangeRef.current({ ...m, nodes: [...m.nodes, newNode], layout: newLayout });
     },
-    [screenToFlowPosition, setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom],
+    [setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom],
   );
+
+  const openCreateMenu=useCallback((event:React.MouseEvent)=>{
+    if(readonly||!event.ctrlKey)return false;
+    event.preventDefault();
+    const flow=screenToFlowPosition({x:event.clientX,y:event.clientY});
+    const rect=containerRef.current?.getBoundingClientRect();
+    const rawLeft=event.clientX-(rect?.left??0);
+    const rawTop=event.clientY-(rect?.top??0);
+    setCreateAt({flowX:flow.x,flowY:flow.y,left:Math.max(8,Math.min(rawLeft,(rect?.width??rawLeft+188)-188)),top:Math.max(8,Math.min(rawTop,(rect?.height??rawTop+104)-104))});
+    return true;
+  },[readonly,screenToFlowPosition]);
+
+  const handlePaneClick=useCallback((event:React.MouseEvent)=>{
+    if(openCreateMenu(event))return;
+    setCreateAt(null);
+    setSelectedNodeId(null);setSelectedNodeIds(new Set());setSelectedEdgeId(null);
+  },[openCreateMenu]);
+
+  const handlePaneContextMenu=useCallback((event:React.MouseEvent)=>{
+    if(event.ctrlKey)openCreateMenu(event);
+  },[openCreateMenu]);
 
   // Derive selectedNode from ReactFlow's nodes state (not model prop) so the
   // panel stays open immediately after an id-rename, before the parent re-renders.
@@ -789,16 +804,35 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
     return model.nodes.find((n) => n.id === selectedNode.id) ?? null;
   })();
 
-  // Whether the selected node is a direct child of a parallel fork.
-  // If true, "添加分支" must be disabled to prevent V11 violations.
-  const selectedIsParallelChild = selectedNodeId
-    ? model.nodes.some(
-        (n) =>
-          (n.route === 'all' || !n.route) &&
-          n.transitions.length > 1 &&
-          n.transitions.some((t) => t.to === selectedNodeId),
-      )
-    : false;
+  const updateNodeVisual = useCallback((nodeId: string, visual: NodeLayout) => {
+    const m=modelRef.current;
+    setNodes(items=>items.map(item=>item.id===nodeId?{...item,position:{x:visual.x,y:visual.y},width:visual.width??item.width,data:{...item.data,visual,nodeWidth:visual.width??(item.data as {nodeWidth?:number}).nodeWidth,nodeHeight:visual.height}}:item));
+    skipSyncRef.current=true;
+    onModelChangeRef.current({...m,layout:{...m.layout,[nodeId]:visual}});
+  },[setNodes]);
+  const updateEdgeVisual = useCallback((id: string, visual: GraphModel['edgeLayout'][string]) => {
+    const m=modelRef.current;
+    setEdges(items=>items.map(item=>item.id===id?{...item,selected:true,data:{...item.data,visual}}:item));
+    skipSyncRef.current=true;
+    onModelChangeRef.current({...m,edgeLayout:{...m.edgeLayout,[id]:visual}});
+  },[setEdges]);
+  const batchIds=[...selectedNodeIds];
+  const updateBatchVisual=(visual:NodeLayout)=>{
+    const m=modelRef.current; const layout={...m.layout};
+    for(const id of batchIds){const flowNode=nodes.find(node=>node.id===id);const old=layout[id]??flowNode?.position??{x:0,y:0};layout[id]={...old,width:visual.width,height:visual.height,visible:visual.visible,fill:visual.fill,border:visual.border};}
+    onModelChangeRef.current({...m,layout});
+  };
+  const alignSelected=(kind:'left'|'hcenter'|'right'|'top'|'vcenter'|'bottom'|'hspace'|'vspace')=>{
+    const chosen=nodes.filter(n=>selectedNodeIds.has(n.id)); if(chosen.length<2)return;
+    const layout={...modelRef.current.layout};
+    const box=(n:Node)=>({x:n.position.x,y:n.position.y,w:n.width??NODE_WIDTH,h:n.height??NODE_HEIGHT});
+    const boxes=chosen.map(box); const left=Math.min(...boxes.map(b=>b.x)); const right=Math.max(...boxes.map(b=>b.x+b.w)); const top=Math.min(...boxes.map(b=>b.y)); const bottom=Math.max(...boxes.map(b=>b.y+b.h));
+    if(kind==='hspace'||kind==='vspace'){
+      const sorted=[...chosen].sort((a,b)=>kind==='hspace'?a.position.x-b.position.x:a.position.y-b.position.y); const total=sorted.reduce((s,n)=>s+(kind==='hspace'?(n.width??NODE_WIDTH):(n.height??NODE_HEIGHT)),0); const span=kind==='hspace'?right-left:bottom-top; const gap=(span-total)/(sorted.length-1); let cursor=kind==='hspace'?left:top;
+      sorted.forEach(n=>{const old=layout[n.id]??n.position;layout[n.id]={...old,[kind==='hspace'?'x':'y']:cursor};cursor+=(kind==='hspace'?(n.width??NODE_WIDTH):(n.height??NODE_HEIGHT))+gap;});
+    }else chosen.forEach(n=>{const b=box(n),old=layout[n.id]??n.position;let x=b.x,y=b.y;if(kind==='left')x=left;if(kind==='hcenter')x=(left+right-b.w)/2;if(kind==='right')x=right-b.w;if(kind==='top')y=top;if(kind==='vcenter')y=(top+bottom-b.h)/2;if(kind==='bottom')y=bottom-b.h;layout[n.id]={...old,x,y};});
+    onModelChangeRef.current({...modelRef.current,layout});
+  };
 
   const handleNodePropertyChange = useCallback((updated: StepNode): boolean => {
     const m = modelRef.current;
@@ -832,51 +866,27 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       const remappedStartTransitions = m.startTransitions.map((t) =>
         t.to === currentSelectedNodeId ? { ...t, to: remaId } : t,
       );
-      const newLayout = { ...m.layout };
-      if (currentSelectedNodeId && newLayout[currentSelectedNodeId]) {
-        newLayout[remaId] = newLayout[currentSelectedNodeId];
-        delete newLayout[currentSelectedNodeId];
+      const remappedLayout = renameLayoutNode(m.layout, m.edgeLayout, currentSelectedNodeId!, remaId);
+      onModelChangeRef.current({ ...m, nodes: remappedNodes, startTransitions: remappedStartTransitions, ...remappedLayout });
+      if (scenarioData && onScenarioChange && currentSelectedNodeId) {
+        const stepDescriptions = { ...scenarioData.stepDescriptions };
+        stepDescriptions[remaId] = stepDescriptions[currentSelectedNodeId] ?? '';
+        delete stepDescriptions[currentSelectedNodeId];
+        onScenarioChange({ ...scenarioData, stepDescriptions });
       }
-      onModelChangeRef.current({ ...m, nodes: remappedNodes, startTransitions: remappedStartTransitions, layout: newLayout });
       setSelectedNodeId(remaId);
     } else {
-      // Same id, only data changed. Set skipSyncRef so the model-sync useEffect
-      // does not run a full RF rebuild (which would cause a position flicker).
-      // Then defer the RF node/edge update to the next microtask so it runs
-      // outside the current React render batch — this prevents Minified React
-      // error #185 caused by two concurrent setState calls in the same batch.
+      // Same id, only data changed. Let the model-sync effect update ReactFlow.
+      // Writing the parent model and the controlled ReactFlow nodes/edges from
+      // the same input event creates two competing sources of truth. React 18
+      // also batches queueMicrotask updates, so deferring the second write does
+      // not isolate it and can make ReactFlow's controlled-store sync recurse
+      // until React raises error #185.
       const newModel = { ...m, nodes: updatedNodes };
-      skipSyncRef.current = true;
       onModelChangeRef.current(newModel);
-      queueMicrotask(() => {
-        const errMap = nodeErrorMapRef.current;
-        setNodes((nds) =>
-          nds.map((n) => {
-            if (n.id !== currentSelectedNodeId) return n;
-            const updatedOutputLabels: Record<string, string> = {};
-            for (const ref of normalised.outputs) {
-              const slot = newModel.slots[ref.slot];
-              updatedOutputLabels[ref.slot] = slot?.label ?? ref.slot;
-            }
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                ...normalised,
-                inputs: normalised.inputs.map((r) => r.slot),
-                outputs: normalised.outputs.map((r) => r.slot),
-                outputLabels: updatedOutputLabels,
-                hasError: (errMap.get(currentSelectedNodeId!) ?? []).length > 0,
-                errorMessages: errMap.get(currentSelectedNodeId!) ?? [],
-              },
-            };
-          }),
-        );
-        setEdges(modelToFlowEdges(newModel, errMap, handleConditionChange));
-      });
     }
     return true;
-  }, [selectedNodeId, setNodes, setEdges]);
+  }, [selectedNodeId, scenarioData, onScenarioChange]);
 
   const handleNodeDelete = (nodeId: string) => {
     const m = modelRef.current;
@@ -884,13 +894,12 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       ...n,
       transitions: n.transitions.filter((t) => t.to !== nodeId),
     }));
-    const newLayout = { ...m.layout };
-    delete newLayout[nodeId];
+    const cleaned = deleteLayoutNode(m.layout, m.edgeLayout, nodeId);
     const newStartTransitions = m.startTransitions.filter((t) => t.to !== nodeId);
     setNodes((nds) => nds.filter((n) => n.id !== nodeId));
     setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
     skipSyncRef.current = true;
-    onModelChangeRef.current({ ...m, nodes: updatedNodes, layout: newLayout, startTransitions: newStartTransitions });
+    onModelChangeRef.current({ ...m, nodes: updatedNodes, ...cleaned, startTransitions: newStartTransitions });
     setSelectedNodeId(null);
   };
 
@@ -903,15 +912,17 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
   // directly in JS and does not rely on native scroll, so preventing the
   // browser default only stops the navigation gesture, not the canvas pan.
   useEffect(() => {
+    const root=document.documentElement;const body=document.body;
+    const previousRoot=root.style.overscrollBehaviorX;const previousBody=body.style.overscrollBehaviorX;
+    root.style.overscrollBehaviorX='none';body.style.overscrollBehaviorX='none';
+    let gestureUntil=0;
     const handler = (e: WheelEvent) => {
-      if (Math.abs(e.deltaX) === 0) return;
       const el = containerRef.current;
-      if (el && el.contains(e.target as Element)) {
-        e.preventDefault();
-      }
+      if(el?.contains(e.target as Element))gestureUntil=Date.now()+300;
+      if(Math.abs(e.deltaX)>0&&Date.now()<=gestureUntil)e.preventDefault();
     };
-    document.addEventListener('wheel', handler, { passive: false, capture: true });
-    return () => document.removeEventListener('wheel', handler, { capture: true });
+    window.addEventListener('wheel', handler, { passive: false, capture: true });
+    return () => {window.removeEventListener('wheel', handler, { capture: true });root.style.overscrollBehaviorX=previousRoot;body.style.overscrollBehaviorX=previousBody;};
   }, []);
 
   return (
@@ -919,7 +930,6 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
       ref={containerRef}
       className="graph-canvas-container"
       onKeyDown={onKeyDown}
-      onDoubleClick={onDoubleClick}
       tabIndex={0}
       role="application"
       aria-label={t('selfEvolutionRun.canvasAriaLabel')}
@@ -931,14 +941,21 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
+        onEdgeClick={handleEdgeClick}
         onNodeClick={handleNodeClick}
+        onSelectionChange={handleSelectionChange}
         onConnect={onConnect}
         onReconnect={onReconnect}
         reconnectRadius={8}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
-        onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
+        onPaneClick={handlePaneClick}
+        onPaneContextMenu={handlePaneContextMenu}
         selectNodesOnDrag={false}
+        selectionOnDrag
+        selectionMode={SelectionMode.Partial}
+        selectionKeyCode={null}
+        multiSelectionKeyCode={['Meta','Control','Shift']}
         elevateEdgesOnSelect
         fitView
         attributionPosition="bottom-right"
@@ -953,24 +970,14 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
         <Background />
         <Controls />
         <MiniMap />
-        <svg style={{ position: 'absolute', width: 0, height: 0 }}>
-          <defs>
-            <marker
-              id="arrow"
-              markerWidth="10"
-              markerHeight="10"
-              refX="9"
-              refY="3"
-              orient="auto"
-            >
-              <path d="M0,0 L0,6 L9,3 z" fill="#8c8c8c" />
-            </marker>
-          </defs>
-        </svg>
       </ReactFlow>
       <AlignmentGuides guides={guides} />
+      {createAt&&<div className="canvas-create-menu" style={{left:createAt.left,top:createAt.top}} role="menu" onPointerDown={(event)=>event.stopPropagation()} onClick={(event)=>event.stopPropagation()}>
+        <button type="button" role="menuitem" onClick={()=>{addNodeAtPosition({x:createAt.flowX,y:createAt.flowY});setCreateAt(null);}}><span className="canvas-create-menu-icon">＋</span><span><strong>新建步骤</strong><small>在此处添加流程步骤</small></span></button>
+        <button type="button" role="menuitem" onClick={()=>{setCreateAt(null);onCreateArtifact?.();}}><span className="canvas-create-menu-icon">◇</span><span><strong>新建素材</strong><small>打开素材面板并创建</small></span></button>
+      </div>}
 
-      {selectedStepNode && (
+      {selectedStepNode && selectedNodeIds.size <= 1 && (
         <NodePropertiesPanel
           node={selectedStepNode}
           model={model}
@@ -980,10 +987,24 @@ function CanvasInner({ model, errors, onModelChange, pluginModel, scenarioData, 
           onClose={() => setSelectedNodeId(null)}
           onChange={handleNodePropertyChange}
           onDelete={handleNodeDelete}
-          disableAddTransition={selectedIsParallelChild}
+          disableAddTransition={false}
           readonly={readonly}
+          visualContent={<NodeVisualPanel
+            value={model.layout[selectedStepNode.id] ?? {x:0,y:0}}
+            readonly={readonly}
+            onChange={(visual) => updateNodeVisual(selectedStepNode.id, visual)}
+            onReset={() => { const current=model.layout[selectedStepNode.id]; if (current) updateNodeVisual(selectedStepNode.id,{x:current.x,y:current.y,width:current.width,height:current.height}); }}
+            onCopy={() => { const {visible,fill,border}=model.layout[selectedStepNode.id]??{x:0,y:0}; visualClipboardRef.current={type:'node',value:{visible,fill,border}}; }}
+            onPaste={visualClipboardRef.current?.type==='node' ? () => updateNodeVisual(selectedStepNode.id,{...(model.layout[selectedStepNode.id]??{x:0,y:0}),...visualClipboardRef.current!.value}) : undefined}
+          />}
         />
       )}
+      {selectedNodeIds.size>1&&<div className="node-props-panel"><div className="node-props-panel-header"><span className="node-props-panel-title">批量视觉效果（{selectedNodeIds.size}）</span><button className="visual-close" onClick={()=>{setSelectedNodeIds(new Set());setSelectedNodeId(null);}}>×</button></div><div className="batch-align">{[['left','左对齐'],['hcenter','水平居中'],['right','右对齐'],['top','顶对齐'],['vcenter','垂直居中'],['bottom','底对齐'],['hspace','水平等距'],['vspace','垂直等距']].map(([id,label])=><button key={id} onClick={()=>alignSelected(id as Parameters<typeof alignSelected>[0])}>{label}</button>)}</div><NodeVisualPanel batch value={model.layout[batchIds[0]]??{x:0,y:0}} readonly={readonly} onChange={updateBatchVisual} onReset={()=>{const m=modelRef.current,layout={...m.layout};batchIds.forEach(id=>{const v=layout[id];if(v)layout[id]={x:v.x,y:v.y,width:v.width,height:v.height};});onModelChangeRef.current({...m,layout});}} /></div>}
+      {selectedNodeId && (selectedNodeId===VIRTUAL_START||selectedNodeId===VIRTUAL_END) && <div className="node-props-panel" role="complementary"><div className="node-props-panel-header"><span className="node-props-panel-title">{selectedNodeId===VIRTUAL_START?'开始':'结束'}节点视觉效果</span><button className="visual-close" onClick={()=>setSelectedNodeId(null)}>×</button></div><NodeVisualPanel terminal value={model.layout[selectedNodeId]??{x:0,y:0}} readonly={readonly} onChange={(visual)=>updateNodeVisual(selectedNodeId,visual)} onReset={()=>{const current=model.layout[selectedNodeId];if(current)updateNodeVisual(selectedNodeId,{x:current.x,y:current.y,width:current.width,height:current.height});}} /></div>}
+      {selectedEdgeId && !selectedStepNode && <div className="node-props-panel" role="complementary">
+        <div className="node-props-panel-header"><span className="node-props-panel-title">连线视觉效果</span><button className="visual-close" onClick={()=>setSelectedEdgeId(null)}>×</button></div>
+        <EdgeVisualPanel value={model.edgeLayout[selectedEdgeId]??{}} readonly={readonly} onChange={(visual)=>updateEdgeVisual(selectedEdgeId,visual)} onReset={()=>{ const next={...model.edgeLayout}; delete next[selectedEdgeId]; setEdges(items=>items.map(item=>item.id===selectedEdgeId?{...item,selected:true,data:{...item.data,visual:{}}}:item)); skipSyncRef.current=true; onModelChangeRef.current({...model,edgeLayout:next}); }} onCopy={()=>{visualClipboardRef.current={type:'edge',value:model.edgeLayout[selectedEdgeId]??{}};}} onPaste={visualClipboardRef.current?.type==='edge'?()=>{const copied=visualClipboardRef.current;if(copied?.type==='edge')updateEdgeVisual(selectedEdgeId,copied.value);}:undefined} />
+      </div>}
     </div>
   );
 }

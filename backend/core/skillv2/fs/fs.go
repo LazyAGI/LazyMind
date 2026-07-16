@@ -223,8 +223,11 @@ func (fs *DraftFS) Mkdir(ctx context.Context, req MkdirRequest) (DraftMutationRe
 		if err != nil {
 			return err
 		}
-		if existing, ok := entries[cleaned]; ok && existing.EntryType == "file" {
-			return fmt.Errorf("cannot create directory over file: %s", cleaned)
+		if existing, ok := entries[cleaned]; ok {
+			if existing.EntryType == "file" {
+				return fmt.Errorf("cannot create directory over file: %s", cleaned)
+			}
+			return fmt.Errorf("path already exists: %s", cleaned)
 		}
 		for p, entry := range entries {
 			if entry.EntryType == "file" && isAncestorPath(p, cleaned) {
@@ -533,7 +536,7 @@ type skillDraftRow struct {
 	SkillID        string     `gorm:"column:skill_id;type:varchar(36);primaryKey"`
 	BaseRevisionID *string    `gorm:"column:base_revision_id;type:varchar(36)"`
 	TaskID         string     `gorm:"column:task_id;type:text;not null;default:''"`
-	ConversationID *string    `gorm:"column:conversation_id;type:varchar(36)"`
+	ConversationID *string    `gorm:"column:conversation_id;type:varchar(128)"`
 	UpdatedBy      *string    `gorm:"column:updated_by;type:varchar(36)"`
 	Version        int64      `gorm:"column:version;not null;default:1"`
 	CreatedAt      time.Time  `gorm:"column:created_at;not null"`

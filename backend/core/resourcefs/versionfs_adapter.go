@@ -163,7 +163,7 @@ func (versionStore) AfterCommit(ctx context.Context, tx *gorm.DB, revision versi
 	return nil
 }
 
-func (versionStore) AfterRollback(ctx context.Context, tx *gorm.DB, revision versionfs.RevisionRecord, entries map[string]versionfs.Entry) error {
+func (versionStore) AfterRollback(ctx context.Context, tx *gorm.DB, resourceID string, revisionID string, entries map[string]versionfs.Entry, now time.Time) error {
 	return nil
 }
 

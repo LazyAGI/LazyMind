@@ -124,6 +124,7 @@ type Revision struct {
 	CreatedBy        string
 	CreatedAt        time.Time
 	FileContent      string
+	IsHead           bool
 }
 
 type TreeNode struct {
@@ -215,7 +216,11 @@ func (s *Service) Rollback(ctx context.Context, req RollbackRequest) (RollbackRe
 	if err != nil {
 		return RollbackResponse{}, err
 	}
-	return RollbackResponse{NewHeadRevisionID: resp.RevisionID, RevisionNo: resp.RevisionNo}, nil
+	revision, err := getRevision(ctx, s.db, req.SkillID, resp.RevisionID)
+	if err != nil {
+		return RollbackResponse{}, err
+	}
+	return RollbackResponse{NewHeadRevisionID: resp.RevisionID, RevisionNo: revision.RevisionNo}, nil
 }
 
 func (s *Service) RollbackPreview(ctx context.Context, req RollbackPreviewRequest) (RollbackPreviewResponse, error) {
@@ -272,13 +277,19 @@ func (s *Service) DeleteRevision(ctx context.Context, req DeleteRevisionRequest)
 }
 
 func (s *Service) ListRevisions(ctx context.Context, req ListRevisionsRequest) (ListRevisionsResponse, error) {
+	headID, err := headRevisionID(ctx, s.db, req.SkillID)
+	if err != nil {
+		return ListRevisionsResponse{}, err
+	}
 	var rows []skillRevisionRow
 	if err := s.db.WithContext(ctx).Where("skill_id = ?", req.SkillID).Order("revision_no DESC, created_at DESC").Find(&rows).Error; err != nil {
 		return ListRevisionsResponse{}, err
 	}
 	items := make([]Revision, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, revisionDTO(row))
+		item := revisionDTO(row)
+		item.IsHead = row.ID == headID
+		items = append(items, item)
 	}
 	return ListRevisionsResponse{Items: items}, nil
 }
@@ -288,7 +299,13 @@ func (s *Service) GetRevision(ctx context.Context, req GetRevisionRequest) (Revi
 	if err != nil {
 		return Revision{}, err
 	}
-	return revisionDTO(row), nil
+	headID, err := headRevisionID(ctx, s.db, req.SkillID)
+	if err != nil {
+		return Revision{}, err
+	}
+	out := revisionDTO(row)
+	out.IsHead = row.ID == headID
+	return out, nil
 }
 
 func (s *Service) GetRevisionTree(ctx context.Context, req GetRevisionTreeRequest) (TreeNode, error) {
@@ -380,44 +397,50 @@ func (s *Service) enforceRevisionLimit(ctx context.Context, tx *gorm.DB, skillID
 		if int(count) <= s.maxRevisions {
 			return nil
 		}
-		var rows []skillRevisionRow
-		if err := tx.WithContext(ctx).Where("skill_id = ?", skillID).Order("revision_no ASC, created_at ASC").Find(&rows).Error; err != nil {
+		row, ok, err := s.selectRevisionToPrune(ctx, tx, skillID, protected)
+		if err != nil {
 			return err
 		}
-		deleted := false
-		for _, row := range rows {
-			if protected[row.ID] {
-				continue
-			}
-			var draftBaseCount int64
-			if err := tx.Model(&skillDraftRow{}).Where("skill_id = ? AND base_revision_id = ?", skillID, row.ID).Count(&draftBaseCount).Error; err != nil {
-				return err
-			}
-			if draftBaseCount > 0 {
-				protected[row.ID] = true
-				continue
-			}
-			var headCount int64
-			if err := tx.Model(&skillRow{}).Where("id = ? AND head_revision_id = ?", skillID, row.ID).Count(&headCount).Error; err != nil {
-				return err
-			}
-			if headCount > 0 {
-				protected[row.ID] = true
-				continue
-			}
-			if err := tx.Where("revision_id = ?", row.ID).Delete(&skillRevisionEntryRow{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("id = ? AND skill_id = ?", row.ID, skillID).Delete(&skillRevisionRow{}).Error; err != nil {
-				return err
-			}
-			deleted = true
-			break
-		}
-		if !deleted {
+		if !ok {
 			return fmt.Errorf("revision limit exceeded and no deletable revision found")
 		}
+		if err := tx.Where("revision_id = ?", row.ID).Delete(&skillRevisionEntryRow{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id = ? AND skill_id = ?", row.ID, skillID).Delete(&skillRevisionRow{}).Error; err != nil {
+			return err
+		}
 	}
+}
+
+func (s *Service) selectRevisionToPrune(ctx context.Context, tx *gorm.DB, skillID string, protected map[string]bool) (skillRevisionRow, bool, error) {
+	var rows []skillRevisionRow
+	if err := tx.WithContext(ctx).Where("skill_id = ?", skillID).Order("revision_no ASC, created_at ASC").Find(&rows).Error; err != nil {
+		return skillRevisionRow{}, false, err
+	}
+	for _, row := range rows {
+		if protected[row.ID] {
+			continue
+		}
+		var draftBaseCount int64
+		if err := tx.Model(&skillDraftRow{}).Where("skill_id = ? AND base_revision_id = ?", skillID, row.ID).Count(&draftBaseCount).Error; err != nil {
+			return skillRevisionRow{}, false, err
+		}
+		if draftBaseCount > 0 {
+			protected[row.ID] = true
+			continue
+		}
+		var headCount int64
+		if err := tx.Model(&skillRow{}).Where("id = ? AND head_revision_id = ?", skillID, row.ID).Count(&headCount).Error; err != nil {
+			return skillRevisionRow{}, false, err
+		}
+		if headCount > 0 {
+			protected[row.ID] = true
+			continue
+		}
+		return row, true, nil
+	}
+	return skillRevisionRow{}, false, nil
 }
 
 type BlobStore interface {
@@ -573,7 +596,7 @@ type skillDraftRow struct {
 	SkillID        string     `gorm:"column:skill_id;type:varchar(36);primaryKey"`
 	BaseRevisionID *string    `gorm:"column:base_revision_id;type:varchar(36)"`
 	TaskID         string     `gorm:"column:task_id;type:text;not null;default:''"`
-	ConversationID *string    `gorm:"column:conversation_id;type:varchar(36)"`
+	ConversationID *string    `gorm:"column:conversation_id;type:varchar(128)"`
 	UpdatedBy      *string    `gorm:"column:updated_by;type:varchar(36)"`
 	Version        int64      `gorm:"column:version;not null;default:1"`
 	CreatedAt      time.Time  `gorm:"column:created_at;not null"`
@@ -611,9 +634,13 @@ type mergedEntry struct {
 }
 
 func mergedEntriesForDraft(ctx context.Context, tx *gorm.DB, skillID, baseRevisionID string) (map[string]mergedEntry, error) {
-	entries, err := entriesForRevision(ctx, tx, skillID, baseRevisionID)
-	if err != nil {
-		return nil, err
+	entries := map[string]mergedEntry{}
+	if baseRevisionID != "" {
+		var err error
+		entries, err = entriesForRevision(ctx, tx, skillID, baseRevisionID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var overlays []skillDraftEntryRow
 	if err := tx.WithContext(ctx).Where("skill_id = ?", skillID).Order("path ASC").Find(&overlays).Error; err != nil {

@@ -9,16 +9,18 @@ import shutil
 import threading
 import time
 from collections.abc import Mapping
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from fastapi import HTTPException
 
 from evo.artifact_flow.commands import ApplyArtifactMutation, CancelFlow, ContinueFlow, PauseFlow, ResumeFlow, RetryFlow
 from evo.artifact_flow.commands import FlowCommand
 from evo.artifact_runtime.evo.actions import InvalidateFromStep, RerunStep
-from evo.operations.router_ledger import RouterAlgorithmLedger
-from evo.operations.router_manager import RouterManager, RouterManagerError
+from evo.operations.route.router_algorithm import discard_owned_algorithm, discard_unpublished_algorithms
+from evo.operations.route.router_ledger import RouterAlgorithmLedger, RouterLedgerError
+from evo.operations.route.router_manager import RouterManager, RouterManagerError
 from .runtime_port import RuntimePort
 
 THREAD_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}')
@@ -36,6 +38,18 @@ class ThreadService:
         self.download_root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._active: set[str] = set()
+
+    @contextmanager
+    def exclusive_operation(self, thread_id: str) -> Iterator[None]:
+        with self._lock:
+            if thread_id in self._active:
+                raise HTTPException(409, 'thread already has an active command')
+            self._active.add(thread_id)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._active.discard(thread_id)
 
     def create(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         inputs = _inputs(payload['inputs'])
@@ -190,12 +204,15 @@ class ThreadService:
     def cancel(self, thread_id: str, payload: Mapping[str, Any]) -> dict[str, str]:
         with self._lock:
             config = self._config(thread_id)
+            active = thread_id in self._active
             command_id = _command_id(payload, 'cancel', thread_id)
             result = self.runtime.flow(_num_case(config)).handle(thread_id, CancelFlow(command_id))
         if result.command_status == 'conflict':
             raise HTTPException(409, 'command_id conflict')
         if result.command_status == 'failed':
             raise HTTPException(500, result.error or 'cancel command failed')
+        if not active:
+            discard_unpublished_algorithms(RouterAlgorithmLedger(self.runtime.store_root), thread_id)
         return _accepted(thread_id, command_id)
 
     def run_message_command(self, thread_id: str, config: Mapping[str, Any], command: FlowCommand):
@@ -294,7 +311,16 @@ class ThreadService:
             action()
         finally:
             with self._lock:
-                self._active.discard(thread_id)
+                try:
+                    config = self.runtime.run_config(thread_id)
+                    cancelled = (
+                        config is not None
+                        and self.runtime.query(_num_case(config)).snapshot(thread_id).status == 'cancelled'
+                    )
+                finally:
+                    self._active.discard(thread_id)
+            if cancelled:
+                discard_unpublished_algorithms(RouterAlgorithmLedger(self.runtime.store_root), thread_id)
 
     def _status(self, thread_id: str, config: Mapping[str, Any]) -> dict[str, str]:
         snapshot = self.runtime.query(_num_case(config)).snapshot(thread_id)
@@ -325,22 +351,29 @@ class ThreadService:
 
     def _stop_owned_router_algorithms(self, thread_id: str) -> None:
         ledger = RouterAlgorithmLedger(self.runtime.store_root)
+        owned = ledger.list_algorithms(thread_id=thread_id)
+        if any(row.get('expected_state') in {'claiming', 'deleting', 'managing'} for row in owned):
+            raise HTTPException(409, 'router algorithm operation is in progress')
+        if any(row.get('cleanup_policy') == 'manual' for row in owned):
+            raise HTTPException(409, 'delete manually managed router algorithms before deleting the thread')
         rows = [
-            row for row in ledger.list_algorithms(thread_id=thread_id, expected_state='active')
+            row for row in owned
             if row.get('cleanup_policy') == 'thread_delete'
+            and row.get('expected_state') in {'active', 'orphaned', 'stopped'}
         ]
         for row in rows:
             algorithm_id = str(row['algorithm_id'])
             manager = RouterManager(str(row['router_admin_url']), str(row['service_url']))
             try:
-                if algorithm_id in _strategy_weights(manager.get_ab_strategy()):
+                discard_owned_algorithm(manager, ledger, algorithm_id)
+            except RouterLedgerError as exc:
+                raise HTTPException(409, f'router algorithm operation is in progress: {algorithm_id}') from exc
+            except RouterManagerError as exc:
+                if exc.kind == 'algorithm_in_ab_strategy':
                     raise HTTPException(
                         409,
                         f'router algorithm {algorithm_id} is referenced by active AB strategy',
-                    )
-                manager.stop_algorithm(algorithm_id)
-                ledger.mark_state(algorithm_id, 'stopped')
-            except RouterManagerError as exc:
+                    ) from exc
                 raise HTTPException(503, f'failed to stop router algorithm {algorithm_id}: {exc}') from exc
 
 
@@ -398,6 +431,8 @@ def _seed(thread_id: str, mode: str, title: str, inputs: Mapping[str, Any], llm_
         'first_frame_timeout_seconds': CHAT_FIRST_FRAME_TIMEOUT_SECONDS,
     }
     candidate_config = {
+        'thread_id': thread_id,
+        'name': title,
         'router_chat_url': inputs['router_chat_url'],
         'router_admin_url': inputs['router_admin_url'],
         'llm_config': dict(llm_config),
@@ -447,11 +482,6 @@ def _digest(value: object) -> str:
         ensure_ascii=False,
     ).encode()
     return hashlib.sha256(raw).hexdigest()
-
-
-def _strategy_weights(strategy: Mapping[str, Any]) -> dict[str, Any]:
-    raw = strategy.get('strategy') if isinstance(strategy.get('strategy'), Mapping) else None
-    return dict((raw or {}).get('weights') or {})
 
 
 __all__ = ['ThreadService']

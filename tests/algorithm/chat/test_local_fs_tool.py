@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 
 import lazymind.chat.engine.tools.local_fs as local_fs_mod
-from lazymind.chat.engine.tools.local_fs import LocalFSToolGroup
+from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
 
 
 def _set_local_fs_sources(monkeypatch, sources):
@@ -23,7 +23,7 @@ def _source(source_id, paths, extensions):
 def test_local_fs_key_source_is_empty_without_config(monkeypatch):
     monkeypatch.setattr(local_fs_mod.lazyllm, 'globals', {})
 
-    assert LocalFSToolGroup().__key_source__() == []
+    assert LocalFileToolkit().__key_source__() == []
 
 
 def test_local_fs_ls_lists_roots_and_filters_directory_files(monkeypatch, tmp_path):
@@ -39,8 +39,8 @@ def test_local_fs_ls_lists_roots_and_filters_directory_files(monkeypatch, tmp_pa
         _source('source-b', [source_b], ['csv']),
     ])
 
-    roots = LocalFSToolGroup().ls()
-    listing = LocalFSToolGroup().ls(str(source_a))
+    roots = LocalFileToolkit().ls()
+    listing = LocalFileToolkit().ls(str(source_a))
 
     assert roots['success'] is True
     assert [entry['source_id'] for entry in roots['result']['entries']] == ['source-a', 'source-b']
@@ -57,8 +57,8 @@ def test_local_fs_read_checks_source_extension(monkeypatch, tmp_path):
     hidden.write_text('secret', encoding='utf-8')
     _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['pdf'])])
 
-    ok = LocalFSToolGroup().read(str(visible), start_line=1, max_lines=1)
-    denied = LocalFSToolGroup().read(str(hidden))
+    ok = LocalFileToolkit().read(str(visible), start_line=1, max_lines=1)
+    denied = LocalFileToolkit().read(str(hidden))
 
     assert ok['success'] is True
     assert ok['result']['content'] == 'b\n'
@@ -78,8 +78,8 @@ def test_local_fs_rejects_symlink_escape(monkeypatch, tmp_path):
     link.symlink_to(secret)
     _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['pdf'])])
 
-    result = LocalFSToolGroup().read(str(link))
-    listing = LocalFSToolGroup().ls(str(allowed))
+    result = LocalFileToolkit().read(str(link))
+    listing = LocalFileToolkit().ls(str(allowed))
 
     assert result['success'] is False
     assert result['tool'] == 'read'
@@ -100,10 +100,10 @@ def test_local_fs_glob_and_grep_search_multiple_sources_with_extensions(monkeypa
         _source('source-a', [source_a], ['pdf']),
         _source('source-b', [source_b], ['csv']),
     ])
-    monkeypatch.setattr(LocalFSToolGroup, '_has_rg', staticmethod(lambda: False))
+    monkeypatch.setattr(LocalFileToolkit, '_has_rg', staticmethod(lambda: False))
 
-    globbed = LocalFSToolGroup().glob('*')
-    grepped = LocalFSToolGroup().grep('needle')
+    globbed = LocalFileToolkit().glob('*')
+    grepped = LocalFileToolkit().grep('needle')
 
     assert globbed['success'] is True
     assert [path.split('/')[-1] for path in globbed['result']['matches']] == ['a.pdf', 'b.csv']
@@ -137,9 +137,9 @@ def test_local_fs_rg_includes_hidden_and_no_ignore_flags(monkeypatch, tmp_path):
             stderr='',
         )
 
-    monkeypatch.setattr(LocalFSToolGroup, '_has_rg', staticmethod(lambda: True))
-    monkeypatch.setattr(LocalFSToolGroup, '_run_rg', staticmethod(fake_run_rg))
+    monkeypatch.setattr(LocalFileToolkit, '_has_rg', staticmethod(lambda: True))
+    monkeypatch.setattr(LocalFileToolkit, '_run_rg', staticmethod(fake_run_rg))
 
-    assert LocalFSToolGroup().glob('*.pdf')['success'] is True
-    assert LocalFSToolGroup().grep('needle')['success'] is True
+    assert LocalFileToolkit().glob('*.pdf')['success'] is True
+    assert LocalFileToolkit().grep('needle')['success'] is True
     assert all('--no-ignore' in args and '--hidden' in args for args in calls)

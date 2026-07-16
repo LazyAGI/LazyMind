@@ -8,6 +8,7 @@ import {
   type TreeNode,
 } from "@/api/generated/scan-client";
 import { AgentAppsAuth } from "@/components/auth";
+import { localizeErrorCode } from "@/components/request";
 import { DEFAULT_SCAN_TENANT_ID } from "../constants/options";
 
 export type ScanV2Client = ScanApi;
@@ -29,11 +30,11 @@ export interface ScanV2AgentHint {
 export function getScanTenantId() {
   const userInfo = AgentAppsAuth.getUserInfo() as
     | (ReturnType<typeof AgentAppsAuth.getUserInfo> & {
-        tenantId?: string;
-        tenant_id?: string;
-        tenantKey?: string;
-        tenant_key?: string;
-      })
+      tenantId?: string;
+      tenant_id?: string;
+      tenantKey?: string;
+      tenant_key?: string;
+    })
     | null;
 
   return (
@@ -198,8 +199,13 @@ export function getBindingSchedule(binding?: ScanV2Binding | null) {
 export function getBindingLastError(binding?: ScanV2Binding | null) {
   const error = binding?.last_error || binding?.lastError;
   if (!error) return "";
-  if (typeof error === "string") return error;
-  return error.message || error.error || JSON.stringify(error);
+  if (typeof error === "string") {
+    return localizeErrorCode(error, localizeErrorCode("2000509"));
+  }
+  return localizeErrorCode(
+    error.code || error.error_code,
+    localizeErrorCode("2000509"),
+  );
 }
 
 export function getDocumentDisplayName(item: ScanV2Document) {

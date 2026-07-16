@@ -35,6 +35,7 @@ import {
 } from "@/api/generated/chatbot-client";
 import { downloadUrl } from "@/modules/chat/utils/download";
 import RiskTip from "../RiskTip";
+import { localizeErrorCode } from "@/components/request";
 const { Dragger } = Upload;
 
 interface ForwardProps {
@@ -203,18 +204,17 @@ const BatchChatComponent = forwardRef<BatchChatImperativeProps, ForwardProps>(
           })
             .then((response) => {
               if (!response.ok) {
-                throw new Error(`Upload failed with status ${response.status}`);
+                throw new Error(localizeErrorCode('2000509'));
               }
             })
             .catch((err) => {
               console.error('File upload failed:', err);
               setFileId('');
-              message.error(t('chat.uploadFailed'));
+              message.error(localizeErrorCode('2000509'));
             });
         })
         .catch((err) => {
           console.error('Failed to get presign URL:', err);
-          message.error(t('chat.uploadFailed'));
         });
     }
 
@@ -301,7 +301,7 @@ const BatchChatComponent = forwardRef<BatchChatImperativeProps, ForwardProps>(
                             <a
                               href={templateUrl}
                               target="_self"
-                              download="批量对话模板.xlsx"
+                              download={t("chat.batchChatTemplateFileName")}
                             >
                               {t("chat.template")}
                             </a>

@@ -8,8 +8,6 @@ import (
 	"lazymind/core/algo"
 )
 
-const defaultSkillBaseDir = "skills"
-
 type HistoryStats struct {
 	UserTurnCount         int `gorm:"column:user_turn_count"`
 	ToolCallCount         int `gorm:"column:tool_call_count"`
@@ -61,12 +59,19 @@ type memoryGenerateRequestJSON struct {
 	CurrentContent string          `json:"current_content,omitempty"`
 }
 
+type skillDraftAutoCommitRequestJSON struct {
+	TaskID       string `json:"task_id"`
+	DraftVersion int64  `json:"draft_version"`
+}
+
 type taskOutcome struct {
 	Status       string
 	ResultID     string
 	ErrorCode    string
 	ErrorMessage string
 	Permanent    bool
+	Deferred     bool
+	RetryAfter   time.Duration
 }
 
 type reviewCallers struct {

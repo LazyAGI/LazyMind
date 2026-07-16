@@ -11,6 +11,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { InboxOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { getLocalizedErrorMessage } from "@/components/request";
 import type {
   DatasetImportResultState,
   DatasetImportRow,
@@ -134,8 +135,9 @@ export default function DatasetImportModal({
       setPreviewRows(buildImportPreview(rows, mapping, importMessages));
       setOnlyErrors(false);
       setStep("preview");
-    } catch (error: any) {
-      message.error(error?.message || t("datasetManagement.import.parseFailed"));
+    } catch (error) {
+      console.error("Parse dataset file failed:", error);
+      message.error(t("datasetManagement.import.parseFailed"));
     } finally {
       setParsing(false);
     }
@@ -157,8 +159,10 @@ export default function DatasetImportModal({
       await onImported(successRows.map((row) => row.normalized), nextResult, file);
       setResult(nextResult);
       setStep("result");
-    } catch (error: any) {
-      message.error(error?.message || t("datasetManagement.import.importFailed"));
+    } catch (error) {
+      if (!(error as { isAxiosError?: boolean })?.isAxiosError) {
+        message.error(getLocalizedErrorMessage(error));
+      }
     } finally {
       setImporting(false);
     }

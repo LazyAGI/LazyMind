@@ -2,6 +2,7 @@ package resourceupdate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -24,6 +25,7 @@ type Scanner struct {
 type ScannerRunResult struct {
 	SkillResultsExpired        int
 	SkillTasksCreated          int
+	SkillDraftTasksCreated     int
 	MemoryTasksCreated         int
 	UserPreferenceTasksCreated int
 }
@@ -59,6 +61,11 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 		}
 		result.SkillResultsExpired = expired
 		result.SkillTasksCreated = created
+		created, err = scanAutoEvoSkillDrafts(ctx, tx, now)
+		if err != nil {
+			return err
+		}
+		result.SkillDraftTasksCreated = created
 		created, err = scanMemoryReviewResults(ctx, tx, orm.ResourceUpdateResourceTypeMemory, now)
 		if err != nil {
 			return err
@@ -71,10 +78,11 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 		result.UserPreferenceTasksCreated = created
 		return nil
 	})
-	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.MemoryTasksCreated > 0 || result.UserPreferenceTasksCreated > 0) {
+	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0 || result.MemoryTasksCreated > 0 || result.UserPreferenceTasksCreated > 0) {
 		resourceUpdateInfo(logEventResultScanDone).
 			Int("skill_results_expired", result.SkillResultsExpired).
 			Int("skill_tasks_created", result.SkillTasksCreated).
+			Int("skill_draft_tasks_created", result.SkillDraftTasksCreated).
 			Int("memory_tasks_created", result.MemoryTasksCreated).
 			Int("user_preference_tasks_created", result.UserPreferenceTasksCreated).
 			Msg(logEventResultScanDone)
@@ -256,6 +264,13 @@ func scanSkillReviewResultRows(ctx context.Context, tx *gorm.DB, rows []SkillRev
 				Msg(logEventResultScanSkipped)
 			continue
 		}
+		hasOwnedDraft, err := hasTaskOwnedSkillDraft(ctx, tx, resourceID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if hasOwnedDraft {
+			continue
+		}
 		if trigger.TriggerType == orm.ResourceUpdateTriggerTypeAutoEvoEnabled {
 			trigger.Generation = generation
 		}
@@ -278,6 +293,75 @@ func scanSkillReviewResultRows(ctx context.Context, tx *gorm.DB, rows []SkillRev
 		return 0, 0, result.Error
 	}
 	return int(result.RowsAffected), created, nil
+}
+
+func scanAutoEvoSkillDrafts(ctx context.Context, tx *gorm.DB, now time.Time) (int, error) {
+	var rows []struct {
+		SkillID      string `gorm:"column:skill_id"`
+		UserID       string `gorm:"column:user_id"`
+		TaskID       string `gorm:"column:task_id"`
+		DraftVersion int64  `gorm:"column:draft_version"`
+	}
+	if err := tx.WithContext(ctx).
+		Table("skills AS s").
+		Select("s.id AS skill_id, s.owner_user_id AS user_id, d.task_id, d.version AS draft_version").
+		Joins("JOIN skill_drafts AS d ON d.skill_id = s.id").
+		Where("s.auto_evo = ? AND s.deleted_at IS NULL AND d.task_id <> '' AND EXISTS (SELECT 1 FROM skill_draft_entries e WHERE e.skill_id = s.id)", true).
+		Order("s.owner_user_id ASC, s.id ASC").
+		Find(&rows).Error; err != nil {
+		return 0, err
+	}
+	created := 0
+	for _, row := range rows {
+		var count int64
+		if err := tx.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
+			Where("task_type = ? AND resource_type = ? AND resource_id = ? AND status IN ?",
+				orm.ResourceUpdateTaskTypeAutoCommitSkillDraft,
+				orm.ResourceUpdateResourceTypeSkill,
+				row.SkillID,
+				activeAutoApplyStatuses()).
+			Count(&count).Error; err != nil {
+			return 0, err
+		}
+		if count > 0 {
+			continue
+		}
+		requestBody, err := json.Marshal(skillDraftAutoCommitRequestJSON{TaskID: row.TaskID, DraftVersion: row.DraftVersion})
+		if err != nil {
+			return 0, err
+		}
+		task := orm.ResourceUpdateTask{
+			ID:           common.GenerateID(),
+			TaskType:     orm.ResourceUpdateTaskTypeAutoCommitSkillDraft,
+			ResourceType: orm.ResourceUpdateResourceTypeSkill,
+			UserID:       strings.TrimSpace(row.UserID),
+			ResourceID:   strings.TrimSpace(row.SkillID),
+			TriggerType:  orm.ResourceUpdateTriggerTypeAutoEvoEnabled,
+			TriggerID:    fmt.Sprintf("skill_draft:%s:%s:%d", row.SkillID, row.TaskID, row.DraftVersion),
+			Status:       orm.ResourceUpdateTaskStatusPending,
+			RequestJSON:  requestBody,
+			NextRunAt:    now,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		if err := tx.WithContext(ctx).Create(&task).Error; err != nil {
+			if errors.Is(err, gorm.ErrDuplicatedKey) {
+				continue
+			}
+			return 0, err
+		}
+		created++
+	}
+	return created, nil
+}
+
+func hasTaskOwnedSkillDraft(ctx context.Context, tx *gorm.DB, skillID string) (bool, error) {
+	var count int64
+	err := tx.WithContext(ctx).
+		Table("skill_drafts AS d").
+		Where("d.skill_id = ? AND d.task_id <> '' AND EXISTS (SELECT 1 FROM skill_draft_entries e WHERE e.skill_id = d.skill_id)", skillID).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func applyNewSkillReviewResult(ctx context.Context, tx *gorm.DB, row SkillReviewResult, now time.Time) error {

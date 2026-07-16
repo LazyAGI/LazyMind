@@ -84,6 +84,7 @@ export interface AlignmentResult {
   /** Returns snapped position if alignment triggered, null otherwise */
   onNodeDrag: (dragging: Node, allNodes: Node[]) => { x: number; y: number } | null;
   onNodeDragStop: () => void;
+  onNodeResize: (nodeId: string, width: number, height?: number, allNodes?: Node[]) => { width: number; height?: number };
 }
 
 export function useAlignmentGuides(): AlignmentResult {
@@ -260,5 +261,18 @@ export function useAlignmentGuides(): AlignmentResult {
     setGuides([]);
   }, []);
 
-  return { guides, onNodeDrag, onNodeDragStop };
+  const onNodeResize = useCallback((nodeId: string, width: number, height?: number, allNodes: Node[] = []) => {
+    const node=allNodes.find(n=>n.id===nodeId); if(!node)return{width,height};
+    const left=node.position.x,top=node.position.y; let snappedWidth=width,snappedHeight=height;
+    let bestX=SNAP_THRESHOLD+1,bestY=SNAP_THRESHOLD+1; const nextGuides:GuideLine[]=[];
+    for(const other of allNodes){if(other.id===nodeId)continue;const r=nodeRect(other);
+      const sameWidthDist=Math.abs(width-r.w);if(sameWidthDist<=SNAP_THRESHOLD&&sameWidthDist<bestX){bestX=sameWidthDist;snappedWidth=r.w;nextGuides.splice(0,nextGuides.length,...nextGuides.filter(g=>g.type!=='vertical'),{type:'vertical',x:left+r.w,y1:Math.min(top,r.top)-GUIDE_PADDING,y2:Math.max(top+(height??nodeRect(node).h),r.bottom)+GUIDE_PADDING});}
+      if(height!=null){const sameHeightDist=Math.abs(height-r.h);if(sameHeightDist<=SNAP_THRESHOLD&&sameHeightDist<bestY){bestY=sameHeightDist;snappedHeight=r.h;nextGuides.splice(0,nextGuides.length,...nextGuides.filter(g=>g.type!=='horizontal'),{type:'horizontal',y:top+r.h,x1:Math.min(left,r.left)-GUIDE_PADDING,x2:Math.max(left+snappedWidth,r.right)+GUIDE_PADDING});}}
+      for(const x of [r.left,r.centerX,r.right]){const dist=Math.abs(left+width-x);if(dist<=SNAP_THRESHOLD&&dist<bestX){bestX=dist;snappedWidth=Math.max(90,x-left);nextGuides.splice(0,nextGuides.length,...nextGuides.filter(g=>g.type!=='vertical'),{type:'vertical',x,y1:Math.min(top,r.top)-GUIDE_PADDING,y2:Math.max(top+(height??nodeRect(node).h),r.bottom)+GUIDE_PADDING});}}
+      if(height!=null)for(const y of [r.top,r.centerY,r.bottom]){const dist=Math.abs(top+height-y);if(dist<=SNAP_THRESHOLD&&dist<bestY){bestY=dist;snappedHeight=Math.max(64,y-top);nextGuides.splice(0,nextGuides.length,...nextGuides.filter(g=>g.type!=='horizontal'),{type:'horizontal',y,x1:Math.min(left,r.left)-GUIDE_PADDING,x2:Math.max(left+snappedWidth,r.right)+GUIDE_PADDING});}}
+    }
+    setGuides(nextGuides);return{width:snappedWidth,height:snappedHeight};
+  },[]);
+
+  return { guides, onNodeDrag, onNodeDragStop, onNodeResize };
 }

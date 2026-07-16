@@ -67,7 +67,6 @@ const GroupManagement = () => {
       });
     } catch (error) {
       console.error("Failed to fetch groups:", error);
-      message.error(t("admin.fetchGroupsFailed"));
     } finally {
       setLoading(false);
     }
@@ -88,9 +87,7 @@ const GroupManagement = () => {
       await api.deleteGroupApiAuthserviceGroupGroupIdDelete({ groupId });
       message.success(t("admin.deleteSuccess"));
       fetchGroups(pagination.current, pagination.pageSize, searchTerm);
-    } catch (error) {
-      message.error(t("admin.deleteFailed"));
-    }
+    } catch {}
   };
 
   const handleEdit = (group: GroupItem) => {

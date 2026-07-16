@@ -5,6 +5,7 @@ import {
   Input,
   Modal,
   Select,
+  Tooltip,
   Upload,
   message,
 } from "antd";
@@ -16,7 +17,7 @@ import {
   SKILL_TAG_MAX_COUNT,
 } from "../shared";
 
-export type SkillCreateSource = "zip" | "url" | "manual";
+export type SkillCreateSource = "zip" | "url";
 
 interface MemoryDraftModalProps {
   t: any;
@@ -376,18 +377,32 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
                     disabled={isReadOnly}
                     showUploadList={false}
                     beforeUpload={(file) => {
+                      const ext = file.name.toLowerCase().replace(/^.*(\.[^.]+)$/, "$1");
+                      if (ext !== ".md" && ext !== ".markdown") {
+                        message.warning(t("admin.memorySkillImportMdFileTypeError"));
+                        return false;
+                      }
+                      if (file.size > 512 * 1024) {
+                        message.warning(t("admin.memorySkillImportMdFileSizeError"));
+                        return false;
+                      }
                       handleImportSkillPackage(file);
                       return false;
                     }}
                   >
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<UploadOutlined />}
-                      disabled={isReadOnly}
+                    <Tooltip
+                      title={t("admin.memorySkillImportMdFileTooltip")}
+                      placement="topRight"
                     >
-                      {t("admin.memorySkillImportMdFile")}
-                    </Button>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<UploadOutlined />}
+                        disabled={isReadOnly}
+                      >
+                        {t("admin.memorySkillImportMdFile")}
+                      </Button>
+                    </Tooltip>
                   </Upload>
                 </div>
                 <Input.TextArea

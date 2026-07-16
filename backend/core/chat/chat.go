@@ -63,6 +63,7 @@ type LazyChatRequest struct {
 
 type ChatMessageOptions struct {
 	Query          string              `json:"query"`
+	UserQuery      string              `json:"user_query,omitempty"`
 	History        []ChatMessage       `json:"history,omitempty"`
 	Files          map[string][]string `json:"files,omitempty"`
 	CurrentTurnSeq int                 `json:"current_turn_seq,omitempty"`
@@ -116,16 +117,17 @@ type ChatPluginOptions struct {
 
 // LazyChatData text data text。
 type LazyChatData struct {
-	Text            string                `json:"text"`
-	Sources         []any                 `json:"sources"`
-	Status          string                `json:"status"`
-	ReasoningText   string                `json:"think"`
-	TaskCreated     *TaskCreatedEvent     `json:"task_created,omitempty"`
-	ArtifactCreated *ArtifactCreatedEvent `json:"artifact_created,omitempty"`
-	AskPending      *AskPendingEvent      `json:"ask_pending,omitempty"`
-	IntentUpdated   *IntentUpdatedEvent   `json:"intent_updated,omitempty"`
-	Heartbeat       bool                  `json:"heartbeat,omitempty"`
-	ToolCallTurns   int64                 `json:"tool_call_turns"`
+	Text                   string                       `json:"text"`
+	Sources                []any                        `json:"sources"`
+	Status                 string                       `json:"status"`
+	ReasoningText          string                       `json:"think"`
+	TaskCreated            *TaskCreatedEvent            `json:"task_created,omitempty"`
+	ArtifactCreated        *ArtifactCreatedEvent        `json:"artifact_created,omitempty"`
+	AskPending             *AskPendingEvent             `json:"ask_pending,omitempty"`
+	IntentUpdated          *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
+	PluginPreflightUpdated *PluginPreflightUpdatedEvent `json:"plugin_preflight_updated,omitempty"`
+	Heartbeat              bool                         `json:"heartbeat,omitempty"`
+	ToolCallTurns          int64                        `json:"tool_call_turns"`
 }
 
 // TaskCreatedEvent is emitted by create_subagent (via translator) on the main SSE.
@@ -177,6 +179,12 @@ type IntentUpdatedEvent struct {
 	Scope     string `json:"scope"` // "session" | "step"
 	Content   string `json:"content"`
 	StepID    string `json:"step_id,omitempty"`
+}
+
+// PluginPreflightUpdatedEvent persists a side-effect-free trigger decision on the conversation.
+type PluginPreflightUpdatedEvent struct {
+	Clear    bool           `json:"clear"`
+	Snapshot map[string]any `json:"snapshot,omitempty"`
 }
 
 // LazyChatResponse text /api/chat textResponse。
@@ -330,17 +338,18 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 
 // UpstreamStreamChunk text ChatConversations text，text LazyChatResponse.Data。
 type UpstreamStreamChunk struct {
-	Text            string                `json:"text"`
-	Think           string                `json:"think"`
-	Status          string                `json:"status"`
-	Sources         []any                 `json:"sources"`
-	ReasoningText   string                `json:"reasoning_text"` // text think
-	TaskCreated     *TaskCreatedEvent     `json:"task_created,omitempty"`
-	ArtifactCreated *ArtifactCreatedEvent `json:"artifact_created,omitempty"`
-	AskPending      *AskPendingEvent      `json:"ask_pending,omitempty"`
-	IntentUpdated   *IntentUpdatedEvent   `json:"intent_updated,omitempty"`
-	Heartbeat       bool                  `json:"heartbeat,omitempty"`
-	ToolCallTurns   int64                 `json:"tool_call_turns"`
+	Text                   string                       `json:"text"`
+	Think                  string                       `json:"think"`
+	Status                 string                       `json:"status"`
+	Sources                []any                        `json:"sources"`
+	ReasoningText          string                       `json:"reasoning_text"` // text think
+	TaskCreated            *TaskCreatedEvent            `json:"task_created,omitempty"`
+	ArtifactCreated        *ArtifactCreatedEvent        `json:"artifact_created,omitempty"`
+	AskPending             *AskPendingEvent             `json:"ask_pending,omitempty"`
+	IntentUpdated          *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
+	PluginPreflightUpdated *PluginPreflightUpdatedEvent `json:"plugin_preflight_updated,omitempty"`
+	Heartbeat              bool                         `json:"heartbeat,omitempty"`
+	ToolCallTurns          int64                        `json:"tool_call_turns"`
 }
 
 type upstreamStreamLine struct {
@@ -360,6 +369,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if q, ok := body["query"].(string); ok {
 		req.Message.Query = q
+	}
+	if q, ok := body["user_query"].(string); ok {
+		req.Message.UserQuery = q
 	}
 	if s, ok := body["session_id"].(string); ok {
 		req.Conversation.SessionID = s
@@ -716,17 +728,18 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				continue
 			}
 			chunk := UpstreamStreamChunk{
-				Text:            d.Resp.Data.Text,
-				Think:           d.Resp.Data.ReasoningText,
-				Status:          d.Resp.Data.Status,
-				Sources:         d.Resp.Data.Sources,
-				ReasoningText:   d.Resp.Data.ReasoningText,
-				TaskCreated:     d.Resp.Data.TaskCreated,
-				ArtifactCreated: d.Resp.Data.ArtifactCreated,
-				AskPending:      d.Resp.Data.AskPending,
-				IntentUpdated:   d.Resp.Data.IntentUpdated,
-				Heartbeat:       d.Resp.Data.Heartbeat,
-				ToolCallTurns:   d.Resp.Data.ToolCallTurns,
+				Text:                   d.Resp.Data.Text,
+				Think:                  d.Resp.Data.ReasoningText,
+				Status:                 d.Resp.Data.Status,
+				Sources:                d.Resp.Data.Sources,
+				ReasoningText:          d.Resp.Data.ReasoningText,
+				TaskCreated:            d.Resp.Data.TaskCreated,
+				ArtifactCreated:        d.Resp.Data.ArtifactCreated,
+				AskPending:             d.Resp.Data.AskPending,
+				IntentUpdated:          d.Resp.Data.IntentUpdated,
+				PluginPreflightUpdated: d.Resp.Data.PluginPreflightUpdated,
+				Heartbeat:              d.Resp.Data.Heartbeat,
+				ToolCallTurns:          d.Resp.Data.ToolCallTurns,
 			}
 			select {
 			case out <- chunk:

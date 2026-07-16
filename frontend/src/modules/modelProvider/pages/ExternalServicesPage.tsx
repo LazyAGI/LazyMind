@@ -17,7 +17,10 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getLocalizedErrorMessage } from "@/components/request";
+import {
+  getLocalizedErrorMessage,
+  localizeErrorCode,
+} from "@/components/request";
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,
@@ -57,10 +60,6 @@ interface BaseUrlPreset {
   labelKey?: string;
   descKey?: string;
   value: string;
-}
-
-interface ExternalServicesPageProps {
-  section?: "parsing" | "tools";
 }
 
 interface ApiExternalProvider {
@@ -146,6 +145,30 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     status: "tbd",
   },
   {
+    key: "tavily",
+    name: "Tavily",
+    description: "",
+    summary: "",
+    category: "search",
+    fields: ["apiKey"],
+    logo: <CompassOutlined />,
+    logoUrl: "https://www.google.com/s2/favicons?domain=tavily.com&sz=96",
+    tone: "violet",
+    status: "missing",
+  },
+  {
+    key: "bocha",
+    name: "Bocha",
+    description: "",
+    summary: "",
+    category: "search",
+    fields: ["apiKey"],
+    logo: <SearchOutlined />,
+    logoUrl: "https://www.google.com/s2/favicons?domain=bochaai.com&sz=96",
+    tone: "green",
+    status: "missing",
+  },
+  {
     key: "bingSearch",
     name: "Bing Search",
     description: "",
@@ -170,30 +193,6 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     status: "configured",
   },
   {
-    key: "bocha",
-    name: "Bocha",
-    description: "",
-    summary: "",
-    category: "search",
-    fields: ["apiKey"],
-    logo: <SearchOutlined />,
-    logoUrl: "https://www.google.com/s2/favicons?domain=bochaai.com&sz=96",
-    tone: "green",
-    status: "missing",
-  },
-  {
-    key: "tavily",
-    name: "Tavily",
-    description: "",
-    summary: "",
-    category: "search",
-    fields: ["apiKey"],
-    logo: <CompassOutlined />,
-    logoUrl: "https://www.google.com/s2/favicons?domain=tavily.com&sz=96",
-    tone: "violet",
-    status: "missing",
-  },
-  {
     key: "sciverse",
     name: "Sciverse",
     description: "",
@@ -210,6 +209,20 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
 const fallbackServiceByName = new Map<string, ExternalServiceConfig>(
   externalServiceConfigs.map((service) => [normalizeProviderName(service.name), service])
 );
+
+/** Display order for search engines: Tavily → Bocha → Bing → Google Custom Search */
+const SEARCH_ENGINE_DISPLAY_ORDER: Array<{ match: RegExp; order: number }> = [
+  { match: /^tavily/, order: 0 },
+  { match: /^bocha/, order: 1 },
+  { match: /^bing/, order: 2 },
+  { match: /^google/, order: 3 },
+];
+
+function getSearchEngineDisplayOrder(name: string) {
+  const normalizedName = normalizeProviderName(name);
+  const matched = SEARCH_ENGINE_DISPLAY_ORDER.find(({ match }) => match.test(normalizedName));
+  return matched?.order ?? Number.MAX_SAFE_INTEGER;
+}
 
 const serviceToneByCategory: Record<ServiceCategoryKey, ServiceTone> = {
   parsing: "blue",
@@ -244,18 +257,6 @@ function isFormValidationError(error: unknown) {
     typeof error === "object" &&
     Array.isArray((error as { errorFields?: unknown[] }).errorFields)
   );
-}
-
-function getCheckFailureMessage(checkResult?: CheckExternalServiceResult): string | undefined {
-  if (!checkResult || typeof checkResult !== "object") {
-    return undefined;
-  }
-
-  if (typeof checkResult.message === "string" && checkResult.message.trim()) {
-    return checkResult.message.trim();
-  }
-
-  return undefined;
 }
 
 function isGoogleCustomSearch(service?: ExternalServiceConfig | null) {
@@ -522,8 +523,9 @@ function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
   );
 }
 
-export default function ExternalServicesPage({ section = "parsing" }: ExternalServicesPageProps) {
-  const { t } = useTranslation();
+export default function ExternalServicesPage() {
+  const { t, i18n } = useTranslation();
+  const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
   const [activeService, setActiveService] = useState<ExternalServiceConfig | null>(null);
   const [services, setServices] = useState<ExternalServiceConfig[]>([]);
@@ -567,7 +569,7 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
           return;
         }
         setServices([]);
-        setLoadError(getLocalizedErrorMessage(error, t("modelProvider.external.loadFailed")) || t("modelProvider.external.loadFailed"));
+        setLoadError(getLocalizedErrorMessage(error));
       })
       .finally(() => {
         if (requestIdRef.current === requestId) {
@@ -576,7 +578,7 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
       });
 
     return () => controller.abort();
-  }, [t]);
+  }, [currentLanguage, t]);
 
   useEffect(() => loadExternalServices(normalizedSearchValue), [loadExternalServices, normalizedSearchValue]);
 
@@ -694,7 +696,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
           await updateProviderGroup(activeService, groupForActiveService, currentUrl);
           message.success(t("modelProvider.external.baseUrlChanged"));
         } catch (error) {
-          message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
           return;
         }
       }
@@ -709,7 +710,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
         message.success(t("modelProvider.external.baseUrlChanged"));
         originalBaseUrlRef.current = currentUrl;
       } catch (error) {
-        message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
       }
       return;
     }
@@ -735,7 +735,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
           void loadExternalServices(normalizedSearchValue);
           closeConfigModal();
         } catch (error) {
-          message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
         }
       },
       onCancel: () => {
@@ -775,7 +774,7 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
           payload as { name: string; base_url: string; api_key?: string; verify: boolean },
         );
         if (savedGroup.check && savedGroup.check.success !== true) {
-          message.error(getCheckFailureMessage(savedGroup.check) || t("modelProvider.external.checkFailed"));
+          message.error(localizeErrorCode("2000509"));
           return;
         }
         setGroupForActiveService(savedGroup);
@@ -801,7 +800,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
       setNewKeyEngineId("");
       void loadExternalServices(normalizedSearchValue);
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     } finally {
       setAddingKey(false);
     }
@@ -846,7 +844,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
       if (isFormValidationError(error)) {
         return;
       }
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     } finally {
       setSavingServiceConfig(false);
     }
@@ -867,7 +864,6 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
       setKeyList((prev) => prev.filter((k) => k !== targetKey));
       void loadExternalServices(normalizedSearchValue);
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     }
   }
 
@@ -924,6 +920,14 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
     };
     services.forEach((service) => {
       byCategory[service.category].push(service);
+    });
+    byCategory.search.sort((a, b) => {
+      const orderA = getSearchEngineDisplayOrder(a.name);
+      const orderB = getSearchEngineDisplayOrder(b.name);
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      return a.name.localeCompare(b.name);
     });
     return byCategory;
   }, [services]);
@@ -1078,16 +1082,13 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
             </div>
           ) : null}
 
-          {section === "tools" ? (
-            <div className="model-provider-tools-substack">
-              {renderServiceCategory("search")}
-              {renderServiceCategory("academic")}
-              {isDeveloperModeActive() ? <ToolManagementSection view="builtin" /> : null}
-              <ToolManagementSection view="mcp" />
-            </div>
-          ) : (
-            renderServiceCategory("parsing")
-          )}
+          <div className="model-provider-tools-substack">
+            {renderServiceCategory("parsing")}
+            {renderServiceCategory("search")}
+            {renderServiceCategory("academic")}
+            {isDeveloperModeActive() ? <ToolManagementSection view="builtin" /> : null}
+            <ToolManagementSection view="mcp" />
+          </div>
         </div>
       </Spin>
 

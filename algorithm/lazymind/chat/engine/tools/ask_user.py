@@ -74,34 +74,39 @@ def ask_user(
     title: Optional[str] = None,
     description: Optional[str] = None,
 ) -> str:
-    """MANDATORY: collect user input via a structured UI card instead of plain text.
+    """MANDATORY: ask the user through a structured UI card.
 
-    ══════════════════════════════════════════════════════════════════════
-    RULE — You MUST call ask_user whenever you need information from the
-    user.  Writing questions as plain text (numbered lists, bullet points,
-    inline questions) is STRICTLY FORBIDDEN.
+    Whenever you want the user to answer a question, call `ask_user` instead
+    of writing the question in plain assistant text. This includes
+    clarification, confirmation, follow-up, preference, quiz, test, exam,
+    interview, and knowledge-check questions. Common trigger scenarios include:
 
-    WRONG — never do this:
-        "1. What is your role?
-         2. What time range should the report cover?"
+    - asking the user to choose between alternatives ("Do you want A or B?");
+    - asking what they want to do next ("Want the answer now or time to think?");
+    - collecting requirements, goals, preferences, constraints, or missing details;
+    - requesting confirmation, approval, permission, or acceptance before continuing;
+    - asking the user to answer a quiz, exercise, interview, or knowledge check;
+    - ending a response with an invitation that expects an answer, such as
+      "Which one should we use?", "Would you like me to continue?", or
+      "Please tell me your specific intent."
 
-    RIGHT — always do this:
-        ask_user(questions=[
-            {"text": "What is your role?", "type": "single",
-             "choices": ["Engineering", "Product", "Marketing"]},
-            {"text": "What time range should the report cover?", "type": "text"},
-        ])
-    ══════════════════════════════════════════════════════════════════════
+    The wording does not need to contain a question mark. Imperatives such as
+    "Choose one", "Tell me your preference", and "Confirm before I continue"
+    also require this tool. Conversely, do not call this tool for rhetorical
+    questions that do not expect an answer, or when you can simply complete the
+    user's request without further input.
 
-    Suspends the current ReAct turn and renders an interactive card in the
-    UI.  The user's answers are delivered as plain text in the NEXT turn's
-    query — no special parameter is needed to receive them.
+    Prefer `boolean`, `single`, or `multiple` when plausible answers are
+    known; use `text` only when they are not. Single- and multiple-choice
+    questions automatically allow a custom response through the appended
+    "Other" option.
 
-    WHEN to call:
-    - You are missing ANY information required to complete the task.
-    - You need the user to choose between options or confirm a decision.
-    - Collect ALL missing inputs in ONE call — never split into multiple turns.
-    - After calling, do NOT continue reasoning; stop immediately and wait.
+    Ask related questions in one manageable batch. If there are many
+    questions, split them into multiple batches. After the user answers, call
+    `ask_user` again if the issue remains unresolved, new questions arise, or
+    another quiz or test batch is needed.
+
+    Calling this tool ends the current turn. Do not continue after calling it.
 
     Question types:
       "boolean"  — Yes / No toggle buttons. Omit choices (auto-set).
@@ -128,6 +133,12 @@ def ask_user(
         ],
         title="Image generation settings",
         description="Answer these questions and I will generate your image."
+
+    More examples that MUST use this tool:
+        - "Do you want a solution, or would you like to think first?"
+        - "Are you asking me to run a quiz or only checking tool availability?"
+        - "Please provide the subject, difficulty, and question type."
+        - "Would you like me to explain the answer?"
 
     Returns:
         A placeholder confirmation string. ReAct exits immediately.

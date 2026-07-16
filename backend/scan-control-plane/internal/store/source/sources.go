@@ -143,6 +143,25 @@ func (r *SQLRepository) GetSourceByDatasetID(ctx context.Context, datasetID stri
 	return sourceFromORM(source), nil
 }
 
+func (r *SQLRepository) ListSourcesByDatasetIDs(ctx context.Context, datasetIDs []string) ([]Source, error) {
+	db := r.ormDB(ctx)
+	if db == nil {
+		return nil, NewStoreError(ErrCodeInternal, "orm repository is not initialized")
+	}
+	if len(datasetIDs) == 0 {
+		return nil, nil
+	}
+	var rows []ormSource
+	if err := db.Where("dataset_id IN ? AND deleted_at IS NULL", datasetIDs).Find(&rows).Error; err != nil {
+		return nil, mapORMNotFound(err, ErrCodeSourceNotFound, "source not found")
+	}
+	sources := make([]Source, 0, len(rows))
+	for _, row := range rows {
+		sources = append(sources, sourceFromORM(row))
+	}
+	return sources, nil
+}
+
 func (r *SQLRepository) ListSourceAccess(ctx context.Context, tenantID string) ([]Source, error) {
 	db := r.ormDB(ctx)
 	if db == nil {

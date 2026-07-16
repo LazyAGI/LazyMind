@@ -3,12 +3,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"gorm.io/gorm"
 )
 
-func TestPatchSkillMetadata_DoesNotCreateRevision(t *testing.T) {
+func TestPatchSkillMetadata_RewritesSkillFrontmatter(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	seedSkillWithHeadRevision(t, db, "skill1", "rev1")
 	svc := NewSkillService(SkillServiceDeps{
@@ -30,8 +31,8 @@ func TestPatchSkillMetadata_DoesNotCreateRevision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PatchSkill returned error: %v", err)
 	}
-	if resp.HeadRevisionID != "rev1" {
-		t.Fatalf("HeadRevisionID = %q, want rev1", resp.HeadRevisionID)
+	if resp.HeadRevisionID == "" || resp.HeadRevisionID == "rev1" {
+		t.Fatalf("HeadRevisionID = %q, want a new revision", resp.HeadRevisionID)
 	}
 
 	var skill testSkillV2SkillRow
@@ -48,14 +49,29 @@ func TestPatchSkillMetadata_DoesNotCreateRevision(t *testing.T) {
 	if skill.IsEnabled {
 		t.Fatal("is_enabled = true, want false")
 	}
-	if skill.HeadRevisionID == nil || *skill.HeadRevisionID != "rev1" {
-		t.Fatalf("head_revision_id changed to %v, want rev1", skill.HeadRevisionID)
+	if skill.HeadRevisionID == nil || *skill.HeadRevisionID != resp.HeadRevisionID {
+		t.Fatalf("head_revision_id = %v, want %q", skill.HeadRevisionID, resp.HeadRevisionID)
 	}
-	if got := countRows(t, db, "skill_revisions", "skill_id = ?", "skill1"); got != 1 {
-		t.Fatalf("skill_revisions count = %d, want 1", got)
+	if got := countRows(t, db, "skill_revisions", "skill_id = ?", "skill1"); got != 2 {
+		t.Fatalf("skill_revisions count = %d, want 2", got)
 	}
-	if got := countRows(t, db, "skill_revision_entries", "revision_id = ?", "rev1"); got != 1 {
-		t.Fatalf("skill_revision_entries count = %d, want 1", got)
+	var revision testSkillV2RevisionRow
+	if err := db.Where("id = ?", resp.HeadRevisionID).Take(&revision).Error; err != nil {
+		t.Fatalf("query metadata revision: %v", err)
+	}
+	if revision.ChangeSource != "metadata_update" {
+		t.Fatalf("change_source = %q, want metadata_update", revision.ChangeSource)
+	}
+	file, err := svc.ReadFile(context.Background(), FileRef{SkillID: "skill1", RefType: "head", Path: "SKILL.md"})
+	if err != nil {
+		t.Fatalf("read updated SKILL.md: %v", err)
+	}
+	meta, ok, err := parseSkillMDMetadata(file.Content)
+	if err != nil || !ok || meta.Name != "论文精读 Pro" || meta.Category != "research-updated" || meta.Description != "更新后的描述" {
+		t.Fatalf("frontmatter not updated: meta=%#v content=%q", meta, file.Content)
+	}
+	if !strings.HasSuffix(file.Content, "# 论文精读\n") {
+		t.Fatalf("body changed: %q", file.Content)
 	}
 }
 
@@ -192,6 +208,70 @@ func TestPatchSkillEnabledTrueDoesNotCommitAlreadyEnabledDraft(t *testing.T) {
 	}
 	if got := countRows(t, db, "skill_draft_entries", "skill_id = ?", "skill1"); got != 1 {
 		t.Fatalf("draft entry count = %d, want 1", got)
+	}
+}
+
+func TestPatchSkillAutoEvoMarksPendingDraftAuto(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	seedSkillWithHeadRevision(t, db, "skill1", "rev1")
+	seedSkillMDDraftEntry(t, db, "skill1", "h_auto_pending_draft", "# Draft update\n")
+	if err := db.Model(&testSkillV2DraftRow{}).Where("skill_id = ?", "skill1").Update("draft_status", skillDraftStatusPendingConfirm).Error; err != nil {
+		t.Fatalf("mark draft pending: %v", err)
+	}
+	svc := NewSkillService(SkillServiceDeps{
+		DB:        db,
+		BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:     fixedClock(),
+	})
+
+	if _, err := svc.PatchSkill(context.Background(), PatchSkillRequest{
+		SkillID: "skill1",
+		UserID:  "user_001",
+		AutoEvo: boolPtr(true),
+	}); err != nil {
+		t.Fatalf("PatchSkill returned error: %v", err)
+	}
+	var draft testSkillV2DraftRow
+	if err := db.Where("skill_id = ?", "skill1").Take(&draft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+	if draft.DraftStatus != skillDraftStatusAutoPending {
+		t.Fatalf("draft_status = %q, want %q", draft.DraftStatus, skillDraftStatusAutoPending)
+	}
+	detail, err := svc.GetSkill(context.Background(), GetSkillRequest{SkillID: "skill1", UserID: "user_001"})
+	if err != nil {
+		t.Fatalf("GetSkill returned error: %v", err)
+	}
+	if detail.Draft.Status != skillDraftStatusAutoPending {
+		t.Fatalf("summary draft status = %q, want %q", detail.Draft.Status, skillDraftStatusAutoPending)
+	}
+	if detail.Draft.HasUncommittedDraft {
+		t.Fatal("summary still exposes auto_pending draft as uncommitted")
+	}
+}
+
+func TestPatchSkillAutoEvoKeepsEmptyDraftStatus(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	seedSkillWithHeadRevision(t, db, "skill1", "rev1")
+	svc := NewSkillService(SkillServiceDeps{
+		DB:        db,
+		BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:     fixedClock(),
+	})
+
+	if _, err := svc.PatchSkill(context.Background(), PatchSkillRequest{
+		SkillID: "skill1",
+		UserID:  "user_001",
+		AutoEvo: boolPtr(true),
+	}); err != nil {
+		t.Fatalf("PatchSkill returned error: %v", err)
+	}
+	var draft testSkillV2DraftRow
+	if err := db.Where("skill_id = ?", "skill1").Take(&draft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+	if draft.DraftStatus != "" {
+		t.Fatalf("draft_status = %q, want empty", draft.DraftStatus)
 	}
 }
 

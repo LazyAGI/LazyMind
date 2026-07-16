@@ -1,5 +1,7 @@
 import { type SelfEvolutionPageView } from "./shared";
 import { HistorySessionModal } from "./components/HistorySessions";
+import { AlgorithmVersionManagementPage as AlgorithmManagementPage } from "./components/AlgorithmVersionManagementPage";
+import { RoutingStrategyManagementPage } from "./components/RoutingStrategyManagementPage";
 import { SelfEvolutionHomeView } from "./components/LaunchViews";
 import { SelfEvolutionObservationPage as ObservationPage } from "./components/ObservationPage";
 import { SelfEvolutionPageController } from "./components/SelfEvolutionPage";
@@ -39,6 +41,14 @@ export function SelfEvolutionDetailPage() {
 
 export function SelfEvolutionObservationPage() {
   return <ObservationPage />;
+}
+
+export function SelfEvolutionAlgorithmManagementPage() {
+  return <AlgorithmManagementPage />;
+}
+
+export function SelfEvolutionRoutingStrategyPage() {
+  return <RoutingStrategyManagementPage />;
 }
 
 export default SelfEvolutionHomePage;

@@ -142,7 +142,10 @@
         border-radius: 12px;
         padding: 0;
         max-height: 80vh;
-        overflow-y: auto;
+        // ChatInput renders prompt rewrite suggestions as an anchored overlay so
+        // opening them does not move the vertically-centered composer. Do not
+        // clip that overlay at the chat-content boundary.
+        overflow: visible;
       }
       .bg {
         position: absolute;

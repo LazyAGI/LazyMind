@@ -256,6 +256,19 @@ export interface BatchDeleteWordGroupsResponse {
 export interface BatchUploadTasksResponse {
     'tasks'?: Array<TaskResponse>;
 }
+export interface BuiltinSkillListOpenAPIResponse {
+    'items'?: Array<BuiltinSkillOpenAPIResponse>;
+    'total': number;
+}
+export interface BuiltinSkillOpenAPIResponse {
+    'builtin_skill_uid': string;
+    'category': string;
+    'content': string;
+    'description': string;
+    'installed': boolean;
+    'installed_skill_id'?: string;
+    'name': string;
+}
 export interface CanResult {
     'allowed'?: boolean;
 }
@@ -276,6 +289,12 @@ export interface CheckDatabaseConnectionResponse {
     'success': boolean;
     'table_count': number;
     'tables'?: Array<string>;
+}
+export interface CheckFileHashesRequest {
+    'hashes': Array<string>;
+}
+export interface CheckFileHashesResponse {
+    'missing_hashes'?: Array<string>;
 }
 export interface CheckModelProviderData {
     'message'?: string;
@@ -311,6 +330,7 @@ export interface CompleteUploadRequest {
     'idempotency_key'?: string;
 }
 export interface CompleteUploadResponse {
+    'content_hash'?: string;
     'content_url'?: string;
     'convert_error'?: string;
     'convert_status'?: string;
@@ -1202,6 +1222,16 @@ export interface PersonalizationSettingOpenAPIRequest {
 export interface PersonalizationSettingOpenAPIResponse {
     'enabled': boolean;
 }
+export interface PluginRepairPreviewOpenAPIRequest {
+    'mode': string;
+    'target': string;
+}
+export interface PluginWorkflowConfirmOpenAPIRequest {
+    'analysis_id': string;
+    'candidate_id': string;
+    'draft_version': number;
+    'source_skill_revision_id': string;
+}
 export interface PromptItem {
     'content'?: string;
     'display_name'?: string;
@@ -2077,7 +2107,7 @@ export interface WordGroupConflictResponse {
 export const AgentApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.
+         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix is known to Core.
          * @summary Get Evo candidate
          * @param {string} candidateId 
          * @param {*} [options] Override http request option.
@@ -2111,18 +2141,16 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             };
         },
         /**
-         * Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
+         * Proxies Evo GET /candidates. When thread_id is provided, Core validates that the thread belongs to the current user before proxying.
          * @summary List Evo candidates
-         * @param {string} threadId 
+         * @param {string} [threadId]
          * @param {string} [status] 
          * @param {number} [pageSize] 
          * @param {string} [pageToken] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAgentCandidatesGet: async (threadId: string, status?: string, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'threadId' is not null or undefined
-            assertParamExists('apiCoreAgentCandidatesGet', 'threadId', threadId)
+        apiCoreAgentCandidatesGet: async (threadId?: string, status?: string, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/agent/candidates`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -2279,7 +2307,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
         /**
          * Proxies Evo GET /router/algorithms.
          * @summary List Evo router algorithms
-         * @param {string} [threadId] 
+         * @param {string} [threadId]
          * @param {string} [algorithmId] 
          * @param {string} [status] 
          * @param {string} [routerAdminUrl] 
@@ -3256,7 +3284,7 @@ export const AgentApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = AgentApiAxiosParamCreator(configuration)
     return {
         /**
-         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.
+         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix is known to Core.
          * @summary Get Evo candidate
          * @param {string} candidateId 
          * @param {*} [options] Override http request option.
@@ -3269,16 +3297,16 @@ export const AgentApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
+         * Proxies Evo GET /candidates. When thread_id is provided, Core validates that the thread belongs to the current user before proxying.
          * @summary List Evo candidates
-         * @param {string} threadId 
+         * @param {string} [threadId]
          * @param {string} [status] 
          * @param {number} [pageSize] 
          * @param {string} [pageToken] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAgentCandidatesGet(threadId: string, status?: string, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+        async apiCoreAgentCandidatesGet(threadId?: string, status?: string, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentCandidatesGet(threadId, status, pageSize, pageToken, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AgentApi.apiCoreAgentCandidatesGet']?.[localVarOperationServerIndex]?.url;
@@ -3679,7 +3707,7 @@ export const AgentApiFactory = function (configuration?: Configuration, basePath
     const localVarFp = AgentApiFp(configuration)
     return {
         /**
-         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.
+         * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix is known to Core.
          * @summary Get Evo candidate
          * @param {AgentApiApiCoreAgentCandidatesCandidateIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -3689,13 +3717,13 @@ export const AgentApiFactory = function (configuration?: Configuration, basePath
             return localVarFp.apiCoreAgentCandidatesCandidateIdGet(requestParameters.candidateId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
+         * Proxies Evo GET /candidates. When thread_id is provided, Core validates that the thread belongs to the current user before proxying.
          * @summary List Evo candidates
          * @param {AgentApiApiCoreAgentCandidatesGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAgentCandidatesGet(requestParameters: AgentApiApiCoreAgentCandidatesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+        apiCoreAgentCandidatesGet(requestParameters: AgentApiApiCoreAgentCandidatesGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
             return localVarFp.apiCoreAgentCandidatesGet(requestParameters.threadId, requestParameters.status, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
         },
         /**
@@ -3981,7 +4009,7 @@ export interface AgentApiApiCoreAgentCandidatesCandidateIdGetRequest {
  * Request parameters for apiCoreAgentCandidatesGet operation in AgentApi.
  */
 export interface AgentApiApiCoreAgentCandidatesGetRequest {
-    readonly threadId: string
+    readonly threadId?: string
 
     readonly status?: string
 
@@ -4247,7 +4275,7 @@ export interface AgentApiApiCoreAgentThreadsThreadIdStepsGetRequest {
  */
 export class AgentApi extends BaseAPI {
     /**
-     * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix belongs to the current user.
+     * Proxies Evo GET /candidates/{candidate_id} after validating the thread_id prefix is known to Core.
      * @summary Get Evo candidate
      * @param {AgentApiApiCoreAgentCandidatesCandidateIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -4258,13 +4286,13 @@ export class AgentApi extends BaseAPI {
     }
 
     /**
-     * Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
+     * Proxies Evo GET /candidates. When thread_id is provided, Core validates that the thread belongs to the current user before proxying.
      * @summary List Evo candidates
      * @param {AgentApiApiCoreAgentCandidatesGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreAgentCandidatesGet(requestParameters: AgentApiApiCoreAgentCandidatesGetRequest, options?: RawAxiosRequestConfig) {
+    public apiCoreAgentCandidatesGet(requestParameters: AgentApiApiCoreAgentCandidatesGetRequest = {}, options?: RawAxiosRequestConfig) {
         return AgentApiFp(this.configuration).apiCoreAgentCandidatesGet(requestParameters.threadId, requestParameters.status, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
     }
 
@@ -23123,6 +23151,362 @@ export class PersonalizationApi extends BaseAPI {
 
 
 /**
+ * PluginApi - axios parameter creator
+ */
+export const PluginApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         * 
+         * @summary Confirm Skill workflow candidate
+         * @param {string} draftId 
+         * @param {PluginWorkflowConfirmOpenAPIRequest} pluginWorkflowConfirmOpenAPIRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginDraftsDraftIdConfirmWorkflowPost: async (draftId: string, pluginWorkflowConfirmOpenAPIRequest: PluginWorkflowConfirmOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCorePluginDraftsDraftIdConfirmWorkflowPost', 'draftId', draftId)
+            // verify required parameter 'pluginWorkflowConfirmOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCorePluginDraftsDraftIdConfirmWorkflowPost', 'pluginWorkflowConfirmOpenAPIRequest', pluginWorkflowConfirmOpenAPIRequest)
+            const localVarPath = `/api/core/plugin-drafts/{draft_id}:confirm-workflow`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pluginWorkflowConfirmOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Get Plugin generation analysis
+         * @param {string} draftId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginDraftsDraftIdGenerationAnalysisGet: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCorePluginDraftsDraftIdGenerationAnalysisGet', 'draftId', draftId)
+            const localVarPath = `/api/core/plugin-drafts/{draft_id}/generation-analysis`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Preview Plugin repair
+         * @param {string} draftId 
+         * @param {PluginRepairPreviewOpenAPIRequest} pluginRepairPreviewOpenAPIRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginDraftsDraftIdRepairPreviewPost: async (draftId: string, pluginRepairPreviewOpenAPIRequest: PluginRepairPreviewOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCorePluginDraftsDraftIdRepairPreviewPost', 'draftId', draftId)
+            // verify required parameter 'pluginRepairPreviewOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCorePluginDraftsDraftIdRepairPreviewPost', 'pluginRepairPreviewOpenAPIRequest', pluginRepairPreviewOpenAPIRequest)
+            const localVarPath = `/api/core/plugin-drafts/{draft_id}:repair-preview`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pluginRepairPreviewOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Get Plugin repair run
+         * @param {string} draftId 
+         * @param {string} repairId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginDraftsDraftIdRepairRunsRepairIdGet: async (draftId: string, repairId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCorePluginDraftsDraftIdRepairRunsRepairIdGet', 'draftId', draftId)
+            // verify required parameter 'repairId' is not null or undefined
+            assertParamExists('apiCorePluginDraftsDraftIdRepairRunsRepairIdGet', 'repairId', repairId)
+            const localVarPath = `/api/core/plugin-drafts/{draft_id}/repair-runs/{repair_id}`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)))
+                .replace(`{${"repair_id"}}`, encodeURIComponent(String(repairId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * PluginApi - functional programming interface
+ */
+export const PluginApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = PluginApiAxiosParamCreator(configuration)
+    return {
+        /**
+         * 
+         * @summary Confirm Skill workflow candidate
+         * @param {string} draftId 
+         * @param {PluginWorkflowConfirmOpenAPIRequest} pluginWorkflowConfirmOpenAPIRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginDraftsDraftIdConfirmWorkflowPost(draftId: string, pluginWorkflowConfirmOpenAPIRequest: PluginWorkflowConfirmOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginDraftsDraftIdConfirmWorkflowPost(draftId, pluginWorkflowConfirmOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['PluginApi.apiCorePluginDraftsDraftIdConfirmWorkflowPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary Get Plugin generation analysis
+         * @param {string} draftId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginDraftsDraftIdGenerationAnalysisGet(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginDraftsDraftIdGenerationAnalysisGet(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['PluginApi.apiCorePluginDraftsDraftIdGenerationAnalysisGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary Preview Plugin repair
+         * @param {string} draftId 
+         * @param {PluginRepairPreviewOpenAPIRequest} pluginRepairPreviewOpenAPIRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginDraftsDraftIdRepairPreviewPost(draftId: string, pluginRepairPreviewOpenAPIRequest: PluginRepairPreviewOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginDraftsDraftIdRepairPreviewPost(draftId, pluginRepairPreviewOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['PluginApi.apiCorePluginDraftsDraftIdRepairPreviewPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary Get Plugin repair run
+         * @param {string} draftId 
+         * @param {string} repairId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginDraftsDraftIdRepairRunsRepairIdGet(draftId: string, repairId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginDraftsDraftIdRepairRunsRepairIdGet(draftId, repairId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['PluginApi.apiCorePluginDraftsDraftIdRepairRunsRepairIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * PluginApi - factory interface
+ */
+export const PluginApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = PluginApiFp(configuration)
+    return {
+        /**
+         * 
+         * @summary Confirm Skill workflow candidate
+         * @param {PluginApiApiCorePluginDraftsDraftIdConfirmWorkflowPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginDraftsDraftIdConfirmWorkflowPost(requestParameters: PluginApiApiCorePluginDraftsDraftIdConfirmWorkflowPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCorePluginDraftsDraftIdConfirmWorkflowPost(requestParameters.draftId, requestParameters.pluginWorkflowConfirmOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Get Plugin generation analysis
+         * @param {PluginApiApiCorePluginDraftsDraftIdGenerationAnalysisGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginDraftsDraftIdGenerationAnalysisGet(requestParameters: PluginApiApiCorePluginDraftsDraftIdGenerationAnalysisGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCorePluginDraftsDraftIdGenerationAnalysisGet(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Preview Plugin repair
+         * @param {PluginApiApiCorePluginDraftsDraftIdRepairPreviewPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginDraftsDraftIdRepairPreviewPost(requestParameters: PluginApiApiCorePluginDraftsDraftIdRepairPreviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCorePluginDraftsDraftIdRepairPreviewPost(requestParameters.draftId, requestParameters.pluginRepairPreviewOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Get Plugin repair run
+         * @param {PluginApiApiCorePluginDraftsDraftIdRepairRunsRepairIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginDraftsDraftIdRepairRunsRepairIdGet(requestParameters: PluginApiApiCorePluginDraftsDraftIdRepairRunsRepairIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCorePluginDraftsDraftIdRepairRunsRepairIdGet(requestParameters.draftId, requestParameters.repairId, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCorePluginDraftsDraftIdConfirmWorkflowPost operation in PluginApi.
+ */
+export interface PluginApiApiCorePluginDraftsDraftIdConfirmWorkflowPostRequest {
+    readonly draftId: string
+
+    readonly pluginWorkflowConfirmOpenAPIRequest: PluginWorkflowConfirmOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCorePluginDraftsDraftIdGenerationAnalysisGet operation in PluginApi.
+ */
+export interface PluginApiApiCorePluginDraftsDraftIdGenerationAnalysisGetRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCorePluginDraftsDraftIdRepairPreviewPost operation in PluginApi.
+ */
+export interface PluginApiApiCorePluginDraftsDraftIdRepairPreviewPostRequest {
+    readonly draftId: string
+
+    readonly pluginRepairPreviewOpenAPIRequest: PluginRepairPreviewOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCorePluginDraftsDraftIdRepairRunsRepairIdGet operation in PluginApi.
+ */
+export interface PluginApiApiCorePluginDraftsDraftIdRepairRunsRepairIdGetRequest {
+    readonly draftId: string
+
+    readonly repairId: string
+}
+
+/**
+ * PluginApi - object-oriented interface
+ */
+export class PluginApi extends BaseAPI {
+    /**
+     * 
+     * @summary Confirm Skill workflow candidate
+     * @param {PluginApiApiCorePluginDraftsDraftIdConfirmWorkflowPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginDraftsDraftIdConfirmWorkflowPost(requestParameters: PluginApiApiCorePluginDraftsDraftIdConfirmWorkflowPostRequest, options?: RawAxiosRequestConfig) {
+        return PluginApiFp(this.configuration).apiCorePluginDraftsDraftIdConfirmWorkflowPost(requestParameters.draftId, requestParameters.pluginWorkflowConfirmOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Get Plugin generation analysis
+     * @param {PluginApiApiCorePluginDraftsDraftIdGenerationAnalysisGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginDraftsDraftIdGenerationAnalysisGet(requestParameters: PluginApiApiCorePluginDraftsDraftIdGenerationAnalysisGetRequest, options?: RawAxiosRequestConfig) {
+        return PluginApiFp(this.configuration).apiCorePluginDraftsDraftIdGenerationAnalysisGet(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Preview Plugin repair
+     * @param {PluginApiApiCorePluginDraftsDraftIdRepairPreviewPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginDraftsDraftIdRepairPreviewPost(requestParameters: PluginApiApiCorePluginDraftsDraftIdRepairPreviewPostRequest, options?: RawAxiosRequestConfig) {
+        return PluginApiFp(this.configuration).apiCorePluginDraftsDraftIdRepairPreviewPost(requestParameters.draftId, requestParameters.pluginRepairPreviewOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Get Plugin repair run
+     * @param {PluginApiApiCorePluginDraftsDraftIdRepairRunsRepairIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginDraftsDraftIdRepairRunsRepairIdGet(requestParameters: PluginApiApiCorePluginDraftsDraftIdRepairRunsRepairIdGetRequest, options?: RawAxiosRequestConfig) {
+        return PluginApiFp(this.configuration).apiCorePluginDraftsDraftIdRepairRunsRepairIdGet(requestParameters.draftId, requestParameters.repairId, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+
+
+/**
  * RemoteFsApi - axios parameter creator
  */
 export const RemoteFsApiAxiosParamCreator = function (configuration?: Configuration) {
@@ -27830,6 +28214,36 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             };
         },
         /**
+         * Lists immutable built-in templates and their installation state for the current user.
+         * @summary List builtin directory skills
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBuiltinSkillsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/builtin-skills`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Submits a skill organize task for current user\'s SkillV2 files. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillOrganizeOpenAPIRequest} skillOrganizeOpenAPIRequest 
@@ -28360,6 +28774,18 @@ export const SkillsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Lists immutable built-in templates and their installation state for the current user.
+         * @summary List builtin directory skills
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreBuiltinSkillsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<BuiltinSkillListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreBuiltinSkillsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreBuiltinSkillsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Submits a skill organize task for current user\'s SkillV2 files. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillOrganizeOpenAPIRequest} skillOrganizeOpenAPIRequest 
@@ -28564,6 +28990,15 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
          */
         apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(requestParameters: SkillsApiApiCoreBuiltinSkillsBuiltinSkillUidEnablePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillDetailOpenAPIResponse> {
             return localVarFp.apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(requestParameters.builtinSkillUid, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Lists immutable built-in templates and their installation state for the current user.
+         * @summary List builtin directory skills
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBuiltinSkillsGet(options?: RawAxiosRequestConfig): AxiosPromise<BuiltinSkillListOpenAPIResponse> {
+            return localVarFp.apiCoreBuiltinSkillsGet(options).then((request) => request(axios, basePath));
         },
         /**
          * Submits a skill organize task for current user\'s SkillV2 files. The task runs asynchronously in the algorithm service.
@@ -28824,6 +29259,16 @@ export class SkillsApi extends BaseAPI {
      */
     public apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(requestParameters: SkillsApiApiCoreBuiltinSkillsBuiltinSkillUidEnablePostRequest, options?: RawAxiosRequestConfig) {
         return SkillsApiFp(this.configuration).apiCoreBuiltinSkillsBuiltinSkillUidEnablePost(requestParameters.builtinSkillUid, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Lists immutable built-in templates and their installation state for the current user.
+     * @summary List builtin directory skills
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreBuiltinSkillsGet(options?: RawAxiosRequestConfig) {
+        return SkillsApiFp(this.configuration).apiCoreBuiltinSkillsGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -29329,6 +29774,45 @@ export const TasksApiAxiosParamCreator = function (configuration?: Configuration
         },
         /**
          * 
+         * @summary Check reusable file hashes
+         * @param {string} dataset 
+         * @param {CheckFileHashesRequest} checkFileHashesRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetUploadsCheckHashesPost: async (dataset: string, checkFileHashesRequest: CheckFileHashesRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetUploadsCheckHashesPost', 'dataset', dataset)
+            // verify required parameter 'checkFileHashesRequest' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetUploadsCheckHashesPost', 'checkFileHashesRequest', checkFileHashesRequest)
+            const localVarPath = `/api/core/datasets/{dataset}/uploads:checkHashes`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(checkFileHashesRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Initialize dataset upload
          * @param {string} dataset 
          * @param {InitUploadRequest} initUploadRequest 
@@ -29625,6 +30109,20 @@ export const TasksApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Check reusable file hashes
+         * @param {string} dataset 
+         * @param {CheckFileHashesRequest} checkFileHashesRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetUploadsCheckHashesPost(dataset: string, checkFileHashesRequest: CheckFileHashesRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CheckFileHashesResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetUploadsCheckHashesPost(dataset, checkFileHashesRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TasksApi.apiCoreDatasetsDatasetUploadsCheckHashesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @summary Initialize dataset upload
          * @param {string} dataset 
          * @param {InitUploadRequest} initUploadRequest 
@@ -29774,6 +30272,16 @@ export const TasksApiFactory = function (configuration?: Configuration, basePath
         },
         /**
          * 
+         * @summary Check reusable file hashes
+         * @param {TasksApiApiCoreDatasetsDatasetUploadsCheckHashesPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetUploadsCheckHashesPost(requestParameters: TasksApiApiCoreDatasetsDatasetUploadsCheckHashesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CheckFileHashesResponse> {
+            return localVarFp.apiCoreDatasetsDatasetUploadsCheckHashesPost(requestParameters.dataset, requestParameters.checkFileHashesRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @summary Initialize dataset upload
          * @param {TasksApiApiCoreDatasetsDatasetUploadsInitUploadPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -29899,6 +30407,15 @@ export interface TasksApiApiCoreDatasetsDatasetTasksTaskSuspendPostRequest {
     readonly task: string
 
     readonly suspendJobRequest: SuspendJobRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetUploadsCheckHashesPost operation in TasksApi.
+ */
+export interface TasksApiApiCoreDatasetsDatasetUploadsCheckHashesPostRequest {
+    readonly dataset: string
+
+    readonly checkFileHashesRequest: CheckFileHashesRequest
 }
 
 /**
@@ -30035,6 +30552,17 @@ export class TasksApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetTasksTaskSuspendPost(requestParameters: TasksApiApiCoreDatasetsDatasetTasksTaskSuspendPostRequest, options?: RawAxiosRequestConfig) {
         return TasksApiFp(this.configuration).apiCoreDatasetsDatasetTasksTaskSuspendPost(requestParameters.dataset, requestParameters.task, requestParameters.suspendJobRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Check reusable file hashes
+     * @param {TasksApiApiCoreDatasetsDatasetUploadsCheckHashesPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetUploadsCheckHashesPost(requestParameters: TasksApiApiCoreDatasetsDatasetUploadsCheckHashesPostRequest, options?: RawAxiosRequestConfig) {
+        return TasksApiFp(this.configuration).apiCoreDatasetsDatasetUploadsCheckHashesPost(requestParameters.dataset, requestParameters.checkFileHashesRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -32073,6 +32601,4 @@ export class WordGroupApi extends BaseAPI {
         return WordGroupApiFp(this.configuration).apiCoreWordGroupUpdatePost(requestParameters.updateWordGroupRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
-
-
 

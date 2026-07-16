@@ -150,6 +150,7 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
       const pm = { ...createEmptyPluginModel(), id: trimmedId, name: effectiveName };
       await updatePluginDraftContent(draft.id, {
         plugin_yaml_content: serializePluginModel(pm),
+        version: draft.version,
       });
       if (mode === 'ai') {
         await aiGeneratePluginDraft(draft.id, { description: description.trim() });
@@ -160,7 +161,6 @@ export default function NewPluginModal({ open, onCancel, onCreated }: NewPluginM
       reset();
       onCreated(draft.id);
     } catch {
-      message.error(t('selfEvolutionRun.newPluginCreateFailed'));
       if (draftId) {
         deletePluginDraft(draftId).catch(() => {});
       }

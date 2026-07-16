@@ -8,6 +8,7 @@ import {
   usernameRules,
 } from "@/modules/signin/utils/formRules";
 import { useTranslation } from "react-i18next";
+import { localizeErrorCode } from "@/components/request";
 
 interface RegisterFormValues {
   username: string;
@@ -35,7 +36,7 @@ const Register = () => {
       navigate("/login", { state: { username: values.username } });
     } catch (error: any) {
       if (!error?.response && !error?.request) {
-        message.error(error?.message || t("auth.registerFailed"));
+        message.error(localizeErrorCode("2000509"));
       }
     } finally {
       setLoading(false);

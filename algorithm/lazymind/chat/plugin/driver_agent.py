@@ -5,8 +5,8 @@ as its system instruction.  Its output is a concise natural-language message tha
 whether the step result is acceptable and, if not, why.
 
 The message is passed verbatim as a synthetic user turn to the ChatAgent, which then
-decides autonomously how to proceed (advance to next step, retry, rewind, or complete
-the plugin by calling advance_step with step_id='__end__').
+decides autonomously how to proceed (advance to a Ready step, retry, or rewind).
+Session completion is calculated by Go and is never submitted as a synthetic step.
 """
 from __future__ import annotations
 
@@ -184,7 +184,11 @@ def evaluate_step(
     )
     if plugin_artifacts_summary:
         user_msg += f'Session artifacts produced so far:\n{plugin_artifacts_summary}\n\n'
-    user_msg += 'Describe whether the step result is complete and acceptable.'
+    user_msg += (
+        'If the terminal status is failed, diagnose the likely cause and recommend whether '
+        'the ChatAgent should retry this step or rewind to a named upstream step. Otherwise, '
+        'describe whether the step result is complete and acceptable.'
+    )
 
     if user_files:
         file_list = ', '.join(_os.path.basename(f) for f in user_files)

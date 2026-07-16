@@ -3280,11 +3280,12 @@
 .memory-skill-diff-line-html {
   .diff-addition {
     background: rgba(82, 196, 26, 0.18);
+    font-weight: 700;
   }
 
   .diff-deletion {
     background: rgba(255, 77, 79, 0.18);
-    text-decoration: line-through;
+    font-weight: 700;
   }
 }
 
@@ -3574,6 +3575,26 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.memory-version-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.memory-version-head-hint {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+
+.memory-version-current-badge {
+  margin-left: 6px;
+  font-style: normal;
+  font-weight: 500;
+  font-size: 12px;
+  color: #1677ff;
 }
 
 .memory-version-detail-summary > div {
@@ -4490,12 +4511,12 @@
 }
 
 .memory-diff-inline-add {
-  background: #a6f4c5;
+  font-weight: 900;
   border-radius: 2px;
 }
 
 .memory-diff-inline-remove {
-  background: #fda29b;
+  font-weight: 900;
   border-radius: 2px;
 }
 

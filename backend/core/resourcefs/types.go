@@ -237,6 +237,7 @@ type RevisionSummary struct {
 	SourceRefID      string    `json:"source_ref_id"`
 	CreatedBy        string    `json:"created_by,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
+	IsHead           bool      `json:"is_head"`
 }
 
 type RevisionDetailResponse struct {

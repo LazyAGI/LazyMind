@@ -2,6 +2,7 @@ package fs
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"lazymind/core/skillv2/testutil"
@@ -94,6 +95,33 @@ func TestDraftFSMkdirEmptyDir_IsVisibleAndCommitable(t *testing.T) {
 	testutil.AssertRevisionEntries(t, db, commit.RevisionID, []testutil.ExpectedEntry{
 		{Path: "empty-notes", EntryType: "dir", FileType: "directory", HasBlob: false},
 	})
+}
+
+func TestDraftFSMkdirExistingDirectory_DoesNotAdvanceVersion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedRevisionEntry(t, db, "rev1", "notes", "dir", "", "directory")
+	draftFS := NewDraftFS(DraftFSDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	_, err := draftFS.Mkdir(context.Background(), MkdirRequest{
+		SkillID:              "skill1",
+		Path:                 "notes",
+		ExpectedDraftVersion: 1,
+		UserID:               "user_001",
+	})
+	if err == nil || !strings.Contains(err.Error(), "path already exists") {
+		t.Fatalf("Mkdir existing directory error = %v, want path already exists", err)
+	}
+	var draft testutil.SkillDraftRow
+	if err := db.Where("skill_id = ?", "skill1").Take(&draft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+	if draft.Version != 1 {
+		t.Fatalf("draft version = %d, want 1", draft.Version)
+	}
+	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ?", "skill1"); got != 0 {
+		t.Fatalf("skill_draft_entries count = %d, want 0", got)
+	}
 }
 
 func TestDraftFSDeleteDraftOnlyEmptyDir_RemovesOverlay(t *testing.T) {

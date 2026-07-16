@@ -439,6 +439,22 @@ components:
                 - success
                 - table_count
             type: object
+        CheckFileHashesRequest:
+            properties:
+                hashes:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - hashes
+            type: object
+        CheckFileHashesResponse:
+            properties:
+                missing_hashes:
+                    items:
+                        type: string
+                    type: array
+            type: object
         CheckModelProviderData:
             properties:
                 message:
@@ -508,6 +524,8 @@ components:
             type: object
         CompleteUploadResponse:
             properties:
+                content_hash:
+                    type: string
                 content_url:
                     type: string
                 convert_error:
@@ -3288,6 +3306,41 @@ components:
                 - thread_id
                 - updated_at
             type: object
+        builtinSkillListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/builtinSkillOpenAPIResponse'
+                    type: array
+                total:
+                    type: integer
+            required:
+                - total
+            type: object
+        builtinSkillOpenAPIResponse:
+            properties:
+                builtin_skill_uid:
+                    type: string
+                category:
+                    type: string
+                content:
+                    type: string
+                description:
+                    type: string
+                installed:
+                    type: boolean
+                installed_skill_id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - builtin_skill_uid
+                - category
+                - content
+                - description
+                - installed
+                - name
+            type: object
         checkModelProviderOpenAPIRequest:
             properties:
                 api_key:
@@ -3852,6 +3905,32 @@ components:
                     type: boolean
             required:
                 - enabled
+            type: object
+        pluginRepairPreviewOpenAPIRequest:
+            properties:
+                mode:
+                    type: string
+                target:
+                    type: string
+            required:
+                - mode
+                - target
+            type: object
+        pluginWorkflowConfirmOpenAPIRequest:
+            properties:
+                analysis_id:
+                    type: string
+                candidate_id:
+                    type: string
+                draft_version:
+                    type: integer
+                source_skill_revision_id:
+                    type: string
+            required:
+                - analysis_id
+                - candidate_id
+                - draft_version
+                - source_skill_revision_id
             type: object
         remoteFSCopyOpenAPIRequest:
             properties:
@@ -5880,6 +5959,19 @@ paths:
             summary: List agent thread steps
             tags:
                 - agent
+    /api/core/builtin-skills:
+        get:
+            description: Lists immutable built-in templates and their installation state for the current user.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/builtinSkillListOpenAPIResponse'
+                    description: Builtin skill list
+            summary: List builtin directory skills
+            tags:
+                - skills
     /api/core/builtin-skills/{builtin_skill_uid}:enable:
         post:
             parameters:
@@ -7442,6 +7534,30 @@ paths:
                                 $ref: '#/components/schemas/CompleteUploadResponse'
                     description: Complete uploadtext
             summary: Complete upload
+            tags:
+                - tasks
+    /api/core/datasets/{dataset}/uploads:checkHashes:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CheckFileHashesRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CheckFileHashesResponse'
+                    description: Missing file hashes
+            summary: Check reusable file hashes
             tags:
                 - tasks
     /api/core/datasets/{dataset}/uploads:initUpload:
@@ -9437,6 +9553,49 @@ paths:
                 "200":
                     description: OK
             summary: GET /plugin-drafts/{draft_id}
+    /api/core/plugin-drafts/{draft_id}/generation-analysis:
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Generation analysis
+            summary: Get Plugin generation analysis
+            tags:
+                - plugin
+    /api/core/plugin-drafts/{draft_id}/repair-runs/{repair_id}:
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: repair_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Repair run
+            summary: Get Plugin repair run
+            tags:
+                - plugin
     /api/core/plugin-drafts/{draft_id}:ai-generate:
         post:
             parameters:
@@ -9461,6 +9620,31 @@ paths:
                 "200":
                     description: OK
             summary: POST /plugin-drafts/{draft_id}:ai-repair
+    /api/core/plugin-drafts/{draft_id}:confirm-workflow:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/pluginWorkflowConfirmOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Confirmation result
+            summary: Confirm Skill workflow candidate
+            tags:
+                - plugin
     /api/core/plugin-drafts/{draft_id}:publish:
         post:
             parameters:
@@ -9473,6 +9657,31 @@ paths:
                 "200":
                     description: OK
             summary: POST /plugin-drafts/{draft_id}:publish
+    /api/core/plugin-drafts/{draft_id}:repair-preview:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/pluginRepairPreviewOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Repair preview
+            summary: Preview Plugin repair
+            tags:
+                - plugin
     /api/core/plugin-drafts/{draft_id}:save:
         post:
             parameters:

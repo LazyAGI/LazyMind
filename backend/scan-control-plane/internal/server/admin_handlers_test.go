@@ -191,3 +191,7 @@ func (adminCoreStub) BatchDeleteDocuments(context.Context, coreclient.BatchDelet
 func (adminCoreStub) DeleteDataset(context.Context, coreclient.DeleteDatasetRequest) error {
 	return nil
 }
+
+func (adminCoreStub) UpdateDataset(context.Context, coreclient.UpdateDatasetRequest) error {
+	return nil
+}

@@ -6,16 +6,11 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any
 
-from evo.operations.abtest.materializers import (
-    GOODCASE_MAX_OVERALL_DROP,
-    candidate_rag_answer,
-    candidate_service,
-    compare_eval_detail_for_repair,
-)
+from evo.operations.abtest.candidate import candidate_rag_answer, candidate_service, discard_candidate
+from evo.operations.abtest.comparison import GOODCASE_MAX_OVERALL_DROP, compare_eval_detail_for_repair
 from evo.operations.analysis.summary import build_analysis_from_answers
 from evo.operations.eval.judge import judge_case
 from evo.operations.eval.materializers import build_eval_detail_summary
-from evo.operations.router_manager import RouterManager, RouterManagerError
 
 from .errors import EXTERNAL_CHAT_FAILURE_TYPES
 from .trace import safe_emit
@@ -66,9 +61,8 @@ def validate_candidate_patch(
         payload={'case_count': len(selected)},
     )
     service: Mapping[str, Any] | None = None
-    cleanup_service = True
     try:
-        service = candidate_service(candidate_config, patch, ctx)
+        service = candidate_service(candidate_config, patch, ctx, temporary=True)
     except Exception as exc:
         safe_emit(
             trace, 'candidate.service_failed', status='failed', attempt=attempt,
@@ -197,7 +191,6 @@ def validate_candidate_patch(
                         'goodcase_guard_status', 'recommended_action')
         })
         accepted, reason = _candidate_gate(comparison, candidate_summary, delta)
-        cleanup_service = not accepted
         return {
             'status': 'accepted' if accepted else 'rejected',
             'accepted': accepted,
@@ -207,8 +200,7 @@ def validate_candidate_patch(
             'analysis_delta': delta,
         }
     finally:
-        if cleanup_service:
-            _cleanup_candidate_service(service, trace=trace, attempt=attempt)
+        _cleanup_candidate_service(service, trace=trace, attempt=attempt)
 
 
 def _cleanup_candidate_service(
@@ -217,31 +209,12 @@ def _cleanup_candidate_service(
     trace: Any | None = None,
     attempt: int | None = None,
 ) -> dict[str, Any]:
-    if not service:
-        return {'status': 'not_applicable', 'reason': 'missing_service'}
-    if service.get('status') != 'ready':
-        return {'status': 'not_applicable', 'reason': 'service_not_ready'}
-    if service.get('cleanup_allowed') is not True:
-        return {'status': 'not_applicable', 'reason': 'cleanup_not_owned'}
-    registered = service.get('register_response') if isinstance(service.get('register_response'), Mapping) else {}
-    if registered.get('reused') is True:
-        return {'status': 'not_applicable', 'reason': 'reused_service'}
-    algorithm_id = _text(service.get('algorithm_id'))
-    admin_url = _text(service.get('router_admin_url'))
-    if not algorithm_id or not admin_url:
-        return {'status': 'not_applicable', 'reason': 'missing_router_target'}
-    if not algorithm_id.startswith('evo_'):
-        return {'status': 'not_applicable', 'reason': 'non_evo_algorithm', 'algorithm_id': algorithm_id}
-
-    payload = {'algorithm_id': algorithm_id}
-    try:
-        RouterManager(admin_url, _text(service.get('router_chat_url'))).stop_algorithm(algorithm_id)
-    except RouterManagerError as exc:
-        safe_emit(trace, 'candidate.service_stopped', status='failed', attempt=attempt,
-                  payload=payload | {'error_type': exc.kind})
-        return {'status': 'failed', 'algorithm_id': algorithm_id, 'error_type': exc.kind, 'message': str(exc)}
-    safe_emit(trace, 'candidate.service_stopped', status='completed', attempt=attempt, payload=payload)
-    return {'status': 'completed', 'algorithm_id': algorithm_id}
+    result = discard_candidate(service)
+    if result['status'] in {'completed', 'failed'}:
+        safe_emit(trace, 'candidate.service_stopped', status=result['status'], attempt=attempt, payload=result)
+    if result['status'] == 'failed':
+        raise RuntimeError(str(result.get('message') or 'failed to discard repair candidate'))
+    return result
 
 
 def _analysis_delta_from(

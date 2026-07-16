@@ -1,7 +1,7 @@
-"""Scheduling tools and lazy ToolGroup for schedule management.
+"""Scheduling tools and lazy Toolkit for schedule management.
 
 Provides create / list / cancel / update / trigger schedule tools,
-packaged as a lazy ToolGroup so the LLM only sees the gateway tool
+packaged as a lazy Toolkit so the LLM only sees the gateway tool
 until the user mentions scheduling topics.
 """
 from __future__ import annotations
@@ -246,18 +246,18 @@ def _schedule_tools() -> List[Any]:
     return [create_schedule, list_schedules, cancel_schedule, update_schedule, trigger_schedule]
 
 
-def build_schedule_tool_group() -> dict:
-    """Return a lazy ToolGroup dict for all schedule management tools.
+def build_schedule_toolkit() -> dict:
+    """Return a lazy Toolkit dict for all schedule management tools.
 
     The group activates when the user mentions scheduled tasks or timing topics.
     Provides: create_schedule, list_schedules, cancel_schedule, update_schedule, trigger_schedule.
     """
     return {
-        'name': 'schedule',
+        'name': 'ScheduleToolkit',
         'tools': _schedule_tools(),
         'desc': (
             'Manage and query recurring scheduled tasks. '
-            'Use this tool group to list existing schedules, create new ones, '
+            'Use this Toolkit to list existing schedules, create new ones, '
             'modify or cancel a schedule, and trigger a schedule immediately.'
         ),
         'lazy': True,

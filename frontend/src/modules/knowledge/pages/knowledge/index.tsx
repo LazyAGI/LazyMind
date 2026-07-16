@@ -26,6 +26,7 @@ import {
   isDeveloperModeActive,
 } from "@/utils/developerMode";
 import { DetailPageHeader } from "@/components/ui";
+import { localizeErrorCode } from "@/components/request";
 import "./index.scss";
 
 type KnowledgeDetail = Doc & {
@@ -156,10 +157,8 @@ const Detail = () => {
     try {
       await fileViewerRef.current?.exportImagePdf();
       message.success("已导出图片 PDF");
-    } catch (err) {
-      message.error(
-        `导出失败: ${err instanceof Error ? err.message : String(err)}`,
-      );
+    } catch {
+      message.error(localizeErrorCode("2000509"));
     } finally {
       setExportingImagePdf(false);
     }

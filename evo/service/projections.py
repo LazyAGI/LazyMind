@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from evo.artifact_flow.state import FlowRunState
 from evo.artifact_runtime.evo import catalog as C
 from evo.artifact_runtime.kernel import ArtifactKey, ArtifactRef
-from evo.operations.abtest.materializers import compare_eval_detail_for_repair
+from evo.operations.abtest.comparison import compare_eval_detail_for_repair
 from evo.operations.eval.materializers import build_eval_detail_summary
 from evo.operations.repair.trace import RepairTraceStore
 

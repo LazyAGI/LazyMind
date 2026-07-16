@@ -1,22 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Button,
+  Drawer,
+  Empty,
   Form,
   Input,
   Modal,
+  Segmented,
   Select,
   Space,
+  Spin,
+  Switch,
   Table,
   Tag,
   TimePicker,
-  Tooltip,
   Typography,
   Upload,
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd/es/upload/interface';
-import { PlusOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CalendarOutlined, EllipsisOutlined, PlayCircleOutlined, PlusOutlined, SearchOutlined, UnorderedListOutlined, UploadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -28,7 +32,7 @@ import { cancelSchedule, createSchedule, enableSchedule, listSchedules, listSche
 import type { Schedule, Task, TaskListResponse } from './api';
 import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
-import { axiosInstance, BASE_URL } from '@/components/request';
+import { axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
 import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
 
 /* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */
@@ -324,7 +328,11 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
 /* ────────────────────────────────────────────────
    Main ScheduleList component
 ──────────────────────────────────────────────── */
-export default function ScheduleList() {
+interface ScheduleListProps {
+  active: boolean;
+}
+
+export default function ScheduleList({ active }: ScheduleListProps) {
   const { t } = useTranslation();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
@@ -336,7 +344,8 @@ export default function ScheduleList() {
   const [uploading, setUploading] = useState(false);
   const [kbOptions, setKbOptions] = useState<{ value: string; label: string }[]>([]);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
-  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useState<'large' | 'compact'>('large');
+  const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
   const [scheduleNameInput, setScheduleNameInput] = useState('');
   // Filter state
   const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('enabled');
@@ -355,13 +364,15 @@ export default function ScheduleList() {
       const resp = await listSchedules(statusFilter === 'all' || statusFilter === 'disabled');
       setSchedules(resp.items ?? []);
     } catch {
-      message.error(t('taskCenter.loadError'));
+      // API errors are reported by the shared request interceptor.
     } finally {
       setLoading(false);
     }
   }, [t, statusFilter]);
 
-  useEffect(() => { void fetchSchedules(); }, [fetchSchedules]);
+  useEffect(() => {
+    if (active) void fetchSchedules();
+  }, [active, fetchSchedules]);
 
   // Client-side filter: status tab + keyword search
   const displaySchedules = schedules.filter((s) => {
@@ -400,9 +411,7 @@ export default function ScheduleList() {
       await cancelSchedule(id);
       message.success(t('taskCenter.cancelSuccess'));
       void fetchSchedules();
-    } catch {
-      message.error(t('taskCenter.cancelError'));
-    }
+    } catch {}
   };
 
   const handleEnable = async (id: string) => {
@@ -410,9 +419,7 @@ export default function ScheduleList() {
       await enableSchedule(id);
       message.success(t('taskCenter.scheduleEnableSuccess'));
       void fetchSchedules();
-    } catch {
-      message.error(t('taskCenter.scheduleEnableFailed'));
-    }
+    } catch {}
   };
 
   const handleRunNow = async (id: string) => {
@@ -420,9 +427,7 @@ export default function ScheduleList() {
       await runScheduleNow(id);
       message.success(t('taskCenter.scheduleRunNowSuccess'));
       void fetchSchedules();
-    } catch {
-      message.error(t('taskCenter.scheduleRunNowFailed'));
-    }
+    } catch {}
   };
 
   const handleOpenEdit = (record: Schedule) => {
@@ -467,11 +472,8 @@ export default function ScheduleList() {
       setFileList([]);
       setUploadedPaths([]);
       void fetchSchedules();
-    } catch (err: unknown) {
-      const isValidation = err != null && typeof err === 'object' && 'errorFields' in err;
-      if (!isValidation) {
-        message.error(editTarget ? t('taskCenter.scheduleUpdateFailed') : t('taskCenter.createError'));
-      }
+    } catch {
+      // Form validation stays local; API errors use the shared interceptor.
     } finally {
       setSubmitting(false);
     }
@@ -488,103 +490,15 @@ export default function ScheduleList() {
     setModalOpen(true);
   };
 
-  const columns: ColumnsType<Schedule> = [
-    {
-      title: t('taskCenter.scheduleName'),
-      dataIndex: 'name',
-      render: (v: string, record: Schedule) => {
-        const display = v || record.prompt_template?.slice(0, 20) + (record.prompt_template?.length > 20 ? '…' : '');
-        return record.remark ? (
-          <Tooltip title={record.remark}>
-            <span style={{ borderBottom: '1px dashed #aaa', cursor: 'help' }}>{display}</span>
-          </Tooltip>
-        ) : display;
-      },
-    },
-    {
-      title: t('taskCenter.scheduleDescription'),
-      dataIndex: 'prompt_template',
-      ellipsis: true,
-      render: (v: string) => (
-        <Tooltip title={v}>
-          <span>{v?.length > 30 ? `${v.slice(0, 30)}…` : v}</span>
-        </Tooltip>
-      ),
-    },
-    {
-      title: t('taskCenter.scheduleAttachments'),
-      dataIndex: 'file_ids',
-      width: 60,
-      render: (v: string[]) => (v?.length ? `${v.length}` : '—'),
-    },
-    {
-      title: t('taskCenter.scheduleTriggerPeriod'),
-      dataIndex: 'cron_expr',
-      width: 180,
-      render: (v: string) => describeCron(v, t),
-    },
-    {
-      title: t('taskCenter.scheduleTaskCount'),
-      dataIndex: 'run_count',
-      width: 100,
-      render: (v: number, record: Schedule) => (
-        <Button
-          type='link'
-          size='small'
-          style={{ padding: 0 }}
-          onClick={() => {
-            setExpandedKeys((prev) =>
-              prev.includes(record.id) ? prev.filter((k) => k !== record.id) : [...prev, record.id],
-            );
-          }}
-        >
-          {v ?? 0}
-        </Button>
-      ),
-    },
-    {
-      title: t('taskCenter.nextRunAt'),
-      dataIndex: 'next_run_at',
-      width: 160,
-      render: (v: string) => (v ? dayjs(v).format('YYYY/MM/DD HH:mm:ss') : '—'),
-    },
-    {
-      title: t('taskCenter.enabled'),
-      dataIndex: 'enabled',
-      width: 70,
-      render: (v: boolean) =>
-        v ? <Tag color='green'>On</Tag> : <Tag color='default'>Off</Tag>,
-    },
-    {
-      title: '',
-      key: 'actions',
-      width: 180,
-      render: (_: unknown, record: Schedule) => (
-        <Space size={4}>
-          <Button size='small' onClick={() => handleOpenEdit(record)}>{t('taskCenter.scheduleEdit')}</Button>
-          <Button size='small' onClick={() => handleRunNow(record.id)}>{t('taskCenter.scheduleRunNow')}</Button>
-          {record.enabled
-            ? <Button size='small' onClick={() => handleDisable(record.id)}>{t('taskCenter.cancelSchedule')}</Button>
-            : <Button size='small' type='primary' onClick={() => handleEnable(record.id)}>{t('taskCenter.scheduleEnable')}</Button>
-          }
-        </Space>
-      ),
-    },
-  ];
-
   return (
-    <div>
-      <Space style={{ marginBottom: 12, flexWrap: 'wrap' }} size={[8, 8]}>
-        <Button type='primary' icon={<PlusOutlined />} onClick={handleOpenModal}>
-          {t('taskCenter.newSchedule')}
-        </Button>
+    <div className='schedule-plans'>
+      <div className='schedule-toolbar'>
         <Input
           prefix={<SearchOutlined style={{ color: '#bbb' }} />}
           placeholder={t('taskCenter.scheduleSearchPlaceholder')}
           allowClear
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
-          style={{ width: 220 }}
         />
         <Space.Compact>
           {(['enabled', 'all', 'disabled'] as const).map((v) => (
@@ -598,21 +512,46 @@ export default function ScheduleList() {
             </Button>
           ))}
         </Space.Compact>
-      </Space>
-      <Table<Schedule>
-        rowKey='id'
-        loading={loading}
-        dataSource={displaySchedules}
-        columns={columns}
-        pagination={false}
-        expandable={{
-          expandedRowKeys: expandedKeys,
-          onExpandedRowsChange: (keys) => setExpandedKeys(keys as string[]),
-          expandedRowRender: (record) => <ExpandedScheduleTasks scheduleId={record.id} />,
-          rowExpandable: (record) => (record.run_count ?? 0) > 0,
-          showExpandColumn: false,
-        }}
-      />
+        <div className='schedule-toolbar-spacer' />
+        <Segmented value={viewMode} onChange={(value) => setViewMode(value as 'large' | 'compact')} options={[
+          { value: 'large', label: t('taskCenter.largeCards'), icon: <UnorderedListOutlined /> },
+          { value: 'compact', label: t('taskCenter.smallCards'), icon: <AppstoreOutlined /> },
+        ]} />
+        <Button type='primary' icon={<PlusOutlined />} onClick={handleOpenModal}>{t('taskCenter.newSchedule')}</Button>
+      </div>
+      <Spin spinning={loading}>
+        {displaySchedules.length ? (
+          <div className={`schedule-grid ${viewMode}`}>
+            {displaySchedules.map((schedule) => (
+              <article className='schedule-card' key={schedule.id} onClick={() => setSelectedSchedule(schedule)}>
+                <div className='schedule-card-identity'>
+                  <span className='schedule-icon'><CalendarOutlined /></span>
+                  <div><h3>{schedule.name || schedule.prompt_template.slice(0, 24)}</h3><p>{schedule.prompt_template}</p></div>
+                </div>
+                <div className='schedule-card-timing'>
+                  <strong><CalendarOutlined /> {describeCron(schedule.cron_expr, t)}</strong>
+                  <span>{t('taskCenter.nextRunAt')}：{schedule.next_run_at ? dayjs(schedule.next_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>
+                  {viewMode === 'large' && <span>{t('taskCenter.lastRun')}：{schedule.last_run_at ? dayjs(schedule.last_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>}
+                </div>
+                <div className='schedule-card-actions' onClick={(event) => event.stopPropagation()}>
+                  <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
+                  <span>{t('taskCenter.scheduleRunTotal', { total: schedule.run_count ?? 0 })}</span>
+                  <div><Button type={viewMode === 'large' ? 'primary' : 'default'} icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button><Button icon={<EllipsisOutlined />} onClick={() => handleOpenEdit(schedule)} /></div>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : <Empty description={t('taskCenter.empty')} />}
+      </Spin>
+      <Drawer className='schedule-detail-drawer' width={460} open={Boolean(selectedSchedule)} onClose={() => setSelectedSchedule(null)} title={selectedSchedule?.name || t('taskCenter.scheduleName')} footer={selectedSchedule ? <Button type='primary' block size='large' onClick={() => handleOpenEdit(selectedSchedule)}>{t('taskCenter.scheduleEdit')}</Button> : null}>
+        {selectedSchedule && <div className='schedule-detail-content'>
+          <section><h3>{t('taskCenter.scheduleDescription')}</h3><p>{selectedSchedule.prompt_template}</p></section>
+          <section><h3>{t('taskCenter.scheduleTriggerPeriod')}</h3><p>{describeCron(selectedSchedule.cron_expr, t)} · {selectedSchedule.timezone}</p></section>
+          <section><h3>{t('taskCenter.nextRunAt')}</h3><p>{selectedSchedule.next_run_at ? dayjs(selectedSchedule.next_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
+          <section><h3>{t('taskCenter.lastRun')}</h3><p>{selectedSchedule.last_run_at ? dayjs(selectedSchedule.last_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
+          <section><h3>{t('taskCenter.scheduleTaskCount')}</h3><ExpandedScheduleTasks scheduleId={selectedSchedule.id} /></section>
+        </div>}
+      </Drawer>
       <Modal
         title={
           <Input
@@ -661,7 +600,9 @@ export default function ScheduleList() {
                   setUploadedPaths((prev) => [...prev, path]);
                   onSuccess?.(path);
                 } catch (err) {
-                  message.error(t('taskCenter.attachmentUploadFailed'));
+                  if (!(err as { isAxiosError?: boolean })?.isAxiosError) {
+                    message.error(localizeErrorCode('2000509'));
+                  }
                   onError?.(err as Error);
                 } finally {
                   setUploading(false);

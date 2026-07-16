@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -13,6 +14,7 @@ from evo.artifact_runtime.kernel import ArtifactRef
 from .schemas import ConfigValidationIssue, PlannedAction
 
 HTTP_URL = TypeAdapter(AnyHttpUrl)
+ALGORITHM_ID = re.compile(r'evo_[A-Za-z0-9][A-Za-z0-9_.-]{0,59}')
 SPEC = {
     'run_config': (['thread_id', 'mode', 'num_case', 'inputs', 'llm_config'],
                    {'thread_id', 'mode', 'title', 'num_case', 'inputs', 'llm_config'}),
@@ -22,7 +24,7 @@ SPEC = {
                        'case_deadline_seconds', 'first_frame_timeout_seconds',
                        'connect_timeout_seconds', 'write_timeout_seconds', 'pool_timeout_seconds'}),
     'candidate_config': (['router_chat_url', 'router_admin_url', 'llm_config'],
-                         {'router_chat_url', 'router_admin_url', 'algorithm_id', 'llm_config',
+                         {'thread_id', 'name', 'router_chat_url', 'router_admin_url', 'algorithm_id', 'llm_config',
                           'case_deadline_seconds', 'first_frame_timeout_seconds',
                           'connect_timeout_seconds', 'write_timeout_seconds', 'pool_timeout_seconds'}),
     'eval_policy': (['judge_llm_config'], {'judge_llm_config'}),
@@ -109,9 +111,11 @@ def _semantic_issues(thread_id: str, target: str, value: object) -> list[ConfigV
         algorithm_id = str(value.get('algorithm_id') or '').strip()
         if target == 'target_config' and not algorithm_id:
             issues.append(_issue('/algorithm_id', 'missing_required', '/algorithm_id is required'))
-        if target == 'candidate_config' and algorithm_id and not algorithm_id.startswith('evo_'):
+        if target == 'candidate_config' and algorithm_id and ALGORITHM_ID.fullmatch(algorithm_id) is None:
             issues.append(_issue('/algorithm_id', 'invalid_value',
-                                 'candidate_config.algorithm_id must start with evo_'))
+                                 'candidate_config.algorithm_id must be an ASCII evo_ id of at most 64 characters'))
+        if target == 'candidate_config' and 'thread_id' in value and value.get('thread_id') != thread_id:
+            issues.append(_issue('/thread_id', 'immutable_field', 'candidate_config.thread_id is immutable'))
         for key in (
             'case_deadline_seconds',
             'first_frame_timeout_seconds',

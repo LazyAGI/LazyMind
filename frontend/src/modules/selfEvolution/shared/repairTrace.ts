@@ -572,6 +572,9 @@ function pickRepairTraceDetail(
   event: NormalizedThreadEvent,
   existing?: RepairTraceRow,
 ): string | undefined {
+  if (event.action === "failed") {
+    return event.displayText || event.content || existing?.detail;
+  }
   const message = getStringField(summary, ["message"]);
   const detail = message || event.displayText || event.content;
   if (detail && detail.trim()) {

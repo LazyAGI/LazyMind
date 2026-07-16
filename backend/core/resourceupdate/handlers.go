@@ -10,11 +10,26 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/algo"
-	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/skillv2/taskguard"
 )
 
 func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdateTask) taskOutcome {
+	decision, err := taskguard.EvaluateSkillOperation(ctx, w.db, nil, taskguard.SkillOperationRequest{
+		UserID:        task.UserID,
+		TaskID:        task.ID,
+		Operation:     taskguard.TriggerSkillReview,
+		TriggerSource: "scheduled",
+	})
+	if err != nil {
+		if decision.Disposition == taskguard.DispositionDefer {
+			return deferredOutcome(decision.ReasonCode, decision.Message, decision.RetryAfter)
+		}
+		return retryableOutcome(taskguard.ReasonTaskStatusUnavailable, err)
+	}
+	if !decision.Allowed {
+		return deferredOutcome(decision.ReasonCode, decision.Message, decision.RetryAfter)
+	}
 	request, outcome := w.freezeSkillRequest(ctx, task)
 	if outcome.Status != "" {
 		return outcome
@@ -42,8 +57,6 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 		EndTime:      request.EndTime,
 		MinUserTurns: w.cfg.MinUserTurns,
 		MinToolTurns: w.cfg.MinToolTurns,
-		SkillBaseDir: defaultSkillBaseDir,
-		FSBaseURL:    common.CoreSelfEndpoint(),
 		ModelConfigs: modelConfigs,
 	})
 	if err != nil {
@@ -58,7 +71,7 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 			Msg(logEventSkillReviewCallFailed)
 		return retryableOutcome("skill_review_call_failed", fmt.Errorf("http_status=%d: %w", status, err))
 	}
-	if status != 200 || resp == nil || resp.Code != 0 || !skillReviewResponseStatusAccepted(resp.Data.Status) || resp.Data.RequestID != request.RequestID {
+	if status != 200 || resp == nil || resp.Code != 0 || !skillReviewResponseStatusAccepted(resp.Data.Status) || resp.Data.RequestID != request.RequestID || strings.TrimSpace(resp.Data.TaskID) == "" {
 		resourceUpdateWarn(logEventSkillReviewCallFailed, nil).
 			Str("task_id", task.ID).
 			Str("user_id", request.UserID).
@@ -78,7 +91,7 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 		Str("requestid", request.RequestID).
 		Int("http_status", status).
 		Msg(logEventSkillReviewAccepted)
-	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone}
+	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone, ResultID: strings.TrimSpace(resp.Data.TaskID)}
 }
 
 func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdateTask) (skillGenerateRequestJSON, taskOutcome) {
@@ -97,6 +110,15 @@ func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdate
 	}
 
 	if request.WindowFrozen {
+		normalizedRequestID := normalizeSkillReviewRequestID(request.RequestID)
+		if normalizedRequestID != strings.TrimSpace(request.RequestID) {
+			request.RequestID = normalizedRequestID
+			if outcome := w.saveFrozenSkillRequest(ctx, task, request); outcome.Status != "" {
+				return request, outcome
+			}
+		} else {
+			request.RequestID = normalizedRequestID
+		}
 		start, err := parseTaskTime(request.StartTime)
 		if err != nil {
 			return request, permanentOutcome("invalid_start_time", err.Error())
@@ -191,7 +213,9 @@ func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdate
 		}
 		request.WindowFrozen = true
 		if strings.TrimSpace(request.RequestID) == "" {
-			request.RequestID = common.GenerateID()
+			request.RequestID = newSkillReviewRequestID()
+		} else {
+			request.RequestID = normalizeSkillReviewRequestID(request.RequestID)
 		}
 		body, err := json.Marshal(request)
 		if err != nil {
@@ -260,6 +284,19 @@ func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdate
 		Str("trigger_reason", frozen.StartTriggerReason).
 		Msg(logEventSkillReviewFrozen)
 	return frozen, taskOutcome{}
+}
+
+func (w *Worker) saveFrozenSkillRequest(ctx context.Context, task orm.ResourceUpdateTask, request skillGenerateRequestJSON) taskOutcome {
+	body, err := json.Marshal(request)
+	if err != nil {
+		return permanentOutcome("invalid_request_json", err.Error())
+	}
+	if err := w.db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
+		Where("id = ? AND status = ? AND locked_by = ?", task.ID, orm.ResourceUpdateTaskStatusRunning, w.workerID).
+		Updates(map[string]any{"request_json": body, "updated_at": w.clock().UTC()}).Error; err != nil {
+		return retryableOutcome("persist_request_json_failed", err)
+	}
+	return taskOutcome{}
 }
 
 func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpdateTask) taskOutcome {
@@ -395,7 +432,7 @@ func safeSkillTaskID(resp *algo.SkillReviewResponse) string {
 
 func skillReviewResponseStatusAccepted(status string) bool {
 	switch strings.TrimSpace(status) {
-	case "running", "completed":
+	case "pending", "running", "completed":
 		return true
 	default:
 		return false

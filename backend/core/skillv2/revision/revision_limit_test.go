@@ -30,9 +30,9 @@ func TestRevisionLimit_DeletesOldestWhenCreating51stRevision(t *testing.T) {
 	testutil.AssertHeadRevision(t, db, "skill1", resp.RevisionID)
 }
 
-func TestRevisionLimit_PreservesDraftBaseWhenOldest(t *testing.T) {
+func TestRevisionLimit_PrunesRolledBackParentByRevisionOrder(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	seedFiftyRevisions(t, db, "skill1", "rev50", "rev1")
+	seedFiftyRevisions(t, db, "skill1", "rev1", "rev1")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_skill_rev50")
 	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir())), MaxRevisions: 50})
 
@@ -43,11 +43,11 @@ func TestRevisionLimit_PreservesDraftBaseWhenOldest(t *testing.T) {
 	if got := testutil.CountRows(t, db, "skill_revisions", "skill_id = ?", "skill1"); got != 50 {
 		t.Fatalf("revision count = %d, want 50", got)
 	}
-	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev1"); got != 1 {
-		t.Fatalf("draft base rev1 count = %d, want 1", got)
+	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev1"); got != 0 {
+		t.Fatalf("rev1 count = %d, want 0", got)
 	}
-	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev2"); got != 0 {
-		t.Fatalf("rev2 count = %d, want 0", got)
+	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev2"); got != 1 {
+		t.Fatalf("rev2 count = %d, want 1", got)
 	}
 	testutil.AssertHeadRevision(t, db, "skill1", resp.RevisionID)
 }
