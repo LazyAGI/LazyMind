@@ -22,6 +22,22 @@ def _new_id(prefix: str) -> str:
     return f'{prefix}{uuid.uuid4().hex}'
 
 
+def _intent_text(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return str(raw).strip() or None
+    if not isinstance(data, dict):
+        return str(data).strip() or None
+    legacy = str(data.get('text') or data.get('content') or '').strip()
+    if legacy:
+        return legacy
+    visible = {k: v for k, v in data.items() if k not in {'version', 'revision'} and v}
+    return json.dumps(visible, ensure_ascii=False, separators=(',', ':')) if visible else None
+
+
 class SubAgentDB:
     """Thin DB accessor over the down-passed core DSN.
 
@@ -555,6 +571,45 @@ class SubAgentDB:
         rows = self.load_artifacts_for_tasks(task_ids)
         return _rows_to_artifact_summary(rows, order_field='seq', is_human_field=None) if rows else []
 
+    def get_conversation_intent(self, conversation_id: str) -> Optional[str]:
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    text('SELECT ext FROM conversations WHERE id = :cid'),
+                    {'cid': conversation_id},
+                ).mappings().first()
+            ext = row['ext'] if row else None
+            if isinstance(ext, str):
+                ext = json.loads(ext)
+            return _intent_text(ext.get('intent_context')) if isinstance(ext, dict) else None
+        except Exception:
+            return None
+
+    def get_session_intent(self, session_id: str) -> Optional[str]:
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    text('SELECT intent_context FROM plugin_sessions WHERE id = :sid'),
+                    {'sid': session_id},
+                ).mappings().first()
+            return _intent_text(row['intent_context']) if row else None
+        except Exception:
+            return None
+
+    def get_step_intent(self, session_id: str, step_id: str) -> Optional[str]:
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    text(
+                        'SELECT intent_context FROM plugin_step_intents '
+                        'WHERE session_id = :sid AND step_id = :step'
+                    ),
+                    {'sid': session_id, 'step': step_id},
+                ).mappings().first()
+            return _intent_text(row['intent_context']) if row else None
+        except Exception:
+            return None
+
 
 # ---------------------------------------------------------------------------
 # TaskQueryDB — read-only DB accessor for ChatAgent tool context.
@@ -914,6 +969,21 @@ class TaskQueryDB:
 
     # ----- intent / constraint helpers -----
 
+    def get_conversation_intent(self, conversation_id: str) -> Optional[str]:
+        """Return conversation-level intent stored outside chat history."""
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    text('SELECT ext FROM conversations WHERE id = :cid'),
+                    {'cid': conversation_id},
+                ).mappings().first()
+            ext = row['ext'] if row else None
+            if isinstance(ext, str):
+                ext = json.loads(ext)
+            return _intent_text(ext.get('intent_context')) if isinstance(ext, dict) else None
+        except Exception:
+            return None
+
     def get_session_intent(self, session_id: str) -> Optional[str]:
         """Return the global intent_context text for a session, or None if not set."""
         try:
@@ -927,8 +997,7 @@ class TaskQueryDB:
             raw = row['intent_context']
             if raw is None:
                 return None
-            data = json.loads(raw) if isinstance(raw, str) else raw
-            return data.get('text') or data.get('content') if isinstance(data, dict) else str(data) or None
+            return _intent_text(raw)
         except Exception:
             return None
 
@@ -948,8 +1017,7 @@ class TaskQueryDB:
             raw = row['intent_context']
             if raw is None:
                 return None
-            data = json.loads(raw) if isinstance(raw, str) else raw
-            return data.get('text') or data.get('content') if isinstance(data, dict) else str(data) or None
+            return _intent_text(raw)
         except Exception:
             return None
 
@@ -969,8 +1037,7 @@ class TaskQueryDB:
                 raw = row['intent_context']
                 if raw is None:
                     continue
-                data = json.loads(raw) if isinstance(raw, str) else raw
-                text_val = data.get('text') or data.get('content') if isinstance(data, dict) else str(data)
+                text_val = _intent_text(raw)
                 if text_val:
                     result[row['step_id']] = text_val
             return result

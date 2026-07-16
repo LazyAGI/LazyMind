@@ -258,22 +258,26 @@ def _build_attachment_context_for_subagent(history_files_per_turn: 'Dict[str, Li
     return '\n'.join(lines)
 
 
-def _build_intent_context_section(db: 'SubAgentDB', session_id: str, step_id: str = '') -> List[str]:
-    """Read global + step-level intent from DB and return prompt lines.
+def _build_intent_context_section(db: 'SubAgentDB', conversation_id: str,
+                                  session_id: str, step_id: str = '') -> List[str]:
+    """Read conversation + plugin-session + current-step intent from DB.
 
     Returns an empty list if there are no intent constraints to inject.
     """
     try:
         lines: List[str] = []
-        session_intent: Optional[str] = db.get_session_intent(session_id)
-        step_intent: Optional[str] = db.get_step_intent(session_id, step_id) if step_id else None
+        conversation_intent: Optional[str] = db.get_conversation_intent(conversation_id)
+        session_intent: Optional[str] = db.get_session_intent(session_id) if session_id else None
+        step_intent: Optional[str] = db.get_step_intent(session_id, step_id) if session_id and step_id else None
 
-        if not session_intent and not step_intent:
+        if not conversation_intent and not session_intent and not step_intent:
             return []
 
         lines.append('')
-        lines.append('## User Intent & Constraints')
+        lines.append('## Effective Execution Intent')
         lines.append('The following constraints were specified by the user and MUST be respected:')
+        if conversation_intent:
+            lines.append(f'Conversation intent: {conversation_intent}')
         if session_intent:
             lines.append(f'Global constraints: {session_intent}')
         if step_intent:
@@ -314,8 +318,8 @@ def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -
         elif ctx.input_slots:
             lines.append(f'Input slots you may read: {", ".join(ctx.input_slots)}')
     # Inject intent/constraints from the plugin session so SubAgent respects user preferences.
-    if session_id and db:
-        intent_lines = _build_intent_context_section(db, session_id, step_id)
+    if db:
+        intent_lines = _build_intent_context_section(db, ctx.conversation_id, session_id, step_id)
         if intent_lines:
             lines.extend(intent_lines)
     # Inject user attachment context so the SubAgent knows which files were uploaded.

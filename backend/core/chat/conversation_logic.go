@@ -700,6 +700,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"use_memory":       useMemory,
 		"user_id":          strings.TrimSpace(userID),
 		"mode":             mode,
+		"intent_context":   loadConversationIntentContext(ctx, db, convID),
 	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
 		body["query"] = mentionContext + "\n\nUser query:\n" + query
@@ -1877,31 +1878,177 @@ func loadPluginPreflightContext(ctx context.Context, db *gorm.DB, convID string)
 	return preflight
 }
 
+func loadConversationIntentContext(ctx context.Context, db *gorm.DB, convID string) map[string]any {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return nil
+	}
+	ext := map[string]any{}
+	if json.Unmarshal(conv.Ext, &ext) != nil {
+		return nil
+	}
+	intent, _ := ext["intent_context"].(map[string]any)
+	return intent
+}
+
 // mergeAskPendingIntoExt merges ask_pending data into the ext JSON field so that
 // the ask card is persisted and can be restored on page reload.
-// handleIntentUpdated writes the intent emitted by the update_intent tool to DB,
+var intentScalarFields = map[string]bool{"goal": true, "deliverable": true, "execution_mode": true}
+var intentListFields = map[string]bool{
+	"constraints": true, "corrections": true, "emphasized_points": true, "superseded": true,
+}
+
+func normalizeIntentDocument(raw any) map[string]any {
+	doc, _ := raw.(map[string]any)
+	if doc == nil {
+		doc = map[string]any{}
+	}
+	if text, _ := doc["text"].(string); strings.TrimSpace(text) != "" {
+		doc = map[string]any{"constraints": []any{strings.TrimSpace(text)}}
+	}
+	doc["version"] = 2
+	if _, ok := doc["revision"]; !ok {
+		doc["revision"] = 0
+	}
+	return doc
+}
+
+func intentRevision(doc map[string]any) int {
+	switch value := doc["revision"].(type) {
+	case float64:
+		return int(value)
+	case int:
+		return value
+	case int64:
+		return int(value)
+	}
+	return 0
+}
+
+func applyIntentOperations(doc map[string]any, operations []IntentOperation) (map[string]any, error) {
+	doc = normalizeIntentDocument(doc)
+	for _, operation := range operations {
+		op := strings.TrimSpace(operation.Op)
+		field := strings.TrimSpace(operation.Field)
+		value := strings.TrimSpace(operation.Value)
+		if value == "" {
+			return nil, fmt.Errorf("intent value is required")
+		}
+		if op == "set" {
+			if !intentScalarFields[field] {
+				return nil, fmt.Errorf("cannot set intent field %q", field)
+			}
+			doc[field] = value
+			continue
+		}
+		if !intentListFields[field] || (op != "add" && op != "remove" && op != "supersede") {
+			return nil, fmt.Errorf("invalid intent operation %q for field %q", op, field)
+		}
+		items, _ := doc[field].([]any)
+		if typed, ok := doc[field].([]string); ok {
+			items = make([]any, 0, len(typed))
+			for _, item := range typed {
+				items = append(items, item)
+			}
+		}
+		if op == "supersede" {
+			remaining := make([]any, 0, len(items))
+			for _, item := range items {
+				text := strings.TrimSpace(fmt.Sprint(item))
+				if text != "" && text != value {
+					remaining = append(remaining, text)
+				}
+			}
+			doc[field] = remaining
+			superseded, _ := doc["superseded"].([]any)
+			found := false
+			for _, item := range superseded {
+				if strings.TrimSpace(fmt.Sprint(item)) == value {
+					found = true
+				}
+			}
+			if !found {
+				superseded = append(superseded, value)
+			}
+			doc["superseded"] = superseded
+			continue
+		}
+		filtered := make([]any, 0, len(items)+1)
+		seen := false
+		for _, item := range items {
+			text := strings.TrimSpace(fmt.Sprint(item))
+			if text == value {
+				seen = true
+				if op == "remove" {
+					continue
+				}
+			}
+			if text != "" {
+				filtered = append(filtered, text)
+			}
+		}
+		if op != "remove" && !seen {
+			filtered = append(filtered, value)
+		}
+		doc[field] = filtered
+	}
+	doc["revision"] = intentRevision(doc) + 1
+	return doc, nil
+}
+
+// handleIntentUpdated writes the patch emitted by intentwrite to DB,
 // then pushes an intent_updated convEvent so the frontend can refresh immediately.
 func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, ev *IntentUpdatedEvent) {
-	if ev == nil || ev.SessionID == "" {
+	if ev == nil || len(ev.Operations) == 0 {
 		return
 	}
 	if db != nil {
 		now := time.Now().UTC()
-		payload := fmt.Sprintf(`{"text":%q}`, ev.Content)
-		if ev.Scope == "session" {
-			db.WithContext(ctx).Exec(
-				`UPDATE plugin_sessions SET intent_context = ?, updated_at = ? WHERE id = ?`,
-				payload, now, ev.SessionID,
-			)
-		} else if ev.Scope == "step" && ev.StepID != "" {
-			rowID := fmt.Sprintf("psi_%s", common.GenerateID())
-			db.WithContext(ctx).Exec(
-				`INSERT INTO plugin_step_intents (id, session_id, step_id, intent_context, updated_at)
+		if ev.Scope == "conversation" && strings.TrimSpace(convID) != "" {
+			var conv orm.Conversation
+			if db.WithContext(ctx).Select("id", "ext").Where("id = ?", convID).First(&conv).Error == nil {
+				ext := map[string]any{}
+				_ = json.Unmarshal(conv.Ext, &ext)
+				doc := normalizeIntentDocument(ext["intent_context"])
+				if updated, err := applyIntentOperations(doc, ev.Operations); err == nil {
+					ext["intent_context"] = updated
+					raw, _ := json.Marshal(ext)
+					_ = db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
+				}
+			}
+		} else if ev.Scope == "plugin_session" && ev.SessionID != "" {
+			var session orm.PluginSession
+			if db.WithContext(ctx).Select("intent_context").Where("id = ?", ev.SessionID).First(&session).Error == nil {
+				doc := map[string]any{}
+				_ = json.Unmarshal([]byte(session.IntentContext), &doc)
+				if updated, err := applyIntentOperations(doc, ev.Operations); err == nil {
+					payload, _ := json.Marshal(updated)
+					_ = db.WithContext(ctx).Model(&orm.PluginSession{}).Where("id = ?", ev.SessionID).
+						Updates(map[string]any{"intent_context": string(payload), "updated_at": now}).Error
+				}
+			}
+		} else if ev.Scope == "plugin_step" && ev.SessionID != "" && ev.StepID != "" {
+			var existing orm.PluginStepIntent
+			doc := map[string]any{}
+			if db.WithContext(ctx).Where("session_id = ? AND step_id = ?", ev.SessionID, ev.StepID).
+				First(&existing).Error == nil {
+				_ = json.Unmarshal([]byte(existing.IntentContext), &doc)
+			}
+			updated, err := applyIntentOperations(doc, ev.Operations)
+			if err == nil {
+				payload, _ := json.Marshal(updated)
+				rowID := fmt.Sprintf("psi_%s", common.GenerateID())
+				_ = db.WithContext(ctx).Exec(
+					`INSERT INTO plugin_step_intents (id, session_id, step_id, intent_context, updated_at)
 				 VALUES (?, ?, ?, ?, ?)
 				 ON CONFLICT (session_id, step_id) DO UPDATE
 				 SET intent_context = EXCLUDED.intent_context, updated_at = EXCLUDED.updated_at`,
-				rowID, ev.SessionID, ev.StepID, payload, now,
-			)
+					rowID, ev.SessionID, ev.StepID, string(payload), now,
+				).Error
+			}
 		}
 	}
 	if stateStore != nil {
