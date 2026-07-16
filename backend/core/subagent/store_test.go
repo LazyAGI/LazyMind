@@ -110,6 +110,27 @@ func TestStatusAndArtifactLifecycle(t *testing.T) {
 	}
 }
 
+func TestListTasksByConversationForUserEnforcesOwnership(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	for _, input := range []CreateTaskInput{
+		{TaskID: "mine", ConversationID: "conv", AgentType: "research", Title: "mine", Mode: "auto", CreateUserID: "user-1"},
+		{TaskID: "other", ConversationID: "conv", AgentType: "research", Title: "other", Mode: "auto", CreateUserID: "user-2"},
+	} {
+		if _, err := CreateTask(ctx, db.DB, input); err != nil {
+			t.Fatalf("create task %s: %v", input.TaskID, err)
+		}
+	}
+
+	tasks, err := ListTasksByConversationForUser(ctx, db.DB, "conv", "user-1")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "mine" {
+		t.Fatalf("expected only user-1 task, got %#v", tasks)
+	}
+}
+
 func TestMarkInterrupted(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

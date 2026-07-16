@@ -327,6 +327,34 @@
     border-radius: 6px;
   }
 
+  .task-artifact-preview {
+    position: relative;
+    width: 64px;
+    height: 64px;
+
+    .task-artifact-preview-download {
+      position: absolute;
+      right: 3px;
+      bottom: 3px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 4px;
+      background: rgb(0 0 0 / 58%);
+      color: #fff;
+      text-decoration: none;
+      opacity: 0.78;
+      transition: opacity 0.15s;
+    }
+
+    &:hover .task-artifact-preview-download,
+    &:focus-within .task-artifact-preview-download {
+      opacity: 1;
+    }
+  }
+
   .task-artifact-file {
     display: flex;
     align-items: center;
@@ -340,6 +368,17 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
+    .task-artifact-file-link {
+      color: #2f6bff;
+      text-decoration: none;
+      cursor: pointer;
+
+      &:hover {
+        text-decoration: underline;
+        color: #1a4fcc;
+      }
+    }
   }
 
   .task-artifact-text {
@@ -348,10 +387,20 @@
     padding: 6px 8px;
     margin-top: 6px;
 
+    .task-artifact-text-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
     .task-artifact-text-key {
       font-size: 11px;
       color: #8c98a8;
-      margin-bottom: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .task-artifact-text-body {
@@ -361,6 +410,27 @@
       overflow-y: auto;
       white-space: pre-wrap;
       word-break: break-word;
+    }
+  }
+
+  .task-artifact-download-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border: 1px solid #c4d2f5;
+    border-radius: 4px;
+    background: #eef3ff;
+    color: #2f6bff;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+
+    &:hover {
+      background: #2f6bff;
+      color: #fff;
+      border-color: #2f6bff;
     }
   }
 }

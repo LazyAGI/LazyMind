@@ -115,7 +115,11 @@ func Run(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunReques
 			continue
 		}
 		ev.TaskID = req.TaskID
-		routeEvent(runCtx, db, stateStore, ev)
+		if err := routeEvent(runCtx, db, stateStore, ev); err != nil {
+			message := fmt.Sprintf("persist subagent %s event failed: %v", ev.Type, err)
+			routeError(runCtx, db, stateStore, req.TaskID, message)
+			return fmt.Errorf("%s", message)
+		}
 	}
 	if err := scanner.Err(); err != nil && runCtx.Err() == nil {
 		routeError(runCtx, db, stateStore, req.TaskID, fmt.Sprintf("subagent stream read error: %v", err))
@@ -125,7 +129,7 @@ func Run(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunReques
 }
 
 // routeEvent persists a SubAgent event to DB (authoritative), then appends to Redis (live tail).
-func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent) {
+func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent) error {
 	switch ev.Type {
 	case "task_start":
 		_ = UpdateStatus(ctx, db, ev.TaskID, StatusRunning)
@@ -142,7 +146,9 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 		if seq <= 0 {
 			seq = 1
 		}
-		_ = SaveArtifact(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, seq)
+		if err := SaveArtifact(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, seq); err != nil {
+			return fmt.Errorf("save artifact task=%s slot=%s seq=%d: %w", ev.TaskID, ev.ArtifactKey, seq, err)
+		}
 		// Write slot revision if this is a plugin_step task with a slot binding.
 		// list_index for partial retry is embedded inside the artifact JSON value and
 		// extracted by the plugin hook via extractListIndex — no need to pass it here.
@@ -168,6 +174,7 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 		routePluginStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Message)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
+	return nil
 }
 
 // routeError synthesizes a terminal error event when the run cannot be driven by the stream.

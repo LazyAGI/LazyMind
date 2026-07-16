@@ -1112,6 +1112,34 @@ func streamSingleAnswer(
 		ThinkingDurationS: 0,
 	})
 	for d := range ch {
+		if d.ArtifactCreated != nil {
+			userIDForArtifact := userIDFromChatRequestBody(reqBody)
+			if userIDForArtifact == "" {
+				userIDForArtifact = "0"
+			}
+			notice, artifactErr := persistConversationArtifact(
+				chatCtx, db, convID, historyID, userIDForArtifact, d.ArtifactCreated,
+			)
+			if artifactErr != nil {
+				log.Logger.Error().Err(artifactErr).Str("conversation_id", convID).
+					Str("history_id", historyID).Msg("persist main chat artifact failed")
+				continue
+			}
+			artifactChunk := &ChatChunkResponse{
+				ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
+				FinishReason: "FINISH_REASON_UNSPECIFIED", ArtifactCreated: notice,
+			}
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, artifactChunk)
+			}
+			if stateStore != nil {
+				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, artifactChunk)
+				_ = AppendConvEvent(chatCtx, stateStore, convID, &ConvEvent{
+					Type: "artifact_created", Payload: notice,
+				})
+			}
+			continue
+		}
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
 			pluginModeForTask := pluginModeFromReqBody(reqBody)
@@ -1571,6 +1599,7 @@ func handleTaskCreated(
 			})
 			return &TaskCreatedNotice{
 				TaskID:            existing.ID,
+				TriggerHistoryID:  existing.TriggerHistoryID,
 				Title:             existing.Title,
 				AgentType:         existing.AgentType,
 				Mode:              existing.Mode,
@@ -1616,6 +1645,7 @@ func handleTaskCreated(
 
 	return &TaskCreatedNotice{
 		TaskID:            task.ID,
+		TriggerHistoryID:  task.TriggerHistoryID,
 		Title:             task.Title,
 		AgentType:         task.AgentType,
 		Mode:              task.Mode,
@@ -1682,6 +1712,7 @@ func handlePluginStepCreated(
 	}
 	return &TaskCreatedNotice{
 		TaskID:            task.ID,
+		TriggerHistoryID:  task.TriggerHistoryID,
 		Title:             task.Title,
 		AgentType:         "plugin_step",
 		Mode:              "manual",

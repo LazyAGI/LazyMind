@@ -99,13 +99,17 @@ class SubAgentContext:
         return content, original_type
 
     def write_draft(self, key: str, original_type: str, content: str,
-                    list_index: Optional[int] = None) -> None:
-        """Write *content* to the draft file and record *original_type* in the sidecar."""
+                    list_index: Optional[int] = None,
+                    pending_commit: bool = True) -> None:
+        """Write a draft and record whether it differs from the committed revision."""
         os.makedirs(self._drafts_dir(), exist_ok=True)
         with open(self.draft_path(key, list_index), 'w', encoding='utf-8') as fh:
             fh.write(content)
         with open(self._meta_path(key, list_index), 'w', encoding='utf-8') as fh:
-            json.dump({'original_type': original_type}, fh)
+            json.dump({
+                'original_type': original_type,
+                'pending_commit': pending_commit,
+            }, fh)
 
     def delete_draft(self, key: str, list_index: Optional[int] = None) -> None:
         """Delete the draft file and its sidecar (silent if missing)."""
@@ -132,11 +136,16 @@ class SubAgentContext:
             path = os.path.join(drafts_dir, name)
             meta_path = path + '.meta'
             original_type = 'text'
+            pending_commit = True
             if os.path.exists(meta_path):
                 try:
-                    original_type = json.loads(open(meta_path).read()).get('original_type', 'text')
+                    metadata = json.loads(open(meta_path).read())
+                    original_type = metadata.get('original_type', 'text')
+                    pending_commit = bool(metadata.get('pending_commit', True))
                 except Exception:
                     pass
+            if not pending_commit:
+                continue
             try:
                 with open(path, 'r', encoding='utf-8') as fh:
                     content = fh.read()

@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 
 	"lazymind/core/doc"
@@ -11,9 +12,17 @@ import (
 // Stored paths may carry expired /static-files/ signatures; always re-sign on read.
 // Pass contentType "" to attempt image signing (legacy snapshot rows).
 func SignArtifactImageValue(contentType string, raw json.RawMessage) json.RawMessage {
+	return SignArtifactValue(contentType, raw, "")
+}
+
+// SignArtifactValue adds fresh signed URLs to file-backed artifact values.
+// workspacePath is used to resolve legacy relative paths written by older
+// SubAgent versions before those paths were normalized to absolute paths.
+func SignArtifactValue(contentType string, raw json.RawMessage, workspacePath string) json.RawMessage {
 	if len(raw) == 0 {
 		return raw
 	}
+	raw = resolveArtifactPaths(raw, workspacePath)
 	ct := strings.TrimSpace(contentType)
 	if ct == "" || ct == "image" {
 		return signImageArtifactValue(raw)
@@ -25,6 +34,66 @@ func SignArtifactImageValue(contentType string, raw json.RawMessage) json.RawMes
 		return signFileArtifactValue(raw)
 	}
 	return raw
+}
+
+func resolveArtifactPaths(raw json.RawMessage, workspacePath string) json.RawMessage {
+	workspacePath = strings.TrimSpace(workspacePath)
+	if workspacePath == "" || len(raw) == 0 {
+		return raw
+	}
+	workspaceRoot, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return raw
+	}
+	workspaceRoot = filepath.Clean(workspaceRoot)
+	var value map[string]any
+	if json.Unmarshal(raw, &value) != nil {
+		return raw
+	}
+	resolve := func(path string) string {
+		path = strings.TrimSpace(path)
+		if path == "" || filepath.IsAbs(path) || strings.HasPrefix(path, "/static-files/") ||
+			strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") ||
+			strings.HasPrefix(path, "data:") {
+			return path
+		}
+		resolved := filepath.Clean(filepath.Join(workspaceRoot, filepath.FromSlash(path)))
+		relative, err := filepath.Rel(workspaceRoot, resolved)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return ""
+		}
+		return resolved
+	}
+	changed := false
+	if path, ok := value["path"].(string); ok {
+		resolved := resolve(path)
+		if resolved != path {
+			value["path"] = resolved
+			changed = true
+		}
+	}
+	if paths, ok := value["paths"].([]any); ok {
+		resolvedPaths := make([]any, 0, len(paths))
+		for _, item := range paths {
+			path, ok := item.(string)
+			if !ok {
+				resolvedPaths = append(resolvedPaths, item)
+				continue
+			}
+			resolved := resolve(path)
+			resolvedPaths = append(resolvedPaths, resolved)
+			changed = changed || resolved != path
+		}
+		value["paths"] = resolvedPaths
+	}
+	if !changed {
+		return raw
+	}
+	out, err := json.Marshal(value)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 func signImageArtifactValue(raw json.RawMessage) json.RawMessage {

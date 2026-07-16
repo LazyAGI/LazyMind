@@ -126,6 +126,20 @@ func ListTasksByConversation(ctx context.Context, db *gorm.DB, convID string) ([
 	return tasks, nil
 }
 
+// ListTasksByConversationForUser returns tasks only when they belong to the
+// requesting user. Public Task Center APIs must use this ownership-scoped form.
+func ListTasksByConversationForUser(
+	ctx context.Context, db *gorm.DB, convID, userID string,
+) ([]orm.SubAgentTask, error) {
+	var tasks []orm.SubAgentTask
+	if err := db.WithContext(ctx).
+		Where("conversation_id = ? AND create_user_id = ?", convID, userID).
+		Order("seq_in_conversation ASC").Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
 // UpdateStatus transitions a task to running and refreshes heartbeat.
 func UpdateStatus(ctx context.Context, db *gorm.DB, taskID, status string) error {
 	now := time.Now().UTC()

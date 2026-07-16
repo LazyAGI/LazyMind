@@ -198,6 +198,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const loadConversationTasks = useTaskCenterStore(
     (s) => s.loadConversationTasks,
   );
+  const loadConversationArtifacts = useTaskCenterStore(
+    (s) => s.loadConversationArtifacts,
+  );
   const subscribeConvEvents = useTaskCenterStore((s) => s.subscribeConvEvents);
   const unsubscribeConvEvents = useTaskCenterStore((s) => s.unsubscribeConvEvents);
 
@@ -210,6 +213,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     // already-finished task would look "new" and we would re-subscribe to its
     // task stream, causing the full execution log to be appended again.
     let cancelled = false;
+    void loadConversationArtifacts(sessionId);
     loadConversationTasks(sessionId).then(() => {
       if (!cancelled) {
         subscribeConvEvents(sessionId);
@@ -219,7 +223,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       cancelled = true;
       unsubscribeConvEvents(sessionId);
     };
-  }, [sessionId, loadConversationTasks, subscribeConvEvents, unsubscribeConvEvents]);
+  }, [sessionId, loadConversationTasks, loadConversationArtifacts, subscribeConvEvents, unsubscribeConvEvents]);
 
   // Auto-expand the task panel the first time a SubAgent task appears.
   // In developer mode: auto-expand; otherwise: keep collapsed (user expands manually).

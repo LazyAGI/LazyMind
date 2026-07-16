@@ -657,6 +657,10 @@ async def run_subagent_stream(
             cost = round(time.time() - start_time, 3)
             if is_ok:
                 _auto_flush_drafts(ctx, db)
+                while emitted:
+                    ev = emitted.pop(0)
+                    ev['task_id'] = task_id
+                    yield _sse(ev)
                 yield _sse({'type': 'done', 'task_id': task_id, 'status': 'succeeded',
                             'summary': eval_summary, 'cost': cost})
             else:
@@ -670,6 +674,10 @@ async def run_subagent_stream(
         cost = round(time.time() - start_time, 3)
         # Auto-flush any pending drafts before emitting done.
         _auto_flush_drafts(ctx, db)
+        while emitted:
+            ev = emitted.pop(0)
+            ev['task_id'] = task_id
+            yield _sse(ev)
         yield _sse({'type': 'done', 'task_id': task_id, 'status': 'succeeded',
                     'summary': summary, 'cost': cost})
         yield 'data: [DONE]\n\n'

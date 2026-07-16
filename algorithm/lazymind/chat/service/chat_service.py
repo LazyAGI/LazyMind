@@ -58,8 +58,6 @@ _CITE_MESSAGE_PATTERN = re.compile(
     r'<cite_message>([\s\S]*?)</cite_message>\s*',
     re.IGNORECASE,
 )
-
-
 def _normalize_cite_message_query_for_agent(query: str) -> tuple[str, str]:
     cite_messages: list[str] = []
 
@@ -155,6 +153,12 @@ def _build_subagent_chat_tools(has_subagents: bool) -> list:
             get_subagent_artifacts,
         ])
     return tools
+
+
+def _build_chat_artifact_tools() -> list:
+    """Tools for artifacts produced directly by the main ChatAgent."""
+    from lazymind.chat.engine.tools.chat_artifact import save_chat_artifact
+    return [save_chat_artifact]
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
@@ -373,22 +377,22 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         and plugin_context.get('synthetic_source') == 'driver'
     )
     sensitive_word = None if is_driver_turn else check_sensitive_content(query)
-    if sensitive_word:
-        cost = round(time.time() - start_time, 3)
-        LOG.warning(
-            f'[ChatServer] [SENSITIVE_FILTER_BLOCKED] [query={query[:50]}...] '
-            f'[sensitive_word={sensitive_word}] [session_id={conversation.session_id}]'
-        )
-        return single_event_stream_response(response_payload(
-            200,
-            'success',
-            {
-                'think': None,
-                'text': SENSITIVE_FILTER_RESPONSE_TEXT,
-                'sources': [],
-            },
-            cost,
-        ), final_data={'tool_call_turns': 0})
+    # if sensitive_word:
+    #     cost = round(time.time() - start_time, 3)
+    #     LOG.warning(
+    #         f'[ChatServer] [SENSITIVE_FILTER_BLOCKED] [query={query[:50]}...] '
+    #         f'[sensitive_word={sensitive_word}] [session_id={conversation.session_id}]'
+    #     )
+    #     return single_event_stream_response(response_payload(
+    #         200,
+    #         'success',
+    #         {
+    #             'think': None,
+    #             'text': SENSITIVE_FILTER_RESPONSE_TEXT,
+    #             'sources': [],
+    #         },
+    #         cost,
+    #     ), final_data={'tool_call_turns': 0})
     filters = dict(retrieval.filters or {})
     files_map: Dict[str, List[str]] = message.files if isinstance(message.files, dict) else {}
     flat_files: List[str] = []
@@ -530,7 +534,8 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
     ask_user_tools = _build_ask_user_tool()
-    all_tools = (agent_tools + subagent_tools + attachment_tools
+    artifact_tools = _build_chat_artifact_tools()
+    all_tools = (agent_tools + artifact_tools + subagent_tools + attachment_tools
                  + schedule_tools + ask_user_tools + plugin_tools + mcp_tools)
     set_trace_context({
         'enabled': bool(runtime.trace),
