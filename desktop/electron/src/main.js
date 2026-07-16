@@ -4,7 +4,7 @@ const { randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
-const { runtimeExitFailureMessage, statusFailureMessage } = require("./runtime-status");
+const { desktopRuntimeReady, runtimeExitFailureMessage, statusFailureMessage } = require("./runtime-status");
 
 const isWindows = process.platform === "win32";
 const isInstallerWarmup = isWindows && process.argv.includes("--installer-warmup");
@@ -42,8 +42,11 @@ const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
 const maxStartupLogEntries = 1200;
 const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";
 const forceExitDelayMs = 1500;
+const rendererReadyTimeoutMs = 30 * 1000;
 
 let mainWindow;
+let startupWindow;
+let rendererReadyWait;
 let runtimeProcess;
 let runtimeProcessExit = null;
 let guardProcess;
@@ -234,10 +237,10 @@ function startupDiagnosticsSnapshot() {
 }
 
 function broadcastStartupDiagnostics(extra = {}) {
-  if (!mainWindow || mainWindow.isDestroyed()) {
+  if (!startupWindow || startupWindow.isDestroyed()) {
     return;
   }
-  mainWindow.webContents.send("lazymind:startupDiagnosticsUpdate", {
+  startupWindow.webContents.send("lazymind:startupDiagnosticsUpdate", {
     ...startupDiagnosticsSnapshot(),
     ...extra,
   });
@@ -567,8 +570,12 @@ function beginFastQuit(reason = "quit") {
     spawnDetachedShutdownHelper(reason);
   }
   detachRuntimeMonitor();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.destroy();
+  rendererReadyWait?.cancel();
+  rendererReadyWait = undefined;
+  for (const window of [mainWindow, startupWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.destroy();
+    }
   }
   setTimeout(() => {
     app.exit(0);
@@ -599,7 +606,7 @@ async function waitForRuntimeReady() {
       if (status.overallStatus === "ready" && !belongsToDesktop) {
         throw new Error(`A ${status.profile || "different"} LazyMind runtime is already running. Stop it before opening Desktop.`);
       }
-      const ownedReady = status.overallStatus === "ready" && belongsToDesktop && status.ownerMatched;
+      const ownedReady = desktopRuntimeReady(status, belongsToDesktop);
       const phase = ownedReady ? "Ready" : `Waiting (${status.overallStatus || "unknown"})`;
       updateStartupState({
         status: ownedReady ? "ready" : (status.overallStatus || "starting"),
@@ -882,12 +889,14 @@ function loadingHTML() {
 </html>`;
 }
 
-async function createWindow() {
-  mainWindow = new BrowserWindow({
+function browserWindowOptions(show = true) {
+  return {
     width: 1440,
     height: 960,
     minWidth: 1120,
     minHeight: 760,
+    show,
+    backgroundColor: "#f7f8fa",
     title: "LazyMind",
     icon: isWindows
       ? (isPackaged ? path.join(process.resourcesPath, "LazyMind.ico") : process.env.LAZYMIND_DESKTOP_WINDOWS_ICON)
@@ -898,23 +907,106 @@ async function createWindow() {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
-  mainWindow.on("close", (event) => {
+  };
+}
+
+function attachManagedClose(window) {
+  window.on("close", (event) => {
     if (allowWindowClose) {
       return;
     }
     event.preventDefault();
     beginFastQuit("window close");
   });
-  await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
+}
+
+function activeWindow() {
+  if (startupWindow && !startupWindow.isDestroyed() && startupWindow.isVisible()) {
+    return startupWindow;
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return mainWindow;
+  }
+  return startupWindow;
+}
+
+function createRendererReadyWait(window) {
+  let settled = false;
+  let resolvePromise;
+  let rejectPromise;
+  const promise = new Promise((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  const timer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    rejectPromise(new Error("LazyMind Chat did not render within 30 seconds"));
+  }, rendererReadyTimeoutMs);
+  return {
+    window,
+    promise,
+    notify() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise();
+    },
+    cancel() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise();
+    },
+  };
+}
+
+async function createWindow() {
+  startupWindow = new BrowserWindow(browserWindowOptions(true));
+  attachManagedClose(startupWindow);
+  await startupWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
   broadcastStartupDiagnostics();
   try {
     const status = await waitForRuntimeReady();
-    await mainWindow.loadURL(`http://127.0.0.1:${status.config.frontendPort}`);
+    mainWindow = new BrowserWindow(browserWindowOptions(false));
+    attachManagedClose(mainWindow);
+    rendererReadyWait = createRendererReadyWait(mainWindow);
+    await Promise.all([
+      mainWindow.loadURL(`http://127.0.0.1:${status.config.frontendPort}/agent/chat/home`),
+      rendererReadyWait.promise,
+    ]);
+    rendererReadyWait.cancel();
+    rendererReadyWait = undefined;
+    if (isQuitting) {
+      return;
+    }
+    startupWindow.removeAllListeners("close");
+    startupWindow.hide();
+    mainWindow.show();
+    mainWindow.focus();
+    startupWindow.destroy();
+    startupWindow = undefined;
   } catch (error) {
+    rendererReadyWait?.cancel();
+    rendererReadyWait = undefined;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.removeAllListeners("close");
+      mainWindow.destroy();
+    }
+    mainWindow = undefined;
     setStartupFailure(error);
   }
 }
+
+ipcMain.on("lazymind:renderer-ready", (event) => {
+  if (!rendererReadyWait || rendererReadyWait.window.isDestroyed()) {
+    return;
+  }
+  if (event.sender !== rendererReadyWait.window.webContents) {
+    return;
+  }
+  rendererReadyWait.notify();
+});
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
 ipcMain.handle("lazymind:restartRuntime", async () => {
@@ -946,7 +1038,7 @@ ipcMain.handle("lazymind:openDataDir", async () => {
   await shell.openPath(target);
 });
 ipcMain.handle("lazymind:selectFolder", async () => {
-  const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] });
+  const result = await dialog.showOpenDialog(activeWindow(), { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
 });
 ipcMain.handle("lazymind:startupDiagnostics", () => startupDiagnosticsSnapshot());
@@ -984,14 +1076,15 @@ if (!hasSingleInstanceLock) {
   }
 } else {
   app.on("second-instance", () => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
+    const window = activeWindow();
+    if (!window || window.isDestroyed()) {
       return;
     }
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore();
+    if (window.isMinimized()) {
+      window.restore();
     }
-    mainWindow.show();
-    mainWindow.focus();
+    window.show();
+    window.focus();
   });
   app.whenReady().then(() => {
     if (isWindows) {

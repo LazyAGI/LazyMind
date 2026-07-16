@@ -232,6 +232,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	state.ProcessCompose.TokenFile = paths.RunDirTokenFile
 	state.Config = snapshotRuntimeConfig(cfg)
 	state = newStateWithServiceStatus(state, cfg, "starting")
+	state.OverallStatus = "starting"
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		return err
 	}
@@ -1183,7 +1184,6 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 	plan := buildRuntimeProcessPlan(cfg)
 
 	if m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
-		resp.OverallStatus = "ready"
 		s := resp.Services[processComposeServiceName]
 		s.Status = "running"
 		resp.Services[processComposeServiceName] = s
@@ -1215,9 +1215,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			}
 			resp.Services[spec.Name] = svc
 		}
-		if !hostHealthy {
-			resp.OverallStatus = "stale"
-		}
+		resp.OverallStatus = processComposeRuntimeStatus(state.OverallStatus, hostHealthy)
 	} else {
 		if m.checkRuntimeReady(ctx, cfg, paths) {
 			resp.OverallStatus = "ready"
@@ -1250,6 +1248,30 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		return "", err
 	}
 	return string(b), nil
+}
+
+func updateProbedService(services map[string]RuntimeServiceState, name string, healthy bool) bool {
+	service := services[name]
+	service.Kind = "host-process"
+	if healthy {
+		service.Status = "running"
+		services[name] = service
+		return true
+	}
+	if service.Status == "running" || service.Status == "starting" {
+		service.Status = "stale"
+	} else {
+		service.Status = "stopped"
+	}
+	services[name] = service
+	return false
+}
+
+func processComposeRuntimeStatus(stateStatus string, hostHealthy bool) string {
+	if !hostHealthy {
+		return "stale"
+	}
+	return stateStatus
 }
 
 func (m *RuntimeManager) humanStatus(resp StatusResponse) string {

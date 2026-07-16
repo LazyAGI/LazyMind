@@ -925,6 +925,56 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	}
 }
 
+func TestUpdateProbedServiceMarksStartingServiceStale(t *testing.T) {
+	services := map[string]RuntimeServiceState{
+		scanControlPlaneProcessName: {Kind: "host-process", Status: "starting"},
+	}
+
+	if updateProbedService(services, scanControlPlaneProcessName, false) {
+		t.Fatal("unhealthy service reported healthy")
+	}
+	if got := services[scanControlPlaneProcessName].Status; got != "stale" {
+		t.Fatalf("status = %q, want stale", got)
+	}
+}
+
+func TestUpdateProbedServiceRejectsStoppedService(t *testing.T) {
+	services := map[string]RuntimeServiceState{
+		fileWatcherProcessName: {Kind: "host-process", Status: "stopped"},
+	}
+
+	if updateProbedService(services, fileWatcherProcessName, false) {
+		t.Fatal("stopped service reported healthy")
+	}
+	if got := services[fileWatcherProcessName].Status; got != "stopped" {
+		t.Fatalf("status = %q, want stopped", got)
+	}
+}
+
+func TestUpdateProbedServiceMarksHealthyServiceRunning(t *testing.T) {
+	services := map[string]RuntimeServiceState{}
+
+	if !updateProbedService(services, scanControlPlaneProcessName, true) {
+		t.Fatal("healthy service reported unhealthy")
+	}
+	service := services[scanControlPlaneProcessName]
+	if service.Status != "running" || service.Kind != "host-process" {
+		t.Fatalf("service = %+v, want running host-process", service)
+	}
+}
+
+func TestProcessComposeRuntimeStatusWaitsForAuthoritativeReady(t *testing.T) {
+	if got := processComposeRuntimeStatus("starting", true); got != "starting" {
+		t.Fatalf("status = %q, want starting", got)
+	}
+	if got := processComposeRuntimeStatus("ready", true); got != "ready" {
+		t.Fatalf("status = %q, want ready", got)
+	}
+	if got := processComposeRuntimeStatus("ready", false); got != "stale" {
+		t.Fatalf("status = %q, want stale", got)
+	}
+}
+
 func TestDerivedToolInstallPathsUseLocalBuildRoot(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
