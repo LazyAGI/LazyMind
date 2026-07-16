@@ -3390,6 +3390,7 @@ const zhCN = {
     algorithmManagementAlgorithmIdPrefix: "algorithm_id 必须以 evo_ 开头",
     algorithmManagementActionHealthcheck: "健康检查",
     algorithmManagementActionRestart: "重启",
+    algorithmManagementActionStart: "启动",
     algorithmManagementActionStop: "停止",
     algorithmManagementMoreActions: "更多操作",
     algorithmManagementActionSuccess: "已执行 {{action}}：{{id}}",

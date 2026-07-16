@@ -30,6 +30,7 @@ import {
   DeleteOutlined,
   MoreOutlined,
   PauseCircleOutlined,
+  PlayCircleOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
   ThunderboltOutlined,
@@ -400,6 +401,8 @@ export function AlgorithmVersionManagementPage() {
                 <div className="self-evolution-algorithm-card-grid">
                   {algorithms.map((record) => {
                     const busy = (action: string) => actionLoadingId === `${record.algorithm_id}:${action}`;
+                    const isPaused = record.status.toLowerCase() === "disabled";
+                    const serviceAction: RouterAlgorithmAction = isPaused ? "start" : "stop";
 
                     return (
                       <div
@@ -451,13 +454,17 @@ export function AlgorithmVersionManagementPage() {
                                 onClick={() => void runAction(record, "restart")}
                               />
                             </Tooltip>
-                            <Tooltip title={t("selfEvolutionRun.algorithmManagementActionStop")}>
+                            <Tooltip
+                              title={t(isPaused
+                                ? "selfEvolutionRun.algorithmManagementActionStart"
+                                : "selfEvolutionRun.algorithmManagementActionStop")}
+                            >
                               <Button
                                 type="text"
-                                className="action-btn action-btn-stop"
-                                icon={<PauseCircleOutlined />}
-                                loading={busy("stop")}
-                                onClick={() => void runAction(record, "stop")}
+                                className={`action-btn action-btn-${serviceAction}`}
+                                icon={isPaused ? <PlayCircleOutlined /> : <PauseCircleOutlined />}
+                                loading={busy(serviceAction)}
+                                onClick={() => void runAction(record, serviceAction)}
                               />
                             </Tooltip>
                             <div className="action-divider" />

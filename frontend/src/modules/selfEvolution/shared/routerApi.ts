@@ -6,7 +6,7 @@ const ROUTER_API_BASE = `${AGENT_API_BASE}/router`;
 const silentConfig = { silentError: true } as Parameters<typeof axiosInstance.get>[1];
 
 export type RouterAlgorithmStatus = "starting" | "active" | "disabled" | "missing" | string;
-export type RouterAlgorithmAction = "healthcheck" | "restart" | "stop";
+export type RouterAlgorithmAction = "healthcheck" | "restart" | "start" | "stop";
 
 export type RouterOwner = {
   thread_id: string;

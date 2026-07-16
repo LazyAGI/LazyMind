@@ -3582,6 +3582,7 @@ const enUS = {
     algorithmManagementAlgorithmIdPrefix: "algorithm_id must start with evo_",
     algorithmManagementActionHealthcheck: "Healthcheck",
     algorithmManagementActionRestart: "Restart",
+    algorithmManagementActionStart: "Start",
     algorithmManagementActionStop: "Stop",
     algorithmManagementMoreActions: "More actions",
     algorithmManagementActionSuccess: "Ran {{action}} on {{id}}",
