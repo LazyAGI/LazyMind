@@ -835,7 +835,8 @@ def _tool_name_suffixes(tool_name: str) -> list[str]:
 
 def _resolve_tool_key(tool_name: str, mapping: dict[str, Any]) -> Any:
     """Look up *tool_name* in *mapping*, falling back to suffix match for
-    class-registered tools prefixed like ``KBToolkit_kb_search``."""
+    class-registered methods like ``KBToolkit_kb_search`` and explicitly
+    prefixed nested Toolkit methods."""
     if not tool_name or not mapping:
         return None
     for suffix in _tool_name_suffixes(tool_name):

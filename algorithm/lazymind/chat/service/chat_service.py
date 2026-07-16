@@ -23,7 +23,7 @@ from lazymind.chat.service.component import (
     filter_tools,
     normalize_history_for_agent,
 )
-from lazymind.chat.engine.agent_core import build_react_agent, drive_agent, tool_registration_name
+from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.utils import (
     SensitiveFilter,
     basename_from_path,
@@ -170,44 +170,6 @@ def _should_register_ask_user(agentic_config: Dict[str, Any]) -> bool:
         agentic_config.get('enable_plugin', True)
         and agentic_config.get('plugin_mode') == 'auto'
     )
-
-
-def _collect_active_tool_names(configs: list) -> set[str]:
-    # Build a per-request callable allowlist from filtered tool configs.
-    # This is consumed by tool_runtime guard to prevent accidental execution
-    # when the model tries to call a tool that is not active in this session.
-    names: set[str] = set()
-
-    def collect(inst: Any) -> None:
-        if isinstance(inst, (tuple, list)) and len(inst) == 2:
-            inst = inst[0]
-        if inst is None:
-            return
-        if isinstance(inst, dict):
-            group_name = str(inst.get('name') or '')
-            if group_name and not inst.get('pick_first_valid'):
-                names.add(f'get_{group_name}_methods')
-            for child in inst.get('tools', []):
-                collect(child)
-            return
-        if callable(inst):
-            tool_name = str(getattr(inst, '__name__', '')).strip()
-            if tool_name:
-                names.add(tool_name)
-        public_apis = getattr(inst, '__public_apis__', None)
-        if isinstance(public_apis, (list, tuple)):
-            group_name = inst.__class__.__name__
-            if group_name:
-                names.add(f'get_{group_name}_methods')
-            for method_name in public_apis:
-                method = str(method_name).strip()
-                if method:
-                    names.add(method)
-                    if group_name:
-                        names.add(f'{group_name}_{method}')
-    for cfg in configs:
-        collect(getattr(cfg, 'tool', None))
-    return names
 
 
 def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]],
@@ -530,13 +492,8 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         'module_trace': {'default': True},
         'request_tags': ['handle_chat'],
     })
-    active_capabilities = {cfg.name for cfg in active_configs}
-    active_capabilities.update(
-        name for tool in (subagent_tools + attachment_tools + ask_user_tools + plugin_tools + mcp_tools)
-        if (name := tool_registration_name(tool))
-    )
     runtime_prompt = build_system_prompt(
-        active_capabilities,
+        bool(all_tools),
         environment_context=runtime.environment_context,
         use_memory=personalization.use_memory,
         user_preference=personalization.user_preference,

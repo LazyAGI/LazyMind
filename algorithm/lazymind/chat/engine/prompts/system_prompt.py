@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .guidance import (
     DEFAULT_SYSTEM_PROMPT,
     RESPONSE_LANGUAGE_GUIDANCE,
-    TOOL_CALL_STATUS_GUIDANCE,
 )
 
 _DEFAULT_UI_LOCALE = 'zh-CN'
@@ -187,7 +186,7 @@ def _build_attached_files_prompt(files: list | None = None) -> str:
 
 
 def build_system_prompt(
-    active_capabilities: set[str],
+    has_tools: bool,
     *,
     environment_context: dict | None = None,
     use_memory: bool = True,
@@ -243,10 +242,12 @@ def build_system_prompt(
         if isinstance(memory, str) and memory.strip():
             prompt_parts.append(f'## Agent Working Memory\n{memory.strip()}')
 
-    if active_capabilities:
-        prompt_parts.append(TOOL_CALL_STATUS_GUIDANCE)
-    if active_capabilities:
+    if has_tools:
         prompt_parts.append(
+            '# Tool call status\n'
+            'Before calling a tool, write one concise, user-visible sentence explaining '
+            'what you are about to do, then make the tool call in the same response. '
+            'Never claim to be calling a tool unless an actual tool call immediately follows.\n\n'
             '# Tool use policy\n'
             'First decide whether tools are needed. A tool named get_*Toolkit_methods '
             'is a Toolkit gateway: call it before using that Toolkit. Prefer private '

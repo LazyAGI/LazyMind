@@ -36,6 +36,44 @@ def test_lazy_tool_group_gateway_uses_group_expansion_preview_in_chinese():
     assert '已经展开**KBToolkit**工具箱。' in result_text
 
 
+def test_instance_toolkit_method_with_class_prefix_uses_kb_template():
+    tool_call = {
+        'id': 'call-kb',
+        'function': {
+            'name': 'KBToolkit_kb_search',
+            'arguments': json.dumps({'query': 'LazyMind'}),
+        },
+    }
+
+    call_text, preview_value = _tool_call_frame_text(tool_call, 'zh')
+    result_text = _tool_result_frame_text(
+        {
+            'id': 'call-kb',
+            'name': 'KBToolkit_kb_search',
+            'result': json.dumps({'data': [{'text': 'matched'}]}),
+        },
+        'zh',
+        preview_value,
+    )
+
+    assert '正在知识库中检索与 **LazyMind** 相关的知识。' in call_text
+    assert '知识库检索' in result_text
+
+
+def test_nested_cloud_supplier_method_with_class_prefix_uses_supplier_template():
+    tool_call = {
+        'id': 'call-notion',
+        'function': {
+            'name': 'NotionFS_read',
+            'arguments': json.dumps({'path': '/project/spec'}),
+        },
+    }
+
+    call_text, _ = _tool_call_frame_text(tool_call, 'en')
+
+    assert 'Reading Notion content from **/project/spec**.' in call_text
+
+
 def test_plugin_preflight_result_renders_outcome_and_reason_in_chinese():
     reason = 'The request can be answered directly without a multi-stage workflow.'
     result_text = _tool_result_frame_text(

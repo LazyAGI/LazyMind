@@ -5,7 +5,12 @@ from lazyllm import AutoModel, LOG
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 from lazyllm.tools.rag.doc_impl import NodeGroupType
 
-from lazymind.chat.engine.tools.infra import tool_success
+from lazymind.chat.engine.tools.infra import (
+    get_core_api,
+    handle_tool_errors,
+    post_core_api,
+    tool_success,
+)
 from lazymind.chat.engine.tools._utils import (
     iter_lookup_ids,
     parse_json_dict,
@@ -25,7 +30,6 @@ from lazymind.chat.service.utils import (
 )
 from lazymind.config import EMBED_IMAGE, EMBED_MAIN, config as _cfg
 from lazymind.model_config import get_dynamic_role_slot_map
-from lazymind.chat.engine.tools.system_query import KnowledgeBaseQueryMixin
 
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
@@ -272,7 +276,27 @@ def _annotate_result_citations(result: Any) -> Any:
     return result
 
 
-class KBToolkit(KnowledgeBaseQueryMixin):
+def _string_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(',') if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def _bounded_page_size(value: int, default: int = 20) -> int:
+    try:
+        page_size = int(value)
+    except (TypeError, ValueError):
+        page_size = default
+    if page_size <= 0:
+        return default
+    return min(page_size, 100)
+
+
+class KBToolkit:
     """Knowledge-base discovery, inspection, search, and navigation tools.
 
     This Toolkit has the highest retrieval priority. If it is
@@ -297,6 +321,67 @@ class KBToolkit(KnowledgeBaseQueryMixin):
         'aggregate_knowledge_base_documents', 'kb_search',
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
     ]
+
+    @handle_tool_errors
+    def list_knowledge_bases(
+        self,
+        keyword: str = '',
+        tags: Optional[List[str]] = None,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """List knowledge bases the current user can read."""
+        params: Dict[str, Any] = {'page_size': _bounded_page_size(page_size)}
+        if keyword:
+            params['keyword'] = keyword
+        tag_values = _string_list(tags)
+        if tag_values:
+            params['tags'] = ','.join(tag_values)
+        return tool_success('list_knowledge_bases', get_core_api('/datasets', params=params))
+
+    @handle_tool_errors
+    def list_knowledge_base_documents(
+        self,
+        knowledge_base_ids: List[str],
+        keyword: str = '',
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """List readable documents in the selected knowledge bases."""
+        payload: Dict[str, Any] = {
+            'dataset_ids': _string_list(knowledge_base_ids),
+            'page_size': _bounded_page_size(page_size),
+        }
+        if keyword:
+            payload['keyword'] = keyword
+        return tool_success(
+            'list_knowledge_base_documents',
+            post_core_api('/documents:listByDatasets', payload)['response'],
+        )
+
+    @handle_tool_errors
+    def aggregate_knowledge_base_documents(
+        self,
+        knowledge_base_ids: Optional[List[str]] = None,
+        file_types: Optional[List[str]] = None,
+        document_stages: Optional[List[str]] = None,
+        data_source_types: Optional[List[str]] = None,
+        creators: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        group_by: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Aggregate readable document counts, optionally grouped by metadata fields."""
+        payload = {
+            'dataset_ids': _string_list(knowledge_base_ids),
+            'file_types': _string_list(file_types),
+            'document_stages': _string_list(document_stages),
+            'data_source_types': _string_list(data_source_types),
+            'creators': _string_list(creators),
+            'tags': _string_list(tags),
+            'group_by': _string_list(group_by),
+        }
+        return tool_success(
+            'aggregate_knowledge_base_documents',
+            post_core_api('/system-query/documents:aggregate', payload),
+        )
 
     @staticmethod
     def _kb_ids(explicit: Optional[List[str]] = None) -> List[str]:

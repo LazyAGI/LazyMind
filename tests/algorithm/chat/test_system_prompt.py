@@ -5,7 +5,7 @@ from lazymind.chat.engine.prompts.system_prompt import build_system_prompt
 
 def test_system_prompt_uses_user_timezone_time() -> None:
     prompt = build_system_prompt(
-        set(),
+        False,
         environment_context={
             'time': {
                 'now': '2026-05-11T11:48:00.000Z',
@@ -21,7 +21,7 @@ def test_system_prompt_uses_user_timezone_time() -> None:
 
 def test_system_prompt_falls_back_to_raw_time_when_timezone_is_invalid() -> None:
     prompt = build_system_prompt(
-        set(),
+        False,
         environment_context={
             'time': {
                 'now': '2026-05-11T11:48:00.000Z',
@@ -34,7 +34,7 @@ def test_system_prompt_falls_back_to_raw_time_when_timezone_is_invalid() -> None
 
 
 def test_system_prompt_includes_cross_tool_policy_when_tools_are_active() -> None:
-    prompt = build_system_prompt({'kb'})
+    prompt = build_system_prompt(True)
 
     assert '# Tool use policy' in prompt
     assert 'get_*Toolkit_methods' in prompt
@@ -42,13 +42,13 @@ def test_system_prompt_includes_cross_tool_policy_when_tools_are_active() -> Non
 
 
 def test_system_prompt_omits_tool_policy_without_tools() -> None:
-    prompt = build_system_prompt(set())
+    prompt = build_system_prompt(False)
 
     assert '# Tool use policy' not in prompt
 
 
 def test_system_prompt_does_not_embed_tool_specific_web_guidance() -> None:
-    prompt = build_system_prompt({'web_search'})
+    prompt = build_system_prompt(True)
 
     assert '# Tool use policy' in prompt
     assert 'one search intent' not in prompt

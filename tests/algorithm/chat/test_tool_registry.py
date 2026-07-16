@@ -71,22 +71,6 @@ def test_registry_key_source_activates_function_tool():
     ]
 
 
-def test_active_tool_names_include_lazy_group_gateways():
-    from lazymind.chat.service.chat_service import _collect_active_tool_names
-
-    configs = filter_tools(DEFAULT_TOOLS)
-    active_names = _collect_active_tool_names(configs)
-
-    assert 'get_KBToolkit_methods' in active_names
-    assert 'get_ExternalDatabaseToolkit_methods' in active_names
-    assert 'list_external_dbs' in active_names
-    assert 'describe_external_db' in active_names
-    assert 'external_db_query' in active_names
-    assert 'ExternalDatabaseToolkit_list_external_dbs' in active_names
-    assert 'ExternalDatabaseToolkit_describe_external_db' in active_names
-    assert 'ExternalDatabaseToolkit_external_db_query' in active_names
-
-
 def test_catalog_exposes_modules_without_registering_module_gateways():
     from lazyllm.tools.agent.toolsManager import ToolManager
 
