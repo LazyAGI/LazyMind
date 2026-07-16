@@ -198,15 +198,14 @@ export async function fetchRouterAlgorithms(params: {
   algorithmId?: string;
   status?: string;
 } = {}) {
-  const query: Record<string, string> = {};
+  const query: Record<string, string> = {
+    status: params.status || "all",
+  };
   if (params.threadId) {
     query.thread_id = params.threadId;
   }
   if (params.algorithmId) {
     query.algorithm_id = params.algorithmId;
-  }
-  if (params.status) {
-    query.status = params.status;
   }
   const response = await axiosInstance.get(`${ROUTER_API_BASE}/algorithms`, {
     params: query,

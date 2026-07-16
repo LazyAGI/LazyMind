@@ -92,7 +92,7 @@ export function AlgorithmVersionManagementPage() {
   const [draftFilters, setDraftFilters] = useState<AlgorithmFilters>({
     threadId: "",
     algorithmId: "",
-    status: "",
+    status: "all",
   });
   const [filters, setFilters] = useState<AlgorithmFilters>(draftFilters);
   const [algorithms, setAlgorithms] = useState<RouterAlgorithm[]>([]);
@@ -136,7 +136,7 @@ export function AlgorithmVersionManagementPage() {
   }, [draftFilters]);
 
   const resetFilters = useCallback(() => {
-    const empty = { threadId: "", algorithmId: "", status: "" };
+    const empty = { threadId: "", algorithmId: "", status: "all" };
     setDraftFilters(empty);
     setFilters(empty);
   }, []);
@@ -341,17 +341,16 @@ export function AlgorithmVersionManagementPage() {
                 onPressEnter={applyFilters}
               />
               <Select
-                allowClear
                 className="self-evolution-algorithm-filter-select"
-                placeholder={t("selfEvolutionRun.algorithmManagementStatusFilter")}
-                value={draftFilters.status || undefined}
+                value={draftFilters.status}
                 options={[
+                  { value: "all", label: "all" },
                   { value: "starting", label: "starting" },
                   { value: "active", label: "active" },
                   { value: "disabled", label: "disabled" },
                   { value: "missing", label: "missing" },
                 ]}
-                onChange={(value?: string) => setDraftFilters((prev) => ({ ...prev, status: value || "" }))}
+                onChange={(value: string) => setDraftFilters((prev) => ({ ...prev, status: value }))}
               />
               <Button type="primary" onClick={applyFilters}>{t("common.search")}</Button>
               <Button onClick={resetFilters}>{t("common.reset")}</Button>
