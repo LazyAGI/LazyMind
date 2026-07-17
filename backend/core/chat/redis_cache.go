@@ -63,7 +63,7 @@ type ChatChunkResponse struct {
 	TaskCreated       *TaskCreatedNotice       `json:"task_created,omitempty"`
 	ArtifactCreated   *ConversationArtifactDTO `json:"artifact_created,omitempty"`
 	AskPending        *AskPendingEvent         `json:"ask_pending,omitempty"`
-	IntentUpdated     *IntentUpdatedEvent        `json:"intent_updated,omitempty"`
+	IntentUpdated     *IntentUpdatedEvent      `json:"intent_updated,omitempty"`
 }
 
 // TaskCreatedNotice notifies the frontend (main SSE) that a SubAgent task was created,
