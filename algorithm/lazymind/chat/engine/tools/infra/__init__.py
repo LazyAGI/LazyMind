@@ -18,7 +18,9 @@ from .kb_opensearch_client import (
 from .skill_identity import (
     resolve_skill_editor_identity,
     rewrite_skill_identity,
+    rewrite_skill_name,
     skill_identity_from_content,
+    skill_name_from_content,
 )
 from .skill_remote_store import (
     SkillRemoteStore,
@@ -31,9 +33,12 @@ from .memory_remote_store import (
     MemoryRemoteStore,
 )
 from .skill_validation import (
+    EXTERNAL_SKILL_CATEGORY,
+    INTERNAL_SKILL_CATEGORY,
     normalize_skill_category,
     parse_skill_frontmatter,
     validate_skill_content,
+    validate_skill_document,
     validate_skill_name,
 )
 from .user_preference_validation import (
@@ -97,10 +102,12 @@ __all__ = [
     'fetch_chat_histories_for_session',
     'fetch_url_content',
     'fetch_vocab_groups_for_user_id',
+    'EXTERNAL_SKILL_CATEGORY',
     'get_core_api',
     'get_vocab_manager',
     'GitHubSkillInstaller',
     'handle_tool_errors',
+    'INTERNAL_SKILL_CATEGORY',
     'norm_vocab_text',
     'normalize_skill_category',
     'opensearch_search',
@@ -112,10 +119,12 @@ __all__ = [
     'resolve_skill_editor_identity',
     'resolve_vocab_user_id',
     'rewrite_skill_identity',
+    'rewrite_skill_name',
     'safe_evaluate_expression',
     'serialize_vocab_backend_actions',
     'SkillRemoteStore',
     'skill_identity_from_content',
+    'skill_name_from_content',
     'summarize_vocab_action_for_log',
     'summarize_vocab_candidate_for_log',
     'summarize_vocab_suggestion_for_log',
@@ -124,6 +133,7 @@ __all__ = [
     'tool_failure',
     'tool_success',
     'validate_skill_content',
+    'validate_skill_document',
     'validate_skill_name',
     'validate_user_preference_content',
 ]

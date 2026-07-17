@@ -60,12 +60,14 @@ class _RemoteFS:
         self.calls.append(('trash', path))
 
 
-def _skill_archive():
+def _skill_archive(category_line=''):
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w') as archive:
         archive.writestr(
             'example-main/SKILL.md',
-            '---\nname: example\ndescription: Example skill.\n---\nUse this skill.\n',
+            '---\nname: example\n'
+            f'{category_line}'
+            'description: Example skill.\n---\nUse this skill.\n',
         )
         archive.writestr('example-main/assets/logo.bin', b'logo')
     return output.getvalue()
@@ -104,5 +106,23 @@ def test_install_public_github_skill_to_remote_fs():
         'write',
         'remote://skills/external/example/SKILL.md',
     )
-    assert 'category: external' in remote_fs.calls[4][2]
+    assert 'category:' not in remote_fs.calls[4][2]
     assert 'github_url: https://github.com/owner/example' in remote_fs.calls[4][2]
+
+
+def test_install_preserves_upstream_category_but_still_uses_external_path():
+    remote_fs = _RemoteFS()
+    store = SkillRemoteStore(fs=remote_fs)
+    store.root = 'remote://skills'
+    installer = GitHubSkillInstaller(
+        session=_GitHubSession(_skill_archive('category: upstream-value\n'))
+    )
+
+    result = SkillManagementToolkit(store=store, installer=installer).install_skill(
+        'https://github.com/owner/example'
+    )
+
+    assert result['success'] is True
+    assert result['result']['skill_key'] == 'external/example'
+    assert remote_fs.calls[4][1] == 'remote://skills/external/example/SKILL.md'
+    assert 'category: upstream-value' in remote_fs.calls[4][2]

@@ -100,7 +100,6 @@ class SkillOutline(BaseModel):
 
 class CandidateSkill(BaseModel):
     skill_name: str
-    category: str = 'general'
     source_trajectories: List[str] = Field(default_factory=list)
     source_skills: Dict[str, str] = Field(default_factory=dict)
     applicable_scenario: str
@@ -110,7 +109,6 @@ class CandidateSkill(BaseModel):
 
 class CandidateSkillLLMOutput(BaseModel):
     skill_name: str
-    category: str = 'general'
     applicable_scenario: str
     content: str
 

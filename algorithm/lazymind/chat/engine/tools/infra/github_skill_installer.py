@@ -13,8 +13,8 @@ import requests
 import yaml  # type: ignore
 
 from .skill_validation import (
-    normalize_skill_category,
-    validate_skill_content,
+    EXTERNAL_SKILL_CATEGORY,
+    validate_skill_document,
     validate_skill_name,
 )
 
@@ -77,17 +77,12 @@ class GitHubSkillInstaller:
         self._session = session or requests.Session()
         self._source_cache: Dict[str, GitHubSkillSource] = {}
 
-    def prepare(self, github_url: str, category: Optional[str] = None) -> PreparedSkillPackage:
-        final_category = normalize_skill_category(category if category is not None else 'external')
-        if not final_category:
-            raise ValueError(
-                f'category {category!r} is invalid; it must be a single ASCII-safe path segment.'
-            )
+    def prepare(self, github_url: str) -> PreparedSkillPackage:
         source = self.resolve_source(github_url)
         with tempfile.TemporaryDirectory(prefix='lazymind-skill-') as temp_dir:
             archive_path = self._download_archive(source, temp_dir)
             files = self._read_package(archive_path, source.skill_path)
-        return self._normalize_package(source, final_category, files)
+        return self._normalize_package(source, files)
 
     def resolve_source(self, github_url: str) -> GitHubSkillSource:
         cache_key = str(github_url or '').strip()
@@ -288,7 +283,6 @@ class GitHubSkillInstaller:
     @staticmethod
     def _normalize_package(
         source: GitHubSkillSource,
-        category: str,
         files: Dict[str, bytes],
     ) -> PreparedSkillPackage:
         raw_skill_md = files['SKILL.md']
@@ -316,14 +310,13 @@ class GitHubSkillInstaller:
         if not description:
             raise ValueError("Frontmatter must include non-empty 'description'.")
         normalized_frontmatter = dict(frontmatter)
-        normalized_frontmatter['category'] = category
         normalized_frontmatter['github_url'] = source.canonical_url
         body = ''.join(lines[end_index + 1:])
         yaml_text = yaml.safe_dump(normalized_frontmatter, allow_unicode=True, sort_keys=False).strip()
         normalized_content = f'---\n{yaml_text}\n---\n{body}'
         if len(normalized_content.encode('utf-8')) > _MAX_SKILL_MD_BYTES:
             raise ValueError('Normalized SKILL.md exceeds the 5 MiB loading limit.')
-        content_error = validate_skill_content(normalized_content)
+        content_error = validate_skill_document(normalized_content)
         if content_error:
             raise ValueError(content_error)
         normalized_files = dict(files)
@@ -331,7 +324,7 @@ class GitHubSkillInstaller:
         return PreparedSkillPackage(
             source=source,
             name=name,
-            category=category,
+            category=EXTERNAL_SKILL_CATEGORY,
             description=description,
             files=normalized_files,
         )

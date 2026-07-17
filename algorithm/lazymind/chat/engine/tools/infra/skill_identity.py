@@ -18,6 +18,11 @@ def skill_identity_from_content(content: str) -> tuple[str, str]:
     return category, name
 
 
+def skill_name_from_content(content: str) -> str:
+    frontmatter, _ = parse_skill_frontmatter(content)
+    return str(frontmatter.get('name') or '').strip()
+
+
 def resolve_skill_editor_identity(
     name: str,
     category: Optional[str],
@@ -87,6 +92,17 @@ def rewrite_skill_identity(content: str, category: str, name: str) -> str:
         raise ValueError('SKILL.md must contain YAML frontmatter.')
     frontmatter = dict(frontmatter)
     frontmatter['category'] = category
+    frontmatter['name'] = name
+
+    yaml_text = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).strip()
+    return f'---\n{yaml_text}\n---\n{body}'
+
+
+def rewrite_skill_name(content: str, name: str) -> str:
+    frontmatter, body = parse_skill_frontmatter(content)
+    if not frontmatter:
+        raise ValueError('SKILL.md must contain YAML frontmatter.')
+    frontmatter = dict(frontmatter)
     frontmatter['name'] = name
 
     yaml_text = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).strip()

@@ -465,17 +465,12 @@ The YAML frontmatter should include:
 
 * name
 * description
-* category
 
 The description should be a single concise routing sentence derived from the outline's applicable_scenario.
 It should describe:
 * when the skill applies;
 * the reusable capability it provides;
 Keep the description consistent with the applicable_scenario and do not narrow it to specific trajectories, tools, projects, or implementations.
-
-The category should:
-* be a concise lowercase classification for the skill, such as `research`, `coding`, `writing`, `data-analysis`, `tool-use`, `planning`, `debugging`, `review`, or `general`
-* describe the reusable task family, not the source trajectory, user, project, or implementation detail
 
 # Markdown Structure
 
@@ -570,7 +565,7 @@ def merge_skill_patch_prompt(
         'more accurate concise English kebab-case skill name;\n'
         '- rename only for semantic clarity or boundary correction, not for cosmetic wording churn;\n'
         '- if you rename, ensure the Markdown body and description consistently describe the renamed skill boundary;\n'
-        '- keep or refine description/category only when the merged workflow boundary requires it;\n'
+        '- keep or refine the description only when the merged workflow boundary requires it;\n'
         '- include a non-empty Markdown body.\n\n'
         'Return ONLY valid JSON with these keys:\n'
         '- summary: concise description of what changed\n'

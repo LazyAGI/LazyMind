@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional
 
-from .skill_identity import skill_identity_from_content
+from .skill_identity import skill_name_from_content
 from .skill_paths import normalize_skill_package_path
-from .skill_validation import validate_skill_content
+from .skill_validation import validate_skill_document
 
 
 _UNICODE_MAP = {
@@ -222,12 +222,12 @@ def _build_skill_file_change(
 
 
 def _validate_skill_identity_unchanged(category: str, name: str, content: str) -> None:
-    content_error = validate_skill_content(content)
+    content_error = validate_skill_document(content)
     if content_error:
         raise ValueError(content_error)
-    edited_category, edited_name = skill_identity_from_content(content)
-    if edited_category != category or edited_name != name:
-        raise ValueError('SKILL.md frontmatter name/category cannot be changed; use rename_skill.')
+    edited_name = skill_name_from_content(content)
+    if edited_name != name:
+        raise ValueError('SKILL.md frontmatter name cannot be changed; use rename_skill.')
 
 
 def _unicode_normalize(text: str) -> str:

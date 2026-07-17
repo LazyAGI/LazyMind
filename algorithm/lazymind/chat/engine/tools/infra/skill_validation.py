@@ -7,6 +7,9 @@ _PATH_SEGMENT_RE = re.compile(r'^[A-Za-z0-9._-]+$')
 _FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n(.*)$', re.DOTALL)
 _MAX_DESCRIPTION_LENGTH = 1024
 
+INTERNAL_SKILL_CATEGORY = 'internal'
+EXTERNAL_SKILL_CATEGORY = 'external'
+
 
 def validate_skill_name(name: str) -> Optional[str]:
     raw = str(name or '')
@@ -50,7 +53,7 @@ def parse_skill_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     return {}, body
 
 
-def validate_skill_content(content: str) -> Optional[str]:
+def _validate_skill_document(content: str, *, require_category: bool) -> Optional[str]:
     if not content or not content.strip():
         return "action='create' requires a non-empty 'content' (full SKILL.md body)."
 
@@ -58,18 +61,19 @@ def validate_skill_content(content: str) -> Optional[str]:
     if not frontmatter:
         return 'SKILL.md must contain YAML frontmatter.'
     name = str(frontmatter.get('name') or '').strip()
-    category = str(frontmatter.get('category') or '').strip()
     description = str(frontmatter.get('description') or '').strip()
     if not name:
         return "Frontmatter must include non-empty 'name'."
-    if not category:
-        return "Frontmatter must include non-empty 'category'."
+    if require_category:
+        category = str(frontmatter.get('category') or '').strip()
+        if not category:
+            return "Frontmatter must include non-empty 'category'."
     if not description:
         return "Frontmatter must include non-empty 'description'."
     name_error = validate_skill_name(name)
     if name_error:
         return name_error
-    if normalize_skill_category(category) is None:
+    if require_category and normalize_skill_category(category) is None:
         return (
             f'Frontmatter category {category!r} is invalid; only ASCII '
             "letters, digits, '-', '_' and '.' are allowed."
@@ -79,3 +83,13 @@ def validate_skill_content(content: str) -> Optional[str]:
     if not body.strip():
         return 'SKILL.md must have markdown content after frontmatter.'
     return None
+
+
+def validate_skill_document(content: str) -> Optional[str]:
+    """Validate SKILL.md structure without interpreting frontmatter category."""
+    return _validate_skill_document(content, require_category=False)
+
+
+def validate_skill_content(content: str) -> Optional[str]:
+    """Validate legacy category-bearing SKILL.md content."""
+    return _validate_skill_document(content, require_category=True)

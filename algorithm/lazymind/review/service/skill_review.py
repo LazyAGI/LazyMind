@@ -12,8 +12,9 @@ from lazyllm.tools.agent.skill_manager import SkillManager
 
 from lazymind.chat.engine.tools.infra.skill_remote_store import SkillRemoteStore
 from lazymind.chat.engine.tools.infra.skill_validation import (
+    INTERNAL_SKILL_CATEGORY,
     parse_skill_frontmatter,
-    validate_skill_content,
+    validate_skill_document,
 )
 from lazymind.chat.integrations.remote_fs import RemoteFS
 from lazymind.config import config as _cfg
@@ -520,54 +521,48 @@ def _apply_skill_review_records(
 
 
 def _apply_skill_review_record(record: SkillReviewResolution, store: SkillRemoteStore) -> dict[str, Any]:
-    content_error = validate_skill_content(record.skill_content)
+    content_error = validate_skill_document(record.skill_content)
     if content_error:
         raise ValueError(content_error)
 
     frontmatter, _ = parse_skill_frontmatter(record.skill_content)
     content_name = str(frontmatter.get('name') or '').strip()
-    content_category = str(frontmatter.get('category') or '').strip()
 
     if record.type == 'new':
-        category = content_category
         name = content_name or record.skill_name
-        if not category:
-            raise ValueError(f'category is required to create skill {name!r}')
-        result = store.create(category, name, record.skill_content)
+        result = store.create(INTERNAL_SKILL_CATEGORY, name, record.skill_content)
         return {
             'id': record.id,
             'type': record.type,
             'name': name,
-            'category': category,
+            'category': INTERNAL_SKILL_CATEGORY,
             'store_result': result,
         }
 
     if record.type == 'patch':
         existing_identity = store.resolve_existing_identity(record.skill_name)
-        if existing_identity.get('error') and content_category:
-            existing_identity = store.resolve_existing_identity(record.skill_name, content_category)
         if existing_identity.get('error'):
             raise ValueError(str(existing_identity['error']))
-        old_category = str(existing_identity.get('category') or '').strip()
+        storage_category = str(existing_identity['category']).strip()
         old_name = str(existing_identity.get('name') or record.skill_name).strip()
-        new_category = content_category or old_category
         new_name = content_name or old_name
-        if not new_category:
-            raise ValueError(f'category is required to patch skill {record.skill_name!r}')
         if (
-            (new_category, new_name) != (old_category, old_name)
-            and _skill_package_exists(store, new_category, new_name)
+            new_name != old_name
+            and _skill_package_exists(store, storage_category, new_name)
         ):
-            raise ValueError(f'cannot rename skill {old_name!r} to existing skill {new_category}/{new_name}')
-        if (new_category, new_name) == (old_category, old_name):
-            before = store.list_files(old_category, old_name)
+            raise ValueError(
+                f'cannot rename skill {old_name!r} to existing skill '
+                f'{storage_category}/{new_name}'
+            )
+        if new_name == old_name:
+            before = store.list_files(storage_category, old_name)
             after = dict(before)
             after['SKILL.md'] = record.skill_content
-            replace_result = store.replace_files(old_category, old_name, before, after)
+            replace_result = store.replace_files(storage_category, old_name, before, after)
             store_result = {'replace': replace_result}
         else:
-            create_result = store.create(new_category, new_name, record.skill_content)
-            remove_result = store.remove(old_category, old_name)
+            create_result = store.create(storage_category, new_name, record.skill_content)
+            remove_result = store.remove(storage_category, old_name)
             store_result = {
                 'create': create_result,
                 'remove': remove_result,
@@ -576,9 +571,9 @@ def _apply_skill_review_record(record: SkillReviewResolution, store: SkillRemote
             'id': record.id,
             'type': record.type,
             'old_name': old_name,
-            'old_category': old_category,
+            'old_category': storage_category,
             'name': new_name,
-            'category': new_category,
+            'category': storage_category,
             'store_result': store_result,
         }
 

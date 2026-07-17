@@ -251,7 +251,7 @@ def test_skill_editor_create_file_tools_remove_core_paths():
     content = (
         '---\n'
         'name: new_skill\n'
-        'category: drafts\n'
+        'category: upstream-value\n'
         'description: A test skill.\n'
         '---\n'
         'Use this skill for tests.\n'
@@ -266,7 +266,6 @@ def test_skill_editor_create_file_tools_remove_core_paths():
 
     create_result = tool_group.create_skill(
         'new_skill',
-        category='drafts',
         content=content,
     )
     patch_result = tool_group.patch_file(
@@ -321,7 +320,7 @@ def test_skill_editor_create_file_tools_remove_core_paths():
         'status': 'removed',
         'message': 'Skill package change was written.',
     }
-    assert ('create', 'drafts', 'new_skill', content) in store.calls
+    assert ('create', 'internal', 'new_skill', content) in store.calls
     assert ('remove', 'writing', 'existing') in store.calls
     replace_calls = [call for call in store.calls if call[0] == 'replace_files']
     assert replace_calls == [
@@ -386,14 +385,60 @@ def test_skill_editor_renames_package():
         'existing',
         category='writing',
         new_name='renamed',
-        new_category='drafts',
     )
 
     assert result['success'] is True
     assert result['result']['status'] == 'renamed'
     assert result['result']['old'] == {'category': 'writing', 'name': 'existing'}
-    assert result['result']['new'] == {'category': 'drafts', 'name': 'renamed'}
+    assert result['result']['new'] == {'category': 'writing', 'name': 'renamed'}
     rename_calls = [call for call in store.calls if call[0] == 'rename']
-    assert rename_calls[0][1:5] == ('writing', 'existing', 'drafts', 'renamed')
+    assert rename_calls[0][1:5] == ('writing', 'existing', 'writing', 'renamed')
     assert 'name: renamed' in rename_calls[0][5]
-    assert 'category: drafts' in rename_calls[0][5]
+    assert 'category: writing' in rename_calls[0][5]
+
+
+def test_skill_editor_create_accepts_missing_category_and_rejects_multilevel_name():
+    content = (
+        '---\n'
+        'name: category-free\n'
+        'description: A category-free skill.\n'
+        '---\n'
+        'Use this skill for tests.\n'
+    )
+    store = FakeSkillStore()
+    toolkit = skill_editor_mod.SkillManagementToolkit(store=store)
+
+    created = toolkit.create_skill('category-free', content=content)
+    slash = toolkit.create_skill('internal/category-free', content=content)
+    backslash = toolkit.create_skill(r'internal\category-free', content=content)
+
+    assert created['success'] is True
+    assert ('create', 'internal', 'category-free', content) in store.calls
+    assert slash['success'] is False
+    assert backslash['success'] is False
+
+
+def test_skill_editor_patch_allows_frontmatter_category_changes_without_moving_package():
+    existing_content = (
+        '---\n'
+        'name: existing\n'
+        'category: writing\n'
+        'description: Existing skill.\n'
+        '---\n'
+        'Use this skill for tests.\n'
+    )
+    store = FakeSkillStore({
+        ('internal', 'existing'): {'SKILL.md': existing_content},
+    })
+
+    result = skill_editor_mod.SkillManagementToolkit(store=store).patch_file(
+        'existing',
+        category='internal',
+        path='SKILL.md',
+        old_text='category: writing',
+        new_text='category: arbitrary-upstream-value',
+    )
+
+    assert result['success'] is True
+    assert ('internal', 'existing') in store.packages
+    assert 'category: arbitrary-upstream-value' in store.packages[('internal', 'existing')]['SKILL.md']
