@@ -85,7 +85,7 @@ const zhCN = {
       aria: "模型服务配置导航",
       models: "模型供应商",
       tools: "工具",
-      defaultServices: "系统模型设置",
+      defaultServices: "系统默认设置",
     },
     cloudDocuments: {
       title: "云文档",
@@ -218,7 +218,7 @@ const zhCN = {
       cloudServiceTavilyOption: "Tavily",
     },
     defaultConfigAria: "模块默认模型配置",
-    defaultTitle: "系统模型设置",
+    defaultTitle: "系统默认设置",
     defaultSubtitle: "不同模块可以选择不同模型；必配项未完成时，系统功能将受限。",
     embeddingLimitedAlert: "向量模型当前仅允许从平台限定的供应商和模型中选择；后续名单确定后可直接收敛这里的选项。",
     moduleHelpAria: "{{title}} 说明",

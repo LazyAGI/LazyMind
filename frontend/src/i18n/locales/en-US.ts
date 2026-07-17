@@ -87,7 +87,7 @@ const enUS = {
       aria: "Model service configuration navigation",
       models: "User Models",
       tools: "Tools",
-      defaultServices: "System Model Settings",
+      defaultServices: "System Default Settings",
     },
     cloudDocuments: {
       title: "Cloud Documents",
@@ -227,7 +227,7 @@ const enUS = {
       cloudServiceTavilyOption: "Tavily",
     },
     defaultConfigAria: "Module default model configuration",
-    defaultTitle: "System Model Settings",
+    defaultTitle: "System Default Settings",
     defaultSubtitle: "Different modules can use different models. Required items must be configured before all features are available.",
     embeddingLimitedAlert: "Embedding models can currently be selected only from platform-approved providers and models. The option list can be narrowed once the final allowlist is confirmed.",
     moduleHelpAria: "{{title}} help",
