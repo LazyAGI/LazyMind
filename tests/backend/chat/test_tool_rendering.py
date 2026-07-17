@@ -10,6 +10,7 @@ from lazymind.chat.service.component.tool_rendering import (  # noqa: E402
     _tool_call_frame_text,
     _tool_result_frame_text,
 )
+from lazymind.chat.engine.tools.system_query import list_data_sources  # noqa: E402
 
 
 def test_lazy_tool_group_gateway_uses_group_expansion_preview_in_chinese():
@@ -34,6 +35,45 @@ def test_lazy_tool_group_gateway_uses_group_expansion_preview_in_chinese():
 
     assert '正在展开**KBToolkit**工具箱。' in call_text
     assert '已经展开**KBToolkit**工具箱。' in result_text
+
+
+def test_list_data_sources_preview_hides_empty_keyword_and_internal_ids():
+    tool_call = {
+        'id': 'call-data-sources',
+        'function': {'name': 'list_data_sources', 'arguments': '{}'},
+    }
+    call_text, preview_value = _tool_call_frame_text(tool_call, 'zh')
+    result_text = _tool_result_frame_text(
+        {
+            'id': 'call-data-sources',
+            'name': 'list_data_sources',
+            'result': {
+                'success': True,
+                'tool': 'list_data_sources',
+                'result': {
+                    'provider_groups': [
+                        {'group_id': '593b933b257a492b9098eb771c6d9c06'}
+                    ],
+                },
+            },
+        },
+        'zh',
+        preview_value,
+    )
+
+    assert '正在检查已配置的数据源服务。' in call_text
+    assert '已成功加载数据源服务列表。' in result_text
+    call_preview = call_text.split('</tp>', 1)[0]
+    result_preview = result_text.split('</trp>', 1)[0]
+    assert 'the current item' not in call_preview
+    assert '593b933b257a492b9098eb771c6d9c06' not in result_preview
+
+
+def test_list_data_sources_description_excludes_tool_catalog_questions():
+    description = list_data_sources.__doc__ or ''
+
+    assert 'Do not call it to answer which tools' in description
+    assert 'does not provide a tool catalog' in description
 
 
 def test_instance_toolkit_method_with_class_prefix_uses_kb_template():

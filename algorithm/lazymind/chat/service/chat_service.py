@@ -27,6 +27,10 @@ from lazymind.chat.service.component import (
     normalize_history_for_agent,
 )
 from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
+from lazymind.chat.engine.tools.intent_writer import (
+    build_intentwrite_tool,
+    render_intent_section,
+)
 from lazymind.chat.service.utils import (  # noqa: F401 - sensitivity block is disabled for local testing
     SensitiveFilter,
     basename_from_path,
@@ -310,6 +314,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         guard_plugin_agent_stream,
         is_plugin_driver_turn,
         resolve_plugin_injection,
+        update_intentwriter,
     )
 
     conversation_id = (conversation.conversation_id or '').strip()
@@ -434,6 +439,13 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                                  disabled_builtin_plugins=plugin.disabled_builtin_plugins)
     agentic_config.update(agentic_config_patch)
 
+    intentwriter = build_intentwrite_tool(
+        conversation_id=conversation_id,
+        current_query=query,
+        current_intent=conversation.intent_context,
+    )
+    intentwriter = update_intentwriter(intentwriter, plugin.plugin_context)
+
     # Inject SubAgent task context into the system prompt independently of plugin state.
     # Injected when either plugin or subagent is enabled so the model knows about ongoing tasks.
     # When both are disabled, the task context is suppressed (pure QA mode).
@@ -458,6 +470,11 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             # rather than into the system prompt, so stale task state from history is
             # overridden by the live snapshot queried at request time.
             parts.append(task_ctx)
+    conversation_intent_section = render_intent_section(
+        'Conversation Intent', conversation.intent_context,
+    )
+    if conversation_intent_section:
+        parts.append(conversation_intent_section)
     if user_attachment_context:
         parts.append(user_attachment_context)
     # Inject the authoritative current-turn declaration so the model is never misled
@@ -494,7 +511,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
     ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
     artifact_tools = _build_chat_artifact_tools()
-    all_tools = (agent_tools + artifact_tools + subagent_tools + attachment_tools
+    all_tools = ([intentwriter] + agent_tools + artifact_tools + subagent_tools + attachment_tools
                  + ask_user_tools + plugin_tools + mcp_tools)
     set_trace_context({
         'enabled': bool(runtime.trace),

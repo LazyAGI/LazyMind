@@ -321,6 +321,18 @@
         box-shadow: none;
       }
 
+      .chat-intent-updated {
+        display: inline-flex;
+        align-items: center;
+        align-self: flex-start;
+        gap: 6px;
+        margin-bottom: 12px;
+        color: #8a6812;
+        font-size: 12px;
+        line-height: 20px;
+        cursor: help;
+      }
+
       .chat-think-status {
         display: flex;
         height: 20px;

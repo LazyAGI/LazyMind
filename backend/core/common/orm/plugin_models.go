@@ -161,7 +161,7 @@ type PluginSlotOrder struct {
 func (PluginSlotOrder) TableName() string { return "plugin_slot_order" }
 
 // PluginStepIntent stores step-level intent/constraints set by the user during a session.
-// There is at most one row per (session_id, step_id) pair; upserted on each update_intent call.
+// There is at most one row per (session_id, step_id) pair; upserted on each intentwrite call.
 type PluginStepIntent struct {
 	ID            string    `gorm:"column:id;type:varchar(36);primaryKey"`
 	SessionID     string    `gorm:"column:session_id;type:varchar(36);not null;uniqueIndex:uk_plugin_step_intent,priority:1"`

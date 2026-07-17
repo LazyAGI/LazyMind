@@ -34,6 +34,83 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 }
 
+func TestApplyIntentOperationsPreservesUnchangedFields(t *testing.T) {
+	doc := map[string]any{
+		"version":        2,
+		"revision":       3,
+		"goal":           "总结经验",
+		"execution_mode": "analysis_only",
+		"constraints":    []any{"不要执行原任务"},
+	}
+
+	updated, err := applyIntentOperations(doc, []IntentOperation{
+		{Op: "add", Field: "corrections", Value: "必须检查 GitHub", Evidence: "检查 GitHub"},
+	})
+	if err != nil {
+		t.Fatalf("apply intent operations: %v", err)
+	}
+	if updated["goal"] != "总结经验" || updated["execution_mode"] != "analysis_only" {
+		t.Fatalf("unchanged intent fields were lost: %#v", updated)
+	}
+	if intentRevision(updated) != 4 {
+		t.Fatalf("expected revision 4, got %#v", updated["revision"])
+	}
+}
+
+func TestApplyIntentOperationsRejectsInvalidBatch(t *testing.T) {
+	_, err := applyIntentOperations(map[string]any{}, []IntentOperation{
+		{Op: "set", Field: "constraints", Value: "invalid"},
+	})
+	if err == nil {
+		t.Fatal("expected invalid scalar/list operation to fail")
+	}
+}
+
+func TestMergeIntentUpdatedIntoExtPreservesExistingFields(t *testing.T) {
+	ext := json.RawMessage(`{"mentions":[{"id":"m1"}]}`)
+	intent := &IntentUpdatedEvent{
+		Scope:         "conversation",
+		IntentContext: map[string]any{"goal": "总结经验", "revision": 2},
+	}
+
+	merged := mergeIntentUpdatedIntoExt(ext, intent)
+	var got map[string]any
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("unmarshal merged ext: %v", err)
+	}
+	if got["mentions"] == nil {
+		t.Fatalf("existing ext field was lost: %#v", got)
+	}
+	updated, ok := got["intent_updated"].(map[string]any)
+	if !ok || updated["scope"] != "conversation" {
+		t.Fatalf("unexpected intent update: %#v", got["intent_updated"])
+	}
+}
+
+func TestMergeChunksRetainsConversationIntentUpdate(t *testing.T) {
+	intent := &IntentUpdatedEvent{Scope: "conversation", IntentContext: map[string]any{"goal": "新目标"}}
+	merged := mergeChunksToFirstChunk([]*ChatChunkResponse{
+		{Delta: "前", IntentUpdated: intent},
+		{Delta: "后", FinishReason: "FINISH_REASON_STOP"},
+	})
+	if merged.Delta != "前后" || merged.IntentUpdated != intent {
+		t.Fatalf("intent update was not retained: %#v", merged)
+	}
+}
+
+func TestBuildLazyChatRequestIncludesConversationIntent(t *testing.T) {
+	req := buildLazyChatRequest(map[string]any{
+		"conversation_id": "conv-1",
+		"intent_context": map[string]any{
+			"version": 2,
+			"goal":    "总结经验",
+		},
+	})
+	if req.Conversation.IntentContext["goal"] != "总结经验" {
+		t.Fatalf("unexpected intent context: %#v", req.Conversation.IntentContext)
+	}
+}
+
 func TestPluginStepParamsFromEventParamsPreservesChatSessionID(t *testing.T) {
 	params := pluginStepParamsFromEventParams(map[string]any{
 		"plugin_id":              "writer-plugin",
