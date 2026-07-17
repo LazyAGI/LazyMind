@@ -16,8 +16,7 @@ func SignArtifactImageValue(contentType string, raw json.RawMessage) json.RawMes
 }
 
 // SignArtifactValue adds fresh signed URLs to file-backed artifact values.
-// workspacePath is used to resolve legacy relative paths written by older
-// SubAgent versions before those paths were normalized to absolute paths.
+// workspacePath resolves relative paths and constrains them to the task workspace.
 func SignArtifactValue(contentType string, raw json.RawMessage, workspacePath string) json.RawMessage {
 	if len(raw) == 0 {
 		return raw

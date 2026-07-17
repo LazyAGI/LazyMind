@@ -90,6 +90,14 @@ def test_build_cold_start_tools_creates_one_trigger_per_plugin(loaded_plugin):
     assert 'trigger_test_plugin' in names
 
 
+def test_build_cold_start_tools_honours_mentioned_plugin_allowlist(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+    tools = plugin_manager.build_cold_start_tools(
+        allowed_plugin_refs=['builtin:test-plugin'],
+    )
+    assert [tool.__name__ for tool in tools] == ['trigger_test_plugin']
+
+
 def test_cold_start_trigger_prepares_launch_without_creating_task(
         loaded_plugin, mock_write_agent_data, mock_agentic_config):
     from lazymind.chat.plugin import plugin_manager
@@ -529,7 +537,7 @@ def test_cold_injection_without_approval_choice_registers_only_hand_off_tool(
     from lazymind.chat.plugin import plugin_manager
     mock_agentic_config['enable_plugin'] = True
 
-    tools, _, stop_tools, patch_config, context = plugin_manager.resolve_plugin_injection({
+    contribution = plugin_manager.resolve_plugin_injection({
         'plugin_mode': 'auto',
         'plugin_preflight': {
             'preflight_id': 'pf-old',
@@ -539,6 +547,10 @@ def test_cold_injection_without_approval_choice_registers_only_hand_off_tool(
             'normalized_request': 'Original request plus answers',
         },
     })
+    tools = contribution.tools
+    stop_tools = contribution.stop_tools
+    patch_config = contribution.agentic_config_patch
+    context = contribution.runtime_context
 
     names = {tool.__name__ for tool in tools}
     assert 'trigger_test_plugin' in names
@@ -592,8 +604,14 @@ def test_active_injection_switches_tools_and_request_local_policy_per_turn(
             'plugin_mode': 'dynamic',
         })
 
-    auto_tools, auto_system_prompt, auto_stop_tools, _, auto_context = auto_result
-    dynamic_tools, dynamic_system_prompt, dynamic_stop_tools, _, dynamic_context = dynamic_result
+    auto_tools = auto_result.tools
+    auto_system_prompt = auto_result.system_prompt
+    auto_stop_tools = auto_result.stop_tools
+    auto_context = auto_result.runtime_context
+    dynamic_tools = dynamic_result.tools
+    dynamic_system_prompt = dynamic_result.system_prompt
+    dynamic_stop_tools = dynamic_result.stop_tools
+    dynamic_context = dynamic_result.runtime_context
     auto_names = {tool.__name__ for tool in auto_tools}
     dynamic_names = {tool.__name__ for tool in dynamic_tools}
 

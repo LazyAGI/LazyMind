@@ -436,8 +436,6 @@ export default function MemoryManagement() {
   const [experienceProfileSaving, setExperienceProfileSaving] = useState<
     Set<string>
   >(new Set());
-  const [expandedExperienceProfileIds, setExpandedExperienceProfileIds] =
-    useState<string[]>([]);
   const [experienceProfileEditTarget, setExperienceProfileEditTarget] =
     useState<ExperienceProfileEditTarget | null>(null);
   const [experienceSettingSaving, setExperienceSettingSaving] = useState(false);
@@ -756,7 +754,9 @@ export default function MemoryManagement() {
             title: item.title,
             content: item.content,
             agentPersona: item.agentPersona,
+            summary: item.summary,
             draftStatus: item.draftStatus,
+            hasPendingReviewResult: item.hasPendingReviewResult,
             hasPendingReviewSuggestions: item.hasPendingReviewSuggestions,
             protect: item.protect,
             responseStyle: item.responseStyle,
@@ -2563,23 +2563,8 @@ export default function MemoryManagement() {
 
   const filteredExperienceItems = experienceAssets;
   useEffect(() => {
-    const profileIds = experienceAssets
-      .filter(isExperienceProfileAsset)
-      .map((item) => item.id);
     const validIdSet = new Set(experienceAssets.map((item) => item.id));
 
-    setExpandedExperienceProfileIds((previous) => {
-      const next = previous.filter((id) => profileIds.includes(id));
-      profileIds.forEach((id) => {
-        if (!next.includes(id)) {
-          next.push(id);
-        }
-      });
-      return next.length === previous.length &&
-        next.every((id, index) => id === previous[index])
-        ? previous
-        : next;
-    });
     setExperienceProfileDrafts((previous) => {
       const nextEntries = Object.entries(previous).filter(([id]) =>
         validIdSet.has(id),
@@ -2618,6 +2603,13 @@ export default function MemoryManagement() {
       return next;
     });
   }, []);
+
+  const openExperienceProfileEditor = useCallback(
+    (recordId: string, fieldKey: ExperienceProfileFieldKey) => {
+      setExperienceProfileEditTarget({ recordId, fieldKey });
+    },
+    [],
+  );
 
   const saveExperienceProfileDraft = useCallback(
     async (record: ExperienceAsset, fieldKey: ExperienceProfileFieldKey) => {
@@ -3211,6 +3203,31 @@ export default function MemoryManagement() {
       await refreshExperienceSection({ silent: true });
     } finally {
       setExperienceSettingSaving(false);
+    }
+  };
+
+  const handleExperienceAutoEvoToggle = async (
+    record: ExperienceAsset,
+    checked: boolean,
+  ) => {
+    setExperienceAutoEvoLoading((previous) =>
+      new Set(previous).add(record.id),
+    );
+    try {
+      await patchPersonalResourceMetadata(
+        resolvePersonalResourceApiType(record.resourceType),
+        { autoEvo: checked },
+      );
+      await refreshExperienceSection({ silent: true });
+    } catch (error) {
+      console.error("Toggle auto_evo failed:", error);
+      await refreshExperienceSection({ silent: true });
+    } finally {
+      setExperienceAutoEvoLoading((previous) => {
+        const next = new Set(previous);
+        next.delete(record.id);
+        return next;
+      });
     }
   };
 
@@ -5752,185 +5769,6 @@ export default function MemoryManagement() {
     [experienceProfileEditTarget, experienceProfileFields],
   );
 
-  const renderExperienceProfileEditor = useCallback(
-    (record: ExperienceAsset): ReactNode => {
-      const draft =
-        experienceProfileDrafts[record.id] || getExperienceProfileDraft(record);
-      const isSaving = experienceProfileSaving.has(record.id);
-      const emptyText = t("admin.memoryProfileEmpty", {
-        defaultValue: "未配置",
-      });
-
-      return (
-        <div className="memory-profile-editor">
-          <div className="memory-profile-editor-head">
-            <div>
-              <strong>
-                {t("admin.memoryProfileEditorTitle", {
-                  defaultValue: "用户画像配置",
-                })}
-              </strong>
-              <span>
-                {t("admin.memoryProfileEditorDesc", {
-                  defaultValue:
-                    "作为用户画像的二级信息参与对话偏好，不影响主内容结构。",
-                })}
-              </span>
-            </div>
-            <Tag bordered={false}>
-              {t("admin.memoryProfileEditorTag", { defaultValue: "二级结构" })}
-            </Tag>
-          </div>
-          <div className="memory-profile-field-grid">
-            {experienceProfileFields.map((field) => (
-              <div className="memory-profile-field" key={field.key}>
-                <div className="memory-profile-field-copy">
-                  <span className="memory-profile-field-label">
-                    {field.label}
-                  </span>
-                  <span className="memory-profile-field-desc">
-                    {field.description}
-                  </span>
-                </div>
-                <div className="memory-profile-field-value">
-                  <span className={draft[field.key] ? "" : "is-empty"}>
-                    {draft[field.key] || emptyText}
-                  </span>
-                </div>
-                <Button
-                  disabled={isSaving}
-                  icon={<EditOutlined />}
-                  size="small"
-                  onClick={() =>
-                    setExperienceProfileEditTarget({
-                      recordId: record.id,
-                      fieldKey: field.key,
-                    })
-                  }
-                >
-                  {t("common.edit")}
-                </Button>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    },
-    [
-      experienceProfileFields,
-      experienceProfileDrafts,
-      experienceProfileSaving,
-      t,
-    ],
-  );
-
-  const experienceProfileExpandable = useMemo(
-    () => ({
-      expandedRowClassName: () => "memory-profile-expanded-row",
-      expandedRowKeys: expandedExperienceProfileIds,
-      expandedRowRender: renderExperienceProfileEditor,
-      rowExpandable: isExperienceProfileAsset,
-      onExpandedRowsChange: (keys: readonly unknown[]) =>
-        setExpandedExperienceProfileIds(keys.map(String)),
-    }),
-    [expandedExperienceProfileIds, renderExperienceProfileEditor],
-  );
-
-  const experienceColumns: ColumnsType<ExperienceAsset> = [
-    {
-      title: t("admin.memoryTitleCol"),
-      dataIndex: "title",
-      key: "title",
-      width: 320,
-      render: (_value, record) => {
-        const showPendingTag =
-          !record.autoEvo && hasDraftPreviewStatus(record);
-
-        return (
-          <div className="memory-table-main">
-            <div className="memory-table-main-title">
-              <button
-                type="button"
-                className="memory-term-link"
-                onClick={() => navigateToExperienceDetail(record.id)}
-              >
-                {record.title}
-              </button>
-              {showPendingTag ? (
-                <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
-              ) : null}
-              {record.protect ? (
-                <Tag className="memory-protect-tag" bordered={false}>
-                  <LockOutlined />
-                  <span>
-                    {t("admin.memoryProtect", { defaultValue: "保护" })}
-                  </span>
-                </Tag>
-              ) : null}
-            </div>
-          </div>
-        );
-      },
-    },
-    {
-      title: t("admin.memoryContentSummary"),
-      dataIndex: "content",
-      key: "content",
-      width: 520,
-      className: "memory-content-summary-column",
-      render: (value: string) =>
-        value ? (
-          <Tooltip
-            title={<div className="memory-text-popover-content">{value}</div>}
-            overlayClassName="memory-text-popover"
-            placement="topLeft"
-            trigger="hover"
-          >
-            <div className="memory-content-preview memory-content-preview-single-line">
-              {value}
-            </div>
-          </Tooltip>
-        ) : (
-          <div className="memory-content-preview memory-content-preview-single-line">
-            {value}
-          </div>
-        ),
-    },
-    {
-      title: t("admin.memoryAutoUpdate"),
-      key: "autoEvo",
-      width: 90,
-      render: (_value, record) => (
-        <Switch
-          checked={Boolean(record.autoEvo)}
-          loading={experienceAutoEvoLoading.has(record.id)}
-          onChange={(checked) => {
-            void (async () => {
-              setExperienceAutoEvoLoading((prev) =>
-                new Set(prev).add(record.id),
-              );
-              try {
-                await patchPersonalResourceMetadata(
-                  resolvePersonalResourceApiType(record.resourceType),
-                  { autoEvo: checked },
-                );
-                await refreshExperienceSection({ silent: true });
-              } catch (error) {
-                console.error("Toggle auto_evo failed:", error);
-                await refreshExperienceSection({ silent: true });
-              } finally {
-                setExperienceAutoEvoLoading((prev) => {
-                  const next = new Set(prev);
-                  next.delete(record.id);
-                  return next;
-                });
-              }
-            })();
-          }}
-        />
-      ),
-    },
-  ];
   const glossaryColumns: ColumnsType<GlossaryAsset> = [
     {
       title: t("admin.memoryGlossaryTerm"),
@@ -6136,6 +5974,8 @@ export default function MemoryManagement() {
     experienceFeatureEnabled,
     experienceSettingSaving,
     handleExperienceFeatureToggle,
+    handleExperienceAutoEvoToggle,
+    openExperienceProfileEditor,
     refreshSkillAssets,
     refreshAllSkillAssets,
     refreshExperienceSection,
@@ -6160,9 +6000,8 @@ export default function MemoryManagement() {
     filteredExperienceItems,
     experienceAssets,
     experienceLoading,
+    experienceAutoEvoLoading,
     experienceInitialized,
-    experienceColumns,
-    experienceProfileExpandable,
     filteredGlossaryItems,
     glossaryColumns,
     selectedGlossaryAssetIds,

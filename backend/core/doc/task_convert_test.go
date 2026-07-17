@@ -15,6 +15,12 @@ func TestNeedsOfficeConvertBeforeParse(t *testing.T) {
 		ContentType:      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 		ConvertRequired:  true,
 	}
+	pptmExt := documentExt{
+		StoredPath:       "/data/demo.pptm",
+		OriginalFilename: "demo.pptm",
+		ContentType:      "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+		ConvertRequired:  true,
+	}
 	docExt := documentExt{
 		StoredPath:       "/data/demo.docx",
 		OriginalFilename: "demo.docx",
@@ -43,6 +49,10 @@ func TestNeedsOfficeConvertBeforeParse(t *testing.T) {
 		{"ppt with self-hosted mineru converts", pptExt, selfHostedMineruCfg, true},
 		{"ppt with paddle converts", pptExt, paddleCfg, true},
 		{"ppt without ocr config converts", pptExt, nil, true},
+		{"pptm with official mineru converts", pptmExt, officialMineruCfg, true},
+		{"pptm with self-hosted mineru converts", pptmExt, selfHostedMineruCfg, true},
+		{"pptm with paddle converts", pptmExt, paddleCfg, true},
+		{"pptm without ocr config converts", pptmExt, nil, true},
 		{"docx with official mineru still converts", docExt, officialMineruCfg, true},
 		{"xlsx always converts", xlsxExt, paddleCfg, true},
 		{"xlsx with official mineru still converts", xlsxExt, officialMineruCfg, true},
@@ -68,6 +78,19 @@ func TestParsePathForIngestionPresentationMineru(t *testing.T) {
 	cfg := map[string]any{"ocr_type": "mineru"}
 	if got := parsePathForIngestion(d, cfg, documentParseProfileCloud); got != "/data/demo.pptx" {
 		t.Fatalf("parsePathForIngestion() = %q, want original pptx path", got)
+	}
+}
+
+func TestParsePathForIngestionMacroPresentationMineru(t *testing.T) {
+	d := documentExt{
+		StoredPath:       "/data/demo.pptm",
+		ParseStoredPath:  "/data/demo.pdf",
+		OriginalFilename: "demo.pptm",
+		ConvertRequired:  true,
+	}
+	cfg := map[string]any{"ocr_type": "mineru"}
+	if got := parsePathForIngestion(d, cfg, documentParseProfileCloud); got != "/data/demo.pdf" {
+		t.Fatalf("parsePathForIngestion() = %q, want converted pdf path", got)
 	}
 }
 
@@ -111,6 +134,19 @@ func TestParsePathForIngestionPresentationSelfHostedMineru(t *testing.T) {
 		StoredPath:       "/data/demo.pptx",
 		ParseStoredPath:  "/data/demo.pdf",
 		OriginalFilename: "demo.pptx",
+		ConvertRequired:  true,
+	}
+	cfg := map[string]any{"ocr_type": "mineru", "ocr_url": "http://local-mineru:8000/api/v1/pdf_parse"}
+	if got := parsePathForIngestion(d, cfg, documentParseProfileCloud); got != "/data/demo.pdf" {
+		t.Fatalf("parsePathForIngestion() = %q, want converted pdf path", got)
+	}
+}
+
+func TestParsePathForIngestionMacroPresentationSelfHostedMineru(t *testing.T) {
+	d := documentExt{
+		StoredPath:       "/data/demo.pptm",
+		ParseStoredPath:  "/data/demo.pdf",
+		OriginalFilename: "demo.pptm",
 		ConvertRequired:  true,
 	}
 	cfg := map[string]any{"ocr_type": "mineru", "ocr_url": "http://local-mineru:8000/api/v1/pdf_parse"}

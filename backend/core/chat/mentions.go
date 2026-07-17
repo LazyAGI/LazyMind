@@ -11,6 +11,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/plugin"
 )
 
 type chatMention struct {
@@ -319,17 +320,19 @@ func mergeMentionedPlugins(ctx context.Context, db *gorm.DB, userID string, refs
 	if len(refs) == 0 {
 		return catalog, nil, nil
 	}
-	seen := map[string]bool{}
+	byRef := map[string]map[string]any{}
 	for _, item := range catalog {
-		seen[fmt.Sprint(item["plugin_ref"])] = true
+		byRef[fmt.Sprint(item["plugin_ref"])] = item
 	}
+	selected := make([]map[string]any, 0, len(refs))
 	var forcedBuiltins []string
 	for _, ref := range refs {
 		if strings.HasPrefix(ref, "builtin:") {
 			forcedBuiltins = append(forcedBuiltins, strings.TrimPrefix(ref, "builtin:"))
 			continue
 		}
-		if seen[ref] {
+		if item, ok := byRef[ref]; ok {
+			selected = append(selected, item)
 			continue
 		}
 		var row struct {
@@ -341,7 +344,49 @@ func mergeMentionedPlugins(ctx context.Context, db *gorm.DB, userID string, refs
 			Where("p.plugin_ref=? AND p.status='active' AND (p.owner_user_id=? OR p.owner_user_id='')", ref, userID).Take(&row).Error; err != nil {
 			return nil, nil, fmt.Errorf("plugin mention is not accessible: %s", ref)
 		}
-		catalog = append(catalog, map[string]any{"plugin_ref": row.PluginRef, "plugin_id": row.PluginID, "name": row.Name, "description": row.Description, "when_to_use": row.WhenToUse, "source_type": row.SourceType, "remote_root": "remote://" + row.RelativeRoot, "revision_id": row.HeadRevisionID, "revision_no": row.Version, "tree_hash": row.TreeHash})
+		selected = append(selected, map[string]any{"plugin_ref": row.PluginRef, "plugin_id": row.PluginID, "name": row.Name, "description": row.Description, "when_to_use": row.WhenToUse, "source_type": row.SourceType, "remote_root": "remote://" + row.RelativeRoot, "revision_id": row.HeadRevisionID, "revision_no": row.Version, "tree_hash": row.TreeHash})
 	}
-	return catalog, forcedBuiltins, nil
+	return selected, forcedBuiltins, nil
+}
+
+// applyPluginSelection is the single catalog/allowlist assembly path used by
+// both real chat execution and context preview/export.
+func applyPluginSelection(
+	ctx context.Context,
+	db *gorm.DB,
+	userID string,
+	reqBody map[string]any,
+	mentionedRefs []string,
+) error {
+	if len(mentionedRefs) > 1 {
+		return fmt.Errorf("at most one plugin mention is allowed per turn")
+	}
+	if len(mentionedRefs) > 0 {
+		reqBody["enable_plugin"] = true
+		reqBody["allowed_plugin_refs"] = mentionedRefs
+	}
+	if enabled, _ := reqBody["enable_plugin"].(bool); !enabled {
+		reqBody["plugin_catalog"] = []map[string]any{}
+		reqBody["disabled_builtin_plugins"] = []string{}
+		return nil
+	}
+	catalog, err := plugin.EnabledCatalog(db, userID)
+	if err != nil {
+		return fmt.Errorf("load plugin catalog: %w", err)
+	}
+	catalog, forcedBuiltins, err := mergeMentionedPlugins(
+		ctx, db, userID, mentionedRefs, catalog,
+	)
+	if err != nil {
+		return err
+	}
+	disabledBuiltins, err := plugin.DisabledBuiltinPluginIDs(db, userID)
+	if err != nil {
+		return fmt.Errorf("load builtin plugin settings: %w", err)
+	}
+	reqBody["plugin_catalog"] = catalog
+	reqBody["disabled_builtin_plugins"] = applyMentionedTools(
+		disabledBuiltins, forcedBuiltins,
+	)
+	return nil
 }

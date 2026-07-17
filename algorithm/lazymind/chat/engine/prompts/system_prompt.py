@@ -4,6 +4,8 @@ from datetime import datetime, timezone as datetime_timezone
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
+
 from .guidance import (
     DEFAULT_SYSTEM_PROMPT,
     RESPONSE_LANGUAGE_GUIDANCE,
@@ -179,15 +181,6 @@ def _build_environment_context_prompt(environment_context: dict | None = None) -
     return f'## Environment Context\nCurrent user time: {user_time}'
 
 
-def _build_attached_files_prompt(files: list | None = None) -> str:
-    clean = [str(path).strip() for path in (files or []) if str(path).strip()]
-    if not clean:
-        return ''
-    lines = ['## Attached Files']
-    lines.extend(f'- {path}' for path in clean)
-    return '\n'.join(lines)
-
-
 _TOOL_APPENDIX_SECTION_TITLES = {
     'tool_policy': 'Tool-specific policies',
     'safety': 'Tool-specific safety constraints',
@@ -205,35 +198,35 @@ def _build_tool_appendix_prompt(appendices: dict[str, list[str]] | None = None) 
     return '\n\n'.join(blocks)
 
 
-def build_system_prompt(
+def add_standard_system_sections(
+    builder: PromptBuilder,
     has_tools: bool,
     *,
     environment_context: dict | None = None,
     use_memory: bool = True,
     user_preference: str | None = None,
     memory: str | None = None,
-    files: list | None = None,
     current_query: str | None = None,
     conversation_history: list[dict] | None = None,
     tool_prompt_appendices: dict[str, list[str]] | None = None,
-) -> str:
-    prompt_parts = [
-        DEFAULT_SYSTEM_PROMPT,
-        _build_response_language_prompt(
+    show_tool_status: bool = True,
+) -> PromptBuilder:
+    builder.system(
+        'platform_identity', '', DEFAULT_SYSTEM_PROMPT, 'platform.guidance', priority=10,
+    ).system(
+        'response_language', '', _build_response_language_prompt(
             environment_context,
             current_query=current_query,
             conversation_history=conversation_history,
             user_preference=user_preference,
         ),
-    ]
+        'platform.language', priority=20,
+    )
 
     environment_prompt = _build_environment_context_prompt(environment_context)
-    if environment_prompt:
-        prompt_parts.append(environment_prompt)
-
-    attached_files_prompt = _build_attached_files_prompt(files)
-    if attached_files_prompt:
-        prompt_parts.append(attached_files_prompt)
+    builder.system(
+        'environment', '', environment_prompt, 'request.environment', priority=30,
+    )
 
     if use_memory:
         if isinstance(user_preference, str) and user_preference.strip():
@@ -259,28 +252,47 @@ def build_system_prompt(
                 + user_preference.strip()
                 + '\n\n<!-- end of User Profile / Preferences -->'
             )
-            prompt_parts.append(preference_block)
+            builder.system(
+                'user_preferences', '', preference_block, 'user.profile', priority=40,
+            )
         if isinstance(memory, str) and memory.strip():
-            prompt_parts.append(f'## Agent Working Memory\n{memory.strip()}')
+            builder.system(
+                'working_memory', '', f'## Agent Working Memory\n{memory.strip()}',
+                'user.memory', priority=50,
+            )
 
     if has_tools:
-        prompt_parts.append(
-            '# Tool call status\n'
-            'Before calling a tool, write one concise, user-visible sentence explaining '
-            'what you are about to do. Keep it action-oriented and do not reveal hidden '
-            'reasoning. Then make the tool call in the same response.\n'
-            "CRITICAL: Never write a status sentence (e.g. '正在…', 'I am now checking…', "
-            "'Activating…') without immediately following it with an actual tool call in the "
-            'same response. If you cannot call a tool, do not pretend you are doing so — '
-            'answer directly instead.\n\n'
+        tool_policy = (
             '# Tool use policy\n'
             'First decide whether tools are needed. A tool named get_*Toolkit_methods '
             'is a Toolkit gateway: call it before using that Toolkit. Confirm before '
             'destructive or externally visible actions unless the user '
             'already requested that exact action.'
         )
+        if show_tool_status:
+            tool_policy = (
+                '# Tool call status\n'
+                'Before calling a tool, write one concise, user-visible sentence explaining '
+                'what you are about to do. Keep it action-oriented and do not reveal hidden '
+                'reasoning. Then make the tool call in the same response.\n'
+                "CRITICAL: Never write a status sentence (e.g. '正在…', 'I am now checking…', "
+                "'Activating…') without immediately following it with an actual tool call in the "
+                'same response. If you cannot call a tool, do not pretend you are doing so — '
+                'answer directly instead.\n\n'
+                + tool_policy
+            )
+        builder.system(
+            'tool_policy', '', tool_policy, 'platform.tools', priority=60,
+        )
         appendix_prompt = _build_tool_appendix_prompt(tool_prompt_appendices)
-        if appendix_prompt:
-            prompt_parts.append(appendix_prompt)
+        builder.system(
+            'tool_appendices', '', appendix_prompt, 'tool.registry', priority=70,
+        )
 
-    return '\n\n'.join(prompt_parts)
+    return builder
+
+
+def build_system_prompt(has_tools: bool, **kwargs) -> str:
+    """Render standard system sections for direct consumers and focused tests."""
+    builder = PromptBuilder.for_role(AgentRole.CHAT)
+    return add_standard_system_sections(builder, has_tools, **kwargs).build().system_prompt

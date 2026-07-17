@@ -299,32 +299,9 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			reqBody["enable_subagent"] = v
 		}
 	}
-	if len(mentionedResources.PluginRefs) > 0 {
-		reqBody["enable_plugin"] = true
-	}
-	if enabled, _ := reqBody["enable_plugin"].(bool); enabled {
-		catalog, catalogErr := plugin.EnabledCatalog(db, userID)
-		if catalogErr != nil {
-			common.ReplyErr(w, "load plugin catalog failed", http.StatusInternalServerError)
-			return
-		}
-		catalog, forcedBuiltins, mergeErr := mergeMentionedPlugins(r.Context(), db, userID, mentionedResources.PluginRefs, catalog)
-		if mergeErr != nil {
-			common.ReplyErr(w, mergeErr.Error(), http.StatusForbidden)
-			return
-		}
-		reqBody["plugin_catalog"] = catalog
-		disabledBuiltins, disabledErr := plugin.DisabledBuiltinPluginIDs(db, userID)
-		if disabledErr != nil {
-			common.ReplyErr(w, "load builtin plugin settings failed", http.StatusInternalServerError)
-			return
-		}
-		if len(forcedBuiltins) > 0 {
-			disabledBuiltins = applyMentionedTools(disabledBuiltins, forcedBuiltins)
-		}
-		reqBody["disabled_builtin_plugins"] = disabledBuiltins
-	} else {
-		reqBody["plugin_catalog"] = []map[string]any{}
+	if err := applyPluginSelection(r.Context(), db, userID, reqBody, mentionedResources.PluginRefs); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
+		return
 	}
 
 	if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {

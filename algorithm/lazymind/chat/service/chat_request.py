@@ -40,6 +40,8 @@ class ChatRuntimeOptions(BaseModel):
     ocr_config: Optional[Dict[str, Any]] = None
     tool_config: Optional[Dict[str, Union[str, List[str]]]] = None
     mcp_config: Optional[List[Dict[str, Any]]] = None
+    context_usage_preview: bool = False
+    context_prompt_export: bool = False
 
 
 class ChatPersonalizationOptions(BaseModel):
@@ -60,6 +62,7 @@ class ChatPluginOptions(BaseModel):
     plugin_context: Optional[Dict[str, Any]] = None
     catalog: List[Dict[str, Any]] = Field(default_factory=list)
     disabled_builtin_plugins: List[str] = Field(default_factory=list)
+    allowed_plugin_refs: List[str] = Field(default_factory=list)
 
 
 class ChatRequest(BaseModel):
