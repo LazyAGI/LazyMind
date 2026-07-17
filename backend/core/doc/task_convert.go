@@ -131,6 +131,19 @@ func isPresentationDocument(storedPath, contentType, originalFilename string) bo
 	return strings.Contains(ct, "presentationml") || strings.Contains(ct, "powerpoint")
 }
 
+func isOfficialMinerURawPresentation(storedPath, originalFilename string) bool {
+	name := originalFilename
+	if name == "" {
+		name = filepath.Base(storedPath)
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".ppt", ".pptx":
+		return true
+	default:
+		return false
+	}
+}
+
 func ocrTypeFromConfig(ocrConfig map[string]any) string {
 	if ocrConfig == nil {
 		return ""
@@ -186,8 +199,9 @@ func documentParseStrategyName(profile documentParseProfile) string {
 }
 
 // needsOfficeConvertBeforeParse decides whether Office-to-PDF conversion runs before parsing.
-// PPT/PPTX/PPTM skip conversion only when official MinerU (mineru.net) is configured so
-// DynamicPDFReader can route them to MineruPPTReader; self-hosted MinerU still converts to PDF.
+// PPT/PPTX skip conversion only when official MinerU (mineru.net) is configured so
+// DynamicPDFReader can route them to MineruPPTReader. PPTM is converted to PDF because
+// the official MinerU upload API does not accept macro-enabled PowerPoint files.
 func needsOfficeConvertBeforeParse(d documentExt, ocrConfig map[string]any, profile documentParseProfile) bool {
 	if !d.ConvertRequired {
 		return false
@@ -208,7 +222,7 @@ func NeedsOfficeConvertForPath(filePath, originalFilename string, ocrConfig map[
 	if !isOfficeDocument(src, "", name) {
 		return false
 	}
-	if isPresentationDocument(src, "", name) && isOfficialMinerU(ocrConfig) {
+	if isOfficialMinerURawPresentation(src, name) && isOfficialMinerU(ocrConfig) {
 		return false
 	}
 	return true

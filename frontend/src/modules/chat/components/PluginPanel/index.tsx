@@ -815,6 +815,7 @@ function TabSlotGrid({
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
 }) {
+  const { t } = useTranslation();
   const addFileInputRef = useRef<HTMLInputElement>(null);
   const addingSlotIdRef = useRef<string>('');
   const addingSlotTypeRef = useRef<string>('');

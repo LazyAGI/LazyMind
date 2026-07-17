@@ -326,6 +326,8 @@ steps:
         - Else if image_output / a single material / upload exists, reuse THAT same origin
           for all N stickers.
         - Else text-only (no urls) for all N.
+      Origins are owned by collect_materials (image_output). Do NOT re-save image_output
+      here — the graph allows only one producer per material.
 
       Step A — parallel video generation (ONE assistant turn, N tool_calls):
         Emit N separate `video_generator` calls in a single response (not sequential turns).
@@ -353,11 +355,12 @@ steps:
         Per sticker i (caption MUST include the index, e.g. caption='Sticker i'):
           1. optional: save_artifact(key='video_output', content_type='file',
                value=<video path>, source_tool='video_generator', caption='Sticker i')
-          2. if origin exists: save_artifact(key='image_output', content_type='image',
-               value=<origin>, caption='Sticker i')  — NEVER put GIF into image_output
-          3. save_artifact(key='gif_output', content_type='image',
+          2. save_artifact(key='gif_output', content_type='image',
                value=<gif path>, source_tool='video_to_gif', caption='Sticker i')
-        Saving in the same i-order across slots keeps composite rows aligned.
+        Do NOT save image_output (origins already saved by collect_materials).
+        Never put GIF into image_output.
+        Saving gif_output in the same i-order keeps composite rows aligned with
+        existing image_output rows from collect.
         If some generate/gif calls fail, save only successful stickers in index order
         (partial saves OK) and STOP with a concise note.
       Prefer quoting image_markdown from tool results verbatim.
@@ -378,8 +381,6 @@ steps:
     outputs:
       - material: generated_image_output
         required: false
-      - material: image_output
-        required: false
       - material: gif_output
         required: false
       - material: video_output
@@ -388,8 +389,8 @@ steps:
       Still workflows: generated_image_output must be saved (sort_order=1 only for overwrite / still path).
       Animated workflows: gif_output must exist for each successful sticker after
       video_generator → video_to_gif → sequential append saves (omit sort_order on first full run).
-      When an origin exists, image_output must also be appended in the SAME order as gif_output
-      (origin still, NOT the GIF). Never put GIF into image_output.
+      Origins stay in image_output from collect_materials — do NOT re-save image_output here.
+      Never put GIF into image_output.
       Use sort_order=N only when overwriting an existing list row on partial retry.
       N is taken from the user request (default 1).
 

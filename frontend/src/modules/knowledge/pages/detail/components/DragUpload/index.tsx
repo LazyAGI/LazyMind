@@ -28,6 +28,7 @@ export const ALLOWED_FILE_TYPES = [
   "doc",
   "ppt",
   "pptx",
+  "pptm",
   "jpg",
   "jpeg",
   "png",

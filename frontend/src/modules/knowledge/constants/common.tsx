@@ -129,7 +129,7 @@ export const CARD_PAGE_SIZE = 12;
 export const IMPORT_TASK_POLL_INTERVAL = 5 * 1000;
 
 // export const SUPPORT_SUFFIX = ['txt', 'xml', 'json', 'pdf', 'docx', 'doc', 'html', 'md', 'pptx', 'csv', 'xlsx', 'xls'];
-export const SUPPORT_SUFFIX = ["pdf", "docx", "doc", "pptx", "zip"];
+export const SUPPORT_SUFFIX = ["pdf", "docx", "doc", "pptx", "pptm", "zip"];
 // Unstructured data file suffix.
 export const UNSTRUCTURED_SUFFIX = [
   "txt",
@@ -140,6 +140,7 @@ export const UNSTRUCTURED_SUFFIX = [
   "html",
   "md",
   "pptx",
+  "pptm",
 ];
 // Structured data file suffix.
 export const STRUCTURED_SUFFIX = ["xls", "xlsx", "csv", "jsonl", "parquet"];

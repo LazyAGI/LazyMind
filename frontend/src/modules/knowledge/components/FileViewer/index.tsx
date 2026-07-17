@@ -125,7 +125,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     if (["pdf"].includes(fileSuffix)) {
       return "pdf";
     }
-    if (["pptx", "ppt"].includes(fileSuffix)) {
+    if (["pptx", "ppt", "pptm"].includes(fileSuffix)) {
       return "pptx";
     }
     if (["docx", "doc"].includes(fileSuffix)) {
