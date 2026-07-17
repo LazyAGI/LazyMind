@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { desktopRuntimeReady, runtimeExitFailureMessage, statusFailureMessage } = require("./runtime-status");
+const { runInstallerWarmupLifecycle } = require("./installer-warmup");
 
 const isWindows = process.platform === "win32";
 const isInstallerWarmup = isWindows && process.argv.includes("--installer-warmup");
@@ -309,60 +310,46 @@ async function runInstallerWarmup() {
     fs.mkdirSync(desktopLogsDir, { recursive: true });
     fs.appendFileSync(warmupLogPath, `[${new Date().toISOString()}] ${message}\n`);
   };
-  let warmupWindow;
-  let activeError = null;
   log(`starting offline installer warmup with timeout ${timeoutSeconds}s`);
-  try {
-    await runSidecar("up", maintenanceArgs, {
+  await runInstallerWarmupLifecycle({
+    startRuntime: () => runSidecar("up", maintenanceArgs, {
       timeout: timeoutSeconds * 1000,
-    });
-    const status = await readStatus();
-    if (status.overallStatus !== "ready" || !status.config?.frontendPort) {
-      throw new Error(`maintenance runtime did not become ready (status=${status.overallStatus || "unknown"})`);
-    }
-
-    warmupWindow = new BrowserWindow({
+    }),
+    readStatus,
+    createRenderer: () => new BrowserWindow({
       show: false,
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
       },
-    });
-    warmupWindow.webContents.session.webRequest.onBeforeRequest((details, callback) => {
-      try {
-        const url = new URL(details.url);
-        const allowed = url.protocol === "data:" ||
-          ((url.protocol === "http:" || url.protocol === "ws:") &&
-            (url.hostname === "127.0.0.1" || url.hostname === "localhost"));
-        callback({ cancel: !allowed });
-      } catch {
-        callback({ cancel: true });
-      }
-    });
-    await warmupWindow.loadURL(`http://127.0.0.1:${status.config.frontendPort}`);
-    log("runtime and renderer warmup completed");
-  } catch (error) {
-    log(`warmup failed: ${serializeError(error)}`);
-    activeError = error;
-    throw error;
-  } finally {
-    if (warmupWindow && !warmupWindow.isDestroyed()) {
-      warmupWindow.destroy();
-    }
-    try {
-      await runSidecar("down", maintenanceArgs, {
-        env: { ...sidecarEnv(), LAZYMIND_LOCAL_DOWN_TIMEOUT: "120s" },
-        timeout: 130000,
+    }),
+    loadRenderer: async (warmupWindow, status) => {
+      warmupWindow.webContents.session.webRequest.onBeforeRequest((details, callback) => {
+        try {
+          const url = new URL(details.url);
+          const allowed = url.protocol === "data:" ||
+            ((url.protocol === "http:" || url.protocol === "ws:") &&
+              (url.hostname === "127.0.0.1" || url.hostname === "localhost"));
+          callback({ cancel: !allowed });
+        } catch {
+          callback({ cancel: true });
+        }
       });
-      log("maintenance runtime stopped");
-    } catch (error) {
-      log(`maintenance runtime shutdown failed: ${serializeError(error)}`);
-      if (!activeError) {
-        throw error;
+      await warmupWindow.loadURL(`http://127.0.0.1:${status.config.frontendPort}`);
+    },
+    stopRuntime: () => runSidecar("down", maintenanceArgs, {
+      env: { ...sidecarEnv(), LAZYMIND_LOCAL_DOWN_TIMEOUT: "120s" },
+      timeout: 130000,
+    }),
+    disposeRenderer: (warmupWindow) => {
+      if (!warmupWindow.isDestroyed()) {
+        warmupWindow.destroy();
       }
-    }
-  }
+    },
+    log,
+    formatError: serializeError,
+  });
 }
 
 function startGuard() {
@@ -1146,6 +1133,9 @@ if (!hasSingleInstanceLock) {
     return createWindow();
   });
   app.on("window-all-closed", () => {
+    if (isInstallerWarmup) {
+      return;
+    }
     app.quit();
   });
   app.on("before-quit", (event) => {
