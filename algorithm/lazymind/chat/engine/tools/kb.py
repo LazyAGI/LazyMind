@@ -37,6 +37,7 @@ _DEFAULT_RETRIEVER_TOPK = 20
 _DEFAULT_RERANK_TOPK = 20
 _DEFAULT_K_MAX = 10
 _DEFAULT_IMAGE_TOPK = 3
+_ACCESSIBLE_KB_IDS_CACHE_KEY = '_accessible_kb_ids'
 _RERANKER_MODULE = 'ModuleReranker'
 _RERANKER_MODEL = 'reranker'
 _KB_RETRIEVER_CONFIGS = [
@@ -389,12 +390,50 @@ class KBToolkit:
         )
 
     @staticmethod
+    def _accessible_kb_ids() -> set[str]:
+        """Return the complete readable KB id set, cached for this agent run."""
+        config = lazyllm.globals.get('agentic_config') or {}
+        cached = config.get(_ACCESSIBLE_KB_IDS_CACHE_KEY)
+        if isinstance(cached, (list, tuple, set)):
+            return {str(item).strip() for item in cached if str(item).strip()}
+
+        accessible: set[str] = set()
+        page_token = ''
+        seen_page_tokens: set[str] = set()
+        while True:
+            params: Dict[str, Any] = {'page_size': 100}
+            if page_token:
+                params['page_token'] = page_token
+            response = get_core_api('/datasets', params=params)
+            for item in response.get('datasets') or []:
+                if not isinstance(item, dict):
+                    continue
+                dataset_id = str(item.get('dataset_id') or '').strip()
+                if dataset_id:
+                    accessible.add(dataset_id)
+
+            next_page_token = str(response.get('next_page_token') or '').strip()
+            if not next_page_token:
+                break
+            if next_page_token in seen_page_tokens:
+                raise RuntimeError('knowledge-base catalog returned a repeated page token')
+            seen_page_tokens.add(next_page_token)
+            page_token = next_page_token
+
+        config[_ACCESSIBLE_KB_IDS_CACHE_KEY] = sorted(accessible)
+        lazyllm.globals['agentic_config'] = config
+        return accessible
+
+    @staticmethod
     def _kb_ids(explicit: Optional[List[str]] = None) -> List[str]:
         config = lazyllm.globals.get('agentic_config') or {}
         selected = explicit if explicit else (config.get('filters') or {}).get('kb_id')
         ids = [str(item).strip() for item in iter_lookup_ids(selected, field_name='kb_ids') if item]
         if not ids:
             raise ValueError('kb_ids is required when no knowledge base is selected in the request')
+        accessible = KBToolkit._accessible_kb_ids()
+        if any(kb_id not in accessible for kb_id in ids):
+            raise ValueError('one or more requested knowledge bases are unavailable')
         return ids
 
     def kb_search(
