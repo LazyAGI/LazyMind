@@ -8,7 +8,6 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
-
 _ALGO = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'algorithm')
 _LAZYLLM_ROOT = os.path.join(_ALGO, 'lazyllm')
 if _ALGO not in sys.path:
@@ -152,7 +151,6 @@ def _patch_runtime_bindings(
     config: dict[str, Any],
     read_memory=None,
     memory_store=None,
-    uuid4=None,
     inject_model_config=None,
     normalize_history_for_agent=None,
 ) -> None:
@@ -167,8 +165,6 @@ def _patch_runtime_bindings(
                 return ''
 
         memory_store = MemoryStore
-    if uuid4 is None:
-        uuid4 = lambda: 'uuid-1'
     if normalize_history_for_agent is None:
         def normalize_history_for_agent(history):
             return history
@@ -179,7 +175,6 @@ def _patch_runtime_bindings(
     monkeypatch.setattr(memory_review, 'memory_editor', memory_editor)
     monkeypatch.setattr(memory_review, 'read_memory', read_memory)
     monkeypatch.setattr(memory_review, 'MemoryRemoteStore', memory_store)
-    monkeypatch.setattr(memory_review, 'uuid4', uuid4)
     monkeypatch.setattr(memory_review, '_cfg', config)
     monkeypatch.setattr(memory_review, 'inject_model_config', inject_model_config)
     monkeypatch.setattr(
@@ -257,10 +252,12 @@ def test_memory_review_payload_allows_missing_or_null_llm_config():
     memory_review_routes = _load_memory_review_routes_module()
 
     missing = memory_review_routes.MemoryReviewPayload(
+        task_id=' memory_review_core-task-missing-config ',
         user_id=' user-1 ',
         history=[{'role': 'user', 'content': '你好'}],
     )
     explicit_null = memory_review_routes.MemoryReviewPayload(
+        task_id='memory_review_core-task-null-config',
         user_id='user-1',
         history=[{'role': 'user', 'content': '你好'}],
         llm_config=None,
@@ -275,18 +272,24 @@ def test_memory_review_route_returns_task_id(monkeypatch):
     memory_review_routes = _load_memory_review_routes_module()
 
     def fake_review_memory(**kwargs):
-        assert set(kwargs) == {'user_id', 'history', 'llm_config'}
-        return memory_review_routes.MemoryReviewResult(status='success', task_id='review_123')
+        assert kwargs == {
+            'task_id': 'memory_review_core-task-123',
+            'user_id': 'user-1',
+            'history': [{'role': 'user', 'content': '你好'}],
+            'llm_config': None,
+        }
+        return memory_review_routes.MemoryReviewResult(status='success', task_id=kwargs['task_id'])
 
     monkeypatch.setattr(memory_review_routes, 'review_memory', fake_review_memory)
     payload = memory_review_routes.MemoryReviewPayload(
+        task_id='memory_review_core-task-123',
         user_id='user-1',
         history=[{'role': 'user', 'content': '你好'}],
     )
 
     result = asyncio.run(memory_review_routes.memory_review(payload))
 
-    assert result == {'status': 'success', 'task_id': 'review_123'}
+    assert result == {'status': 'success', 'task_id': 'memory_review_core-task-123'}
 
 
 def test_review_memory_runs_agent_with_memory_editor_tool(monkeypatch):
@@ -346,19 +349,19 @@ def test_review_memory_runs_agent_with_memory_editor_tool(monkeypatch):
         memory_editor=memory_editor,
         read_memory=read_memory,
         memory_store=FakeMemoryStore,
-        uuid4=lambda: 'uuid-1',
         config={'core_api_url': 'http://core', 'review_max_retries': 2},
         inject_model_config=inject_model_config,
         normalize_history_for_agent=normalize_history_for_agent,
     )
 
     result = memory_review.review_memory(
+        task_id='memory_review_core-task-123',
         user_id='user-1',
         history=[{'role': 'user', 'content': '以后请用中文简洁回答'}],
         llm_config={'llm': {'model': 'test'}},
     )
 
-    assert result.model_dump() == {'status': 'success', 'task_id': 'memory_review_uuid-1'}
+    assert result.model_dump() == {'status': 'success', 'task_id': 'memory_review_core-task-123'}
     assert [tool.__name__ for tool in calls['agent_kwargs']['tools']] == ['read_memory', 'memory_editor']
     assert calls['normalizer_input'] == [{'role': 'user', 'content': '以后请用中文简洁回答'}]
     assert calls['history'] == [{'role': 'user', 'content': 'normalized'}]
@@ -366,7 +369,7 @@ def test_review_memory_runs_agent_with_memory_editor_tool(monkeypatch):
     assert 'RemoteFS 用户画像' in calls['prompt']
     assert calls['store_reads'] == ['memory', 'user_preference']
     assert fake_lazyllm.globals['agentic_config']['user_id'] == 'user-1'
-    assert fake_lazyllm.globals['agentic_config']['task_id'] == 'memory_review_uuid-1'
+    assert fake_lazyllm.globals['agentic_config']['task_id'] == 'memory_review_core-task-123'
     assert 'memory' not in fake_lazyllm.globals['agentic_config']
     assert 'user_preference' not in fake_lazyllm.globals['agentic_config']
     assert 'core_api_url' not in fake_lazyllm.globals['agentic_config']
@@ -413,15 +416,15 @@ def test_review_memory_returns_success_when_no_tool_submission(monkeypatch):
         fs=object,
         memory_editor=memory_editor,
         memory_store=FakeMemoryStore,
-        uuid4=lambda: 'uuid-2',
         config={'core_api_url': 'http://core', 'review_max_retries': 2},
         inject_model_config=inject_model_config,
     )
 
     result = memory_review.review_memory(
+        task_id='memory_review_core-task-no-submission',
         user_id='user-1',
         history=[{'role': 'user', 'content': '你好'}],
     )
 
-    assert result.model_dump() == {'status': 'success', 'task_id': 'memory_review_uuid-2'}
+    assert result.model_dump() == {'status': 'success', 'task_id': 'memory_review_core-task-no-submission'}
     assert calls['model_config'] is None

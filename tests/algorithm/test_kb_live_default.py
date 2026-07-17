@@ -56,7 +56,7 @@ def test_kb_search_core_flow(monkeypatch):
         'user_id': 'user-007',
     }
     try:
-        result = kb.KBToolGroup().kb_search(SEED_KEYWORD)
+        result = kb.KBToolkit().kb_search(SEED_KEYWORD)
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 

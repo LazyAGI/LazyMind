@@ -28,7 +28,6 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 		store.Init(oldDB, nil, nil)
 	})
 
-	t.Setenv("LAZYMIND_CORE_SELF_URL", "http://core.test")
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
 	store.Init(db.DB, nil, nil)
@@ -45,7 +44,7 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 		return &algo.SkillOrganizeResponse{
 			Code: 0,
 			Data: algo.SkillOrganizeData{
-				Status:    "running",
+				Status:    "pending",
 				RequestID: req.RequestID,
 				TaskID:    "org_smoke_20260707183512345678",
 			},
@@ -71,11 +70,8 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	if captured.UserID != "user_001" || captured.RequestID != "org_smoke" {
 		t.Fatalf("unexpected forwarded request identity: %#v", captured)
 	}
-	if strings.Join(captured.Skills, ",") != "skills/research/论文精读" {
+	if strings.Join(captured.Skills, ",") != "research/论文精读" {
 		t.Fatalf("unexpected forwarded skills: %#v", captured.Skills)
-	}
-	if captured.FSBaseURL != "http://core.test" {
-		t.Fatalf("fs_base_url = %q", captured.FSBaseURL)
 	}
 	if captured.ArtifactDir != "tmp/a-skill-org" {
 		t.Fatalf("artifact_dir = %q", captured.ArtifactDir)
@@ -90,13 +86,16 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	if reservation.Status != orm.ResourceUpdateTaskStatusDone {
 		t.Fatalf("organize reservation status = %q, want done", reservation.Status)
 	}
+	if reservation.ResultID != "org_smoke_20260707183512345678" {
+		t.Fatalf("organize reservation result_id = %q", reservation.ResultID)
+	}
 
 	var out common.APIResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	data, ok := out.Data.(map[string]any)
-	if !ok || data["taskid"] != "org_smoke_20260707183512345678" || data["status"] != "running" {
+	if !ok || data["taskid"] != "org_smoke_20260707183512345678" || data["status"] != "pending" {
 		t.Fatalf("unexpected response: %#v", out)
 	}
 }

@@ -158,6 +158,7 @@ func (e *DefaultEngine) newBinding(sourceID, folderID, displayName string, input
 		ExcludeExtensions:      jsonFromStrings(input.ExcludeExtensions),
 		Status:                 status,
 		LastError:              store.JSON{},
+		ChatEnabled:            true,
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}

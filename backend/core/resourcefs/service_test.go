@@ -210,6 +210,90 @@ func TestRollbackRejectsPendingDraft(t *testing.T) {
 	}
 }
 
+func TestUpdateMetadataEnableAutoEvoMarksPendingDraftAuto(t *testing.T) {
+	db := newResourceFSTestDB(t)
+	service := NewService(ServiceDeps{DB: db.DB})
+	ref := ResourceRef{UserID: "u1", ResourceType: ResourceTypeMemory}
+	ctx := context.Background()
+
+	state, err := service.EnsureResource(ctx, ref, "v1")
+	if err != nil {
+		t.Fatalf("EnsureResource returned error: %v", err)
+	}
+	if err := db.Model(&orm.PersonalResource{}).Where("id = ?", state.ID).Update("auto_evo", false).Error; err != nil {
+		t.Fatalf("disable auto_evo: %v", err)
+	}
+	draft, err := service.WriteDraft(ctx, WriteDraftRequest{
+		Ref:                  ref,
+		Content:              "v2",
+		ExpectedDraftVersion: state.DraftVersion,
+		UpdatedBy:            "u1",
+	})
+	if err != nil {
+		t.Fatalf("WriteDraft returned error: %v", err)
+	}
+	preview, err := service.DraftPreview(ctx, DraftPreviewRequest{Ref: ref})
+	if err != nil {
+		t.Fatalf("DraftPreview returned error: %v", err)
+	}
+	if preview.ReviewID == "" {
+		t.Fatal("expected active review session")
+	}
+
+	autoEvo := true
+	resp, err := service.UpdateMetadata(ctx, UpdateMetadataRequest{
+		Ref:       ref,
+		AutoEvo:   &autoEvo,
+		UpdatedBy: "u1",
+	})
+	if err != nil {
+		t.Fatalf("UpdateMetadata returned error: %v", err)
+	}
+	if !resp.EnabledFromOff || !resp.AutoEvo {
+		t.Fatalf("unexpected metadata response: %#v", resp)
+	}
+	nextDraft, err := service.ReadFile(ctx, ReadFileRequest{Ref: ref, RefType: FileRefDraft})
+	if err != nil {
+		t.Fatalf("ReadFile draft returned error: %v", err)
+	}
+	if nextDraft.DraftVersion != draft.DraftVersion || nextDraft.DraftStatus != draftStatusAutoPending {
+		t.Fatalf("draft after auto_evo = version %d status %q, want version %d status %q", nextDraft.DraftVersion, nextDraft.DraftStatus, draft.DraftVersion, draftStatusAutoPending)
+	}
+	var review orm.PersonalResourceReviewSession
+	if err := db.Where("id = ?", preview.ReviewID).Take(&review).Error; err != nil {
+		t.Fatalf("query review session: %v", err)
+	}
+	if review.Status != reviewStatusInvalidated {
+		t.Fatalf("review status = %q, want %q", review.Status, reviewStatusInvalidated)
+	}
+}
+
+func TestUpdateMetadataEnableAutoEvoKeepsEmptyDraftStatus(t *testing.T) {
+	db := newResourceFSTestDB(t)
+	service := NewService(ServiceDeps{DB: db.DB})
+	ref := ResourceRef{UserID: "u1", ResourceType: ResourceTypeMemory}
+	ctx := context.Background()
+
+	state, err := service.EnsureResource(ctx, ref, "v1")
+	if err != nil {
+		t.Fatalf("EnsureResource returned error: %v", err)
+	}
+	if err := db.Model(&orm.PersonalResource{}).Where("id = ?", state.ID).Update("auto_evo", false).Error; err != nil {
+		t.Fatalf("disable auto_evo: %v", err)
+	}
+	autoEvo := true
+	if _, err := service.UpdateMetadata(ctx, UpdateMetadataRequest{Ref: ref, AutoEvo: &autoEvo}); err != nil {
+		t.Fatalf("UpdateMetadata returned error: %v", err)
+	}
+	draft, err := service.ReadFile(ctx, ReadFileRequest{Ref: ref, RefType: FileRefDraft})
+	if err != nil {
+		t.Fatalf("ReadFile draft returned error: %v", err)
+	}
+	if draft.DraftStatus != "" {
+		t.Fatalf("draft status = %q, want empty", draft.DraftStatus)
+	}
+}
+
 func TestReviewActionRejectAndUndoUpdatesDraftOnly(t *testing.T) {
 	db := newResourceFSTestDB(t)
 	service := NewService(ServiceDeps{DB: db.DB})

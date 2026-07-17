@@ -14,26 +14,31 @@ func TestSkillReviewStatsActiveScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect sqlite: %v", err)
 	}
-	if err := db.Exec(`CREATE TABLE skill_review_stats (id TEXT PRIMARY KEY, status TEXT NOT NULL)`).Error; err != nil {
+	if err := db.Exec(`CREATE TABLE skill_review_stats (id TEXT PRIMARY KEY, requestid TEXT NOT NULL, userid TEXT NOT NULL, status TEXT NOT NULL)`).Error; err != nil {
 		t.Fatalf("create skill_review_stats: %v", err)
 	}
 	for id, status := range map[string]string{
-		"preparing": "preparing",
-		"analyzing": "analyzing",
-		"completed": "completed",
-		"skipped":   "skipped",
-		"failed":    "failed",
+		"review-draft":   SkillReviewStatsStatusReviewDraft,
+		"organize-draft": SkillReviewStatsStatusOrganizeDraft,
+		"completed":      "completed",
+		"skipped":        "skipped",
+		"failed":         "failed",
 	} {
-		if err := db.Table("skill_review_stats").Create(map[string]any{"id": id, "status": status}).Error; err != nil {
+		if err := db.Table("skill_review_stats").Create(map[string]any{"id": id, "requestid": id, "userid": "user-1", "status": status}).Error; err != nil {
 			t.Fatalf("insert status %q: %v", status, err)
 		}
+	}
+	if err := db.Table("skill_review_stats").Create(map[string]any{
+		"id": "duplicate-completed", "requestid": "review-draft", "userid": "user-1", "status": SkillReviewStatsStatusCompleted,
+	}).Error; err != nil {
+		t.Fatalf("insert completed duplicate: %v", err)
 	}
 
 	var ids []string
 	if err := db.Table("skill_review_stats").Scopes(SkillReviewStatsActiveScope).Order("id").Pluck("id", &ids).Error; err != nil {
 		t.Fatalf("query active statuses: %v", err)
 	}
-	want := []string{"analyzing", "preparing"}
+	want := []string{"organize-draft"}
 	if !reflect.DeepEqual(ids, want) {
 		t.Fatalf("active ids = %#v, want %#v", ids, want)
 	}

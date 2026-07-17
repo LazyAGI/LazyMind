@@ -137,6 +137,35 @@ func TestMarketListInstalledStateIsScopedByUserAndDelete(t *testing.T) {
 	}
 }
 
+func TestMarketListDoesNotTreatPublisherSourceAsInstalled(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "market_skill", "market_rev1")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "market_skill").Updates(map[string]any{
+		"owner_user_id":    "admin_001",
+		"owner_user_name":  "admin",
+		"create_user_id":   "admin_001",
+		"create_user_name": "admin",
+	}).Error; err != nil {
+		t.Fatalf("reassign market source owner: %v", err)
+	}
+	adminID := "admin_001"
+	testutil.MustCreate(t, db, &testutil.SkillMarketItemRow{
+		ID:            "market_item1",
+		SourceSkillID: "market_skill",
+		Status:        "published",
+		CreatedBy:     &adminID,
+		CreatedAt:     testutil.TimeFixture(),
+		UpdatedAt:     testutil.TimeFixture(),
+	})
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	item := marketListItemForUser(t, "admin_001")
+	if item.Installed || item.InstalledSkillID != "" {
+		t.Fatalf("publisher source skill was treated as installed: %#v", item)
+	}
+}
+
 func TestMarketListSkipsDeletedMarketSource(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "market_skill", "market_rev1")

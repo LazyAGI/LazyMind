@@ -99,13 +99,19 @@ func SubmitSkillOrganize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, status, err := submitSkillOrganize(r.Context(), db, userID, normalized)
-	accepted := err == nil && status == http.StatusOK && resp != nil && resp.Code == 0 && resp.Data.Status == "running" &&
+	accepted := err == nil && status == http.StatusOK && resp != nil && resp.Code == 0 && skillOrganizeResponseStatusAccepted(resp.Data.Status) &&
 		resp.Data.RequestID == normalized.RequestID && strings.TrimSpace(resp.Data.TaskID) != ""
 	reservationStatus := orm.ResourceUpdateTaskStatusFailed
+	algorithmTaskID := ""
 	if accepted {
 		reservationStatus = orm.ResourceUpdateTaskStatusDone
+		algorithmTaskID = strings.TrimSpace(resp.Data.TaskID)
 	}
-	if finishErr := finishSkillOrganizeReservation(r.Context(), db, reservation.ID, reservationStatus, err); finishErr != nil {
+	reservationErr := err
+	if !accepted && reservationErr == nil {
+		reservationErr = fmt.Errorf("skill organize returned unexpected response")
+	}
+	if finishErr := finishSkillOrganizeReservation(r.Context(), db, reservation.ID, reservationStatus, algorithmTaskID, reservationErr); finishErr != nil {
 		replyError(w, "update skill organize reservation failed", http.StatusInternalServerError)
 		return
 	}
@@ -151,7 +157,7 @@ func createSkillOrganizeReservation(ctx context.Context, db *gorm.DB, userID, re
 	return task, db.WithContext(ctx).Create(&task).Error
 }
 
-func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, status string, taskErr error) error {
+func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, status, resultID string, taskErr error) error {
 	now := time.Now().UTC()
 	errorMessage := ""
 	errorCode := ""
@@ -163,6 +169,7 @@ func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, st
 	}
 	return db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).Where("id = ?", taskID).Updates(map[string]any{
 		"status":        status,
+		"result_id":     strings.TrimSpace(resultID),
 		"error_code":    errorCode,
 		"error_message": errorMessage,
 		"locked_by":     "",
@@ -170,6 +177,15 @@ func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, st
 		"finished_at":   now,
 		"updated_at":    now,
 	}).Error
+}
+
+func skillOrganizeResponseStatusAccepted(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "pending", "running", "completed":
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveSkillOrganizeIDs(ctx context.Context, db *gorm.DB, userID string, skillPaths []string) ([]string, error) {
@@ -207,11 +223,14 @@ func submitSkillOrganize(ctx context.Context, db *gorm.DB, userID string, req sk
 	if err != nil {
 		return nil, 0, fmt.Errorf("load model configs: %w", err)
 	}
+	algorithmSkills := make([]string, len(req.Skills))
+	for i, skillPath := range req.Skills {
+		algorithmSkills[i] = strings.TrimPrefix(skillPath, skillOrganizeBaseDir+"/")
+	}
 	return skillOrganizeCaller(ctx, algo.SkillOrganizeRequest{
 		RequestID:    req.RequestID,
 		UserID:       userID,
-		Skills:       req.Skills,
-		FSBaseURL:    common.CoreSelfEndpoint(),
+		Skills:       algorithmSkills,
 		ArtifactDir:  req.ArtifactDir,
 		ModelConfigs: modelConfigs,
 	})

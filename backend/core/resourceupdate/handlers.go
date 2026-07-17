@@ -71,7 +71,7 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 			Msg(logEventSkillReviewCallFailed)
 		return retryableOutcome("skill_review_call_failed", fmt.Errorf("http_status=%d: %w", status, err))
 	}
-	if status != 200 || resp == nil || resp.Code != 0 || !skillReviewResponseStatusAccepted(resp.Data.Status) || resp.Data.RequestID != request.RequestID {
+	if status != 200 || resp == nil || resp.Code != 0 || !skillReviewResponseStatusAccepted(resp.Data.Status) || resp.Data.RequestID != request.RequestID || strings.TrimSpace(resp.Data.TaskID) == "" {
 		resourceUpdateWarn(logEventSkillReviewCallFailed, nil).
 			Str("task_id", task.ID).
 			Str("user_id", request.UserID).
@@ -91,7 +91,7 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 		Str("requestid", request.RequestID).
 		Int("http_status", status).
 		Msg(logEventSkillReviewAccepted)
-	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone}
+	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone, ResultID: strings.TrimSpace(resp.Data.TaskID)}
 }
 
 func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdateTask) (skillGenerateRequestJSON, taskOutcome) {
@@ -432,7 +432,7 @@ func safeSkillTaskID(resp *algo.SkillReviewResponse) string {
 
 func skillReviewResponseStatusAccepted(status string) bool {
 	switch strings.TrimSpace(status) {
-	case "running", "completed":
+	case "pending", "running", "completed":
 		return true
 	default:
 		return false

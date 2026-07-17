@@ -211,6 +211,70 @@ func TestPatchSkillEnabledTrueDoesNotCommitAlreadyEnabledDraft(t *testing.T) {
 	}
 }
 
+func TestPatchSkillAutoEvoMarksPendingDraftAuto(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	seedSkillWithHeadRevision(t, db, "skill1", "rev1")
+	seedSkillMDDraftEntry(t, db, "skill1", "h_auto_pending_draft", "# Draft update\n")
+	if err := db.Model(&testSkillV2DraftRow{}).Where("skill_id = ?", "skill1").Update("draft_status", skillDraftStatusPendingConfirm).Error; err != nil {
+		t.Fatalf("mark draft pending: %v", err)
+	}
+	svc := NewSkillService(SkillServiceDeps{
+		DB:        db,
+		BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:     fixedClock(),
+	})
+
+	if _, err := svc.PatchSkill(context.Background(), PatchSkillRequest{
+		SkillID: "skill1",
+		UserID:  "user_001",
+		AutoEvo: boolPtr(true),
+	}); err != nil {
+		t.Fatalf("PatchSkill returned error: %v", err)
+	}
+	var draft testSkillV2DraftRow
+	if err := db.Where("skill_id = ?", "skill1").Take(&draft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+	if draft.DraftStatus != skillDraftStatusAutoPending {
+		t.Fatalf("draft_status = %q, want %q", draft.DraftStatus, skillDraftStatusAutoPending)
+	}
+	detail, err := svc.GetSkill(context.Background(), GetSkillRequest{SkillID: "skill1", UserID: "user_001"})
+	if err != nil {
+		t.Fatalf("GetSkill returned error: %v", err)
+	}
+	if detail.Draft.Status != skillDraftStatusAutoPending {
+		t.Fatalf("summary draft status = %q, want %q", detail.Draft.Status, skillDraftStatusAutoPending)
+	}
+	if detail.Draft.HasUncommittedDraft {
+		t.Fatal("summary still exposes auto_pending draft as uncommitted")
+	}
+}
+
+func TestPatchSkillAutoEvoKeepsEmptyDraftStatus(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	seedSkillWithHeadRevision(t, db, "skill1", "rev1")
+	svc := NewSkillService(SkillServiceDeps{
+		DB:        db,
+		BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:     fixedClock(),
+	})
+
+	if _, err := svc.PatchSkill(context.Background(), PatchSkillRequest{
+		SkillID: "skill1",
+		UserID:  "user_001",
+		AutoEvo: boolPtr(true),
+	}); err != nil {
+		t.Fatalf("PatchSkill returned error: %v", err)
+	}
+	var draft testSkillV2DraftRow
+	if err := db.Where("skill_id = ?", "skill1").Take(&draft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+	if draft.DraftStatus != "" {
+		t.Fatalf("draft_status = %q, want empty", draft.DraftStatus)
+	}
+}
+
 func seedSkillMDDraftEntry(t *testing.T, db *gorm.DB, skillID, blobHash, content string) {
 	t.Helper()
 	now := fixedClock().Now()

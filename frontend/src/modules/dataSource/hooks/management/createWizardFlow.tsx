@@ -287,7 +287,7 @@ export function createWizardFlow(ctx: ManagementContext) {
 
   const openDetailPage = (record: DataSourceItem) => {
     if (record.type === "database") {
-      navigate("/data-sources/database-connections");
+      navigate("/databases");
       return;
     }
 

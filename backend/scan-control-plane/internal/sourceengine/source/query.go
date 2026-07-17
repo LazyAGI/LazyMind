@@ -198,6 +198,23 @@ func (e *DefaultEngine) GetSourceByDatasetID(ctx context.Context, datasetID stri
 	}
 	return GetSourceResponse{Source: sourceToResponse(src)}, nil
 }
+func (e *DefaultEngine) BatchGetSourcesByDatasetIDs(ctx context.Context, datasetIDs []string) (map[string]bool, error) {
+	sources, err := e.repo.ListSourcesByDatasetIDs(ctx, datasetIDs)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	sourceMap := make(map[string]bool, len(datasetIDs))
+	for _, id := range datasetIDs {
+		sourceMap[id] = false
+	}
+	for _, src := range sources {
+		if src.DatasetID != "" {
+			sourceMap[src.DatasetID] = true
+		}
+	}
+	return sourceMap, nil
+}
+
 
 func (e *DefaultEngine) TriggerSourceSync(ctx context.Context, req TriggerSourceSyncRequest) (TriggerSourceSyncResponse, error) {
 	if req.SourceID == "" {

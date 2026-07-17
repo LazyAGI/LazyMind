@@ -30,7 +30,6 @@ import {
 } from '../skillApi';
 import {
   buildDiffLinesWithInline,
-  buildUnifiedDiffLines,
   formatDateTime,
   parseMarkdownFrontMatter,
 } from "../shared";
@@ -103,6 +102,8 @@ const toPersonalResourceApiType = (
   resourceType: ResourceVersionType,
 ): PersonalResourceApiType =>
   resourceType === "memory" ? "memory" : "user_preference";
+
+const formatRevisionLabel = (revisionNo: number) => `v${revisionNo}`;
 
 const getContentLines = (content: string) =>
   (content || "-").split("\n").map((text, index) => ({
@@ -215,7 +216,7 @@ function RevisionDetail({
         </div>
         <div>
           <span>{t("admin.memoryVersionRange")}</span>
-          <strong>r{revision.revisionNo}</strong>
+          <strong>{formatRevisionLabel(revision.revisionNo)}</strong>
         </div>
         <div>
           <span>{t("admin.memoryVersionChangedAt")}</span>
@@ -532,7 +533,7 @@ export default function ResourceVersionDrawer({
     Modal.confirm({
       title: t('admin.memoryVersionRollbackConfirmTitle'),
       content: t('admin.memoryVersionRollbackConfirmContent', {
-        version: `r${selectedRevision.revisionNo}`,
+        version: formatRevisionLabel(selectedRevision.revisionNo),
         name: resourceName || resourceId,
       }),
       okText: t('admin.memoryVersionRollbackButton'),
@@ -547,7 +548,7 @@ export default function ResourceVersionDrawer({
             await rollbackPersonalResource(personalResourceType, {
               revisionId: selectedRevision.revisionId,
               expectedHeadRevisionId: headRevision?.revisionId || undefined,
-              message: `rollback to r${selectedRevision.revisionNo}`,
+              message: `rollback to ${formatRevisionLabel(selectedRevision.revisionNo)}`,
             });
           }
           message.success(t('admin.memoryVersionRollbackSuccess'));
@@ -627,7 +628,7 @@ export default function ResourceVersionDrawer({
                   >
                     <span className="memory-version-list-item-main">
                       <strong>
-                        r{item.revisionNo}
+                        {formatRevisionLabel(item.revisionNo)}
                         {item.isHead ? (
                           <em className="memory-version-current-badge">
                             {t("admin.memoryVersionCurrentBadge")}

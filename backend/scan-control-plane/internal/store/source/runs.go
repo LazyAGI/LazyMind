@@ -43,6 +43,7 @@ func (r *SQLRepository) EnqueueSyncRun(ctx context.Context, run SyncRun) (SyncRu
 				return err
 			}
 		}
+
 		if run.Status == "" {
 			run.Status = SyncRunStatusPending
 		}
@@ -253,3 +254,4 @@ func queryActiveSyncRunORM(db *gorm.DB, bindingID string, generation int64) (Syn
 	}
 	return syncRunFromORM(model), true, nil
 }
+

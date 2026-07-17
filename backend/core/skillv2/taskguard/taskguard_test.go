@@ -36,10 +36,10 @@ func TestEvaluateSkillOperationRules(t *testing.T) {
 	base := SkillOperationRequest{UserID: "user_001"}
 	assertDecision("review allowed without maintenance", withOperation(base, TriggerSkillReview), true, "", "")
 
-	insertStats(t, db, "review_preparing", "review_req", "other_user", "preparing")
+	insertStats(t, db, "review_preparing", "review_req", "other_user", "review_draft")
 	assertDecision("other user does not block", withOperation(base, TriggerSkillReview), true, "", "")
 
-	insertStats(t, db, "review_analyzing_own", "review_req_own", "user_001", "analyzing")
+	insertStats(t, db, "review_analyzing_own", "review_req_own", "user_001", "review_cluster")
 	assertDecision("non-terminal maintenance rejects manual review", withOperation(base, TriggerSkillReview), false, ReasonMaintenanceTaskRunning, DispositionReject)
 	scheduled := withOperation(base, TriggerSkillReview)
 	scheduled.TriggerSource = triggerSourceScheduled
@@ -50,9 +50,17 @@ func TestEvaluateSkillOperationRules(t *testing.T) {
 	insertStats(t, db, "review_skipped_own", "review_req_skipped", "user_001", "skipped")
 	insertStats(t, db, "review_failed_own", "review_req_failed", "user_001", "failed")
 	assertDecision("terminal maintenance statuses do not block", withOperation(base, TriggerSkillReview), true, "", "")
+	insertStats(t, db, "review_retry_after_completed", "review_req_own", "user_001", "review_draft")
+	assertDecision("completed logical request ignores duplicate active row", withOperation(base, TriggerSkillReview), true, "", "")
 
 	testutil.SeedTextBlob(t, db, "draft_hash", "draft")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "draft_hash")
+	if err := db.Model(&testutil.SkillDraftRow{}).Where("skill_id = ?", "skill1").Updates(map[string]any{
+		"task_id": "review_req_own", "draft_status": "pending_confirm",
+	}).Error; err != nil {
+		t.Fatalf("mark review draft pending confirmation: %v", err)
+	}
+	assertDecision("pending confirmation is not a running maintenance task", SkillOperationRequest{UserID: "user_001", SkillID: "skill1", Operation: StartUserEdit}, true, "", "")
 	organize := SkillOperationRequest{UserID: "user_001", SkillIDs: []string{"skill1"}, Operation: TriggerSkillOrganize}
 	decision, err := EvaluateSkillOperation(ctx, db.DB, stateStore, organize)
 	if err != nil {
@@ -95,7 +103,7 @@ func TestEvaluateSkillOperationRemoteMaintenanceAndAutoUpdate(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 
-	insertStats(t, db, "org_task", "org_request", "user_001", "organizing")
+	insertStats(t, db, "org_task", "org_request", "user_001", "organize_draft")
 	orgWrite := SkillOperationRequest{UserID: "user_001", SkillID: "skill1", TaskID: "org_request", Operation: WriteSkillDraft, TriggerSource: "remote_fs"}
 	decision, err := EvaluateSkillOperation(context.Background(), db.DB, stateStore, orgWrite)
 	if err != nil {
@@ -108,7 +116,7 @@ func TestEvaluateSkillOperationRemoteMaintenanceAndAutoUpdate(t *testing.T) {
 	if err := db.Table("skill_review_stats").Where("id = ?", "org_task").Update("status", "completed").Error; err != nil {
 		t.Fatalf("complete org task: %v", err)
 	}
-	insertStats(t, db, "review_task", "review_request", "user_001", "generating")
+	insertStats(t, db, "review_task", "review_request", "user_001", "review_apply")
 	reviewWrite := orgWrite
 	reviewWrite.TaskID = "review_request"
 	decision, err = EvaluateSkillOperation(context.Background(), db.DB, stateStore, reviewWrite)

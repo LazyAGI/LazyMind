@@ -97,8 +97,8 @@ func TestMarketAdminPublishEditUnpublish(t *testing.T) {
 	if got := testutil.CountRows(t, db, "skill_market_items", "id = ? AND status = ?", published.MarketItemID, "published"); got != 1 {
 		t.Fatalf("published market item count = %d, want 1", got)
 	}
-	if got := testutil.CountRows(t, db, "skill_market_installs", "market_item_id = ? AND user_id = ? AND skill_id = ?", published.MarketItemID, "admin_001", published.SourceSkillID); got != 1 {
-		t.Fatalf("publisher market install count = %d, want 1", got)
+	if got := testutil.CountRows(t, db, "skill_market_installs", "market_item_id = ? AND user_id = ? AND skill_id = ?", published.MarketItemID, "admin_001", published.SourceSkillID); got != 0 {
+		t.Fatalf("publisher market install count = %d, want 0", got)
 	}
 
 	if _, err := service.Edit(context.Background(), EditRequest{AdminUserID: "admin_001", MarketItemID: published.MarketItemID, VersionNote: "v2"}); err != nil {

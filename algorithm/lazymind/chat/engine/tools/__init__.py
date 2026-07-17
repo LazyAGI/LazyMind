@@ -5,38 +5,35 @@ registration side effects happen in one consistent place.
 """
 
 from .calculator import calculator
-from .external_db import ExternalDBToolGroup
-from .kb import KBToolGroup, kb_tmp_search
-from .local_fs import LocalFSToolGroup
-from .memory_editor import memory_editor
-from .memory_reader import read_memory
+from .external_db import ExternalDatabaseToolkit
+from .kb import KBToolkit, kb_tmp_search
+from .local_fs import LocalFileToolkit
 from .multimodal import image_editor, image_generator, video_generator, video_to_gif, vision_extractor
 from .plugin_chat_tools import create_plugin_draft
-from .schedule import build_schedule_tool_group
-from .skill_editor import SkillEditorToolGroup
-from .system_query import SystemQueryToolGroup
+from .schedule import build_schedule_toolkit
+from .skill_editor import SkillManagementToolkit
+from .system_query import list_data_sources
 from .vocab_learn import vocab_learn
 from .web_search import url_fetch
-from .writer import WriterToolGroup
+from .writer import WriterCreateToolkit, WriterRevisionToolkit
 
 __all__ = [
-    'build_schedule_tool_group',
+    'build_schedule_toolkit',
     'calculator',
     'create_plugin_draft',
-    'ExternalDBToolGroup',
+    'ExternalDatabaseToolkit',
     'image_editor',
     'image_generator',
     'video_generator',
     'video_to_gif',
-    'KBToolGroup',
+    'KBToolkit',
     'kb_tmp_search',
-    'LocalFSToolGroup',
-    'memory_editor',
-    'read_memory',
+    'LocalFileToolkit',
     'vision_extractor',
-    'SkillEditorToolGroup',
-    'SystemQueryToolGroup',
+    'SkillManagementToolkit',
+    'list_data_sources',
     'vocab_learn',
     'url_fetch',
-    'WriterToolGroup',
+    'WriterCreateToolkit',
+    'WriterRevisionToolkit',
 ]

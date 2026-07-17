@@ -12,14 +12,22 @@ from lazyllm import LOG, AutoModel
 
 from lazymind.model_config import inject_model_config
 from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
+from lazymind.chat.engine.prompts import build_system_prompt
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
-from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, build_agent_tools
+from lazymind.chat.service.component.tool_registry import (
+    DEFAULT_TOOLS,
+    USER_ATTACHMENT_TOOL_CONFIGS,
+    collect_system_prompt_appendices,
+    filter_tools,
+    tool_is_active,
+)
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
 from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
 from .db import SubAgentDB
 from . import tools as subagent_tools
+from . import SUBAGENT_CORE_TOOL_NAMES
 
 
 def _build_artifact_context_section(
@@ -96,13 +104,14 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
     of this list — they are injected as mandatory base tools in _build_subagent_tools.
     Names of base tools in the explicit list are silently ignored (already present).
     """
-    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts',
-                        'list_knowledge_bases', 'read_user_attachment', 'find_user_attachment',
-                        'find_artifact', 'patch_artifact', 'discard_draft'}
     if explicit:
-        name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
+        core_tool_names = set(SUBAGENT_CORE_TOOL_NAMES)
+        name_list = [
+            name for item in explicit
+            if (name := str(item).strip()) and name not in core_tool_names
+        ]
         # Build lookup from DEFAULT_TOOLS
-        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS}
+        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
         # Build lookup from plugin script tools
         script_by_name: Dict[str, Any] = {}
         if plugin_id:
@@ -120,12 +129,11 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
             if name in script_by_name:
                 result.append(script_by_name[name])
             elif name in default_by_name:
-                resolved = build_agent_tools([default_by_name[name]])
-                result.extend(resolved)
+                result.append(default_by_name[name].tool)
             else:
                 LOG.warning('[SubAgent] tool %r not found in plugin scripts or DEFAULT_TOOLS — skipped', name)
         return result
-    return build_agent_tools(list(DEFAULT_TOOLS))
+    return [cfg.tool for cfg in filter_tools(DEFAULT_TOOLS)]
 
 
 def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
@@ -150,6 +158,11 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
     if extra_tools:
         base.extend(extra_tools)
     return base
+
+
+def _tool_configs_for_runtime_tools(runtime_tools: List[Any]) -> list:
+    runtime_ids = {id(tool) for tool in runtime_tools}
+    return [cfg for cfg in DEFAULT_TOOLS if id(cfg.tool) in runtime_ids]
 
 
 _ZH_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
@@ -242,31 +255,29 @@ def _build_attachment_context_for_subagent(history_files_per_turn: 'Dict[str, Li
     lines.append('')
     lines.append('Turn numbers are 1-based integers matching the "Turn N" labels above.')
     lines.append('Omit the turn parameter to search the current turn first, then historical turns.')
-    lines.append(
-        'Do not parse attachments by default. '
-        'find_user_attachment for path/url (image tools, plugins); '
-        'read_user_attachment only when extracted text is required.'
-    )
-    lines.append('find_user_attachment(filename, turn=N) returns path/url without parsing.')
     return '\n'.join(lines)
 
 
-def _build_intent_context_section(db: 'SubAgentDB', session_id: str, step_id: str = '') -> List[str]:
-    """Read global + step-level intent from DB and return prompt lines.
+def _build_intent_context_section(db: 'SubAgentDB', conversation_id: str,
+                                  session_id: str, step_id: str = '') -> List[str]:
+    """Read conversation + plugin-session + current-step intent from DB.
 
     Returns an empty list if there are no intent constraints to inject.
     """
     try:
         lines: List[str] = []
-        session_intent: Optional[str] = db.get_session_intent(session_id)
-        step_intent: Optional[str] = db.get_step_intent(session_id, step_id) if step_id else None
+        conversation_intent: Optional[str] = db.get_conversation_intent(conversation_id)
+        session_intent: Optional[str] = db.get_session_intent(session_id) if session_id else None
+        step_intent: Optional[str] = db.get_step_intent(session_id, step_id) if session_id and step_id else None
 
-        if not session_intent and not step_intent:
+        if not conversation_intent and not session_intent and not step_intent:
             return []
 
         lines.append('')
-        lines.append('## User Intent & Constraints')
+        lines.append('## Effective Execution Intent')
         lines.append('The following constraints were specified by the user and MUST be respected:')
+        if conversation_intent:
+            lines.append(f'Conversation intent: {conversation_intent}')
         if session_intent:
             lines.append(f'Global constraints: {session_intent}')
         if step_intent:
@@ -307,8 +318,8 @@ def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -
         elif ctx.input_slots:
             lines.append(f'Input slots you may read: {", ".join(ctx.input_slots)}')
     # Inject intent/constraints from the plugin session so SubAgent respects user preferences.
-    if session_id and db:
-        intent_lines = _build_intent_context_section(db, session_id, step_id)
+    if db:
+        intent_lines = _build_intent_context_section(db, ctx.conversation_id, session_id, step_id)
         if intent_lines:
             lines.extend(intent_lines)
     # Inject user attachment context so the SubAgent knows which files were uploaded.
@@ -550,9 +561,20 @@ async def run_subagent_stream(
 
         llm = AutoModel(model='llm')
         runtime_tools = _resolve_runtime_tools(tools, plugin_id=params.get('plugin_id') or None)
+        subagent_tools_all = _build_subagent_tools(runtime_tools)
+        runtime_configs = _tool_configs_for_runtime_tools(runtime_tools)
+        runtime_prompt = build_system_prompt(
+            bool(subagent_tools_all),
+            use_memory=False,
+            current_query=ctx.objective,
+            tool_prompt_appendices=collect_system_prompt_appendices(
+                runtime_configs + list(USER_ATTACHMENT_TOOL_CONFIGS),
+            ),
+        )
         agent = build_react_agent(
             llm=llm,
-            tools=_build_subagent_tools(runtime_tools),
+            tools=subagent_tools_all,
+            prompt=runtime_prompt,
             force_summarize_context=ctx.objective,
             extra_stop_condition=_make_cancel_stop_condition(),
         )

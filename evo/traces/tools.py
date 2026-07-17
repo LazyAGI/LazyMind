@@ -22,7 +22,6 @@ _FALLBACK_CHAT_TOOL_NAMES = frozenset({
     'kb_get_window_nodes',
     'kb_keyword_search',
     'kb_search',
-    'memory_editor',
     'read_reference',
     'run_script',
     'skill_editor',

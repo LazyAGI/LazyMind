@@ -52,3 +52,21 @@ func TestReviewSkillUsesRegisteredChatRoute(t *testing.T) {
 		t.Fatalf("ReviewSkill() response = %#v", response)
 	}
 }
+
+func TestSkillOrganizeRequestMatchesAlgorithmContract(t *testing.T) {
+	body, err := json.Marshal(SkillOrganizeRequest{
+		RequestID: "org-request-1",
+		UserID:    "user-1",
+		Skills:    []string{"vcs/git-usage"},
+	})
+	if err != nil {
+		t.Fatalf("marshal SkillOrganizeRequest: %v", err)
+	}
+	var gotBody map[string]any
+	if err := json.Unmarshal(body, &gotBody); err != nil {
+		t.Fatalf("unmarshal SkillOrganizeRequest: %v", err)
+	}
+	if _, ok := gotBody["fs_base_url"]; ok {
+		t.Fatalf("SkillOrganizeRequest sent non-contract field fs_base_url: %#v", gotBody)
+	}
+}

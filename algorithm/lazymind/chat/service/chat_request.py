@@ -20,6 +20,7 @@ class ChatConversationOptions(BaseModel):
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None
     mode: Optional[str] = 'auto'
+    intent_context: Optional[Dict[str, Any]] = None
 
 
 class ChatRetrievalOptions(BaseModel):

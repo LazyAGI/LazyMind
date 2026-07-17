@@ -26,7 +26,6 @@ type SkillOrganizeRequest struct {
 	RequestID    string         `json:"requestid"`
 	UserID       string         `json:"user_id"`
 	Skills       []string       `json:"skills"`
-	FSBaseURL    string         `json:"fs_base_url"`
 	ArtifactDir  string         `json:"artifact_dir,omitempty"`
 	ModelConfigs map[string]any `json:"model_configs,omitempty"`
 }

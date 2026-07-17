@@ -312,44 +312,71 @@ func buildSkillReviewTaskStatus(ctx context.Context, db *gorm.DB, userID string,
 		RequestID: requestID,
 		Status:    task.Status,
 	}
-	var stats skillReviewStatsRow
-	err := db.WithContext(ctx).
-		Table("skill_review_stats").
-		Select("id, requestid, userid, status, started_at, duration_ms, summary").
-		Where("userid = ? AND requestid = ?", strings.TrimSpace(userID), requestID).
-		Order("started_at DESC").
-		Take(&stats).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	stats, found, err := findSkillReviewTaskStats(ctx, db, userID, task, requestID)
+	if err != nil {
+		return skillReviewTaskStatusResponse{}, err
+	}
+	if !found {
 		if task.Status == orm.ResourceUpdateTaskStatusDone {
 			resp.Status = orm.ResourceUpdateTaskStatusRunning
 		}
 		return resp, nil
 	}
-	if err != nil {
-		return skillReviewTaskStatusResponse{}, err
-	}
 
 	resp.RunStatus = stats.Status
-	resp.Status = skillReviewTaskStatusFromRunStats(task.Status, stats.Status)
+	resp.Status = skillReviewTaskStatusFromRunStats(stats.Status)
 	resp.ResultCount = skillReviewStatsToResponse(stats).SkillCount
 	return resp, nil
 }
 
-func skillReviewTaskStatusFromRunStats(taskStatus, runStatus string) string {
-	switch taskStatus {
-	case orm.ResourceUpdateTaskStatusPending, orm.ResourceUpdateTaskStatusRunning,
-		orm.ResourceUpdateTaskStatusFailed, orm.ResourceUpdateTaskStatusSkipped:
-		return taskStatus
+func findSkillReviewTaskStats(ctx context.Context, db *gorm.DB, userID string, task orm.ResourceUpdateTask, requestID string) (skillReviewStatsRow, bool, error) {
+	query := db.WithContext(ctx).
+		Table("skill_review_stats").
+		Select("id, requestid, userid, status, started_at, duration_ms, summary").
+		Where("userid = ?", strings.TrimSpace(userID))
+	if resultID := strings.TrimSpace(task.ResultID); resultID != "" {
+		var row skillReviewStatsRow
+		err := query.Where("id = ?", resultID).Take(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return skillReviewStatsRow{}, false, nil
+		}
+		if err != nil {
+			return skillReviewStatsRow{}, false, err
+		}
+		return row, true, nil
 	}
+
+	var rows []skillReviewStatsRow
+	if err := query.
+		Where("requestid = ?", strings.TrimSpace(requestID)).
+		Order("started_at ASC, id ASC").
+		Find(&rows).Error; err != nil {
+		return skillReviewStatsRow{}, false, err
+	}
+	if len(rows) == 0 {
+		return skillReviewStatsRow{}, false, nil
+	}
+	for _, row := range rows {
+		if strings.TrimSpace(row.Status) == orm.SkillReviewStatsStatusCompleted {
+			return row, true, nil
+		}
+	}
+	for _, row := range rows {
+		if strings.TrimSpace(row.Status) == orm.SkillReviewStatsStatusSkipped {
+			return row, true, nil
+		}
+	}
+	return rows[len(rows)-1], true, nil
+}
+
+func skillReviewTaskStatusFromRunStats(runStatus string) string {
 	switch strings.TrimSpace(runStatus) {
-	case "completed":
+	case orm.SkillReviewStatsStatusCompleted:
 		return orm.ResourceUpdateTaskStatusDone
-	case "failed":
+	case orm.SkillReviewStatsStatusFailed:
 		return orm.ResourceUpdateTaskStatusFailed
-	case "skipped":
+	case orm.SkillReviewStatsStatusSkipped:
 		return orm.ResourceUpdateTaskStatusSkipped
-	case "running":
-		return orm.ResourceUpdateTaskStatusRunning
 	default:
 		return orm.ResourceUpdateTaskStatusRunning
 	}
@@ -435,6 +462,25 @@ func skillReviewStatsCountsFromSummary(summary map[string]any) skillReviewStatsC
 	if counts.FailedCount == 0 {
 		counts.FailedCount = summaryArrayLen(summary, "failed_skills")
 	}
+	if apply := summaryObject(summary, "apply"); apply != nil {
+		if counts.SkillCount == 0 {
+			counts.SkillCount = summaryInt64(apply, "output_count")
+		}
+		if counts.CreatedCount == 0 && counts.UpdatedCount == 0 {
+			for _, item := range summaryArray(apply, "applied") {
+				entry, _ := item.(map[string]any)
+				switch strings.TrimSpace(summaryString(entry, "type")) {
+				case "new":
+					counts.CreatedCount++
+				case "patch":
+					counts.UpdatedCount++
+				}
+			}
+		}
+	}
+	if nested := summaryObject(summary, "counts"); nested != nil && counts.SkillCount == 0 {
+		counts.SkillCount = summaryInt64(nested, "skill_count", "result_count", "resolution", "candidate", "draft")
+	}
 	if counts.SkillCount == 0 {
 		counts.SkillCount = counts.CreatedCount + counts.UpdatedCount + counts.SkippedCount + counts.FailedCount
 	}
@@ -442,6 +488,30 @@ func skillReviewStatsCountsFromSummary(summary map[string]any) skillReviewStatsC
 		counts.SkillCount = summaryArrayLen(summary, "skills", "items", "results", "review_results", "skill_results")
 	}
 	return counts
+}
+
+func summaryObject(summary map[string]any, key string) map[string]any {
+	if summary == nil {
+		return nil
+	}
+	value, _ := summary[key].(map[string]any)
+	return value
+}
+
+func summaryArray(summary map[string]any, key string) []any {
+	if summary == nil {
+		return nil
+	}
+	value, _ := summary[key].([]any)
+	return value
+}
+
+func summaryString(summary map[string]any, key string) string {
+	if summary == nil {
+		return ""
+	}
+	value, _ := summary[key].(string)
+	return value
 }
 
 func summaryInt64(summary map[string]any, keys ...string) int64 {

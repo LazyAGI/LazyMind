@@ -262,7 +262,7 @@ def test_skill_editor_create_file_tools_remove_core_paths():
             'references/old.md': 'old reference\n',
         },
     })
-    tool_group = skill_editor_mod.SkillEditorToolGroup(store=store)
+    tool_group = skill_editor_mod.SkillManagementToolkit(store=store)
 
     create_result = tool_group.create_skill(
         'new_skill',
@@ -382,7 +382,7 @@ def test_skill_editor_renames_package():
         ('writing', 'existing'): {'SKILL.md': existing_content, 'references/doc.md': 'doc\n'},
     })
 
-    result = skill_editor_mod.SkillEditorToolGroup(store=store).rename_skill(
+    result = skill_editor_mod.SkillManagementToolkit(store=store).rename_skill(
         'existing',
         category='writing',
         new_name='renamed',

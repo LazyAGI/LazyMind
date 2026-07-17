@@ -936,8 +936,23 @@ func (s *serverSourceEngineStub) TriggerSourceSync(_ context.Context, req source
 	return sourceengine.TriggerSourceSyncResponse{}, nil
 }
 
-func (s *serverSourceEngineStub) UpdateSource(context.Context, string, string, sourceengine.UpdateSourceRequest) (sourceengine.UpdateSourceResponse, error) {
-	return sourceengine.UpdateSourceResponse{}, nil
+func (s *serverSourceEngineStub) UpdateSource(_ context.Context, _ string, _ string, req sourceengine.UpdateSourceRequest) (sourceengine.UpdateSourceResponse, error) {
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	name := "Docs"
+	if req.Name != nil {
+		name = *req.Name
+	}
+	return sourceengine.UpdateSourceResponse{
+		Source: sourceengine.SourceResponse{
+			SourceID:      "source-1",
+			Name:          name,
+			DatasetID:     "dataset-1",
+			Status:        sourceengine.SourceStatusActive,
+			ConfigVersion: req.ConfigVersion + 1,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		},
+	}, nil
 }
 
 func (s *serverSourceEngineStub) DeleteSource(context.Context, string) (sourceengine.DeleteSourceResponse, error) {
@@ -962,6 +977,22 @@ func (s *serverSourceEngineStub) UpdateBinding(context.Context, string, string, 
 
 func (s *serverSourceEngineStub) DeleteBinding(context.Context, string, string) (sourceengine.DeleteBindingResponse, error) {
 	return sourceengine.DeleteBindingResponse{}, nil
+}
+
+func (s *serverSourceEngineStub) UpdateBindingChatEnabled(_ context.Context, bindingID string, chatEnabled bool) error {
+	return nil
+}
+
+
+
+
+
+func (s *serverSourceEngineStub) BatchGetSourcesByDatasetIDs(_ context.Context, datasetIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(datasetIDs))
+	for _, id := range datasetIDs {
+		result[id] = false
+	}
+	return result, nil
 }
 
 type serverTargetTreeStub struct {
@@ -1123,6 +1154,32 @@ func (a *apiContractLocalAgentStub) StatPath(context.Context, localfs.StatPathRe
 
 func (a *apiContractLocalAgentStub) ExportFile(context.Context, localfs.ExportFileRequest) (localfs.ExportedFile, error) {
 	return localfs.ExportedFile{}, nil
+}
+
+
+func TestUpdateSourceHandlerModifiesName(t *testing.T) {
+	t.Parallel()
+
+	engine := &serverSourceEngineStub{}
+	handler := NewHandler(WithSourceEngine(engine), WithAccessChecker(allowAccess{}))
+	body := `{"config_version":10,"name":"renamed-source"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/scan/sources/source-1", strings.NewReader(body))
+	setAPIContractActor(req)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp sourceengine.UpdateSourceResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Source.Name != "renamed-source" {
+		t.Fatalf("response source.name=renamed-source, got %s", resp.Source.Name)
+	}
 }
 
 var _ sourceengine.Engine = (*serverSourceEngineStub)(nil)

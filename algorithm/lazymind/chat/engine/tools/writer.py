@@ -70,7 +70,7 @@ def _write_input_artifact(root: Path, filename: str, data: Any, schema_name: str
         data,
         str(root / filename),
         schema_name=schema_name,
-        created_by='WriterToolGroup',
+        created_by='WriterToolkit',
     )
 
 
@@ -117,7 +117,7 @@ def _infer_content_schema(data: Any) -> str:
     return writer_artifact_schema('content')
 
 
-class WriterToolGroup:
+class WriterToolkitBase:
     """Common writer tools.
 
     All public methods accept text or JSON strings and return text or JSON strings.
@@ -125,29 +125,7 @@ class WriterToolGroup:
     underlying lazyllm writer tools.
     """
 
-    __public_apis__ = [
-        'build_writing_task',
-        'profile_resources',
-        'create_writing_context',
-        'generate_outline',
-        'generate_section_instructions',
-        'generate_draft_section',
-        'assemble_draft_document',
-        'update_writing_context',
-        'check_consistency',
-        'generate_writing_output',
-        'build_revise_task',
-        'draft_to_doc_ir',
-        'locate_revision_target',
-        'generate_modify_plan',
-        'generate_patch_set',
-        'validate_patch_set',
-        'apply_patch',
-        'doc_ir_to_draft',
-    ]
-
-    def __key_source__(self) -> bool:
-        return True
+    __public_apis__: list[str] = []
 
     def build_writing_task(self, query: str) -> str:
         """Build a writing task from the user's original request.
@@ -569,3 +547,34 @@ class WriterToolGroup:
             llm=None, artifact_store=str(root),
         ).doc_ir_to_draft(doc_ir=doc_ir_path)
         return _json_dumps(_primary_data(result))
+
+
+class WriterCreateToolkit(WriterToolkitBase):
+    """Create long-form writing from source profiling through final output.
+
+    Start with build_writing_task, profile resources and create context. Build
+    the outline before drafting sections, assemble the document, then validate
+    consistency and generate the final output.
+    """
+
+    __public_apis__ = [
+        'build_writing_task', 'profile_resources', 'create_writing_context',
+        'generate_outline', 'generate_section_instructions',
+        'generate_draft_section', 'assemble_draft_document',
+        'update_writing_context', 'check_consistency',
+        'generate_writing_output',
+    ]
+
+
+class WriterRevisionToolkit(WriterToolkitBase):
+    """Revise an existing draft through a validated structured patch workflow.
+
+    Build the revision task, convert the draft to DocIR, locate the target,
+    generate and validate a patch set, apply it, then convert back to a draft.
+    """
+
+    __public_apis__ = [
+        'build_revise_task', 'draft_to_doc_ir', 'locate_revision_target',
+        'generate_modify_plan', 'generate_patch_set', 'validate_patch_set',
+        'apply_patch', 'doc_ir_to_draft',
+    ]

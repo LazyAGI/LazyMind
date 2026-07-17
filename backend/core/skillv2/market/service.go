@@ -303,11 +303,6 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishRespo
 		if err := skillsearch.RebuildSkillTx(ctx, tx, sourceSkillID, now); err != nil {
 			return err
 		}
-		if strings.TrimSpace(req.AdminUserID) != "" {
-			if err := recordMarketInstall(ctx, tx, marketItemID, req.AdminUserID, sourceSkillID, now); err != nil {
-				return err
-			}
-		}
 		out = PublishResponse{MarketItemID: marketItemID, SourceSkillID: sourceSkillID}
 		return nil
 	})

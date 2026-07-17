@@ -60,6 +60,14 @@ func (c *HTTPCoreClient) CreateDataset(ctx context.Context, req CreateDatasetReq
 	return out, nil
 }
 
+func (c *HTTPCoreClient) UpdateDataset(ctx context.Context, req UpdateDatasetRequest) error {
+	if strings.TrimSpace(req.DatasetID) == "" || strings.TrimSpace(req.DisplayName) == "" {
+		return fmt.Errorf("dataset_id and display_name are required")
+	}
+	body := map[string]any{"display_name": req.DisplayName}
+	return c.doJSON(ctx, http.MethodPatch, "/datasets/"+url.PathEscape(req.DatasetID), body, nil, req.UserID, "")
+}
+
 func (c *HTTPCoreClient) DeleteDataset(ctx context.Context, req DeleteDatasetRequest) error {
 	if strings.TrimSpace(req.DatasetID) == "" {
 		return fmt.Errorf("dataset_id is required")

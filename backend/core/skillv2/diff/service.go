@@ -44,6 +44,14 @@ type EntryInfo struct {
 	Size     int64
 }
 
+type emptySkillFS struct{}
+
+func (emptySkillFS) ListAll(context.Context) ([]EntryInfo, error) { return []EntryInfo{}, nil }
+
+func (emptySkillFS) ReadFile(context.Context, string) ([]byte, error) {
+	return nil, gorm.ErrRecordNotFound
+}
+
 type DiffOptions struct {
 	Path         string
 	ContextLines int
@@ -322,6 +330,9 @@ func (r *RefResolver) Resolve(ctx context.Context, userID string, ref DiffRef) (
 		}
 		revisionID, err := headRevisionID(ctx, r.db, ref.SkillID)
 		if err != nil {
+			if errors.Is(err, errSkillHasNoHeadRevision) {
+				return emptySkillFS{}, nil
+			}
 			return nil, err
 		}
 		return newRevisionFS(ctx, r.db, ref.SkillID, revisionID)
@@ -458,12 +469,14 @@ func readRevisionEntryBlob(ctx context.Context, db *gorm.DB, entry skillRevision
 
 func draftEntriesForSkill(ctx context.Context, db *gorm.DB, skillID string) ([]skillRevisionEntryRow, error) {
 	revisionID, err := headRevisionID(ctx, db, skillID)
-	if err != nil {
+	if err != nil && !errors.Is(err, errSkillHasNoHeadRevision) {
 		return nil, err
 	}
 	var rows []skillRevisionEntryRow
-	if err := db.WithContext(ctx).Where("revision_id = ?", revisionID).Order("path ASC").Find(&rows).Error; err != nil {
-		return nil, err
+	if revisionID != "" {
+		if err := db.WithContext(ctx).Where("revision_id = ?", revisionID).Order("path ASC").Find(&rows).Error; err != nil {
+			return nil, err
+		}
 	}
 	entriesByPath := make(map[string]skillRevisionEntryRow, len(rows))
 	for _, row := range rows {
@@ -700,6 +713,8 @@ type skillBlobRow struct {
 
 func (skillBlobRow) TableName() string { return "skill_blobs" }
 
+var errSkillHasNoHeadRevision = errors.New("skill has no head revision")
+
 func headRevisionID(ctx context.Context, db *gorm.DB, skillID string) (string, error) {
 	if db == nil {
 		return "", fmt.Errorf("db is not configured")
@@ -709,7 +724,7 @@ func headRevisionID(ctx context.Context, db *gorm.DB, skillID string) (string, e
 		return "", err
 	}
 	if skill.HeadRevisionID == nil || *skill.HeadRevisionID == "" {
-		return "", fmt.Errorf("skill has no head revision")
+		return "", errSkillHasNoHeadRevision
 	}
 	return *skill.HeadRevisionID, nil
 }

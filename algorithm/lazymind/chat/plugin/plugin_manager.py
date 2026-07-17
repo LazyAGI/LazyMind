@@ -9,7 +9,7 @@ Tool types registered dynamically per-conversation:
 - advance_steps             : Atomic synchronous batch advancement for multiple Ready steps.
 - advance_steps_and_hand_off: Atomic asynchronous batch advancement (stop-tool).
 - ask_user                  : Ask the user a question (stop-tool). ChatAgent only; absent in auto mode.
-- update_intent             : Upsert a global or step-level intent/constraint (ChatAgent only).
+- intentwrite               : Extended with plugin-session and plugin-step scopes when active.
 - list_plugin_steps         : Read-only step status query (ChatAgent only, when session active).
 - get_step_result           : Read-only artifact summary for a step (ChatAgent only).
 - get_failed_steps          : Read-only failed steps with error info (ChatAgent only).
@@ -33,6 +33,8 @@ import lazyllm
 from lazyllm.tools.agent.base import _write_agent_data
 
 from lazymind.chat.plugin import plugin_loader
+from lazymind.chat.engine.subagent import SUBAGENT_CORE_TOOL_NAMES
+from lazymind.chat.engine.tools.intent_writer import enable_plugin_intent_scopes
 from lazymind.model_config import is_model_role_available
 
 LOG = logging.getLogger(__name__)
@@ -343,24 +345,11 @@ _COLD_START_PLUGIN_PROMPT = (
 # the plugin's state.yml declares.
 # ---------------------------------------------------------------------------
 
-_FRAMEWORK_TOOLS: List[str] = [
-    'save_artifact',
-    'get_artifact',
-    'list_artifacts',
-    'list_knowledge_bases',
-    'read_user_attachment',
-    'find_user_attachment',
-    'find_artifact',
-    'patch_artifact',
-    'discard_draft',
-]
-
-
 def _merge_tools(declared: List[str]) -> List[str]:
     """Return a deduplicated tool list with framework tools prepended."""
     seen = set()
     merged: List[str] = []
-    for t in _FRAMEWORK_TOOLS + list(declared):
+    for t in (*SUBAGENT_CORE_TOOL_NAMES, *declared):
         if t not in seen:
             seen.add(t)
             merged.append(t)
@@ -1829,69 +1818,25 @@ def _wait_for_go_task(step_id: str, trigger_result: str, timeout: float = 600.0)
         return trigger_result
 
 
-# ---------------------------------------------------------------------------
-# update_intent — ChatAgent only, persists intent/constraint to DB
-# ---------------------------------------------------------------------------
+def update_intentwriter(tool: Any, plugin_context: Optional[Dict[str, Any]]) -> Any:
+    """Extend a conversation IntentWriter with active-plugin scopes.
 
-def build_update_intent_tool() -> Any:
-    """Build the update_intent tool for ChatAgent.
-
-    UPSERT a global or step-level intent/constraint. Plugin-agnostic — the
-    framework manages this, not the plugin author.
+    ChatService owns the base tool. Plugin internals stay here: ChatService does
+    not inspect step ids, DAG state, or plugin lifecycle.
     """
-    def update_intent(
-        scope: str,
-        content: str,
-        step_id: Optional[str] = None,
-    ) -> str:
-        """Record or update an intent/constraint for this plugin session.
-
-        ALWAYS call this tool BEFORE advancing any step when the user expresses
-        a style preference, quality requirement, or execution constraint in their
-        message. Do not skip this even if you are about to call advance_step_and_hand_off.
-
-        Also call this tool when:
-        - The user repeats or emphasizes the same point across multiple turns.
-        - The user pushes back on a result and explains why (e.g. "that's wrong because...",
-          "I didn't mean X, I meant Y") — capture the clarification so future steps honour it.
-
-        Scope 'session' — applies to the entire session (global constraint):
-          e.g. "keep the tone formal throughout", "always use bullet points"
-          → update_intent(scope='session', content='keep the tone formal throughout')
-
-        Scope 'step' — applies to a specific step only:
-          e.g. "make step 2 output shorter", "use a different format for the summary step"
-          → update_intent(scope='step', step_id='<step_id>', content='output should be shorter')
-
-        Args:
-            scope (str): 'session' for global or 'step' for step-specific constraint.
-            content (str): A concise model-generated summary of the user's emphasized
-                constraints in the latest query (not a full raw quote). If no explicit
-                constraints are present, do not call this tool.
-            step_id (str, optional): Required when scope='step'.
-
-        Returns:
-            Confirmation string.
-        """
-        cfg = _agentic_config()
-        session_id = cfg.get('plugin_session_id', '')
-        if not session_id:
-            raise ValueError('no active plugin session.')
-        if scope not in ('session', 'step'):
-            raise ValueError(f'unknown scope {scope!r}. Use "session" or "step".')
-        if scope == 'step' and not step_id:
-            raise ValueError('step_id required for scope="step".')
-        # Emit via SSE so Go writes the DB and pushes an intent_updated convEvent
-        # to notify the frontend immediately — avoids the user having to refresh.
-        _write_agent_data('intent_updated', **{
-            'session_id': session_id,
-            'scope': scope,
-            'content': content,
-            'step_id': step_id or '',
-        })
-        return '约束已更新'
-
-    return update_intent
+    if not isinstance(plugin_context, dict):
+        return tool
+    session_id = str(plugin_context.get('session_id') or '').strip()
+    plugin_id = str(plugin_context.get('plugin_id') or '').strip()
+    spec = plugin_loader.get_plugin(plugin_id) if session_id and plugin_id else None
+    if not spec:
+        return tool
+    return enable_plugin_intent_scopes(
+        tool,
+        session_id=session_id,
+        plugin_id=plugin_id,
+        valid_step_ids=list(spec._steps.keys()),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2219,9 +2164,6 @@ def resolve_plugin_injection(
                     ),
                 ])
 
-            # update_intent for ChatAgent only.
-            plugin_tools.append(build_update_intent_tool())
-
             # Read-only query tools (active session required).
             plugin_tools.extend(build_query_tools())
 
@@ -2323,11 +2265,9 @@ def _catalog_intro(entry: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _build_intent_section(session_id: str, step_id: Optional[str] = None) -> str:
-    """Serialize session-level and step-level intent/constraints for injection into ChatAgent prompts.
+    """Serialize plugin-session intent for ChatAgent prompt injection.
 
-    Both global (session-level) and all recorded step-level constraints are injected here
-    so ChatAgent has full visibility when deciding whether to call update_intent and which
-    step to advance next.
+    Step intent is execution detail and is injected only into its SubAgent.
     """
     if not session_id:
         return ''
@@ -2335,17 +2275,13 @@ def _build_intent_section(session_id: str, step_id: Optional[str] = None) -> str
         from lazymind.chat.engine.subagent.db import TaskQueryDB
         db = TaskQueryDB()
         session_intent = db.get_session_intent(session_id) if hasattr(db, 'get_session_intent') else None
-        step_intents: Dict[str, str] = db.list_step_intents(session_id) if hasattr(db, 'list_step_intents') else {}
-
-        if not session_intent and not step_intents:
+        if not session_intent:
             return ''
 
         lines = ['## User Intent & Constraints']
         lines.append('These constraints were recorded from the user and MUST be respected when advancing steps.')
         if session_intent:
             lines.append(f'Global: {session_intent}')
-        for sid, txt in step_intents.items():
-            lines.append(f'Step "{sid}": {txt}')
         return '\n'.join(lines)
     except Exception:
         return ''
@@ -2443,18 +2379,18 @@ def _build_mode_guidance(
     global_rules = (
         '\n\n## Step decision rules (READ BEFORE EVERY ACTION)\n\n'
         '### Rule 0 — Intent capture from latest user query (highest priority)\n'
-        'At the beginning of each plugin turn, inspect ONLY the latest user query.\n'
+        'At the beginning of each plugin turn, compare the latest user query with the inherited intent.\n'
         'If it contains explicit constraints/emphasis or a named execution boundary (e.g.\n'
         '"必须/不要/只能/执行到 X/做到 X/完成 X 后确认/until X"),\n'
-        'you MUST call `update_intent(scope="session", content="<concise summary>")` FIRST,\n'
+        'you MUST call `intentwrite` with the minimal intent delta FIRST,\n'
         'before any step-advance tool call. Summarize 1-2 key constraints in concise Chinese.\n'
-        'If the latest query has no explicit new constraints, do NOT call update_intent.\n\n'
+        'If the latest query has no explicit new constraints, do NOT call intentwrite.\n\n'
         'ALSO: if the "User Intent & Constraints" section is empty (no session intent recorded yet)\n'
         'AND the conversation history contains a persistent execution preference such as\n'
         '"一次性", "不要中断", "执行到 X", "完成 X 后确认", "每步确认", "每一步审批",\n'
         '"无需审批", "一次性写完", "run all steps", "approve every step",\n'
         '"do it all at once", or similar phrases,\n'
-        'call `update_intent(scope="session", content="<concise summary of the constraint>")`\n'
+        'call `intentwrite(scope="plugin_session", operations=[...])`\n'
         'to persist the constraint before advancing any step.\n\n'
         '### Rule 1 — Intent-change detection\n'
         'Before advancing any step, check whether the user is rejecting or changing\n'

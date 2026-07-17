@@ -86,7 +86,7 @@ func TestSkillOrganizeDraftConflictDoesNotCallAlgorithm(t *testing.T) {
 func insertHandlerMaintenanceTask(t *testing.T, db *testutil.TestDB, taskID, userID string) {
 	t.Helper()
 	if err := db.Table("skill_review_stats").Create(map[string]any{
-		"id": taskID, "requestid": taskID, "userid": userID, "status": "running",
+		"id": taskID, "requestid": taskID, "userid": userID, "status": "review_apply",
 		"started_at": "2026-07-13T10:00:00Z", "duration_ms": 0, "summary": "{}",
 	}).Error; err != nil {
 		t.Fatalf("insert maintenance task: %v", err)

@@ -19,12 +19,18 @@ from lazymind.chat.engine.prompts import build_system_prompt
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
+    ASK_USER_TOOL_CONFIG,
     DEFAULT_TOOLS,
-    build_agent_tools,
+    USER_ATTACHMENT_TOOL_CONFIGS,
+    collect_system_prompt_appendices,
     filter_tools,
     normalize_history_for_agent,
 )
 from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
+from lazymind.chat.engine.tools.intent_writer import (
+    build_intentwrite_tool,
+    render_intent_section,
+)
 from lazymind.chat.service.utils import (
     SensitiveFilter,
     basename_from_path,
@@ -131,9 +137,8 @@ def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
     return tools
 
 
-def _build_subagent_chat_tools(has_subagents: bool) -> list:
-    """Assemble ChatAgent SubAgent tools. create_subagent is always available; query tools
-    are registered only when the conversation already has SubAgent tasks."""
+def _build_subagent_chat_tools() -> list:
+    """Return all ChatAgent SubAgent tools as directly registered callables."""
     from lazymind.chat.engine.tools.subagent_chat_tools import (
         create_subagent,
         get_subagent_artifacts,
@@ -141,15 +146,10 @@ def _build_subagent_chat_tools(has_subagents: bool) -> list:
         list_subagent_artifacts,
         list_subagents,
     )
-    tools = [create_subagent]
-    if has_subagents:
-        tools.extend([
-            list_subagents,
-            get_subagent_status,
-            list_subagent_artifacts,
-            get_subagent_artifacts,
-        ])
-    return tools
+    return [
+        create_subagent, list_subagents, get_subagent_status,
+        list_subagent_artifacts, get_subagent_artifacts,
+    ]
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
@@ -177,43 +177,6 @@ def _should_register_ask_user(agentic_config: Dict[str, Any]) -> bool:
         agentic_config.get('enable_plugin', True)
         and agentic_config.get('plugin_mode') == 'auto'
     )
-
-
-def _build_schedule_tools() -> list:
-    """Return a lazy ToolGroup dict for all schedule management tools.
-
-    Injected as a single lazy group so the LLM only sees the gateway tool until
-    the user mentions scheduling topics.
-    """
-    from lazymind.chat.engine.tools.schedule import build_schedule_tool_group
-    return [build_schedule_tool_group()]
-
-
-def _collect_active_tool_names(configs: list) -> set[str]:
-    # Build a per-request callable allowlist from filtered tool configs.
-    # This is consumed by tool_runtime guard to prevent accidental execution
-    # when the model tries to call a tool that is not active in this session.
-    names: set[str] = set()
-    for cfg in configs:
-        inst = getattr(cfg, 'instance', None)
-        if inst is None:
-            continue
-        if callable(inst):
-            tool_name = str(getattr(inst, '__name__', '')).strip()
-            if tool_name:
-                names.add(tool_name)
-        public_apis = getattr(inst, '__public_apis__', None)
-        if isinstance(public_apis, (list, tuple)):
-            group_name = inst.__class__.__name__
-            if group_name:
-                names.add(f'get_{group_name}_methods')
-            for method_name in public_apis:
-                method = str(method_name).strip()
-                if method:
-                    names.add(method)
-                    if group_name:
-                        names.add(f'{group_name}_{method}')
-    return names
 
 
 def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]],
@@ -329,18 +292,6 @@ def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]],
         'Only fall back to historical turns when the user explicitly references a past turn '
         'or when the current turn has no attachments.'
     )
-    lines.append(
-        'Do not parse attachments by default. '
-        'Use find_user_attachment(filename, turn=N) to get path/url for image tools, plugins, '
-        'or vision_extractor (visual/edit tasks). '
-        'Use read_user_attachment only when you need extracted text (documents, or textual '
-        'Q&A about image content). Supported: png, jpg, jpeg, pdf, doc, docx, pptx.'
-    )
-    lines.append(
-        'find_user_attachment returns `path` (local) and `url` (signed); '
-        'prefer `path` for save_plugin_artifact.'
-    )
-
     return '\n'.join(lines)
 
 
@@ -357,6 +308,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         guard_plugin_agent_stream,
         is_plugin_driver_turn,
         resolve_plugin_injection,
+        update_intentwriter,
     )
 
     conversation_id = (conversation.conversation_id or '').strip()
@@ -403,7 +355,6 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             flat_files.extend(files_map[seq_key])
     resolved_files = validate_and_resolve_files(flat_files)
     filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))
-    LOG.info(f'[KBToolGroup_DEBUG] filters={filters!r} kb_id={filters.get("kb_id")!r}')
 
     raw_history = list(message.history) if isinstance(message.history, list) else []
     agent_history = normalize_history_for_agent(raw_history)
@@ -482,6 +433,13 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                                  disabled_builtin_plugins=plugin.disabled_builtin_plugins)
     agentic_config.update(agentic_config_patch)
 
+    intentwriter = build_intentwrite_tool(
+        conversation_id=conversation_id,
+        current_query=query,
+        current_intent=conversation.intent_context,
+    )
+    intentwriter = update_intentwriter(intentwriter, plugin.plugin_context)
+
     # Inject SubAgent task context into the system prompt independently of plugin state.
     # Injected when either plugin or subagent is enabled so the model knows about ongoing tasks.
     # When both are disabled, the task context is suppressed (pure QA mode).
@@ -506,6 +464,11 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             # rather than into the system prompt, so stale task state from history is
             # overridden by the live snapshot queried at request time.
             parts.append(task_ctx)
+    conversation_intent_section = render_intent_section(
+        'Conversation Intent', conversation.intent_context,
+    )
+    if conversation_intent_section:
+        parts.append(conversation_intent_section)
     if user_attachment_context:
         parts.append(user_attachment_context)
     # Inject the authoritative current-turn declaration so the model is never misled
@@ -526,24 +489,23 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     active_configs = filter_tools(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
     )
-    agent_tools = build_agent_tools(active_configs)
+    agent_tools = [cfg.tool for cfg in active_configs]
     # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
     enable_subagent = agentic_config.get('enable_subagent', True)
-    subagent_tools = _build_subagent_chat_tools(bool(agent.has_subagents)) if enable_subagent else []
+    subagent_tools = _build_subagent_chat_tools() if enable_subagent else []
     mcp_tools = _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
     # User attachment tools are only meaningful when the user has uploaded files.
     attachment_tools = _build_user_attachment_tools(bool(files_map))
-    # Schedule tools are independent of plugin and subagent flags — always inject them
-    # as a lazy group so the LLM only sees the gateway until the user mentions scheduling.
-    schedule_tools = _build_schedule_tools()
+    attachment_configs = list(USER_ATTACHMENT_TOOL_CONFIGS) if attachment_tools else []
     # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
     # Auto plugin mode is non-interactive by contract: ask_user must be absent,
     # not merely discouraged by prompt text.
     allow_ask_user = _should_register_ask_user(agentic_config)
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
-    all_tools = (agent_tools + subagent_tools + attachment_tools
-                 + schedule_tools + ask_user_tools + plugin_tools + mcp_tools)
+    ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
+    all_tools = ([intentwriter] + agent_tools + subagent_tools + attachment_tools
+                 + ask_user_tools + plugin_tools + mcp_tools)
     set_trace_context({
         'enabled': bool(runtime.trace),
         'trace_id': conversation.session_id if runtime.trace else None,
@@ -553,7 +515,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         'request_tags': ['handle_chat'],
     })
     runtime_prompt = build_system_prompt(
-        {cfg.name for cfg in active_configs},
+        bool(all_tools),
         environment_context=runtime.environment_context,
         use_memory=personalization.use_memory,
         user_preference=personalization.user_preference,
@@ -561,6 +523,9 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         files=display_files,
         current_query=language_query,
         conversation_history=agent_history,
+        tool_prompt_appendices=collect_system_prompt_appendices(
+            active_configs + attachment_configs + ask_user_configs,
+        ),
     )
     if plugin_system_prompt:
         runtime_prompt = runtime_prompt + '\n\n' + plugin_system_prompt

@@ -327,7 +327,7 @@ func manualPaths() map[string]any {
 		"/dataset/algos": map[string]any{"get": op("Dataset algorithm list", nil, nil, response(200, "Algorithm list", refSchema("ListAlgosResponse")))},
 		"/dataset/tags":  map[string]any{"get": op("Dataset tags", queryParams(param("name", "order_by", false, strSchema()), param("query", "keyword", false, strSchema())), nil, response(200, "Dataset tags", refSchema("AllDatasetTagsResponse")))},
 		"/datasets": map[string]any{
-			"get":  op("Dataset list", queryParams(param("query", "page_token", false, strSchema()), param("query", "page_size", false, intSchema()), param("query", "order_by", false, strSchema()), param("query", "keyword", false, strSchema()), param("query", "tags", false, array(strSchema()))), nil, response(200, "Dataset list", refSchema("ListDatasetsResponse"))),
+			"get":  op("Dataset list", queryParams(param("query", "page_token", false, strSchema()), param("query", "page_size", false, intSchema()), param("query", "order_by", false, strSchema()), param("query", "keyword", false, strSchema()), param("query", "tags", false, array(strSchema())), param("query", "source", false, strSchema())), nil, response(200, "Dataset list", refSchema("ListDatasetsResponse"))),
 			"post": op("Create dataset", queryParams(param("query", "dataset_id", false, strSchema())), jsonBody(refSchema("Dataset"), false), response(200, "Created dataset", refSchema("Dataset"))),
 		},
 		"/datasets/{dataset}": map[string]any{

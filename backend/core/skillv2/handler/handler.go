@@ -882,7 +882,7 @@ func DiffFile(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
-	if isDraftReviewDiff(diffReq) && strings.TrimSpace(opts.Mode) == "" {
+	if isDraftReviewDiff(diffReq) && strings.TrimSpace(opts.Mode) == "" && skillHasHeadRevision(r.Context(), db, diffReq.New.SkillID) {
 		resp, err = newReviewService(db).PrepareFile(r.Context(), skillreview.PrepareFileRequest{
 			SkillID: strings.TrimSpace(diffReq.New.SkillID),
 			UserID:  userID,
@@ -894,6 +894,16 @@ func DiffFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	common.ReplyOK(w, diffFileDTO(resp))
+}
+
+func skillHasHeadRevision(ctx context.Context, db *gorm.DB, skillID string) bool {
+	var row struct {
+		HeadRevisionID *string `gorm:"column:head_revision_id"`
+	}
+	if err := db.WithContext(ctx).Table("skills").Select("head_revision_id").Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(skillID)).Take(&row).Error; err != nil {
+		return false
+	}
+	return row.HeadRevisionID != nil && strings.TrimSpace(*row.HeadRevisionID) != ""
 }
 
 func DraftReviewAction(w http.ResponseWriter, r *http.Request) {
@@ -2085,7 +2095,13 @@ func skillDetailDTO(item skillservice.SkillDetail) map[string]any {
 }
 
 func draftSummaryDTO(item skillservice.DraftSummary) map[string]any {
-	return map[string]any{"has_uncommitted_draft": item.HasUncommittedDraft, "task_id": item.TaskID, "version": item.Version}
+	return map[string]any{
+		"has_uncommitted_draft": item.HasUncommittedDraft,
+		"task_id":               item.TaskID,
+		"version":               item.Version,
+		"type":                  item.Type,
+		"status":                item.Status,
+	}
 }
 
 func draftStateDTO(item skillfs.DraftState) map[string]any {

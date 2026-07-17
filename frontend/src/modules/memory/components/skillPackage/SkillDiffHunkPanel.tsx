@@ -144,7 +144,7 @@ export default function SkillDiffHunkPanel({
   stripFrontMatter = false,
 }: SkillDiffHunkPanelProps) {
   const mappedEntryLines = mapSkillDiffEntryLines(diffEntryLines);
-  const entryLines = stripFrontMatter
+  const entryLines = stripFrontMatter && !hunkReviewActive
     ? stripLeadingFrontMatterLines(mappedEntryLines)
     : mappedEntryLines;
   const hunks = buildDiffHunkBlocks(entryLines);

@@ -13,7 +13,6 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
-  ArrowLeftOutlined,
   CheckCircleOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -23,7 +22,6 @@ import {
   SyncOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
 import { localizeErrorCode } from "@/components/request";
 import {
   checkDatabaseConnection,
@@ -41,7 +39,6 @@ const { Paragraph, Text } = Typography;
 
 export default function DatabaseConnectionsPage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [items, setItems] = useState<DatabaseConnectionItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -207,14 +204,6 @@ export default function DatabaseConnectionsPage() {
       <div className="admin-page-toolbar data-source-page-toolbar">
         <div className="admin-page-toolbar-left data-source-page-toolbar-left">
           <div>
-            <Button
-              type="link"
-              icon={<ArrowLeftOutlined />}
-              className="data-source-provider-back-button"
-              onClick={() => navigate("/model-providers/cloud-documents")}
-            >
-              {t("modelProvider.cloudDocuments.backToProviders")}
-            </Button>
             <h2 className="admin-page-title">{t("admin.dataSourceDatabaseTitle")}</h2>
             <Paragraph className="data-source-page-subtitle">
               {t("admin.dataSourceDatabaseSubtitle")}

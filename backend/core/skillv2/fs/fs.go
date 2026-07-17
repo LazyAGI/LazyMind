@@ -223,8 +223,11 @@ func (fs *DraftFS) Mkdir(ctx context.Context, req MkdirRequest) (DraftMutationRe
 		if err != nil {
 			return err
 		}
-		if existing, ok := entries[cleaned]; ok && existing.EntryType == "file" {
-			return fmt.Errorf("cannot create directory over file: %s", cleaned)
+		if existing, ok := entries[cleaned]; ok {
+			if existing.EntryType == "file" {
+				return fmt.Errorf("cannot create directory over file: %s", cleaned)
+			}
+			return fmt.Errorf("path already exists: %s", cleaned)
 		}
 		for p, entry := range entries {
 			if entry.EntryType == "file" && isAncestorPath(p, cleaned) {

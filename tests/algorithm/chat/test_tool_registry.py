@@ -3,9 +3,10 @@ import pytest
 import lazyllm
 from lazymind.chat.service.component.tool_registry import (
     DEFAULT_TOOLS,
-    SKILL_TOOL_GROUP,
-    ToolGroupConfig,
-    build_agent_tools,
+    IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+    SKILL_TOOL_CONFIG,
+    ToolConfig,
+    collect_system_prompt_appendices,
     filter_tools,
     get_all_tool_groups,
 )
@@ -53,14 +54,14 @@ def test_registry_key_source_activates_function_tool():
     assert _tool_group('temp_kb')['active'] is False
 
     temp_kb_cfg = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'temp_kb')
-    manager = ToolManager(build_agent_tools([temp_kb_cfg]))
+    manager = ToolManager([temp_kb_cfg.tool])
     assert manager.tools_description == []
 
     lazyllm.globals['agentic_config'] = {'files': ['tmp-a.md']}
 
     configs = filter_tools(DEFAULT_TOOLS)
     assert 'temp_kb' in {cfg.name for cfg in configs}
-    manager = ToolManager(build_agent_tools([temp_kb_cfg]))
+    manager = ToolManager([temp_kb_cfg.tool])
     assert [d['function']['name'] for d in manager.tools_description] == ['kb_tmp_search']
     group = _tool_group('temp_kb')
     assert group['active'] is True
@@ -72,32 +73,76 @@ def test_registry_key_source_activates_function_tool():
     ]
 
 
-def test_active_tool_names_include_lazy_group_gateways():
-    from lazymind.chat.service.chat_service import _collect_active_tool_names
+def test_catalog_exposes_modules_without_registering_module_gateways():
+    from lazyllm.tools.agent.toolsManager import ToolManager
 
-    configs = filter_tools(DEFAULT_TOOLS)
-    active_names = _collect_active_tool_names(configs)
+    groups = get_all_tool_groups()
+    assert all(group['module'] for group in groups)
+    calculator = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'calculator')
+    manager = ToolManager([calculator.tool])
+    names = {item['function']['name'] for item in manager.tools_description}
+    assert names == {'calculator'}
+    assert not any('utility' in name for name in names)
 
-    assert 'get_SystemQueryToolGroup_methods' in active_names
-    assert 'get_ExternalDBToolGroup_methods' in active_names
-    assert 'list_external_dbs' in active_names
-    assert 'describe_external_db' in active_names
-    assert 'external_db_query' in active_names
-    assert 'ExternalDBToolGroup_list_external_dbs' in active_names
-    assert 'ExternalDBToolGroup_describe_external_db' in active_names
-    assert 'ExternalDBToolGroup_external_db_query' in active_names
+
+def test_shared_prompt_appendix_is_reused_and_deduplicated():
+    configs = [
+        cfg for cfg in DEFAULT_TOOLS
+        if cfg.name in {'image_generator', 'image_editor', 'video_to_gif'}
+    ]
+
+    assert len(configs) == 3
+    assert all(cfg.appendix_system_prompt is IMAGE_MARKDOWN_OUTPUT_APPENDIX for cfg in configs)
+    collected = collect_system_prompt_appendices(configs)
+    assert collected['output_contract'] == list(
+        IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract']
+    )
+
+    with_dynamic_attachment = collect_system_prompt_appendices(
+        configs,
+        extra_appendices=(IMAGE_MARKDOWN_OUTPUT_APPENDIX,),
+    )
+    assert with_dynamic_attachment == collected
+
+
+def test_prompt_appendix_deduplication_normalizes_whitespace():
+    first = ToolConfig(
+        name='first', label='first', description='first', tool=lambda: None, module='utility',
+        appendix_system_prompt={'safety': 'Confirm before writing external data.'},
+    )
+    second = ToolConfig(
+        name='second', label='second', description='second', tool=lambda: None, module='utility',
+        appendix_system_prompt={'safety': ' Confirm  before\nwriting external data. '},
+    )
+
+    assert collect_system_prompt_appendices([first, second]) == {
+        'safety': ['Confirm before writing external data.'],
+    }
+
+
+def test_cloud_files_use_nested_supplier_toolkits():
+    from lazyllm.tools.agent.toolsManager import ToolManager
+
+    config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'cloud_files')
+    manager = ToolManager([config.tool])
+    names = {item['function']['name'] for item in manager.tools_description}
+    assert names == {'get_CloudFileToolkit_methods'}
+    manager._tool_call['get_CloudFileToolkit_methods']({})
+    names = {item['function']['name'] for item in manager.tools_description}
+    assert 'get_FeishuWikiFS_methods' in names
+    assert 'get_NotionFS_methods' in names
+    assert not any(name.endswith('_read') for name in names)
 
 
 def test_pick_first_valid_agent_tool_uses_group_config_description():
     lazyllm.globals.config['dynamic_tool_auth'] = {'bocha': 'bocha-token'}
 
     web_search_cfg = next(cfg for cfg in filter_tools(DEFAULT_TOOLS) if cfg.name == 'web_search')
-    agent_tool = build_agent_tools([web_search_cfg])[0]
+    agent_tool = web_search_cfg.tool
 
-    assert agent_tool['name'] == 'web_search'
-    assert agent_tool['desc'] == web_search_cfg.description
+    assert agent_tool['name'] == 'WebSearchToolkit'
     assert agent_tool['pick_first_valid'] is True
-    assert agent_tool['tools'] == web_search_cfg.instance
+    assert agent_tool['tools']
 
 
 def test_tool_catalog_localizes_display_fields_without_changing_runtime_description():
@@ -114,20 +159,9 @@ def test_tool_catalog_localizes_display_fields_without_changing_runtime_descript
     assert en_group['methods'] == zh_group['methods']
 
     config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'web_search')
-    agent_tool = build_agent_tools([config])[0]
-    assert agent_tool['desc'] == config.description
+    agent_tool = config.tool
+    assert agent_tool['desc']
 
-    for group_config in [*DEFAULT_TOOLS, SKILL_TOOL_GROUP]:
+    for group_config in [*DEFAULT_TOOLS, SKILL_TOOL_CONFIG]:
         assert group_config.label_en.strip()
         assert group_config.description_en.strip()
-
-
-def test_pick_first_valid_requires_sequence_instance():
-    with pytest.raises(TypeError, match='pick_first_valid'):
-        ToolGroupConfig(
-            name='broken',
-            label='Broken',
-            description='Broken pick-first-valid group',
-            instance=None,
-            pick_first_valid=True,
-        )

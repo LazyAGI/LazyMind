@@ -1381,6 +1381,8 @@ type skillDraftSummaryOpenAPIResponse struct {
 	HasUncommittedDraft bool   `json:"has_uncommitted_draft"`
 	TaskID              string `json:"task_id,omitempty"`
 	Version             int64  `json:"version"`
+	Type                string `json:"type,omitempty" desc:"Draft type. create identifies a Skill that has no formal revision yet."`
+	Status              string `json:"status,omitempty"`
 }
 
 type skillListItemOpenAPIResponse struct {
@@ -1650,6 +1652,7 @@ type remoteFSListQueryParams struct {
 	UserID string `query:"user_id" required:"true" desc:"Required. Target user id used to resolve skills owned by the user."`
 	Path   string `query:"path" required:"true" desc:"RemoteFS path. Use skills for categories, skills/<category> for package list, or skills/<category>/<skill_name>[/rel_path] for package content."`
 	TaskID string `query:"task_id,omitempty" desc:"Optional for skills root/category list; required when path enters a package. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids."`
+	Mode   string `query:"mode" enum:"auto,manual" desc:"Conversation mode. auto marks a newly created Skill draft for idle-time auto commit."`
 }
 
 type remoteFSQueryParams struct {
@@ -1657,11 +1660,13 @@ type remoteFSQueryParams struct {
 	Path     string `query:"path" required:"true" desc:"RemoteFS package path: skills/<category>/<skill_name>[/rel_path]."`
 	TaskID   string `query:"task_id" required:"true" desc:"Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids."`
 	Encoding string `query:"encoding,omitempty" enum:"raw,base64" desc:"Optional content encoding for GET /remote-fs/content."`
+	Mode     string `query:"mode" enum:"auto,manual" desc:"Conversation mode."`
 }
 
 type remoteFSTaskQueryParams struct {
 	UserID string `query:"user_id" required:"true" desc:"Required. Target user id used to resolve skills owned by the user."`
 	TaskID string `query:"task_id" required:"true" desc:"Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids."`
+	Mode   string `query:"mode" enum:"auto,manual" desc:"Conversation mode. auto marks a newly created Skill draft for idle-time auto commit."`
 }
 
 type remoteFSUserQueryParams struct {

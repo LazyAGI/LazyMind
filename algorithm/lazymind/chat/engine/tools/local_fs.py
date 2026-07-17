@@ -39,7 +39,7 @@ class LocalFSScope:
     file_extensions: frozenset[str]
 
 
-class LocalFSToolGroup:
+class LocalFileToolkit:
     """Read-only tools for listing, searching, and reading local files.
 
     The tools can access only the local files and directories made available

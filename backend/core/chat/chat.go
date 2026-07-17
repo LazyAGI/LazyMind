@@ -70,10 +70,11 @@ type ChatMessageOptions struct {
 }
 
 type ChatConversationOptions struct {
-	SessionID      string `json:"session_id"`
-	ConversationID string `json:"conversation_id,omitempty"`
-	UserID         string `json:"user_id"`
-	Mode           string `json:"mode,omitempty"`
+	SessionID      string         `json:"session_id"`
+	ConversationID string         `json:"conversation_id,omitempty"`
+	UserID         string         `json:"user_id"`
+	Mode           string         `json:"mode,omitempty"`
+	IntentContext  map[string]any `json:"intent_context,omitempty"`
 }
 
 type ChatRetrievalOptions struct {
@@ -160,14 +161,22 @@ type AskPendingEvent struct {
 	Questions []AskQuestion `json:"questions"`
 }
 
-// IntentUpdatedEvent is emitted by update_intent (via _write_agent_data) on the main SSE stream.
+// IntentUpdatedEvent is emitted by intentwrite (via _write_agent_data) on the main SSE stream.
 // Go writes the intent to DB and pushes an intent_updated convEvent so the frontend refreshes
 // the session immediately without requiring a manual page reload.
 type IntentUpdatedEvent struct {
-	SessionID string `json:"session_id"`
-	Scope     string `json:"scope"` // "session" | "step"
-	Content   string `json:"content"`
-	StepID    string `json:"step_id,omitempty"`
+	SessionID     string            `json:"session_id,omitempty"`
+	Scope         string            `json:"scope"`
+	Operations    []IntentOperation `json:"operations,omitempty"`
+	StepID        string            `json:"step_id,omitempty"`
+	IntentContext map[string]any    `json:"intent_context,omitempty"`
+}
+
+type IntentOperation struct {
+	Op       string `json:"op"`
+	Field    string `json:"field"`
+	Value    string `json:"value"`
+	Evidence string `json:"evidence"`
 }
 
 // PluginPreflightUpdatedEvent persists a side-effect-free trigger decision on the conversation.
@@ -402,6 +411,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if convID, ok := body["conversation_id"].(string); ok {
 		req.Conversation.ConversationID = strings.TrimSpace(convID)
+	}
+	if intentContext, ok := body["intent_context"].(map[string]any); ok {
+		req.Conversation.IntentContext = intentContext
 	}
 	if debug, ok := body["debug"].(bool); ok {
 		req.Runtime.Debug = debug
