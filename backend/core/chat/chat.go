@@ -149,7 +149,7 @@ type TaskCreatedEvent struct {
 	Resume      bool           `json:"resume,omitempty"`
 }
 
-// ArtifactCreatedEvent is emitted by save_chat_artifact on the main Agent stream.
+// ArtifactCreatedEvent is emitted by the main Agent's artifact tools.
 // Core binds it to the authoritative conversation and history IDs of this request.
 type ArtifactCreatedEvent struct {
 	ArtifactID  string          `json:"artifact_id"`

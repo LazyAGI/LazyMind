@@ -2,9 +2,13 @@ package chat
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -22,6 +26,7 @@ import (
 )
 
 const maxConversationArtifactBytes = 2 * 1024 * 1024
+const conversationArtifactFileDirectory = "chat-artifacts"
 
 // ConversationArtifactDTO is the common download-card shape for both main-Agent
 // and SubAgent artifacts.
@@ -54,6 +59,92 @@ func validArtifactFilename(name string) bool {
 	return true
 }
 
+func artifactScopeHash(value string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
+}
+
+func conversationArtifactFileRoot(userID, conversationID, artifactID string) string {
+	return filepath.Join(
+		conversationArtifactConversationRoot(userID, conversationID),
+		artifactID,
+	)
+}
+
+func conversationArtifactConversationRoot(userID, conversationID string) string {
+	return filepath.Join(
+		subagent.WorkspaceRoot(),
+		conversationArtifactFileDirectory,
+		artifactScopeHash(userID),
+		artifactScopeHash(conversationID),
+	)
+}
+
+func removeConversationArtifactFiles(userID, conversationID string) error {
+	return os.RemoveAll(conversationArtifactConversationRoot(userID, conversationID))
+}
+
+func canonicalConversationFileValue(
+	userID, conversationID, artifactID, filename string, raw json.RawMessage,
+) (json.RawMessage, error) {
+	var value map[string]any
+	if json.Unmarshal(raw, &value) != nil {
+		return nil, errors.New("file artifact value must be an object")
+	}
+	valueFilename, ok := value["filename"].(string)
+	if !ok || strings.TrimSpace(valueFilename) != filename {
+		return nil, errors.New("file artifact filename does not match metadata")
+	}
+	storedPath, ok := value["path"].(string)
+	if !ok || strings.TrimSpace(storedPath) == "" {
+		return nil, errors.New("file artifact value must contain path")
+	}
+	expectedPath := filepath.Join(
+		conversationArtifactFileRoot(userID, conversationID, artifactID), filename,
+	)
+	actualAbs, err := filepath.Abs(strings.TrimSpace(storedPath))
+	if err != nil {
+		return nil, errors.New("file artifact path is invalid")
+	}
+	expectedAbs, err := filepath.Abs(expectedPath)
+	if err != nil || filepath.Clean(actualAbs) != filepath.Clean(expectedAbs) {
+		return nil, errors.New("file artifact path is outside its conversation workspace")
+	}
+	resolvedPath, err := filepath.EvalSymlinks(actualAbs)
+	if err != nil {
+		return nil, errors.New("file artifact does not exist")
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(filepath.Dir(expectedAbs))
+	if err != nil || filepath.Dir(resolvedPath) != resolvedRoot {
+		return nil, errors.New("file artifact path escapes its conversation workspace")
+	}
+	info, err := os.Stat(resolvedPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, errors.New("file artifact must be a regular file")
+	}
+	canonical, err := json.Marshal(map[string]any{
+		"filename": filename,
+		"path":     resolvedPath,
+		"size":     info.Size(),
+	})
+	if err != nil {
+		return nil, errors.New("file artifact value is invalid")
+	}
+	return canonical, nil
+}
+
+func conversationArtifactResponseValue(
+	userID, conversationID string, artifact orm.ConversationArtifact,
+) json.RawMessage {
+	if artifact.ContentType != "file" {
+		return artifact.Value
+	}
+	return subagent.SignArtifactValue(
+		artifact.ContentType,
+		artifact.Value,
+		conversationArtifactFileRoot(userID, conversationID, artifact.ID),
+	)
+}
+
 func persistConversationArtifact(
 	ctx context.Context, db *gorm.DB, conversationID, historyID, userID string,
 	event *ArtifactCreatedEvent,
@@ -71,22 +162,32 @@ func persistConversationArtifact(
 		return nil, errors.New("invalid artifact metadata")
 	}
 	contentType := strings.ToLower(strings.TrimSpace(event.ContentType))
-	if contentType != "text" && contentType != "json" {
+	if contentType != "text" && contentType != "json" && contentType != "file" {
 		return nil, errors.New("unsupported artifact content type")
 	}
 	if len(event.Value) == 0 || len(event.Value) > maxConversationArtifactBytes || !json.Valid(event.Value) {
 		return nil, errors.New("invalid artifact value")
 	}
-	var value map[string]any
-	if json.Unmarshal(event.Value, &value) != nil {
-		return nil, errors.New("artifact value must be an object")
-	}
-	if contentType == "text" {
-		if _, ok := value["text"].(string); !ok {
-			return nil, errors.New("text artifact value must contain text")
+	if contentType == "file" {
+		canonical, err := canonicalConversationFileValue(
+			userID, conversationID, artifactID, strings.TrimSpace(event.Filename), event.Value,
+		)
+		if err != nil {
+			return nil, err
 		}
-	} else if _, ok := value["data"]; !ok {
-		return nil, errors.New("json artifact value must contain data")
+		event.Value = canonical
+	} else {
+		var value map[string]any
+		if json.Unmarshal(event.Value, &value) != nil {
+			return nil, errors.New("artifact value must be an object")
+		}
+		if contentType == "text" {
+			if _, ok := value["text"].(string); !ok {
+				return nil, errors.New("text artifact value must contain text")
+			}
+		} else if _, ok := value["data"]; !ok {
+			return nil, errors.New("json artifact value must contain data")
+		}
 	}
 	if event.Caption != nil && utf8.RuneCountInString(*event.Caption) > 2000 {
 		return nil, errors.New("artifact caption is too long")
@@ -114,7 +215,9 @@ func persistConversationArtifact(
 	return &ConversationArtifactDTO{
 		ArtifactID: row.ID, ConversationID: row.ConversationID, HistoryID: row.HistoryID,
 		ProducerType: "main_agent", Filename: row.Filename, Slot: row.Slot,
-		ContentType: row.ContentType, Seq: 1, Value: row.Value, Caption: row.Caption,
+		ContentType: row.ContentType, Seq: 1,
+		Value:     conversationArtifactResponseValue(userID, conversationID, row),
+		Caption:   row.Caption,
 		CreatedAt: row.CreatedAt,
 	}, nil
 }
@@ -159,7 +262,8 @@ func ListConversationArtifacts(w http.ResponseWriter, r *http.Request) {
 		out = append(out, ConversationArtifactDTO{
 			ArtifactID: artifact.ID, ConversationID: conversationID, HistoryID: artifact.HistoryID,
 			ProducerType: "main_agent", Filename: artifact.Filename, Slot: artifact.Slot,
-			ContentType: artifact.ContentType, Seq: 1, Value: artifact.Value,
+			ContentType: artifact.ContentType, Seq: 1,
+			Value:   conversationArtifactResponseValue(userID, conversationID, artifact),
 			Caption: artifact.Caption, CreatedAt: artifact.CreatedAt,
 		})
 	}

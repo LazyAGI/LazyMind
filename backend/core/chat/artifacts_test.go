@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,5 +95,79 @@ func TestPersistConversationArtifactUsesCharacterLimitsForUnicode(t *testing.T) 
 		context.Background(), db.DB, "conversation-1", "history-1", "user-1", event,
 	); err != nil {
 		t.Fatalf("valid Unicode metadata should be accepted: %v", err)
+	}
+}
+
+func TestPersistConversationFileArtifactValidatesSharedWorkspace(t *testing.T) {
+	db := newArtifactTestDB(t)
+	workspace := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", workspace)
+	artifactID := "da41e7e1-c085-447b-af51-6f89490c393a"
+	root := conversationArtifactFileRoot("user-1", "conversation-1", artifactID)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("create artifact directory: %v", err)
+	}
+	path := filepath.Join(root, "report.docx")
+	if err := os.WriteFile(path, []byte("docx"), 0o644); err != nil {
+		t.Fatalf("write artifact file: %v", err)
+	}
+	value, _ := json.Marshal(map[string]any{
+		"filename": "report.docx", "path": path, "size": 999,
+	})
+	event := &ArtifactCreatedEvent{
+		ArtifactID: artifactID, Filename: "report.docx", ContentType: "file", Value: value,
+	}
+
+	dto, err := persistConversationArtifact(
+		context.Background(), db.DB, "conversation-1", "history-1", "user-1", event,
+	)
+	if err != nil {
+		t.Fatalf("persist file artifact: %v", err)
+	}
+	var responseValue map[string]any
+	if err := json.Unmarshal(dto.Value, &responseValue); err != nil {
+		t.Fatalf("decode response value: %v", err)
+	}
+	if responseValue["url"] == nil || responseValue["path"] != nil {
+		t.Fatalf("response did not replace the storage path with a signed URL: %#v", responseValue)
+	}
+	var stored orm.ConversationArtifact
+	if err := db.First(&stored, "id = ?", artifactID).Error; err != nil {
+		t.Fatalf("load stored file artifact: %v", err)
+	}
+	var storedValue map[string]any
+	if err := json.Unmarshal(stored.Value, &storedValue); err != nil {
+		t.Fatalf("decode canonical value: %v", err)
+	}
+	if storedValue["size"] != float64(4) || storedValue["path"] != path {
+		t.Fatalf("file metadata was not canonicalized: %#v", storedValue)
+	}
+}
+
+func TestPersistConversationFileArtifactRejectsForeignPath(t *testing.T) {
+	db := newArtifactTestDB(t)
+	workspace := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", workspace)
+	foreign := filepath.Join(workspace, "another-conversation", "report.pdf")
+	if err := os.MkdirAll(filepath.Dir(foreign), 0o755); err != nil {
+		t.Fatalf("create foreign directory: %v", err)
+	}
+	if err := os.WriteFile(foreign, []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write foreign file: %v", err)
+	}
+	value, _ := json.Marshal(map[string]any{
+		"filename": "report.pdf", "path": foreign, "size": 3,
+	})
+	event := &ArtifactCreatedEvent{
+		ArtifactID:  "22bdb08b-8459-43cd-99d4-5364aa50842c",
+		Filename:    "report.pdf",
+		ContentType: "file",
+		Value:       value,
+	}
+
+	if _, err := persistConversationArtifact(
+		context.Background(), db.DB, "conversation-1", "history-1", "user-1", event,
+	); err == nil || !strings.Contains(err.Error(), "outside its conversation workspace") {
+		t.Fatalf("expected foreign path rejection, got %v", err)
 	}
 }

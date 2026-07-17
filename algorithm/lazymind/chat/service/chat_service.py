@@ -38,6 +38,7 @@ from lazymind.chat.engine.agent_runtime import (
     report_to_dict,
     render_attachment_content,
 )
+from lazymind.chat.engine.tools.chat_artifact import chat_agent_workspace
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
     render_intent_section,
@@ -466,7 +467,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         force_summarize_context=query,
         execution_options=AgentExecutionOptions(
             skills=agent.available_skills,
-            workspace=_cfg['agentic_workspace'],
+            workspace=chat_agent_workspace(user_id or '0', conversation_id),
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,
             skills_dir=_cfg['skill_fs_url'],
