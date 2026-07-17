@@ -241,9 +241,14 @@ def _build_intent_context_section(db: 'SubAgentDB', conversation_id: str,
         return []
 
 
-_LLM_VISIBLE_PARAM_KEYS = (
-    'user_input', 'workflow', 'target', 'count', 'retry_hint', 'focused_tab',
-)
+_STRUCTURED_PARAM_KEYS = {
+    # These values are rendered by dedicated sections below. Excluding only these
+    # avoids duplicating large/internal representations while preserving arbitrary
+    # task parameters supplied by plugin and ordinary SubAgent callers.
+    'history_files_per_turn',
+    'partial_indices',
+    'required_output_artifact_keys',
+}
 
 
 def _build_subagent_plan(
@@ -279,8 +284,8 @@ def _build_subagent_plan(
     )
 
     display_params = {
-        key: ctx.params[key] for key in _LLM_VISIBLE_PARAM_KEYS
-        if key in ctx.params and ctx.params[key] not in (None, '', [], {})
+        key: value for key, value in ctx.params.items()
+        if key not in _STRUCTURED_PARAM_KEYS and value not in (None, '', [], {})
     }
     if display_params:
         builder.runtime(

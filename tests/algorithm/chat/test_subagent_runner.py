@@ -145,6 +145,46 @@ def _install_fake_translator(monkeypatch):
     monkeypatch.setattr(runner_mod, 'AgentEventFrameTranslator', FakeTranslator)
 
 
+def test_subagent_plan_preserves_extension_params_without_structured_duplicates(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-params',
+        conversation_id='conv-1',
+        agent_type='test',
+        objective='do something',
+        params={
+            'custom_plugin_option': 'keep-me',
+            'count': 3,
+            'history_files_per_turn': {'1': ['/tmp/input.txt']},
+            'partial_indices': {'items': [0]},
+            'required_output_artifact_keys': ['result'],
+        },
+        workspace_path=str(tmp_path),
+        input_slots=[],
+        output_slots=['result'],
+        db=None,
+        emit=lambda _event: None,
+    )
+
+    plan = runner_mod._build_subagent_plan(
+        ctx,
+        None,
+        tools=[],
+        tool_prompt_appendices={},
+    )
+
+    parameter_section = next(
+        section for section in plan.prompt.sections
+        if section.section_id == 'subagent_parameters'
+    )
+    assert 'custom_plugin_option: keep-me' in parameter_section.content
+    assert 'count: 3' in parameter_section.content
+    assert 'history_files_per_turn' not in parameter_section.content
+    assert 'partial_indices' not in parameter_section.content
+    assert 'required_output_artifact_keys' not in parameter_section.content
+
+
 # ---------------------------------------------------------------------------
 # Test: task not found
 # ---------------------------------------------------------------------------

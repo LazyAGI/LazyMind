@@ -54,10 +54,11 @@ def normalize_attachments(
     if effective_current is None:
         effective_current = max(seq for seq, _ in parsed)
 
-    name_counts: dict[str, int] = {}
+    name_counts_by_turn: dict[int, dict[str, int]] = {}
     result: list[AttachmentRef] = []
     for seq, path in sorted(parsed, key=lambda item: (-item[0], item[1])):
         base = os.path.basename(path) or path
+        name_counts = name_counts_by_turn.setdefault(seq, {})
         seen = name_counts.get(base, 0)
         name_counts[base] = seen + 1
         if seen:

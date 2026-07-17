@@ -396,7 +396,9 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             title='Plugin Policy',
             content=plugin_contribution.system_prompt,
             source='plugin.scenario',
-            priority=20,
+            # Plugin policy was historically appended after the common system prompt.
+            # Keep that precedence while still assembling it through PromptBuilder.
+            priority=80,
         )
     if plugin_contribution.runtime_context:
         prompt_builder.runtime(
@@ -461,7 +463,9 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             title='Current Turn',
             content=(
                 f'This is conversation turn {_eff_current_seq}. Any turn described as current '
-                f'in chat history is outdated; Turn {_eff_current_seq} is the present request.'
+                f'in chat history is outdated; Turn {_eff_current_seq} is the present request. '
+                f'Unless another turn is explicitly named, "现在 / 本次" refers to '
+                f'Turn {_eff_current_seq}.'
             ),
             source='backend.turn',
             priority=60,

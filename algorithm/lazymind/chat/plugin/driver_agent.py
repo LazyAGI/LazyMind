@@ -152,12 +152,15 @@ def _build_driver_plan(
         ),
         source='platform.driver',
     )
+    prompt = builder.build()
     return AgentRunPlan(
         role=AgentRole.DRIVER,
-        prompt=builder.build(),
+        prompt=prompt,
         history=[],
         tools=tools,
-        force_summarize_context=step_result,
+        # Forced summarization must retain the same runtime facts and evaluation
+        # instruction as the normal one-shot path, not only the raw step result.
+        force_summarize_context=prompt.current_input,
         execution_options=AgentExecutionOptions(),
     )
 

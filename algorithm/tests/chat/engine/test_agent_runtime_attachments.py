@@ -40,3 +40,19 @@ def test_attachment_renderer_reports_current_turn_without_files() -> None:
         current_turn_seq=2,
     )
     assert 'current turn is Turn 2 and has no attachments' in rendered
+
+
+def test_attachment_names_are_deduplicated_only_within_each_turn(tmp_path) -> None:
+    current = tmp_path / 'current' / 'design.png'
+    historical = tmp_path / 'historical' / 'design.png'
+    current.parent.mkdir()
+    historical.parent.mkdir()
+    current.write_bytes(b'current')
+    historical.write_bytes(b'historical')
+
+    attachments = normalize_attachments({
+        '2': [str(current)],
+        '1': [str(historical)],
+    }, current_turn_seq=2)
+
+    assert [item.display_name for item in attachments] == ['design.png', 'design.png']
