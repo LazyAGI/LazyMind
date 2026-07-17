@@ -257,6 +257,11 @@ func trustedInstallDir(root, candidate string) (string, error) {
 	if !filepath.IsAbs(root) || !strings.EqualFold(filepath.Base(root), appDataLeaf) {
 		return "", fmt.Errorf("invalid LazyMind Local AppData root %q", root)
 	}
+	// This path is an authorization boundary for terminating every executable
+	// below it, not just a convenience validation. The Desktop installer does
+	// not allow a custom install directory. If that product policy changes, the
+	// helper must authenticate a registered install path instead of trusting a
+	// caller-controlled directory merely because its base name is LazyMind.
 	expected := filepath.Join(filepath.Dir(root), "Programs", appDataLeaf)
 	candidate = filepath.Clean(candidate)
 	if !filepath.IsAbs(candidate) || !strings.EqualFold(candidate, expected) {

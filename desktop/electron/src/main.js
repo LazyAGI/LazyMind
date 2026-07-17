@@ -999,6 +999,9 @@ async function createWindow() {
   broadcastStartupDiagnostics();
   try {
     const status = await waitForRuntimeReady();
+    if (isQuitting) {
+      return;
+    }
     mainWindow = new BrowserWindow(browserWindowOptions(false));
     attachManagedClose(mainWindow);
     rendererReadyWait = createRendererReadyWait(mainWindow);

@@ -10,6 +10,8 @@ const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const manifestScript = path.join(scriptsDir, "write-runtime-manifest.mjs");
 const iconScript = path.join(scriptsDir, "generate-windows-icon.mjs");
 const icnsSource = path.join(scriptsDir, "..", "electron", "assets", "LazyMind.icns");
+const electronMainScript = path.join(scriptsDir, "..", "electron", "src", "main.js");
+const electronBuilderConfig = path.join(scriptsDir, "..", "electron", "electron-builder.config.cjs");
 const installerScript = path.join(scriptsDir, "..", "installer", "installer.nsh");
 
 function nsisMacro(source, name) {
@@ -117,4 +119,27 @@ test("Windows installer verifies and force-cleans processes left by warmup", () 
     /\$0 == 10[\s\S]*force-stop --install-dir "\$INSTDIR"[\s\S]*Goto LMWarmupCheckStopped/,
   );
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
+});
+
+test("Desktop does not create the Chat window after shutdown begins", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const start = source.indexOf("async function createWindow()");
+  const end = source.indexOf('ipcMain.on("lazymind:renderer-ready"', start);
+  assert.ok(start >= 0 && end > start, "could not locate createWindow");
+  const createWindow = source.slice(start, end);
+
+  assert.match(
+    createWindow,
+    /const status = await waitForRuntimeReady\(\);\s*if \(isQuitting\) \{\s*return;\s*\}\s*mainWindow = new BrowserWindow/,
+    "shutdown must be rechecked before creating the hidden Chat window",
+  );
+});
+
+test("Windows installer path policy matches the maintenance helper trust boundary", () => {
+  const source = readFileSync(electronBuilderConfig, "utf8");
+  assert.match(
+    source,
+    /allowToChangeInstallationDirectory:\s*false/,
+    "custom install directories require an authenticated path policy in installer-maintenance",
+  );
 });
