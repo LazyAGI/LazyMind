@@ -64,3 +64,19 @@ async def chat(
     ],
 ):
     return await handle_chat(request)
+
+
+@router.post('/api/chat/context-usage', summary='Estimate next-request ChatAgent context usage')
+async def context_usage(
+    request: Annotated[ChatRequest, Body(description='Same structured request as chat preview.')],
+):
+    request.runtime.context_usage_preview = True
+    return await handle_chat(request)
+
+
+@router.post('/api/chat/context-prompt', summary='Export next-request ChatAgent context')
+async def context_prompt(
+    request: Annotated[ChatRequest, Body(description='Same structured request as chat preview.')],
+):
+    request.runtime.context_prompt_export = True
+    return await handle_chat(request)

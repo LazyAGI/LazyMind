@@ -40,6 +40,8 @@ class ChatRuntimeOptions(BaseModel):
     ocr_config: Optional[Dict[str, Any]] = None
     tool_config: Optional[Dict[str, Union[str, List[str]]]] = None
     mcp_config: Optional[List[Dict[str, Any]]] = None
+    context_usage_preview: bool = False
+    context_prompt_export: bool = False
 
 
 class ChatPersonalizationOptions(BaseModel):

@@ -8,8 +8,17 @@ from .models import (
     AgentRunPlan,
     PromptBundle,
     PromptSection,
+    ContextUsageCategory,
+    ContextUsageItem,
+    ContextUsageReport,
 )
 from .prompt_builder import PromptBuilder
+from .context_estimator import (
+    estimate_context_usage,
+    estimate_tokens,
+    render_context_markdown,
+    report_to_dict,
+)
 
 __all__ = [
     'AgentExecutionOptions',
@@ -19,6 +28,13 @@ __all__ = [
     'PromptBuilder',
     'PromptBundle',
     'PromptSection',
+    'ContextUsageCategory',
+    'ContextUsageItem',
+    'ContextUsageReport',
+    'estimate_context_usage',
+    'estimate_tokens',
+    'render_context_markdown',
+    'report_to_dict',
     'AttachmentRef',
     'normalize_attachments',
     'render_attachment_content',

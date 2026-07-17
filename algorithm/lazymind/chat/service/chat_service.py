@@ -33,6 +33,9 @@ from lazymind.chat.engine.agent_runtime import (
     AgentRunPlan,
     PromptBuilder,
     normalize_attachments,
+    estimate_context_usage,
+    render_context_markdown,
+    report_to_dict,
     render_attachment_content,
 )
 from lazymind.chat.engine.tools.intent_writer import (
@@ -222,7 +225,10 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         cited_message_context = user_cited_context
     language_query = user_input.strip()
     is_driver_turn = is_plugin_driver_turn(plugin.plugin_context)
-    sensitive_word = None if is_driver_turn else check_sensitive_content(query)
+    sensitive_word = (
+        None if is_driver_turn or runtime.context_usage_preview or runtime.context_prompt_export
+        else check_sensitive_content(query)
+    )
     if sensitive_word:
         cost = round(time.time() - start_time, 3)
         LOG.warning(
@@ -300,7 +306,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
 
     # Register the active session so the cancel endpoint can find it by conversation_id.
     _conv_id_key = conversation_id  # already stripped above
-    if _conv_id_key:
+    if _conv_id_key and not runtime.context_usage_preview and not runtime.context_prompt_export:
         _active_sessions[_conv_id_key] = conversation.session_id
     lazyllm.globals._init_sid(sid=conversation.session_id)
     lazyllm.locals._init_sid(sid=conversation.session_id)
@@ -460,6 +466,12 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     )
     executor = AgentExecutor()
     react_agent = executor.create_agent(llm, plan)
+    if runtime.context_usage_preview or runtime.context_prompt_export:
+        agent_context = await asyncio.to_thread(react_agent.describe_context)
+        if runtime.context_prompt_export:
+            return {'prompt_markdown': render_context_markdown(plan, agent_context)}
+        report = await estimate_context_usage(plan, agent_context)
+        return report_to_dict(report)
 
     async def event_stream() -> Any:
         final_result: Any = None

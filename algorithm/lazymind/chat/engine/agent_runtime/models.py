@@ -55,3 +55,35 @@ class AgentRunPlan:
     stop_tools: list[str] = field(default_factory=list)
     force_summarize_context: str = ''
     execution_options: AgentExecutionOptions = field(default_factory=AgentExecutionOptions)
+
+
+@dataclass(frozen=True)
+class ContextUsageItem:
+    item_id: str
+    category: str
+    title: str
+    source: str
+    estimated_tokens: int
+    char_count: int
+    item_count: int = 1
+    channel: Optional[str] = None
+    content_kind: Optional[str] = None
+    authoritative: bool = False
+
+
+@dataclass(frozen=True)
+class ContextUsageCategory:
+    category_id: str
+    title: str
+    estimated_tokens: int
+    char_count: int
+    item_count: int
+    items: Tuple[ContextUsageItem, ...]
+
+
+@dataclass(frozen=True)
+class ContextUsageReport:
+    scope: Literal['next_request']
+    estimated_tokens: int
+    categories: Tuple[ContextUsageCategory, ...]
+    estimation_version: str = 'unicode-weighted-v1'
