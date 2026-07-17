@@ -11,8 +11,16 @@ import lazyllm
 from lazyllm import LOG, AutoModel
 
 from lazymind.model_config import inject_model_config
-from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
-from lazymind.chat.engine.prompts import build_system_prompt
+from lazymind.chat.engine.agent_runtime import (
+    AgentExecutionOptions,
+    AgentExecutor,
+    AgentRole,
+    AgentRunPlan,
+    PromptBuilder,
+    normalize_attachments,
+    render_attachment_content,
+)
+from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
 from lazymind.chat.service.component.tool_registry import (
@@ -165,9 +173,6 @@ def _tool_configs_for_runtime_tools(runtime_tools: List[Any]) -> list:
     return [cfg for cfg in DEFAULT_TOOLS if id(cfg.tool) in runtime_ids]
 
 
-_ZH_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
-
-
 def _build_partial_sort_order_hints(
     db: 'SubAgentDB',
     session_id: str,
@@ -207,57 +212,6 @@ def _build_partial_sort_order_hints(
         return ''
 
 
-def _build_attachment_context_for_subagent(history_files_per_turn: 'Dict[str, List[str]]') -> str:
-    """Build the '## User Uploaded Files' context block for SubAgent prompts.
-
-    Mirrors _build_user_attachment_context in chat_service without cross-layer import.
-    Returns an empty string when history_files_per_turn is empty.
-    """
-    if not history_files_per_turn:
-        return ''
-    turns: Dict[int, List[str]] = {}
-    for key, paths in history_files_per_turn.items():
-        if not paths:
-            continue
-        try:
-            turns[int(key)] = paths
-        except ValueError:
-            continue
-    if not turns:
-        return ''
-
-    def _describe_file(path: str) -> str:
-        name = os.path.basename(path)
-        try:
-            size_bytes = os.path.getsize(path)
-            if size_bytes < 1024:
-                return f'{name} ({size_bytes} B)'
-            if size_bytes < 1024 * 1024:
-                return f'{name} ({size_bytes / 1024:.1f} KB)'
-            return f'{name} ({size_bytes / (1024 * 1024):.1f} MB)'
-        except OSError:
-            return name
-
-    lines: List[str] = ['## User Uploaded Files [queried at request time]']
-    for seq in sorted(turns.keys()):
-        seen: Dict[str, int] = {}
-        names: List[str] = []
-        for path in turns[seq]:
-            base = os.path.basename(path)
-            if base not in seen:
-                seen[base] = 0
-                names.append(_describe_file(path))
-            else:
-                seen[base] += 1
-                name_no_ext, ext = os.path.splitext(base)
-                names.append(f'{name_no_ext}-{seen[base]}{ext}')
-        lines.append(f'- Turn {seq}: {", ".join(names)}')
-    lines.append('')
-    lines.append('Turn numbers are 1-based integers matching the "Turn N" labels above.')
-    lines.append('Omit the turn parameter to search the current turn first, then historical turns.')
-    return '\n'.join(lines)
-
-
 def _build_intent_context_section(db: 'SubAgentDB', conversation_id: str,
                                   session_id: str, step_id: str = '') -> List[str]:
     """Read conversation + plugin-session + current-step intent from DB.
@@ -287,26 +241,56 @@ def _build_intent_context_section(db: 'SubAgentDB', conversation_id: str,
         return []
 
 
-def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -> str:
-    # Detect language from the user_input param (primary) or the full objective text.
-    user_input = str(ctx.params.get('user_input') or '')
-    is_zh = bool(_ZH_RE.search(user_input) or _ZH_RE.search(ctx.objective))
-    lines = [
-        'You are an autonomous SubAgent. Complete the objective below using the available tools.',
-        'You are NOT allowed to spawn or create sub-agents or delegate tasks to other agents. '
-        'Only use the tools explicitly listed in your tool set.',
-    ]
-    if is_zh:
-        lines.append('You MUST respond and write all artifact content in Simplified Chinese(简体中文).')
-    lines += [
-        '',
-        f'Objective: {ctx.objective}',
-    ]
-    if ctx.params:
-        # Filter out partial_indices from params: it contains internal 0-based list_index
-        # values which would confuse the AI (it should use 1-based sort_order instead).
-        display_params = {k: v for k, v in ctx.params.items() if k != 'partial_indices'}
-        lines.append(f'Parameters: {json.dumps(display_params, ensure_ascii=False)}')
+_STRUCTURED_PARAM_KEYS = {
+    # These values are rendered by dedicated sections below. Excluding only these
+    # avoids duplicating large/internal representations while preserving arbitrary
+    # task parameters supplied by plugin and ordinary SubAgent callers.
+    'history_files_per_turn',
+    'partial_indices',
+    'required_output_artifact_keys',
+}
+
+
+def _build_subagent_plan(
+    ctx: SubAgentContext,
+    db: Optional['SubAgentDB'],
+    *,
+    tools: List[Any],
+    tool_prompt_appendices: Dict[str, List[str]],
+    resume: bool = False,
+) -> AgentRunPlan:
+    builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
+    add_standard_system_sections(
+        builder,
+        bool(tools),
+        use_memory=False,
+        current_query=ctx.objective,
+        show_tool_status=False,
+        tool_prompt_appendices=tool_prompt_appendices,
+    )
+    builder.system(
+        'subagent_role', 'SubAgent Role', (
+            'You are an autonomous SubAgent. Complete the task objective using only the '
+            'available tools. You may not spawn, create, or delegate to other agents.\n'
+            'Use the selected user-visible language for progress and the final summary. '
+            'Artifact content must follow the language required by the task objective or '
+            'the output slot contract; do not translate an artifact when its required '
+            'format specifies another language.'
+        ),
+        'platform.subagent',
+        priority=20,
+    )
+
+    display_params = {
+        key: value for key, value in ctx.params.items()
+        if key not in _STRUCTURED_PARAM_KEYS and value not in (None, '', [], {})
+    }
+    builder.runtime(
+        'subagent_parameters', 'Task Parameters',
+        '\n'.join(f'- {key}: {value}' for key, value in display_params.items()),
+        'task.params', priority=10, content_kind='reference',
+    )
+
     # Inject artifact context: plugin session reads from slot revisions with sort_order;
     # ordinary SubAgent reads from sub_agent_artifacts of prior succeeded steps.
     session_id: str = ctx.params.get('session_id', '')
@@ -314,19 +298,40 @@ def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -
     if session_id or ctx.input_slots:
         artifact_section = _build_artifact_context_section(ctx, db) if db else []
         if artifact_section:
-            lines.extend(artifact_section)
+            builder.runtime(
+                'subagent_artifacts', 'Existing Artifacts', '\n'.join(artifact_section),
+                'database.artifacts',
+                priority=20,
+                content_kind='reference',
+            )
         elif ctx.input_slots:
-            lines.append(f'Input slots you may read: {", ".join(ctx.input_slots)}')
+            builder.runtime(
+                'subagent_input_slots', 'Input Slots', ', '.join(ctx.input_slots),
+                'task.slots',
+                priority=20,
+                content_kind='reference',
+            )
     # Inject intent/constraints from the plugin session so SubAgent respects user preferences.
     if db:
         intent_lines = _build_intent_context_section(db, ctx.conversation_id, session_id, step_id)
         if intent_lines:
-            lines.extend(intent_lines)
+            builder.runtime(
+                'subagent_intent', 'Effective Execution Intent',
+                '\n'.join(intent_lines).strip(), 'database.intent',
+                priority=30,
+                authoritative=True,
+                content_kind='instruction',
+            )
     # Inject user attachment context so the SubAgent knows which files were uploaded.
     history_files_per_turn: Dict[str, List[str]] = ctx.params.get('history_files_per_turn') or {}
-    attachment_section = _build_attachment_context_for_subagent(history_files_per_turn)
-    if attachment_section:
-        lines.append(attachment_section)
+    attachment_section = render_attachment_content(
+        normalize_attachments(history_files_per_turn),
+        role=AgentRole.SUBAGENT,
+    )
+    builder.runtime(
+        'subagent_attachments', 'User Attachments', attachment_section,
+        'request.attachments', priority=40, content_kind='reference',
+    )
     # Translate partial_indices (internal 0-based list_index) into sort_order guidance.
     # This tells the AI exactly which display position(s) to overwrite instead of append.
     partial_indices: Dict[str, List[int]] = ctx.params.get('partial_indices') or {}
@@ -335,30 +340,36 @@ def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -
             db, session_id, partial_indices,
         )
         if sort_order_hints:
-            lines.append(sort_order_hints)
+            builder.runtime(
+                'subagent_partial_retry', 'Partial Retry', sort_order_hints, 'task.retry',
+                priority=50,
+                authoritative=True,
+                content_kind='instruction',
+            )
     if ctx.params.get('required_output_artifact_keys') is not None:
         required_keys = _coerce_str_list(ctx.params.get('required_output_artifact_keys'))
     elif str(ctx.agent_type or '') == 'plugin_step':
         required_keys = []
     else:
         required_keys = list(ctx.output_slots)
+    output_lines = []
     if required_keys:
-        lines.append(
+        output_lines.append(
             'Required output artifacts: '
             + ', '.join(required_keys)
             + '. Call save_artifact for each required key before finishing.'
         )
     else:
-        lines.append(
+        output_lines.append(
             'No output artifact is unconditionally required. Save only artifacts requested by '
             'the objective or step prompt, and never save placeholder content.'
         )
     optional_keys = [k for k in ctx.output_slots if k not in required_keys]
     if optional_keys:
-        lines.append(
+        output_lines.append(
             'Optional output artifact keys: ' + ', '.join(optional_keys)
         )
-    lines.append(
+    output_lines.append(
         '## Overwrite vs. Append for list slots\n'
         'save_artifact has an optional sort_order parameter (1-based):\n'
         '- Omit sort_order → append a new item at the end of the list.\n'
@@ -367,14 +378,38 @@ def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -
         '(e.g. "重新收集第二张图", "replace item 3", "redo position N"), '
         'you MUST pass sort_order=N. Omitting it will append a new item instead of replacing.'
     )
-    lines.append(
+    output_lines.append(
         'After all required artifacts are saved, write a final summary that contains the '
         'actual results and key findings — not only a reference to the artifacts. '
         'For example, if you searched for information, include the information itself. '
         'The summary must be self-contained and directly usable by the caller without '
         'opening any artifact.'
     )
-    return '\n'.join(lines)
+    builder.runtime(
+        'subagent_output_contract', 'Output Contract', '\n'.join(output_lines), 'task.slots',
+        priority=60,
+        authoritative=True,
+        content_kind='instruction',
+    )
+    input_content = (
+        'Continue the task from the execution history using the refreshed context above.'
+        if resume else ctx.objective
+    )
+    builder.input(
+        content=input_content,
+        source='task.objective',
+    )
+    history = []
+    return AgentRunPlan(
+        role=AgentRole.SUBAGENT,
+        prompt=builder.build(),
+        history=history,
+        tools=tools,
+        force_summarize_context=ctx.objective,
+        execution_options=AgentExecutionOptions(
+            extra_stop_condition=_make_cancel_stop_condition(),
+        ),
+    )
 
 
 def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> str:
@@ -563,24 +598,26 @@ async def run_subagent_stream(
         runtime_tools = _resolve_runtime_tools(tools, plugin_id=params.get('plugin_id') or None)
         subagent_tools_all = _build_subagent_tools(runtime_tools)
         runtime_configs = _tool_configs_for_runtime_tools(runtime_tools)
-        runtime_prompt = build_system_prompt(
-            bool(subagent_tools_all),
-            use_memory=False,
-            current_query=ctx.objective,
+        plan = _build_subagent_plan(
+            ctx,
+            db,
+            tools=subagent_tools_all,
             tool_prompt_appendices=collect_system_prompt_appendices(
                 runtime_configs + list(USER_ATTACHMENT_TOOL_CONFIGS),
             ),
-        )
-        agent = build_react_agent(
-            llm=llm,
-            tools=subagent_tools_all,
-            prompt=runtime_prompt,
-            force_summarize_context=ctx.objective,
-            extra_stop_condition=_make_cancel_stop_condition(),
+            resume=resume,
         )
 
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0
         resume_history = _rebuild_history_from_steps(db, task_id) if resume else None
+        if resume:
+            objective_message = (
+                PromptBuilder.for_role(AgentRole.SUBAGENT)
+                .input(content=ctx.objective, source='task.objective')
+                .build()
+                .current_input
+            )
+            plan.history = [{'role': 'user', 'content': objective_message}, *(resume_history or [])]
         progress = 5
         yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
                     'current_phase': '恢复执行...' if resume else '开始执行...'})
@@ -592,7 +629,8 @@ async def run_subagent_stream(
         _pending_text: str = ''
         _pending_think: str = ''
 
-        async for kind, payload in drive_agent(agent, _objective_prompt(ctx, db), history=resume_history):
+        executor = AgentExecutor()
+        async for kind, payload in executor.stream(llm, plan):
             if kind == 'event':
                 item = payload
                 tag = item.get('tag')
@@ -652,7 +690,7 @@ async def run_subagent_stream(
                         _pending_think += frame.get('think') or ''
                     else:
                         _pending_text += frame.get('text') or ''
-            else:  # 'final' -- drive_agent propagates future exceptions before yielding this.
+            else:  # 'final' -- AgentExecutor propagates future exceptions before yielding this.
                 final_result = payload
                 # Flush any remaining accumulated text/think as the final step.
                 if _pending_think:

@@ -16,7 +16,13 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm import AutoModel, LOG
 
-from lazymind.chat.engine.agent_core import build_react_agent
+from lazymind.chat.engine.agent_runtime import (
+    AgentExecutionOptions,
+    AgentExecutor,
+    AgentRole,
+    AgentRunPlan,
+    PromptBuilder,
+)
 from lazymind.chat.plugin import plugin_loader
 from lazymind.model_config import inject_model_config
 
@@ -74,6 +80,67 @@ def _build_driver_prompt(plugin_id: str) -> str:
     if isinstance(base, str) and base.strip():
         base = _DRIVER_OUTPUT_FORMAT_SECTION_RE.sub('', base).strip()
     return base + _OUTPUT_CONSTRAINT
+
+
+def _build_driver_plan(
+    *,
+    plugin_id: str,
+    step_id: str,
+    step_result: str,
+    acceptance: str,
+    plugin_artifacts_summary: Optional[str],
+    user_files: Optional[List[str]],
+    tools: List[Any],
+) -> AgentRunPlan:
+    builder = PromptBuilder.for_role(AgentRole.DRIVER)
+    builder.system(
+        'driver_policy', '', _build_driver_prompt(plugin_id), 'plugin.driver', priority=10,
+    )
+    builder.system(
+        'driver_acceptance', f'Acceptance criteria for step {step_id!r}', acceptance,
+        'plugin.state', priority=20,
+    )
+    builder.runtime(
+        'driver_step', 'Plugin Step', f'Plugin: {plugin_id}\nStep: {step_id}',
+        'plugin.runtime',
+        priority=10,
+        authoritative=True,
+        content_kind='state',
+    ).runtime(
+        'driver_result', 'Execution Result', step_result, 'subagent.summary',
+        priority=20,
+        content_kind='reference',
+    )
+    builder.runtime(
+        'driver_artifacts', 'Session Artifacts', plugin_artifacts_summary,
+        'database.artifacts', priority=30, content_kind='reference',
+    )
+    import os as _os
+    builder.runtime(
+        'driver_attachments', 'Available Attachments',
+        ', '.join(_os.path.basename(path) for path in user_files or []),
+        'request.attachments', priority=40, content_kind='reference',
+    )
+    builder.input(
+        content=(
+            'Evaluate whether the completed step satisfies its acceptance criteria. '
+            'If the terminal status is failed, diagnose the likely cause and recommend '
+            'whether the ChatAgent should retry this step or rewind to a named upstream '
+            'step. Otherwise, describe whether the result is complete and acceptable.'
+        ),
+        source='platform.driver',
+    )
+    prompt = builder.build()
+    return AgentRunPlan(
+        role=AgentRole.DRIVER,
+        prompt=prompt,
+        history=[],
+        tools=tools,
+        # Forced summarization must retain the same runtime facts and evaluation
+        # instruction as the normal one-shot path, not only the raw step result.
+        force_summarize_context=prompt.current_input,
+        execution_options=AgentExecutionOptions(),
+    )
 
 
 def _init_driver_sid(session_id: Optional[str], plugin_id: str, step_id: str) -> str:
@@ -162,38 +229,12 @@ def evaluate_step(
     Raises:
         DriverEvaluationError: when the plugin is missing or the LLM cannot produce output.
     """
-    import os as _os
-
     spec = plugin_loader.get_plugin(plugin_id)
     if spec is None:
         raise DriverEvaluationError(f'Plugin {plugin_id!r} not found; cannot evaluate step.')
 
     step_config = spec.get_step_config(step_id)
     acceptance = step_config.get('acceptance_criteria', '')
-    accept_prompt = (
-        f'\n\nAcceptance criteria for step {step_id!r}:\n{acceptance}'
-        if acceptance else ''
-    )
-
-    driver_prompt = _build_driver_prompt(plugin_id) + accept_prompt
-
-    user_msg = (
-        f'Plugin: {plugin_id}\n'
-        f'Step: {step_id}\n'
-        f'Step result:\n{step_result}\n\n'
-    )
-    if plugin_artifacts_summary:
-        user_msg += f'Session artifacts produced so far:\n{plugin_artifacts_summary}\n\n'
-    user_msg += (
-        'If the terminal status is failed, diagnose the likely cause and recommend whether '
-        'the ChatAgent should retry this step or rewind to a named upstream step. Otherwise, '
-        'describe whether the step result is complete and acceptable.'
-    )
-
-    if user_files:
-        file_list = ', '.join(_os.path.basename(f) for f in user_files)
-        user_msg += f'\n\nUser-uploaded files available for this step: {file_list}'
-
     driver_db = None
     try:
         _init_driver_sid(session_id, plugin_id, step_id)
@@ -206,17 +247,20 @@ def evaluate_step(
         except Exception as exc:
             LOG.warning('[DriverAgent] failed to load artifact tools: %s', exc)
 
+        plan = _build_driver_plan(
+            plugin_id=plugin_id,
+            step_id=step_id,
+            step_result=step_result,
+            acceptance=acceptance,
+            plugin_artifacts_summary=plugin_artifacts_summary,
+            user_files=user_files,
+            tools=tools,
+        )
         if tools:
-            # Use the same callable-tool injection path as ChatAgent/SubAgent.
-            agent = build_react_agent(
-                llm=llm,
-                tools=tools,
-                force_summarize_context=user_msg,
-                prompt=driver_prompt,
-            )
-            response = agent(user_msg)
+            # Use the same plan/executor path as ChatAgent and SubAgent.
+            response = AgentExecutor().run(llm, plan)
         else:
-            response = llm(user_msg, system_prompt=driver_prompt)
+            response = llm(plan.prompt.current_input, system_prompt=plan.prompt.system_prompt)
         cleaned = _clean_message(str(response or ''))
         if cleaned:
             return {'message': cleaned}

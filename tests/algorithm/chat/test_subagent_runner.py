@@ -13,7 +13,6 @@ from unittest.mock import MagicMock
 import pytest
 
 import lazymind.chat.engine.subagent.runner as runner_mod
-import lazymind.chat.engine.agent_core as core_mod
 
 
 # ---------------------------------------------------------------------------
@@ -112,18 +111,18 @@ def _install_fake_lazyllm(monkeypatch):
 
 
 def _install_fake_drive(monkeypatch, events, final_value='task done'):
-    """Replace drive_agent in runner_mod with a fake that yields the given events."""
-    async def fake_drive(agent, query, *, history=None):
-        for ev in events:
-            yield ('event', ev)
-        yield ('final', final_value)
+    """Replace AgentExecutor with a deterministic event stream."""
+    class FakeExecutor:
+        async def stream(self, llm, plan):
+            for ev in events:
+                yield 'event', ev
+            yield 'final', final_value
 
-    monkeypatch.setattr(runner_mod, 'drive_agent', fake_drive)
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', FakeExecutor)
 
 
 def _install_fake_build(monkeypatch):
-    monkeypatch.setattr(runner_mod, 'build_react_agent',
-                        lambda llm, tools, **kw: 'fake_agent')
+    """Agent creation is covered by AgentExecutor tests; runner tests replace the executor."""
 
 
 def _install_fake_translator(monkeypatch):
@@ -144,6 +143,46 @@ def _install_fake_translator(monkeypatch):
             return []
 
     monkeypatch.setattr(runner_mod, 'AgentEventFrameTranslator', FakeTranslator)
+
+
+def test_subagent_plan_preserves_extension_params_without_structured_duplicates(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-params',
+        conversation_id='conv-1',
+        agent_type='test',
+        objective='do something',
+        params={
+            'custom_plugin_option': 'keep-me',
+            'count': 3,
+            'history_files_per_turn': {'1': ['/tmp/input.txt']},
+            'partial_indices': {'items': [0]},
+            'required_output_artifact_keys': ['result'],
+        },
+        workspace_path=str(tmp_path),
+        input_slots=[],
+        output_slots=['result'],
+        db=None,
+        emit=lambda _event: None,
+    )
+
+    plan = runner_mod._build_subagent_plan(
+        ctx,
+        None,
+        tools=[],
+        tool_prompt_appendices={},
+    )
+
+    parameter_section = next(
+        section for section in plan.prompt.sections
+        if section.section_id == 'subagent_parameters'
+    )
+    assert 'custom_plugin_option: keep-me' in parameter_section.content
+    assert 'count: 3' in parameter_section.content
+    assert 'history_files_per_turn' not in parameter_section.content
+    assert 'partial_indices' not in parameter_section.content
+    assert 'required_output_artifact_keys' not in parameter_section.content
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +276,7 @@ def test_run_subagent_stream_missing_artifact_emits_error(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Test: drive_agent raises → outer except → error frame
+# Test: AgentExecutor raises → outer except → error frame
 # ---------------------------------------------------------------------------
 
 def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
@@ -246,11 +285,12 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
     _install_fake_build(monkeypatch)
     _install_fake_translator(monkeypatch)
 
-    async def exploding_drive(agent, query, *, history=None):
-        raise RuntimeError('llm exploded')
-        yield  # pragma: no cover
+    class ExplodingExecutor:
+        async def stream(self, llm, plan):
+            raise RuntimeError('llm exploded')
+            yield  # pragma: no cover
 
-    monkeypatch.setattr(runner_mod, 'drive_agent', exploding_drive)
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', ExplodingExecutor)
 
     async def run():
         return await _collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, 'dsn://'))

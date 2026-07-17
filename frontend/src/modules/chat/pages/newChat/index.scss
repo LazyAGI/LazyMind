@@ -278,6 +278,66 @@
       gap: 16px;
       width: 100%;
 
+      .task-mode-notice {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) 20px;
+        align-items: center;
+        gap: 12px;
+        width: calc(100% - 20px);
+        min-height: 58px;
+        padding: 10px 14px;
+        border: 1px solid rgba(70, 137, 255, 0.14);
+        border-radius: 12px;
+        background: linear-gradient(90deg, #eef5ff 0%, #f6f9ff 100%);
+        color: #344256;
+        cursor: pointer;
+        font: inherit;
+        text-align: left;
+        transition:
+          border-color 0.18s ease,
+          background 0.18s ease,
+          transform 0.18s ease;
+
+        &:hover {
+          border-color: rgba(70, 137, 255, 0.3);
+          background: linear-gradient(90deg, #e8f2ff 0%, #f2f7ff 100%);
+        }
+
+        &:active {
+          transform: translateY(1px);
+        }
+
+        &:focus-visible {
+          outline: 2px solid rgba(70, 137, 255, 0.42);
+          outline-offset: 2px;
+        }
+      }
+
+      .task-mode-notice-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: #2f7df4;
+        color: #ffffff;
+        font-size: 17px;
+      }
+
+      .task-mode-notice-text {
+        min-width: 0;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 22px;
+      }
+
+      .task-mode-notice-arrow {
+        justify-self: end;
+        color: #2f7df4;
+        font-size: 15px;
+      }
+
       .model-provider-warning-banner {
         position: relative;
         display: grid;
@@ -368,6 +428,26 @@
             width: 100%;
             justify-content: center;
           }
+        }
+      }
+
+      @media (max-width: 768px) {
+        .task-mode-notice {
+          width: 100%;
+          grid-template-columns: 30px minmax(0, 1fr) 18px;
+          gap: 10px;
+          padding: 10px 12px;
+        }
+
+        .task-mode-notice-icon {
+          width: 30px;
+          height: 30px;
+          font-size: 15px;
+        }
+
+        .task-mode-notice-text {
+          font-size: 13px;
+          line-height: 20px;
         }
       }
     }

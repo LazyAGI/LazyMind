@@ -49,6 +49,8 @@ import MentionEditor, {
   type ChatMention,
   type MentionEditorRef,
 } from "./MentionEditor";
+import ContextUsageButton from "./ContextUsageButton";
+import { buildCitedMessageText } from "../newChatContainer/utils/citeMessage";
 
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
@@ -341,6 +343,8 @@ interface ChatInputProps {
   skillDepositStats?: SkillDepositStats;
   skillDepositDisabledReason?: string;
   onSkillDeposit?: () => void;
+  /** Send the next message as a background task. Used by the new-task entry point. */
+  runInBackground?: boolean;
 }
 
 export interface ChatFileList {
@@ -443,6 +447,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onPluginSettingsChange,
       initialPluginSettings,
       hasPluginSession,
+      runInBackground = false,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
@@ -459,9 +464,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const { t } = useTranslation();
     const [text, setText] = useState("");
     const [mentions, setMentions] = useState<ChatMention[]>([]);
+    const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialPluginSettings);
+    const [contextUsageReset, setContextUsageReset] = useState(0);
     const disabledNoticeId = useId();
     const previousSessionIdRef = useRef<string | undefined>(undefined);
     const hasSentMessageRef = useRef(false);
+
+    useEffect(() => {
+      setContextRuntimeSettings(initialPluginSettings);
+    }, [initialPluginSettings]);
 
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
@@ -740,7 +751,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       }
       const normalizedText = value.trim();
       setNewMessage(false);
-      const sendParams = {
+      const sendParams: SendMessageParams = {
         text: normalizedText,
         mentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
@@ -749,6 +760,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         fileListRef,
         files: fileListRef.current?.getFiles(),
         create_time: new Date().toISOString(),
+        ...(runInBackground ? { run_in_background: true } : {}),
       };
 
       if (!isChatContent) {
@@ -760,6 +772,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       }
 
       hasSentMessageRef.current = true;
+      setContextUsageReset((current) => current + 1);
 
       if (sessionId !== undefined) {
         debouncedSaveInput.cancel();
@@ -1023,6 +1036,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         clearMultiData();
                         clearPendingMessage();
                         openNewChat?.();
+                        setContextUsageReset((current) => current + 1);
                         setNewMessage(true);
                       }}
                     >
@@ -1104,7 +1118,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     }
                     initialSettings={initialPluginSettings}
                     hasPluginSession={hasPluginSession}
-                    onSave={onPluginSettingsChange}
+                    onSave={(settings) => {
+                      setContextRuntimeSettings(settings);
+                      onPluginSettingsChange?.(settings);
+                    }}
                   />
                   {sessionId && !sessionId.startsWith("temp_") && (
                     <DismissedPluginRestoreButton conversationId={sessionId} />
@@ -1113,6 +1130,54 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
                 <div className="input-bottom-actions-right">
                   {}
+                  <div className="input-bottom-actions-right-item">
+                    <ContextUsageButton
+                      disabled={disabled || isUploading || isStreaming}
+                      resetKey={`${sessionId ?? "new"}:${contextUsageReset}`}
+                      staleKey={JSON.stringify({
+                        text: value,
+                        mentions: mentions.map((item) => [item.type, item.resource_id]),
+                        files: fileList.map((item) => item.uid),
+                        cites: normalizedCiteMessages,
+                        knowledge: {
+                          ids: chatConfig?.knowledgeBaseId ?? [],
+                          creators: chatConfig?.creators ?? [],
+                          tags: chatConfig?.tags ?? [],
+                        },
+                        runtime: contextRuntimeSettings,
+                      })}
+                      buildRequest={() => {
+                        const files = fileListRef.current?.getFiles() ?? [];
+                        return {
+                          ...(sessionId && !sessionId.startsWith("temp_")
+                            ? { conversation_id: sessionId }
+                            : {}),
+                          input: [
+                            {
+                              input_type: "text",
+                              text: buildCitedMessageText(value.trim(), normalizedCiteMessages),
+                            },
+                            ...files.map((file) => ({
+                              input_type: allowedImageTypes.includes(
+                                file.name.substring(file.name.lastIndexOf(".")).toLowerCase(),
+                              )
+                                ? "image"
+                                : "file",
+                              uri: file.uri,
+                            })),
+                          ],
+                          mentions,
+                          cite_messages: normalizedCiteMessages,
+                          filters: {
+                            kb_id: chatConfig?.knowledgeBaseId ?? [],
+                            creator: chatConfig?.creators ?? [],
+                            tags: chatConfig?.tags ?? [],
+                          },
+                          ...contextRuntimeSettings,
+                        };
+                      }}
+                    />
+                  </div>
                   <div className="input-bottom-actions-right-item">
                     <ImageUpload
                       updateFiles={updateImageList}
@@ -1143,50 +1208,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         </Badge>
                       }
                     />
-                  </div>
-                  <div className="input-bottom-actions-right-item">
-                    <Tooltip title={t("chat.runInBackgroundTooltip")}>
-                      <Button
-                        size="small"
-                        type="text"
-                        style={{
-                          fontSize: 12,
-                          color: "#888",
-                          padding: "0 4px",
-                        }}
-                        disabled={isSendDisabled || isStreaming}
-                        onClick={() => {
-                          if (isSendDisabled || isStreaming) return;
-                          const normalizedText = value.trim();
-                          setNewMessage(false);
-                          const sendParams: SendMessageParams = {
-                            text: normalizedText,
-                            mentions,
-                            citeMessage: normalizedCiteMessages.join("\n\n"),
-                            citeMessages: normalizedCiteMessages,
-                            fileList,
-                            fileListRef,
-                            files: fileListRef.current?.getFiles(),
-                            create_time: new Date().toISOString(),
-                            run_in_background: true,
-                          };
-                          if (!isChatContent) {
-                            setPendingMessage(sendParams);
-                            setIsChatContent?.(true);
-                          } else {
-                            onSend?.(sendParams);
-                            clearMultiData();
-                          }
-                          onChange("");
-                          setMentions([]);
-                          setText("");
-                          onClearCiteMessage?.();
-                        }}
-                        aria-label={t("chat.runInBackground")}
-                      >
-                        {t("chat.runInBackground")}
-                      </Button>
-                    </Tooltip>
                   </div>
                   <div className="input-bottom-actions-right-item">
                     <SendButton

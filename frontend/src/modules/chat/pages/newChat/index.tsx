@@ -9,6 +9,7 @@ import ChatLayout from "../chatLayout";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { Button, Tooltip, message } from "antd";
 import {
+  CHAT_NEW_RUN_IN_BACKGROUND_KEY,
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
 } from "@/modules/chat/constants/chat";
@@ -20,6 +21,29 @@ import { AgentAppsAuth } from "@/components/auth";
 import { localizeErrorCode } from "@/components/request";
 import PreferenceConfigNotice from "@/modules/chat/components/PreferenceConfigNotice";
 import type { ConversationPluginSettings } from "@/modules/chat/utils/request";
+import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
+
+function readRunInBackgroundMode() {
+  try {
+    return sessionStorage.getItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistRunInBackgroundMode(enabled: boolean) {
+  try {
+    sessionStorage.setItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY, enabled ? "1" : "0");
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function getInitialPluginSettings(
+  runInBackground: boolean,
+): ConversationPluginSettings | null {
+  return runInBackground ? null : { enable_plugin: false };
+}
 
 const NewChatPage = () => {
   const { t } = useTranslation();
@@ -34,11 +58,15 @@ const NewChatPage = () => {
   const [isChatContent, setIsChatContent] = useState(false);
   const [chatConfig, setChatConfig] = useState<ChatConfig>({});
   const [chatLayoutMounted, setChatLayoutMounted] = useState(false);
+  const [runInBackground, setRunInBackground] = useState(readRunInBackgroundMode);
   const [welcomeKnowledgeRefreshKey, setWelcomeKnowledgeRefreshKey] =
     useState(0);
   const newChatInputRef = useRef<ChatInputImperativeProps>(null);
   // Stash plugin settings changed in the welcome-screen ChatInput before a conversation is created.
-  const [pendingPluginSettings, setPendingPluginSettings] = useState<ConversationPluginSettings | null>(null);
+  const [pendingPluginSettings, setPendingPluginSettings] =
+    useState<ConversationPluginSettings | null>(() =>
+      getInitialPluginSettings(readRunInBackgroundMode()),
+    );
 
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
@@ -89,9 +117,11 @@ const NewChatPage = () => {
       setChatLayoutMounted(true);
     }
     if (!value) {
+      const nextRunInBackground = readRunInBackgroundMode();
+      setRunInBackground(nextRunInBackground);
       setWelcomeKnowledgeRefreshKey((key) => key + 1);
       // Reset pending settings and KB config so a fresh new conversation starts clean.
-      setPendingPluginSettings(null);
+      setPendingPluginSettings(getInitialPluginSettings(nextRunInBackground));
       setChatConfig({});
     }
     setIsChatContent(value);
@@ -109,16 +139,28 @@ const NewChatPage = () => {
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {
-      const conversationId =
-        (event as CustomEvent<{ conversationId?: string }>).detail
-          ?.conversationId || "";
+      const detail = (
+        event as CustomEvent<{
+          conversationId?: string;
+          runInBackground?: boolean;
+        }>
+      ).detail;
+      const conversationId = detail?.conversationId || "";
       if (!conversationId) {
+        const nextRunInBackground =
+          detail?.runInBackground ?? readRunInBackgroundMode();
+        setRunInBackground(nextRunInBackground);
+        persistRunInBackgroundMode(nextRunInBackground);
         setWelcomeKnowledgeRefreshKey((key) => key + 1);
         setIsChatContent(false);
         setChatConfig({});
-        setPendingPluginSettings(null);
+        setPendingPluginSettings(
+          getInitialPluginSettings(nextRunInBackground),
+        );
         return;
       }
+      setRunInBackground(false);
+      persistRunInBackgroundMode(false);
       setChatLayoutMounted(true);
       setIsChatContent(true);
     };
@@ -246,6 +288,22 @@ const NewChatPage = () => {
                 </div>
 
                 <div className="input-section">
+                  {runInBackground ? (
+                    <button
+                      type="button"
+                      className="task-mode-notice"
+                      onClick={() => navigate("/task-center")}
+                      aria-label={t("chat.taskModeNoticeAction")}
+                    >
+                      <span className="task-mode-notice-icon" aria-hidden="true">
+                        <ScheduleOutlined />
+                      </span>
+                      <span className="task-mode-notice-text">
+                        {t("chat.taskModeNotice")}
+                      </span>
+                      <RightOutlined className="task-mode-notice-arrow" aria-hidden="true" />
+                    </button>
+                  ) : null}
                   {showEmbeddingWarning ? (
                     <div className="model-provider-warning-banner embedding-warning-banner" role="alert">
                       <span className="model-provider-warning-text">
@@ -298,6 +356,8 @@ const NewChatPage = () => {
                     onPluginSettingsChange={(settings) => {
                       setPendingPluginSettings(settings);
                     }}
+                    initialPluginSettings={pendingPluginSettings ?? undefined}
+                    runInBackground={runInBackground}
                   />
                 </div>
               </div>

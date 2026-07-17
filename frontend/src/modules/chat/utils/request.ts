@@ -74,6 +74,55 @@ export interface PromptLibraryListParams {
 export const CHAT_STREAM_URL = `${coreApiBaseUrl}/conversations:chat`;
 export const CHAT_RESUME_STREAM_URL = `${coreApiBaseUrl}/conversations:resumeChat`;
 
+export interface ContextUsageItem {
+  item_id: string;
+  category: string;
+  title: string;
+  source: string;
+  estimated_tokens: number;
+  char_count: number;
+  item_count: number;
+  channel?: string;
+  content_kind?: string;
+  authoritative?: boolean;
+  content: string;
+}
+
+export interface ContextUsageCategory {
+  category_id: string;
+  title: string;
+  estimated_tokens: number;
+  char_count: number;
+  item_count: number;
+  items: ContextUsageItem[];
+}
+
+export interface ContextUsageReport {
+  scope: "next_request";
+  estimated_tokens: number;
+  max_input_tokens?: number;
+  estimated_ratio?: number;
+  categories: ContextUsageCategory[];
+  estimation_version: string;
+}
+
+export function estimateContextUsage(payload: Record<string, unknown>) {
+  return axiosInstance
+    .post<{ data: ContextUsageReport }>(
+      `${coreApiBaseUrl}/conversations:estimateContextUsage`,
+      payload,
+    )
+    .then((response) => response.data.data);
+}
+
+export function exportContextPrompt(payload: Record<string, unknown>) {
+  return axiosInstance
+    .post(`${coreApiBaseUrl}/conversations:exportContextPrompt`, payload, {
+      responseType: "blob",
+    })
+    .then((response) => response.data as Blob);
+}
+
 // SubAgent Task Center endpoints.
 export const taskStreamUrl = (taskId: string) =>
   `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;

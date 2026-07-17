@@ -43,6 +43,15 @@ _PREFLIGHT_DECISIONS = {'ready', 'need_information', 'not_applicable'}
 _PREFLIGHT_TIMEOUT_SECONDS = 30.0
 
 
+@dataclass
+class PluginAgentContribution:
+    tools: List[Any]
+    system_prompt: str
+    stop_tools: List[str]
+    agentic_config_patch: Dict[str, Any]
+    runtime_context: str
+
+
 @dataclass(frozen=True)
 class _ReachabilitySnapshot:
     current_step: str
@@ -848,16 +857,25 @@ def _emit_preflight_snapshot(snapshot: Optional[Dict[str, Any]]) -> None:
 def build_cold_start_tools(
     plugin_catalog: Optional[List[Dict[str, Any]]] = None,
     disabled_builtin_plugins: Optional[List[str]] = None,
+    allowed_plugin_refs: Optional[List[str]] = None,
 ) -> List[Any]:
     """Build one side-effect-free preflight trigger per loaded plugin."""
     tools = []
     disabled = set(disabled_builtin_plugins or [])
+    allowed = set(allowed_plugin_refs or [])
     candidates = [
         (spec, None)
         for spec in (plugin_loader._registry or {}).values()
-        if not spec.plugin_id.startswith('user_') and spec.plugin_id not in disabled
+        if (
+            not spec.plugin_id.startswith('user_')
+            and spec.plugin_id not in disabled
+            and (not allowed or f'builtin:{spec.plugin_id}' in allowed)
+        )
     ]
-    candidates.extend((None, entry) for entry in (plugin_catalog or []))
+    candidates.extend(
+        (None, entry) for entry in (plugin_catalog or [])
+        if not allowed or str(entry.get('plugin_ref') or '') in allowed
+    )
     for spec, catalog_entry in candidates:
         if catalog_entry is not None:
             pid = str(catalog_entry.get('plugin_id') or 'plugin')
@@ -1317,7 +1335,9 @@ async def _enforce_prepared_plugin_advance(
     ):
         return
 
-    from lazymind.chat.engine.agent_core import drive_agent
+    from lazymind.chat.engine.agent_runtime import (
+        AgentExecutor, AgentRole, AgentRunPlan, PromptBuilder,
+    )
     from lazymind.chat.service.component.status_retry import _new_react_agent
 
     launch_plan = dict(prepared.get('launch_plan') or {})
@@ -1359,7 +1379,23 @@ async def _enforce_prepared_plugin_advance(
             'using the advancement tool named by this plan exactly as specified:\n'
             + json.dumps(visible_launch_plan, ensure_ascii=False)
         )
-    async for kind, payload in drive_agent(retry_agent, correction, history=history):
+    retry_prompt = (
+        PromptBuilder.for_role(AgentRole.CHAT)
+        .runtime(
+            'plugin_launch_correction', 'Mandatory Plugin Launch Correction', correction,
+            'plugin.runtime',
+            authoritative=True,
+            content_kind='instruction',
+        )
+        .input(query, source='user')
+        .build()
+    )
+    retry_plan = AgentRunPlan(
+        role=AgentRole.CHAT,
+        prompt=retry_prompt,
+        history=history or [],
+    )
+    async for kind, payload in AgentExecutor().stream_agent(retry_agent, retry_plan):
         if kind == 'event' and _should_suppress_prepared_plugin_text(payload):
             continue
         yield kind, payload
@@ -2046,7 +2082,8 @@ def resolve_plugin_injection(
     conversation_id: str = '',
     plugin_catalog: Optional[List[Dict[str, Any]]] = None,
     disabled_builtin_plugins: Optional[List[str]] = None,
-) -> tuple:
+    allowed_plugin_refs: Optional[List[str]] = None,
+) -> PluginAgentContribution:
     """Resolve plugin tools, system prompt, stop-tools and agentic_config patches.
 
     Called once per request from handle_chat.  Encapsulates all plugin-context
@@ -2056,14 +2093,8 @@ def resolve_plugin_injection(
     here — they are handled independently in chat_service.py so that schedule
     availability and task context visibility are not affected by enable_plugin.
 
-    Returns:
-        (plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context)
-
-        plugin_tools             – list of callables to append to the agent tool list.
-        plugin_system_prompt     – extra system-prompt text to append (may be empty).
-        plugin_stop_tools        – list of tool names that terminate the ReAct loop.
-        agentic_config_patch     – dict to merge into agentic_config (may be empty).
-        plugin_artifact_context  – artifact summary to prepend to the current user-turn (not system prompt).
+    Returns a structured contribution containing tools, stable plugin policy,
+    stop tools, runtime config patches, and request-local runtime context.
     """
     plugin_tools: List[Any] = []
     plugin_system_prompt: str = ''
@@ -2074,11 +2105,17 @@ def resolve_plugin_injection(
     # Honour enable_plugin=false: skip all plugin tooling and fall back to pure QA.
     cfg = _agentic_config()
     if not cfg.get('enable_plugin', True):
-        return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
+        return PluginAgentContribution(
+            plugin_tools, plugin_system_prompt, plugin_stop_tools,
+            agentic_config_patch, plugin_artifact_context,
+        )
 
     if not plugin_loader._registry:
         # No plugins registered — return empty; task context is injected by chat_service.
-        return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
+        return PluginAgentContribution(
+            plugin_tools, plugin_system_prompt, plugin_stop_tools,
+            agentic_config_patch, plugin_artifact_context,
+        )
 
     # Resolve plugin_mode from plugin_context (injected by Go).
     plugin_mode = 'dynamic'
@@ -2205,7 +2242,9 @@ def resolve_plugin_injection(
                 ).strip()
         else:
             # Cold start: no active session yet
-            triggers = build_cold_start_tools(plugin_catalog, disabled_builtin_plugins)
+            triggers = build_cold_start_tools(
+                plugin_catalog, disabled_builtin_plugins, allowed_plugin_refs,
+            )
             plugin_tools = triggers + build_cold_advance_tools(plugin_mode)
             plugin_stop_tools = ['advance_step_and_hand_off']
             plugin_artifact_context = _build_preflight_context_section(
@@ -2221,16 +2260,22 @@ def resolve_plugin_injection(
                     for spec in (plugin_loader._registry or {}).values()
                     if (
                         spec.plugin_id not in set(disabled_builtin_plugins or [])
+                        and (not allowed_plugin_refs or f'builtin:{spec.plugin_id}' in set(allowed_plugin_refs))
                         and not spec.plugin_id.startswith('user_')
                     )
                 ]
-                scenarios.extend(_catalog_intro(entry) for entry in (plugin_catalog or []))
+                scenarios.extend(
+                    _catalog_intro(entry) for entry in (plugin_catalog or [])
+                    if not allowed_plugin_refs or str(entry.get('plugin_ref') or '') in set(allowed_plugin_refs)
+                )
                 plugin_system_prompt = (
                     _COLD_START_PLUGIN_PROMPT
                 ) + '\n\n---\n\n'.join(s for s in scenarios if s)
     else:
         # No plugin_context provided: still inject cold-start triggers
-        triggers = build_cold_start_tools(plugin_catalog, disabled_builtin_plugins)
+        triggers = build_cold_start_tools(
+            plugin_catalog, disabled_builtin_plugins, allowed_plugin_refs,
+        )
         plugin_tools = triggers + build_cold_advance_tools(plugin_mode)
         plugin_stop_tools = ['advance_step_and_hand_off']
         plugin_artifact_context = _build_cold_execution_policy(plugin_mode)
@@ -2240,15 +2285,22 @@ def resolve_plugin_injection(
                 for spec in (plugin_loader._registry or {}).values()
                 if (
                     spec.plugin_id not in set(disabled_builtin_plugins or [])
+                    and (not allowed_plugin_refs or f'builtin:{spec.plugin_id}' in set(allowed_plugin_refs))
                     and not spec.plugin_id.startswith('user_')
                 )
             ]
-            scenarios.extend(_catalog_intro(entry) for entry in (plugin_catalog or []))
+            scenarios.extend(
+                _catalog_intro(entry) for entry in (plugin_catalog or [])
+                if not allowed_plugin_refs or str(entry.get('plugin_ref') or '') in set(allowed_plugin_refs)
+            )
             plugin_system_prompt = (
                 _COLD_START_PLUGIN_PROMPT
             ) + '\n\n---\n\n'.join(s for s in scenarios if s)
 
-    return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
+    return PluginAgentContribution(
+        plugin_tools, plugin_system_prompt, plugin_stop_tools,
+        agentic_config_patch, plugin_artifact_context,
+    )
 
 
 def _catalog_intro(entry: Dict[str, Any]) -> str:
