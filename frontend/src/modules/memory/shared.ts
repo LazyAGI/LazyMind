@@ -61,6 +61,9 @@ export const isSkillUpdatePendingForRecord = (record: StructuredAsset) =>
 export interface ExperienceAsset extends BaseAsset {
   title: string;
   agentPersona?: string;
+  draftStatus?: string;
+  summary?: string;
+  hasPendingReviewResult?: boolean;
   hasPendingReviewSuggestions?: boolean;
   responseStyle?: string;
   resourceType?: string;

@@ -1,30 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
-  Empty,
   Input,
   Select,
   Space,
-  Switch,
-  Table,
   Tooltip,
 } from "antd";
 import { QuestionCircleOutlined } from "@ant-design/icons";
-import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import { useMemoryManagementOutletContext } from "../../context";
-import type { ExperienceAsset } from "../../shared";
+import ExperienceOverview from "../../components/ExperienceOverview";
 import GlossaryListSection from "../../components/GlossaryListSection";
 import SkillManagementSection from "../../components/SkillManagementSection";
 
-const defaultMemoryListPageSize = 6;
-const memoryListPageSizeOptions = [6, 12, 20, 50];
 const showGlossaryInboxUi = true;
 
 export default function MemoryManagementListPage() {
-  const listContentRef = useRef<HTMLDivElement>(null);
-  const [memoryTableBodyHeight, setMemoryTableBodyHeight] = useState<number>();
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(defaultMemoryListPageSize);
   const {
     t,
     activeTab,
@@ -38,9 +27,6 @@ export default function MemoryManagementListPage() {
     setGlossaryInboxOpen,
     resetFilters,
     navigateToMemoryList,
-    experienceFeatureEnabled,
-    experienceSettingSaving,
-    handleExperienceFeatureToggle,
     searchInput,
     setSearchInput,
     query,
@@ -58,10 +44,6 @@ export default function MemoryManagementListPage() {
     refreshGlossaryAssets,
     handleBatchMergeGlossary,
     handleBatchDeleteGlossary,
-    filteredExperienceItems,
-    experienceLoading,
-    experienceColumns,
-    experienceProfileExpandable,
     filteredGlossaryItems,
     glossaryColumns,
     selectedGlossaryAssetIds,
@@ -69,90 +51,6 @@ export default function MemoryManagementListPage() {
     setGlossaryListPageSize,
     setSelectedGlossaryAssetIds,
   } = useMemoryManagementOutletContext();
-
-  const activeListTotal = useMemo(() => {
-    if (activeTab === "experience") {
-      return filteredExperienceItems.length;
-    }
-    return 0;
-  }, [activeTab, filteredExperienceItems.length]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [activeTab, query]);
-
-  const activePage = currentPage;
-  const activePageSize = pageSize;
-
-  useEffect(() => {
-    const maxPage = Math.max(1, Math.ceil(activeListTotal / activePageSize));
-    if (activePage <= maxPage) {
-      return;
-    }
-    setCurrentPage(maxPage);
-  }, [activeListTotal, activePage, activePageSize]);
-
-  const memoryListPagination = getLocalizedTablePagination(
-    {
-      current: activePage,
-      pageSize: activePageSize,
-      total: activeListTotal,
-      showSizeChanger: true,
-      pageSizeOptions: memoryListPageSizeOptions,
-      showTotal: (total) => t("common.totalItems", { total }),
-      onChange: (page, nextPageSize) => {
-        setCurrentPage(page);
-        setPageSize(nextPageSize);
-      },
-      onShowSizeChange: (_current, nextPageSize) => {
-        setCurrentPage(1);
-        setPageSize(nextPageSize);
-      },
-    },
-    t,
-  );
-  const memoryTableScroll = memoryTableBodyHeight
-    ? { x: 980, y: memoryTableBodyHeight }
-    : { x: 980 };
-
-  useEffect(() => {
-    if (activeTab === "glossary" || activeTab === "skills") {
-      return undefined;
-    }
-
-    const contentElement = listContentRef.current;
-    if (!contentElement) {
-      return undefined;
-    }
-
-    const updateTableHeight = () => {
-      const headerElement =
-        contentElement.querySelector<HTMLElement>(".ant-table-thead");
-      const paginationElement = contentElement.querySelector<HTMLElement>(
-        ".ant-table-pagination",
-      );
-      const availableHeight =
-        contentElement.getBoundingClientRect().height -
-        (headerElement?.getBoundingClientRect().height ?? 0) -
-        (paginationElement?.getBoundingClientRect().height ?? 0) -
-        12;
-      const nextBodyHeight = Math.max(240, Math.floor(availableHeight));
-
-      setMemoryTableBodyHeight((previous) =>
-        previous === nextBodyHeight ? previous : nextBodyHeight,
-      );
-    };
-
-    updateTableHeight();
-    const resizeObserver = new ResizeObserver(updateTableHeight);
-    resizeObserver.observe(contentElement);
-    window.addEventListener("resize", updateTableHeight);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", updateTableHeight);
-    };
-  }, [activeListTotal, activePageSize, activeTab]);
 
   return (
     <div
@@ -228,38 +126,6 @@ export default function MemoryManagementListPage() {
         })}
       </div>
 
-      {activeTab === "experience" ? (
-        <div className="memory-experience-feature-bar">
-          <div className="memory-experience-feature-copy">
-            <span
-              className={`memory-experience-feature-status ${
-                experienceFeatureEnabled ? "is-on" : "is-off"
-              }`}
-            >
-              <span className="memory-experience-feature-status-dot" />
-              {experienceFeatureEnabled
-                ? t("admin.enabled")
-                : t("admin.disabled")}
-            </span>
-            <div className="memory-experience-feature-text">
-              <strong>{t("admin.memoryHabitFeatureToggle")}</strong>
-              <span>
-                {experienceFeatureEnabled
-                  ? t("admin.memoryHabitFeatureEnabledHint")
-                  : t("admin.memoryHabitFeatureDisabledHint")}
-              </span>
-            </div>
-          </div>
-          <Switch
-            checked={experienceFeatureEnabled}
-            loading={experienceSettingSaving}
-            checkedChildren={t("admin.enable")}
-            unCheckedChildren={t("admin.disable")}
-            onChange={(checked) => void handleExperienceFeatureToggle(checked)}
-          />
-        </div>
-      ) : null}
-
       {activeTab !== "experience" && activeTab !== "skills" ? (
         <div className="memory-filter-bar">
           <Input.Search
@@ -286,30 +152,11 @@ export default function MemoryManagementListPage() {
 
       <div
         className={`memory-list-content ${activeTab === "skills" ? "is-skill-management" : ""}`}
-        ref={activeTab === "skills" ? undefined : listContentRef}
       >
         {activeTab === "skills" ? (
           <SkillManagementSection />
         ) : activeTab === "experience" ? (
-          <Table<ExperienceAsset>
-            className="admin-page-table memory-table"
-            rowKey="id"
-            loading={experienceLoading}
-            dataSource={filteredExperienceItems}
-            columns={experienceColumns}
-            expandable={experienceProfileExpandable}
-            tableLayout="fixed"
-            pagination={memoryListPagination}
-            locale={{
-              emptyText: (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={t("admin.memoryEmpty")}
-                />
-              ),
-            }}
-            scroll={memoryTableScroll}
-          />
+          <ExperienceOverview />
         ) : activeTab === "glossary" ? (
           <GlossaryListSection
             t={t}

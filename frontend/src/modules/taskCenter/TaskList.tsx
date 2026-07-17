@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Input, Progress, Segmented, Select, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, ReloadOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, EllipsisOutlined, ReloadOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { listTasks } from './api';
@@ -71,26 +71,23 @@ export default function TaskList({ active }: TaskListProps) {
     {
       title: t('taskCenter.tasks'),
       key: 'task',
-      width: 250,
+      width: '40%',
       render: (_, task) => {
         const title = task.conversation_title || task.title || t('taskCenter.noTitle');
         const description = task.title || task.schedule_name || t('taskCenter.noDescription');
-        return <div className='task-name-cell'><Tooltip title={title}><strong>{truncate(title, 6)}</strong></Tooltip><Tooltip title={description}><span>{truncate(description, 15)}</span></Tooltip></div>;
+        return <div className='task-identity-cell'><span className={`task-status-dot status-${task.status}`} /><div><Tooltip title={title}><strong>{title}</strong></Tooltip><span>{typeLabel(task.task_type, t)} / {description}</span></div></div>;
       },
     },
-    { title: t('taskCenter.taskType'), dataIndex: 'task_type', width: 140, render: (value) => <span className='source-tag'>{typeLabel(value, t)}</span> },
     {
-      title: t('taskCenter.currentProgress'), key: 'progress', width: 190,
+      title: t('taskCenter.statusAndNext'), key: 'state', width: '34%',
       render: (_, task) => {
         const done = task.steps?.filter((step) => ['completed', 'succeeded'].includes(step.status)).length ?? 0;
         const count = task.steps?.length ?? 0;
-        return <div className='progress-cell'><span>{count ? `${done}/${count}` : '—'}</span><Progress percent={count ? Math.round(done / count * 100) : 0} showInfo={false} size='small' /></div>;
+        return <div className='task-list-state'><div><StatusTag status={task.status} onClick={task.plugin_session_id ? () => setGraphTask(task) : undefined} /><span>{count ? t('taskCenter.stepsCompleted', { done, total: count }) : task.title || t('taskCenter.noDescription')}</span></div>{count ? <Progress percent={Math.round(done / count * 100)} showInfo={false} size='small' /> : null}</div>;
       },
     },
-    { title: t('taskCenter.statusCol'), dataIndex: 'status', width: 130, render: (value, task) => <StatusTag status={value} onClick={task.plugin_session_id ? () => setGraphTask(task) : undefined} /> },
-    { title: t('taskCenter.createdAt'), dataIndex: 'created_at', width: 190, render: formatDate },
-    { title: t('taskCenter.finishedAt'), dataIndex: 'finished_at', width: 190, render: formatDate },
-    { title: t('common.actions'), width: 110, render: (_, task) => <Button type='link' onClick={(event) => { event.stopPropagation(); setSelected(task); }}>{t('taskCenter.viewDetails')}</Button> },
+    { title: t('taskCenter.time'), key: 'time', width: '20%', render: (_, task) => <div className='task-time-cell'><span>{formatDate(task.finished_at || task.updated_at)}</span><small>{t('taskCenter.createdAt')} {formatDate(task.created_at)}</small></div> },
+    { title: '', width: 56, align: 'center', render: (_, task) => <Button type='text' icon={<EllipsisOutlined />} aria-label={t('taskCenter.viewDetails')} onClick={(event: React.MouseEvent<HTMLElement>) => { event.stopPropagation(); setSelected(task); }} /> },
   ];
 
   const statusOptions = [
@@ -109,10 +106,10 @@ export default function TaskList({ active }: TaskListProps) {
   return (
     <div className='all-tasks'>
       <div className='all-tasks-toolbar'>
-        <Segmented className='task-status-segmented' value={status} onChange={(value) => { setStatus(String(value)); setPage(1); }} options={statusOptions} />
+        <Segmented className='task-status-segmented' value={status} onChange={(value: string | number) => { setStatus(String(value)); setPage(1); }} options={statusOptions} />
         <div className='all-tasks-filters'>
-          <Input prefix={<SearchOutlined />} allowClear placeholder={t('taskCenter.searchPlaceholder')} value={keyword} onChange={(event) => { setKeyword(event.target.value); setPage(1); }} />
-          <Select value={type} onChange={(value) => { setType(value); setPage(1); }} options={[
+          <Input prefix={<SearchOutlined />} allowClear placeholder={t('taskCenter.searchPlaceholder')} value={keyword} onChange={(event: React.ChangeEvent<HTMLInputElement>) => { setKeyword(event.target.value); setPage(1); }} />
+          <Select value={type} onChange={(value: string) => { setType(value); setPage(1); }} options={[
             { value: '', label: t('taskCenter.triggerAll') },
             { value: 'plugin_run', label: t('taskCenter.typePluginRun') },
             { value: 'background_chat', label: t('taskCenter.typeBackgroundChat') },
@@ -121,15 +118,11 @@ export default function TaskList({ active }: TaskListProps) {
           <Button icon={<ReloadOutlined />} onClick={() => void load()} aria-label={t('taskCenter.refresh')} />
         </div>
       </div>
-      <Table rowKey='id' className='task-table' loading={loading} columns={columns} dataSource={tasks} onRow={(task) => ({ onClick: () => setSelected(task) })} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: setPage, showSizeChanger: false, showTotal: (value) => t('taskCenter.taskTotalItems', { total: value }) }} />
+      <Table rowKey='id' className='task-table' loading={loading} columns={columns} dataSource={tasks} onRow={(task: Task) => ({ onClick: () => setSelected(task) })} rowClassName={(task: Task) => `task-table-row status-${task.status}`} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: setPage, showSizeChanger: false, showTotal: (value: number) => t('taskCenter.taskTotalItems', { total: value }) }} />
       <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} />
       {graphTask?.plugin_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.plugin_session_id} pluginId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>
   );
-}
-
-function truncate(value: string, maxLength: number) {
-  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 }
 
 function typeLabel(value: string, t: (key: string) => string) {
