@@ -212,24 +212,21 @@ def add_standard_system_sections(
     show_tool_status: bool = True,
 ) -> PromptBuilder:
     builder.system(
-        'platform_identity', DEFAULT_SYSTEM_PROMPT,
-        source='platform.guidance', priority=10,
+        'platform_identity', '', DEFAULT_SYSTEM_PROMPT, 'platform.guidance', priority=10,
     ).system(
-        'response_language', _build_response_language_prompt(
+        'response_language', '', _build_response_language_prompt(
             environment_context,
             current_query=current_query,
             conversation_history=conversation_history,
             user_preference=user_preference,
         ),
-        source='platform.language', priority=20,
+        'platform.language', priority=20,
     )
 
     environment_prompt = _build_environment_context_prompt(environment_context)
-    if environment_prompt:
-        builder.system(
-            'environment', environment_prompt,
-            source='request.environment', priority=30,
-        )
+    builder.system(
+        'environment', '', environment_prompt, 'request.environment', priority=30,
+    )
 
     if use_memory:
         if isinstance(user_preference, str) and user_preference.strip():
@@ -256,13 +253,12 @@ def add_standard_system_sections(
                 + '\n\n<!-- end of User Profile / Preferences -->'
             )
             builder.system(
-                'user_preferences', preference_block,
-                source='user.profile', priority=40,
+                'user_preferences', '', preference_block, 'user.profile', priority=40,
             )
         if isinstance(memory, str) and memory.strip():
             builder.system(
-                'working_memory', f'## Agent Working Memory\n{memory.strip()}',
-                source='user.memory', priority=50,
+                'working_memory', '', f'## Agent Working Memory\n{memory.strip()}',
+                'user.memory', priority=50,
             )
 
     if has_tools:
@@ -286,15 +282,12 @@ def add_standard_system_sections(
                 + tool_policy
             )
         builder.system(
-            'tool_policy', tool_policy,
-            source='platform.tools', priority=60,
+            'tool_policy', '', tool_policy, 'platform.tools', priority=60,
         )
         appendix_prompt = _build_tool_appendix_prompt(tool_prompt_appendices)
-        if appendix_prompt:
-            builder.system(
-                'tool_appendices', appendix_prompt,
-                source='tool.registry', priority=70,
-            )
+        builder.system(
+            'tool_appendices', '', appendix_prompt, 'tool.registry', priority=70,
+        )
 
     return builder
 

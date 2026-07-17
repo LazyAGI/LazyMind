@@ -269,9 +269,7 @@ def _build_subagent_plan(
         tool_prompt_appendices=tool_prompt_appendices,
     )
     builder.system(
-        section_id='subagent_role',
-        title='SubAgent Role',
-        content=(
+        'subagent_role', 'SubAgent Role', (
             'You are an autonomous SubAgent. Complete the task objective using only the '
             'available tools. You may not spawn, create, or delegate to other agents.\n'
             'Use the selected user-visible language for progress and the final summary. '
@@ -279,7 +277,7 @@ def _build_subagent_plan(
             'the output slot contract; do not translate an artifact when its required '
             'format specifies another language.'
         ),
-        source='platform.subagent',
+        'platform.subagent',
         priority=20,
     )
 
@@ -287,17 +285,11 @@ def _build_subagent_plan(
         key: value for key, value in ctx.params.items()
         if key not in _STRUCTURED_PARAM_KEYS and value not in (None, '', [], {})
     }
-    if display_params:
-        builder.runtime(
-            section_id='subagent_parameters',
-            title='Task Parameters',
-            content='\n'.join(
-                f'- {key}: {value}' for key, value in display_params.items()
-            ),
-            source='task.params',
-            priority=10,
-            content_kind='reference',
-        )
+    builder.runtime(
+        'subagent_parameters', 'Task Parameters',
+        '\n'.join(f'- {key}: {value}' for key, value in display_params.items()),
+        'task.params', priority=10, content_kind='reference',
+    )
 
     # Inject artifact context: plugin session reads from slot revisions with sort_order;
     # ordinary SubAgent reads from sub_agent_artifacts of prior succeeded steps.
@@ -307,19 +299,15 @@ def _build_subagent_plan(
         artifact_section = _build_artifact_context_section(ctx, db) if db else []
         if artifact_section:
             builder.runtime(
-                section_id='subagent_artifacts',
-                title='Existing Artifacts',
-                content='\n'.join(artifact_section),
-                source='database.artifacts',
+                'subagent_artifacts', 'Existing Artifacts', '\n'.join(artifact_section),
+                'database.artifacts',
                 priority=20,
                 content_kind='reference',
             )
         elif ctx.input_slots:
             builder.runtime(
-                section_id='subagent_input_slots',
-                title='Input Slots',
-                content=', '.join(ctx.input_slots),
-                source='task.slots',
+                'subagent_input_slots', 'Input Slots', ', '.join(ctx.input_slots),
+                'task.slots',
                 priority=20,
                 content_kind='reference',
             )
@@ -328,10 +316,8 @@ def _build_subagent_plan(
         intent_lines = _build_intent_context_section(db, ctx.conversation_id, session_id, step_id)
         if intent_lines:
             builder.runtime(
-                section_id='subagent_intent',
-                title='Effective Execution Intent',
-                content='\n'.join(intent_lines).strip(),
-                source='database.intent',
+                'subagent_intent', 'Effective Execution Intent',
+                '\n'.join(intent_lines).strip(), 'database.intent',
                 priority=30,
                 authoritative=True,
                 content_kind='instruction',
@@ -342,15 +328,10 @@ def _build_subagent_plan(
         normalize_attachments(history_files_per_turn),
         role=AgentRole.SUBAGENT,
     )
-    if attachment_section:
-        builder.runtime(
-            section_id='subagent_attachments',
-            title='User Attachments',
-            content=attachment_section,
-            source='request.attachments',
-            priority=40,
-            content_kind='reference',
-        )
+    builder.runtime(
+        'subagent_attachments', 'User Attachments', attachment_section,
+        'request.attachments', priority=40, content_kind='reference',
+    )
     # Translate partial_indices (internal 0-based list_index) into sort_order guidance.
     # This tells the AI exactly which display position(s) to overwrite instead of append.
     partial_indices: Dict[str, List[int]] = ctx.params.get('partial_indices') or {}
@@ -360,10 +341,7 @@ def _build_subagent_plan(
         )
         if sort_order_hints:
             builder.runtime(
-                section_id='subagent_partial_retry',
-                title='Partial Retry',
-                content=sort_order_hints,
-                source='task.retry',
+                'subagent_partial_retry', 'Partial Retry', sort_order_hints, 'task.retry',
                 priority=50,
                 authoritative=True,
                 content_kind='instruction',
@@ -408,10 +386,7 @@ def _build_subagent_plan(
         'opening any artifact.'
     )
     builder.runtime(
-        section_id='subagent_output_contract',
-        title='Output Contract',
-        content='\n'.join(output_lines),
-        source='task.slots',
+        'subagent_output_contract', 'Output Contract', '\n'.join(output_lines), 'task.slots',
         priority=60,
         authoritative=True,
         content_kind='instruction',

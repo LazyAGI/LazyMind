@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import List, Tuple
 
 from .models import AgentRole, ContentKind, PromptBundle, PromptSection
@@ -53,12 +54,15 @@ class PromptBuilder:
     def system(
         self,
         section_id: str,
+        title: str,
         content: str,
-        *,
-        title: str = '',
         source: str,
+        *,
         priority: int = 100,
+        skip_if: bool | Callable[[], bool] = False,
     ) -> 'PromptBuilder':
+        if skip_if() if callable(skip_if) else skip_if:
+            return self
         return self._add(PromptSection(
             section_id=section_id.strip(),
             channel='system',
@@ -71,11 +75,12 @@ class PromptBuilder:
     def runtime(
         self,
         section_id: str,
-        content: str,
-        *,
         title: str,
+        content: str,
         source: str,
+        *,
         priority: int = 100,
+        skip_if: bool | Callable[[], bool] = False,
         authoritative: bool = False,
         content_kind: ContentKind = 'instruction',
     ) -> 'PromptBuilder':

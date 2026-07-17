@@ -1373,9 +1373,8 @@ async def _enforce_prepared_plugin_advance(
     retry_prompt = (
         PromptBuilder.for_role(AgentRole.CHAT)
         .runtime(
-            'plugin_launch_correction', correction,
-            title='Mandatory Plugin Launch Correction',
-            source='plugin.runtime',
+            'plugin_launch_correction', 'Mandatory Plugin Launch Correction', correction,
+            'plugin.runtime',
             authoritative=True,
             content_kind='instruction',
         )

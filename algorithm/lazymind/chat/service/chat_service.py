@@ -390,88 +390,47 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             active_configs + attachment_configs + ask_user_configs,
         ),
     )
-    if plugin_contribution.system_prompt:
-        prompt_builder.system(
-            section_id='chat_plugin_policy',
-            title='Plugin Policy',
-            content=plugin_contribution.system_prompt,
-            source='plugin.scenario',
-            # Plugin policy was historically appended after the common system prompt.
-            # Keep that precedence while still assembling it through PromptBuilder.
-            priority=80,
-        )
-    if plugin_contribution.runtime_context:
-        prompt_builder.runtime(
-            section_id='chat_plugin_runtime',
-            title='Plugin State',
-            content=plugin_contribution.runtime_context,
-            source='plugin.runtime',
-            priority=10,
-            authoritative=True,
-            content_kind='state',
-        )
-    if task_ctx:
-        prompt_builder.runtime(
-            section_id='chat_tasks',
-            title='SubAgent Tasks',
-            content=task_ctx,
-            source='database.tasks',
-            priority=20,
-            authoritative=True,
-            content_kind='state',
-        )
-    if conversation_intent_section:
-        prompt_builder.runtime(
-            section_id='chat_intent',
-            title='Conversation Intent',
-            content=conversation_intent_section,
-            source='database.intent',
-            priority=30,
-            content_kind='instruction',
-        )
-    if cited_message_context:
-        prompt_builder.runtime(
-            section_id='chat_quoted_message',
-            title='Quoted Message',
-            content=cited_message_context,
-            source='user.quote',
-            priority=40,
-            content_kind='reference',
-        )
-    if query.strip() != language_query:
-        prompt_builder.runtime(
-            section_id='chat_resource_context',
-            title='Mentioned Resource Context',
-            content=query,
-            source='backend.resources',
-            priority=45,
-            content_kind='reference',
-        )
-    if attachment_content:
-        prompt_builder.runtime(
-            section_id='chat_attachments',
-            title='Attachments',
-            content=attachment_content,
-            source='request.attachments',
-            priority=50,
-            authoritative=True,
-            content_kind='reference',
-        )
-    if _eff_current_seq is not None:
-        prompt_builder.runtime(
-            section_id='chat_current_turn',
-            title='Current Turn',
-            content=(
-                f'This is conversation turn {_eff_current_seq}. Any turn described as current '
-                f'in chat history is outdated; Turn {_eff_current_seq} is the present request. '
-                f'Unless another turn is explicitly named, "现在 / 本次" refers to '
-                f'Turn {_eff_current_seq}.'
-            ),
-            source='backend.turn',
-            priority=60,
-            authoritative=True,
-            content_kind='state',
-        )
+    # Plugin policy historically followed the common system prompt.
+    prompt_builder.system(
+        'chat_plugin_policy', 'Plugin Policy', plugin_contribution.system_prompt,
+        'plugin.scenario', priority=80,
+    )
+    prompt_builder.runtime(
+        'chat_plugin_runtime', 'Plugin State', plugin_contribution.runtime_context,
+        'plugin.runtime', priority=10, authoritative=True, content_kind='state',
+    )
+    prompt_builder.runtime(
+        'chat_tasks', 'SubAgent Tasks', task_ctx, 'database.tasks',
+        priority=20, authoritative=True, content_kind='state',
+    )
+    prompt_builder.runtime(
+        'chat_intent', 'Conversation Intent', conversation_intent_section,
+        'database.intent', priority=30, content_kind='instruction',
+    )
+    prompt_builder.runtime(
+        'chat_quoted_message', 'Quoted Message', cited_message_context,
+        'user.quote', priority=40, content_kind='reference',
+    )
+    prompt_builder.runtime(
+        'chat_resource_context', 'Mentioned Resource Context', query,
+        'backend.resources', priority=45, content_kind='reference',
+        skip_if=lambda: query.strip() == language_query,
+    )
+    prompt_builder.runtime(
+        'chat_attachments', 'Attachments', attachment_content,
+        'request.attachments', priority=50, authoritative=True,
+        content_kind='reference',
+    )
+    prompt_builder.runtime(
+        'chat_current_turn', 'Current Turn', (
+            f'This is conversation turn {_eff_current_seq}. Any turn described as current '
+            f'in chat history is outdated; Turn {_eff_current_seq} is the present request. '
+            f'Unless another turn is explicitly named, "现在 / 本次" refers to '
+            f'Turn {_eff_current_seq}.'
+        ),
+        'backend.turn', priority=60, authoritative=True, content_kind='state',
+        skip_if=lambda: _eff_current_seq is None,
+    )
     prompt_bundle = prompt_builder.input(
         content=language_query,
         source='user',

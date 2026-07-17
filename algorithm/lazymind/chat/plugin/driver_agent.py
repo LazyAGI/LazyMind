@@ -94,55 +94,33 @@ def _build_driver_plan(
 ) -> AgentRunPlan:
     builder = PromptBuilder.for_role(AgentRole.DRIVER)
     builder.system(
-        section_id='driver_policy',
-        title='',
-        content=_build_driver_prompt(plugin_id),
-        source='plugin.driver',
-        priority=10,
+        'driver_policy', '', _build_driver_prompt(plugin_id), 'plugin.driver', priority=10,
     )
-    if acceptance:
-        builder.system(
-            section_id='driver_acceptance',
-            title=f'Acceptance criteria for step {step_id!r}',
-            content=acceptance,
-            source='plugin.state',
-            priority=20,
-        )
+    builder.system(
+        'driver_acceptance', f'Acceptance criteria for step {step_id!r}', acceptance,
+        'plugin.state', priority=20,
+    )
     builder.runtime(
-        section_id='driver_step',
-        title='Plugin Step',
-        content=f'Plugin: {plugin_id}\nStep: {step_id}',
-        source='plugin.runtime',
+        'driver_step', 'Plugin Step', f'Plugin: {plugin_id}\nStep: {step_id}',
+        'plugin.runtime',
         priority=10,
         authoritative=True,
         content_kind='state',
     ).runtime(
-        section_id='driver_result',
-        title='Execution Result',
-        content=step_result,
-        source='subagent.summary',
+        'driver_result', 'Execution Result', step_result, 'subagent.summary',
         priority=20,
         content_kind='reference',
     )
-    if plugin_artifacts_summary:
-        builder.runtime(
-            section_id='driver_artifacts',
-            title='Session Artifacts',
-            content=plugin_artifacts_summary,
-            source='database.artifacts',
-            priority=30,
-            content_kind='reference',
-        )
-    if user_files:
-        import os as _os
-        builder.runtime(
-            section_id='driver_attachments',
-            title='Available Attachments',
-            content=', '.join(_os.path.basename(path) for path in user_files),
-            source='request.attachments',
-            priority=40,
-            content_kind='reference',
-        )
+    builder.runtime(
+        'driver_artifacts', 'Session Artifacts', plugin_artifacts_summary,
+        'database.artifacts', priority=30, content_kind='reference',
+    )
+    import os as _os
+    builder.runtime(
+        'driver_attachments', 'Available Attachments',
+        ', '.join(_os.path.basename(path) for path in user_files or []),
+        'request.attachments', priority=40, content_kind='reference',
+    )
     builder.input(
         content=(
             'Evaluate whether the completed step satisfies its acceptance criteria. '

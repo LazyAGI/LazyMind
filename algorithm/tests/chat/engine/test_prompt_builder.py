@@ -9,14 +9,14 @@ def test_prompt_builder_renders_stable_sections_and_boundaries() -> None:
     bundle = (
         PromptBuilder.for_role(AgentRole.CHAT)
         .system(
-            section_id='base', title='', content='Base policy.', source='platform', priority=10,
+            'base', '', 'Base policy.', 'platform', priority=10,
         )
         .runtime(
-            section_id='artifact', title='Artifacts', content='draft.md', source='database',
+            'artifact', 'Artifacts', 'draft.md', 'database',
             priority=30, content_kind='reference',
         )
         .runtime(
-            section_id='state', title='Plugin State', content='Step A is ready.', source='backend',
+            'state', 'Plugin State', 'Step A is ready.', 'backend',
             priority=20, authoritative=True, content_kind='state',
         )
         .input(content='Please continue.', source='user')
@@ -32,11 +32,12 @@ def test_prompt_builder_renders_stable_sections_and_boundaries() -> None:
 
 def test_prompt_builder_ignores_empty_sections_and_rejects_duplicate_ids() -> None:
     builder = PromptBuilder.for_role(AgentRole.CHAT)
-    builder.system(section_id='empty', title='', content='', source='platform')
-    builder.system(section_id='base', title='', content='A', source='platform')
+    builder.system('empty', '', '', 'platform')
+    builder.system('skipped', '', 'ignored', 'platform', skip_if=lambda: True)
+    builder.system('base', '', 'A', 'platform')
     with pytest.raises(ValueError, match='duplicate prompt section_id'):
         builder.runtime(
-            section_id='base', title='State', content='B', source='backend',
+            'base', 'State', 'B', 'backend',
         )
     assert [section.section_id for section in builder.build().sections] == ['base']
 
