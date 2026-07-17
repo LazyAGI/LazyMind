@@ -13,7 +13,6 @@ from unittest.mock import MagicMock
 import pytest
 
 import lazymind.chat.engine.subagent.runner as runner_mod
-import lazymind.chat.engine.agent_core as core_mod
 
 
 # ---------------------------------------------------------------------------
@@ -112,18 +111,18 @@ def _install_fake_lazyllm(monkeypatch):
 
 
 def _install_fake_drive(monkeypatch, events, final_value='task done'):
-    """Replace drive_agent in runner_mod with a fake that yields the given events."""
-    async def fake_drive(agent, query, *, history=None):
-        for ev in events:
-            yield ('event', ev)
-        yield ('final', final_value)
+    """Replace AgentExecutor with a deterministic event stream."""
+    class FakeExecutor:
+        async def stream(self, llm, plan):
+            for ev in events:
+                yield 'event', ev
+            yield 'final', final_value
 
-    monkeypatch.setattr(runner_mod, 'drive_agent', fake_drive)
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', FakeExecutor)
 
 
 def _install_fake_build(monkeypatch):
-    monkeypatch.setattr(runner_mod, 'build_react_agent',
-                        lambda llm, tools, **kw: 'fake_agent')
+    """Agent creation is covered by AgentExecutor tests; runner tests replace the executor."""
 
 
 def _install_fake_translator(monkeypatch):
@@ -237,7 +236,7 @@ def test_run_subagent_stream_missing_artifact_emits_error(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Test: drive_agent raises → outer except → error frame
+# Test: AgentExecutor raises → outer except → error frame
 # ---------------------------------------------------------------------------
 
 def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
@@ -246,11 +245,12 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
     _install_fake_build(monkeypatch)
     _install_fake_translator(monkeypatch)
 
-    async def exploding_drive(agent, query, *, history=None):
-        raise RuntimeError('llm exploded')
-        yield  # pragma: no cover
+    class ExplodingExecutor:
+        async def stream(self, llm, plan):
+            raise RuntimeError('llm exploded')
+            yield  # pragma: no cover
 
-    monkeypatch.setattr(runner_mod, 'drive_agent', exploding_drive)
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', ExplodingExecutor)
 
     async def run():
         return await _collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, 'dsn://'))
