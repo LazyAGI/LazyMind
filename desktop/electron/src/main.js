@@ -40,6 +40,7 @@ const startupLogPath = path.join(desktopLogsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
 const maxStartupLogEntries = 1200;
+const maxSidecarFailureBytes = 32 * 1024;
 const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";
 const forceExitDelayMs = 1500;
 const rendererReadyTimeoutMs = 30 * 1000;
@@ -49,6 +50,9 @@ let startupWindow;
 let rendererReadyWait;
 let runtimeProcess;
 let runtimeProcessExit = null;
+let sidecarStderrTail = "";
+let sidecarStructuredFailure = "";
+let sidecarEventBuffer = "";
 let guardProcess;
 let guardPID = 0;
 let guardWatchTimer;
@@ -86,6 +90,7 @@ function sidecarEnv() {
     ...process.env,
     LAZYMIND_RUNTIME_PROFILE: "desktop",
     LAZYMIND_RUNTIME_OWNER_TOKEN: ownerToken,
+    LAZYMIND_DESKTOP_OWNER_PID: String(process.pid),
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
     LAZYMIND_LOCAL_NETWORK_PROFILE: "localhost",
     LAZYMIND_LOCAL_PROXY_ADDRESS: "127.0.0.1",
@@ -191,6 +196,39 @@ function appendStartupLog(source, line) {
 
 function appendStartupChunk(source, chunk) {
   String(chunk).split(/\r?\n/).forEach((line) => appendStartupLog(source, line));
+}
+
+function captureSidecarChunk(source, chunk) {
+  const text = String(chunk);
+  appendStartupChunk(source, text);
+  if (source === "sidecar.stderr") {
+    sidecarStderrTail = `${sidecarStderrTail}${text}`.slice(-maxSidecarFailureBytes);
+  }
+  if (source !== "sidecar.stdout") {
+    return;
+  }
+  const eventText = `${sidecarEventBuffer}${text}`;
+  const lines = eventText.split(/\r?\n/);
+  sidecarEventBuffer = lines.pop() || "";
+  for (const line of lines) {
+    const marker = "[startup-event] ";
+    const markerIndex = line.indexOf(marker);
+    if (markerIndex < 0) {
+      continue;
+    }
+    try {
+      const event = JSON.parse(line.slice(markerIndex + marker.length));
+      if (["phase.failed", "startup.failed"].includes(event?.event) && event?.error) {
+        sidecarStructuredFailure = String(event.error);
+      }
+    } catch {
+      // Keep the raw line in desktop-startup.log; stderr remains the fallback.
+    }
+  }
+}
+
+function sidecarFailureDetail() {
+  return sidecarStructuredFailure.trim() || sidecarStderrTail.trim();
 }
 
 function updateStartupState(patch) {
@@ -523,6 +561,9 @@ function startRuntime() {
   resetStartupLogsForRun();
   ensureDesktopLogDirs();
   runtimeProcessExit = null;
+  sidecarStderrTail = "";
+  sidecarStructuredFailure = "";
+  sidecarEventBuffer = "";
   updateStartupState({
     status: "starting",
     phase: "Starting sidecar",
@@ -537,15 +578,18 @@ function startRuntime() {
     detached: false,
     windowsHide: isWindows,
   });
-  runtimeProcess.stdout?.on("data", (chunk) => appendStartupChunk("sidecar", chunk));
-  runtimeProcess.stderr?.on("data", (chunk) => appendStartupChunk("sidecar", chunk));
+  runtimeProcess.stdout?.on("data", (chunk) => captureSidecarChunk("sidecar.stdout", chunk));
+  runtimeProcess.stderr?.on("data", (chunk) => captureSidecarChunk("sidecar.stderr", chunk));
   runtimeProcess.once("error", (error) => {
-    runtimeProcessExit = { error: serializeError(error) };
+    runtimeProcessExit = { error: serializeError(error), detail: serializeError(error) };
     runtimeProcess = null;
     setStartupFailure(error, "Could not start desktop runtime sidecar");
   });
-  runtimeProcess.once("exit", (code, signal) => {
-    runtimeProcessExit = { code, signal, at: new Date().toISOString() };
+  // `close` fires after stdout/stderr are drained, so the final Go error cannot
+  // race with ownership/status handling below.
+  runtimeProcess.once("close", (code, signal) => {
+    const detail = sidecarFailureDetail() || runtimeProcessExit?.detail || "";
+    runtimeProcessExit = { code, signal, at: new Date().toISOString(), detail };
     appendStartupLog("sidecar", `local-runtime-manager exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
     runtimeProcess = null;
     if (startupState.status !== "ready" && startupState.status !== "failed") {

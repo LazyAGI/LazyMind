@@ -52,6 +52,20 @@ test("fails fast when a ready Desktop runtime has a stale owner", () => {
   assert.match(message, /Another LazyMind Desktop instance owns/);
 });
 
+test("preserves a concrete sidecar failure instead of masking it with stale ownership", () => {
+  const message = runtimeExitFailureMessage(
+    { overallStatus: "ready", ownerMatched: false },
+    true,
+    {
+      code: 1,
+      detail: "replace relocatable desktop Python executable: the file is being used by another process",
+    },
+  );
+
+  assert.match(message, /file is being used by another process/);
+  assert.doesNotMatch(message, /Another LazyMind Desktop instance owns/);
+});
+
 test("does not reject a ready runtime owned by this Desktop instance", () => {
   const message = runtimeExitFailureMessage(
     { overallStatus: "ready", ownerMatched: true },

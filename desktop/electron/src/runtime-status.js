@@ -44,6 +44,10 @@ function runtimeExitFailureMessage(status, belongsToDesktop, runtimeProcessExit)
   if (!runtimeProcessExit) {
     return "";
   }
+  const sidecarDetail = String(runtimeProcessExit.detail || runtimeProcessExit.error || "").trim();
+  if (sidecarDetail && (runtimeProcessExit.code !== 0 || runtimeProcessExit.error)) {
+    return sidecarDetail;
+  }
   if (status?.overallStatus === "ready" && belongsToDesktop && !status.ownerMatched) {
     return "Another LazyMind Desktop instance owns the running local runtime. Close it before opening Desktop again.";
   }

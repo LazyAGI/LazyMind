@@ -890,6 +890,50 @@ func TestRuntimeManagerUpRequiresBundledLazyLLMSourceInDesktopProfile(t *testing
 	runner.assertCommandCount(0)
 }
 
+func TestRuntimeManagerUpRejectsForeignOwnerBeforePythonRelocation(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       "desktop",
+		OwnerToken:    "new-desktop-owner",
+		RepoRoot:      repo,
+		RuntimeRoot:   filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	state.OwnerToken = "old-desktop-owner"
+	state.OverallStatus = "running"
+	state.Services[processComposeServiceName] = RuntimeServiceState{Kind: "host-supervisor", Status: "running"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	relocated := false
+	manager.relocatePythonVenvs = func(RuntimeConfig, RuntimePaths) error {
+		relocated = true
+		return nil
+	}
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	err = manager.Up(context.Background(), cfg, paths)
+	if err == nil || !strings.Contains(err.Error(), "another application instance") {
+		t.Fatalf("runtime manager up error = %v, want owner conflict", err)
+	}
+	if relocated {
+		t.Fatal("Python relocation ran before active owner rejection")
+	}
+	if !strings.Contains(output.String(), `"event":"startup.failed"`) || !strings.Contains(output.String(), "another application instance") {
+		t.Fatalf("startup output did not preserve ownership failure: %s", output.String())
+	}
+}
+
 func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

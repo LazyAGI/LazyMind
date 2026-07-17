@@ -136,9 +136,11 @@ func (m *FrontendManager) Down(ctx context.Context, cfg RuntimeConfig, paths Run
 	if len(frontendRecords) == 0 {
 		return nil
 	}
-	err := stopLocalProcessRecords(ctx, frontendRecords)
+	if err := stopLocalProcessRecords(ctx, frontendRecords); err != nil {
+		return err
+	}
 	cleanupLocalProcessRecords(paths, frontendRecords)
-	return err
+	return nil
 }
 
 func frontendBuildEnv() []string {
