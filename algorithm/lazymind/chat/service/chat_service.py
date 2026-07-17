@@ -320,6 +320,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         conversation_id=conversation_id,
         plugin_catalog=plugin.catalog,
         disabled_builtin_plugins=plugin.disabled_builtin_plugins,
+        allowed_plugin_refs=plugin.allowed_plugin_refs,
     )
     plugin_tools = plugin_contribution.tools
     agentic_config.update(plugin_contribution.agentic_config_patch)
@@ -467,7 +468,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     executor = AgentExecutor()
     react_agent = executor.create_agent(llm, plan)
     if runtime.context_usage_preview or runtime.context_prompt_export:
-        agent_context = await asyncio.to_thread(react_agent.describe_context)
+        agent_context = await asyncio.to_thread(react_agent.describe_context, agent_history)
         if runtime.context_prompt_export:
             return {'prompt_markdown': render_context_markdown(plan, agent_context)}
         report = await estimate_context_usage(plan, agent_context)

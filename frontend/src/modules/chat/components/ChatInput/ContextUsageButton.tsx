@@ -3,7 +3,6 @@ import { Button, Collapse, Modal, Popover, Spin, Tooltip } from "antd";
 import {
   DashboardOutlined,
   DownloadOutlined,
-  InfoCircleOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -124,6 +123,21 @@ export default function ContextUsageButton({
     const translated = t(key);
     return translated === key ? fallback : translated;
   };
+  const itemTitle = (categoryId: string, title: string) => {
+    if (categoryId !== "conversation") return title;
+    const separator = " · ";
+    const [prefix, ...rest] = title.split(separator);
+    const keyByPrefix: Record<string, string> = {
+      "User message": "chat.contextUsageHistoryUser",
+      "Assistant message": "chat.contextUsageHistoryAssistant",
+      "Assistant tool call": "chat.contextUsageHistoryToolCall",
+      "Tool result": "chat.contextUsageHistoryToolResult",
+      "System message": "chat.contextUsageHistorySystem",
+    };
+    const key = keyByPrefix[prefix];
+    if (!key) return title;
+    return [t(key), ...rest].join(separator);
+  };
 
   const content = (
     <div className="context-usage-popover">
@@ -225,26 +239,17 @@ export default function ContextUsageButton({
                       <Collapse
                         key={item.item_id}
                         ghost
-                        className="context-usage-item-collapse"
+                        className="context-usage-content-collapse"
                         items={[{
                           key: item.item_id,
                           label: (
                             <span className="context-usage-item-title">
-                              <strong>{item.title}</strong>
+                              <strong>{itemTitle(category.category_id, item.title)}</strong>
                               <small>{t("chat.contextUsageChars", { count: item.char_count })}</small>
                             </span>
                           ),
                           extra: `~${formatTokens(item.estimated_tokens)}`,
-                          children: (
-                            <dl className="context-usage-item-detail">
-                              <div><dt>{t("chat.contextUsageDetailId")}</dt><dd>{item.item_id}</dd></div>
-                              {item.channel ? <div><dt>{t("chat.contextUsageDetailChannel")}</dt><dd>{item.channel}</dd></div> : null}
-                              {item.content_kind ? <div><dt>{t("chat.contextUsageDetailKind")}</dt><dd>{item.content_kind}</dd></div> : null}
-                              <div><dt>{t("chat.contextUsageDetailItems")}</dt><dd>{item.item_count}</dd></div>
-                              <div><dt>{t("chat.contextUsageDetailAuthority")}</dt><dd>{item.authoritative ? t("chat.contextUsageYes") : t("chat.contextUsageNo")}</dd></div>
-                              <div className="context-usage-detail-note"><InfoCircleOutlined /><dd>{t("chat.contextUsageDetailPrivacy")}</dd></div>
-                            </dl>
-                          ),
+                          children: <pre className="context-usage-content">{item.content}</pre>,
                         }]}
                       />
                     ))}

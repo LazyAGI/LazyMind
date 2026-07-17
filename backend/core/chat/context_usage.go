@@ -37,6 +37,7 @@ type ContextUsageItem struct {
 	Channel         string `json:"channel,omitempty"`
 	ContentKind     string `json:"content_kind,omitempty"`
 	Authoritative   bool   `json:"authoritative"`
+	Content         string `json:"content"`
 }
 
 type ContextUsageCategory struct {
@@ -218,6 +219,10 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}
+	if len(mentioned.PluginRefs) > 1 {
+		common.ReplyErr(w, "at most one plugin mention is allowed per turn", http.StatusBadRequest)
+		return
+	}
 	disabled, err := listDisabledToolNames(r.Context(), db, userID)
 	if err != nil {
 		common.ReplyErr(w, "query disabled tools failed", http.StatusInternalServerError)
@@ -291,31 +296,9 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		}
 	}
 	reqBody["plugin_context"] = pluginContext
-	if len(mentioned.PluginRefs) > 0 {
-		reqBody["enable_plugin"] = true
-	}
-	if enabled, _ := reqBody["enable_plugin"].(bool); enabled {
-		catalog, catalogErr := plugin.EnabledCatalog(db, userID)
-		if catalogErr != nil {
-			common.ReplyErr(w, "load plugin catalog failed", http.StatusInternalServerError)
-			return
-		}
-		catalog, forcedBuiltins, mergeErr := mergeMentionedPlugins(
-			r.Context(), db, userID, mentioned.PluginRefs, catalog,
-		)
-		if mergeErr != nil {
-			common.ReplyErr(w, mergeErr.Error(), http.StatusForbidden)
-			return
-		}
-		reqBody["plugin_catalog"] = catalog
-		disabledBuiltins, disabledErr := plugin.DisabledBuiltinPluginIDs(db, userID)
-		if disabledErr != nil {
-			common.ReplyErr(w, "load builtin plugin settings failed", http.StatusInternalServerError)
-			return
-		}
-		reqBody["disabled_builtin_plugins"] = applyMentionedTools(disabledBuiltins, forcedBuiltins)
-	} else {
-		reqBody["plugin_catalog"] = []map[string]any{}
+	if err := applyPluginSelection(r.Context(), db, userID, reqBody, mentioned.PluginRefs); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
+		return
 	}
 	if exportPrompt {
 		reqBody["context_prompt_export"] = true

@@ -116,6 +116,7 @@ type ChatPluginOptions struct {
 	PluginContext          map[string]any   `json:"plugin_context,omitempty"`
 	Catalog                []map[string]any `json:"catalog,omitempty"`
 	DisabledBuiltinPlugins []string         `json:"disabled_builtin_plugins,omitempty"`
+	AllowedPluginRefs      []string         `json:"allowed_plugin_refs,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -485,6 +486,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if ids, ok := body["disabled_builtin_plugins"].([]string); ok {
 		req.Plugin.DisabledBuiltinPlugins = ids
+	}
+	if refs, ok := body["allowed_plugin_refs"].([]string); ok {
+		req.Plugin.AllowedPluginRefs = refs
 	}
 	// current_turn_seq is an int in the body map. JSON numbers decode as float64.
 	switch v := body["current_turn_seq"].(type) {

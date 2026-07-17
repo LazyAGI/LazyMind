@@ -33,3 +33,19 @@ func TestPreviewQueryReadsTextInput(t *testing.T) {
 		t.Fatalf("previewQuery() = %q, want hello", got)
 	}
 }
+
+func TestMentionedBuiltinPluginReplacesDefaultCatalog(t *testing.T) {
+	catalog := []map[string]any{{"plugin_ref": "plugin:default", "plugin_id": "default"}}
+	selected, builtins, err := mergeMentionedPlugins(
+		t.Context(), nil, "user-1", []string{"builtin:image-plugin"}, catalog,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 0 {
+		t.Fatalf("selected catalog = %#v, want no default plugins", selected)
+	}
+	if len(builtins) != 1 || builtins[0] != "image-plugin" {
+		t.Fatalf("builtins = %#v, want image-plugin", builtins)
+	}
+}

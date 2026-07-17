@@ -57,6 +57,7 @@ def _item(
     content_kind: str | None = None,
     authoritative: bool = False,
     fixed_overhead: int = 0,
+    display_content: str | None = None,
 ) -> ContextUsageItem:
     return ContextUsageItem(
         item_id=item_id,
@@ -69,7 +70,25 @@ def _item(
         channel=channel,
         content_kind=content_kind,
         authoritative=authoritative,
+        content=text if display_content is None else display_content,
     )
+
+
+def _history_title(message: dict[str, Any], index: int) -> str:
+    role = str(message.get('role') or 'unknown')
+    if role == 'tool':
+        name = str(message.get('name') or '').strip()
+        return f'Tool result · {name}' if name else 'Tool result'
+    if role == 'assistant' and message.get('tool_calls'):
+        calls = message.get('tool_calls') or []
+        names = [
+            str(call.get('function', {}).get('name') or '')
+            for call in calls if isinstance(call, dict)
+        ]
+        suffix = ', '.join(name for name in names if name)
+        return f'Assistant tool call · {suffix}' if suffix else 'Assistant tool call'
+    titles = {'user': 'User message', 'assistant': 'Assistant message', 'system': 'System message'}
+    return titles.get(role, f'Message {index + 1} · {role}')
 
 
 def _estimate(plan: AgentRunPlan, agent_context: dict[str, Any]) -> ContextUsageReport:
@@ -92,13 +111,14 @@ def _estimate(plan: AgentRunPlan, agent_context: dict[str, Any]) -> ContextUsage
         plan.prompt.input_content, fixed_overhead=4,
     ))
 
-    for index, message in enumerate(plan.history):
-        content = message.get('content', '')
-        if not isinstance(content, str):
-            content = json.dumps(content, ensure_ascii=False, separators=(',', ':'), default=str)
+    model_history = agent_context.get('history', plan.history)
+    for index, message in enumerate(model_history):
+        compact = json.dumps(message, ensure_ascii=False, separators=(',', ':'), default=str)
+        rendered = json.dumps(message, ensure_ascii=False, indent=2, default=str)
         grouped['conversation'].append(_item(
-            f'history_{index}', 'conversation', f'Message {index + 1}',
-            f"history.{message.get('role', 'unknown')}", content, fixed_overhead=4,
+            f'history_{index}', 'conversation', _history_title(message, index),
+            f"history.{message.get('role', 'unknown')}", compact,
+            fixed_overhead=4, display_content=rendered,
         ))
 
     tool_definitions = agent_context.get('tool_definitions') or []
@@ -109,16 +129,25 @@ def _estimate(plan: AgentRunPlan, agent_context: dict[str, Any]) -> ContextUsage
         grouped['tools'].append(_item(
             f'tool_{name or index}', 'tools', str(name or f'Tool {index + 1}'),
             'tool.registry', rendered, fixed_overhead=2,
+            display_content=json.dumps(tool, ensure_ascii=False, indent=2, default=str),
         ))
 
-    skills_prompt = str(agent_context.get('skills_prompt') or '')
-    if skills_prompt:
-        configured_skills = plan.execution_options.skills
-        skill_count = len(configured_skills) if isinstance(configured_skills, (list, tuple, set)) else 1
-        grouped['skills'].append(_item(
-            'skills_prompt', 'skills', 'Available skills', 'skill.registry', skills_prompt,
-            item_count=max(1, skill_count),
-        ))
+    skill_prompt_parts = agent_context.get('skill_prompt_parts') or []
+    if skill_prompt_parts:
+        for index, part in enumerate(skill_prompt_parts):
+            grouped['skills'].append(_item(
+                str(part.get('item_id') or f'skill_part_{index}'),
+                'skills', str(part.get('title') or f'Skill {index + 1}'),
+                str(part.get('source') or 'skill.registry'),
+                str(part.get('content') or ''),
+                content_kind=str(part.get('content_kind') or 'reference'),
+            ))
+    else:
+        skills_prompt = str(agent_context.get('skills_prompt') or '')
+        if skills_prompt:
+            grouped['skills'].append(_item(
+                'skills_prompt', 'skills', 'Available skills', 'skill.registry', skills_prompt,
+            ))
 
     visible_system = str(agent_context.get('system_prompt') or plan.prompt.system_prompt)
     accounted_system = sum(item.estimated_tokens for item in grouped['system'])
@@ -135,6 +164,10 @@ def _estimate(plan: AgentRunPlan, agent_context: dict[str, Any]) -> ContextUsage
             item_id='prompt_boundaries', category='formatting', title='Prompt boundaries',
             source='prompt.renderer', estimated_tokens=formatting_tokens,
             char_count=formatting_chars,
+            content=(
+                'Prompt section headings, separators, role wrappers, and other '
+                'serialization overhead added around the displayed content.'
+            ),
         ))
 
     categories = []
@@ -189,8 +222,9 @@ def render_context_markdown(plan: AgentRunPlan, agent_context: dict[str, Any]) -
     if skills_prompt:
         sections.extend(['', '## Skills Prompt', '', skills_prompt])
     sections.extend(['', '## Conversation History', ''])
-    if plan.history:
-        for index, message in enumerate(plan.history, 1):
+    model_history = agent_context.get('history', plan.history)
+    if model_history:
+        for index, message in enumerate(model_history, 1):
             role = str(message.get('role') or 'unknown')
             content = message.get('content', '')
             if not isinstance(content, str):

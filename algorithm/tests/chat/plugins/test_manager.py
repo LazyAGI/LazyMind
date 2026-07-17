@@ -90,6 +90,14 @@ def test_build_cold_start_tools_creates_one_trigger_per_plugin(loaded_plugin):
     assert 'trigger_test_plugin' in names
 
 
+def test_build_cold_start_tools_honours_mentioned_plugin_allowlist(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+    tools = plugin_manager.build_cold_start_tools(
+        allowed_plugin_refs=['builtin:test-plugin'],
+    )
+    assert [tool.__name__ for tool in tools] == ['trigger_test_plugin']
+
+
 def test_cold_start_trigger_prepares_launch_without_creating_task(
         loaded_plugin, mock_write_agent_data, mock_agentic_config):
     from lazymind.chat.plugin import plugin_manager

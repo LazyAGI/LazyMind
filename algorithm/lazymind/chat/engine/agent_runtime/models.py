@@ -69,6 +69,7 @@ class ContextUsageItem:
     channel: Optional[str] = None
     content_kind: Optional[str] = None
     authoritative: bool = False
+    content: str = ''
 
 
 @dataclass(frozen=True)

@@ -85,6 +85,7 @@ export interface ContextUsageItem {
   channel?: string;
   content_kind?: string;
   authoritative?: boolean;
+  content: string;
 }
 
 export interface ContextUsageCategory {
