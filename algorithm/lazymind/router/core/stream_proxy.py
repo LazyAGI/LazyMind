@@ -9,8 +9,11 @@ from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
-# Shared async client with no timeout (streaming responses can be arbitrarily long)
-_client = httpx.AsyncClient(timeout=None)
+# Shared async client with no timeout (streaming responses can be arbitrarily long).
+# Router-to-child traffic is an internal hop and must not inherit host/container
+# proxy variables, otherwise dynamic container hostnames can be sent to egress
+# proxies instead of the local child process.
+_client = httpx.AsyncClient(timeout=None, trust_env=False)
 
 
 class StreamProxy:

@@ -268,6 +268,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
 		return
 	}
+	if toolConfig, err := loadChatToolConfig(r.Context(), db, userID); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat tool config failed", err), http.StatusInternalServerError)
+		return
+	} else if len(toolConfig) > 0 {
+		existing, _ := reqBody["tool_config"].(map[string]any)
+		reqBody["tool_config"] = mergeToolConfig(existing, toolConfig)
+	}
 	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
 	// resolvePluginModeWithFallback determines the effective plugin_mode for this request.
 	// It is injected into plugin_context (below) so Python can use it; it is not sent
