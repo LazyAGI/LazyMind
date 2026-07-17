@@ -514,34 +514,41 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         </Space.Compact>
         <div className='schedule-toolbar-spacer' />
         <Segmented value={viewMode} onChange={(value) => setViewMode(value as 'large' | 'compact')} options={[
-          { value: 'large', label: t('taskCenter.largeCards'), icon: <UnorderedListOutlined /> },
-          { value: 'compact', label: t('taskCenter.smallCards'), icon: <AppstoreOutlined /> },
+          { value: 'large', label: t('taskCenter.largeCards'), icon: <AppstoreOutlined /> },
+          { value: 'compact', label: t('taskCenter.smallCards'), icon: <UnorderedListOutlined /> },
         ]} />
         <Button type='primary' icon={<PlusOutlined />} onClick={handleOpenModal}>{t('taskCenter.newSchedule')}</Button>
       </div>
       <Spin spinning={loading}>
-        {displaySchedules.length ? (
-          <div className={`schedule-grid ${viewMode}`}>
-            {displaySchedules.map((schedule) => (
-              <article className='schedule-card' key={schedule.id} onClick={() => setSelectedSchedule(schedule)}>
-                <div className='schedule-card-identity'>
-                  <span className='schedule-icon'><CalendarOutlined /></span>
-                  <div><h3>{schedule.name || schedule.prompt_template.slice(0, 24)}</h3><p>{schedule.prompt_template}</p></div>
-                </div>
-                <div className='schedule-card-timing'>
-                  <strong><CalendarOutlined /> {describeCron(schedule.cron_expr, t)}</strong>
-                  <span>{t('taskCenter.nextRunAt')}：{schedule.next_run_at ? dayjs(schedule.next_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>
-                  {viewMode === 'large' && <span>{t('taskCenter.lastRun')}：{schedule.last_run_at ? dayjs(schedule.last_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>}
-                </div>
-                <div className='schedule-card-actions' onClick={(event) => event.stopPropagation()}>
-                  <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
-                  <span>{t('taskCenter.scheduleRunTotal', { total: schedule.run_count ?? 0 })}</span>
-                  <div><Button type={viewMode === 'large' ? 'primary' : 'default'} icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button><Button icon={<EllipsisOutlined />} onClick={() => handleOpenEdit(schedule)} /></div>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : <Empty description={t('taskCenter.empty')} />}
+        <section className='schedule-board'>
+          <header className='schedule-board-header'>
+            <div><h2>{t('taskCenter.scheduleBoardTitle')}</h2><p>{t('taskCenter.scheduleBoardDescription')}</p></div>
+            <span>{t('taskCenter.scheduleBoardCount', { total: displaySchedules.length })}</span>
+          </header>
+          {displaySchedules.length ? (
+            <div className={`schedule-grid ${viewMode}`}>
+              {displaySchedules.map((schedule) => (
+                <article className={`schedule-card ${schedule.enabled ? '' : 'is-disabled'}`} key={schedule.id} onClick={() => setSelectedSchedule(schedule)}>
+                  <div className='schedule-card-identity'>
+                    <span className='schedule-icon'><CalendarOutlined /></span>
+                    <div><h3>{schedule.name || schedule.prompt_template.slice(0, 24)}</h3><p>{schedule.prompt_template}</p></div>
+                    <span className={`schedule-status-chip ${schedule.enabled ? 'enabled' : 'disabled'}`}>{schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</span>
+                  </div>
+                  <div className='schedule-card-timing'>
+                    <strong><CalendarOutlined /> {describeCron(schedule.cron_expr, t)}</strong>
+                    <span>{t('taskCenter.nextRunAt')}：{schedule.next_run_at ? dayjs(schedule.next_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>
+                    {viewMode === 'large' && <span>{t('taskCenter.lastRun')}：{schedule.last_run_at ? dayjs(schedule.last_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>}
+                  </div>
+                  <div className='schedule-card-actions' onClick={(event) => event.stopPropagation()}>
+                    <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
+                    <span>{t('taskCenter.scheduleRunTotal', { total: schedule.run_count ?? 0 })}</span>
+                    <div><Button className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button><Button icon={<EllipsisOutlined />} aria-label={t('taskCenter.scheduleEdit')} onClick={() => handleOpenEdit(schedule)} /></div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : <Empty className='schedule-empty' description={t('taskCenter.empty')} />}
+        </section>
       </Spin>
       <Drawer className='schedule-detail-drawer' width={460} open={Boolean(selectedSchedule)} onClose={() => setSelectedSchedule(null)} title={selectedSchedule?.name || t('taskCenter.scheduleName')} footer={selectedSchedule ? <Button type='primary' block size='large' onClick={() => handleOpenEdit(selectedSchedule)}>{t('taskCenter.scheduleEdit')}</Button> : null}>
         {selectedSchedule && <div className='schedule-detail-content'>

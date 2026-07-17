@@ -341,6 +341,8 @@ interface ChatInputProps {
   skillDepositStats?: SkillDepositStats;
   skillDepositDisabledReason?: string;
   onSkillDeposit?: () => void;
+  /** Send the next message as a background task. Used by the new-task entry point. */
+  runInBackground?: boolean;
 }
 
 export interface ChatFileList {
@@ -443,6 +445,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onPluginSettingsChange,
       initialPluginSettings,
       hasPluginSession,
+      runInBackground = false,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
@@ -740,7 +743,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       }
       const normalizedText = value.trim();
       setNewMessage(false);
-      const sendParams = {
+      const sendParams: SendMessageParams = {
         text: normalizedText,
         mentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
@@ -749,6 +752,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         fileListRef,
         files: fileListRef.current?.getFiles(),
         create_time: new Date().toISOString(),
+        ...(runInBackground ? { run_in_background: true } : {}),
       };
 
       if (!isChatContent) {
@@ -1143,50 +1147,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         </Badge>
                       }
                     />
-                  </div>
-                  <div className="input-bottom-actions-right-item">
-                    <Tooltip title={t("chat.runInBackgroundTooltip")}>
-                      <Button
-                        size="small"
-                        type="text"
-                        style={{
-                          fontSize: 12,
-                          color: "#888",
-                          padding: "0 4px",
-                        }}
-                        disabled={isSendDisabled || isStreaming}
-                        onClick={() => {
-                          if (isSendDisabled || isStreaming) return;
-                          const normalizedText = value.trim();
-                          setNewMessage(false);
-                          const sendParams: SendMessageParams = {
-                            text: normalizedText,
-                            mentions,
-                            citeMessage: normalizedCiteMessages.join("\n\n"),
-                            citeMessages: normalizedCiteMessages,
-                            fileList,
-                            fileListRef,
-                            files: fileListRef.current?.getFiles(),
-                            create_time: new Date().toISOString(),
-                            run_in_background: true,
-                          };
-                          if (!isChatContent) {
-                            setPendingMessage(sendParams);
-                            setIsChatContent?.(true);
-                          } else {
-                            onSend?.(sendParams);
-                            clearMultiData();
-                          }
-                          onChange("");
-                          setMentions([]);
-                          setText("");
-                          onClearCiteMessage?.();
-                        }}
-                        aria-label={t("chat.runInBackground")}
-                      >
-                        {t("chat.runInBackground")}
-                      </Button>
-                    </Tooltip>
                   </div>
                   <div className="input-bottom-actions-right-item">
                     <SendButton

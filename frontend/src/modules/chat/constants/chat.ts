@@ -1,5 +1,6 @@
 
 export const CHAT_RESUME_CONVERSATION_KEY = "chat_resume_conversation_id";
+export const CHAT_NEW_RUN_IN_BACKGROUND_KEY = "chat_new_run_in_background";
 export const CHAT_SELECT_CONVERSATION_EVENT = "lazymind:chat-select-conversation";
 export const CHAT_AUTO_ADVANCE_EVENT = "lazymind:chat-auto-advance";
 export const CHAT_CONVERSATION_ACTIVITY_EVENT =
