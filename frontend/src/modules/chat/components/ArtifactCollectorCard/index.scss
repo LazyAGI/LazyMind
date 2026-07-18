@@ -1,0 +1,229 @@
+.artifact-collector {
+  background: #fff;
+  border: 1px solid #e6ebf5;
+  border-radius: 14px;
+  width: min(480px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 28px));
+  box-shadow: 0 12px 32px rgb(35 55 90 / 14%), 0 2px 8px rgb(35 55 90 / 8%);
+  overflow: hidden;
+
+  // ── Header ──────────────────────────────────────────────
+  &__header {
+    background: linear-gradient(135deg, #f8faff 0%, #f4f7ff 100%);
+    padding: 10px 14px 9px;
+    border-bottom: 1px solid #e8edf8;
+  }
+
+  &__header-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 0;
+    gap: 12px;
+  }
+
+  &__title-area {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a1e2e;
+    margin: 0 0 2px;
+    line-height: 20px;
+  }
+
+  &__description {
+    font-size: 12px;
+    color: #6b7a99;
+    margin: 0;
+    line-height: 18px;
+  }
+
+  &__meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  &__count {
+    font-size: 12px;
+    color: #8c98a8;
+    white-space: nowrap;
+  }
+
+  &__close-btn {
+    color: #8c98a8;
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    border-radius: 7px;
+
+    &:hover {
+      color: #34425a;
+      background: rgb(47 107 255 / 8%);
+    }
+  }
+
+  &__select-all {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 14px 3px;
+    font-size: 12px;
+  }
+
+  &__tabs {
+    .ant-tabs-nav {
+      margin: 0;
+      padding: 0 14px;
+      min-height: 38px;
+    }
+
+    .ant-tabs-tab {
+      padding: 9px 0 8px;
+      font-size: 13px;
+    }
+
+    .ant-tabs-tab + .ant-tabs-tab {
+      margin-left: 28px;
+    }
+
+    .ant-tabs-content-holder {
+      display: none;
+    }
+  }
+
+  // ── Body (file list) ────────────────────────────────────
+  &__body {
+    padding: 5px 10px 7px;
+    max-height: min(210px, calc(100vh - 210px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e5 transparent;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      border-radius: 6px;
+      background: #cbd5e5;
+    }
+  }
+
+  &__empty-text {
+    margin: 0;
+    padding: 16px 4px;
+    color: #7e8ba3;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  &__file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 42px;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    transition: background 0.15s, border-color 0.15s;
+
+    & + & {
+      margin-top: 3px;
+    }
+
+    &:hover {
+      background: #f7f9fc;
+      border-color: #edf1f7;
+    }
+
+    &.is-selected {
+      background: #f1f5ff;
+      border-color: #e3ebff;
+    }
+  }
+
+  &__checkbox {
+    flex-shrink: 0;
+  }
+
+  &__file-icon {
+    color: #2f6bff;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+
+  &__file-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  &__file-name {
+    font-size: 12px;
+    color: #1f2733;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__file-size {
+    font-size: 11px;
+    color: #8c98a8;
+  }
+
+  &__file-download {
+    flex-shrink: 0;
+    color: #2f6bff;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 7px;
+
+    &:hover {
+      background: rgb(47 107 255 / 9%);
+    }
+  }
+
+  // ── Footer ──────────────────────────────────────────────
+  &__footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 8px 12px;
+    border-top: 1px solid #e8edf8;
+    background: #fafbfd;
+
+    .ant-btn {
+      height: 30px;
+      border-radius: 7px;
+      font-size: 12px;
+    }
+  }
+}
+
+.artifact-collector-popover {
+  .ant-popover-inner {
+    padding: 0;
+    border-radius: 14px;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .ant-popover-inner-content {
+    padding: 0;
+  }
+}
+
+.artifact-download-trigger {
+  display: inline-flex;
+}

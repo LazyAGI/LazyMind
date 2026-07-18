@@ -279,3 +279,46 @@ func TestCloudServiceCheckRejectsAuthFailure(t *testing.T) {
 		t.Fatal("expected auth-looking bad request to fail")
 	}
 }
+
+func TestDoProviderGroupCheckRoutesDoubaoThroughAlgorithmModelCheck(t *testing.T) {
+	var received algoModelCheckBody
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/api/model/check" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"message":"Doubao API key accepted","source":"Doubao"}`))
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+
+	result, err := doProviderGroupCheck(
+		t.Context(),
+		"model",
+		"Doubao",
+		"https://ark.cn-beijing.volces.com/api/v3/",
+		"test-key",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("doProviderGroupCheck error: %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("expected success, got %+v", result)
+	}
+	if received.Source != "Doubao" {
+		t.Fatalf("unexpected source: %q", received.Source)
+	}
+	if received.URL != "https://ark.cn-beijing.volces.com/api/v3/" {
+		t.Fatalf("unexpected URL: %q", received.URL)
+	}
+	if received.APIKey != "test-key" {
+		t.Fatalf("unexpected API key: %q", received.APIKey)
+	}
+}

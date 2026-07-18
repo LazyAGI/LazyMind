@@ -14,7 +14,6 @@ from lazymind.chat.engine.tools.infra import (
 from lazymind.chat.engine.tools._utils import (
     iter_lookup_ids,
     parse_json_dict,
-    parse_number_range,
     truncate_text,
 )
 from lazymind.chat.engine.tools.algo import DOCUMENT, search_kb, search_temp_files
@@ -37,6 +36,7 @@ _DEFAULT_RETRIEVER_TOPK = 20
 _DEFAULT_RERANK_TOPK = 20
 _DEFAULT_K_MAX = 10
 _DEFAULT_IMAGE_TOPK = 3
+_ACCESSIBLE_KB_IDS_CACHE_KEY = '_accessible_kb_ids'
 _RERANKER_MODULE = 'ModuleReranker'
 _RERANKER_MODEL = 'reranker'
 _KB_RETRIEVER_CONFIGS = [
@@ -389,12 +389,51 @@ class KBToolkit:
         )
 
     @staticmethod
+    def _accessible_kb_ids() -> set[str]:
+        """Return the complete readable KB id set, cached for this agent run."""
+        config = lazyllm.globals.get('agentic_config') or {}
+        cached = config.get(_ACCESSIBLE_KB_IDS_CACHE_KEY)
+        if isinstance(cached, (list, tuple, set)):
+            return {str(item).strip() for item in cached if str(item).strip()}
+
+        accessible: set[str] = set()
+        page_token = ''
+        seen_page_tokens: set[str] = set()
+        while True:
+            params: Dict[str, Any] = {'page_size': 100}
+            if page_token:
+                params['page_token'] = page_token
+            response = get_core_api('/datasets', params=params)
+            for item in response.get('datasets') or []:
+                if not isinstance(item, dict):
+                    continue
+                dataset_id = str(item.get('dataset_id') or '').strip()
+                if dataset_id:
+                    accessible.add(dataset_id)
+
+            next_page_token = str(response.get('next_page_token') or '').strip()
+            if not next_page_token:
+                break
+            if next_page_token in seen_page_tokens:
+                raise RuntimeError('knowledge-base catalog returned a repeated page token')
+            seen_page_tokens.add(next_page_token)
+            page_token = next_page_token
+
+        config[_ACCESSIBLE_KB_IDS_CACHE_KEY] = sorted(accessible)
+        lazyllm.globals['agentic_config'] = config
+        return accessible
+
+    @staticmethod
     def _kb_ids(explicit: Optional[List[str]] = None) -> List[str]:
         config = lazyllm.globals.get('agentic_config') or {}
         selected = explicit if explicit else (config.get('filters') or {}).get('kb_id')
         ids = [str(item).strip() for item in iter_lookup_ids(selected, field_name='kb_ids') if item]
         if not ids:
             raise ValueError('kb_ids is required when no knowledge base is selected in the request')
+        if explicit:
+            accessible = KBToolkit._accessible_kb_ids()
+            if any(kb_id not in accessible for kb_id in ids):
+                raise ValueError('one or more requested knowledge bases are unavailable')
         return ids
 
     def kb_search(
@@ -465,7 +504,7 @@ class KBToolkit:
             serialized,
         )
 
-    def kb_get_parent_node(self, node_id: str, kb_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
         """Get the parent node of a target document node.
 
         Retrieves the parent node (e.g., section heading or enclosing
@@ -480,29 +519,20 @@ class KBToolkit:
             parent can be found.
         """
         doc = DOCUMENT
-
-        for kb_id in self._kb_ids(kb_ids):
-            current_nodes = doc.get_nodes(uids=[node_id], kb_id=kb_id)
-            current_nodes = current_nodes if isinstance(current_nodes, list) else []
-            if not current_nodes:
-                continue
-
-            current = _serialize_doc_node_like(current_nodes[0])
+        current_nodes = doc.get_nodes(uids=[node_id])
+        current_nodes = current_nodes if isinstance(current_nodes, list) else []
+        if current_nodes:
+            current_node = current_nodes[0]
+            current = _serialize_doc_node_like(current_node)
             parent_id = current.get('parent')
-            if not parent_id:
-                result = {
-                    'node_id': node_id,
-                    'current_node': current,
-                    'parent_id': None,
-                    'total': 0,
-                    'items': [],
-                }
-                _annotate_result_citations(result)
-                return tool_success('kb_get_parent_node', result)
-
-            parent_nodes = doc.get_nodes(uids=[parent_id], kb_id=kb_id)
-            parent_nodes = parent_nodes if isinstance(parent_nodes, list) else []
-            parent = _serialize_doc_node_like(parent_nodes[0]) if parent_nodes else None
+            if parent_id:
+                global_metadata = getattr(current_node, 'global_metadata', {}) or {}
+                kb_id = global_metadata.get('kb_id') if isinstance(global_metadata, dict) else None
+                parent_nodes = doc.get_nodes(uids=[parent_id], kb_id=kb_id)
+                parent_nodes = parent_nodes if isinstance(parent_nodes, list) else []
+                parent = _serialize_doc_node_like(parent_nodes[0]) if parent_nodes else None
+            else:
+                parent = None
             result = {
                 'node_id': node_id,
                 'current_node': current,
@@ -525,49 +555,35 @@ class KBToolkit:
 
     def kb_get_window_nodes(
         self,
-        docid: str,
-        number: Any,
-        group: str = 'block',
-        kb_ids: Optional[List[str]] = None,
+        node_id: str,
+        before: int = 5,
+        after: int = 5,
     ) -> Dict[str, Any]:
-        """Get nodes by number range from a target document.
+        """Get neighboring nodes around a target node.
 
-        Retrieves one or more neighboring nodes around a specific position
-        within a known document. This provides surrounding context for a
-        node whose docid and number are already known.
+        The target node supplies its own knowledge-base, document, group, and
+        position metadata, so callers only need the node id returned by search.
 
         Args:
-            docid: Target document id.
-            number: Node number or inclusive number range. Pass an int for one
-                node, or [start, end] / "start,end" for all nodes in that
-                range.
-            group: Node group, either block or line.
+            node_id: Target document node uid returned by a search method.
+            before: Maximum number of preceding nodes. Defaults to 5.
+            after: Maximum number of following nodes. Defaults to 5.
 
         Returns:
             A compact dict with node numbers and contents only.
         """
-        start, end = parse_number_range(number)
-
-        numbers = set(range(start, end + 1))
-        if len(numbers) > _MAX_RESULT_ITEMS:
-            raise ValueError(f'number range cannot exceed {_MAX_RESULT_ITEMS} nodes')
-
+        before = int(before)
+        after = int(after)
+        if before < 0 or after < 0:
+            raise ValueError('before and after must be non-negative')
+        if before + after + 1 > _MAX_RESULT_ITEMS:
+            raise ValueError(f'window cannot exceed {_MAX_RESULT_ITEMS} nodes')
         doc = DOCUMENT
-
-        for kb_id in self._kb_ids(kb_ids):
-            nodes = doc.get_nodes(
-                doc_ids=[docid],
-                group=group,
-                kb_id=kb_id,
-                offset=max(start - 1, 0),
-                limit=len(numbers),
-                sort_by_number=True,
-            )
+        seed_nodes = doc.get_nodes(uids=[node_id])
+        seed_nodes = seed_nodes if isinstance(seed_nodes, list) else []
+        if seed_nodes:
+            nodes = doc.get_window_nodes(seed_nodes[0], span=(-before, after), merge=False)
             nodes = nodes if isinstance(nodes, list) else []
-            nodes = [n for n in nodes if getattr(n, 'number', None) in numbers]
-            if not nodes:
-                continue
-            nodes.sort(key=lambda n: (getattr(n, 'number', 0) or 0, getattr(n, 'uid', '') or ''))
             result = {
                 'total': len(nodes),
                 'items': [_serialize_doc_node_like(n) for n in nodes],

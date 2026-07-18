@@ -126,6 +126,7 @@ type LazyChatData struct {
 	Status                 string                       `json:"status"`
 	ReasoningText          string                       `json:"think"`
 	TaskCreated            *TaskCreatedEvent            `json:"task_created,omitempty"`
+	ArtifactCreated        *ArtifactCreatedEvent        `json:"artifact_created,omitempty"`
 	AskPending             *AskPendingEvent             `json:"ask_pending,omitempty"`
 	IntentUpdated          *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
 	PluginPreflightUpdated *PluginPreflightUpdatedEvent `json:"plugin_preflight_updated,omitempty"`
@@ -146,6 +147,16 @@ type TaskCreatedEvent struct {
 	OutputSlots []string       `json:"output_slots"`
 	Tools       []string       `json:"tools,omitempty"`
 	Resume      bool           `json:"resume,omitempty"`
+}
+
+// ArtifactCreatedEvent is emitted by the main Agent's artifact tools.
+// Core binds it to the authoritative conversation and history IDs of this request.
+type ArtifactCreatedEvent struct {
+	ArtifactID  string          `json:"artifact_id"`
+	Filename    string          `json:"filename"`
+	ContentType string          `json:"content_type"`
+	Value       json.RawMessage `json:"value"`
+	Caption     *string         `json:"caption,omitempty"`
 }
 
 // AskQuestion is a single question within an AskPendingEvent.
@@ -345,6 +356,7 @@ type UpstreamStreamChunk struct {
 	Sources                []any                        `json:"sources"`
 	ReasoningText          string                       `json:"reasoning_text"` // text think
 	TaskCreated            *TaskCreatedEvent            `json:"task_created,omitempty"`
+	ArtifactCreated        *ArtifactCreatedEvent        `json:"artifact_created,omitempty"`
 	AskPending             *AskPendingEvent             `json:"ask_pending,omitempty"`
 	IntentUpdated          *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
 	PluginPreflightUpdated *PluginPreflightUpdatedEvent `json:"plugin_preflight_updated,omitempty"`
@@ -746,6 +758,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				Sources:                d.Resp.Data.Sources,
 				ReasoningText:          d.Resp.Data.ReasoningText,
 				TaskCreated:            d.Resp.Data.TaskCreated,
+				ArtifactCreated:        d.Resp.Data.ArtifactCreated,
 				AskPending:             d.Resp.Data.AskPending,
 				IntentUpdated:          d.Resp.Data.IntentUpdated,
 				PluginPreflightUpdated: d.Resp.Data.PluginPreflightUpdated,

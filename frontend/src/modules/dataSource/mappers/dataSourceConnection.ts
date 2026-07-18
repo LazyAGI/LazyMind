@@ -23,14 +23,15 @@ export function getCloudConnectionItems(payload: unknown): CloudConnectionRespon
 
 export function mapCloudConnectionToFeishuAccount(
   connection: CloudConnectionResponse,
-  cachedAccounts: FeishuAuthAccount[],
+  cachedAccounts: FeishuAuthAccount[] = [],
 ): FeishuAuthAccount {
   const providerMeta = connection.provider_account_meta || {};
+  const safeCachedAccounts = Array.isArray(cachedAccounts) ? cachedAccounts : [];
   const cachedAccount =
-    cachedAccounts.find(
+    safeCachedAccounts.find(
       (item) => item.connection?.connectionId === connection.connection_id,
     ) ||
-    cachedAccounts.find(
+    safeCachedAccounts.find(
       (item) =>
         item.appId &&
         (item.appId === providerMeta.client_id ||
@@ -83,14 +84,15 @@ export function mapCloudConnectionToFeishuAccount(
 
 export function mapCloudConnectionToNotionAccount(
   connection: CloudConnectionResponse,
-  cachedAccounts: FeishuAuthAccount[],
+  cachedAccounts: FeishuAuthAccount[] = [],
 ): FeishuAuthAccount {
   const providerMeta = connection.provider_account_meta || {};
+  const safeCachedAccounts = Array.isArray(cachedAccounts) ? cachedAccounts : [];
   const cachedAccount =
-    cachedAccounts.find(
+    safeCachedAccounts.find(
       (item) => item.connection?.connectionId === connection.connection_id,
     ) ||
-    cachedAccounts.find(
+    safeCachedAccounts.find(
       (item) =>
         item.appId &&
         (item.appId === providerMeta.client_id ||

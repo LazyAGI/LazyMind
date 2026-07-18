@@ -149,6 +149,59 @@ make up
 
 常用部署选项：
 
+### macOS 使用 Colima 启动容器栈
+
+如果本机无法使用 Docker Desktop，可以使用 [Colima](https://github.com/abiosoft/colima) 提供 Docker 运行环境。未安装 Homebrew 时，先按官方方式安装：
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+安装完成后按终端提示配置 `PATH`。Apple Silicon 通常使用：
+
+```bash
+echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+eval "$(/opt/homebrew/bin/brew shellenv)"
+brew --version
+```
+
+安装 Colima 和 Docker 命令行工具：
+
+```bash
+brew install colima docker docker-compose docker-buildx
+```
+
+启动 Colima：
+
+```bash
+colima start --runtime docker --vm-type vz --mount-type virtiofs --cpu 4 --memory 6 --disk 80
+```
+
+验证环境：
+
+```bash
+colima status
+docker version
+docker compose version
+```
+
+环境就绪后，在项目根目录启动容器栈：
+
+```bash
+make up
+```
+
+使用完毕后，先停掉容器栈，再关闭 Colima：
+
+```bash
+make down
+colima stop
+```
+
+### 启动命令速查
+
+除 Colima 容器栈外，项目还支持宿主机本地运行等多种方式，常用命令如下：
+
 | 场景 | 命令 |
 |------|------|
 | 构建镜像并启动 | `make up-build` |

@@ -38,6 +38,7 @@ from lazymind.chat.engine.agent_runtime import (
     report_to_dict,
     render_attachment_content,
 )
+from lazymind.chat.engine.tools.chat_artifact import chat_agent_workspace
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
     render_intent_section,
@@ -156,6 +157,12 @@ def _build_subagent_chat_tools() -> list:
         create_subagent, list_subagents, get_subagent_status,
         list_subagent_artifacts, get_subagent_artifacts,
     ]
+
+
+def _build_chat_artifact_tools() -> list:
+    """Tools for artifacts produced directly by the main ChatAgent."""
+    from lazymind.chat.engine.tools.chat_artifact import save_chat_artifact
+    return [save_chat_artifact]
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
@@ -373,7 +380,8 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     allow_ask_user = _should_register_ask_user(agentic_config)
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
     ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
-    all_tools = ([intentwriter] + agent_tools + subagent_tools + attachment_tools
+    artifact_tools = _build_chat_artifact_tools()
+    all_tools = ([intentwriter] + agent_tools + artifact_tools + subagent_tools + attachment_tools
                  + ask_user_tools + plugin_tools + mcp_tools)
     set_trace_context({
         'enabled': bool(runtime.trace),
@@ -459,7 +467,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         force_summarize_context=query,
         execution_options=AgentExecutionOptions(
             skills=agent.available_skills,
-            workspace=_cfg['agentic_workspace'],
+            workspace=chat_agent_workspace(user_id or '0', conversation_id),
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,
             skills_dir=_cfg['skill_fs_url'],

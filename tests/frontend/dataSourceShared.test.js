@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { normalizeDataSourceParseStatus } from '../../frontend/src/modules/dataSource/shared.ts';
 
 describe('data source parse status normalization', () => {
@@ -62,5 +63,33 @@ describe('data source parse status normalization', () => {
         sourceType: 'local',
       }),
     ).toBe('failed');
+  });
+});
+
+describe('cloud OAuth provider wording', () => {
+  it('renders callback status with the active provider name', () => {
+    const callbackSource = readFileSync(
+      new URL('../../frontend/src/modules/dataSource/common/feishuCallback.tsx', import.meta.url),
+      'utf8',
+    );
+    const zhSource = readFileSync(
+      new URL('../../frontend/src/i18n/locales/zh-CN.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(callbackSource).toContain('notion: "admin.dataSourceTypeNotion"');
+    expect(callbackSource).toContain('dataSourceCallbackSuccessTitle", { providerName }');
+    expect(zhSource).toContain('dataSourceCallbackSuccessTitle: "{{providerName}}账号已连接"');
+    expect(zhSource).not.toContain('dataSourceCallbackSuccessTitle: "飞书账号已连接"');
+  });
+
+  it('builds the Notion callback URL from the current application origin', () => {
+    const guideSource = readFileSync(
+      new URL('../../frontend/src/modules/dataSource/NotionSetupGuide.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(guideSource).toContain('getCloudDataSourceCallbackUrl("notion")');
+    expect(guideSource).not.toContain('http://127.0.0.1:8090/oauth/notion');
   });
 });

@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/plugin"
 	"lazymind/core/state"
@@ -267,6 +268,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
 		return
+	}
+	if toolConfig, err := loadChatToolConfig(r.Context(), db, userID); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat tool config failed", err), http.StatusInternalServerError)
+		return
+	} else if len(toolConfig) > 0 {
+		existing, _ := reqBody["tool_config"].(map[string]any)
+		reqBody["tool_config"] = mergeToolConfig(existing, toolConfig)
 	}
 	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
 	// resolvePluginModeWithFallback determines the effective plugin_mode for this request.
@@ -1186,8 +1194,13 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	db.Where("conversation_id = ?", convID).Delete(&orm.ChatHistory{})
 	db.Where("conversation_id = ?", convID).Delete(&orm.MultiAnswersChatHistory{})
+	db.Where("conversation_id = ?", convID).Delete(&orm.ConversationArtifact{})
 	// Cascade-delete task center entries for this conversation.
 	db.Where("conversation_id = ?", convID).Delete(&orm.TaskCenterTask{})
+	if err := removeConversationArtifactFiles(userID, convID); err != nil {
+		log.Logger.Warn().Err(err).Str("conversation_id", convID).
+			Msg("remove main chat artifact files failed")
+	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 
@@ -1251,10 +1264,19 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.MultiAnswersChatHistory{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ConversationArtifact{}).Error; err != nil {
+			return err
+		}
 		return tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.TaskCenterTask{}).Error
 	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "batch delete conversations failed", err), http.StatusInternalServerError)
 		return
+	}
+	for _, conversationID := range ownedIDs {
+		if err := removeConversationArtifactFiles(userID, conversationID); err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", conversationID).
+				Msg("remove main chat artifact files failed")
+		}
 	}
 
 	writeConversationJSON(w, http.StatusOK, map[string]any{

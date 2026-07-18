@@ -94,7 +94,9 @@ export function createOAuthEngine(ctx: ManagementContext) {
           provider: "notion",
           status: null,
         });
-      const cachedAccounts = ctx.notionAuthAccounts;
+      const cachedAccounts = Array.isArray(ctx.notionAuthAccounts)
+        ? ctx.notionAuthAccounts
+        : [];
       const nextAccounts = getCloudConnectionItems(response.data).map((item) =>
         mapCloudConnectionToNotionAccount(item, cachedAccounts),
       );
@@ -392,7 +394,7 @@ export function createOAuthEngine(ctx: ManagementContext) {
     const previousConnection = options?.previousConnection ?? ctx.oauthConnection;
 
     try {
-      if (!activeSetup?.appId.trim() || !activeSetup.appSecret.trim()) {
+      if (!activeSetup?.appId.trim()) {
         message.warning(
           provider === "feishu"
             ? t("admin.dataSourceFeishuCredentialRequired")
