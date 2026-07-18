@@ -45,6 +45,22 @@ def test_web_search_requires_at_least_one_search_key():
     assert any(method['name'] == 'BingSearch' and method['active'] for method in group['methods'])
 
 
+def test_wikipedia_and_web_search_remain_visible_when_tavily_is_configured():
+    lazyllm.globals.config['dynamic_tool_auth'] = {'tavily': 'tavily-token'}
+    lazyllm.globals['agentic_config'] = {'query': '怎么制作 AI 视频'}
+
+    assert 'web_search' in _active_tool_names()
+    assert 'wikipedia' in _active_tool_names()
+
+
+def test_wikipedia_remains_available_without_web_provider():
+    lazyllm.globals.config['dynamic_tool_auth'] = {}
+    lazyllm.globals['agentic_config'] = {'query': 'AI 视频是什么'}
+
+    assert 'web_search' not in _active_tool_names()
+    assert 'wikipedia' in _active_tool_names()
+
+
 def test_registry_key_source_activates_function_tool():
     from lazymind.chat.engine.tools import kb_tmp_search
     from lazyllm.tools.agent.toolsManager import ToolManager
@@ -135,13 +151,15 @@ def test_conditional_prompt_appendix_provider_can_disable_itself():
     assert collect_system_prompt_appendices([config]) == {'tool_policy': ['Enabled policy.']}
 
 
-def test_web_search_policy_routes_wikipedia_to_encyclopedic_or_fallback_use():
+def test_search_tool_descriptions_distinguish_open_web_from_encyclopedic_lookup():
     web_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'web_search')
+    wikipedia_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'wikipedia')
     policy = '\n'.join(collect_system_prompt_appendices([web_config])['tool_policy'])
 
-    assert 'current information' in policy
-    assert 'stable encyclopedic background' in policy
-    assert 'fallback/supplement' in policy
+    assert 'Wikipedia' not in policy
+    assert 'current information' in web_config.tool['desc']
+    assert 'stable encyclopedic background' in wikipedia_config.description_en
+    assert 'not for news' in wikipedia_config.description_en
 
 
 def test_prompt_appendix_deduplication_normalizes_whitespace():

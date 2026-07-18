@@ -162,15 +162,20 @@ KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
 WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Web Search Tool Rules\n'
-        'Prefer the configured web-search provider for current information, industry developments, '
-        'frontier practices, products, companies, recommendations, and broad research. '
-        'Use Wikipedia only for stable encyclopedic background or named encyclopedia entries, or as '
-        'a fallback/supplement when web search does not provide adequate results. Do not choose '
-        'Wikipedia merely because it is directly available.\n'
         'When using `web_search`, the `query` must represent one search intent. '
         'If the user asks to search multiple unrelated keywords or topics, call '
         '`web_search` separately for each keyword/topic. Do not combine unrelated '
         'terms into one `query` with spaces, commas, punctuation, or list-like text.',
+    ),
+}
+MEMORY_READER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Conversation history versus persistent memory\n'
+        'Conversation history is already included in the model messages and is the authoritative '
+        'source for earlier turns in the current chat. Resolve short follow-ups and omitted subjects '
+        'from that history. Do not call `read_memory` to inspect, summarize, or recover the current '
+        'conversation. `read_memory` only reads optional cross-conversation notes or user-profile '
+        'content; an empty result never implies that chat history is missing.'
     ),
 }
 CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -240,7 +245,12 @@ _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [
 
 
 class WikipediaToolkit(WikipediaSearch):
-    """Search Wikipedia, then fetch one or more result contents when needed."""
+    """Search stable encyclopedic background and named entries in Wikipedia.
+
+    Use this for established concepts, people, places, organizations, and historical topics.
+    It is not a general web search engine and should not be used for current events, recent product
+    information, recommendations, industry developments, or broad open-web research.
+    """
 
 
 _CLOUD_FILE_TOOLKIT = {
@@ -388,10 +398,13 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='wikipedia',
         label='Wikipedia 搜索',
-        description='从 Wikipedia 搜索知识条目',
+        description='查询 Wikipedia 中稳定的百科背景和明确词条；不用于新闻、时效信息或开放网页搜索',
         tool=WikipediaToolkit(skip_auth=True), module='retrieval',
         label_en='Wikipedia Search',
-        description_en='Search Wikipedia knowledge entries.',
+        description_en=(
+            'Look up stable encyclopedic background and named Wikipedia entries; not for news, '
+            'current information, or open-web search.'
+        ),
     ),
     ToolConfig(
         name='web_search',
@@ -400,7 +413,9 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool={
             'name': 'WebSearchToolkit',
             'desc': (
-                'Search the web with the first available provider. Each search query must represent '
+                'Search the open web for current information, news, products, companies, '
+                'recommendations, industry developments, and broad research using the first '
+                'available provider. Each search query must represent '
                 'one search intent; issue separate calls for unrelated topics. Use get_content or '
                 'get_contents when result snippets are insufficient.'
             ),
@@ -409,7 +424,10 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         },
         module='retrieval',
         label_en='Web Search',
-        description_en='Search the internet using the first available search provider.',
+        description_en=(
+            'Search the open internet for current information and broad research using the first '
+            'available search provider.'
+        ),
         capability_id='web_search',
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['search_provider'],
@@ -511,6 +529,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=read_memory, module='personalization',
         label_en='Memory Reading',
         description_en='Read the current user memory and preferences.',
+        appendix_system_prompt=MEMORY_READER_TOOL_POLICY_APPENDIX,
     ),
     ToolConfig(
         name='memory_editor',
