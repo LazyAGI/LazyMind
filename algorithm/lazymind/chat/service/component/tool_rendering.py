@@ -54,7 +54,7 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'vocab_learn': 'suggestions.word <-> suggestions.synonym',
     'vision_extractor': 'url',
     'skill_editor': 'category/name',
-    'SkillManagementToolkit_create_skill': 'category/name',
+    'SkillManagementToolkit_create_skill': 'name',
     'SkillManagementToolkit_install_skill': 'github_url',
     'SkillManagementToolkit_edit_file': 'path',
     'SkillManagementToolkit_patch_file': 'path',

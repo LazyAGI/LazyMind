@@ -57,6 +57,7 @@ def test_skill_editor_tool_group_exposes_action_specific_schemas():
     patch_required = set(patch_tool.params_schema.model_json_schema().get('required', []))
 
     assert create_fields == {'name', 'content'}
+    assert 'Single-segment skill name.' in create_tool.description
     assert install_fields == {'github_url'}
     assert patch_fields == {'name', 'category', 'path', 'old_text', 'new_text', 'replace_all', 'reason'}
     assert rename_fields == {'name', 'category', 'new_name'}

@@ -104,6 +104,8 @@ class SkillManagementToolkit:
     def _find_installed_github_source(self, source_identity: tuple[str, str]) -> Optional[str]:
         for package in self.store.list_packages():
             category = package['category']
+            if category != EXTERNAL_SKILL_CATEGORY:
+                continue
             name = package['name']
             try:
                 frontmatter, _ = parse_skill_frontmatter(self.store.read_skill_md(category, name))
@@ -111,10 +113,10 @@ class SkillManagementToolkit:
                 if not github_url:
                     continue
                 existing_source = self.installer.resolve_source(github_url)
-            except ValueError as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 lazyllm.LOG.warning(
-                    '[install_skill] skip invalid existing github source '
-                    f'skill={category}/{name} error={exc}'
+                    '[install_skill] skip unreadable or invalid existing github source '
+                    f'skill={category}/{name} error_type={type(exc).__name__} error={exc}'
                 )
                 continue
             if existing_source.identity == source_identity:

@@ -1,0 +1,144 @@
+import pytest
+
+from lazymind.chat.engine.tools.infra.skill_remote_store import SkillRemoteStore
+
+
+class _RemoteFS:
+    def __init__(self, *, existing=(), listings=None):
+        self.calls = []
+        self.existing = set(existing)
+        self.listings = dict(listings or {})
+
+    def exists(self, path):
+        self.calls.append(('exists', path))
+        return path in self.existing
+
+    def ls(self, path, detail=True):
+        self.calls.append(('ls', path, detail))
+        return list(self.listings.get(path, []))
+
+    def mkdir(self, path, create_parents=True):
+        self.calls.append(('mkdir', path, create_parents))
+        self.existing.add(path)
+
+    def write(self, path, content, content_type='text/plain; charset=utf-8'):
+        self.calls.append(('write', path, content, content_type))
+
+    def write_file(self, path, data, content_type='application/octet-stream'):
+        self.calls.append(('write_file', path, data, content_type))
+
+    def move(self, source, target, recursive=False):
+        self.calls.append(('move', source, target, recursive))
+        self.existing.discard(source)
+        self.existing.add(target)
+
+    def trash(self, path):
+        self.calls.append(('trash', path))
+        self.existing.discard(path)
+
+
+def _store(fs):
+    store = SkillRemoteStore(fs=fs)
+    store.root = 'remote://skills'
+    return store
+
+
+def test_storage_category_is_limited_to_internal_and_external():
+    fs = _RemoteFS()
+    store = _store(fs)
+
+    assert store.package_dir('internal', 'example') == 'remote://skills/internal/example'
+    assert store.package_dir(' external ', 'example') == 'remote://skills/external/example'
+
+    with pytest.raises(ValueError, match='internal.*external'):
+        store.create('research', 'example', 'content')
+    with pytest.raises(ValueError, match='internal.*external'):
+        store.install_package('personal', 'example', {'SKILL.md': b'content'})
+    with pytest.raises(ValueError, match='internal.*external'):
+        store.remove('system', 'example')
+
+    assert fs.calls == []
+    assert 'internal' in store.resolve_existing_identity('example', 'research')['error']
+    assert 'external' in store.resolve_existing_identity('research/example')['error']
+
+
+def test_list_packages_only_returns_valid_storage_categories_and_names():
+    fs = _RemoteFS(listings={
+        'remote://skills': [
+            {'name': 'remote://skills/internal', 'type': 'directory'},
+            {'name': 'remote://skills/research', 'type': 'directory'},
+            {'name': 'remote://skills/external', 'type': 'directory'},
+        ],
+        'remote://skills/internal': [
+            {'name': 'remote://skills/internal/generated', 'type': 'directory'},
+            {'name': 'remote://skills/internal/invalid name', 'type': 'directory'},
+        ],
+        'remote://skills/external': [
+            {'name': 'remote://skills/external/downloaded', 'type': 'directory'},
+        ],
+    })
+    store = _store(fs)
+
+    assert store.list_packages() == [
+        {'category': 'external', 'name': 'downloaded'},
+        {'category': 'internal', 'name': 'generated'},
+    ]
+    assert not any(call[0] == 'ls' and call[1] == 'remote://skills/research' for call in fs.calls)
+
+
+def test_create_rejects_same_key_but_allows_same_name_in_other_category():
+    fs = _RemoteFS(existing={'remote://skills/external/example'})
+    store = _store(fs)
+
+    result = store.create('internal', 'example', 'content')
+
+    assert result['category'] == 'internal'
+    assert ('write', 'remote://skills/internal/example/SKILL.md', 'content', 'text/plain; charset=utf-8') in fs.calls
+
+    fs.calls.clear()
+    with pytest.raises(FileExistsError, match='internal/example already exists'):
+        store.create('internal', 'example', 'replacement')
+    assert fs.calls == [('exists', 'remote://skills/internal/example')]
+
+
+def test_install_package_rejects_existing_key_before_writing():
+    fs = _RemoteFS(existing={'remote://skills/external/example'})
+    store = _store(fs)
+
+    with pytest.raises(FileExistsError, match='external/example already exists'):
+        store.install_package('external', 'example', {
+            'SKILL.md': b'content',
+            'assets/logo.bin': b'logo',
+        })
+
+    assert fs.calls == [('exists', 'remote://skills/external/example')]
+
+
+def test_rename_stays_in_category_and_rejects_existing_target():
+    source = 'remote://skills/internal/source'
+    target = 'remote://skills/internal/target'
+    fs = _RemoteFS(existing={source, target})
+    store = _store(fs)
+
+    with pytest.raises(ValueError, match='cannot be moved across storage categories'):
+        store.rename('internal', 'source', 'external', 'target', skill_content='content')
+    assert fs.calls == []
+
+    with pytest.raises(FileExistsError, match='internal/target already exists'):
+        store.rename('internal', 'source', 'internal', 'target', skill_content='content')
+    assert fs.calls == [('exists', source), ('exists', target)]
+
+
+def test_replace_and_remove_require_existing_package():
+    fs = _RemoteFS()
+    store = _store(fs)
+
+    with pytest.raises(FileNotFoundError, match='internal/missing does not exist'):
+        store.replace_files('internal', 'missing', {}, {'SKILL.md': 'content'})
+    with pytest.raises(FileNotFoundError, match='external/missing does not exist'):
+        store.remove('external', 'missing')
+
+    assert fs.calls == [
+        ('exists', 'remote://skills/internal/missing'),
+        ('exists', 'remote://skills/external/missing'),
+    ]

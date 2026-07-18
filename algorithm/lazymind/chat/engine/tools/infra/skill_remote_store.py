@@ -7,7 +7,19 @@ from lazymind.chat.integrations.remote_fs import RemoteFS
 from lazymind.config import config
 
 from .skill_paths import normalize_skill_package_path, relative_to_package
-from .skill_validation import normalize_skill_category, validate_skill_name
+from .skill_validation import (
+    EXTERNAL_SKILL_CATEGORY,
+    INTERNAL_SKILL_CATEGORY,
+    normalize_skill_category,
+    validate_skill_name,
+)
+
+
+_STORAGE_CATEGORIES = frozenset({INTERNAL_SKILL_CATEGORY, EXTERNAL_SKILL_CATEGORY})
+_STORAGE_CATEGORY_ERROR = (
+    f'Skill storage category must be {INTERNAL_SKILL_CATEGORY!r} or '
+    f'{EXTERNAL_SKILL_CATEGORY!r}.'
+)
 
 
 class SkillRemoteStore:
@@ -18,7 +30,8 @@ class SkillRemoteStore:
         self.root = str(config['skill_fs_url']).rstrip('/')
 
     def package_dir(self, category: str, name: str) -> str:
-        return f'{self.root}/{category}/{name}'
+        normalized_category, normalized_name = _require_storage_identity(category, name)
+        return f'{self.root}/{normalized_category}/{normalized_name}'
 
     def package_exists(self, category: str, name: str) -> bool:
         return bool(self.fs.exists(self.package_dir(category, name)))
@@ -30,13 +43,13 @@ class SkillRemoteStore:
                 continue
             category_path = str((category_entry or {}).get('name') or '').strip()
             category = _last_path_part(category_path)
-            if not category:
+            if category not in _STORAGE_CATEGORIES:
                 continue
             for package_entry in self.fs.ls(category_path, detail=True):
                 if str((package_entry or {}).get('type') or 'file').strip() not in ('directory', 'dir'):
                     continue
                 package_name = _last_path_part(str((package_entry or {}).get('name') or '').strip())
-                if package_name:
+                if package_name and validate_skill_name(package_name) is None:
                     packages.append({'category': category, 'name': package_name})
         return sorted(packages, key=lambda item: (item['category'], item['name']))
 
@@ -47,26 +60,20 @@ class SkillRemoteStore:
 
     def resolve_existing_identity(self, name: str, category: Optional[str] = None) -> Dict[str, str]:
         raw_name = str(name or '').strip()
-        normalized_category = normalize_skill_category(category) if category is not None else None
-        if category is not None and not normalized_category:
-            return {
-                'error': (
-                    f'category {category!r} is invalid; it must be a single ASCII-safe path segment.'
-                )
-            }
+        try:
+            normalized_category = _require_storage_category(category) if category is not None else None
+        except ValueError as exc:
+            return {'error': str(exc)}
 
         if '/' in raw_name:
             parts = [part.strip() for part in raw_name.split('/')]
             if len(parts) != 2 or not all(parts):
                 return {'error': f'Skill key {raw_name!r} must be in \'category/name\' form.'}
-            key_category = normalize_skill_category(parts[0])
+            try:
+                key_category = _require_storage_category(parts[0])
+            except ValueError as exc:
+                return {'error': str(exc)}
             key_name = parts[1]
-            if not key_category:
-                return {
-                    'error': (
-                        f'Skill key {raw_name!r} has invalid category; it must be a single ASCII-safe path segment.'
-                    )
-                }
             name_error = validate_skill_name(key_name)
             if name_error:
                 return {'error': f'Skill key {raw_name!r} has invalid name: {name_error}'}
@@ -123,7 +130,12 @@ class SkillRemoteStore:
         before: Mapping[str, str],
         after: Mapping[str, str],
     ) -> Dict[str, list[str]]:
-        package_dir = self.package_dir(category, name)
+        normalized_category, normalized_name = _require_storage_identity(category, name)
+        package_dir = f'{self.root}/{normalized_category}/{normalized_name}'
+        if not self.fs.exists(package_dir):
+            raise FileNotFoundError(
+                f'Skill package {normalized_category}/{normalized_name} does not exist.'
+            )
         before_paths = set(before)
         after_paths = set(after)
         deleted = sorted(before_paths - after_paths)
@@ -135,20 +147,26 @@ class SkillRemoteStore:
         return {'written': written, 'deleted': deleted}
 
     def create(self, category: str, name: str, content: str) -> dict:
-        package_dir = self.package_dir(category, name)
+        normalized_category, normalized_name = _require_storage_identity(category, name)
+        package_dir = f'{self.root}/{normalized_category}/{normalized_name}'
+        if self.fs.exists(package_dir):
+            raise FileExistsError(
+                f'Skill package {normalized_category}/{normalized_name} already exists.'
+            )
         path = f'{package_dir}/SKILL.md'
         self.fs.mkdir(package_dir, create_parents=True)
         self.fs.write(path, content)
         return {
             'persisted': 'remote_fs',
             'path': path,
-            'name': name,
-            'category': category,
+            'name': normalized_name,
+            'category': normalized_category,
             'action': 'create',
         }
 
     def install_package(self, category: str, name: str, files: Mapping[str, bytes]) -> dict:
-        package_dir = self.package_dir(category, name)
+        normalized_category, normalized_name = _require_storage_identity(category, name)
+        package_dir = f'{self.root}/{normalized_category}/{normalized_name}'
         skill_md = files.get('SKILL.md')
         if skill_md is None:
             raise ValueError('Skill package must contain SKILL.md.')
@@ -157,6 +175,10 @@ class SkillRemoteStore:
         except UnicodeDecodeError as exc:
             raise ValueError('SKILL.md must be valid UTF-8.') from exc
 
+        if self.fs.exists(package_dir):
+            raise FileExistsError(
+                f'Skill package {normalized_category}/{normalized_name} already exists.'
+            )
         self.fs.mkdir(package_dir, create_parents=True)
         try:
             for rel_path in sorted(path for path in files if path != 'SKILL.md'):
@@ -183,8 +205,8 @@ class SkillRemoteStore:
         return {
             'persisted': 'remote_fs',
             'path': package_dir,
-            'name': name,
-            'category': category,
+            'name': normalized_name,
+            'category': normalized_category,
             'action': 'install',
         }
 
@@ -197,29 +219,48 @@ class SkillRemoteStore:
         *,
         skill_content: str,
     ) -> dict:
-        old_path = self.package_dir(old_category, old_name)
-        new_path = self.package_dir(new_category, new_name)
+        normalized_old_category, normalized_old_name = _require_storage_identity(old_category, old_name)
+        normalized_new_category, normalized_new_name = _require_storage_identity(new_category, new_name)
+        if normalized_old_category != normalized_new_category:
+            raise ValueError('Skill packages cannot be moved across storage categories.')
+        old_path = f'{self.root}/{normalized_old_category}/{normalized_old_name}'
+        new_path = f'{self.root}/{normalized_new_category}/{normalized_new_name}'
+        if old_path == new_path:
+            raise ValueError('Skill rename requires a different name.')
+        if not self.fs.exists(old_path):
+            raise FileNotFoundError(
+                f'Skill package {normalized_old_category}/{normalized_old_name} does not exist.'
+            )
+        if self.fs.exists(new_path):
+            raise FileExistsError(
+                f'Skill package {normalized_new_category}/{normalized_new_name} already exists.'
+            )
         self.fs.move(old_path, new_path, recursive=True)
         self.fs.write(f'{new_path}/SKILL.md', skill_content)
         return {
             'persisted': 'remote_fs',
             'path': new_path,
-            'old_name': old_name,
-            'old_category': old_category,
-            'name': new_name,
-            'category': new_category,
+            'old_name': normalized_old_name,
+            'old_category': normalized_old_category,
+            'name': normalized_new_name,
+            'category': normalized_new_category,
             'action': 'rename',
         }
 
     def remove(self, category: str, name: str) -> dict:
-        path = self.package_dir(category, name)
+        normalized_category, normalized_name = _require_storage_identity(category, name)
+        path = f'{self.root}/{normalized_category}/{normalized_name}'
+        if not self.fs.exists(path):
+            raise FileNotFoundError(
+                f'Skill package {normalized_category}/{normalized_name} does not exist.'
+            )
         self.fs.trash(path)
         return {
             'persisted': 'remote_fs',
             'deleted': True,
             'path': path,
-            'name': name,
-            'category': category,
+            'name': normalized_name,
+            'category': normalized_category,
             'action': 'remove',
         }
 
@@ -230,3 +271,21 @@ class SkillRemoteStore:
 def _last_path_part(path: str) -> str:
     raw = RemoteFS._normalize_path(path)
     return raw.rstrip('/').rsplit('/', 1)[-1] if raw else ''
+
+
+def _require_storage_category(category: Optional[str]) -> str:
+    normalized = normalize_skill_category(category)
+    if normalized not in _STORAGE_CATEGORIES:
+        raise ValueError(_STORAGE_CATEGORY_ERROR)
+    return normalized
+
+
+def _require_skill_name(name: str) -> str:
+    error = validate_skill_name(name)
+    if error:
+        raise ValueError(error)
+    return str(name).strip()
+
+
+def _require_storage_identity(category: Optional[str], name: str) -> tuple[str, str]:
+    return _require_storage_category(category), _require_skill_name(name)
