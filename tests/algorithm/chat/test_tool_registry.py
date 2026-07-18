@@ -188,6 +188,7 @@ def test_cloud_files_use_nested_supplier_toolkits():
     names = {item['function']['name'] for item in manager.tools_description}
     assert 'get_FeishuWikiFS_methods' in names
     assert 'get_NotionFS_methods' in names
+    assert 'get_GoogleDriveFS_methods' in names
     assert not any(name.endswith('_read') for name in names)
 
 

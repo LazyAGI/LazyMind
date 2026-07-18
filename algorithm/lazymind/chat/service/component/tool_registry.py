@@ -188,7 +188,10 @@ CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '`app.notion.com`), use the Notion file-system tools first. Prefer resolving the '
         'link, then reading with references when the task asks for analysis, summary, or '
         'linked-page context. Do not fall back to generic URL fetching for private Notion '
-        'pages unless Notion tools are unavailable or unauthorized.',
+        'pages unless Notion tools are unavailable or unauthorized.\n'
+        'When the user provides a Google Drive or Google Workspace document URL '
+        '(`drive.google.com` or `docs.google.com`), use the Google Drive file-system tools '
+        'instead of generic URL fetching.',
     ),
 }
 
@@ -258,7 +261,8 @@ _CLOUD_FILE_TOOLKIT = {
     'name': 'CloudFileToolkit',
     'desc': (
         'Authenticated cloud files and documents. Use this Toolkit for Feishu/Lark '
-        'Wiki or Docs links (including *.feishu.cn/wiki/*), Notion links, and paths '
+        'Wiki or Docs links (including *.feishu.cn/wiki/*), Notion links, Google Drive '
+        'and Google Workspace document links, and paths '
         'inside connected cloud services; do not send those URLs to url_fetch. '
         'Expand this Toolkit, choose the supplier that owns the URL or path, then '
         'expand that supplier Toolkit and select its resolve, read, search, browse, '
@@ -274,7 +278,10 @@ _CLOUD_FILE_TOOLKIT = {
     'auto_activate': [
         r'https?://[^\s/]+\.(?:feishu\.(?:cn|com)|larksuite\.com)(?:[/:?#]|$)',
         r'https?://(?:[^\s/]+\.)?notion\.(?:so|site|com)(?:[/:?#]|$)',
+        r'https?://(?:drive|docs)\.google\.com(?:[/:?#]|$)',
         r'飞书|(?<!\w)feishu(?!\w)',
+        r'谷歌云端硬盘|谷歌(?:文档|表格|幻灯片)|Google\s*云端硬盘',
+        r'(?<!\w)google\s+(?:drive|docs|sheets|slides)(?!\w)',
     ],
 }
 
