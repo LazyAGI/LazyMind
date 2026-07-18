@@ -232,6 +232,20 @@ func TestMergeToolConfigKeepsFeishuAndSearchTool(t *testing.T) {
 	}
 }
 
+func TestCloudToolProvidersIncludeGoogleDrive(t *testing.T) {
+	want := map[string]bool{
+		"feishu":      true,
+		"googledrive": true,
+		"notion":      true,
+	}
+	for _, provider := range _cloudToolProviders {
+		delete(want, provider)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing cloud tool providers: %#v", want)
+	}
+}
+
 func TestSearchToolConfigEntrySplitsMultiKeyCredential(t *testing.T) {
 	db := setupToolConfigTestDB(t)
 	seedSelectedSearchTool(t, db, "user-1", "Sciverse", "group-sciverse", "key-1\n key-2 \n", false)

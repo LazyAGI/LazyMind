@@ -14,6 +14,7 @@ import (
 )
 
 const windowsProcessScanTimeout = 10 * time.Second
+const desktopOwnerPIDEnvVar = "LAZYMIND_DESKTOP_OWNER_PID"
 
 type windowsProcessInfo struct {
 	ProcessID       uint32  `json:"ProcessId"`
@@ -50,6 +51,10 @@ func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error)
 	for pid := parents[os.Getpid()]; pid > 0 && !excluded[pid]; pid = parents[pid] {
 		excluded[pid] = true
 	}
+	ownerPID, _ := strconv.Atoi(strings.TrimSpace(os.Getenv(desktopOwnerPIDEnvVar)))
+	if ownerPID > 0 {
+		excludeProcessTree(excluded, parents, ownerPID)
+	}
 	records := make([]LocalProcessRecord, 0, len(processes))
 	for _, process := range processes {
 		pid := int(process.ProcessID)
@@ -71,6 +76,23 @@ func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error)
 		})
 	}
 	return records, nil
+}
+
+func excludeProcessTree(excluded map[int]bool, parents map[int]int, rootPID int) {
+	if rootPID <= 0 {
+		return
+	}
+	excluded[rootPID] = true
+	for pid := range parents {
+		seen := map[int]bool{}
+		for ancestor := pid; ancestor > 0 && !seen[ancestor]; ancestor = parents[ancestor] {
+			if ancestor == rootPID {
+				excluded[pid] = true
+				break
+			}
+			seen[ancestor] = true
+		}
+	}
 }
 
 func nullableText(value *string) string {

@@ -353,7 +353,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		if effectiveAPIKey == "" {
 			updates["is_verified"] = true
 		} else {
-			checkResult, checkErr := doCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
+			checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
 			if checkErr != nil || !checkResult.Success {
 				msg := "verification failed"
 				if checkResult != nil {
@@ -530,6 +530,7 @@ var sensenovaNewPlatformModelNames = map[string]bool{
 	"deepseek-v4-flash":        true,
 	"glm-5.2":                  true,
 	"sensenova-6.7-flash-lite": true,
+	"sensenova-u1-fast":        true,
 }
 
 // seedGroupModelsFromDefaults inserts user_model_provider_group_models from default_models when the group's
@@ -563,7 +564,7 @@ func seedGroupModelsFromDefaults(
 		return err
 	}
 
-	// For the new SenseNova platform, seed only the 3 specific models (loaded from DB).
+	// For the new SenseNova platform, seed only the Token Plan model subset (loaded from DB).
 	// For all other providers / URLs, match the base URL against the catalog default.
 	if useNewPlatform {
 		// seed only the new-platform-specific models from default_models

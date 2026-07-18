@@ -29,6 +29,8 @@ _DEFAULT_GIF_FPS = 10
 _DEFAULT_GIF_WIDTH = 480
 _VIDEO_SUFFIXES = ('.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v')
 _UPLOAD_SUBDIR = 'ai_generated'
+# Ark Seedance rejects first-frame images smaller than 300px on either side.
+_ARK_FIRST_FRAME_MIN_PX = 300
 # Cap concurrent Seedance / ffmpeg calls when the agent emits many tool_calls in one turn.
 _VIDEO_MAX_PARALLEL = 3
 _VIDEO_SEMAPHORE = threading.Semaphore(_VIDEO_MAX_PARALLEL)
@@ -38,6 +40,50 @@ _GIF_SEMAPHORE = threading.Semaphore(_VIDEO_MAX_PARALLEL)
 def _agentic_priority() -> int:
     agentic_config = lazyllm.globals.get('agentic_config') or {}
     return int(agentic_config.get('priority', 0) or 0)
+
+
+def _ensure_ark_first_frame_size(path: str) -> str:
+    """Upscale a local first-frame image when it is below Ark's minimum size.
+
+    Writes a JPEG under ai_generated/ and returns that path. Leaves the original
+    file untouched when already large enough or when the path is not a local image.
+    """
+    src = Path(str(path or '').strip())
+    if not src.is_file():
+        return str(path)
+
+    try:
+        from PIL import Image
+    except Exception as exc:  # noqa: BLE001
+        lazyllm.LOG.warning(f'[video_generator] PIL unavailable, skip first-frame upscale: {exc}')
+        return str(src.resolve())
+
+    try:
+        with Image.open(src) as img:
+            width, height = img.size
+            if width >= _ARK_FIRST_FRAME_MIN_PX and height >= _ARK_FIRST_FRAME_MIN_PX:
+                return str(src.resolve())
+
+            scale = max(
+                _ARK_FIRST_FRAME_MIN_PX / max(width, 1),
+                _ARK_FIRST_FRAME_MIN_PX / max(height, 1),
+            )
+            new_w = max(_ARK_FIRST_FRAME_MIN_PX, int(round(width * scale)))
+            new_h = max(_ARK_FIRST_FRAME_MIN_PX, int(round(height * scale)))
+            resample = getattr(getattr(Image, 'Resampling', Image), 'LANCZOS', Image.LANCZOS)
+            resized = img.convert('RGB').resize((new_w, new_h), resample)
+
+            dest_dir = Path(_upload_root()).resolve() / _UPLOAD_SUBDIR
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / f'{uuid.uuid4().hex}_ark_frame.jpg'
+            resized.save(dest, format='JPEG', quality=95)
+            lazyllm.LOG.info(
+                f'[video_generator] upscaled first frame {width}x{height} -> {new_w}x{new_h} path={dest}'
+            )
+            return str(dest)
+    except Exception as exc:  # noqa: BLE001
+        lazyllm.LOG.warning(f'[video_generator] first-frame upscale failed for {src}: {exc}')
+        return str(src.resolve())
 
 
 def _parse_generated_files(result: Any) -> List[str]:
@@ -96,7 +142,7 @@ def run_video_model(
         'priority': _agentic_priority(),
     }
     if files:
-        call_kwargs['files'] = files
+        call_kwargs['files'] = [_ensure_ark_first_frame_size(path) for path in files]
 
     with _VIDEO_SEMAPHORE:
         model = AutoModel(model=role)

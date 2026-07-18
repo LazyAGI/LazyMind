@@ -890,6 +890,50 @@ func TestRuntimeManagerUpRequiresBundledLazyLLMSourceInDesktopProfile(t *testing
 	runner.assertCommandCount(0)
 }
 
+func TestRuntimeManagerUpRejectsForeignOwnerBeforePythonRelocation(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       "desktop",
+		OwnerToken:    "new-desktop-owner",
+		RepoRoot:      repo,
+		RuntimeRoot:   filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	state.OwnerToken = "old-desktop-owner"
+	state.OverallStatus = "running"
+	state.Services[processComposeServiceName] = RuntimeServiceState{Kind: "host-supervisor", Status: "running"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	relocated := false
+	manager.relocatePythonVenvs = func(RuntimeConfig, RuntimePaths) error {
+		relocated = true
+		return nil
+	}
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	err = manager.Up(context.Background(), cfg, paths)
+	if err == nil || !strings.Contains(err.Error(), "another application instance") {
+		t.Fatalf("runtime manager up error = %v, want owner conflict", err)
+	}
+	if relocated {
+		t.Fatal("Python relocation ran before active owner rejection")
+	}
+	if !strings.Contains(output.String(), `"event":"startup.failed"`) || !strings.Contains(output.String(), "another application instance") {
+		t.Fatalf("startup output did not preserve ownership failure: %s", output.String())
+	}
+}
+
 func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -922,6 +966,56 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	}
 	if svc.Kind != "host-supervisor" {
 		t.Fatalf("kind = %q, want host-supervisor", svc.Kind)
+	}
+}
+
+func TestUpdateProbedServiceMarksStartingServiceStale(t *testing.T) {
+	services := map[string]RuntimeServiceState{
+		scanControlPlaneProcessName: {Kind: "host-process", Status: "starting"},
+	}
+
+	if updateProbedService(services, scanControlPlaneProcessName, false) {
+		t.Fatal("unhealthy service reported healthy")
+	}
+	if got := services[scanControlPlaneProcessName].Status; got != "stale" {
+		t.Fatalf("status = %q, want stale", got)
+	}
+}
+
+func TestUpdateProbedServiceRejectsStoppedService(t *testing.T) {
+	services := map[string]RuntimeServiceState{
+		fileWatcherProcessName: {Kind: "host-process", Status: "stopped"},
+	}
+
+	if updateProbedService(services, fileWatcherProcessName, false) {
+		t.Fatal("stopped service reported healthy")
+	}
+	if got := services[fileWatcherProcessName].Status; got != "stopped" {
+		t.Fatalf("status = %q, want stopped", got)
+	}
+}
+
+func TestUpdateProbedServiceMarksHealthyServiceRunning(t *testing.T) {
+	services := map[string]RuntimeServiceState{}
+
+	if !updateProbedService(services, scanControlPlaneProcessName, true) {
+		t.Fatal("healthy service reported unhealthy")
+	}
+	service := services[scanControlPlaneProcessName]
+	if service.Status != "running" || service.Kind != "host-process" {
+		t.Fatalf("service = %+v, want running host-process", service)
+	}
+}
+
+func TestProcessComposeRuntimeStatusWaitsForAuthoritativeReady(t *testing.T) {
+	if got := processComposeRuntimeStatus("starting", true); got != "starting" {
+		t.Fatalf("status = %q, want starting", got)
+	}
+	if got := processComposeRuntimeStatus("ready", true); got != "ready" {
+		t.Fatalf("status = %q, want ready", got)
+	}
+	if got := processComposeRuntimeStatus("ready", false); got != "stale" {
+		t.Fatalf("status = %q, want stale", got)
 	}
 }
 

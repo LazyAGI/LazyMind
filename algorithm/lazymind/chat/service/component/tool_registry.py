@@ -8,6 +8,7 @@ from typing import Any, Callable
 import docstring_parser
 import lazyllm
 from lazyllm.tools.fs.supplier.feishu import FeishuFS
+from lazyllm.tools.fs.supplier.googledrive import GoogleDriveFS
 from lazyllm.tools.fs.supplier.notion import NotionFS
 from lazyllm.tools.tools.search import (
     ArxivSearch,
@@ -267,6 +268,7 @@ _CLOUD_FILE_TOOLKIT = {
     'tools': [
         FeishuFS(space_id='dynamic', dynamic_auth=True),
         NotionFS(dynamic_auth=True),
+        GoogleDriveFS(dynamic_auth=True),
     ],
     'lazy': True,
     'auto_activate': [
