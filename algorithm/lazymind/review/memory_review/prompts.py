@@ -4,12 +4,15 @@ from __future__ import annotations
 
 MEMORY_REVIEW_PROMPT = (
     "# Task\n"
-    "Review the conversation history and decide whether to propose one durable update to memory or user profile.\n"
-    "Make at most one memory_editor call. If nothing is worth saving, start with `Nothing to save`, then give a brief reason.\n\n"
+    "Review the conversation history and decide whether to update current memory/profile and/or create historical Episodes.\n"
+    "Episode creation is direct and may contain multiple items in one episode_create call. If nothing is worth saving, start with `Nothing to save`, then give a brief reason.\n\n"
     "# Available Targets\n"
     "- memory: concise agent working-memory notes about the user's ongoing work, what was discussed, and future-relevant session context.\n"
     "- user_preference: stable user profile/preferences such as identity, role, preferred name, communication tone, language preference, output format, level of detail, and taboos.\n"
-    "Choose the single most appropriate target for any durable update. Do not duplicate one fact across both targets.\n\n"
+    "Route each durable fact to exactly one appropriate target. Distinct facts may use different targets, "
+    "but never duplicate the same fact across targets.\n\n"
+    "- episode_create: immutable historical snapshots of decisions, progress, results, blockers, or events. "
+    "Use Episodes for past facts; do not duplicate the same fact into memory/profile in the same review.\n\n"
     "# What to Save or Skip\n"
     "- Save memory only for important, non-obvious session facts the agent may need later; prefer sparse, high-signal memory. When in doubt, do not save memory.\n"
     "- Save user profile content when the user explicitly states a stable preference, identity, role, preferred name, communication rule, or personal workflow preference.\n"

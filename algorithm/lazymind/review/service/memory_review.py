@@ -7,8 +7,7 @@ from lazyllm import AutoModel, LOG
 from lazyllm.tools.fs.client import FS
 from pydantic import BaseModel, ConfigDict
 
-from lazymind.chat.engine.tools.memory_editor import memory_editor
-from lazymind.chat.engine.tools.memory_reader import read_memory
+from lazymind.chat.engine.tools import episode_create, memory_editor, read_memory
 from lazymind.chat.engine.tools.infra import MemoryRemoteStore
 from lazymind.chat.service.component.history import normalize_history_for_agent
 from lazymind.config import config as _cfg
@@ -63,7 +62,7 @@ def review_memory(
     llm = AutoModel(model='llm')
     review_agent = lazyllm.tools.agent.ReactAgent(
         llm=llm,
-        tools=[read_memory, memory_editor],
+        tools=[read_memory, memory_editor, episode_create],
         max_retries=_cfg['review_max_retries'],
         return_trace=False,
         prompt=' ',

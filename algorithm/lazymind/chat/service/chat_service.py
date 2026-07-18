@@ -59,6 +59,7 @@ from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
 from lazymind.config import config as _cfg
+from lazymind.memory import get_episode_store
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
@@ -391,6 +392,21 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         'module_trace': {'default': True},
         'request_tags': ['handle_chat'],
     })
+    episode_results = []
+    if personalization.use_memory and user_id:
+        retrieval_parts = [language_query]
+        for entry in agent_history[-4:]:
+            content = entry.get('content') if isinstance(entry, dict) else None
+            if isinstance(content, str) and content.strip():
+                retrieval_parts.append(content.strip()[-1000:])
+        try:
+            episode_results = get_episode_store().search(user_id, '\n'.join(retrieval_parts))
+        except Exception as exc:
+            LOG.warning(
+                f'[EpisodeMemory] retrieval failed: user_id={user_id!r} '
+                f'error_type={type(exc).__name__} error={exc}'
+            )
+
     prompt_builder = PromptBuilder.for_role(AgentRole.CHAT)
     add_standard_system_sections(
         prompt_builder,
@@ -405,6 +421,14 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             active_configs + attachment_configs + ask_user_configs,
         ),
     )
+    if episode_results:
+        prompt_builder.system(
+            'historical_episodes', 'Historical Episode Snapshots',
+            'These are immutable historical snapshots, not necessarily the current state. '
+            'Use them only when relevant and do not silently treat old decisions as current.\n\n'
+            + '\n\n'.join(item.rendered for item in episode_results),
+            'user.episode_memory', priority=55,
+        )
     # Plugin policy historically followed the common system prompt.
     prompt_builder.system(
         'chat_plugin_policy', 'Plugin Policy', plugin_contribution.system_prompt,
@@ -487,6 +511,22 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
 
         try:
             async with rag_sem:
+                if episode_results:
+                    try:
+                        hit_results = get_episode_store().increment_hits(
+                            user_id, [item.episode.id for item in episode_results],
+                        )
+                        failed_ids = [episode_id for episode_id, ok in hit_results.items() if not ok]
+                        if failed_ids:
+                            LOG.warning(
+                                f'[EpisodeMemory] hit increment matched no record: '
+                                f'user_id={user_id!r} ids={failed_ids!r}'
+                            )
+                    except Exception as exc:
+                        LOG.warning(
+                            f'[EpisodeMemory] hit increment failed: user_id={user_id!r} '
+                            f'error_type={type(exc).__name__} error={exc}'
+                        )
                 initial_agent_stream = executor.stream_agent(react_agent, plan)
                 guarded_agent_stream = guard_plugin_agent_stream(
                     initial_agent_stream,

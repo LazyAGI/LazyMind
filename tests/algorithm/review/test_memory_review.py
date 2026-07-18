@@ -83,6 +83,11 @@ def _load_review_modules():
     fake_tools_pkg = ModuleType('lazymind.chat.engine.tools')
     fake_tools_pkg.memory_editor = lambda *args, **kwargs: None
     fake_tools_pkg.read_memory = lambda *args, **kwargs: None
+
+    def episode_create(*args, **kwargs):
+        return None
+
+    fake_tools_pkg.episode_create = episode_create
     fake_infra = ModuleType('lazymind.chat.engine.tools.infra')
     fake_infra.MemoryRemoteStore = object
     fake_history = ModuleType('lazymind.chat.service.component.history')
@@ -198,7 +203,8 @@ def test_memory_review_prompt_excludes_preferences_and_workflows():
     assert '# What to Save or Skip' in prompt
     assert '# Existing State and Conflict Rules' in prompt
     assert '# Tool Contract' not in prompt
-    assert 'Make at most one memory_editor call' in prompt
+    assert 'multiple items in one episode_create call' in prompt
+    assert 'do not duplicate the same fact into memory/profile' in prompt
     assert 'When in doubt, do not save memory' in prompt
     assert "memory_editor(target='memory'" not in prompt
     assert "memory_editor(target='user_preference'" not in prompt
@@ -243,7 +249,7 @@ def test_user_review_prompt_excludes_session_history():
 
     assert '旧记忆' in prompt
     assert '旧用户画像' in prompt
-    assert 'Choose the single most appropriate target' in prompt
+    assert 'Route each durable fact to exactly one appropriate target' in prompt
     assert "memory_editor(target='user_preference'" not in prompt
     assert "Do not call memory_editor with target='memory'" not in prompt
 
@@ -362,7 +368,9 @@ def test_review_memory_runs_agent_with_memory_editor_tool(monkeypatch):
     )
 
     assert result.model_dump() == {'status': 'success', 'task_id': 'memory_review_core-task-123'}
-    assert [tool.__name__ for tool in calls['agent_kwargs']['tools']] == ['read_memory', 'memory_editor']
+    assert [tool.__name__ for tool in calls['agent_kwargs']['tools']] == [
+        'read_memory', 'memory_editor', 'episode_create',
+    ]
     assert calls['normalizer_input'] == [{'role': 'user', 'content': '以后请用中文简洁回答'}]
     assert calls['history'] == [{'role': 'user', 'content': 'normalized'}]
     assert 'RemoteFS 记忆' in calls['prompt']

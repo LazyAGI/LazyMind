@@ -45,6 +45,15 @@ def test_web_search_requires_at_least_one_search_key():
     assert any(method['name'] == 'BingSearch' and method['active'] for method in group['methods'])
 
 
+def test_episode_create_is_always_available_with_explicit_write_policy():
+    config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'episode_create')
+
+    assert config.name in _active_tool_names()
+    policy = ' '.join(config.appendix_system_prompt['tool_policy'])
+    assert 'only when the user explicitly asks' in policy
+    assert 'use_memory=false does not disable' in policy
+
+
 def test_registry_key_source_activates_function_tool():
     from lazymind.chat.engine.tools import kb_tmp_search
     from lazyllm.tools.agent.toolsManager import ToolManager

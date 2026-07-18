@@ -117,6 +117,18 @@ config.add('segment_store_user', str, 'admin', 'SEGMENT_STORE_USER',
            description='Segment store username (OpenSearch/Elasticsearch only).')
 config.add('segment_store_password', str, 'LazyRAG_OpenSearch123!', 'SEGMENT_STORE_PASSWORD',
            description='Segment store password (OpenSearch/Elasticsearch only).')
+config.add('episode_candidate_topk', int, 20, 'EPISODE_CANDIDATE_TOPK',
+           description='Episode BM25 candidate count.')
+config.add('episode_inject_topk', int, 5, 'EPISODE_INJECT_TOPK',
+           description='Maximum Episode snapshots injected per chat request.')
+config.add('episode_context_max_chars', int, 4000, 'EPISODE_CONTEXT_MAX_CHARS',
+           description='Episode prompt character budget.')
+config.add('episode_relevance_weight', float, 0.75, 'EPISODE_RELEVANCE_WEIGHT')
+config.add('episode_recency_weight', float, 0.20, 'EPISODE_RECENCY_WEIGHT')
+config.add('episode_hit_weight', float, 0.05, 'EPISODE_HIT_WEIGHT')
+config.add('episode_half_life_days', float, 30.0, 'EPISODE_HALF_LIFE_DAYS')
+config.add('episode_hit_saturation', int, 10, 'EPISODE_HIT_SATURATION')
+config.add('episode_score_threshold', float, 0.55, 'EPISODE_SCORE_THRESHOLD')
 config.add('web_search_timeout', int, 10, 'WEB_SEARCH_TIMEOUT', description='Web search request timeout in seconds.')
 config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')

@@ -30,6 +30,7 @@ from lazymind.chat.engine.tools import (
     image_generator,
     kb_tmp_search,
     memory_editor,
+    episode_create,
     read_memory,
     SkillManagementToolkit,
     list_data_sources,
@@ -489,6 +490,19 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=read_memory, module='personalization',
         label_en='Memory Reading',
         description_en='Read the current user memory and preferences.',
+    ),
+    ToolConfig(
+        name='episode_create',
+        label='历史事件记录',
+        description='记录不可变的历史决策、进展、结果、阻塞或事件',
+        tool=episode_create, module='personalization',
+        label_en='Episode Creation',
+        description_en='Record immutable historical decisions, progress, results, blockers, or events.',
+        appendix_system_prompt={'tool_policy': (
+            'Call episode_create only when the user explicitly asks to record, remember, or save a '
+            'historical event. Do not call it merely because information seems useful. '
+            'use_memory=false does not disable explicit Episode creation.',
+        )},
     ),
     ToolConfig(
         name='memory_editor',
