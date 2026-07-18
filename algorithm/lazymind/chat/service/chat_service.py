@@ -476,7 +476,9 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     executor = AgentExecutor()
     react_agent = executor.create_agent(llm, plan)
     if runtime.context_usage_preview or runtime.context_prompt_export:
-        agent_context = await asyncio.to_thread(react_agent.describe_context, agent_history)
+        agent_context = await asyncio.to_thread(
+            react_agent.describe_context, agent_history, language_query,
+        )
         if runtime.context_prompt_export:
             return {'prompt_markdown': render_context_markdown(plan, agent_context)}
         report = await estimate_context_usage(plan, agent_context)

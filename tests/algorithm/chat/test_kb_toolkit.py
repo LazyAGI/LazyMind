@@ -2,6 +2,8 @@ import pytest
 from types import SimpleNamespace
 
 import lazyllm
+from lazyllm import init_session, locals as lazyllm_locals
+from lazyllm.tools.agent.toolsManager import ToolManager
 from lazymind.chat.engine.tools.kb import KBToolkit
 
 
@@ -11,6 +13,49 @@ def test_kb_toolkit_is_available_without_selected_kb():
     assert 'list_knowledge_bases' in toolkit.__public_apis__
     with pytest.raises(ValueError, match='kb_ids is required'):
         toolkit._kb_ids()
+
+
+def _kb_tool_names(manager):
+    return {item['function']['name'] for item in manager.tools_description}
+
+
+def test_selected_knowledge_base_exposes_concrete_tools_directly():
+    init_session()
+    lazyllm_locals['_lazyllm_agent'] = {'workspace': {}}
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'selected-kb'}}
+
+    names = _kb_tool_names(ToolManager([KBToolkit()]))
+
+    assert 'KBToolkit_kb_search' in names
+    assert 'get_KBToolkit_methods' not in names
+
+
+@pytest.mark.parametrize('query', [
+    '请查询知识库里的发布计划',
+    'search the knowledge base for the release plan',
+    'search our KNOWLEDGE-BASES',
+])
+def test_knowledge_base_words_auto_expand_toolkit(query):
+    init_session()
+    lazyllm_locals['_lazyllm_agent'] = {'workspace': {}}
+    lazyllm.globals['agentic_config'] = {'filters': {}}
+    manager = ToolManager([KBToolkit()])
+
+    assert _kb_tool_names(manager) == {'get_KBToolkit_methods'}
+    manager.sync_active_groups(query)
+
+    assert 'KBToolkit_kb_search' in _kb_tool_names(manager)
+
+
+def test_knowledge_base_rule_does_not_match_longer_word_fragment():
+    init_session()
+    lazyllm_locals['_lazyllm_agent'] = {'workspace': {}}
+    lazyllm.globals['agentic_config'] = {'filters': {}}
+    manager = ToolManager([KBToolkit()])
+
+    manager.sync_active_groups('the knowledge baseline changed')
+
+    assert _kb_tool_names(manager) == {'get_KBToolkit_methods'}
 
 
 def test_explicit_kb_ids_override_request_selection(monkeypatch):

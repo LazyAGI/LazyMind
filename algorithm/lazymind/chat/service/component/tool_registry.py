@@ -45,6 +45,7 @@ from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
 
 SystemPromptAppendix = dict[str, str | tuple[str, ...]]
+SystemPromptAppendixProvider = Callable[[], SystemPromptAppendix | None]
 SYSTEM_PROMPT_APPENDIX_SECTIONS = ('tool_policy', 'safety', 'output_contract', 'response_policy')
 
 IMAGE_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
@@ -116,14 +117,12 @@ ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
 }
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
-        "# Search Tool Rules (CRITICAL — follow strictly)\n"
-        "If only the `KBToolkit` gateway is available, you MUST activate it first by calling "
-        "its activation tool (e.g. `get_KBToolkit_methods`). If concrete methods such as "
-        "`KBToolkit_kb_search` are already available, call the appropriate search method directly. "
-        "A selected knowledge base is an explicit user instruction to search it, not merely permission "
-        "to search it. The presence of concrete `KBToolkit_kb_search` or "
-        "`KBToolkit_kb_keyword_search` methods means a knowledge base is selected. In that case, "
-        "your first substantive action for the turn MUST be one of those searches. Do not answer "
+        "# Selected Knowledge Base Rules (CRITICAL — follow strictly)\n"
+        "The user selected or @mentioned one or more knowledge bases in this request. "
+        "This is an explicit instruction to search them, not merely permission to do so. "
+        "Concrete methods such as `KBToolkit_kb_search` and `KBToolkit_kb_keyword_search` "
+        "are available, so call the appropriate search method directly. "
+        "Your first substantive action for the turn MUST be one of those searches. Do not answer "
         "from memory, announce that you could search later, ask whether you should search, or start "
         "a plugin before searching. Use the knowledge-base search method FIRST for every retrieval "
         "need — no exceptions. Do not skip it because you think the web might have "
@@ -163,6 +162,11 @@ KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
 WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Web Search Tool Rules\n'
+        'Prefer the configured web-search provider for current information, industry developments, '
+        'frontier practices, products, companies, recommendations, and broad research. '
+        'Use Wikipedia only for stable encyclopedic background or named encyclopedia entries, or as '
+        'a fallback/supplement when web search does not provide adequate results. Do not choose '
+        'Wikipedia merely because it is directly available.\n'
         'When using `web_search`, the `query` must represent one search intent. '
         'If the user asks to search multiple unrelated keywords or topics, call '
         '`web_search` separately for each keyword/topic. Do not combine unrelated '
@@ -200,10 +204,16 @@ class ToolConfig:
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     required_config: list[str] | None = None
-    appendix_system_prompt: SystemPromptAppendix | None = None
+    appendix_system_prompt: SystemPromptAppendix | SystemPromptAppendixProvider | None = None
 
     def __post_init__(self) -> None:
-        for section, values in (self.appendix_system_prompt or {}).items():
+        if callable(self.appendix_system_prompt):
+            return
+        self._validate_appendix(self.appendix_system_prompt)
+
+    @staticmethod
+    def _validate_appendix(appendix: SystemPromptAppendix | None) -> None:
+        for section, values in (appendix or {}).items():
             if section not in SYSTEM_PROMPT_APPENDIX_SECTIONS:
                 raise ValueError(
                     f'unsupported appendix_system_prompt section {section!r}; '
@@ -241,19 +251,38 @@ _CLOUD_FILE_TOOLKIT = {
         'inside connected cloud services; do not send those URLs to url_fetch. '
         'Expand this Toolkit, choose the supplier that owns the URL or path, then '
         'expand that supplier Toolkit and select its resolve, read, search, browse, '
-        'or write tool.'
+        'or write tool. For a Feishu Wiki URL, keep the complete URL as the locator: '
+        'the token after /wiki/ identifies a wiki node and is not a space_id or document_id.'
     ),
     'tools': [
         FeishuFS(space_id='dynamic', dynamic_auth=True),
         NotionFS(dynamic_auth=True),
     ],
     'lazy': True,
+    'auto_activate': [
+        r'https?://[^\s/]+\.(?:feishu\.(?:cn|com)|larksuite\.com)(?:[/:?#]|$)',
+        r'https?://(?:[^\s/]+\.)?notion\.(?:so|site|com)(?:[/:?#]|$)',
+        r'飞书|(?<!\w)feishu(?!\w)',
+    ],
 }
 
 
 def _temp_kb_key_source() -> Any:
     agentic_config = lazyllm.globals.get('agentic_config') or {}
     return agentic_config.get('files')
+
+
+def _kb_prompt_appendix() -> SystemPromptAppendix:
+    appendix: SystemPromptAppendix = {
+        'output_contract': (
+            *IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract'],
+            *KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
+        ),
+    }
+    agentic_config = lazyllm.globals.get('agentic_config') or {}
+    if (agentic_config.get('filters') or {}).get('kb_id'):
+        appendix['tool_policy'] = KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy']
+    return appendix
 
 
 SKILL_TOOL_CONFIG = ToolConfig(
@@ -307,13 +336,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description_en='Discover knowledge bases, inspect documents and statistics, and retrieve their content.',
         capability_id='knowledge_base_search',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['knowledge_base'],
-        appendix_system_prompt={
-            'tool_policy': KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy'],
-            'output_contract': (
-                *IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract'],
-                *KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
-            ),
-        },
+        appendix_system_prompt=_kb_prompt_appendix,
     ),
     ToolConfig(
         name='temp_kb',
@@ -323,7 +346,6 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         label_en='Temporary File Search',
         description_en='Search relevant content in temporary files uploaded by the user.',
         appendix_system_prompt={
-            'tool_policy': KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy'],
             'output_contract': KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
         },
     ),
@@ -680,7 +702,13 @@ def collect_system_prompt_appendices(
     """Collect active tool prompt appendices with stable per-section deduplication."""
     collected: dict[str, list[str]] = {}
     seen: dict[str, set[str]] = {}
-    appendices = [cfg.appendix_system_prompt for cfg in configs if cfg.appendix_system_prompt]
+    appendices = []
+    for cfg in configs:
+        provider = cfg.appendix_system_prompt
+        appendix = provider() if callable(provider) else provider
+        if appendix:
+            ToolConfig._validate_appendix(appendix)
+            appendices.append(appendix)
     appendices.extend(extra_appendices)
     for appendix in appendices:
         for section, values in appendix.items():

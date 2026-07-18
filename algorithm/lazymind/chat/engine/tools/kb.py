@@ -299,13 +299,10 @@ def _bounded_page_size(value: int, default: int = 20) -> int:
 class KBToolkit:
     """Knowledge-base discovery, inspection, search, and navigation tools.
 
-    This Toolkit has the highest retrieval priority. If it is
-    visible, use it before Wikipedia, web search, academic search, URL fetching,
-    or answering from the model's own knowledge for every factual, definition,
-    explanation, or retrieval-style question. Do not skip it because the topic
-    looks general, familiar, popular, or likely available on the web. Use other
-    retrieval sources only after this knowledge-base search returns no useful
-    evidence.
+    Use this Toolkit when the user selects or @mentions a knowledge base, or
+    explicitly asks to discover, inspect, or search knowledge bases. If only the
+    gateway is visible and you decide this Toolkit is relevant, activate the
+    gateway before calling its methods. Do not activate it for unrelated requests.
 
     Use list_knowledge_bases to discover a knowledge base, then inspect its
     documents or aggregates. Use kb_search for open-ended semantic questions,
@@ -320,6 +317,9 @@ class KBToolkit:
         'list_knowledge_bases', 'list_knowledge_base_documents',
         'aggregate_knowledge_base_documents', 'kb_search',
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
+    ]
+    __tool_auto_activate__ = [
+        r'知识库|(?<!\w)knowledge[\s_-]+bases?(?!\w)',
     ]
 
     def __lazy_source__(self) -> bool:

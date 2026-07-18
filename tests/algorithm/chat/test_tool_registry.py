@@ -105,6 +105,45 @@ def test_shared_prompt_appendix_is_reused_and_deduplicated():
     assert with_dynamic_attachment == collected
 
 
+def test_knowledge_base_priority_policy_is_not_globally_attached():
+    kb_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'kb')
+    lazyllm.globals['agentic_config'] = {'filters': {}}
+    default_appendices = collect_system_prompt_appendices([kb_config])
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'selected-kb'}}
+    selected_appendices = collect_system_prompt_appendices([kb_config])
+
+    assert not any(
+        'Selected Knowledge Base Rules' in item
+        for item in default_appendices.get('tool_policy', [])
+    )
+    assert any(
+        'Selected Knowledge Base Rules' in item
+        for item in selected_appendices['tool_policy']
+    )
+
+
+def test_conditional_prompt_appendix_provider_can_disable_itself():
+    enabled = False
+    config = ToolConfig(
+        name='conditional', label='conditional', description='conditional',
+        tool=lambda: None, module='utility',
+        appendix_system_prompt=lambda: {'tool_policy': 'Enabled policy.'} if enabled else None,
+    )
+
+    assert collect_system_prompt_appendices([config]) == {}
+    enabled = True
+    assert collect_system_prompt_appendices([config]) == {'tool_policy': ['Enabled policy.']}
+
+
+def test_web_search_policy_routes_wikipedia_to_encyclopedic_or_fallback_use():
+    web_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'web_search')
+    policy = '\n'.join(collect_system_prompt_appendices([web_config])['tool_policy'])
+
+    assert 'current information' in policy
+    assert 'stable encyclopedic background' in policy
+    assert 'fallback/supplement' in policy
+
+
 def test_prompt_appendix_deduplication_normalizes_whitespace():
     first = ToolConfig(
         name='first', label='first', description='first', tool=lambda: None, module='utility',
