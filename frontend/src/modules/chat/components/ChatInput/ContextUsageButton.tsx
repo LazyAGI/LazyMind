@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Collapse, Modal, Popover, Spin, Tooltip } from "antd";
+import { Button, Collapse, Modal, Popover, Spin, Tooltip } from "antd";
 import {
+  CheckCircleFilled,
   DashboardOutlined,
   DownloadOutlined,
+  ExclamationCircleFilled,
+  LoadingOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -44,6 +47,7 @@ export default function ContextUsageButton({
   const [detailOpen, setDetailOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [llmEnhanced, setLlmEnhanced] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
   const versionRef = useRef(0);
   const calculatedKeyRef = useRef("");
   const requestRef = useRef<Promise<void> | null>(null);
@@ -64,6 +68,7 @@ export default function ContextUsageButton({
     setOpen(false);
     setDetailOpen(false);
     setLlmEnhanced(false);
+    setEnhancing(false);
   }, [resetKey]);
 
   useEffect(() => () => {
@@ -76,6 +81,8 @@ export default function ContextUsageButton({
     const requestedVersion = versionRef.current;
     const requestedKey = staleKey;
     const requestId = ++requestIdRef.current;
+    setEnhancing(allowLlmRouting);
+    if (allowLlmRouting) setOpen(true);
     setStatus("loading");
     const payload = {
       ...buildRequest(),
@@ -97,7 +104,10 @@ export default function ContextUsageButton({
         if (requestId === requestIdRef.current) setStatus(report ? "stale" : "error");
       })
       .finally(() => {
-        if (requestId === requestIdRef.current) requestRef.current = null;
+        if (requestId === requestIdRef.current) {
+          requestRef.current = null;
+          setEnhancing(false);
+        }
       });
     requestRef.current = request;
     return request;
@@ -193,20 +203,35 @@ export default function ContextUsageButton({
               </Button>
             </div>
           ) : null}
-          {report.requires_llm ? (
-            <Alert
-              type="warning"
-              showIcon
-              message={t("chat.contextUsageRuleOnlyWarning")}
-              description={report.llm_reason || t("chat.contextUsageRuleOnlyReason")}
-              action={(
-                <Button size="small" onClick={() => void calculate(true)}>
-                  {t("chat.contextUsageUseLlm")}
-                </Button>
-              )}
-            />
+          {enhancing ? (
+            <div className="context-usage-routing-state is-loading" aria-live="polite">
+              <LoadingOutlined className="context-usage-routing-icon" spin />
+              <div className="context-usage-routing-copy">
+                <strong>{t("chat.contextUsageLlmLoading")}</strong>
+                <span>{t("chat.contextUsageLlmLoadingHint")}</span>
+              </div>
+              <div className="context-usage-routing-progress" aria-hidden="true"><i /></div>
+            </div>
+          ) : report.requires_llm ? (
+            <div className="context-usage-routing-state is-warning">
+              <ExclamationCircleFilled className="context-usage-routing-icon" />
+              <div className="context-usage-routing-copy">
+                <strong>{t("chat.contextUsageRuleOnlyWarning")}</strong>
+                <span>{report.llm_reason || t("chat.contextUsageRuleOnlyReason")}</span>
+                <small>{t("chat.contextUsageLlmTokenHint")}</small>
+              </div>
+              <Button type="primary" size="small" onClick={() => void calculate(true)}>
+                {t("chat.contextUsageUseLlm")}
+              </Button>
+            </div>
           ) : llmEnhanced ? (
-            <Alert type="success" showIcon message={t("chat.contextUsageLlmEnhanced")} />
+            <div className="context-usage-routing-state is-success" aria-live="polite">
+              <CheckCircleFilled className="context-usage-routing-icon" />
+              <div className="context-usage-routing-copy">
+                <strong>{t("chat.contextUsageLlmEnhanced")}</strong>
+                <span>{t("chat.contextUsageLlmEnhancedHint")}</span>
+              </div>
+            </div>
           ) : null}
           <div className="context-usage-categories">
             {report.categories.map((category, index) => (
@@ -228,7 +253,14 @@ export default function ContextUsageButton({
 
   return (
     <>
-      <Popover content={content} trigger="click" open={open} onOpenChange={handleOpenChange} placement="topRight">
+      <Popover
+        content={content}
+        trigger="click"
+        open={open}
+        fresh
+        onOpenChange={handleOpenChange}
+        placement="topRight"
+      >
         <Tooltip title={t("chat.contextUsageShow")}>
           <Button type="text" icon={<DashboardOutlined />} disabled={disabled} aria-label={t("chat.contextUsageShow")} />
         </Tooltip>

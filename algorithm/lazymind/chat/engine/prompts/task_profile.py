@@ -142,7 +142,12 @@ _CURRENT = re.compile(
 )
 _EXPLICIT_WEB = re.compile(r'联网|网上搜索|搜索资料|查资料|查一下|web\s+search|browse|look\s+up', re.I)
 _SKILL_EXPLICIT = re.compile(r'skill|技能(?:库|包|文件|管理)?|SKILL\.md', re.I)
-_OPEN_ENDED = re.compile(r'如何|怎么|有哪些|帮我看看|给我.*方案|what\s+should|how\s+can', re.I)
+_OPEN_ENDED = re.compile(
+    r'如何|怎么|有哪些|帮我看看|给我.*方案|'
+    r'我(?:现在|目前)?想(?:搞|做|弄|了解|看看).{0,20}(?:相关|方面|方向|东西|内容)|'
+    r'what\s+should|how\s+can|i(?:\s+am|\'m)?\s+interested\s+in',
+    re.I,
+)
 _SIMPLE_FACT = re.compile(r'^(?:什么是|解释一下|定义|谁是|多少|what\s+is|define)', re.I)
 _REQUEST_REVIEW_HINT = re.compile(
     r'全部|所有|必须|不能|至少|最多|保证|确保|同时|既要|又要|all|must|never|at\s+least|at\s+most|guarantee',
