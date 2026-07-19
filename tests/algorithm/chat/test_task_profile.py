@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
+from itertools import permutations
 
 import pytest
 
 from lazymind.chat.engine.prompts.system_prompt import add_standard_system_sections
 from lazymind.chat.engine.prompts.task_profile import (
-    TaskProfile,
     resolve_task_profile,
     select_skill_candidates,
     selected_prompt_modules,
@@ -72,6 +72,202 @@ SCENARIOS = [
 ]
 
 
+OUTCOME_CLAUSES = {
+    'answer': '解释一下帧率',
+    'learn': '教我学会剪辑',
+    'research': '调研AI工具市场',
+    'analyze': '分析这份方案',
+    'transform': '总结这份材料',
+    'decide': '帮我选择合适工具',
+    'plan': '制定实施计划',
+    'create': '创建一份海报',
+    'execute': '发布这份报告',
+    'diagnose': '排查系统变慢原因',
+}
+OUTCOME_NAMES = tuple(OUTCOME_CLAUSES)
+
+
+def _chain(*outcomes: str, variant: int = 0) -> str:
+    clauses = [OUTCOME_CLAUSES[outcomes[0]]]
+    clauses.extend(f'然后{OUTCOME_CLAUSES[item]}' for item in outcomes[1:])
+    return '，'.join(clauses) + f'，表达变体{variant}'
+
+
+SINGLE_SCENARIOS = [
+    {
+        'id': f'single-{outcome}-{variant}',
+        'query': _chain(outcome, variant=variant),
+        'primary': outcome,
+        'secondary': (),
+    }
+    for outcome in OUTCOME_NAMES
+    for variant in range(20)
+]
+
+PAIR_SCENARIOS = [
+    {
+        'id': f'pair-{first}-{second}-{variant}',
+        'query': _chain(first, second, variant=variant),
+        'primary': first,
+        'secondary': (second,),
+    }
+    for first, second in permutations(OUTCOME_NAMES, 2)
+    for variant in range(2)
+]
+
+TRIPLE_SCENARIOS = [
+    {
+        'id': f'triple-{first}-{second}-{third}-{variant}',
+        'query': _chain(first, second, third, variant=variant),
+        'primary': first,
+        'secondary': (second, third),
+    }
+    for first, second, third in list(permutations(OUTCOME_NAMES, 3))[:50]
+    for variant in range(2)
+]
+
+BOUNDARY_PAIRS = (
+    ('research', 'analyze'),
+    ('analyze', 'diagnose'),
+    ('create', 'transform'),
+    ('plan', 'execute'),
+    ('answer', 'learn'),
+    ('analyze', 'decide'),
+    ('answer', 'research'),
+)
+BOUNDARY_SCENARIOS = [
+    {
+        'id': f'boundary-{first}-{second}-{variant}',
+        'query': _chain(first, second, variant=variant),
+        'primary': first,
+        'secondary': (second,),
+    }
+    for first, second in BOUNDARY_PAIRS
+    for variant in range(20)
+]
+
+ORTHOGONAL_TEMPLATES = (
+    ('分析附件里的代码', 'analyze', 'code', 'attachment', 'provided_content_only', True),
+    ('总结附件里的财报', 'transform', 'document', 'attachment', 'provided_content_only', True),
+    ('翻译以下文字：hello', 'transform', 'topic', 'inline_content', 'provided_content_only', False),
+    ('调研最新AI工具', 'research', 'topic', 'query_only', 'web', False),
+    ('比较这两个数据库', 'analyze', 'data', 'query_only', 'model_knowledge', False),
+    ('把这段代码改写成函数', 'transform', 'code', 'inline_content', 'provided_content_only', False),
+    ('分析这个网址 https://example.com', 'analyze', 'topic', 'url', 'provided_content_only', False),
+    ('创建一份演示文稿', 'create', 'topic', 'query_only', 'model_knowledge', False),
+    ('发布这份报告', 'execute', 'document', 'query_only', 'model_knowledge', False),
+    ('网站变慢，找出原因', 'diagnose', 'system', 'query_only', 'model_knowledge', False),
+)
+ORTHOGONAL_SCENARIOS = [
+    {
+        'id': f'orthogonal-{index}-{variant}',
+        'query': query + f'，版本{variant}',
+        'primary': primary,
+        'subject_kind': subject,
+        'input_mode': input_mode,
+        'source_strategy': source,
+        'has_attachments': attachments,
+    }
+    for index, (query, primary, subject, input_mode, source, attachments) in enumerate(
+        ORTHOGONAL_TEMPLATES
+    )
+    for variant in range(10)
+]
+
+REQUEST_ASSESSMENT_TEMPLATES = (
+    ('用500个场景覆盖10个目标的所有组合', 'contradictory', 'blocking'),
+    ('不要联网，给我最新AI工具', 'contradictory', 'blocking'),
+    ('总结这份文档', 'underspecified', 'blocking'),
+    ('保证这个方案100%成功', 'ambiguous', 'optional'),
+)
+REQUEST_ASSESSMENT_SCENARIOS = [
+    {
+        'id': f'assessment-{index}-{variant}',
+        'query': query + f'，场景{variant}',
+        'status': status,
+        'interaction_need': interaction_need,
+    }
+    for index, (query, status, interaction_need) in enumerate(REQUEST_ASSESSMENT_TEMPLATES)
+    for variant in range(25)
+]
+
+ENGLISH_CLAUSES = {
+    'answer': 'Explain what frame rate means',
+    'learn': 'Teach me video editing',
+    'research': 'Research the AI tools market',
+    'analyze': 'Analyze this proposal',
+    'transform': 'Summarize this document',
+    'decide': 'Should I choose product A',
+    'plan': 'Build an implementation roadmap',
+    'create': 'Generate a product brief',
+    'execute': 'Execute the deployment',
+    'diagnose': 'Diagnose this deployment failure',
+}
+MULTILINGUAL_SCENARIOS = [
+    {
+        'id': f'english-{outcome}-{variant}',
+        'query': f'{query}; variant {variant}',
+        'primary': outcome,
+    }
+    for outcome, query in ENGLISH_CLAUSES.items()
+    for variant in range(4)
+]
+
+ROUTING_SCENARIOS = (
+    SINGLE_SCENARIOS + PAIR_SCENARIOS + TRIPLE_SCENARIOS
+    + BOUNDARY_SCENARIOS + ORTHOGONAL_SCENARIOS + MULTILINGUAL_SCENARIOS
+)
+FALLBACK_SCENARIOS = [f'帮我看看一些材料，模糊表达{index}' for index in range(40)]
+
+
+def test_evaluation_suite_contains_nine_hundred_scenarios() -> None:
+    total = len(ROUTING_SCENARIOS) + len(REQUEST_ASSESSMENT_SCENARIOS) + len(FALLBACK_SCENARIOS)
+    assert total == 900
+
+
+def test_all_ordered_two_outcome_combinations_are_covered() -> None:
+    covered = {(item['primary'], item['secondary'][0]) for item in PAIR_SCENARIOS}
+    assert covered == set(permutations(OUTCOME_NAMES, 2))
+    assert len(covered) == 90
+
+
+def test_triple_suite_covers_fifty_distinct_ordered_chains() -> None:
+    covered = {(item['primary'], *item['secondary']) for item in TRIPLE_SCENARIOS}
+    assert len(covered) == 50
+
+
+@pytest.mark.parametrize('scenario', ROUTING_SCENARIOS, ids=lambda item: item['id'])
+def test_expanded_routing_scenarios(scenario: dict) -> None:
+    profile = resolve_task_profile(
+        scenario['query'],
+        enable_llm_fallback=False,
+        has_attachments=scenario.get('has_attachments', False),
+    )
+    assert profile.primary_outcome == scenario['primary']
+    if 'secondary' in scenario:
+        assert profile.secondary_outcomes == scenario['secondary']
+    for field in ('subject_kind', 'input_mode', 'source_strategy'):
+        if field in scenario:
+            assert getattr(profile, field) == scenario[field]
+
+
+@pytest.mark.parametrize('scenario', REQUEST_ASSESSMENT_SCENARIOS, ids=lambda item: item['id'])
+def test_request_assessment_scenarios(scenario: dict) -> None:
+    assessment = resolve_task_profile(
+        scenario['query'], enable_llm_fallback=False,
+    ).request_assessment
+    assert assessment.status == scenario['status']
+    assert assessment.interaction_need == scenario['interaction_need']
+
+
+@pytest.mark.parametrize('query', FALLBACK_SCENARIOS)
+def test_classifier_failure_scenarios_are_safe(query: str) -> None:
+    profile = resolve_task_profile(query, classifier=lambda _: 'invalid')
+    assert profile.source == 'fallback'
+    assert profile.primary_outcome == 'answer'
+    assert profile.skill_mode == 'suppress'
+
+
 @pytest.mark.parametrize(('query', 'expected'), SCENARIOS)
 def test_one_hundred_divergent_scenarios_route_by_user_outcome(query: str, expected: str) -> None:
     profile = resolve_task_profile(query, enable_llm_fallback=False)
@@ -81,16 +277,13 @@ def test_one_hundred_divergent_scenarios_route_by_user_outcome(query: str, expec
 def test_ai_video_learning_uses_research_tutorial_and_suppresses_skills() -> None:
     profile = resolve_task_profile('如何制作AI视频', enable_llm_fallback=False)
 
-    assert profile == TaskProfile(
-        primary_outcome='learn',
-        complexity='open_ended',
-        freshness='current',
-        research_required=True,
-        deliverable_kind='tutorial',
-        skill_mode='suppress',
-        confidence=0.92,
-        reasons=('explicit outcome wording', 'current-information signal'),
-    )
+    assert profile.primary_outcome == 'learn'
+    assert profile.outcome_subtype == 'tutorial'
+    assert profile.complexity == 'open_ended'
+    assert profile.freshness == 'current'
+    assert profile.research_required is True
+    assert profile.deliverable_kind == 'tutorial'
+    assert profile.skill_mode == 'suppress'
     assert selected_prompt_modules(profile) == [
         'learning', 'fresh_research', 'tutorial', 'skill_restraint',
     ]
@@ -106,10 +299,10 @@ def test_simple_fact_uses_no_deliverable_module() -> None:
 def test_compound_request_discloses_at_most_two_deliverables() -> None:
     profile = resolve_task_profile('研究一下AI视频，然后教我做第一条作品', enable_llm_fallback=False)
     modules = selected_prompt_modules(profile)
-    assert profile.primary_outcome == 'learn'
-    assert profile.secondary_outcomes == ('research',)
+    assert profile.primary_outcome == 'research'
+    assert profile.secondary_outcomes == ('learn',)
     assert [item for item in modules if item in {'tutorial', 'research_report'}] == [
-        'tutorial', 'research_report',
+        'research_report', 'tutorial',
     ]
 
 
@@ -169,11 +362,91 @@ def test_dynamic_prompt_builder_injects_only_selected_contracts() -> None:
     assert 'Deliver a decision brief' not in bundle.system_prompt
 
 
+def test_blocking_request_issue_is_disclosed_as_authoritative_runtime_state() -> None:
+    profile = resolve_task_profile(
+        '用500个场景覆盖10个目标的所有组合', enable_llm_fallback=False,
+    )
+    bundle = add_standard_system_sections(
+        PromptBuilder.for_role(AgentRole.CHAT),
+        True,
+        task_profile=profile,
+        dynamic_prompt_modules=True,
+    ).input('用500个场景覆盖10个目标的所有组合', source='user').build()
+
+    assert '# Request quality check' in bundle.system_prompt
+    assert '# Clarification required' in bundle.system_prompt
+    assert '#### Request Assessment [AUTHORITATIVE]' in bundle.current_input
+    assert 'mathematical_inconsistency' in bundle.current_input
+    assert 'Interaction need: blocking' in bundle.current_input
+
+
 def test_task_profile_is_ephemeral_and_does_not_mutate_intent() -> None:
     intent = {'goal': 'learn photography', 'constraints': ['one hour per day']}
     before = json.dumps(intent, sort_keys=True)
     resolve_task_profile('现在教我制作AI视频', intent=intent, enable_llm_fallback=False)
     assert json.dumps(intent, sort_keys=True) == before
+
+
+def test_analyze_and_transform_have_distinct_source_contracts() -> None:
+    analysis = resolve_task_profile(
+        '分析附件里的财报', enable_llm_fallback=False, has_attachments=True,
+    )
+    transformation = resolve_task_profile(
+        '总结附件里的财报', enable_llm_fallback=False, has_attachments=True,
+    )
+    assert analysis.primary_outcome == 'analyze'
+    assert analysis.deliverable_kind == 'analysis_report'
+    assert transformation.primary_outcome == 'transform'
+    assert transformation.deliverable_kind == 'transformed_content'
+    assert transformation.source_strategy == 'provided_content_only'
+
+
+def test_comparison_is_analysis_but_contextual_selection_is_decision() -> None:
+    comparison = resolve_task_profile('比较Runway和可灵', enable_llm_fallback=False)
+    selection = resolve_task_profile('做广告视频时Runway和可灵怎么选', enable_llm_fallback=False)
+    assert comparison.primary_outcome == 'analyze'
+    assert comparison.outcome_subtype == 'compare'
+    assert selection.primary_outcome == 'decide'
+    assert selection.outcome_subtype == 'select'
+
+
+def test_request_assessment_detects_impossible_combination_budget() -> None:
+    profile = resolve_task_profile(
+        '用500个场景覆盖10个目标的所有组合', enable_llm_fallback=False,
+    )
+    assessment = profile.request_assessment
+    assert assessment.status == 'contradictory'
+    assert assessment.interaction_need == 'blocking'
+    assert assessment.issues[0].issue_type == 'mathematical_inconsistency'
+    assert '1023' in assessment.issues[0].description
+    assert 'request_analysis' in selected_prompt_modules(profile)
+    assert 'clarification' in selected_prompt_modules(profile)
+
+
+def test_missing_referenced_attachment_requires_minimal_clarification() -> None:
+    assessment = resolve_task_profile(
+        '总结这份文档', enable_llm_fallback=False, has_attachments=False,
+    ).request_assessment
+    assert assessment.status == 'underspecified'
+    assert assessment.interaction_need == 'blocking'
+    assert len(assessment.clarification_questions) == 1
+
+
+def test_available_attachment_avoids_unnecessary_question() -> None:
+    assessment = resolve_task_profile(
+        '总结这份文档', enable_llm_fallback=False, has_attachments=True,
+    ).request_assessment
+    assert assessment.status == 'ready'
+    assert assessment.interaction_need == 'none'
+
+
+def test_optional_issue_uses_assumption_without_forcing_clarification() -> None:
+    profile = resolve_task_profile(
+        '保证这个方案100%成功', enable_llm_fallback=False,
+    )
+    assert profile.request_assessment.interaction_need == 'optional'
+    assert 'request_analysis' in selected_prompt_modules(profile)
+    assert 'clarification' not in selected_prompt_modules(profile)
 
 
 def test_skill_candidates_are_relevance_ranked_and_capped_at_five() -> None:

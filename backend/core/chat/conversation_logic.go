@@ -1109,6 +1109,39 @@ func streamSingleAnswer(
 	var pendingAskPending any
 	var pendingConversationIntent *IntentUpdatedEvent
 	thinkStart := time.Now()
+	var thinkingDurationS int64
+	progressRowCreated := target.IsRegeneration && target.Existing != nil
+	persistThinkingProgress := func() {
+		partialResult := fullResult
+		if pendingThink != "" {
+			partialResult += "<think>" + pendingThink + "</think>"
+		}
+		values := map[string]any{
+			"seq":                 seq,
+			"raw_content":         query,
+			"content":             query,
+			"result":              partialResult,
+			"thinking_duration_s": thinkingDurationS,
+			"ext":                 historyExt,
+			"update_time":         time.Now(),
+		}
+		if progressRowCreated {
+			if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(values).Error; err != nil {
+				log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist thinking progress")
+			}
+			return
+		}
+		now := time.Now()
+		if err := db.Create(&orm.ChatHistory{
+			ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query,
+			Result: partialResult, ThinkingDurationS: thinkingDurationS, Ext: historyExt,
+			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+		}).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to create thinking progress")
+			return
+		}
+		progressRowCreated = true
+	}
 	// text：textConversation/text，finish_reason text UNSPECIFIED
 	writeSSEChunk(w, flusher, &ChatChunkResponse{
 		ConversationID:    convID,
@@ -1224,6 +1257,18 @@ func streamSingleAnswer(
 		}
 		if d.ReasoningText != "" {
 			pendingThink += d.ReasoningText
+			thinkingDurationS = int64(time.Since(thinkStart).Seconds())
+			persistThinkingProgress()
+			thinkingChunk := &ChatChunkResponse{
+				ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
+				FinishReason: "FINISH_REASON_UNSPECIFIED", ThinkingDurationS: thinkingDurationS,
+			}
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, thinkingChunk)
+			}
+			if stateStore != nil {
+				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, thinkingChunk)
+			}
 			continue
 		}
 		if pendingThink != "" {
@@ -1249,7 +1294,7 @@ func streamSingleAnswer(
 			Sources:           sources,
 			PromptQuestions:   []string{},
 			ReasoningContent:  "",
-			ThinkingDurationS: int64(time.Since(thinkStart).Seconds()),
+			ThinkingDurationS: thinkingDurationS,
 		}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
@@ -1273,34 +1318,46 @@ func streamSingleAnswer(
 	persisted := false
 	if target.IsRegeneration && target.Existing != nil {
 		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
-			"seq":              seq,
-			"raw_content":      query,
-			"content":          query,
-			"result":           fullResult,
-			"tool_call_turns":  toolCallTurns,
-			"retrieval_result": retrievalResult,
-			"feed_back":        0,
-			"reason":           "",
-			"expected_answer":  "",
-			"ext":              historyExt,
-			"update_time":      now,
+			"seq":                 seq,
+			"raw_content":         query,
+			"content":             query,
+			"result":              fullResult,
+			"tool_call_turns":     toolCallTurns,
+			"thinking_duration_s": thinkingDurationS,
+			"retrieval_result":    retrievalResult,
+			"feed_back":           0,
+			"reason":              "",
+			"expected_answer":     "",
+			"ext":                 historyExt,
+			"update_time":         now,
 		}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to update stream chat history")
 		} else {
 			persisted = true
 		}
+	} else if progressRowCreated {
+		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+			"seq": seq, "raw_content": query, "content": query, "result": fullResult,
+			"tool_call_turns": toolCallTurns, "thinking_duration_s": thinkingDurationS,
+			"retrieval_result": retrievalResult, "ext": historyExt, "update_time": now,
+		}).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to finalize stream chat history")
+		} else {
+			persisted = true
+		}
 	} else {
 		if err := db.Create(&orm.ChatHistory{
-			ID:              historyID,
-			Seq:             seq,
-			ConversationID:  convID,
-			RawContent:      query,
-			RetrievalResult: retrievalResult,
-			Content:         query,
-			Result:          fullResult,
-			ToolCallTurns:   toolCallTurns,
-			Ext:             historyExt,
-			TimeMixin:       orm.TimeMixin{CreateTime: now, UpdateTime: now},
+			ID:                historyID,
+			Seq:               seq,
+			ConversationID:    convID,
+			RawContent:        query,
+			RetrievalResult:   retrievalResult,
+			Content:           query,
+			Result:            fullResult,
+			ToolCallTurns:     toolCallTurns,
+			ThinkingDurationS: thinkingDurationS,
+			Ext:               historyExt,
+			TimeMixin:         orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to save stream chat history")
 		} else {
@@ -1332,7 +1389,7 @@ func streamSingleAnswer(
 			PromptQuestions: []string{},
 			// Do not replay reasoning on final message frame.
 			ReasoningContent:  "",
-			ThinkingDurationS: int64(time.Since(thinkStart).Seconds()),
+			ThinkingDurationS: thinkingDurationS,
 			ToolCallTurns:     toolCallTurns,
 		})
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
@@ -1427,11 +1484,39 @@ func streamDualAnswer(
 	var primaryResult, secondaryResult string
 	var primaryPendingThink, secondaryPendingThink string
 	var primaryToolCallTurns, secondaryToolCallTurns int
+	thinkStart := time.Now()
+	var primaryThinkingDurationS, secondaryThinkingDurationS int64
+	primaryProgressCreated, secondaryProgressCreated := false, false
+	persistProgress := func(id, result, pending string, duration int64, created *bool) {
+		partialResult := result
+		if pending != "" {
+			partialResult += "<think>" + pending + "</think>"
+		}
+		if *created {
+			_ = db.Model(&orm.MultiAnswersChatHistory{}).Where("id = ?", id).Updates(map[string]any{
+				"result": partialResult, "thinking_duration_s": duration, "update_time": time.Now(),
+			}).Error
+			return
+		}
+		now := time.Now()
+		if err := db.Create(&orm.MultiAnswersChatHistory{
+			ID: id, Seq: seq, ConversationID: convID, RawContent: query, Content: query,
+			Result: partialResult, ThinkingDurationS: duration, Ext: historyExt,
+			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+		}).Error; err == nil {
+			*created = true
+		}
+	}
 	primaryDone := primaryCh == nil
 	secondaryDone := secondaryCh == nil
 	appendPrimary := func(delta, reasoning string, sources []any) {
 		if reasoning != "" {
 			primaryPendingThink += reasoning
+			primaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
+			persistProgress(historyID, primaryResult, primaryPendingThink, primaryThinkingDurationS, &primaryProgressCreated)
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, map[string]any{"conversation_id": convID, "seq": seq, "history_id": historyID, "thinking_duration_s": primaryThinkingDurationS})
+			}
 			return
 		}
 		if primaryPendingThink != "" {
@@ -1460,6 +1545,11 @@ func streamDualAnswer(
 	appendSecondary := func(delta, reasoning string, sources []any) {
 		if reasoning != "" {
 			secondaryPendingThink += reasoning
+			secondaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
+			persistProgress(secondaryHistoryID, secondaryResult, secondaryPendingThink, secondaryThinkingDurationS, &secondaryProgressCreated)
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, map[string]any{"conversation_id": convID, "seq": seq, "history_id": secondaryHistoryID, "thinking_duration_s": secondaryThinkingDurationS})
+			}
 			return
 		}
 		if secondaryPendingThink != "" {
@@ -1540,6 +1630,8 @@ func streamDualAnswer(
 						}
 						if d.ReasoningText != "" {
 							primaryPendingThink += d.ReasoningText
+							primaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
+							persistProgress(historyID, primaryResult, primaryPendingThink, primaryThinkingDurationS, &primaryProgressCreated)
 							continue
 						}
 						if primaryPendingThink != "" {
@@ -1576,6 +1668,8 @@ func streamDualAnswer(
 						}
 						if d.ReasoningText != "" {
 							secondaryPendingThink += d.ReasoningText
+							secondaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
+							persistProgress(secondaryHistoryID, secondaryResult, secondaryPendingThink, secondaryThinkingDurationS, &secondaryProgressCreated)
 							continue
 						}
 						if secondaryPendingThink != "" {
@@ -1608,18 +1702,28 @@ dualPersist:
 	if secondaryPendingThink != "" {
 		secondaryResult += "<think>" + secondaryPendingThink + "</think>"
 	}
-	_ = db.Create(&orm.MultiAnswersChatHistory{
+	primaryHistory := &orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
-		ToolCallTurns: primaryToolCallTurns,
-		Ext:           historyExt,
-		TimeMixin:     orm.TimeMixin{CreateTime: now, UpdateTime: now},
-	}).Error
-	_ = db.Create(&orm.MultiAnswersChatHistory{
+		ToolCallTurns: primaryToolCallTurns, ThinkingDurationS: primaryThinkingDurationS,
+		Ext:       historyExt,
+		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}
+	if primaryProgressCreated {
+		_ = db.Model(primaryHistory).Where("id = ?", historyID).Updates(primaryHistory).Error
+	} else {
+		_ = db.Create(primaryHistory).Error
+	}
+	secondaryHistory := &orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
-		ToolCallTurns: secondaryToolCallTurns,
-		Ext:           historyExt,
-		TimeMixin:     orm.TimeMixin{CreateTime: now, UpdateTime: now},
-	}).Error
+		ToolCallTurns: secondaryToolCallTurns, ThinkingDurationS: secondaryThinkingDurationS,
+		Ext:       historyExt,
+		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}
+	if secondaryProgressCreated {
+		_ = db.Model(secondaryHistory).Where("id = ?", secondaryHistoryID).Updates(secondaryHistory).Error
+	} else {
+		_ = db.Create(secondaryHistory).Error
+	}
 	if stateStore != nil {
 		_ = setChatStatus(context.Background(), stateStore, convID, historyID, "completed", stripToolTags(primaryText))
 		_ = setChatStatus(context.Background(), stateStore, convID, secondaryHistoryID, "completed", stripToolTags(secondaryText))
@@ -1631,14 +1735,16 @@ dualPersist:
 	recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
 	if reqCtx.Err() == nil {
 		writeSSEChunk(w, flusher, map[string]any{
-			"finish_reason":   "FINISH_REASON_STOP",
-			"history_id":      historyID,
-			"tool_call_turns": primaryToolCallTurns,
+			"finish_reason":       "FINISH_REASON_STOP",
+			"history_id":          historyID,
+			"tool_call_turns":     primaryToolCallTurns,
+			"thinking_duration_s": primaryThinkingDurationS,
 		})
 		writeSSEChunk(w, flusher, map[string]any{
-			"finish_reason":   "FINISH_REASON_STOP",
-			"history_id":      secondaryHistoryID,
-			"tool_call_turns": secondaryToolCallTurns,
+			"finish_reason":       "FINISH_REASON_STOP",
+			"history_id":          secondaryHistoryID,
+			"tool_call_turns":     secondaryToolCallTurns,
+			"thinking_duration_s": secondaryThinkingDurationS,
 		})
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()

@@ -7,13 +7,17 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
 
 from .guidance import (
+    ANALYSIS_GUIDANCE,
+    CLARIFICATION_GUIDANCE,
     DECISION_PLANNING_GUIDANCE,
     DEFAULT_SYSTEM_PROMPT,
     DELIVERABLE_GUIDANCE,
     FRESH_RESEARCH_GUIDANCE,
     LEARNING_GUIDANCE,
+    REQUEST_ANALYSIS_GUIDANCE,
     RESPONSE_LANGUAGE_GUIDANCE,
     SKILL_RESTRAINT_GUIDANCE,
+    TRANSFORMATION_GUIDANCE,
 )
 from .task_profile import TaskProfile
 
@@ -249,6 +253,14 @@ def add_standard_system_sections(
             'task_decision_planning', '', DECISION_PLANNING_GUIDANCE,
             'platform.task.decision', priority=34,
             skip_if=not outcomes.intersection({'decide', 'plan'}),
+        ).system(
+            'task_analysis', '', ANALYSIS_GUIDANCE,
+            'platform.task.analysis', priority=34,
+            skip_if='analyze' not in outcomes,
+        ).system(
+            'task_transformation', '', TRANSFORMATION_GUIDANCE,
+            'platform.task.transformation', priority=34,
+            skip_if='transform' not in outcomes,
         )
         deliverables = [task_profile.deliverable_kind, *task_profile.secondary_deliverables][:2]
         contracts = [DELIVERABLE_GUIDANCE[item] for item in deliverables if item in DELIVERABLE_GUIDANCE]
@@ -262,7 +274,41 @@ def add_standard_system_sections(
             'task_skill_restraint', '', SKILL_RESTRAINT_GUIDANCE,
             'platform.task.skills', priority=36,
             skip_if=task_profile.skill_mode == 'explicit',
+        ).system(
+            'task_request_analysis', '', REQUEST_ANALYSIS_GUIDANCE,
+            'platform.task.request_analysis', priority=37,
+            skip_if=(
+                task_profile.request_assessment.status == 'ready'
+                and task_profile.complexity != 'compound'
+            ),
+        ).system(
+            'task_clarification', '', CLARIFICATION_GUIDANCE,
+            'platform.task.clarification', priority=38,
+            skip_if=task_profile.request_assessment.interaction_need != 'blocking',
         )
+        assessment = task_profile.request_assessment
+        if assessment.status != 'ready':
+            issue_lines = [
+                f'- {issue.issue_type} ({issue.impact}): {issue.description} '
+                f'[evidence: {issue.evidence}]'
+                for issue in assessment.issues
+            ]
+            question_lines = [
+                f'- {question.question}'
+                + (f' Options: {", ".join(question.options)}.' if question.options else '')
+                + (f' Recommended: {question.recommended}.' if question.recommended else '')
+                for question in assessment.clarification_questions
+            ]
+            builder.runtime(
+                'task_request_assessment', 'Request Assessment',
+                '\n'.join([
+                    f'Status: {assessment.status}',
+                    f'Interaction need: {assessment.interaction_need}',
+                    *issue_lines,
+                    *question_lines,
+                ]),
+                'runtime.task.assessment', priority=5, authoritative=True, content_kind='state',
+            )
 
     if use_memory:
         if isinstance(user_preference, str) and user_preference.strip():

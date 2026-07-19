@@ -341,6 +341,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                     intent=conversation.intent_context,
                     classifier=routing_model,
                     enable_llm_fallback=_cfg['task_profile_llm_fallback'],
+                    has_attachments=bool(files_map),
                 ),
                 timeout=max(1, _cfg['task_profile_llm_timeout']),
             )
@@ -349,6 +350,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 language_query,
                 error=exc,
                 latency_ms=int((time.monotonic() - profile_started) * 1000),
+                has_attachments=bool(files_map),
             )
         LOG.info(
             '[ChatServer] [TASK_PROFILE] [sid=%s] source=%s outcome=%s deliverable=%s '

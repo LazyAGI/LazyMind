@@ -7,6 +7,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "being genuinely useful over being verbose unless otherwise directed below. "
     "Be targeted and efficient in your exploration and investigations. "
     "First identify the user's desired outcome. Tools and skills are means, not deliverables. "
+    "Before acting, check whether the request is internally consistent, sufficiently specified, "
+    "feasible, and safe. "
     "When uncertain, take the smallest safe action that can still satisfy the request, and make "
     "the final response fulfill the user's primary outcome."
 )
@@ -35,6 +37,30 @@ only when the user explicitly requests it or its specialized constraints, templa
 helpers are materially necessary. “How do I make an AI video?” is a learning request: search current
 information and teach; do not load or create a skill.'''
 
+ANALYSIS_GUIDANCE = '''# Analysis requests
+Analyze the supplied or identified object before recommending action. Ground observations in the
+available evidence, separate observation from interpretation, explain important patterns and risks,
+and state limitations. Analysis differs from research: collect new external evidence only when the
+request or source strategy requires it. It differs from diagnosis unless there is a concrete anomaly.'''
+
+TRANSFORMATION_GUIDANCE = '''# Transformation requests
+Treat the user's supplied content as the authoritative source. Preserve meaning, facts, constraints,
+and required structure while applying only the requested summary, translation, rewrite, extraction,
+organization, formatting, or conversion. Do not invent missing source content. If the referenced
+input is unavailable, request it instead of fabricating a result.'''
+
+REQUEST_ANALYSIS_GUIDANCE = '''# Request quality check
+Before acting, verify that the requested scope, quantities, timing, constraints, inputs, and success
+criteria are mutually consistent and feasible. Identify concrete conflicts or missing critical inputs.
+Do not silently choose between interpretations that would materially change the result. If a safe,
+low-impact assumption is sufficient, state it briefly and continue; avoid unnecessary questions.'''
+
+CLARIFICATION_GUIDANCE = '''# Clarification required
+The request assessment below identifies an issue that may require user input. Explain the concrete
+issue and its impact, offer 2–3 meaningful resolutions when possible, recommend one, and ask only
+the minimum question needed. If interaction_need is blocking, do not perform the affected work first.
+Use `ask_user` when it is available; otherwise ask one concise clarification question and stop.'''
+
 DELIVERABLE_GUIDANCE = {
     'tutorial': (
         'Deliver a tutorial with an outcome, prerequisites, an ordered zero-to-working-result path, '
@@ -42,6 +68,14 @@ DELIVERABLE_GUIDANCE = {
     ),
     'research_report': (
         'Deliver an evidence-backed report with scope, findings, synthesis, uncertainty, and sources.'
+    ),
+    'analysis_report': (
+        'Deliver an analysis with evidence-based observations, interpretations, material risks or '
+        'patterns, limitations, and a concise conclusion.'
+    ),
+    'transformed_content': (
+        'Deliver the transformed content itself in the requested form while preserving source facts '
+        'and constraints; do not substitute advice about how to transform it.'
     ),
     'comparison': (
         'Deliver a comparison using explicit criteria, meaningful alternatives, tradeoffs, and a '

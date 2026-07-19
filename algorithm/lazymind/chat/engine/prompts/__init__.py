@@ -6,6 +6,9 @@ from .guidance import (
 )
 from .system_prompt import add_standard_system_sections, build_system_prompt
 from .task_profile import (
+    ClarificationQuestion,
+    RequestAssessment,
+    RequestIssue,
     TaskProfile,
     fallback_task_profile,
     resolve_task_profile,
@@ -18,6 +21,9 @@ __all__ = [
     'VISION_EXTRACT_DEFAULT_INSTRUCTION',
     'add_standard_system_sections',
     'build_system_prompt',
+    'ClarificationQuestion',
+    'RequestAssessment',
+    'RequestIssue',
     'TaskProfile',
     'fallback_task_profile',
     'resolve_task_profile',

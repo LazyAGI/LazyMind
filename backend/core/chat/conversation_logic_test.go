@@ -452,6 +452,19 @@ func TestChatHistoryResponseIncludesMentions(t *testing.T) {
 	}
 }
 
+func TestChatHistoryResponseIncludesThinkingDuration(t *testing.T) {
+	item := chatHistoryToResponseItem(orm.ChatHistory{
+		Result:            "<think>分析并调用工具</think>最终答案",
+		ThinkingDurationS: 7,
+	})
+	if got := item["thinking_time_s"]; got != int64(7) {
+		t.Fatalf("thinking_time_s: got %#v want 7", got)
+	}
+	if got := item["reasoning_content"]; got != "分析并调用工具" {
+		t.Fatalf("reasoning_content: got %#v", got)
+	}
+}
+
 func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
 	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail-datasets.db")
 	if err != nil {
