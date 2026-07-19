@@ -235,6 +235,7 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		r.Context(), db, convID, sessionID, query, histories, raw,
 		resourceContext, userID, currentSeq,
 	)
+	applyExplicitResourceBindings(reqBody, mentioned)
 	if mentioned.ConversationContext != "" {
 		history, _ := reqBody["history"].([]map[string]string)
 		reqBody["history"] = append(history, map[string]string{

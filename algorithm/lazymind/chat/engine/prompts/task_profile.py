@@ -62,6 +62,21 @@ class RequestAssessment:
 
 
 @dataclass(frozen=True)
+class ResourceMention:
+    resource_type: Literal['skill', 'knowledge_base', 'plugin']
+    resource_ref: str
+    display_name: str = ''
+
+
+@dataclass(frozen=True)
+class ExplicitResourceBindings:
+    skill_names: tuple[str, ...] = ()
+    knowledge_base_ids: tuple[str, ...] = ()
+    plugin_refs: tuple[str, ...] = ()
+    mentions: tuple[ResourceMention, ...] = ()
+
+
+@dataclass(frozen=True)
 class TaskProfile:
     primary_outcome: Outcome = 'answer'
     secondary_outcomes: tuple[Outcome, ...] = ()
@@ -77,6 +92,8 @@ class TaskProfile:
     secondary_deliverables: tuple[Deliverable, ...] = ()
     execution_scope: str = 'chat_only'
     request_assessment: RequestAssessment = field(default_factory=RequestAssessment)
+    explicit_resources: ExplicitResourceBindings = field(default_factory=ExplicitResourceBindings)
+    excluded_resources: ExplicitResourceBindings = field(default_factory=ExplicitResourceBindings)
     skill_mode: SkillMode = 'suppress'
     confidence: float = 1.0
     reasons: tuple[str, ...] = ()
@@ -409,11 +426,195 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
     return profile, needs_llm
 
 
+def _normalize_explicit_resources(value: Any) -> ExplicitResourceBindings:
+    if isinstance(value, ExplicitResourceBindings):
+        return value
+    if not isinstance(value, dict):
+        return ExplicitResourceBindings()
+
+    def strings(key: str) -> tuple[str, ...]:
+        raw = value.get(key) or []
+        if not isinstance(raw, (list, tuple)):
+            return ()
+        return tuple(dict.fromkeys(str(item).strip() for item in raw if str(item).strip()))
+
+    raw_mentions = value.get('mentions') or []
+    mentions = []
+    for item in raw_mentions[:12]:
+        if not isinstance(item, dict):
+            continue
+        resource_type = str(item.get('resource_type') or '').strip()
+        resource_ref = str(item.get('resource_ref') or '').strip()
+        if resource_type in {'skill', 'knowledge_base', 'plugin'} and resource_ref:
+            mentions.append(ResourceMention(
+                resource_type=resource_type,
+                resource_ref=resource_ref[:240],
+                display_name=str(item.get('display_name') or '').strip()[:120],
+            ))
+    return ExplicitResourceBindings(
+        skill_names=strings('skill_names'),
+        knowledge_base_ids=strings('knowledge_base_ids'),
+        plugin_refs=strings('plugin_refs'),
+        mentions=tuple(mentions),
+    )
+
+
+_RESOURCE_DENY = re.compile(
+    r'不要|别(?:再)?用|不想用|无需|不用|禁止|排除|忽略|跳过|避免使用|'
+    r'do\s+not\s+use|don[’\']t\s+use|without|exclude|ignore', re.I,
+)
+_RESOURCE_ALLOW = re.compile(
+    r'可以使用|可以用|可使用|可用|请使用|请用|使用|优先使用|启用|调用|'
+    r'may\s+use|can\s+use|please\s+use|use', re.I,
+)
+_RESOURCE_POLICY_HINT = re.compile(
+    r'不要|别(?:再)?用|不想用|无需|不用|禁止|排除|忽略|跳过|避免|尽量|'
+    r'do\s+not|don[’\']t|without|exclude|ignore|avoid', re.I,
+)
+
+
+def _resource_usage_policy(
+    query: str, resources: ExplicitResourceBindings,
+) -> tuple[ExplicitResourceBindings, ExplicitResourceBindings, bool]:
+    """Split current-turn mentions into usable/excluded sets; return whether intent is ambiguous."""
+    excluded: dict[str, set[str]] = {'skill': set(), 'knowledge_base': set(), 'plugin': set()}
+    ambiguous = False
+    for mention in resources.mentions:
+        labels = [label for label in (mention.display_name, mention.resource_ref) if label]
+        positions = [query.lower().find(label.lower()) for label in labels]
+        positions = [position for position in positions if position >= 0]
+        if not positions:
+            ambiguous = ambiguous or bool(_RESOURCE_POLICY_HINT.search(query))
+            continue
+        position = min(positions)
+        prefix = query[max(0, position - 28):position]
+        deny = list(_RESOURCE_DENY.finditer(prefix))
+        allow = list(_RESOURCE_ALLOW.finditer(prefix))
+        if deny and (not allow or deny[-1].start() >= allow[-1].start()):
+            excluded[mention.resource_type].add(mention.resource_ref)
+        elif _RESOURCE_POLICY_HINT.search(prefix) and not allow:
+            ambiguous = True
+
+    def remaining(values: tuple[str, ...], kind: str) -> tuple[str, ...]:
+        return tuple(value for value in values if value not in excluded[kind])
+
+    active_mentions = tuple(
+        item for item in resources.mentions
+        if item.resource_ref not in excluded[item.resource_type]
+    )
+    excluded_mentions = tuple(
+        item for item in resources.mentions
+        if item.resource_ref in excluded[item.resource_type]
+    )
+    active = ExplicitResourceBindings(
+        skill_names=remaining(resources.skill_names, 'skill'),
+        knowledge_base_ids=remaining(resources.knowledge_base_ids, 'knowledge_base'),
+        plugin_refs=remaining(resources.plugin_refs, 'plugin'),
+        mentions=active_mentions,
+    )
+    denied = ExplicitResourceBindings(
+        skill_names=tuple(value for value in resources.skill_names if value in excluded['skill']),
+        knowledge_base_ids=tuple(
+            value for value in resources.knowledge_base_ids if value in excluded['knowledge_base']
+        ),
+        plugin_refs=tuple(value for value in resources.plugin_refs if value in excluded['plugin']),
+        mentions=excluded_mentions,
+    )
+    return active, denied, ambiguous
+
+
+def _apply_explicit_resources(
+    profile: TaskProfile,
+    resources: ExplicitResourceBindings,
+    query: str,
+    model_excluded_refs: tuple[str, ...] = (),
+) -> TaskProfile:
+    resources, excluded, policy_ambiguous = _resource_usage_policy(query, resources)
+    if model_excluded_refs:
+        all_resources = ExplicitResourceBindings(
+            skill_names=resources.skill_names + excluded.skill_names,
+            knowledge_base_ids=resources.knowledge_base_ids + excluded.knowledge_base_ids,
+            plugin_refs=resources.plugin_refs + excluded.plugin_refs,
+            mentions=resources.mentions + excluded.mentions,
+        )
+        allowed_refs = {
+            *all_resources.skill_names,
+            *all_resources.knowledge_base_ids,
+            *all_resources.plugin_refs,
+        }
+        denied_refs = set(model_excluded_refs)
+        if not denied_refs.issubset(allowed_refs):
+            raise ValueError('classifier excluded an unbound resource')
+        resources = ExplicitResourceBindings(
+            skill_names=tuple(x for x in all_resources.skill_names if x not in denied_refs),
+            knowledge_base_ids=tuple(x for x in all_resources.knowledge_base_ids if x not in denied_refs),
+            plugin_refs=tuple(x for x in all_resources.plugin_refs if x not in denied_refs),
+            mentions=tuple(x for x in all_resources.mentions if x.resource_ref not in denied_refs),
+        )
+        excluded = ExplicitResourceBindings(
+            skill_names=tuple(x for x in all_resources.skill_names if x in denied_refs),
+            knowledge_base_ids=tuple(x for x in all_resources.knowledge_base_ids if x in denied_refs),
+            plugin_refs=tuple(x for x in all_resources.plugin_refs if x in denied_refs),
+            mentions=tuple(x for x in all_resources.mentions if x.resource_ref in denied_refs),
+        )
+        policy_ambiguous = False
+    updates: dict[str, Any] = {
+        'explicit_resources': resources,
+        'excluded_resources': excluded,
+    }
+    reasons = list(profile.reasons)
+    if resources.skill_names:
+        updates['skill_mode'] = 'explicit'
+        reasons.append('explicit skill selection')
+    elif excluded.skill_names:
+        updates['skill_mode'] = 'suppress'
+    if resources.knowledge_base_ids:
+        updates['source_strategy'] = 'mixed' if _EXPLICIT_WEB.search(query) else 'knowledge_base'
+        reasons.append('explicit knowledge-base selection')
+    elif excluded.knowledge_base_ids:
+        updates['source_strategy'] = 'web' if _EXPLICIT_WEB.search(query) else 'model_knowledge'
+    if resources.plugin_refs:
+        reasons.append('explicit plugin selection')
+    assessment = profile.request_assessment
+    issues = list(assessment.issues)
+    questions = list(assessment.clarification_questions)
+    if model_excluded_refs:
+        issues = [issue for issue in issues if issue.issue_type != 'ambiguous_resource_policy']
+        questions = [
+            question for question in questions
+            if question.question != 'Which mentioned resources should I use, and which should I avoid?'
+        ]
+        if not issues and assessment.status == 'ambiguous':
+            updates['request_assessment'] = RequestAssessment()
+    if policy_ambiguous and not any(
+        issue.issue_type == 'ambiguous_resource_policy' for issue in issues
+    ):
+        issues.append(RequestIssue(
+            'ambiguous_resource_policy',
+            'The request contains a resource-use preference that cannot be mapped reliably.',
+            'resource usage wording',
+            'medium',
+        ))
+        questions.append(ClarificationQuestion(
+            'Which mentioned resources should I use, and which should I avoid?',
+        ))
+    if policy_ambiguous:
+        updates['request_assessment'] = RequestAssessment(
+            status='ambiguous',
+            issues=tuple(issues[:4]),
+            interaction_need='blocking',
+            assumptions_allowed=False,
+            clarification_questions=tuple(questions[:2]),
+        )
+    updates['reasons'] = tuple(dict.fromkeys(reasons))[:6]
+    return replace(profile, **updates)
+
+
 _CLASSIFIER_PROMPT = '''Classify the user's desired outcome. Return JSON only, with keys:
 primary_outcome, secondary_outcomes, complexity, freshness, research_required,
 deliverable_kind, secondary_deliverables, outcome_subtype, secondary_subtypes,
 subject_kind, input_mode, source_strategy, execution_scope, skill_mode, confidence, reasons,
-request_status, interaction_need, request_issues, clarification_questions.
+request_status, interaction_need, request_issues, clarification_questions, excluded_resource_refs.
 Use only the allowed enum values supplied in this schema:
 primary_outcome/secondary_outcomes: answer, learn, research, analyze, transform, decide, plan,
 create, execute, diagnose;
@@ -427,13 +628,19 @@ web, academic, connected_source, mixed; execution_scope: chat_only, create_artif
 workspace_change, external_action; request_status: ready, underspecified, ambiguous, contradictory,
 infeasible, unsafe; interaction_need: none, optional, blocking.
 skill_mode: suppress, candidates, explicit. Use suppress for ordinary learning/how-to requests.
+When explicit resource bindings are supplied, excluded_resource_refs may contain only their exact
+resource_ref values. Use it when the user asks not to use a mentioned resource; do not treat a clear
+exclusion as a contradiction. A mentioned resource not excluded remains allowed.
 Detect conflicting requirements, missing critical inputs, infeasible scope, and unverifiable success
 criteria before execution. Ask only when different interpretations materially change the result.
 Reasons and request issues must be short observable labels, not private reasoning. Maximum two
 secondary items, four reasons, four issues, and two clarification questions.'''
 
 
-def _classifier_input(query: str, history: list[dict] | None, intent: Any, has_attachments: bool) -> str:
+def _classifier_input(
+    query: str, history: list[dict] | None, intent: Any, has_attachments: bool,
+    resources: ExplicitResourceBindings,
+) -> str:
     recent = [
         str(item.get('content') or '')[:1000]
         for item in (history or []) if isinstance(item, dict) and item.get('role') == 'user'
@@ -443,6 +650,7 @@ def _classifier_input(query: str, history: list[dict] | None, intent: Any, has_a
         f'{json.dumps(intent or {}, ensure_ascii=False)[:2000]}\n\n'
         f'Recent user messages:\n{json.dumps(recent, ensure_ascii=False)}\n\n'
         f'Attachments available: {has_attachments}\n\n'
+        f'Explicit resource bindings:\n{json.dumps(asdict(resources), ensure_ascii=False)[:3000]}\n\n'
         f'Current request:\n{query[:3000]}'
     )
 
@@ -461,7 +669,9 @@ def _extract_json(value: Any) -> dict[str, Any]:
     return raw
 
 
-def _validate_llm_profile(raw: dict[str, Any], rule: TaskProfile) -> TaskProfile:
+def _validate_llm_profile(
+    raw: dict[str, Any], rule: TaskProfile, resources: ExplicitResourceBindings, query: str,
+) -> TaskProfile:
     primary = str(raw.get('primary_outcome') or '')
     complexity = str(raw.get('complexity') or '')
     freshness = str(raw.get('freshness') or '')
@@ -525,7 +735,7 @@ def _validate_llm_profile(raw: dict[str, Any], rule: TaskProfile) -> TaskProfile
         freshness = 'current'
     if rule.skill_mode == 'explicit':
         skill_mode = 'explicit'
-    return TaskProfile(
+    profile = TaskProfile(
         primary_outcome=primary, secondary_outcomes=secondary, complexity=complexity,
         outcome_subtype=str(raw.get('outcome_subtype') or rule.outcome_subtype)[:40] or None,
         secondary_subtypes=tuple(str(x)[:40] for x in (raw.get('secondary_subtypes') or [])[:2]),
@@ -535,6 +745,11 @@ def _validate_llm_profile(raw: dict[str, Any], rule: TaskProfile) -> TaskProfile
         execution_scope=execution_scope, request_assessment=assessment,
         skill_mode=skill_mode, confidence=confidence, reasons=reasons, source='llm',
     )
+    excluded_refs = tuple(
+        str(value).strip() for value in (raw.get('excluded_resource_refs') or [])[:12]
+        if str(value).strip()
+    )
+    return _apply_explicit_resources(profile, resources, query, excluded_refs)
 
 
 def resolve_task_profile(
@@ -545,20 +760,28 @@ def resolve_task_profile(
     classifier: Callable[[str], Any] | None = None,
     enable_llm_fallback: bool = True,
     has_attachments: bool = False,
+    explicit_resources: ExplicitResourceBindings | dict[str, Any] | None = None,
 ) -> TaskProfile:
     rule, needs_llm = _rule_profile(query, has_attachments=has_attachments)
+    resources = _normalize_explicit_resources(explicit_resources)
+    rule = _apply_explicit_resources(rule, resources, query)
+    needs_llm = needs_llm or any(
+        issue.issue_type == 'ambiguous_resource_policy'
+        for issue in rule.request_assessment.issues
+    )
     if not needs_llm or not enable_llm_fallback or classifier is None:
         return rule
     started = time.monotonic()
     try:
-        result = classifier(_classifier_input(query, history, intent, has_attachments))
-        profile = _validate_llm_profile(_extract_json(result), rule)
+        result = classifier(_classifier_input(query, history, intent, has_attachments, resources))
+        profile = _validate_llm_profile(_extract_json(result), rule, resources, query)
         return replace(profile, router_latency_ms=int((time.monotonic() - started) * 1000))
     except Exception as exc:
         return fallback_task_profile(
             query,
             error=exc,
             latency_ms=int((time.monotonic() - started) * 1000),
+            explicit_resources=resources,
         )
 
 
@@ -568,8 +791,11 @@ def fallback_task_profile(
     error: Any,
     latency_ms: int = 0,
     has_attachments: bool = False,
+    explicit_resources: ExplicitResourceBindings | dict[str, Any] | None = None,
 ) -> TaskProfile:
     rule, _ = _rule_profile(query, has_attachments=has_attachments)
+    resources = _normalize_explicit_resources(explicit_resources)
+    rule = _apply_explicit_resources(rule, resources, query)
     return replace(
         rule,
         primary_outcome='answer',
@@ -578,7 +804,7 @@ def fallback_task_profile(
         secondary_subtypes=(),
         deliverable_kind='direct_answer',
         secondary_deliverables=(),
-        skill_mode='suppress',
+        skill_mode='explicit' if rule.explicit_resources.skill_names else 'suppress',
         source='fallback',
         router_latency_ms=max(0, int(latency_ms)),
         router_error=f'{type(error).__name__}: {error}'[:240],
@@ -643,7 +869,11 @@ def select_skill_candidates(
     if profile.skill_mode == 'suppress':
         return []
     if profile.skill_mode == 'explicit':
-        return available_skills
+        selected = profile.explicit_resources.skill_names
+        if not selected:
+            return available_skills
+        available = set(available_skills or [])
+        return [skill for skill in selected if skill in available]
     available = [str(item) for item in (available_skills or []) if str(item).strip()]
     query_tokens = _selection_tokens(query)
     query_tokens.update(_SKILL_OUTCOME_TERMS[profile.primary_outcome])

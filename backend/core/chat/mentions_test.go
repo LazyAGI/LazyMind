@@ -30,6 +30,61 @@ func TestApplyMentionedToolsOnlyEnablesMentionedNames(t *testing.T) {
 	}
 }
 
+func TestApplyExplicitResourceBindingsIncludesOnlyCurrentMentions(t *testing.T) {
+	body := map[string]any{}
+	applyExplicitResourceBindings(body, resolvedChatMentions{
+		SkillNames:       []string{"video/ai-production"},
+		KnowledgeBaseIDs: []string{"kb-video"},
+		PluginRefs:       []string{"video/workflow"},
+		ResourceMentions: []map[string]string{{
+			"resource_type": "knowledge_base", "resource_ref": "kb-video",
+			"display_name": "视频资料库",
+		}},
+	})
+	bindings, ok := body["explicit_resource_bindings"].(map[string]any)
+	if !ok {
+		t.Fatalf("explicit_resource_bindings = %#v", body["explicit_resource_bindings"])
+	}
+	if got := bindings["skill_names"].([]string); len(got) != 1 || got[0] != "video/ai-production" {
+		t.Fatalf("skill_names = %#v", got)
+	}
+	if got := bindings["knowledge_base_ids"].([]string); len(got) != 1 || got[0] != "kb-video" {
+		t.Fatalf("knowledge_base_ids = %#v", got)
+	}
+	if got := bindings["plugin_refs"].([]string); len(got) != 1 || got[0] != "video/workflow" {
+		t.Fatalf("plugin_refs = %#v", got)
+	}
+	if got := bindings["mentions"].([]map[string]string); len(got) != 1 || got[0]["display_name"] != "视频资料库" {
+		t.Fatalf("mentions = %#v", got)
+	}
+}
+
+func TestBuildLazyChatRequestPropagatesExplicitResourceBindings(t *testing.T) {
+	req := buildLazyChatRequest(map[string]any{
+		"explicit_resource_bindings": map[string]any{
+			"skill_names":        []string{"video/ai-production"},
+			"knowledge_base_ids": []string{"kb-video"},
+			"plugin_refs":        []string{"video/workflow"},
+			"mentions": []any{map[string]any{
+				"resource_type": "knowledge_base", "resource_ref": "kb-video",
+				"display_name": "视频资料库",
+			}},
+		},
+	})
+	if got := req.ExplicitResources.SkillNames; len(got) != 1 || got[0] != "video/ai-production" {
+		t.Fatalf("SkillNames = %#v", got)
+	}
+	if got := req.ExplicitResources.KnowledgeBaseIDs; len(got) != 1 || got[0] != "kb-video" {
+		t.Fatalf("KnowledgeBaseIDs = %#v", got)
+	}
+	if got := req.ExplicitResources.PluginRefs; len(got) != 1 || got[0] != "video/workflow" {
+		t.Fatalf("PluginRefs = %#v", got)
+	}
+	if got := req.ExplicitResources.Mentions; len(got) != 1 || got[0]["resource_ref"] != "kb-video" {
+		t.Fatalf("Mentions = %#v", got)
+	}
+}
+
 func TestMergeMentionedDatasetsPreservesDefaultsAndDeduplicates(t *testing.T) {
 	raw := map[string]any{"conversation": map[string]any{"search_config": map[string]any{
 		"dataset_list": []any{map[string]any{"id": "default"}},

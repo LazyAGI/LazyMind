@@ -206,6 +206,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     personalization = request.personalization
     agent = request.agent
     plugin = request.plugin
+    explicit_resources = request.explicit_resource_bindings
     from lazymind.chat.plugin.plugin_manager import (
         _build_chat_agent_task_context,
         guard_plugin_agent_stream,
@@ -266,6 +267,15 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             flat_files.extend(files_map[seq_key])
     resolved_files = validate_and_resolve_files(flat_files)
     filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))
+    explicit_resource_payload = explicit_resources.model_dump()
+    selected_kb_ids = filters.get('kb_id')
+    if selected_kb_ids and not explicit_resource_payload['knowledge_base_ids']:
+        explicit_resource_payload['knowledge_base_ids'] = (
+            selected_kb_ids if isinstance(selected_kb_ids, list) else [selected_kb_ids]
+        )
+    active_plugin_ref = str((plugin.plugin_context or {}).get('plugin_ref') or '').strip()
+    if active_plugin_ref and not explicit_resource_payload['plugin_refs']:
+        explicit_resource_payload['plugin_refs'] = [active_plugin_ref]
 
     raw_history = list(message.history) if isinstance(message.history, list) else []
     agent_history = normalize_history_for_agent(raw_history)
@@ -342,6 +352,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                     classifier=routing_model,
                     enable_llm_fallback=_cfg['task_profile_llm_fallback'],
                     has_attachments=bool(files_map),
+                    explicit_resources=explicit_resource_payload,
                 ),
                 timeout=max(1, _cfg['task_profile_llm_timeout']),
             )
@@ -351,6 +362,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 error=exc,
                 latency_ms=int((time.monotonic() - profile_started) * 1000),
                 has_attachments=bool(files_map),
+                explicit_resources=explicit_resource_payload,
             )
         LOG.info(
             '[ChatServer] [TASK_PROFILE] [sid=%s] source=%s outcome=%s deliverable=%s '
@@ -364,12 +376,47 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             task_profile.router_error,
         )
 
+        excluded_kb_ids = set(task_profile.excluded_resources.knowledge_base_ids)
+        if excluded_kb_ids and agentic_config.get('filters'):
+            effective_filters = dict(agentic_config['filters'])
+            configured_kb_ids = effective_filters.get('kb_id')
+            configured_kb_ids = (
+                configured_kb_ids if isinstance(configured_kb_ids, list) else [configured_kb_ids]
+            )
+            remaining_kb_ids = [
+                value for value in configured_kb_ids
+                if value and value not in excluded_kb_ids
+            ]
+            effective_filters['kb_id'] = (
+                remaining_kb_ids[0] if len(remaining_kb_ids) == 1 else (remaining_kb_ids or None)
+            )
+            agentic_config['filters'] = effective_filters
+
+    excluded_plugin_refs = set(
+        task_profile.excluded_resources.plugin_refs if task_profile else ()
+    )
+    effective_plugin_context = plugin.plugin_context
+    if str((effective_plugin_context or {}).get('plugin_ref') or '') in excluded_plugin_refs:
+        effective_plugin_context = None
+    effective_plugin_catalog = [
+        item for item in plugin.catalog
+        if str(item.get('plugin_ref') or '') not in excluded_plugin_refs
+    ]
+    effective_allowed_plugin_refs = [
+        ref for ref in plugin.allowed_plugin_refs if ref not in excluded_plugin_refs
+    ]
+    effective_disabled_builtin_plugins = list(plugin.disabled_builtin_plugins)
+    effective_disabled_builtin_plugins.extend(
+        ref.removeprefix('builtin:') for ref in excluded_plugin_refs
+        if ref.startswith('builtin:')
+    )
+
     plugin_contribution = resolve_plugin_injection(
-        plugin.plugin_context,
+        effective_plugin_context,
         conversation_id=conversation_id,
-        plugin_catalog=plugin.catalog,
-        disabled_builtin_plugins=plugin.disabled_builtin_plugins,
-        allowed_plugin_refs=plugin.allowed_plugin_refs,
+        plugin_catalog=effective_plugin_catalog,
+        disabled_builtin_plugins=list(dict.fromkeys(effective_disabled_builtin_plugins)),
+        allowed_plugin_refs=effective_allowed_plugin_refs,
     )
     plugin_tools = plugin_contribution.tools
     agentic_config.update(plugin_contribution.agentic_config_patch)

@@ -25,8 +25,11 @@ type chatMention struct {
 
 type resolvedChatMentions struct {
 	PluginRefs          []string
+	SkillNames          []string
+	KnowledgeBaseIDs    []string
 	ToolNames           []string
 	ConversationContext string
+	ResourceMentions    []map[string]string
 }
 
 func parseChatMentions(raw map[string]any) ([]chatMention, error) {
@@ -78,12 +81,26 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 				return query, resolved, fmt.Errorf("knowledge base mention not found: %s", mention.ResourceID)
 			}
 			datasetIDs = append(datasetIDs, mention.ResourceID)
+			resolved.KnowledgeBaseIDs = append(resolved.KnowledgeBaseIDs, mention.ResourceID)
+			resolved.ResourceMentions = append(resolved.ResourceMentions, map[string]string{
+				"resource_type": "knowledge_base", "resource_ref": mention.ResourceID,
+				"display_name": mention.DisplayName,
+			})
 		case "skill":
 			var skill orm.SkillV2Skill
 			if err := db.WithContext(ctx).Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", mention.ResourceID, userID).Take(&skill).Error; err != nil || skill.HeadRevisionID == nil {
 				return query, resolved, fmt.Errorf("skill mention is not accessible or unpublished: %s", mention.ResourceID)
 			}
 			skillIDs = append(skillIDs, mention.ResourceID)
+			resolved.SkillNames = append(
+				resolved.SkillNames,
+				fmt.Sprintf("%s/%s", strings.TrimSpace(skill.Category), strings.TrimSpace(skill.SkillName)),
+			)
+			resolved.ResourceMentions = append(resolved.ResourceMentions, map[string]string{
+				"resource_type": "skill",
+				"resource_ref":  resolved.SkillNames[len(resolved.SkillNames)-1],
+				"display_name":  mention.DisplayName,
+			})
 		case "tool":
 			tools, toolErr := fetchChatTools(ctx, db, userID, "")
 			if toolErr != nil {
@@ -96,6 +113,10 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 		case "plugin":
 			if strings.HasPrefix(mention.ResourceID, "builtin:") {
 				resolved.PluginRefs = append(resolved.PluginRefs, mention.ResourceID)
+				resolved.ResourceMentions = append(resolved.ResourceMentions, map[string]string{
+					"resource_type": "plugin", "resource_ref": mention.ResourceID,
+					"display_name": mention.DisplayName,
+				})
 				continue
 			}
 			var count int64
@@ -104,6 +125,10 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 				return query, resolved, fmt.Errorf("plugin mention is not accessible: %s", mention.ResourceID)
 			}
 			resolved.PluginRefs = append(resolved.PluginRefs, mention.ResourceID)
+			resolved.ResourceMentions = append(resolved.ResourceMentions, map[string]string{
+				"resource_type": "plugin", "resource_ref": mention.ResourceID,
+				"display_name": mention.DisplayName,
+			})
 		case "conversation":
 			conversationIDs = append(conversationIDs, mention.ResourceID)
 		default:
@@ -130,6 +155,18 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 		resolved.ConversationContext = contextText
 	}
 	return query, resolved, nil
+}
+
+func applyExplicitResourceBindings(body map[string]any, mentions resolvedChatMentions) {
+	if len(mentions.SkillNames) == 0 && len(mentions.KnowledgeBaseIDs) == 0 && len(mentions.PluginRefs) == 0 {
+		return
+	}
+	body["explicit_resource_bindings"] = map[string]any{
+		"skill_names":        mentions.SkillNames,
+		"knowledge_base_ids": mentions.KnowledgeBaseIDs,
+		"plugin_refs":        mentions.PluginRefs,
+		"mentions":           mentions.ResourceMentions,
+	}
 }
 
 func mergeMentionedDatasets(raw map[string]any, ids []string) {

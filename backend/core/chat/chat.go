@@ -52,13 +52,21 @@ type DatasetFilters struct {
 }
 
 type LazyChatRequest struct {
-	Message         ChatMessageOptions         `json:"message"`
-	Conversation    ChatConversationOptions    `json:"conversation"`
-	Retrieval       ChatRetrievalOptions       `json:"retrieval,omitempty"`
-	Runtime         ChatRuntimeOptions         `json:"runtime,omitempty"`
-	Personalization ChatPersonalizationOptions `json:"personalization,omitempty"`
-	Agent           ChatAgentOptions           `json:"agent,omitempty"`
-	Plugin          ChatPluginOptions          `json:"plugin,omitempty"`
+	Message           ChatMessageOptions         `json:"message"`
+	Conversation      ChatConversationOptions    `json:"conversation"`
+	Retrieval         ChatRetrievalOptions       `json:"retrieval,omitempty"`
+	Runtime           ChatRuntimeOptions         `json:"runtime,omitempty"`
+	Personalization   ChatPersonalizationOptions `json:"personalization,omitempty"`
+	Agent             ChatAgentOptions           `json:"agent,omitempty"`
+	Plugin            ChatPluginOptions          `json:"plugin,omitempty"`
+	ExplicitResources ExplicitResourceBindings   `json:"explicit_resource_bindings,omitempty"`
+}
+
+type ExplicitResourceBindings struct {
+	SkillNames       []string            `json:"skill_names,omitempty"`
+	KnowledgeBaseIDs []string            `json:"knowledge_base_ids,omitempty"`
+	PluginRefs       []string            `json:"plugin_refs,omitempty"`
+	Mentions         []map[string]string `json:"mentions,omitempty"`
 }
 
 type ChatMessageOptions struct {
@@ -502,6 +510,14 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if refs, ok := body["allowed_plugin_refs"].([]string); ok {
 		req.Plugin.AllowedPluginRefs = refs
 	}
+	if bindings, ok := body["explicit_resource_bindings"].(map[string]any); ok {
+		req.ExplicitResources = ExplicitResourceBindings{
+			SkillNames:       stringSlice(bindings["skill_names"]),
+			KnowledgeBaseIDs: stringSlice(bindings["knowledge_base_ids"]),
+			PluginRefs:       stringSlice(bindings["plugin_refs"]),
+			Mentions:         stringMapSlice(bindings["mentions"]),
+		}
+	}
 	// current_turn_seq is an int in the body map. JSON numbers decode as float64.
 	switch v := body["current_turn_seq"].(type) {
 	case int:
@@ -646,6 +662,33 @@ func stringSlice(v any) []string {
 	}
 	if len(result) == 0 {
 		return nil
+	}
+	return result
+}
+
+func stringMapSlice(v any) []map[string]string {
+	if typed, ok := v.([]map[string]string); ok {
+		return typed
+	}
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]map[string]string, 0, len(raw))
+	for _, item := range raw {
+		values, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		entry := map[string]string{}
+		for _, key := range []string{"resource_type", "resource_ref", "display_name"} {
+			if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
+				entry[key] = strings.TrimSpace(value)
+			}
+		}
+		if entry["resource_type"] != "" && entry["resource_ref"] != "" {
+			result = append(result, entry)
+		}
 	}
 	return result
 }

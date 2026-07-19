@@ -240,6 +240,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	}
 	resourceContext.DisabledTools = applyMentionedTools(resourceContext.DisabledTools, mentionedResources.ToolNames)
 	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
+	applyExplicitResourceBindings(reqBody, mentionedResources)
 	if mentionedResources.ConversationContext != "" {
 		history, _ := reqBody["history"].([]map[string]string)
 		history = append(history, map[string]string{

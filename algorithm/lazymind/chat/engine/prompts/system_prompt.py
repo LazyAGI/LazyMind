@@ -287,6 +287,22 @@ def add_standard_system_sections(
             skip_if=task_profile.request_assessment.interaction_need != 'blocking',
         )
         assessment = task_profile.request_assessment
+        excluded = task_profile.excluded_resources
+        excluded_lines = [
+            *(f'- Skill: {value}' for value in excluded.skill_names),
+            *(f'- Knowledge base: {value}' for value in excluded.knowledge_base_ids),
+            *(f'- Plugin: {value}' for value in excluded.plugin_refs),
+        ]
+        if excluded_lines:
+            builder.runtime(
+                'task_resource_policy', 'Resource Usage Policy',
+                '\n'.join([
+                    'Do not use, invoke, cite, or rely on these resources in this turn, even if '
+                    'their content appears elsewhere in the assembled context:',
+                    *excluded_lines,
+                ]),
+                'runtime.task.resources', priority=4, authoritative=True, content_kind='instruction',
+            )
         if assessment.status != 'ready':
             issue_lines = [
                 f'- {issue.issue_type} ({issue.impact}): {issue.description} '

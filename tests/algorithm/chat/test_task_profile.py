@@ -219,10 +219,152 @@ ROUTING_SCENARIOS = (
 )
 FALLBACK_SCENARIOS = [f'帮我看看一些材料，模糊表达{index}' for index in range(40)]
 
+SKILL_MENTION_SCENARIOS = [
+    {
+        'id': f'mention-skill-{outcome}-{variant}',
+        'query': _chain(outcome, variant=variant),
+        'bindings': {'skill_names': [f'{outcome}/selected-skill']},
+        'expected_skill_mode': 'explicit',
+        'expected_selected_skills': [f'{outcome}/selected-skill'],
+    }
+    for outcome in OUTCOME_NAMES
+    for variant in range(2)
+]
+KNOWLEDGE_BASE_MENTION_SCENARIOS = [
+    {
+        'id': f'mention-kb-{outcome}-{variant}',
+        'query': _chain(outcome, variant=variant),
+        'bindings': {'knowledge_base_ids': [f'kb-{outcome}']},
+        'expected_source_strategy': 'knowledge_base',
+    }
+    for outcome in OUTCOME_NAMES
+    for variant in range(2)
+]
+PLUGIN_MENTION_SCENARIOS = [
+    {
+        'id': f'mention-plugin-{outcome}-{variant}',
+        'query': _chain(outcome, variant=variant),
+        'bindings': {'plugin_refs': [f'plugin/{outcome}']},
+        'expected_plugin_refs': (f'plugin/{outcome}',),
+        'expected_primary': outcome,
+    }
+    for outcome in OUTCOME_NAMES
+    for variant in range(2)
+]
+RESOURCE_PAIR_KINDS = (
+    {'skill_names': ['review/selected'], 'knowledge_base_ids': ['kb-selected']},
+    {'skill_names': ['review/selected'], 'plugin_refs': ['plugin/selected']},
+    {'knowledge_base_ids': ['kb-selected'], 'plugin_refs': ['plugin/selected']},
+)
+RESOURCE_PAIR_SCENARIOS = [
+    {
+        'id': f'mention-pair-{kind_index}-{variant}',
+        'query': _chain(OUTCOME_NAMES[variant % len(OUTCOME_NAMES)], variant=variant),
+        'bindings': bindings,
+    }
+    for kind_index, bindings in enumerate(RESOURCE_PAIR_KINDS)
+    for variant in range(8)
+]
+RESOURCE_TRIPLE_SCENARIOS = [
+    {
+        'id': f'mention-triple-{variant}',
+        'query': _chain(OUTCOME_NAMES[variant], variant=variant),
+        'bindings': {
+            'skill_names': ['review/selected'],
+            'knowledge_base_ids': ['kb-selected'],
+            'plugin_refs': ['plugin/selected'],
+        },
+    }
+    for variant in range(8)
+]
+RESOURCE_CONFLICT_SCENARIOS = [
+    *[
+        {
+            'id': f'mention-conflict-skill-{variant}',
+            'query': f'解释一下这个主题，但不要使用任何Skill，变体{variant}',
+            'bindings': {
+                'skill_names': ['review/selected'],
+                'mentions': [{
+                    'resource_type': 'skill', 'resource_ref': 'review/selected',
+                    'display_name': 'Skill',
+                }],
+            },
+            'expected_excluded': ('review/selected',),
+        }
+        for variant in range(6)
+    ],
+    *[
+        {
+            'id': f'mention-conflict-kb-{variant}',
+            'query': f'解释一下这个主题，但不要使用这个知识库，变体{variant}',
+            'bindings': {
+                'knowledge_base_ids': ['kb-selected'],
+                'mentions': [{
+                    'resource_type': 'knowledge_base', 'resource_ref': 'kb-selected',
+                    'display_name': '这个知识库',
+                }],
+            },
+            'expected_excluded': ('kb-selected',),
+        }
+        for variant in range(5)
+    ],
+    *[
+        {
+            'id': f'mention-conflict-plugin-{variant}',
+            'query': f'解释一下这个主题，但不要启动这个Plugin，变体{variant}',
+            'bindings': {
+                'plugin_refs': ['plugin/selected'],
+                'mentions': [{
+                    'resource_type': 'plugin', 'resource_ref': 'plugin/selected',
+                    'display_name': '这个Plugin',
+                }],
+            },
+            'expected_excluded': ('plugin/selected',),
+        }
+        for variant in range(5)
+    ],
+]
+RESOURCE_CURRENT_VS_DEFAULT_SCENARIOS = [
+    *[
+        {
+            'id': f'mention-default-only-{variant}',
+            'query': f'分析产品方案，默认资源变体{variant}',
+            'bindings': {},
+            'available_skills': ['default/enabled-skill'],
+            'expected_not_explicit': True,
+        }
+        for variant in range(6)
+    ],
+    *[
+        {
+            'id': f'mention-current-over-default-{variant}',
+            'query': f'分析产品方案，本轮资源变体{variant}',
+            'bindings': {'skill_names': ['current/mentioned-skill']},
+            'available_skills': ['default/enabled-skill', 'current/mentioned-skill'],
+            'expected_selected_skills': ['current/mentioned-skill'],
+        }
+        for variant in range(6)
+    ],
+]
+RESOURCE_BINDING_SCENARIOS = (
+    SKILL_MENTION_SCENARIOS
+    + KNOWLEDGE_BASE_MENTION_SCENARIOS
+    + PLUGIN_MENTION_SCENARIOS
+    + RESOURCE_PAIR_SCENARIOS
+    + RESOURCE_TRIPLE_SCENARIOS
+    + RESOURCE_CONFLICT_SCENARIOS
+    + RESOURCE_CURRENT_VS_DEFAULT_SCENARIOS
+)
+
 
 def test_evaluation_suite_contains_nine_hundred_scenarios() -> None:
     total = len(ROUTING_SCENARIOS) + len(REQUEST_ASSESSMENT_SCENARIOS) + len(FALLBACK_SCENARIOS)
     assert total == 900
+
+
+def test_resource_binding_suite_adds_one_hundred_twenty_scenarios() -> None:
+    assert len(RESOURCE_BINDING_SCENARIOS) == 120
+    assert 900 + len(RESOURCE_BINDING_SCENARIOS) == 1020
 
 
 def test_all_ordered_two_outcome_combinations_are_covered() -> None:
@@ -266,6 +408,47 @@ def test_classifier_failure_scenarios_are_safe(query: str) -> None:
     assert profile.source == 'fallback'
     assert profile.primary_outcome == 'answer'
     assert profile.skill_mode == 'suppress'
+
+
+@pytest.mark.parametrize('scenario', RESOURCE_BINDING_SCENARIOS, ids=lambda item: item['id'])
+def test_explicit_resource_binding_scenarios(scenario: dict) -> None:
+    profile = resolve_task_profile(
+        scenario['query'],
+        enable_llm_fallback=False,
+        explicit_resources=scenario['bindings'],
+    )
+    bindings = scenario['bindings']
+    if bindings.get('skill_names') and not scenario.get('expected_excluded'):
+        assert profile.skill_mode == 'explicit'
+        available = ['default/enabled-skill', *bindings['skill_names']]
+        assert select_skill_candidates(available, scenario['query'], profile) == bindings['skill_names']
+    if bindings.get('knowledge_base_ids') and not scenario.get('expected_excluded'):
+        assert profile.source_strategy == 'knowledge_base'
+        assert profile.explicit_resources.knowledge_base_ids == tuple(bindings['knowledge_base_ids'])
+    if bindings.get('plugin_refs') and not scenario.get('expected_excluded'):
+        assert profile.explicit_resources.plugin_refs == tuple(bindings['plugin_refs'])
+    if 'expected_primary' in scenario:
+        assert profile.primary_outcome == scenario['expected_primary']
+    if 'expected_skill_mode' in scenario:
+        assert profile.skill_mode == scenario['expected_skill_mode']
+    if 'expected_source_strategy' in scenario:
+        assert profile.source_strategy == scenario['expected_source_strategy']
+    if 'expected_plugin_refs' in scenario:
+        assert profile.explicit_resources.plugin_refs == scenario['expected_plugin_refs']
+    if scenario.get('expected_excluded'):
+        excluded = profile.excluded_resources
+        actual = excluded.skill_names + excluded.knowledge_base_ids + excluded.plugin_refs
+        assert actual == scenario['expected_excluded']
+        assert profile.request_assessment.status == 'ready'
+    if scenario.get('expected_not_explicit'):
+        assert profile.skill_mode != 'explicit'
+    if 'expected_selected_skills' in scenario:
+        available = scenario.get('available_skills') or [
+            'default/enabled-skill', *bindings.get('skill_names', []),
+        ]
+        assert select_skill_candidates(available, scenario['query'], profile) == scenario[
+            'expected_selected_skills'
+        ]
 
 
 @pytest.mark.parametrize(('query', 'expected'), SCENARIOS)
@@ -456,3 +639,142 @@ def test_skill_candidates_are_relevance_ranked_and_capped_at_five() -> None:
     assert visible is not None
     assert len(visible) == 5
     assert all(item.startswith('research/video-') for item in visible)
+
+
+def test_explicit_skill_selection_overrides_learning_suppression() -> None:
+    profile = resolve_task_profile(
+        '教我制作AI视频',
+        enable_llm_fallback=False,
+        explicit_resources={'skill_names': ['video/ai-production']},
+    )
+    assert profile.primary_outcome == 'learn'
+    assert profile.skill_mode == 'explicit'
+    assert select_skill_candidates(
+        ['research/deep-research', 'video/ai-production'], '教我制作AI视频', profile,
+    ) == ['video/ai-production']
+
+
+def test_explicit_knowledge_base_overrides_inferred_web_source() -> None:
+    profile = resolve_task_profile(
+        '分析当前AI视频市场',
+        enable_llm_fallback=False,
+        explicit_resources={'knowledge_base_ids': ['kb-market']},
+    )
+    assert profile.primary_outcome == 'analyze'
+    assert profile.source_strategy == 'knowledge_base'
+    assert profile.research_required is True
+
+
+def test_explicit_knowledge_base_and_explicit_web_request_use_mixed_sources() -> None:
+    profile = resolve_task_profile(
+        '基于资料库并联网搜索最新信息',
+        enable_llm_fallback=False,
+        explicit_resources={'knowledge_base_ids': ['kb-internal']},
+    )
+    assert profile.source_strategy == 'mixed'
+
+
+def test_explicit_plugin_binding_preserves_user_outcome() -> None:
+    profile = resolve_task_profile(
+        '帮我制定发布计划',
+        enable_llm_fallback=False,
+        explicit_resources={'plugin_refs': ['marketing/campaign']},
+    )
+    assert profile.primary_outcome == 'plan'
+    assert profile.explicit_resources.plugin_refs == ('marketing/campaign',)
+    assert 'explicit plugin selection' in profile.reasons
+
+
+def test_mixed_resource_allow_and_deny_keeps_only_allowed_mentions() -> None:
+    profile = resolve_task_profile(
+        '帮我分析方案，注意，你不要用内部资料，可以使用公开资料',
+        enable_llm_fallback=False,
+        explicit_resources={
+            'knowledge_base_ids': ['kb-internal', 'kb-public'],
+            'mentions': [
+                {'resource_type': 'knowledge_base', 'resource_ref': 'kb-internal',
+                 'display_name': '内部资料'},
+                {'resource_type': 'knowledge_base', 'resource_ref': 'kb-public',
+                 'display_name': '公开资料'},
+            ],
+        },
+    )
+    assert profile.primary_outcome == 'analyze'
+    assert profile.explicit_resources.knowledge_base_ids == ('kb-public',)
+    assert profile.excluded_resources.knowledge_base_ids == ('kb-internal',)
+    assert profile.source_strategy == 'knowledge_base'
+    assert profile.request_assessment.status == 'ready'
+
+
+def test_colloquial_resource_denials_are_executed_without_clarification() -> None:
+    for wording in ('别用内部库', '我不想用内部库', '不用内部库', '忽略内部库'):
+        profile = resolve_task_profile(
+            f'帮我解释这个问题，{wording}',
+            enable_llm_fallback=False,
+            explicit_resources={
+                'knowledge_base_ids': ['kb-internal'],
+                'mentions': [{'resource_type': 'knowledge_base',
+                              'resource_ref': 'kb-internal', 'display_name': '内部库'}],
+            },
+        )
+        assert not profile.explicit_resources.knowledge_base_ids
+        assert profile.excluded_resources.knowledge_base_ids == ('kb-internal',)
+        assert profile.source_strategy == 'model_knowledge'
+        assert profile.request_assessment.status == 'ready'
+
+
+def test_ambiguous_resource_preference_uses_llm_intent_result() -> None:
+    result = {
+        'primary_outcome': 'analyze', 'secondary_outcomes': [],
+        'complexity': 'open_ended', 'freshness': 'stable',
+        'research_required': False, 'deliverable_kind': 'analysis_report',
+        'secondary_deliverables': [], 'skill_mode': 'suppress',
+        'source_strategy': 'knowledge_base', 'confidence': 0.88,
+        'reasons': ['resource preference'], 'excluded_resource_refs': ['kb-internal'],
+    }
+    profile = resolve_task_profile(
+        '分析方案，尽量别依赖内部库，外部库你看着办',
+        classifier=lambda _: json.dumps(result),
+        explicit_resources={
+            'knowledge_base_ids': ['kb-internal', 'kb-external'],
+            'mentions': [
+                {'resource_type': 'knowledge_base', 'resource_ref': 'kb-internal',
+                 'display_name': '内部库'},
+                {'resource_type': 'knowledge_base', 'resource_ref': 'kb-external',
+                 'display_name': '外部库'},
+            ],
+        },
+    )
+    assert profile.source == 'llm'
+    assert profile.explicit_resources.knowledge_base_ids == ('kb-external',)
+    assert profile.excluded_resources.knowledge_base_ids == ('kb-internal',)
+    assert profile.request_assessment.status == 'ready'
+
+
+def test_llm_classification_cannot_override_explicit_resources() -> None:
+    result = {
+        'primary_outcome': 'learn',
+        'secondary_outcomes': [],
+        'complexity': 'open_ended',
+        'freshness': 'current',
+        'research_required': True,
+        'deliverable_kind': 'tutorial',
+        'secondary_deliverables': [],
+        'skill_mode': 'suppress',
+        'source_strategy': 'web',
+        'confidence': 0.9,
+        'reasons': ['learning request'],
+    }
+    profile = resolve_task_profile(
+        '帮我看看AI视频方向',
+        classifier=lambda _: json.dumps(result),
+        explicit_resources={
+            'skill_names': ['video/ai-production'],
+            'knowledge_base_ids': ['kb-video'],
+            'plugin_refs': ['video/workflow'],
+        },
+    )
+    assert profile.skill_mode == 'explicit'
+    assert profile.source_strategy == 'knowledge_base'
+    assert profile.explicit_resources.skill_names == ('video/ai-production',)
+    assert profile.explicit_resources.plugin_refs == ('video/workflow',)
