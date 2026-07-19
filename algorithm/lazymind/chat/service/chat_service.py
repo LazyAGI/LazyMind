@@ -15,7 +15,13 @@ from lazymind.chat.config import (
     SENSITIVE_FILTER_RESPONSE_TEXT,
     SENSITIVE_WORDS_PATH,
 )
-from lazymind.chat.engine.prompts import add_standard_system_sections
+from lazymind.chat.engine.prompts import (
+    add_standard_system_sections,
+    fallback_task_profile,
+    resolve_task_profile,
+    select_skill_candidates,
+    selected_prompt_modules,
+)
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
@@ -322,6 +328,40 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     inject_reader_config(ocr_config=runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
+    task_profile = None
+    if _cfg['dynamic_prompt_modules']:
+        routing_model = AutoModel(model='llm') if _cfg['task_profile_llm_fallback'] else None
+        profile_started = time.monotonic()
+        try:
+            task_profile = await asyncio.wait_for(
+                asyncio.to_thread(
+                    resolve_task_profile,
+                    language_query,
+                    history=agent_history,
+                    intent=conversation.intent_context,
+                    classifier=routing_model,
+                    enable_llm_fallback=_cfg['task_profile_llm_fallback'],
+                ),
+                timeout=max(1, _cfg['task_profile_llm_timeout']),
+            )
+        except asyncio.TimeoutError as exc:
+            task_profile = fallback_task_profile(
+                language_query,
+                error=exc,
+                latency_ms=int((time.monotonic() - profile_started) * 1000),
+            )
+        LOG.info(
+            '[ChatServer] [TASK_PROFILE] [sid=%s] source=%s outcome=%s deliverable=%s '
+            'modules_dynamic=true skill_mode=%s latency_ms=%s error=%s',
+            conversation.session_id,
+            task_profile.source,
+            task_profile.primary_outcome,
+            task_profile.deliverable_kind,
+            task_profile.skill_mode,
+            task_profile.router_latency_ms,
+            task_profile.router_error,
+        )
+
     plugin_contribution = resolve_plugin_injection(
         plugin.plugin_context,
         conversation_id=conversation_id,
@@ -383,6 +423,11 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     artifact_tools = _build_chat_artifact_tools()
     all_tools = ([intentwriter] + agent_tools + artifact_tools + subagent_tools + attachment_tools
                  + ask_user_tools + plugin_tools + mcp_tools)
+    skill_config = agent.available_skills
+    selected_skills = agent.available_skills
+    if task_profile is not None:
+        selected_skills = select_skill_candidates(agent.available_skills, language_query, task_profile)
+        skill_config = selected_skills or False
     set_trace_context({
         'enabled': bool(runtime.trace),
         'trace_id': conversation.session_id if runtime.trace else None,
@@ -390,6 +435,12 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         'sampled': True,
         'module_trace': {'default': True},
         'request_tags': ['handle_chat'],
+        'task_profile_source': task_profile.source if task_profile else 'disabled',
+        'task_profile': task_profile.to_trace_dict() if task_profile else {},
+        'router_latency_ms': task_profile.router_latency_ms if task_profile else 0,
+        'router_error': task_profile.router_error if task_profile else '',
+        'prompt_modules': selected_prompt_modules(task_profile) if task_profile else [],
+        'skills_exposed': list(selected_skills or []),
     })
     prompt_builder = PromptBuilder.for_role(AgentRole.CHAT)
     add_standard_system_sections(
@@ -404,6 +455,8 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         tool_prompt_appendices=collect_system_prompt_appendices(
             active_configs + attachment_configs + ask_user_configs,
         ),
+        task_profile=task_profile,
+        dynamic_prompt_modules=_cfg['dynamic_prompt_modules'],
     )
     # Plugin policy historically followed the common system prompt.
     prompt_builder.system(
@@ -466,7 +519,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         stop_tools=stop_tools,
         force_summarize_context=query,
         execution_options=AgentExecutionOptions(
-            skills=agent.available_skills,
+            skills=skill_config,
             workspace=chat_agent_workspace(user_id or '0', conversation_id),
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,

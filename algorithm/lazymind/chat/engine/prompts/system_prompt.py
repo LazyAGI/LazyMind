@@ -7,9 +7,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
 
 from .guidance import (
+    DECISION_PLANNING_GUIDANCE,
     DEFAULT_SYSTEM_PROMPT,
+    DELIVERABLE_GUIDANCE,
+    FRESH_RESEARCH_GUIDANCE,
+    LEARNING_GUIDANCE,
     RESPONSE_LANGUAGE_GUIDANCE,
+    SKILL_RESTRAINT_GUIDANCE,
 )
+from .task_profile import TaskProfile
 
 _DEFAULT_UI_LOCALE = 'zh-CN'
 _CJK_PATTERN = re.compile(r'[\u3400-\u9fff]')
@@ -210,6 +216,8 @@ def add_standard_system_sections(
     conversation_history: list[dict] | None = None,
     tool_prompt_appendices: dict[str, list[str]] | None = None,
     show_tool_status: bool = True,
+    task_profile: TaskProfile | None = None,
+    dynamic_prompt_modules: bool = False,
 ) -> PromptBuilder:
     builder.system(
         'platform_identity', '', DEFAULT_SYSTEM_PROMPT, 'platform.guidance', priority=10,
@@ -227,6 +235,34 @@ def add_standard_system_sections(
     builder.system(
         'environment', '', environment_prompt, 'request.environment', priority=30,
     )
+
+    if dynamic_prompt_modules and task_profile is not None:
+        outcomes = {task_profile.primary_outcome, *task_profile.secondary_outcomes}
+        builder.system(
+            'task_learning', '', LEARNING_GUIDANCE, 'platform.task.learning', priority=32,
+            skip_if='learn' not in outcomes,
+        ).system(
+            'task_fresh_research', '', FRESH_RESEARCH_GUIDANCE,
+            'platform.task.research', priority=33,
+            skip_if=not task_profile.research_required and task_profile.freshness != 'current',
+        ).system(
+            'task_decision_planning', '', DECISION_PLANNING_GUIDANCE,
+            'platform.task.decision', priority=34,
+            skip_if=not outcomes.intersection({'decide', 'plan'}),
+        )
+        deliverables = [task_profile.deliverable_kind, *task_profile.secondary_deliverables][:2]
+        contracts = [DELIVERABLE_GUIDANCE[item] for item in deliverables if item in DELIVERABLE_GUIDANCE]
+        builder.system(
+            'task_deliverable', '# Deliverable contract', '\n'.join(contracts),
+            'platform.task.deliverable', priority=35,
+            skip_if=not contracts or (
+                task_profile.complexity == 'simple' and task_profile.deliverable_kind == 'direct_answer'
+            ),
+        ).system(
+            'task_skill_restraint', '', SKILL_RESTRAINT_GUIDANCE,
+            'platform.task.skills', priority=36,
+            skip_if=task_profile.skill_mode == 'explicit',
+        )
 
     if use_memory:
         if isinstance(user_preference, str) and user_preference.strip():
