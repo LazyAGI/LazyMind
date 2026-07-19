@@ -30,6 +30,40 @@ func TestApplyMentionedToolsOnlyEnablesMentionedNames(t *testing.T) {
 	}
 }
 
+func TestMentionIsDeniedUsesOnlyTheMentionsLocalClause(t *testing.T) {
+	query := "不要使用 paper-search，可以使用 web-search"
+	denied := chatMention{Type: "tool", ResourceID: "paper-search", DisplayName: "paper-search"}
+	allowed := chatMention{Type: "tool", ResourceID: "web-search", DisplayName: "web-search"}
+	if !mentionIsDenied(query, denied) {
+		t.Fatal("paper-search should be denied")
+	}
+	if mentionIsDenied(query, allowed) {
+		t.Fatal("the earlier denial must not leak into web-search")
+	}
+}
+
+func TestMentionIsDeniedHandlesConjunctionsAndCommonDenialWords(t *testing.T) {
+	tests := []struct {
+		query  string
+		name   string
+		denied bool
+	}{
+		{"别用 paper-search", "paper-search", true},
+		{"我不想使用 paper-search", "paper-search", true},
+		{"不能调用 paper-search", "paper-search", true},
+		{"忽略 paper-search", "paper-search", true},
+		{"do not use paper-search", "paper-search", true},
+		{"不要用 paper-search 但可以用 web-search", "web-search", false},
+		{"不要用 paper-search 但请使用 web-search", "web-search", false},
+	}
+	for _, test := range tests {
+		mention := chatMention{Type: "plugin", ResourceID: test.name, DisplayName: test.name}
+		if got := mentionIsDenied(test.query, mention); got != test.denied {
+			t.Errorf("mentionIsDenied(%q, %q) = %v, want %v", test.query, test.name, got, test.denied)
+		}
+	}
+}
+
 func TestApplyExplicitResourceBindingsIncludesOnlyCurrentMentions(t *testing.T) {
 	body := map[string]any{}
 	applyExplicitResourceBindings(body, resolvedChatMentions{
@@ -82,6 +116,16 @@ func TestBuildLazyChatRequestPropagatesExplicitResourceBindings(t *testing.T) {
 	}
 	if got := req.ExplicitResources.Mentions; len(got) != 1 || got[0]["resource_ref"] != "kb-video" {
 		t.Fatalf("Mentions = %#v", got)
+	}
+}
+
+func TestBuildLazyChatRequestPropagatesPreviewLLMConfirmation(t *testing.T) {
+	req := buildLazyChatRequest(map[string]any{
+		"context_usage_preview":             true,
+		"context_preview_allow_llm_routing": true,
+	})
+	if !req.Runtime.ContextUsagePreview || !req.Runtime.ContextPreviewAllowLLMRouting {
+		t.Fatalf("runtime preview flags = %#v", req.Runtime)
 	}
 }
 

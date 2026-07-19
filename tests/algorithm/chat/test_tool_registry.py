@@ -6,10 +6,28 @@ from lazymind.chat.service.component.tool_registry import (
     IMAGE_MARKDOWN_OUTPUT_APPENDIX,
     SKILL_TOOL_CONFIG,
     ToolConfig,
+    _capability_is_denied,
     collect_system_prompt_appendices,
     filter_tools,
     get_all_tool_groups,
 )
+
+
+@pytest.mark.parametrize(
+    'query',
+    [
+        '不要使用知识库', '别用知识库', '我不想用知识库', '无需查询知识库',
+        '不能使用知识库', '禁止调用知识库', '忽略知识库', 'do not use knowledge base',
+    ],
+)
+def test_capability_denial_recognizes_common_wording(query):
+    assert _capability_is_denied(query, ('知识库', 'knowledge base')) is True
+
+
+def test_capability_denial_does_not_leak_across_positive_clause():
+    assert _capability_is_denied(
+        '不用知识库A，可以使用知识库B', ('知识库',),
+    ) is False
 
 
 @pytest.fixture(autouse=True)

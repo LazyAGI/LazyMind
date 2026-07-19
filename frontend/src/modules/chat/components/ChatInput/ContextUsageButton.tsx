@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Collapse, Modal, Popover, Spin, Tooltip } from "antd";
+import { Alert, Button, Collapse, Modal, Popover, Spin, Tooltip } from "antd";
 import {
   DashboardOutlined,
   DownloadOutlined,
@@ -43,6 +43,7 @@ export default function ContextUsageButton({
   const [open, setOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [llmEnhanced, setLlmEnhanced] = useState(false);
   const versionRef = useRef(0);
   const calculatedKeyRef = useRef("");
   const requestRef = useRef<Promise<void> | null>(null);
@@ -62,6 +63,7 @@ export default function ContextUsageButton({
     setStatus("empty");
     setOpen(false);
     setDetailOpen(false);
+    setLlmEnhanced(false);
   }, [resetKey]);
 
   useEffect(() => () => {
@@ -69,16 +71,21 @@ export default function ContextUsageButton({
     requestRef.current = null;
   }, []);
 
-  const calculate = () => {
+  const calculate = (allowLlmRouting = false) => {
     if (requestRef.current) return requestRef.current;
     const requestedVersion = versionRef.current;
     const requestedKey = staleKey;
     const requestId = ++requestIdRef.current;
     setStatus("loading");
-    const request = estimateContextUsage(buildRequest())
+    const payload = {
+      ...buildRequest(),
+      context_preview_allow_llm_routing: allowLlmRouting,
+    };
+    const request = estimateContextUsage(payload)
       .then((nextReport) => {
         if (requestId !== requestIdRef.current) return;
         setReport(nextReport);
+        setLlmEnhanced(allowLlmRouting && !nextReport.requires_llm);
         calculatedKeyRef.current = requestedKey;
         setStatus(
           requestedVersion === versionRef.current && requestedKey === staleKey
@@ -104,7 +111,10 @@ export default function ContextUsageButton({
     if (exporting) return;
     setExporting(true);
     try {
-      const blob = await exportContextPrompt(buildRequest());
+      const blob = await exportContextPrompt({
+        ...buildRequest(),
+        context_preview_allow_llm_routing: llmEnhanced,
+      });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -182,6 +192,21 @@ export default function ContextUsageButton({
                 {t("chat.contextUsageUpdate")}
               </Button>
             </div>
+          ) : null}
+          {report.requires_llm ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={t("chat.contextUsageRuleOnlyWarning")}
+              description={report.llm_reason || t("chat.contextUsageRuleOnlyReason")}
+              action={(
+                <Button size="small" onClick={() => void calculate(true)}>
+                  {t("chat.contextUsageUseLlm")}
+                </Button>
+              )}
+            />
+          ) : llmEnhanced ? (
+            <Alert type="success" showIcon message={t("chat.contextUsageLlmEnhanced")} />
           ) : null}
           <div className="context-usage-categories">
             {report.categories.map((category, index) => (

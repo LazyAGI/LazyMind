@@ -238,6 +238,9 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if len(dbDisabledTools) > 0 {
 		resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, dbDisabledTools)
 	}
+	resourceContext.DisabledTools = mergeDisabledToolNames(
+		resourceContext.DisabledTools, mentionedResources.ExcludedToolNames,
+	)
 	resourceContext.DisabledTools = applyMentionedTools(resourceContext.DisabledTools, mentionedResources.ToolNames)
 	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
 	applyExplicitResourceBindings(reqBody, mentionedResources)
@@ -308,7 +311,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			reqBody["enable_subagent"] = v
 		}
 	}
-	if err := applyPluginSelection(r.Context(), db, userID, reqBody, mentionedResources.PluginRefs); err != nil {
+	if err := applyPluginSelection(
+		r.Context(), db, userID, reqBody, mentionedResources.PluginRefs,
+		mentionedResources.ExcludedPluginRefs,
+	); err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}

@@ -340,7 +340,13 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
 
     task_profile = None
     if _cfg['dynamic_prompt_modules']:
-        routing_model = AutoModel(model='llm') if _cfg['task_profile_llm_fallback'] else None
+        is_context_preview = runtime.context_usage_preview or runtime.context_prompt_export
+        preview_allows_llm = bool(runtime.context_preview_allow_llm_routing)
+        allow_routing_model = (
+            _cfg['task_profile_llm_fallback']
+            and (not is_context_preview or preview_allows_llm)
+        )
+        routing_model = AutoModel(model='llm') if allow_routing_model else None
         profile_started = time.monotonic()
         try:
             task_profile = await asyncio.wait_for(
@@ -350,7 +356,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                     history=agent_history,
                     intent=conversation.intent_context,
                     classifier=routing_model,
-                    enable_llm_fallback=_cfg['task_profile_llm_fallback'],
+                    enable_llm_fallback=allow_routing_model,
                     has_attachments=bool(files_map),
                     explicit_resources=explicit_resource_payload,
                 ),
@@ -453,6 +459,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     disabled = set(agent.disabled_tools or [])
     active_configs = filter_tools(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
+        user_query=language_query,
     )
     agent_tools = [cfg.tool for cfg in active_configs]
     # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
@@ -582,9 +589,27 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             react_agent.describe_context, agent_history, language_query,
         )
         if runtime.context_prompt_export:
-            return {'prompt_markdown': render_context_markdown(plan, agent_context)}
+            prompt_markdown = render_context_markdown(plan, agent_context)
+            if task_profile and task_profile.routing_review_required:
+                prompt_markdown = '\n'.join([
+                    '> ⚠️ This is a rule-only prompt preview and may be inaccurate.',
+                    f'> Reason: {task_profile.routing_review_reason}',
+                    '> Confirm model-assisted routing in the context preview to refine it.',
+                    '',
+                    prompt_markdown,
+                ])
+            return {'prompt_markdown': prompt_markdown}
         report = await estimate_context_usage(plan, agent_context)
-        return report_to_dict(report)
+        report_data = report_to_dict(report)
+        requires_llm = bool(task_profile and task_profile.routing_review_required)
+        report_data.update({
+            'preview_accuracy': 'rule_only' if requires_llm else (
+                'llm_enhanced' if runtime.context_preview_allow_llm_routing else 'deterministic'
+            ),
+            'requires_llm': requires_llm,
+            'llm_reason': task_profile.routing_review_reason if requires_llm else '',
+        })
+        return report_data
 
     async def event_stream() -> Any:
         final_result: Any = None

@@ -751,6 +751,27 @@ def test_ambiguous_resource_preference_uses_llm_intent_result() -> None:
     assert profile.request_assessment.status == 'ready'
 
 
+def test_rule_only_preview_marks_when_llm_review_would_be_needed() -> None:
+    calls = []
+    profile = resolve_task_profile(
+        '分析方案，尽量别依赖内部库，外部库你看着办',
+        classifier=lambda prompt: calls.append(prompt),
+        enable_llm_fallback=False,
+        explicit_resources={
+            'knowledge_base_ids': ['kb-internal', 'kb-external'],
+            'mentions': [
+                {'resource_type': 'knowledge_base', 'resource_ref': 'kb-internal',
+                 'display_name': '内部库'},
+                {'resource_type': 'knowledge_base', 'resource_ref': 'kb-external',
+                 'display_name': '外部库'},
+            ],
+        },
+    )
+    assert calls == []
+    assert profile.routing_review_required is True
+    assert '资源' in profile.routing_review_reason
+
+
 def test_llm_classification_cannot_override_explicit_resources() -> None:
     result = {
         'primary_outcome': 'learn',

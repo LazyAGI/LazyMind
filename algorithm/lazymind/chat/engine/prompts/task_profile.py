@@ -100,6 +100,8 @@ class TaskProfile:
     source: Literal['rules', 'llm', 'fallback'] = 'rules'
     router_latency_ms: int = 0
     router_error: str = ''
+    routing_review_required: bool = False
+    routing_review_reason: str = ''
 
     def to_trace_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -460,7 +462,8 @@ def _normalize_explicit_resources(value: Any) -> ExplicitResourceBindings:
 
 
 _RESOURCE_DENY = re.compile(
-    r'不要|别(?:再)?用|不想用|无需|不用|禁止|排除|忽略|跳过|避免使用|'
+    r'不要(?:使用|调用|加载|启用|查询|搜索|检索|用)?|别(?:再)?(?:使用|调用|用)|'
+    r'不想(?:使用|调用|用)|无需|不用|禁止|排除|忽略|跳过|避免使用|'
     r'do\s+not\s+use|don[’\']t\s+use|without|exclude|ignore', re.I,
 )
 _RESOURCE_ALLOW = re.compile(
@@ -490,7 +493,7 @@ def _resource_usage_policy(
         prefix = query[max(0, position - 28):position]
         deny = list(_RESOURCE_DENY.finditer(prefix))
         allow = list(_RESOURCE_ALLOW.finditer(prefix))
-        if deny and (not allow or deny[-1].start() >= allow[-1].start()):
+        if deny and (not allow or deny[-1].end() >= allow[-1].end()):
             excluded[mention.resource_type].add(mention.resource_ref)
         elif _RESOURCE_POLICY_HINT.search(prefix) and not allow:
             ambiguous = True
@@ -769,13 +772,36 @@ def resolve_task_profile(
         issue.issue_type == 'ambiguous_resource_policy'
         for issue in rule.request_assessment.issues
     )
+    review_reasons = []
+    if any(
+        issue.issue_type == 'ambiguous_resource_policy'
+        for issue in rule.request_assessment.issues
+    ):
+        review_reasons.append('资源的允许或排除关系需要语义判断')
+    if len({rule.primary_outcome, *rule.secondary_outcomes}) > 1:
+        review_reasons.append('请求包含多个可能竞争的目标')
+    if rule.confidence < 0.75:
+        review_reasons.append('规则无法高置信度确定主要目标')
+    if rule.request_assessment.status != 'ready' and not review_reasons:
+        review_reasons.append('请求约束需要进一步分析')
+    if needs_llm:
+        rule = replace(
+            rule,
+            routing_review_required=True,
+            routing_review_reason='；'.join(review_reasons) or '开放请求需要进一步判断交付目标',
+        )
     if not needs_llm or not enable_llm_fallback or classifier is None:
         return rule
     started = time.monotonic()
     try:
         result = classifier(_classifier_input(query, history, intent, has_attachments, resources))
         profile = _validate_llm_profile(_extract_json(result), rule, resources, query)
-        return replace(profile, router_latency_ms=int((time.monotonic() - started) * 1000))
+        return replace(
+            profile,
+            router_latency_ms=int((time.monotonic() - started) * 1000),
+            routing_review_required=False,
+            routing_review_reason='',
+        )
     except Exception as exc:
         return fallback_task_profile(
             query,
@@ -793,9 +819,13 @@ def fallback_task_profile(
     has_attachments: bool = False,
     explicit_resources: ExplicitResourceBindings | dict[str, Any] | None = None,
 ) -> TaskProfile:
-    rule, _ = _rule_profile(query, has_attachments=has_attachments)
+    rule, needed_llm = _rule_profile(query, has_attachments=has_attachments)
     resources = _normalize_explicit_resources(explicit_resources)
     rule = _apply_explicit_resources(rule, resources, query)
+    needed_llm = needed_llm or any(
+        issue.issue_type == 'ambiguous_resource_policy'
+        for issue in rule.request_assessment.issues
+    )
     return replace(
         rule,
         primary_outcome='answer',
@@ -808,6 +838,10 @@ def fallback_task_profile(
         source='fallback',
         router_latency_ms=max(0, int(latency_ms)),
         router_error=f'{type(error).__name__}: {error}'[:240],
+        routing_review_required=needed_llm,
+        routing_review_reason=(
+            '模型路由失败，当前结果使用规则安全回退' if needed_llm else ''
+        ),
     )
 
 

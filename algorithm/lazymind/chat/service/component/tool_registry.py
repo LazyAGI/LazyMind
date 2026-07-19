@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -709,13 +710,49 @@ def get_all_tool_groups(locale: str | None = None) -> list[dict]:
     return result
 
 
+_CAPABILITY_DENY_CUES = re.compile(
+    r'不要(?:使用|调用|查询|检索|搜索|启用|用)?|别(?:再)?(?:使用|调用|查询|检索|搜索|用)|'
+    r'不想(?:使用|调用|用)|不(?:使用|用)|无需|不能(?:用|使用)|'
+    r'禁止(?:使用|调用)|避免使用|排除|忽略|跳过|do\s+not\s+use|'
+    r'don[’\']t\s+use|never\s+use|without|exclude|ignore|avoid', re.I,
+)
+_CAPABILITY_ALLOW_CUES = re.compile(
+    r'可以(?:用|使用)|可(?:用|使用)|请(?:用|使用)|优先使用|允许使用|使用|调用|启用|'
+    r'can\s+use|may\s+use|please\s+use|use|enable', re.I,
+)
+_TOOL_CAPABILITY_TERMS: dict[str, tuple[str, ...]] = {
+    'kb': ('知识库', 'knowledge base'),
+}
+
+
+def _capability_is_denied(query: str, terms: tuple[str, ...]) -> bool:
+    """Return true only when every locally qualified occurrence is denied."""
+    decisions = []
+    lowered = query.lower()
+    for term in terms:
+        for match in re.finditer(re.escape(term.lower()), lowered):
+            prefix = query[max(0, match.start() - 40):match.start()]
+            prefix = re.split(r'[，,。；;！？!?\n]|但是|不过|然而|但', prefix)[-1]
+            denies = list(_CAPABILITY_DENY_CUES.finditer(prefix))
+            allows = list(_CAPABILITY_ALLOW_CUES.finditer(prefix))
+            if denies or allows:
+                decisions.append(
+                    bool(denies) and (not allows or denies[-1].end() >= allows[-1].end())
+                )
+    return bool(decisions) and all(decisions)
+
+
 def filter_tools(
     configs: list[ToolConfig],
     available_tools: list[str] | None = None,
+    user_query: str = '',
 ) -> list[ToolConfig]:
     result = []
     for cfg in configs:
         if available_tools is not None and cfg.name not in available_tools:
+            continue
+        terms = _TOOL_CAPABILITY_TERMS.get(cfg.name)
+        if terms and user_query and _capability_is_denied(user_query, terms):
             continue
         if not tool_is_active(cfg):
             continue

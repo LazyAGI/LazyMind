@@ -42,6 +42,7 @@ class ChatRuntimeOptions(BaseModel):
     mcp_config: Optional[List[Dict[str, Any]]] = None
     context_usage_preview: bool = False
     context_prompt_export: bool = False
+    context_preview_allow_llm_routing: bool = False
 
 
 class ChatPersonalizationOptions(BaseModel):
