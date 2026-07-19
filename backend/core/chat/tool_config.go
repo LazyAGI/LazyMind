@@ -23,10 +23,17 @@ func loadSelectedSearchToolCredential(ctx context.Context, db *gorm.DB, userID s
 	if item, err := loadSelectedSearchToolCredentialForUser(ctx, db, userID); err != nil || item != nil {
 		return item, err
 	}
+	return loadSharedToolCredential(ctx, db, searchProviderCategory)
+}
+
+func loadAcademicSearchToolCredential(ctx context.Context, db *gorm.DB, userID string) (*selectedToolProviderCredential, error) {
+	if item, err := loadSelectedToolCredentialForUser(ctx, db, userID, datasourceProviderCategory); err != nil || item != nil {
+		return item, err
+	}
 	if item, err := loadConfiguredSciverseDatasourceCredentialForUser(ctx, db, userID); err != nil || item != nil {
 		return item, err
 	}
-	return loadSharedSearchToolCredential(ctx, db)
+	return loadSharedToolCredential(ctx, db, datasourceProviderCategory)
 }
 
 func loadSelectedSearchToolCredentialForUser(
@@ -36,14 +43,26 @@ func loadSelectedSearchToolCredentialForUser(
 ) (*selectedToolProviderCredential, error) {
 	return scanSelectedSearchToolCredential(
 		db.WithContext(ctx).Table("user_selected_providers usp").
-			Where("usp.user_id = ?", userID),
+			Where("usp.user_id = ? AND usp.category = ?", userID, searchProviderCategory),
 	)
 }
 
-func loadSharedSearchToolCredential(ctx context.Context, db *gorm.DB) (*selectedToolProviderCredential, error) {
+func loadSelectedToolCredentialForUser(
+	ctx context.Context,
+	db *gorm.DB,
+	userID string,
+	category string,
+) (*selectedToolProviderCredential, error) {
 	return scanSelectedSearchToolCredential(
 		db.WithContext(ctx).Table("user_selected_providers usp").
-			Where("usp.share = ?", true),
+			Where("usp.user_id = ? AND usp.category = ?", userID, category),
+	)
+}
+
+func loadSharedToolCredential(ctx context.Context, db *gorm.DB, category string) (*selectedToolProviderCredential, error) {
+	return scanSelectedSearchToolCredential(
+		db.WithContext(ctx).Table("user_selected_providers usp").
+			Where("usp.share = ? AND usp.category = ?", true, category),
 	)
 }
 
@@ -224,6 +243,18 @@ func splitToolConfigKeys(raw string) []string {
 
 func searchToolConfigEntry(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
 	credential, err := loadSelectedSearchToolCredential(ctx, db, userID)
+	return toolConfigEntryFromCredential(credential, err)
+}
+
+func academicSearchToolConfigEntry(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
+	credential, err := loadAcademicSearchToolCredential(ctx, db, userID)
+	return toolConfigEntryFromCredential(credential, err)
+}
+
+func toolConfigEntryFromCredential(
+	credential *selectedToolProviderCredential,
+	err error,
+) (map[string]any, error) {
 	if err != nil || credential == nil {
 		return nil, err
 	}
