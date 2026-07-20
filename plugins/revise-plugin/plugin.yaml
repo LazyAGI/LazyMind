@@ -128,19 +128,19 @@ i18n:
     name: 文档局部修改
     steps:
       load_document: {label: 读取飞书文档}
-      build_context: {label: 构建修改上下文}
+      build_context: {label: 构建上下文}
       revise_document: {label: 修改文档}
       write_back: {label: 写回飞书}
     tabs:
       source: {label: 原始文档}
-      context: {label: 修改上下文}
+      context: {label: 构建上下文}
       revision: {label: 修改过程}
       write_back: {label: 写回结果}
     slots:
       source_ir: {label: 原始 IR}
       working_ir: {label: 工作 IR}
       remote_snapshot: {label: 飞书快照}
-      revision_context: {label: 修改上下文}
+      revision_context: {label: 上下文}
       revise_task: {label: 修改任务}
       locate_result: {label: 定位结果}
       modify_plan: {label: 修改计划}
