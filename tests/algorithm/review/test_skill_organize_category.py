@@ -107,6 +107,7 @@ def test_source_skill_uses_request_key_as_storage_identity():
     assert source.key == 'internal/demo'
     assert source.category == 'internal'
     assert source.name == 'demo'
+    assert source.model_dump()['category'] == 'internal'
 
 
 def test_planner_uses_full_keys_and_target_source_instead_of_model_category():

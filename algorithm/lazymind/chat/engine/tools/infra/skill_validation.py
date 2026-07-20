@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal, Optional
+from enum import StrEnum
+from typing import Any, Optional
 
 import yaml  # type: ignore
 
@@ -9,17 +10,15 @@ _PATH_SEGMENT_RE = re.compile(r'^[A-Za-z0-9._-]+$')
 _FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n(.*)$', re.DOTALL)
 _MAX_DESCRIPTION_LENGTH = 1024
 
-INTERNAL_SKILL_CATEGORY = 'internal'
-EXTERNAL_SKILL_CATEGORY = 'external'
-SkillStorageCategory = Literal['internal', 'external']
-SKILL_STORAGE_CATEGORIES: frozenset[SkillStorageCategory] = frozenset({
-    INTERNAL_SKILL_CATEGORY,
-    EXTERNAL_SKILL_CATEGORY,
-})
-_SKILL_STORAGE_CATEGORY_ERROR = (
-    f'Skill storage category must be {INTERNAL_SKILL_CATEGORY!r} or '
-    f'{EXTERNAL_SKILL_CATEGORY!r}.'
-)
+
+class SkillStorageCategory(StrEnum):
+    INTERNAL = 'internal'
+    EXTERNAL = 'external'
+
+
+INTERNAL_SKILL_CATEGORY = SkillStorageCategory.INTERNAL.value
+EXTERNAL_SKILL_CATEGORY = SkillStorageCategory.EXTERNAL.value
+SKILL_STORAGE_CATEGORIES = frozenset(category.value for category in SkillStorageCategory)
 
 
 def validate_skill_name(name: str) -> Optional[str]:
@@ -37,9 +36,11 @@ def validate_skill_name(name: str) -> Optional[str]:
 
 def require_skill_storage_category(category: str) -> str:
     normalized = str(category or '').strip()
-    if normalized not in SKILL_STORAGE_CATEGORIES:
-        raise ValueError(_SKILL_STORAGE_CATEGORY_ERROR)
-    return normalized
+    try:
+        return SkillStorageCategory(normalized).value
+    except ValueError:
+        allowed = ' or '.join(repr(item.value) for item in SkillStorageCategory)
+        raise ValueError(f'Skill storage category must be {allowed}.') from None
 
 
 def parse_skill_storage_key(value: str) -> tuple[str, str]:

@@ -333,11 +333,13 @@ class SkillManagementToolkit:
         """Rename an existing reusable skill package within its category.
 
         This moves the package within its existing storage category and rewrites
-        only the SKILL.md frontmatter name.
+        only the SKILL.md frontmatter name. The storage category is preserved:
+        an internal skill remains internal, and an external skill remains external.
 
         Args:
             name: Unique current skill name, or full "internal/name" or "external/name" skill key.
-            new_name: New skill name.
+            new_name: New single-segment skill name without an "internal/" or
+                "external/" prefix.
         """
         lazyllm.LOG.info(
             '[rename_skill] called '

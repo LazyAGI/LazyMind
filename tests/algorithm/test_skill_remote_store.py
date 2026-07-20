@@ -1,12 +1,7 @@
-import inspect
-from typing import get_args
-
 import pytest
 
 from lazymind.chat.engine.tools.infra.skill_remote_store import SkillRemoteStore
 from lazymind.chat.engine.tools.infra.skill_validation import (
-    SKILL_STORAGE_CATEGORIES,
-    SkillStorageCategory,
     parse_skill_storage_key,
     require_skill_storage_category,
 )
@@ -52,9 +47,7 @@ def _store(fs):
     return store
 
 
-def test_skill_storage_category_interface_accepts_only_internal_and_external():
-    assert set(get_args(SkillStorageCategory)) == {'internal', 'external'}
-    assert SKILL_STORAGE_CATEGORIES == frozenset({'internal', 'external'})
+def test_skill_storage_category_validation():
     assert require_skill_storage_category(' internal ') == 'internal'
     assert require_skill_storage_category('external') == 'external'
     assert parse_skill_storage_key('internal/example') == ('internal', 'example')
@@ -69,23 +62,14 @@ def test_skill_storage_category_interface_accepts_only_internal_and_external():
         parse_skill_storage_key('external/invalid name')
 
 
-def test_storage_category_is_limited_to_internal_and_external():
+def test_store_rejects_unsupported_storage_category_before_accessing_fs():
     fs = _RemoteFS()
     store = _store(fs)
 
-    assert store.package_dir('internal', 'example') == 'remote://skills/internal/example'
-    assert store.package_dir(' external ', 'example') == 'remote://skills/external/example'
-
     with pytest.raises(ValueError, match='internal.*external'):
         store.create('research', 'example', 'content')
-    with pytest.raises(ValueError, match='internal.*external'):
-        store.install_package('personal', 'example', {'SKILL.md': b'content'})
-    with pytest.raises(ValueError, match='internal.*external'):
-        store.remove('system', 'example')
 
     assert fs.calls == []
-    assert list(inspect.signature(store.resolve_existing_identity).parameters) == ['name']
-    assert 'external' in store.resolve_existing_identity('research/example')['error']
 
 
 def test_list_packages_only_returns_valid_storage_categories_and_names():

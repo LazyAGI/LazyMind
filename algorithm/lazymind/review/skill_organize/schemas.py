@@ -37,6 +37,8 @@ class SkillOrganizeRequest(BaseModel):
 
 
 class SourceSkill(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
     key: str
     category: SkillStorageCategory
     name: str
@@ -44,6 +46,8 @@ class SourceSkill(BaseModel):
 
 
 class SkillSummary(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
     key: str
     category: SkillStorageCategory
     name: str
