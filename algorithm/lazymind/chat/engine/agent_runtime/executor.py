@@ -12,13 +12,13 @@ from .models import AgentRunPlan
 
 
 class ToolCallGuard:
-    """Deduplicate identical calls and cap selected exploratory tools per agent run."""
+    """Stop selected tools from looping after failures without limiting successful work."""
 
-    def __init__(self, manager: Any, limits: dict[str, int] | None = None):
+    def __init__(self, manager: Any, failure_limits: dict[str, int] | None = None):
         self._manager = manager
-        self._limits = dict(limits or {})
-        self._cache: dict[str, Any] = {}
-        self._counts: dict[str, int] = {}
+        self._failure_limits = dict(failure_limits or {})
+        self._failed_signatures: set[str] = set()
+        self._consecutive_failures: dict[str, int] = {}
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
@@ -40,6 +40,32 @@ class ToolCallGuard:
             normalized = str(arguments)
         return f"{function.get('name', '')}:{normalized}"
 
+    @staticmethod
+    def _failed(result: Any) -> bool:
+        if not isinstance(result, dict):
+            return False
+        if result.get('ok') is False:
+            return True
+        value = result.get('value')
+        if isinstance(value, dict):
+            if value.get('success') is False:
+                return True
+            payload = value.get('result')
+            if isinstance(payload, dict):
+                total = payload.get('total')
+                succeeded = payload.get('succeeded')
+                if isinstance(total, int) and total > 0 and succeeded == 0:
+                    return True
+        return False
+
+    @staticmethod
+    def _blocked(name: str, message: str) -> dict[str, Any]:
+        return {
+            'ok': False,
+            'value': None,
+            'msg': f'[Repeated Tool Failure] {name}: {message}',
+        }
+
     def __call__(self, tools: Any, verbose: bool = False) -> Any:
         tool_calls = [tools] if isinstance(tools, dict) else list(tools or [])
         results: list[Any] = [None] * len(tool_calls)
@@ -51,30 +77,26 @@ class ToolCallGuard:
             function = tool_call.get('function') or {}
             name = str(function.get('name') or '')
             signature = self._signature(tool_call)
-            guarded = name in self._limits
-            if guarded and signature in self._cache:
-                results[index] = self._cache[signature]
-                lazyllm.LOG.info(f'[ToolCallGuard] reused duplicate tool call: {name}')
+            guarded = name in self._failure_limits
+            if guarded and signature in self._failed_signatures:
+                results[index] = self._blocked(
+                    name, 'this exact call already failed; do not retry it with the same arguments.',
+                )
+                lazyllm.LOG.info(f'[ToolCallGuard] blocked repeated failed call: {name}')
                 continue
             if guarded and signature in pending_signatures:
                 duplicate_indices[index] = pending_signatures[signature]
                 lazyllm.LOG.info(f'[ToolCallGuard] merged duplicate tool call: {name}')
                 continue
-            count = self._counts.get(name, 0)
-            limit = self._limits.get(name)
-            if limit is not None and count >= limit:
-                results[index] = {
-                    'ok': False,
-                    'value': None,
-                    'msg': (
-                        f'[Tool Call Limit] {name} has already been called {count} times in this '
-                        'task. Do not call it again; use existing observations or explain that '
-                        'the available evidence is insufficient.'
-                    ),
-                }
+            failures = self._consecutive_failures.get(name, 0)
+            limit = self._failure_limits.get(name)
+            if limit is not None and failures >= limit:
+                results[index] = self._blocked(
+                    name,
+                    f'{failures} consecutive attempts failed. Stop changing parameters and use '
+                    'another grounded source or explain that the evidence is unavailable.',
+                )
                 continue
-            if guarded:
-                self._counts[name] = count + 1
             pending.append(tool_call)
             pending_indices.append(index)
             if guarded:
@@ -84,8 +106,18 @@ class ToolCallGuard:
             for index, tool_call, result in zip(pending_indices, pending, pending_results):
                 results[index] = result
                 name = str((tool_call.get('function') or {}).get('name') or '')
-                if name in self._limits:
-                    self._cache[self._signature(tool_call)] = result
+                if name in self._failure_limits:
+                    if self._failed(result):
+                        self._consecutive_failures[name] = (
+                            self._consecutive_failures.get(name, 0) + 1
+                        )
+                        self._failed_signatures.add(self._signature(tool_call))
+                    else:
+                        self._consecutive_failures[name] = 0
+                        prefix = f'{name}:'
+                        self._failed_signatures = {
+                            item for item in self._failed_signatures if not item.startswith(prefix)
+                        }
         for duplicate_index, original_index in duplicate_indices.items():
             results[duplicate_index] = results[original_index]
         return results
@@ -138,7 +170,9 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
-        agent._tools_manager = ToolCallGuard(agent._tools_manager, options.tool_call_limits)
+        agent._tools_manager = ToolCallGuard(
+            agent._tools_manager, options.tool_failure_limits,
+        )
         agent.set_stop_tools(plan.stop_tools)
         return agent
 

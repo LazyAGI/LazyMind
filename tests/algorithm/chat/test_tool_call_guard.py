@@ -6,30 +6,26 @@ def _call(name, arguments):
 
 
 class _RecordingToolManager:
-    def __init__(self):
+    def __init__(self, result_factory=None):
         self.calls = []
+        self.result_factory = result_factory or (
+            lambda call: {'ok': True, 'value': call['function']['arguments']}
+        )
 
     def __call__(self, calls, verbose=False):
         self.calls.extend(calls)
-        return [
-            {'ok': True, 'value': call['function']['arguments']}
-            for call in calls
-        ]
+        return [self.result_factory(call) for call in calls]
 
 
-def test_exact_duplicate_tool_calls_are_reused_across_batches():
+def test_successful_calls_are_never_limited_or_cached():
     manager = _RecordingToolManager()
     guard = ToolCallGuard(manager, {'url_fetch': 2})
 
-    first = guard([
-        _call('url_fetch', '{"url":"https://example.com","mode":"text"}'),
-    ])
-    second = guard([
-        _call('url_fetch', '{"mode":"text","url":"https://example.com"}'),
-    ])
+    for index in range(20):
+        guard([_call('url_fetch', {'url': f'https://example.com/{index}'})])
+    guard([_call('url_fetch', {'url': 'https://example.com/0'})])
 
-    assert second == first
-    assert len(manager.calls) == 1
+    assert len(manager.calls) == 21
 
 
 def test_exact_duplicate_tool_calls_in_one_batch_are_merged():
@@ -45,8 +41,24 @@ def test_exact_duplicate_tool_calls_in_one_batch_are_merged():
     assert len(manager.calls) == 1
 
 
-def test_tool_call_limit_blocks_different_guesses_after_budget():
-    manager = _RecordingToolManager()
+def test_repeated_exact_failure_is_blocked_without_reexecution():
+    manager = _RecordingToolManager(
+        lambda _: {'ok': False, 'value': None, 'msg': 'network error'},
+    )
+    guard = ToolCallGuard(manager, {'url_fetch': 2})
+
+    guard([_call('url_fetch', {'url': 'https://one.example'})])
+    blocked = guard([_call('url_fetch', {'url': 'https://one.example'})])
+
+    assert len(manager.calls) == 1
+    assert blocked[0]['ok'] is False
+    assert '[Repeated Tool Failure]' in blocked[0]['msg']
+
+
+def test_different_parameter_guesses_are_blocked_after_consecutive_failures():
+    manager = _RecordingToolManager(
+        lambda _: {'ok': False, 'value': None, 'msg': 'network error'},
+    )
     guard = ToolCallGuard(manager, {'url_fetch': 2})
 
     guard([_call('url_fetch', {'url': 'https://one.example'})])
@@ -54,8 +66,20 @@ def test_tool_call_limit_blocks_different_guesses_after_budget():
     blocked = guard([_call('url_fetch', {'url': 'https://three.example'})])
 
     assert len(manager.calls) == 2
-    assert blocked[0]['ok'] is False
-    assert '[Tool Call Limit]' in blocked[0]['msg']
+    assert '[Repeated Tool Failure]' in blocked[0]['msg']
+
+
+def test_success_resets_consecutive_failure_count():
+    outcomes = iter([False, True, False, False])
+    manager = _RecordingToolManager(
+        lambda _: {'ok': next(outcomes), 'value': None},
+    )
+    guard = ToolCallGuard(manager, {'url_fetch': 2})
+
+    for index in range(4):
+        guard([_call('url_fetch', {'url': f'https://example.com/{index}'})])
+
+    assert len(manager.calls) == 4
 
 
 def test_unconfigured_stateful_tool_is_not_deduplicated():

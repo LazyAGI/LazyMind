@@ -121,6 +121,12 @@ config.add('web_search_timeout', int, 10, 'WEB_SEARCH_TIMEOUT', description='Web
 config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')
 config.add('max_retries', int, 20, 'MAX_RETRIES', description='Max retries for agentic function call loop.')
+config.add('agentic_max_rounds_low', int, 6, 'AGENTIC_MAX_ROUNDS_LOW',
+           description='Maximum ChatAgent ReAct rounds in low thinking-depth mode.')
+config.add('agentic_max_rounds_medium', int, 20, 'AGENTIC_MAX_ROUNDS_MEDIUM',
+           description='Maximum ChatAgent ReAct rounds in medium thinking-depth mode.')
+config.add('agentic_max_rounds_high', int, 60, 'AGENTIC_MAX_ROUNDS_HIGH',
+           description='Maximum ChatAgent ReAct rounds in high thinking-depth mode.')
 config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
            description='Workspace directory for agentic tools.')
 config.add('agentic_keep_full_turns', int, 3, 'AGENTIC_KEEP_FULL_TURNS',

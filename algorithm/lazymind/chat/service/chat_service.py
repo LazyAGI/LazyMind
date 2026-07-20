@@ -579,12 +579,16 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,
             skills_dir=_cfg['skill_fs_url'],
-            max_retries={'low': 4, 'medium': 8, 'high': 20}.get(thinking_depth, 8),
-            tool_call_limits={
+            max_retries={
+                'low': _cfg['agentic_max_rounds_low'],
+                'medium': _cfg['agentic_max_rounds_medium'],
+                'high': _cfg['agentic_max_rounds_high'],
+            }.get(thinking_depth, _cfg['agentic_max_rounds_medium']),
+            tool_failure_limits={
                 'url_fetch': 2,
-                'kb_search': 3,
-                'kb_tmp_search': 3,
-                'list_knowledge_bases': 1,
+                'kb_search': 2,
+                'kb_tmp_search': 2,
+                'list_knowledge_bases': 2,
                 'list_knowledge_base_documents': 2,
                 'aggregate_knowledge_base_documents': 2,
             },
