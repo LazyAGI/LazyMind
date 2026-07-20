@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { RcFile } from "antd/es/upload";
-import { Badge, Button, message, Spin, Tooltip } from "antd";
+import { Badge, Button, message, Select, Spin, Tooltip } from "antd";
 import {
   BulbOutlined,
   CloseOutlined,
@@ -459,7 +459,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<
       string | null
     >(null);
-    const { setThink } = useChatThinkStore();
+    const { setThink, thinkingDepth, setThinkingDepth } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
     const [text, setText] = useState("");
@@ -1052,6 +1052,20 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     rerankReady={rerankReady}
                     onChange={onKnowledgeBaseChange}
                   />
+                  <Select
+                    aria-label={t("chat.thinkingDepth")}
+                    className="chat-thinking-depth-select"
+                    size="small"
+                    variant="borderless"
+                    value={thinkingDepth}
+                    disabled={disabled || isStreaming}
+                    onChange={setThinkingDepth}
+                    options={[
+                      { value: "low", label: t("chat.thinkingDepthLow") },
+                      { value: "medium", label: t("chat.thinkingDepthMedium") },
+                      { value: "high", label: t("chat.thinkingDepthHigh") },
+                    ]}
+                  />
                   {/* <ModelSelector sessionId={sessionId} disabled={isStreaming} /> */}
                   {showHistoryButton && openHistory && (
                     <div
@@ -1145,6 +1159,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           tags: chatConfig?.tags ?? [],
                         },
                         runtime: contextRuntimeSettings,
+                        thinkingDepth,
                       })}
                       buildRequest={() => {
                         const files = fileListRef.current?.getFiles() ?? [];
@@ -1173,6 +1188,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                             creator: chatConfig?.creators ?? [],
                             tags: chatConfig?.tags ?? [],
                           },
+                          thinking_depth: thinkingDepth,
                           ...contextRuntimeSettings,
                         };
                       }}

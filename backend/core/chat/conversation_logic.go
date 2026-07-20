@@ -695,6 +695,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"databases":        raw["databases"],
 		"debug":            raw["debug"],
 		"reasoning":        resolveReasoning(raw),
+		"thinking_depth":   resolveThinkingDepth(raw),
 		"priority":         raw["priority"],
 		"use_memory":       useMemory,
 		"user_id":          strings.TrimSpace(userID),
@@ -845,6 +846,16 @@ func resolveReasoning(raw map[string]any) bool {
 		return value
 	}
 	return true
+}
+
+func resolveThinkingDepth(raw map[string]any) string {
+	if value, ok := raw["thinking_depth"].(string); ok {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "low", "medium", "high":
+			return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return "medium"
 }
 
 func datasetIDsFromSearchConfig(sc map[string]any) []string {

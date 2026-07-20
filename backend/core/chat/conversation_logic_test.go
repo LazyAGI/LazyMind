@@ -336,6 +336,29 @@ func TestBuildChatRequestBodyPreservesExplicitReasoningFalse(t *testing.T) {
 	}
 }
 
+func TestBuildChatRequestBodyForwardsThinkingDepth(t *testing.T) {
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+		"thinking_depth": "low",
+	}, nil, "", 1)
+
+	if got := body["thinking_depth"]; got != "low" {
+		t.Fatalf("expected low thinking depth, got %#v", got)
+	}
+	req := buildLazyChatRequest(body)
+	if req.Runtime.ThinkingDepth != "low" {
+		t.Fatalf("expected upstream low thinking depth, got %q", req.Runtime.ThinkingDepth)
+	}
+}
+
+func TestBuildChatRequestBodyDefaultsInvalidThinkingDepth(t *testing.T) {
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+		"thinking_depth": "turbo",
+	}, nil, "", 1)
+	if got := body["thinking_depth"]; got != "medium" {
+		t.Fatalf("expected medium thinking depth, got %#v", got)
+	}
+}
+
 func TestBuildChatHistoryExtPreservesMultimodalInput(t *testing.T) {
 	ext := buildChatHistoryExt(map[string]any{
 		"input": []any{

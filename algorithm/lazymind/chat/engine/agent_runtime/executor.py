@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, AsyncIterator, Tuple
 
 import lazyllm
@@ -8,6 +9,86 @@ import lazyllm.tools.agent as _agent_mod
 from lazymind.config import config as _cfg
 
 from .models import AgentRunPlan
+
+
+class ToolCallGuard:
+    """Deduplicate identical calls and cap selected exploratory tools per agent run."""
+
+    def __init__(self, manager: Any, limits: dict[str, int] | None = None):
+        self._manager = manager
+        self._limits = dict(limits or {})
+        self._cache: dict[str, Any] = {}
+        self._counts: dict[str, int] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._manager, name)
+
+    @staticmethod
+    def _signature(tool_call: dict[str, Any]) -> str:
+        function = tool_call.get('function') or {}
+        arguments = function.get('arguments', {})
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except Exception:
+                arguments = arguments.strip()
+        try:
+            normalized = json.dumps(
+                arguments, ensure_ascii=False, sort_keys=True, separators=(',', ':'),
+            )
+        except (TypeError, ValueError):
+            normalized = str(arguments)
+        return f"{function.get('name', '')}:{normalized}"
+
+    def __call__(self, tools: Any, verbose: bool = False) -> Any:
+        tool_calls = [tools] if isinstance(tools, dict) else list(tools or [])
+        results: list[Any] = [None] * len(tool_calls)
+        pending: list[dict[str, Any]] = []
+        pending_indices: list[int] = []
+        pending_signatures: dict[str, int] = {}
+        duplicate_indices: dict[int, int] = {}
+        for index, tool_call in enumerate(tool_calls):
+            function = tool_call.get('function') or {}
+            name = str(function.get('name') or '')
+            signature = self._signature(tool_call)
+            guarded = name in self._limits
+            if guarded and signature in self._cache:
+                results[index] = self._cache[signature]
+                lazyllm.LOG.info(f'[ToolCallGuard] reused duplicate tool call: {name}')
+                continue
+            if guarded and signature in pending_signatures:
+                duplicate_indices[index] = pending_signatures[signature]
+                lazyllm.LOG.info(f'[ToolCallGuard] merged duplicate tool call: {name}')
+                continue
+            count = self._counts.get(name, 0)
+            limit = self._limits.get(name)
+            if limit is not None and count >= limit:
+                results[index] = {
+                    'ok': False,
+                    'value': None,
+                    'msg': (
+                        f'[Tool Call Limit] {name} has already been called {count} times in this '
+                        'task. Do not call it again; use existing observations or explain that '
+                        'the available evidence is insufficient.'
+                    ),
+                }
+                continue
+            if guarded:
+                self._counts[name] = count + 1
+            pending.append(tool_call)
+            pending_indices.append(index)
+            if guarded:
+                pending_signatures[signature] = index
+        if pending:
+            pending_results = self._manager(pending, verbose=verbose)
+            for index, tool_call, result in zip(pending_indices, pending, pending_results):
+                results[index] = result
+                name = str((tool_call.get('function') or {}).get('name') or '')
+                if name in self._limits:
+                    self._cache[self._signature(tool_call)] = result
+        for duplicate_index, original_index in duplicate_indices.items():
+            results[duplicate_index] = results[original_index]
+        return results
 
 
 def _tool_name(tool: Any) -> str:
@@ -37,7 +118,7 @@ class AgentExecutor:
         options = plan.execution_options
         kwargs = {
             'stream': True,
-            'max_retries': _cfg['max_retries'],
+            'max_retries': options.max_retries or _cfg['max_retries'],
             'enable_builtin_tools': False,
             'force_summarize': True,
             'force_summarize_context': plan.force_summarize_context,
@@ -57,6 +138,7 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
+        agent._tools_manager = ToolCallGuard(agent._tools_manager, options.tool_call_limits)
         agent.set_stop_tools(plan.stop_tools)
         return agent
 

@@ -17,7 +17,6 @@ from lazymind.chat.config import (
 )
 from lazymind.chat.engine.prompts import (
     add_standard_system_sections,
-    fallback_task_profile,
     resolve_task_profile,
     select_skill_candidates,
     selected_prompt_modules,
@@ -338,38 +337,23 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     inject_reader_config(ocr_config=runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
+    thinking_depth = (
+        runtime.thinking_depth
+        if runtime.thinking_depth in ('low', 'medium', 'high') else 'medium'
+    )
     task_profile = None
     if _cfg['dynamic_prompt_modules']:
-        is_context_preview = runtime.context_usage_preview or runtime.context_prompt_export
-        preview_allows_llm = bool(runtime.context_preview_allow_llm_routing)
-        allow_routing_model = (
-            _cfg['task_profile_llm_fallback']
-            and (not is_context_preview or preview_allows_llm)
-        )
-        routing_model = AutoModel(model='llm') if allow_routing_model else None
         profile_started = time.monotonic()
-        try:
-            task_profile = await asyncio.wait_for(
-                asyncio.to_thread(
-                    resolve_task_profile,
-                    language_query,
-                    history=agent_history,
-                    intent=conversation.intent_context,
-                    classifier=routing_model,
-                    enable_llm_fallback=allow_routing_model,
-                    has_attachments=bool(files_map),
-                    explicit_resources=explicit_resource_payload,
-                ),
-                timeout=max(1, _cfg['task_profile_llm_timeout']),
-            )
-        except asyncio.TimeoutError as exc:
-            task_profile = fallback_task_profile(
-                language_query,
-                error=exc,
-                latency_ms=int((time.monotonic() - profile_started) * 1000),
-                has_attachments=bool(files_map),
-                explicit_resources=explicit_resource_payload,
-            )
+        task_profile = resolve_task_profile(
+            language_query,
+            history=agent_history,
+            intent=conversation.intent_context,
+            classifier=None,
+            enable_llm_fallback=False,
+            has_attachments=bool(files_map),
+            explicit_resources=explicit_resource_payload,
+        )
+        profile_latency_ms = int((time.monotonic() - profile_started) * 1000)
         LOG.info(
             '[ChatServer] [TASK_PROFILE] [sid=%s] source=%s outcome=%s deliverable=%s '
             'modules_dynamic=true skill_mode=%s latency_ms=%s error=%s',
@@ -378,7 +362,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             task_profile.primary_outcome,
             task_profile.deliverable_kind,
             task_profile.skill_mode,
-            task_profile.router_latency_ms,
+            profile_latency_ms,
             task_profile.router_error,
         )
 
@@ -555,6 +539,21 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         'backend.turn', priority=60, authoritative=True, content_kind='state',
         skip_if=lambda: _eff_current_seq is None,
     )
+    prompt_builder.runtime(
+        'chat_task_routing_review', 'Task Routing Review', (
+            'The fast rule-only task profile was not conclusive. Independently determine the '
+            'user\'s actual goal, needed capabilities, and best response strategy before acting. '
+            'The provisional task profile is guidance, not an authoritative decision. Do not '
+            'announce or explain this routing analysis to the user; begin the useful response or '
+            'tool work directly. Uncertainty reported by rules: '
+            f'{task_profile.routing_review_reason if task_profile else "unknown"}'
+        ),
+        'backend.task_profile', priority=65, content_kind='instruction',
+        skip_if=lambda: not (
+            task_profile is not None
+            and task_profile.routing_review_required
+        ),
+    )
     prompt_bundle = prompt_builder.input(
         content=language_query,
         source='user',
@@ -580,6 +579,15 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,
             skills_dir=_cfg['skill_fs_url'],
+            max_retries={'low': 4, 'medium': 8, 'high': 20}.get(thinking_depth, 8),
+            tool_call_limits={
+                'url_fetch': 2,
+                'kb_search': 3,
+                'kb_tmp_search': 3,
+                'list_knowledge_bases': 1,
+                'list_knowledge_base_documents': 2,
+                'aggregate_knowledge_base_documents': 2,
+            },
         ),
     )
     executor = AgentExecutor()
@@ -594,7 +602,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 prompt_markdown = '\n'.join([
                     '> ⚠️ This is a rule-only prompt preview and may be inaccurate.',
                     f'> Reason: {task_profile.routing_review_reason}',
-                    '> Confirm model-assisted routing in the context preview to refine it.',
+                    '> ChatAgent will resolve this uncertainty when the request executes.',
                     '',
                     prompt_markdown,
                 ])
@@ -603,9 +611,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         report_data = report_to_dict(report)
         requires_llm = bool(task_profile and task_profile.routing_review_required)
         report_data.update({
-            'preview_accuracy': 'rule_only' if requires_llm else (
-                'llm_enhanced' if runtime.context_preview_allow_llm_routing else 'deterministic'
-            ),
+            'preview_accuracy': 'rule_only' if requires_llm else 'deterministic',
             'requires_llm': requires_llm,
             'llm_reason': task_profile.routing_review_reason if requires_llm else '',
         })
