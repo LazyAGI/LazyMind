@@ -69,7 +69,7 @@ const groups: Array<{
 }> = [
   { type: "knowledge_base", shortcut: "kb", labelKey: "chat.mentionKnowledgeBase", icon: <DatabaseOutlined /> },
   { type: "skill", shortcut: "skill", labelKey: "chat.mentionSkill", icon: <BulbOutlined /> },
-  { type: "plugin", shortcut: "plugin", labelKey: "chat.mentionPlugin", icon: <AppstoreOutlined /> },
+  { type: "plugin", shortcut: "workflow", labelKey: "chat.mentionPlugin", icon: <AppstoreOutlined /> },
   { type: "tool", shortcut: "tool", labelKey: "chat.mentionTool", icon: <ThunderboltOutlined /> },
   { type: "prompt", shortcut: "prompt", labelKey: "chat.mentionPrompt", icon: <BookOutlined /> },
   { type: "conversation", shortcut: "chat", labelKey: "chat.mentionConversation", icon: <CommentOutlined /> },

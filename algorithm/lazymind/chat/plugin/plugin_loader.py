@@ -453,7 +453,7 @@ def get_plugin_intro(plugin_id: str) -> str:
     plugin_id_val = spec.plugin_id
     description = (spec.yaml.get('description') or '').strip()
     when_to_use = (spec.yaml.get('when_to_use') or '').strip()
-    lines = [f'## Plugin: {plugin_id_val}']
+    lines = [f'## Workflow: {plugin_id_val}']
     if description:
         lines.append(description)
     if when_to_use:

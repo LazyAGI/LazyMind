@@ -301,7 +301,7 @@ def save_plugin_artifact(
     sort_order: Optional[int] = None,
     caption: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Save a plugin artifact directly from ChatAgent without launching a SubAgent.
+    """Save a workflow artifact directly from ChatAgent without launching a SubAgent.
 
     Use this when ChatAgent can produce the artifact value itself (e.g. copying a user
     file into a slot, or writing a short text value) without running a full SubAgent.
@@ -310,7 +310,7 @@ def save_plugin_artifact(
     Calls Go core POST /plugin-sessions/{session_id}/artifacts to write a slot revision.
 
     Args:
-        slot (str): The slot id to write (must have a slot binding in the plugin).
+        slot (str): The slot id to write (must have a slot binding in the workflow).
         value (Any): The artifact value.
             - text: a plain string.
             - json: a dict or list.
@@ -331,7 +331,7 @@ def save_plugin_artifact(
     if not session_id:
         return tool_success('save_plugin_artifact', {
             'status': 'error',
-            'message': 'No active plugin session found in agentic_config.',
+            'message': 'No active workflow session found.',
         })
 
     from lazymind.config import config as _cfg
@@ -382,7 +382,7 @@ def save_plugin_artifact(
                 'message': f'Go core returned {resp.status_code}: {resp.text[:200]}',
             })
         data = resp.json()
-        msg = f"Artifact '{slot}' saved to plugin session {session_id}."
+        msg = f"Artifact '{slot}' saved to workflow session {session_id}."
         return tool_success('save_plugin_artifact', {
             'status': 'ok',
             'message': msg,

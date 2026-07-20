@@ -594,7 +594,7 @@ def _apply_explicit_resources(
     elif excluded.knowledge_base_ids:
         updates['source_strategy'] = 'web' if _EXPLICIT_WEB.search(query) else 'model_knowledge'
     if resources.plugin_refs:
-        reasons.append('explicit plugin selection')
+        reasons.append('explicit workflow selection')
     assessment = profile.request_assessment
     issues = list(assessment.issues)
     questions = list(assessment.clarification_questions)
