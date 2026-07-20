@@ -28,8 +28,15 @@ from .github_skill_installer import (
 )
 from .memory_remote_store import (
     MEMORY_TARGET_PATHS,
+    MEMORY_TREE_PATHS,
     MemoryRemoteStore,
 )
+from lazymind.review.memory_review.paths import (
+    PREFERENCE_PATH,
+    PROFILE_PATH,
+    SOUL_PATH,
+)
+from lazymind.review.memory_review.store import MemoryStore
 from .skill_validation import (
     normalize_skill_category,
     parse_skill_frontmatter,
@@ -85,7 +92,12 @@ __all__ = [
     'ActionPlanningModule',
     'ChatHistoryRecord',
     'MEMORY_TARGET_PATHS',
+    'MEMORY_TREE_PATHS',
     'MemoryRemoteStore',
+    'MemoryStore',
+    'PREFERENCE_PATH',
+    'PROFILE_PATH',
+    'SOUL_PATH',
     'SynonymCandidate',
     'VocabSuggestion',
     'VocabEvolutionRequest',

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# LEGACY: old memory/user.md format (agent_persona / preferred_name / response_style).
+# New writes should use lazymind.review.memory_review.schema.profile / preference instead.
+# Keep this module for migrate.py and existing memory_editor validation.
+
 import re
 from typing import Any, Optional
 
