@@ -1,7 +1,9 @@
 from __future__ import annotations
 import asyncio
+import hashlib
 import json
 import re
+import threading
 import time
 from typing import Any, Dict, List, Optional, Union
 import lazyllm
@@ -75,6 +77,9 @@ _CITE_MESSAGE_PATTERN = re.compile(
     r'<cite_message>([\s\S]*?)</cite_message>\s*',
     re.IGNORECASE,
 )
+_MCP_TOOL_CACHE_TTL_SECONDS = 300
+_mcp_tool_cache: dict[str, tuple[float, list[Any]]] = {}
+_mcp_tool_cache_lock = threading.Lock()
 
 
 def _normalize_cite_message_query_for_agent(query: str) -> tuple[str, str]:
@@ -119,34 +124,47 @@ def check_sensitive_content(
     return sensitive_word if has_sensitive else None
 
 
-def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
-    """Build MCP tool list from mcp_config. Skip individual servers on failure with a warning."""
-    tools = []
-    for server in mcp_config:
-        url = server.get('url')
-        if not url:
-            LOG.warning(
-                f"[MCP] skipped server {server.get('name')}: missing 'url' field"
-            )
-            continue
-        try:
-            client = MCPClient(
-                command_or_url=url,
-                headers=server.get('headers'),
-                timeout=server.get('timeout', 5),
-                transport=server.get('transport', 'auto'),
-            )
-            allowed = server.get('allowed_tools') or None
-            mcp_tools = client.get_tools(allowed_tools=allowed)
-            tools.extend(mcp_tools)
-            LOG.info(
-                f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}"
-            )
-        except Exception as e:
-            LOG.warning(
-                f"[MCP] failed to connect {server.get('name')}: {e}"
-            )
-    return tools
+def _mcp_server_cache_key(server: Dict[str, Any]) -> str:
+    encoded = json.dumps(server, ensure_ascii=False, sort_keys=True, default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
+    url = server.get('url')
+    if not url:
+        LOG.warning(f"[MCP] skipped server {server.get('name')}: missing 'url' field")
+        return []
+    cache_key = _mcp_server_cache_key(server)
+    now = time.monotonic()
+    with _mcp_tool_cache_lock:
+        cached = _mcp_tool_cache.get(cache_key)
+        if cached and now - cached[0] < _MCP_TOOL_CACHE_TTL_SECONDS:
+            LOG.info(f"[MCP] reused cached tools from {server.get('name')}")
+            return list(cached[1])
+    try:
+        client = MCPClient(
+            command_or_url=url,
+            headers=server.get('headers'),
+            timeout=server.get('timeout', 5),
+            transport=server.get('transport', 'auto'),
+        )
+        allowed = server.get('allowed_tools') or None
+        mcp_tools = client.get_tools(allowed_tools=allowed)
+        with _mcp_tool_cache_lock:
+            _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
+        LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")
+        return mcp_tools
+    except Exception as e:
+        LOG.warning(f"[MCP] failed to connect {server.get('name')}: {e}")
+        return []
+
+
+async def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
+    """Load MCP schemas concurrently and reuse unchanged schemas briefly."""
+    groups = await asyncio.gather(*(
+        asyncio.to_thread(_load_mcp_server_tools, server) for server in mcp_config
+    ))
+    return [tool for group in groups for tool in group]
 
 
 def _build_subagent_chat_tools() -> list:
@@ -449,7 +467,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
     enable_subagent = agentic_config.get('enable_subagent', True)
     subagent_tools = _build_subagent_chat_tools() if enable_subagent else []
-    mcp_tools = _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
+    mcp_tools = await _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
     # User attachment tools are only meaningful when the user has uploaded files.
     attachment_tools = _build_user_attachment_tools(bool(files_map))
     attachment_configs = list(USER_ATTACHMENT_TOOL_CONFIGS) if attachment_tools else []
