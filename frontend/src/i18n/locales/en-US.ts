@@ -115,7 +115,6 @@ const enUS = {
       localDetailTitle: "Local Data Source",
       localDetailSubtitle:
         "Manage default local directory retrieval for new conversations and create sync tasks from the data source list.",
-      localManageDataSources: "Manage data sources",
       localConnectedCountLabel: "Connected directories",
       localScanChatSettingTitle: "Default local directory retrieval in new chats",
       localScanChatSwitchHint:
@@ -1140,6 +1139,7 @@ const enUS = {
       custom: "Custom",
     },
     promptGridView: "Grid view",
+    previewImage: "Preview image",
     promptListView: "List view",
     promptSortLabel: "Sort phrases",
     promptSortUpdated: "Last updated",
@@ -1323,6 +1323,7 @@ const enUS = {
     statusCompleted: "Done",
     statusFailed: "Failed",
     statusRunning: "In progress",
+    statusPending: "Pending",
     statusInterrupted: "Interrupted",
     statusWaiting: "Waiting for approval",
     filterAll: "All",
@@ -2046,7 +2047,6 @@ const enUS = {
     dataSourceFeishuSetupGuideAction: "Setup Guide",
     dataSourceNotionSetupGuideAction: "Setup Guide",
     dataSourceFeishuSetupGuide: {
-      backCreateSource: "Back to New Data Source",
       backAccounts: "Back to Feishu Accounts",
       title: "Data Source Management - New Data Source - Feishu",
       subtitle:
@@ -2171,7 +2171,6 @@ const enUS = {
       },
     },
     dataSourceNotionSetupGuide: {
-      backCreateSource: "Back to New Data Source",
       backManagement: "Back to Data Source Management",
       title: "Data Source Management - New Data Source - Notion",
       subtitle:
@@ -3245,6 +3244,9 @@ const enUS = {
     memorySkillCreateImportDesc: "Import from GitHub or a URL",
     memorySkillReviewCardTitle: "Skill Review",
     memorySkillReviewCardHint: "Pending experience",
+    memorySkillReviewDisabledLoading: "Checking for eligible conversations. Please wait.",
+    memorySkillReviewDisabledRunning: "A skill review is already running. Please try again later.",
+    memorySkillReviewDisabledEmpty: "No conversations currently qualify for skill review.",
     memorySkillOrganizeTitle: "Organize Skills",
     memorySkillOrganizeHint: "Select skills to organize",
     memorySkillOrganizeSelected: "{{count}} skills selected",
@@ -4348,6 +4350,7 @@ const enUS = {
       back: "Back",
       noLabelData: "No {{label}} data available.",
       viewLabelJson: "View {{label}} JSON",
+      hideLabelJson: "Hide {{label}} JSON",
       noSummary: "No summary",
       pendingAnalysis: "Pending analysis",
       alreadyLinked: "Linked",

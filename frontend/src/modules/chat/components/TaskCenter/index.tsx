@@ -481,7 +481,11 @@ function TaskCard({ task }: { task: SubAgentTask }) {
         >
           {collapsed ? <RightOutlined /> : <DownOutlined />}
         </button>
-        <span className="task-card-title">{task.title}</span>
+        <Tooltip title={task.title} placement="topLeft">
+          <span className="task-card-title" title={task.title}>
+            {task.title}
+          </span>
+        </Tooltip>
         <span className="task-card-tag">{t("taskCenter.panelTitle")}</span>
         <StatusBadge status={task.status} />
       </div>

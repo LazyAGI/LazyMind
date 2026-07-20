@@ -33,6 +33,7 @@ import ImageUpload, {
 import { fileToBase64 } from "@/modules/chat/utils/upload";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
 
 import "./index.scss";
 
@@ -235,6 +236,46 @@ function isImage(f: { name?: string }) {
 function isDoc(f: { name?: string }) {
   const suffix = getSuffix(f);
   return suffix !== "" && allowedFileTypes.includes(suffix);
+}
+
+const MARKDOWN_IMAGE_PATTERN =
+  /!\[[^\]]*\]\(([^\s)]+)(?:\s+["'][^"']*["'])?\)/g;
+
+function extractMarkdownImageSources(text: string): string[] {
+  return Array.from(
+    text.matchAll(MARKDOWN_IMAGE_PATTERN),
+    (match) => match[1] ?? "",
+  ).filter(Boolean);
+}
+
+function removeMarkdownImages(text: string): string {
+  return text.replace(MARKDOWN_IMAGE_PATTERN, "").trim();
+}
+
+async function markdownImageToFile(source: string): Promise<File> {
+  const resolvedSource = await resolveMarkdownImageUrlAsync(source);
+  const url = new URL(resolvedSource, window.location.origin);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Unsupported image URL protocol");
+  }
+
+  const response = await fetch(url, { credentials: "same-origin" });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch pasted image: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/")) {
+    throw new Error("Pasted URL did not return an image");
+  }
+  const rawName = decodeURIComponent(url.pathname.split("/").pop() || "");
+  const suffix = getSuffix({ name: rawName });
+  const mimeExtension = blob.type.split("/")[1]?.split("+")[0] || "png";
+  const fileName = allowedImageTypes.includes(suffix)
+    ? rawName
+    : `pasted-image-${Date.now()}.${mimeExtension}`;
+
+  return new File([blob], fileName, { type: blob.type || "image/png" });
 }
 
 function preprocessUpload(
@@ -902,14 +943,30 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             fileListRef.current?.uploadFiles(files);
           }
         } else {
+          const plainText = clipboardData.getData("text/plain");
+          const imageSources = extractMarkdownImageSources(plainText);
+
           // Keep the structured editor plain-text only; pasted HTML must not be
           // able to manufacture trusted mention nodes.
           e.preventDefault();
-          document.execCommand(
-            "insertText",
-            false,
-            clipboardData.getData("text/plain"),
-          );
+          if (imageSources.length > 0) {
+            e.stopPropagation();
+            void Promise.all(imageSources.map(markdownImageToFile))
+              .then((imageFiles) => {
+                fileListRef.current?.uploadFiles(imageFiles);
+                const remainingText = removeMarkdownImages(plainText);
+                if (remainingText) {
+                  document.execCommand("insertText", false, remainingText);
+                }
+              })
+              .catch(() => {
+                message.error(t("chat.fileUploadFailedRetry"));
+                document.execCommand("insertText", false, plainText);
+              });
+            return;
+          }
+
+          document.execCommand("insertText", false, plainText);
         }
       },
       [disabled, disabledReason, fileList.length, t],

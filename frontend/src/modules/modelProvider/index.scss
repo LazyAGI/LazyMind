@@ -2260,28 +2260,6 @@
   box-shadow: inset 0 0 0 1px rgba(191, 219, 254, 0.8);
 }
 
-.model-provider-cloud-doc-local-summary {
-  min-width: 108px;
-  padding-left: 20px;
-  border-left: 1px solid #e2e8f0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-
-  strong {
-    color: #0f172a;
-    font-size: 22px;
-    font-weight: 800;
-    line-height: 1;
-  }
-
-  .ant-typography {
-    font-size: 12px;
-    white-space: nowrap;
-  }
-}
-
 .model-provider-cloud-doc-setting-card {
   padding: 16px 18px;
   display: flex;
@@ -2416,15 +2394,6 @@
 }
 
 @media (max-width: 720px) {
-  .model-provider-cloud-doc-local-summary {
-    min-width: 0;
-    padding-left: 0;
-    border-left: 0;
-    flex-direction: row;
-    align-items: baseline;
-    gap: 8px;
-  }
-
   .model-provider-cloud-doc-setting-card {
     align-items: flex-start;
     flex-direction: column;
