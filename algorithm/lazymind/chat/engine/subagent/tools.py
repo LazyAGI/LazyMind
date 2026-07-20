@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from lazymind.chat.engine.attachment_reader import (
     is_chat_attachment_file,
     is_chat_image_file,
+    is_chat_text_file,
     parse_attachment_content,
 )
 from lazymind.chat.engine.tools.infra import tool_error, tool_success
+from lazymind.chat.engine.tools.attachment_edit import (
+    AttachmentEditDraft,
+    effective_attachment_path,
+)
 
 from .context import get_context, require_context, LARGE_ARTIFACT_THRESHOLD
 
@@ -18,6 +23,7 @@ _CONTENT_TYPES = {'text', 'json', 'image', 'file', 'file_list'}
 
 UPLOAD_MARKER = '/var/lib/lazymind/uploads/'
 SUBAGENT_MARKER = '/data/subagent/'
+_MAX_ATTACHMENT_EDIT_BYTES = 20 * 1024 * 1024
 
 
 def _is_valid_image_ref(path: str) -> bool:
@@ -996,7 +1002,8 @@ def _resolve_attachment(
 def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
     """Extract text from a user-uploaded attachment (on demand only).
 
-    Documents (pdf/doc/docx/pptx): OCR reader. Images: vision-model text description.
+    Documents (pdf/doc/docx/pptx): OCR reader. Plain-text files: direct UTF-8 read.
+    Images: vision-model text description.
     Do NOT call this just because a file is attached. For images used in visual tasks
     (edit, plugin, image_generator), use find_user_attachment for path/url instead.
     Call this when the user needs document text or a textual summary of image content.
@@ -1025,7 +1032,7 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
             'status': 'error',
             'message': (
                 f"Unsupported file type '{os.path.splitext(matched)[1].lower() or '(no extension)'}'. "
-                'Supported: png, jpg, jpeg, pdf, doc, docx, pptx.'
+                'Supported: images, Office/PDF documents, and common plain-text files.'
             ),
         })
 
@@ -1033,14 +1040,17 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
         import lazyllm
         cfg: Dict[str, Any] = lazyllm.globals.get('agentic_config') or {}
         priority = int(cfg.get('priority') or 0)
-        content = parse_attachment_content(matched, priority=priority)
+        read_path = effective_attachment_path(matched) if is_chat_text_file(matched) else matched
+        content = parse_attachment_content(read_path, priority=priority)
     except Exception as e:
         return tool_success('read_user_attachment', {
             'status': 'error',
             'message': f"Could not parse '{os.path.basename(matched)}': {e}",
         })
 
-    kind = 'image' if is_chat_image_file(matched) else 'document'
+    kind = 'image' if is_chat_image_file(matched) else (
+        'text' if is_chat_text_file(matched) else 'document'
+    )
 
     return tool_success('read_user_attachment', {
         'status': 'ok',
@@ -1049,6 +1059,135 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
         'kind': kind,
         'content': content,
     })
+
+
+def string_replace(
+    filename: str,
+    old_string: Optional[str] = None,
+    new_string: Optional[str] = None,
+    expected_replacements: int = 1,
+    turn: Optional[int] = None,
+    output_filename: Optional[str] = None,
+    mode: Literal['literal', 'regex'] = 'literal',
+    regex_flags: str = 'MULTILINE',
+    action: Literal['preview', 'apply', 'undo'] = 'preview',
+    preview_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Preview, apply, or undo a safe text replacement in an uploaded attachment.
+
+    Always call action='preview' first, inspect matches and diff, then call action='apply'
+    with the returned preview_id. Literal mode supports multiline text and treats LF/CRLF
+    as equivalent. Regex mode supports controlled flags and still requires an exact expected
+    match count. Applied edits update one downloadable artifact; action='undo' reverts one step.
+
+    Args:
+        filename: Attachment filename or display name shown in the conversation.
+        old_string: Literal text or regex pattern. Required only for preview.
+        new_string: Replacement text. Regex mode supports Python-style backreferences.
+        expected_replacements: Required match count, 1-100. A mismatch never changes the draft.
+        turn: Optional attachment turn number; omit to search newest attachments first.
+        output_filename: Optional download filename; defaults to the original filename.
+        mode: 'literal' (default) or 'regex'.
+        regex_flags: Comma-separated IGNORECASE, MULTILINE, and/or DOTALL for regex mode.
+        action: 'preview' (default), 'apply', or 'undo'.
+        preview_id: Required for apply; copy it exactly from a successful preview result.
+
+    Returns:
+        Preview diff and match locations, applied artifact metadata, or undo result.
+    """
+    matched, err = _resolve_attachment(filename, turn)
+    if err:
+        return tool_success('string_replace', {'status': 'error', 'message': err})
+    if not os.path.isfile(matched):
+        return tool_success('string_replace', {
+            'status': 'error',
+            'message': f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
+        })
+    if not is_chat_text_file(matched):
+        return tool_success('string_replace', {
+            'status': 'error',
+            'message': 'string_replace supports uploaded plain-text/code/config files only.',
+        })
+    size = os.path.getsize(matched)
+    if size > _MAX_ATTACHMENT_EDIT_BYTES:
+        return tool_success('string_replace', {
+            'status': 'error',
+            'message': 'Text attachment exceeds the 20 MiB editing limit.',
+        })
+
+    normalized_action = str(action or 'preview').strip().lower()
+    try:
+        draft = AttachmentEditDraft.for_current_conversation(matched)
+        if normalized_action == 'preview':
+            if old_string is None or new_string is None:
+                raise ValueError('old_string and new_string are required for preview')
+            preview = draft.create_preview(
+                old_string,
+                new_string,
+                expected_replacements,
+                mode,
+                regex_flags,
+                output_filename or os.path.basename(matched),
+            )
+            return tool_success('string_replace', {
+                'status': 'preview',
+                'action': 'preview',
+                'source_filename': os.path.basename(matched),
+                **preview,
+                'requires_apply': True,
+                'message': (
+                    'Preview only; no file was changed. Verify every match and the diff, then call '
+                    "string_replace with action='apply' and this preview_id."
+                ),
+            })
+        if normalized_action == 'apply':
+            if not preview_id:
+                raise ValueError('preview_id is required for apply; run preview first')
+            had_previous_edit = os.path.isfile(draft.draft_path)
+            preview, content, revision = draft.apply_preview(preview_id)
+            artifact = draft.publish(str(preview.get('output_filename') or draft.filename), content)
+            artifact_result = artifact.get('result', {}) if isinstance(artifact, dict) else {}
+            return tool_success('string_replace', {
+                'status': 'ok',
+                'action': 'apply',
+                'source_filename': os.path.basename(matched),
+                'filename': artifact_result.get('filename') or preview.get('output_filename'),
+                'artifact_id': artifact_result.get('artifact_id'),
+                'replacements': preview.get('replacements'),
+                'matches': preview.get('matches'),
+                'diff': preview.get('diff'),
+                'mode': preview.get('mode'),
+                'bytes': len(content),
+                'revision': revision,
+                'undo_available': True,
+                'original_unchanged': True,
+                'continues_previous_edit': had_previous_edit,
+                'message': artifact_result.get('message') or 'Applied the validated preview.',
+            })
+        if normalized_action == 'undo':
+            content, diff, revision, filename = draft.undo(output_filename)
+            artifact = draft.publish(filename, content)
+            artifact_result = artifact.get('result', {}) if isinstance(artifact, dict) else {}
+            return tool_success('string_replace', {
+                'status': 'ok',
+                'action': 'undo',
+                'source_filename': os.path.basename(matched),
+                'filename': artifact_result.get('filename') or filename,
+                'artifact_id': artifact_result.get('artifact_id'),
+                'diff': diff,
+                'bytes': len(content),
+                'revision': revision,
+                'undo_available': revision > 0,
+                'original_unchanged': True,
+                'message': 'Reverted the most recent applied edit and updated the download artifact.',
+            })
+        raise ValueError("action must be 'preview', 'apply', or 'undo'")
+    except Exception as exc:
+        return tool_success('string_replace', {
+            'status': 'error',
+            'action': normalized_action,
+            'message': str(exc),
+        })
 
 
 def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:

@@ -205,6 +205,44 @@ func persistConversationArtifact(
 		CreateUserID:   userID,
 		CreatedAt:      now,
 	}
+	if event.ReplaceExisting {
+		var existing orm.ConversationArtifact
+		err := db.WithContext(ctx).First(&existing, "id = ?", artifactID).Error
+		if err == nil {
+			if existing.ConversationID != conversationID || existing.HistoryID != historyID ||
+				existing.CreateUserID != userID {
+				return nil, errors.New("artifact replacement scope mismatch")
+			}
+			row.CreatedAt = existing.CreatedAt
+			result := db.WithContext(ctx).Model(&orm.ConversationArtifact{}).
+				Where("id = ? AND conversation_id = ? AND history_id = ? AND create_user_id = ?",
+					artifactID, conversationID, historyID, userID).
+				Updates(map[string]any{
+					"filename":     row.Filename,
+					"slot":         row.Slot,
+					"content_type": row.ContentType,
+					"value":        row.Value,
+					"caption":      row.Caption,
+				})
+			if result.Error != nil {
+				return nil, result.Error
+			}
+			if result.RowsAffected != 1 {
+				return nil, errors.New("artifact replacement failed")
+			}
+			return &ConversationArtifactDTO{
+				ArtifactID: row.ID, ConversationID: row.ConversationID, HistoryID: row.HistoryID,
+				ProducerType: "main_agent", Filename: row.Filename, Slot: row.Slot,
+				ContentType: row.ContentType, Seq: 1,
+				Value:     conversationArtifactResponseValue(userID, conversationID, row),
+				Caption:   row.Caption,
+				CreatedAt: row.CreatedAt,
+			}, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
 	result := db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 	if result.Error != nil {
 		return nil, result.Error

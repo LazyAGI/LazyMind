@@ -11,13 +11,14 @@ from lazyllm import AutoModel, LOG
 from lazyllm.components.formatter import encode_query_with_filepaths
 from lazyllm.tools.rag.readers.ocrReader import DynamicPDFReader
 
-from lazymind.chat.config import CHAT_DOCUMENT_EXTENSIONS, IMAGE_EXTENSIONS
+from lazymind.chat.config import CHAT_DOCUMENT_EXTENSIONS, CHAT_TEXT_EXTENSIONS, IMAGE_EXTENSIONS
 from lazymind.chat.engine.prompts import VISION_EXTRACT_DEFAULT_INSTRUCTION
 from lazymind.config import config as _cfg
 from lazymind.model_config import is_model_role_available
 
-_SUPPORTED_ATTACHMENT_LABEL = 'png, jpg, jpeg, pdf, doc, docx, pptx'
+_SUPPORTED_ATTACHMENT_LABEL = 'images, Office/PDF documents, and common plain-text files'
 _PROMPT_TEMPLATE_PLACEHOLDER_RE = re.compile(r'\{(\w+)\}')
+_MAX_TEXT_ATTACHMENT_CHARS = 200_000
 
 
 def _sanitize_for_prompt_template(text: str) -> str:
@@ -48,8 +49,12 @@ def is_chat_document_file(path: str) -> bool:
     return _suffix(path) in CHAT_DOCUMENT_EXTENSIONS
 
 
+def is_chat_text_file(path: str) -> bool:
+    return _suffix(path) in CHAT_TEXT_EXTENSIONS
+
+
 def is_chat_attachment_file(path: str) -> bool:
-    return is_chat_image_file(path) or is_chat_document_file(path)
+    return is_chat_image_file(path) or is_chat_document_file(path) or is_chat_text_file(path)
 
 
 def filter_chat_image_files(files: List[str]) -> List[str]:
@@ -109,6 +114,21 @@ def read_chat_document_text(file_path: str) -> str:
     return body
 
 
+def read_chat_text_file(file_path: str, max_chars: int = _MAX_TEXT_ATTACHMENT_CHARS) -> str:
+    started_at = _log_parse_start(file_path, kind='text')
+    with open(file_path, 'r', encoding='utf-8', errors='strict') as file:
+        body = file.read(max_chars + 1)
+    if '\x00' in body:
+        raise ValueError('Attachment contains NUL bytes and is not a plain-text file')
+    if len(body) > max_chars:
+        body = (
+            body[:max_chars]
+            + f'\n\n[Attachment truncated after {max_chars} characters.]'
+        )
+    _log_parse_done(file_path, kind='text', started_at=started_at, body=body)
+    return body
+
+
 def extract_image_description(
     file_path: str,
     *,
@@ -134,7 +154,7 @@ def extract_image_description(
 
 
 def parse_attachment_content(file_path: str, *, priority: int = 0) -> str:
-    """Parse one chat attachment: images via VLM, documents via OCR reader."""
+    """Parse one chat attachment via VLM, OCR, or direct UTF-8 text reading."""
     path = str(Path(file_path).resolve())
     if not is_chat_attachment_file(path):
         raise ValueError(
@@ -145,6 +165,8 @@ def parse_attachment_content(file_path: str, *, priority: int = 0) -> str:
         if not is_model_role_available('vlm'):
             raise RuntimeError('vlm model role is not configured')
         return extract_image_description(path, priority=priority)
+    if is_chat_text_file(path):
+        return read_chat_text_file(path)
     return read_chat_document_text(path)
 
 

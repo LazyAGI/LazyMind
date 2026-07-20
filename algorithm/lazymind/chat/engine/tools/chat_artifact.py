@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
 import unicodedata
 import uuid
 from typing import Any, Dict, Optional
@@ -28,6 +29,11 @@ def _safe_filename(filename: str, content_type: str) -> str:
     if content_type in {'text', 'json'} and '.' not in name:
         name += '.json' if content_type == 'json' else '.txt'
     return name
+
+
+def validate_chat_artifact_filename(filename: str) -> str:
+    """Validate and normalize a downloadable file artifact name."""
+    return _safe_filename(filename, 'file')
 
 
 def _normalize_caption(caption: Optional[str]) -> Optional[str]:
@@ -152,16 +158,23 @@ def _save_chat_file(
     filename: str,
     path: str,
     caption: Optional[str],
+    artifact_id: Optional[str] = None,
+    replace_existing: bool = False,
 ) -> Dict[str, Any]:
     user_id, conversation_id = _current_artifact_scope()
     source = _resolve_source_file(path, user_id, conversation_id)
-    artifact_id = str(uuid.uuid4())
+    artifact_id = artifact_id or str(uuid.uuid4())
     destination_dir = _published_file_directory(user_id, conversation_id, artifact_id)
     destination = os.path.join(destination_dir, filename)
-    temporary = destination + '.tmp'
+    temporary = destination + f'.{uuid.uuid4().hex}.tmp'
+    created_directory = False
 
     try:
-        os.makedirs(destination_dir, exist_ok=False)
+        if replace_existing:
+            os.makedirs(destination_dir, exist_ok=True)
+        else:
+            os.makedirs(destination_dir, exist_ok=False)
+            created_directory = True
         shutil.copy2(source, temporary)
         os.replace(temporary, destination)
         size = os.path.getsize(destination)
@@ -173,9 +186,15 @@ def _save_chat_file(
             content_type='file',
             value=value,
             caption=caption,
+            replace_existing=replace_existing,
         )
     except Exception:
-        shutil.rmtree(destination_dir, ignore_errors=True)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        if created_directory:
+            shutil.rmtree(destination_dir, ignore_errors=True)
         raise
 
     return tool_success('save_chat_artifact', {
@@ -185,3 +204,36 @@ def _save_chat_file(
         'size': size,
         'message': f"Saved downloadable artifact '{filename}'.",
     })
+
+
+def save_chat_file_bytes(
+    filename: str,
+    content: bytes,
+    caption: Optional[str] = None,
+    artifact_id: Optional[str] = None,
+    replace_existing: bool = False,
+) -> Dict[str, Any]:
+    """Publish byte content as a downloadable main-chat file artifact."""
+    if not isinstance(content, bytes):
+        raise TypeError('content must be bytes')
+    safe_name = _safe_filename(filename, 'file')
+    normalized_caption = _normalize_caption(caption)
+    user_id, conversation_id = _current_artifact_scope()
+    workspace = chat_agent_workspace(user_id, conversation_id)
+    os.makedirs(workspace, exist_ok=True)
+    staging_dir = tempfile.mkdtemp(prefix='attachment-edit-', dir=workspace)
+    staged_file = os.path.join(staging_dir, safe_name)
+    try:
+        with open(staged_file, 'xb') as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        return _save_chat_file(
+            safe_name,
+            staged_file,
+            normalized_caption,
+            artifact_id=artifact_id,
+            replace_existing=replace_existing,
+        )
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)

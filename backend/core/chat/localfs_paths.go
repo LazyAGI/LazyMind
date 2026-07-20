@@ -28,6 +28,9 @@ var localFSScanHTTPClient = &http.Client{Timeout: localFSScanRequestTimeout}
 var allowedFileExtensions = map[string]bool{
 	"pdf": true, "doc": true, "docx": true,
 	"csv": true, "xls": true, "xlsx": true,
+	"ipynb": true, "md": true, "mbox": true,
+	"txt": true, "xml": true, "json": true, "jsonl": true,
+	"yaml": true, "yml": true, "html": true, "htm": true, "py": true,
 }
 
 type scanSourceListResponse struct {

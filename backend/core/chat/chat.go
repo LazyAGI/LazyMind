@@ -161,11 +161,12 @@ type TaskCreatedEvent struct {
 // ArtifactCreatedEvent is emitted by the main Agent's artifact tools.
 // Core binds it to the authoritative conversation and history IDs of this request.
 type ArtifactCreatedEvent struct {
-	ArtifactID  string          `json:"artifact_id"`
-	Filename    string          `json:"filename"`
-	ContentType string          `json:"content_type"`
-	Value       json.RawMessage `json:"value"`
-	Caption     *string         `json:"caption,omitempty"`
+	ArtifactID      string          `json:"artifact_id"`
+	Filename        string          `json:"filename"`
+	ContentType     string          `json:"content_type"`
+	Value           json.RawMessage `json:"value"`
+	Caption         *string         `json:"caption,omitempty"`
+	ReplaceExisting bool            `json:"replace_existing,omitempty"`
 }
 
 // AskQuestion is a single question within an AskPendingEvent.

@@ -172,11 +172,15 @@ def _build_chat_artifact_tools() -> list:
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
-    """Register find_user_attachment / read_user_attachment when the conversation has uploads."""
+    """Register attachment lookup, reading, and text editing when uploads exist."""
     if not has_files:
         return []
-    from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
-    return [find_user_attachment, read_user_attachment]
+    from lazymind.chat.engine.subagent.tools import (
+        find_user_attachment,
+        read_user_attachment,
+        string_replace,
+    )
+    return [find_user_attachment, read_user_attachment, string_replace]
 
 
 def _build_ask_user_tool() -> list:
