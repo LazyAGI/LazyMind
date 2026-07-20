@@ -6,7 +6,7 @@ import {
 } from "@ant-design/icons";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { getCloudDataSourceCallbackUrl } from "@/modules/dataSource/oauth/urls";
 import "./feishuSetupGuide.scss";
 import { CLOUD_DOCUMENTS_PATH } from "../utils/cloudDocumentUrls";
@@ -94,12 +94,9 @@ function buildGuideSteps(t: TFunction, redirectUri: string): GuideStep[] {
 export default function NotionSetupGuide() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
   const pageRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
   const stepRefs = useRef<Array<HTMLElement | null>>([]);
-  const isFromCreateSource =
-    new URLSearchParams(location.search).get("from") === "create-source";
   const orderedGuideSteps = buildGuideSteps(
     t,
     getCloudDataSourceCallbackUrl("notion"),
@@ -131,13 +128,9 @@ export default function NotionSetupGuide() {
             type="link"
             icon={<ArrowLeftOutlined />}
             className="feishu-setup-guide-back"
-            onClick={() =>
-              navigate(isFromCreateSource ? "/data-sources" : CLOUD_DOCUMENTS_PATH)
-            }
+            onClick={() => navigate(CLOUD_DOCUMENTS_PATH)}
           >
-            {isFromCreateSource
-              ? t("admin.dataSourceNotionSetupGuide.backCreateSource")
-              : t("admin.dataSourceNotionSetupGuide.backManagement")}
+            {t("admin.dataSourceNotionSetupGuide.backManagement")}
           </Button>
           <h1>{t("admin.dataSourceNotionSetupGuide.title")}</h1>
           <Paragraph className="feishu-setup-guide-subtitle">

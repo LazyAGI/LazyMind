@@ -1,6 +1,6 @@
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { Button, Checkbox, Input, Progress, Radio } from "antd";
-import { EditOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
 
@@ -55,6 +55,9 @@ export type AnswerState =
   | { type: "single"; value: string | null; otherText: string }
   | { type: "multiple"; value: string[]; otherText: string }
   | { type: "text"; value: string };
+
+// Must match algorithm/lazymind/chat/engine/tools/ask_user.py::_OTHER_OPTION.
+const OTHER_OPTION = "其他";
 
 function initAnswer(q: AskQuestion): AnswerState {
   switch (q.type) {
@@ -119,67 +122,8 @@ function formatAnswer(
   }
 }
 
-/** Editable inline choice label. */
-function EditableChoice({
-  value,
-  disabled,
-  onChange,
-}: {
-  value: string;
-  disabled: boolean;
-  onChange: (next: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const inputRef = useRef<any>(null);
-
-  const startEdit = (e: React.MouseEvent) => {
-    if (disabled) return;
-    e.stopPropagation();
-    setDraft(value);
-    setEditing(true);
-    // Focus after render
-    setTimeout(() => inputRef.current?.focus(), 0);
-  };
-
-  const commit = () => {
-    setEditing(false);
-    const trimmed = draft.trim();
-    if (trimmed && trimmed !== value) {
-      onChange(trimmed);
-    } else {
-      setDraft(value);
-    }
-  };
-
-  if (editing) {
-    return (
-      <Input
-        ref={inputRef}
-        size="small"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onPressEnter={commit}
-        onClick={(e) => e.stopPropagation()}
-        className="ask-wizard__choice-input"
-      />
-    );
-  }
-
-  return (
-    <span className="ask-wizard__choice-label">
-      {value}
-      {!disabled && (
-        <EditOutlined
-          className="ask-wizard__choice-edit-icon"
-          onClick={startEdit}
-          title={t("chat.askCardEditOption")}
-        />
-      )}
-    </span>
-  );
+function ChoiceLabel({ value }: { value: string }) {
+  return <span className="ask-wizard__choice-label">{value}</span>;
 }
 
 export default function AskCard({
@@ -190,7 +134,8 @@ export default function AskCard({
   onAnswerChange,
 }: AskCardProps) {
   const { t } = useTranslation();
-  const otherOption = t("chat.askCardOtherOption");
+  const otherOption = OTHER_OPTION;
+  const otherOptionLabel = t("chat.askCardOtherOption");
   const answerSeparator = t("chat.askCardAnswerSeparator");
   const { questions, title, description } = askPending;
   const total = questions.length;
@@ -200,9 +145,8 @@ export default function AskCard({
   );
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Per-question, per-choice edited labels. Keyed as `${qIdx}-${choiceIdx}`.
-  // Stored as Record<qIdx, string[]> mirroring the original choices array.
-  const [customChoices, setCustomChoices] = useState<Record<number, string[]>>(
+  // Preserve the structured payload shape expected by the backend.
+  const [customChoices] = useState<Record<number, string[]>>(
     () =>
       Object.fromEntries(questions.map((q, i) => [i, [...(q.choices ?? [])]])),
   );
@@ -230,16 +174,6 @@ export default function AskCard({
     if (autoAdvance && idx < total - 1) {
       setTimeout(() => setCurrentIndex(idx + 1), 180);
     }
-  };
-
-  const updateChoice = (qIdx: number, choiceIdx: number, newLabel: string) => {
-    setCustomChoices((prev) => {
-      const updated = { ...prev };
-      const arr = [...(updated[qIdx] ?? questions[qIdx]!.choices ?? [])];
-      arr[choiceIdx] = newLabel;
-      updated[qIdx] = arr;
-      return updated;
-    });
   };
 
   const handleSubmit = () => {
@@ -373,10 +307,12 @@ export default function AskCard({
                     value={origVal}
                     className="ask-wizard__choice"
                   >
-                    <EditableChoice
-                      value={currentChoices[ci] ?? origVal}
-                      disabled={disabled}
-                      onChange={(next) => updateChoice(currentIndex, ci, next)}
+                    <ChoiceLabel
+                      value={
+                        origVal === otherOption
+                          ? otherOptionLabel
+                          : (currentChoices[ci] ?? origVal)
+                      }
                     />
                   </Radio>
                 ))}
@@ -422,10 +358,12 @@ export default function AskCard({
                     value={origVal}
                     className="ask-wizard__choice"
                   >
-                    <EditableChoice
-                      value={currentChoices[ci] ?? origVal}
-                      disabled={disabled}
-                      onChange={(next) => updateChoice(currentIndex, ci, next)}
+                    <ChoiceLabel
+                      value={
+                        origVal === otherOption
+                          ? otherOptionLabel
+                          : (currentChoices[ci] ?? origVal)
+                      }
                     />
                   </Checkbox>
                 ))}

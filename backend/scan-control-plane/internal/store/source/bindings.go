@@ -122,7 +122,102 @@ func (r *SQLRepository) DeleteBinding(ctx context.Context, sourceID, bindingID s
 	return result, err
 }
 
+func (r *SQLRepository) ListReadyBindingCleanups(ctx context.Context, limit int) ([]Binding, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	db := r.ormDB(ctx)
+	if db == nil {
+		return nil, NewStoreError(ErrCodeInternal, "orm repository is not initialized")
+	}
+	var rows []ormBinding
+	err := db.Model(&ormBinding{}).
+		Joins("JOIN sources s ON s.source_id = source_bindings.source_id AND s.status = ?", "ACTIVE").
+		Where("source_bindings.status = ?", "DELETING").
+		Where(`EXISTS (
+			SELECT 1 FROM source_sync_runs sr
+			WHERE sr.source_id = source_bindings.source_id
+			  AND sr.binding_id = source_bindings.binding_id
+			  AND sr.binding_generation = source_bindings.binding_generation
+			  AND sr.scope_type = ?
+			  AND sr.status = ?
+		)`, "cleanup", SyncRunStatusSucceeded).
+		Where(`NOT EXISTS (
+			SELECT 1 FROM source_document_states ds
+			WHERE ds.source_id = source_bindings.source_id
+			  AND ds.binding_id = source_bindings.binding_id
+			  AND ds.pending_action = ?
+		)`, "DELETE").
+		Where(`NOT EXISTS (
+			SELECT 1 FROM parse_tasks pt
+			WHERE pt.source_id = source_bindings.source_id
+			  AND pt.binding_id = source_bindings.binding_id
+			  AND pt.task_action = ?
+			  AND pt.status IN ?
+		)`, "DELETE", []string{"PENDING", "RUNNING", "SUBMITTED"}).
+		Order("source_bindings.deleted_at, source_bindings.binding_id").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, mapSQLConstraint(err)
+	}
+	bindings := make([]Binding, 0, len(rows))
+	for _, row := range rows {
+		bindings = append(bindings, bindingFromORM(row))
+	}
+	return bindings, nil
+}
+
+func (r *SQLRepository) FinalizeBindingCleanup(ctx context.Context, sourceID, bindingID string, now time.Time) error {
+	return r.withORMTx(ctx, func(tx *gorm.DB) error {
+		var row ormBinding
+		if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("source_id = ? AND binding_id = ?", sourceID, bindingID).First(&row).Error; err != nil {
+			return mapORMNotFound(err, ErrCodeBindingNotFound, "binding not found")
+		}
+		binding := bindingFromORM(row)
+		if binding.Status != "DELETING" {
+			return NewStoreError(ErrCodeGenerationConflict, "binding is not deleting")
+		}
+		var pending int64
+		if err := tx.Model(&ormDocumentState{}).Where("source_id = ? AND binding_id = ? AND pending_action = ?", sourceID, bindingID, "DELETE").Count(&pending).Error; err != nil {
+			return mapSQLConstraint(err)
+		}
+		if pending > 0 {
+			return NewStoreError(ErrCodeGenerationConflict, "binding cleanup is still pending")
+		}
+		if _, err := cleanupBindingGenerationORMTx(tx, sourceID, bindingID, 0, "binding cleanup finalized", now); err != nil {
+			return err
+		}
+		if err := tx.Where("binding_id = ?", bindingID).Delete(&ormSyncCheckpoint{}).Error; err != nil {
+			return mapSQLConstraint(err)
+		}
+		return mapSQLConstraint(tx.Where("source_id = ? AND binding_id = ?", sourceID, bindingID).Delete(&ormBinding{}).Error)
+	})
+}
+
 func (r *SQLRepository) softDeleteBindingTx(ctx context.Context, tx *gorm.DB, sourceID, bindingID string, deletedAt time.Time) (Binding, CleanupResult, error) {
+	var row ormBinding
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("source_id = ? AND binding_id = ?", sourceID, bindingID).First(&row).Error; err != nil {
+		return Binding{}, CleanupResult{}, mapORMNotFound(err, ErrCodeBindingNotFound, "binding not found")
+	}
+	binding := bindingFromORM(row)
+	binding.Status = "DELETING"
+	binding.DeletedAt = &deletedAt
+	binding.UpdatedAt = deletedAt
+	if err := ormUpdateBinding(tx, binding); err != nil {
+		return Binding{}, CleanupResult{}, err
+	}
+	if err := releaseCheckpointLockORMTx(tx, sourceID, bindingID, deletedAt); err != nil {
+		return Binding{}, CleanupResult{}, err
+	}
+	cleanup, err := prepareBindingCleanupORMTx(tx, sourceID, bindingID, binding.BindingGeneration, "binding delete cleanup", deletedAt)
+	if err != nil {
+		return Binding{}, CleanupResult{}, err
+	}
+	return binding, cleanup, nil
+}
+
+func (r *SQLRepository) deleteBindingImmediatelyTx(ctx context.Context, tx *gorm.DB, sourceID, bindingID string, deletedAt time.Time) (Binding, CleanupResult, error) {
 	var row ormBinding
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("source_id = ? AND binding_id = ?", sourceID, bindingID).First(&row).Error; err != nil {
 		return Binding{}, CleanupResult{}, mapORMNotFound(err, ErrCodeBindingNotFound, "binding not found")
@@ -142,6 +237,18 @@ func (r *SQLRepository) softDeleteBindingTx(ctx context.Context, tx *gorm.DB, so
 		return Binding{}, CleanupResult{}, err
 	}
 	return binding, cleanup, nil
+}
+
+func releaseCheckpointLockORMTx(tx *gorm.DB, sourceID, bindingID string, now time.Time) error {
+	err := tx.Model(&ormSyncCheckpoint{}).
+		Where("binding_id = ?", bindingID).
+		Updates(map[string]any{
+			"source_id":  sourceID,
+			"lock_owner": nil,
+			"lock_until": nil,
+			"updated_at": now,
+		}).Error
+	return mapSQLConstraint(err)
 }
 
 func stopCheckpointORMTx(tx *gorm.DB, sourceID, bindingID string, now time.Time) error {
@@ -189,6 +296,75 @@ func cleanupBindingGenerationORMTx(tx *gorm.DB, sourceID, bindingID string, gene
 	result.TombstonedDocumentCount = count
 	result.CleanupIntents = append(result.CleanupIntents, CleanupIntent{Kind: "binding_cleanup", Reason: reason, CreatedAt: now})
 	return result, nil
+}
+
+func prepareBindingCleanupORMTx(tx *gorm.DB, sourceID, bindingID string, generation int64, reason string, now time.Time) (CleanupResult, error) {
+	if reason == "" {
+		reason = "binding cleanup"
+	}
+	var result CleanupResult
+	count, err := cancelSyncRunsORMTx(tx, sourceID, bindingID, generation, reason, now)
+	if err != nil {
+		return CleanupResult{}, err
+	}
+	result.CancelledSyncRunCount = count
+	count, err = cancelParseTasksORMTx(tx, sourceID, bindingID, generation, reason, now)
+	if err != nil {
+		return CleanupResult{}, err
+	}
+	result.CancelledParseTaskCount = count
+
+	var rows []ormDocumentState
+	if err := tx.Where("source_id = ? AND binding_id = ?", sourceID, bindingID).Find(&rows).Error; err != nil {
+		return CleanupResult{}, mapSQLConstraint(err)
+	}
+	var documents []ormDocument
+	if err := tx.Where("source_id = ? AND binding_id = ?", sourceID, bindingID).Find(&documents).Error; err != nil {
+		return CleanupResult{}, mapSQLConstraint(err)
+	}
+	documentsByObject := make(map[string]ormDocument, len(documents))
+	for _, document := range documents {
+		documentsByObject[document.ObjectKey] = document
+	}
+	for _, row := range rows {
+		state := documentStateFromORM(row)
+		document := documentsByObject[state.ObjectKey]
+		synced := strings.TrimSpace(state.BaselineVersion) != "" || strings.TrimSpace(document.CoreDocumentID) != ""
+		state.BindingGeneration = generation
+		state.ParseQueueState = "NONE"
+		state.ActiveTaskID = ""
+		state.LastError = JSON{}
+		state.UpdatedAt = now
+		if synced {
+			if strings.TrimSpace(state.BaselineVersion) == "" {
+				state.BaselineVersion = firstNonEmptyStoreString(document.CurrentVersionID, document.SourceVersion, state.SourceVersion)
+			}
+			state.SourceState = "OUT_OF_SCOPE"
+			state.PendingAction = "DELETE"
+			state.DocumentListVisible = true
+			state.Selectable = true
+		} else {
+			state.SourceState = "UNCHANGED"
+			state.PendingAction = ""
+			state.DocumentListVisible = false
+			state.Selectable = false
+			state.DocumentID = ""
+		}
+		if err := saveDocumentStateORMTx(tx, state); err != nil {
+			return CleanupResult{}, err
+		}
+	}
+	result.CleanupIntents = append(result.CleanupIntents, CleanupIntent{Kind: "binding_cleanup_pending", Reason: reason, CreatedAt: now})
+	return result, nil
+}
+
+func firstNonEmptyStoreString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func cancelSyncRunsORMTx(tx *gorm.DB, sourceID, bindingID string, generation int64, reason string, now time.Time) (int64, error) {

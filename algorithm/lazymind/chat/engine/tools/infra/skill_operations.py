@@ -3,9 +3,11 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional
 
-from .skill_identity import skill_identity_from_content
-from .skill_paths import normalize_skill_package_path
-from .skill_validation import validate_skill_content
+from lazymind.common.skill_document import (
+    SkillDocumentError,
+    require_valid_skill_document,
+)
+from lazymind.common.skill_paths import normalize_skill_package_path
 
 
 _UNICODE_MAP = {
@@ -22,7 +24,6 @@ _UNICODE_MAP = {
 
 def edit_skill_file(
     current_files: dict[str, str],
-    category: str,
     name: str,
     path: str,
     content: str,
@@ -36,7 +37,6 @@ def edit_skill_file(
     edited_files = dict(current_files)
     edited_files[normalized_path] = content
     return _build_skill_file_change(
-        category,
         name,
         normalized_path,
         current_files,
@@ -50,7 +50,6 @@ def edit_skill_file(
 
 def patch_skill_file(
     current_files: dict[str, str],
-    category: str,
     name: str,
     path: str,
     old_text: str,
@@ -77,7 +76,6 @@ def patch_skill_file(
     edited_files = dict(current_files)
     edited_files[normalized_path] = new_content
     return _build_skill_file_change(
-        category,
         name,
         normalized_path,
         current_files,
@@ -93,7 +91,6 @@ def patch_skill_file(
 
 def create_skill_file(
     current_files: dict[str, str],
-    category: str,
     name: str,
     path: str,
     content: str,
@@ -109,7 +106,6 @@ def create_skill_file(
     edited_files = dict(current_files)
     edited_files[normalized_path] = content
     return _build_skill_file_change(
-        category,
         name,
         normalized_path,
         current_files,
@@ -123,7 +119,6 @@ def create_skill_file(
 
 def delete_skill_file(
     current_files: dict[str, str],
-    category: str,
     name: str,
     path: str,
 ) -> dict:
@@ -138,7 +133,6 @@ def delete_skill_file(
     edited_files = dict(current_files)
     del edited_files[normalized_path]
     return _build_skill_file_change(
-        category,
         name,
         normalized_path,
         current_files,
@@ -202,7 +196,6 @@ def _validate_loaded_skill_package(files: dict[str, str]) -> None:
 
 
 def _build_skill_file_change(
-    category: str,
     name: str,
     normalized_path: str,
     current_files: dict[str, str],
@@ -213,7 +206,7 @@ def _build_skill_file_change(
     if edited_files == current_files:
         raise ValueError('Edited skill package is unchanged from current package.')
     if edited_files.get('SKILL.md') != current_files.get('SKILL.md'):
-        _validate_skill_identity_unchanged(category, name, edited_files.get('SKILL.md') or '')
+        _validate_skill_identity_unchanged(name, edited_files.get('SKILL.md') or '')
 
     result = dict(result)
     result['files'] = edited_files
@@ -221,13 +214,15 @@ def _build_skill_file_change(
     return result
 
 
-def _validate_skill_identity_unchanged(category: str, name: str, content: str) -> None:
-    content_error = validate_skill_content(content)
-    if content_error:
-        raise ValueError(content_error)
-    edited_category, edited_name = skill_identity_from_content(content)
-    if edited_category != category or edited_name != name:
-        raise ValueError('SKILL.md frontmatter name/category cannot be changed; use rename_skill.')
+def _validate_skill_identity_unchanged(name: str, content: str) -> None:
+    try:
+        require_valid_skill_document(content, expected_name=name)
+    except SkillDocumentError as exc:
+        if exc.code == 'name_mismatch':
+            raise ValueError(
+                'SKILL.md frontmatter name cannot be changed; use rename_skill.'
+            ) from exc
+        raise
 
 
 def _unicode_normalize(text: str) -> str:

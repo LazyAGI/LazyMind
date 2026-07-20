@@ -141,19 +141,20 @@ type Conversation struct {
 func (Conversation) TableName() string { return "conversations" }
 
 type ChatHistory struct {
-	ID              string          `gorm:"column:id;type:varchar(36);primaryKey"`
-	Seq             int             `gorm:"column:seq;not null"`
-	ConversationID  string          `gorm:"column:conversation_id;type:varchar(36);index;not null"`
-	RawContent      string          `gorm:"column:raw_content;type:text"`
-	RetrievalResult json.RawMessage `gorm:"column:retrieval_result;type:json"`
-	Content         string          `gorm:"column:content;type:text"`
-	Result          string          `gorm:"column:result;type:text"`
-	FeedBack        int             `gorm:"column:feed_back;default:0"`
-	Reason          string          `gorm:"column:reason;type:varchar(255)"`
-	ExpectedAnswer  string          `gorm:"column:expected_answer;type:text"`
-	Ext             json.RawMessage `gorm:"column:ext;type:json"`
-	Version         string          `gorm:"column:version;type:varchar(128);default:2.3"`
-	ToolCallTurns   int             `gorm:"column:tool_call_turns;not null;default:0;check:chk_chat_histories_tool_call_turns_non_negative,tool_call_turns >= 0"`
+	ID                string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	Seq               int             `gorm:"column:seq;not null"`
+	ConversationID    string          `gorm:"column:conversation_id;type:varchar(36);index;not null"`
+	RawContent        string          `gorm:"column:raw_content;type:text"`
+	RetrievalResult   json.RawMessage `gorm:"column:retrieval_result;type:json"`
+	Content           string          `gorm:"column:content;type:text"`
+	Result            string          `gorm:"column:result;type:text"`
+	FeedBack          int             `gorm:"column:feed_back;default:0"`
+	Reason            string          `gorm:"column:reason;type:varchar(255)"`
+	ExpectedAnswer    string          `gorm:"column:expected_answer;type:text"`
+	Ext               json.RawMessage `gorm:"column:ext;type:json"`
+	Version           string          `gorm:"column:version;type:varchar(128);default:2.3"`
+	ToolCallTurns     int             `gorm:"column:tool_call_turns;not null;default:0;check:chk_chat_histories_tool_call_turns_non_negative,tool_call_turns >= 0"`
+	ThinkingDurationS int64           `gorm:"column:thinking_duration_s;not null;default:0"`
 
 	TimeMixin
 }
@@ -161,18 +162,19 @@ type ChatHistory struct {
 func (ChatHistory) TableName() string { return "chat_histories" }
 
 type MultiAnswersChatHistory struct {
-	ID              string          `gorm:"column:id;type:varchar(36);primaryKey"`
-	Seq             int             `gorm:"column:seq;not null"`
-	ConversationID  string          `gorm:"column:conversation_id;type:varchar(36);index;not null"`
-	RawContent      string          `gorm:"column:raw_content;type:text"`
-	RetrievalResult json.RawMessage `gorm:"column:retrieval_result;type:json"`
-	Content         string          `gorm:"column:content;type:text"`
-	Result          string          `gorm:"column:result;type:text"`
-	ToolCallTurns   int             `gorm:"column:tool_call_turns;not null;default:0;check:chk_multi_answers_chat_histories_tool_call_turns_non_negative,tool_call_turns >= 0"`
-	FeedBack        int             `gorm:"column:feed_back;default:0"`
-	Reason          string          `gorm:"column:reason;type:varchar(255)"`
-	Ext             json.RawMessage `gorm:"column:ext;type:json"`
-	Endpoint        string          `gorm:"column:endpoint;type:varchar(512)"`
+	ID                string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	Seq               int             `gorm:"column:seq;not null"`
+	ConversationID    string          `gorm:"column:conversation_id;type:varchar(36);index;not null"`
+	RawContent        string          `gorm:"column:raw_content;type:text"`
+	RetrievalResult   json.RawMessage `gorm:"column:retrieval_result;type:json"`
+	Content           string          `gorm:"column:content;type:text"`
+	Result            string          `gorm:"column:result;type:text"`
+	ToolCallTurns     int             `gorm:"column:tool_call_turns;not null;default:0;check:chk_multi_answers_chat_histories_tool_call_turns_non_negative,tool_call_turns >= 0"`
+	ThinkingDurationS int64           `gorm:"column:thinking_duration_s;not null;default:0"`
+	FeedBack          int             `gorm:"column:feed_back;default:0"`
+	Reason            string          `gorm:"column:reason;type:varchar(255)"`
+	Ext               json.RawMessage `gorm:"column:ext;type:json"`
+	Endpoint          string          `gorm:"column:endpoint;type:varchar(512)"`
 
 	TimeMixin
 }

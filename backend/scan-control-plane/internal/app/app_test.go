@@ -93,8 +93,8 @@ func TestBuildSelectsSQLRepositoryAndHTTPAdapters(t *testing.T) {
 	if built.ParseWorkerRunner == nil || built.Scheduler == nil {
 		t.Fatalf("parse worker runner and scheduler should be wired: parse=%v scheduler=%v", built.ParseWorkerRunner, built.Scheduler)
 	}
-	if built.CrawlWorker == nil || built.CoreResultRunner == nil || built.TempCleanupRunner == nil {
-		t.Fatalf("runtime runners should be wired: crawl=%v reconciler=%v temp=%v", built.CrawlWorker, built.CoreResultRunner, built.TempCleanupRunner)
+	if built.CrawlWorker == nil || built.CoreResultRunner == nil || built.BindingCleanupRunner == nil || built.TempCleanupRunner == nil {
+		t.Fatalf("runtime runners should be wired: crawl=%v reconciler=%v binding_cleanup=%v temp=%v", built.CrawlWorker, built.CoreResultRunner, built.BindingCleanupRunner, built.TempCleanupRunner)
 	}
 	if got, want := built.ConnectorTypes, []connector.ConnectorType{localfs.ConnectorType, feishu.ConnectorType, notion.ConnectorType}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("connectors = %+v, want %+v", got, want)

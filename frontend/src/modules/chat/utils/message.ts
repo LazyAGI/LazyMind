@@ -154,8 +154,7 @@ export function buildChatMessageListFromHistory(
     });
 
     const isLastRecord = record === lastRecord;
-    const isActuallyGenerating =
-      isGenerating && isLastRecord && !record.result;
+    const isActuallyGenerating = isGenerating && isLastRecord;
     const splitResult = splitThinkingContent(
       record.result,
       record.reasoning_content,

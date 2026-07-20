@@ -65,6 +65,31 @@ func TestOpenAPISpecCoversAllRegisteredRoutes(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecIncludesDatasetSourceFilter(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+
+	op := openAPIOperationForTest(t, spec, "get", "/api/core/datasets")
+	params := openAPIParameterNamesForTest(t, op)
+	if _, ok := params["source"]; !ok {
+		t.Fatalf("dataset list must document the source query parameter")
+	}
+	sourceSchema := openAPIParameterSchemaForTest(t, op, "source")
+	if !reflect.DeepEqual(sourceSchema["enum"], []any{"manual", "cloud"}) {
+		t.Fatalf("unexpected dataset source values: %#v", sourceSchema["enum"])
+	}
+}
+
 func TestOpenAPISpecRevisionSchemasIncludeHeadMarker(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)
@@ -90,6 +115,28 @@ func TestOpenAPISpecRevisionSchemasIncludeHeadMarker(t *testing.T) {
 		isHead, ok := properties["is_head"].(map[string]any)
 		if !ok || isHead["type"] != "boolean" {
 			t.Fatalf("schema %s is_head property = %#v, want boolean", schemaName, properties["is_head"])
+		}
+	}
+}
+
+func TestOpenAPISpecPromptFacetsIncludeCategoryTotal(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	for _, schemaName := range []string{"promptFacetOpenAPIResponse", "PromptFacets"} {
+		properties := schemaPropertiesForTest(t, schemas, schemaName)
+		categoryTotal, ok := properties["category_total"].(map[string]any)
+		if !ok || categoryTotal["type"] != "integer" || categoryTotal["format"] != "int64" {
+			t.Fatalf("schema %s category_total property = %#v, want int64", schemaName, properties["category_total"])
 		}
 	}
 }
@@ -425,6 +472,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"get", "/api/core/skills", false, true, true},
 		{"get", "/api/core/skills/tags", false, false, true},
 		{"get", "/api/core/skills/categories", false, false, true},
+		{"get", "/api/core/skill-market/tags", false, false, true},
 		{"post", "/api/core/skills", true, false, true},
 		{"get", "/api/core/skills/{skill_id}", false, true, true},
 		{"patch", "/api/core/skills/{skill_id}", true, true, true},
@@ -476,7 +524,6 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"get", "/api/core/skill-review:summary", false, false, false},
 		{"post", "/api/core/skill-review:run", false, false, false},
 		{"get", "/api/core/skill-review/tasks", false, false, false},
-		{"get", "/api/core/skill-review-results/{review_result_id}", false, false, false},
 		{"get", "/api/core/agent/threads", false, true, true},
 		{"get", "/api/core/conversations/{name}:history", false, true, true},
 	}
@@ -540,6 +587,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		"/api/core/user-preference:confirm",
 		"/api/core/user-preference:discard",
 		"/api/core/skill-review-results",
+		"/api/core/skill-review-results/{review_result_id}",
 		"/api/core/skill-review-results/{review_result_id}:accept",
 		"/api/core/skill-review-results/{review_result_id}:reject",
 		"/api/core/memory-review-results",

@@ -3,6 +3,7 @@ import { Button, Collapse, Modal, Popover, Spin, Tooltip } from "antd";
 import {
   DashboardOutlined,
   DownloadOutlined,
+  ExclamationCircleFilled,
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -90,7 +91,9 @@ export default function ContextUsageButton({
         if (requestId === requestIdRef.current) setStatus(report ? "stale" : "error");
       })
       .finally(() => {
-        if (requestId === requestIdRef.current) requestRef.current = null;
+        if (requestId === requestIdRef.current) {
+          requestRef.current = null;
+        }
       });
     requestRef.current = request;
     return request;
@@ -104,7 +107,9 @@ export default function ContextUsageButton({
     if (exporting) return;
     setExporting(true);
     try {
-      const blob = await exportContextPrompt(buildRequest());
+      const blob = await exportContextPrompt({
+        ...buildRequest(),
+      });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -183,6 +188,16 @@ export default function ContextUsageButton({
               </Button>
             </div>
           ) : null}
+          {report.requires_llm ? (
+            <div className="context-usage-routing-state is-warning">
+              <ExclamationCircleFilled className="context-usage-routing-icon" />
+              <div className="context-usage-routing-copy">
+                <strong>{t("chat.contextUsageRuleOnlyWarning")}</strong>
+                <span>{report.llm_reason || t("chat.contextUsageRuleOnlyReason")}</span>
+                <small>{t("chat.contextUsageAgentReviewHint")}</small>
+              </div>
+            </div>
+          ) : null}
           <div className="context-usage-categories">
             {report.categories.map((category, index) => (
               <div key={category.category_id} className="context-usage-category">
@@ -203,7 +218,14 @@ export default function ContextUsageButton({
 
   return (
     <>
-      <Popover content={content} trigger="click" open={open} onOpenChange={handleOpenChange} placement="topRight">
+      <Popover
+        content={content}
+        trigger="click"
+        open={open}
+        fresh
+        onOpenChange={handleOpenChange}
+        placement="topRight"
+      >
         <Tooltip title={t("chat.contextUsageShow")}>
           <Button type="text" icon={<DashboardOutlined />} disabled={disabled} aria-label={t("chat.contextUsageShow")} />
         </Tooltip>

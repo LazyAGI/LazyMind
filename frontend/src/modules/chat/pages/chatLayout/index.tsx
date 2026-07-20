@@ -37,6 +37,7 @@ import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 
 // Stable empty reference to avoid returning a fresh array from the zustand
 // selector on every render, which (with useSyncExternalStore) would trigger an
@@ -433,6 +434,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           },
         },
         models: [t("chat.lazyMindModel")],
+        thinking_depth: useChatThinkStore.getState().thinkingDepth,
         // enable_thinking: think ? true : false,
         stream: true,
         input,

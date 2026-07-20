@@ -238,7 +238,6 @@ def _normalize_candidate_payload(
         raise ValueError('candidate payload must contain content')
     return {
         'skill_name': skill_name,
-        'category': str(payload.get('category') or 'general'),
         'source_trajectories': source_trajectories,
         'source_skills': source_skills,
         'applicable_scenario': applicable_scenario,

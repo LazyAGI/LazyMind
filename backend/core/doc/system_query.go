@@ -50,9 +50,9 @@ func AggregateDocuments(w http.ResponseWriter, r *http.Request) {
 	datasetIDs := normalizeDocumentDatasetIDs(req.DatasetIDs)
 	var err error
 	if len(datasetIDs) == 0 {
-		datasetIDs, err = accessibleDatasetIDs(r.Context(), userID)
+		datasetIDs, err = accessibleDatasetIDs(r, userID)
 	} else {
-		datasetIDs, err = readableRequestedDatasetIDs(r.Context(), userID, datasetIDs)
+		datasetIDs, err = readableRequestedDatasetIDs(r, userID, datasetIDs)
 	}
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query datasets failed", err), http.StatusInternalServerError)

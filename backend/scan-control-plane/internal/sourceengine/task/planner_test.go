@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
 	statepkg "github.com/lazymind/scan_control_plane/internal/sourceengine/state"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
@@ -525,6 +526,37 @@ func TestGeneratePendingTasksUsesPendingActionForDelete(t *testing.T) {
 	task := repo.tasks[result.TaskIDs[0]]
 	if task.TaskAction != TaskActionDelete || task.TargetVersionID != "v1" {
 		t.Fatalf("pending delete action was not preserved: %+v", task)
+	}
+}
+
+func TestGeneratePendingTasksAllowsOnlyDeleteForDeletingBinding(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	repo := newPlannerStore(now)
+	repo.binding.Status = "DELETING"
+	repo.run.ScopeType = string(connector.ScopeTypeCleanup)
+	repo.run.Coverage = store.JSON{"complete": true, "covered_target_root": true, "scope_type": string(connector.ScopeTypeCleanup)}
+	for _, key := range []string{"doc-delete", "doc-create"} {
+		repo.objects[key] = sourceObject(key, true)
+	}
+	deleteState := documentState("doc-delete", statepkg.SourceStateOutOfScope, true, now)
+	deleteState.PendingAction = statepkg.PendingActionDelete
+	deleteState.BaselineVersion = "v1"
+	repo.states["doc-delete"] = deleteState
+	repo.states["doc-create"] = documentState("doc-create", statepkg.SourceStateNew, true, now)
+	planner := NewDBTaskPlanner(repo, WithClock(func() time.Time { return now }), WithIDGenerator(repo.nextID))
+
+	result, err := planner.GeneratePendingTasks(ctx, GeneratePendingRequest{SourceID: "source-1", BindingID: "binding-1", RunID: "run-1"})
+	if err != nil {
+		t.Fatalf("generate cleanup tasks: %v", err)
+	}
+	if result.AcceptedCount != 1 || result.SkippedCount != 1 || len(result.TaskIDs) != 1 {
+		t.Fatalf("cleanup run should queue only the delete state: %+v", result)
+	}
+	if task := repo.tasks[result.TaskIDs[0]]; task.TaskAction != TaskActionDelete || task.ObjectKey != "doc-delete" {
+		t.Fatalf("unexpected cleanup task: %+v", task)
 	}
 }
 

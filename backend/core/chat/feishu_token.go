@@ -13,12 +13,13 @@ import (
 )
 
 const (
-	_authTokenTimeout = 5 * time.Second
-	_feishuProvider   = "feishu"
-	_notionProvider   = "notion"
+	_authTokenTimeout    = 5 * time.Second
+	_feishuProvider      = "feishu"
+	_googleDriveProvider = "googledrive"
+	_notionProvider      = "notion"
 )
 
-var _cloudToolProviders = []string{_feishuProvider, _notionProvider}
+var _cloudToolProviders = []string{_feishuProvider, _googleDriveProvider, _notionProvider}
 
 // _chatEnabledConnectionItem is a minimal projection of the auth-service
 // connection list response.

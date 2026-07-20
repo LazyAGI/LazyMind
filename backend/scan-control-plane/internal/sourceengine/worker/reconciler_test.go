@@ -92,6 +92,34 @@ func TestCoreResultReconcilerDoneWritesSuccessIntent(t *testing.T) {
 	}
 }
 
+func TestCoreResultReconcilerCompletesDeleteForDeletingBinding(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	task := store.ParseTask{TaskID: "task-delete", IdempotencyKey: "idem-delete", CoreTaskID: "core-task-delete", TaskAction: "DELETE", Status: TaskStatusSubmitted, NextRunAt: now}
+	s := newReconcilerStore(task)
+	binding := s.bindings["source-1/binding-1"]
+	binding.Status = "DELETING"
+	s.bindings["source-1/binding-1"] = binding
+	state := s.states["source-1/binding-1/doc-1"]
+	state.SourceState = statepkg.SourceStateOutOfScope
+	state.PendingAction = statepkg.PendingActionDelete
+	state.BaselineVersion = "v1"
+	s.states["source-1/binding-1/doc-1"] = state
+	core := newRecordingCoreClient()
+	core.Results["idem-delete"] = coreclient.CoreTaskResult{Status: coreclient.ResultStatusSucceeded}
+	reducer := &recordingReducer{}
+	reconciler := NewCoreResultReconciler(s, core, reducer, WithReconcilerClock(func() time.Time { return now }))
+
+	if err := reconciler.RunOnce(ctx, "worker-a"); err != nil {
+		t.Fatalf("reconcile deleting binding task: %v", err)
+	}
+	if s.tasks["task-delete"].Status != TaskStatusSucceeded || len(reducer.successes) != 1 {
+		t.Fatalf("deleting binding task was not completed: task=%+v successes=%+v", s.tasks["task-delete"], reducer.successes)
+	}
+}
+
 func TestCoreResultReconcilerFailedWritesFailureIntent(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 5, 27, 9, 0, 0, 0, time.UTC)

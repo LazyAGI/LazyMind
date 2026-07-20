@@ -13,11 +13,13 @@ from lazymind.chat.engine.tools.infra import (
 def read_memory(target: str) -> Dict[str, Any]:
     """Read the agent's current working memory or user profile text.
 
-    Use this tool when you are unsure about what is currently stored in
-    memory, for example when the user asks about their preferences,
-    references past discussions, or when you need to check existing content
-    before making an informed decision. This tool returns the full current
-    text and does not modify anything.
+    This reads optional persistent, cross-conversation notes. It does NOT read
+    the current conversation history, which is already present in the model's
+    messages. Never call this tool to recall earlier turns in the current chat,
+    summarize the conversation, or resolve a follow-up question. Empty
+    persistent memory does not mean that conversation history is unavailable.
+    Use this tool only when the user explicitly asks about saved memory/profile
+    content or when persistent cross-conversation notes are specifically needed.
 
     Args:
         target: Selects the document to read. Use 'memory' for agent

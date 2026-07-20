@@ -17,8 +17,10 @@ function getProviderStorageKey(baseKey: string, provider: CloudDataSourceProvide
 
 function savePendingFeishuOAuthSession(payload: FeishuPendingOAuthSession) {
   const serialized = JSON.stringify(payload);
-  sessionStorage.setItem(PENDING_STORAGE_KEY, serialized);
-  sessionStorage.setItem(`${PENDING_STORAGE_KEY_PREFIX}${payload.state}`, serialized);
+  for (const storage of [sessionStorage, localStorage]) {
+    storage.setItem(PENDING_STORAGE_KEY, serialized);
+    storage.setItem(`${PENDING_STORAGE_KEY_PREFIX}${payload.state}`, serialized);
+  }
 }
 
 function parsePendingFeishuOAuthSession(raw: string | null) {
@@ -34,20 +36,17 @@ function parsePendingFeishuOAuthSession(raw: string | null) {
 }
 
 function loadPendingFeishuOAuthSession(state: string) {
-  const pendingByState = parsePendingFeishuOAuthSession(
-    sessionStorage.getItem(`${PENDING_STORAGE_KEY_PREFIX}${state}`),
-  );
-
-  if (pendingByState?.state === state) {
-    return pendingByState;
-  }
-
-  const pending = parsePendingFeishuOAuthSession(
-    sessionStorage.getItem(PENDING_STORAGE_KEY),
-  );
-
-  if (pending?.state === state) {
-    return pending;
+  for (const storage of [sessionStorage, localStorage]) {
+    const pendingByState = parsePendingFeishuOAuthSession(
+      storage.getItem(`${PENDING_STORAGE_KEY_PREFIX}${state}`),
+    );
+    if (pendingByState?.state === state) {
+      return pendingByState;
+    }
+    const pending = parsePendingFeishuOAuthSession(storage.getItem(PENDING_STORAGE_KEY));
+    if (pending?.state === state) {
+      return pending;
+    }
   }
 
   return null;
@@ -65,8 +64,10 @@ export function savePendingCloudOAuthSession(
   const storageKey = getProviderStorageKey(PENDING_STORAGE_KEY, provider);
   const storageKeyPrefix = `${storageKey}:`;
   const serialized = JSON.stringify({ ...payload, provider });
-  sessionStorage.setItem(storageKey, serialized);
-  sessionStorage.setItem(`${storageKeyPrefix}${payload.state}`, serialized);
+  for (const storage of [sessionStorage, localStorage]) {
+    storage.setItem(storageKey, serialized);
+    storage.setItem(`${storageKeyPrefix}${payload.state}`, serialized);
+  }
 }
 
 export function loadPendingCloudOAuthSession(
@@ -79,17 +80,17 @@ export function loadPendingCloudOAuthSession(
 
   const storageKey = getProviderStorageKey(PENDING_STORAGE_KEY, provider);
   const storageKeyPrefix = `${storageKey}:`;
-  const pendingByState = parsePendingFeishuOAuthSession(
-    sessionStorage.getItem(`${storageKeyPrefix}${state}`),
-  );
-
-  if (pendingByState?.state === state) {
-    return pendingByState;
-  }
-
-  const pending = parsePendingFeishuOAuthSession(sessionStorage.getItem(storageKey));
-  if (pending?.state === state) {
-    return pending;
+  for (const storage of [sessionStorage, localStorage]) {
+    const pendingByState = parsePendingFeishuOAuthSession(
+      storage.getItem(`${storageKeyPrefix}${state}`),
+    );
+    if (pendingByState?.state === state) {
+      return pendingByState;
+    }
+    const pending = parsePendingFeishuOAuthSession(storage.getItem(storageKey));
+    if (pending?.state === state) {
+      return pending;
+    }
   }
 
   return null;
@@ -106,22 +107,22 @@ export function clearPendingCloudOAuthSession(
 
   const storageKey = getProviderStorageKey(PENDING_STORAGE_KEY, provider);
   const storageKeyPrefix = `${storageKey}:`;
-  sessionStorage.removeItem(`${storageKeyPrefix}${state}`);
-  const pending = parsePendingFeishuOAuthSession(sessionStorage.getItem(storageKey));
-
-  if (!pending || pending.state === state) {
-    sessionStorage.removeItem(storageKey);
+  for (const storage of [sessionStorage, localStorage]) {
+    storage.removeItem(`${storageKeyPrefix}${state}`);
+    const pending = parsePendingFeishuOAuthSession(storage.getItem(storageKey));
+    if (!pending || pending.state === state) {
+      storage.removeItem(storageKey);
+    }
   }
 }
 
 function clearPendingFeishuOAuthSession(state: string) {
-  sessionStorage.removeItem(`${PENDING_STORAGE_KEY_PREFIX}${state}`);
-  const pending = parsePendingFeishuOAuthSession(
-    sessionStorage.getItem(PENDING_STORAGE_KEY),
-  );
-
-  if (!pending || pending.state === state) {
-    sessionStorage.removeItem(PENDING_STORAGE_KEY);
+  for (const storage of [sessionStorage, localStorage]) {
+    storage.removeItem(`${PENDING_STORAGE_KEY_PREFIX}${state}`);
+    const pending = parsePendingFeishuOAuthSession(storage.getItem(PENDING_STORAGE_KEY));
+    if (!pending || pending.state === state) {
+      storage.removeItem(PENDING_STORAGE_KEY);
+    }
   }
 }
 

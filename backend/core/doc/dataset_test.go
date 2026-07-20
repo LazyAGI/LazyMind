@@ -145,6 +145,80 @@ func TestListDatasetsKeywordMatchesTags(t *testing.T) {
 	}
 }
 
+func TestListDatasetsFiltersScanDeniedSourceDatasets(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "ds-local", "user-1")
+	seedDocumentListDataset(t, db, "ds-manual", "user-1")
+
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost {
+			t.Errorf("unexpected scan request %s %q", r.Method, r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+		switch r.URL.Path {
+		case "/api/scan/internal/source-access/by-dataset:batch":
+			if got := r.Header.Get("Authorization"); got != "Bearer user-token" {
+				t.Errorf("expected Authorization to be forwarded, got %q", got)
+			}
+			return testJSONResponse(http.StatusOK, `{"items":[{"dataset_id":"ds-local","source_id":"source-local","exists":true,"allowed":false},{"dataset_id":"ds-manual","exists":false,"allowed":true}]}`), nil
+		case "/api/scan/internal/sources/by-datasets":
+			return testJSONResponse(http.StatusOK, `{"source_map":{"ds-manual":false}}`), nil
+		default:
+			t.Errorf("unexpected scan request %s %q", r.Method, r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/datasets?page_size=10", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	req.Header.Set("Authorization", "Bearer user-token")
+	rec := httptest.NewRecorder()
+
+	ListDatasets(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp ListDatasetsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.TotalSize != 1 || len(resp.Datasets) != 1 || resp.Datasets[0].DatasetID != "ds-manual" {
+		t.Fatalf("expected only manual dataset to remain, got total=%d datasets=%+v", resp.TotalSize, resp.Datasets)
+	}
+}
+
+func TestGetDatasetRejectsScanDeniedSourceDataset(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "ds-local", "user-1")
+
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/scan/internal/source-access/by-dataset:batch" {
+			t.Errorf("unexpected scan request %s %q", r.Method, r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+		return testJSONResponse(http.StatusOK, `{"items":[{"dataset_id":"ds-local","source_id":"source-local","exists":true,"allowed":false}]}`), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/datasets/ds-local", nil)
+	req = mux.SetURLVars(req, map[string]string{"dataset": "ds-local"})
+	req.Header.Set("X-User-Id", "user-1")
+	req.Header.Set("Authorization", "Bearer user-token")
+	rec := httptest.NewRecorder()
+
+	GetDataset(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected forbidden, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestGetDatasetReturnsCreatedByDataSource(t *testing.T) {
 	db := newDocumentTestDB(t)
 	seedDocumentListDataset(t, db, "ds-source", "user-1")
@@ -152,6 +226,9 @@ func TestGetDatasetReturnsCreatedByDataSource(t *testing.T) {
 
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/scan/internal/source-access/by-dataset:batch" {
+			return testJSONResponse(http.StatusOK, `{"items":[{"dataset_id":"ds-source","source_id":"source-1","exists":true,"allowed":true},{"dataset_id":"ds-manual","exists":false,"allowed":true}]}`), nil
+		}
 		if r.Method != http.MethodGet {
 			t.Errorf("unexpected method %s for %q", r.Method, r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
@@ -493,6 +570,9 @@ func TestDeleteDatasetRemovesEvalSetDatasetReferences(t *testing.T) {
 
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/scan/internal/source-access/by-dataset:batch" {
+			return testJSONResponse(http.StatusOK, `{"items":[{"dataset_id":"ds-delete","exists":false,"allowed":true}]}`), nil
+		}
 		if r.Method != http.MethodDelete {
 			t.Errorf("unexpected method %s for %q", r.Method, r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
@@ -568,6 +648,9 @@ func TestDeleteDatasetDeletesScanSourceFirst(t *testing.T) {
 	var calls []string
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/scan/internal/source-access/by-dataset:batch" {
+			return testJSONResponse(http.StatusOK, `{"items":[{"dataset_id":"ds-delete","source_id":"source-delete","exists":true,"allowed":true}]}`), nil
+		}
 		if r.Method != http.MethodDelete {
 			t.Errorf("unexpected method %s for %q", r.Method, r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
@@ -633,6 +716,9 @@ func TestDeleteDatasetContinuesWhenScanSourceMissing(t *testing.T) {
 	var calls []string
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/scan/internal/source-access/by-dataset:batch" {
+			return testJSONResponse(http.StatusOK, `{"items":[{"dataset_id":"ds-delete","exists":false,"allowed":true}]}`), nil
+		}
 		calls = append(calls, r.URL.Path)
 		switch r.URL.Path {
 		case "/api/scan/internal/sources/by-dataset/ds-delete":
@@ -687,6 +773,9 @@ func TestUpdateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	var got kbUpdateRequest
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/scan/internal/source-access/by-dataset:batch" {
+			return testJSONResponse(http.StatusOK, `{"items":[{"dataset_id":"ds-update","exists":false,"allowed":true}]}`), nil
+		}
 		if r.URL.Path == "/api/scan/internal/sources/by-dataset/ds-update" {
 			return testJSONResponse(http.StatusNotFound, `{"message":"source not found"}`), nil
 		}
@@ -750,6 +839,9 @@ func TestUpdateDatasetRejectsInvalidDisplayName(t *testing.T) {
 	called := false
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/scan/internal/source-access/by-dataset:batch" {
+			return testJSONResponse(http.StatusOK, `{"items":[{"dataset_id":"ds-update-invalid","exists":false,"allowed":true}]}`), nil
+		}
 		called = true
 		return testJSONResponse(http.StatusInternalServerError, `{"message":"unexpected call"}`), nil
 	})

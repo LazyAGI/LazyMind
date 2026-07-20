@@ -336,6 +336,29 @@ func TestBuildChatRequestBodyPreservesExplicitReasoningFalse(t *testing.T) {
 	}
 }
 
+func TestBuildChatRequestBodyForwardsThinkingDepth(t *testing.T) {
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+		"thinking_depth": "low",
+	}, nil, "", 1)
+
+	if got := body["thinking_depth"]; got != "low" {
+		t.Fatalf("expected low thinking depth, got %#v", got)
+	}
+	req := buildLazyChatRequest(body)
+	if req.Runtime.ThinkingDepth != "low" {
+		t.Fatalf("expected upstream low thinking depth, got %q", req.Runtime.ThinkingDepth)
+	}
+}
+
+func TestBuildChatRequestBodyDefaultsInvalidThinkingDepth(t *testing.T) {
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+		"thinking_depth": "turbo",
+	}, nil, "", 1)
+	if got := body["thinking_depth"]; got != "medium" {
+		t.Fatalf("expected medium thinking depth, got %#v", got)
+	}
+}
+
 func TestBuildChatHistoryExtPreservesMultimodalInput(t *testing.T) {
 	ext := buildChatHistoryExt(map[string]any{
 		"input": []any{
@@ -449,6 +472,40 @@ func TestChatHistoryResponseIncludesMentions(t *testing.T) {
 	mentions, ok := item["mentions"].([]any)
 	if !ok || len(mentions) != 1 {
 		t.Fatalf("mentions missing from history response: %#v", item["mentions"])
+	}
+}
+
+func TestChatHistoryResponseIncludesThinkingDuration(t *testing.T) {
+	item := chatHistoryToResponseItem(orm.ChatHistory{
+		Result:            "<think>分析并调用工具</think>最终答案",
+		ThinkingDurationS: 7,
+	})
+	if got := item["thinking_time_s"]; got != int64(7) {
+		t.Fatalf("thinking_time_s: got %#v want 7", got)
+	}
+	if got := item["reasoning_content"]; got != "分析并调用工具" {
+		t.Fatalf("reasoning_content: got %#v", got)
+	}
+}
+
+func TestElapsedThinkingSecondsRoundsUp(t *testing.T) {
+	tests := []struct {
+		name    string
+		elapsed time.Duration
+		want    int64
+	}{
+		{name: "initial reasoning chunk", elapsed: 0, want: 1},
+		{name: "sub-second reasoning", elapsed: 250 * time.Millisecond, want: 1},
+		{name: "exact second", elapsed: time.Second, want: 1},
+		{name: "partial next second", elapsed: time.Second + time.Millisecond, want: 2},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := elapsedThinkingSeconds(tc.elapsed); got != tc.want {
+				t.Fatalf("elapsedThinkingSeconds(%s) = %d, want %d", tc.elapsed, got, tc.want)
+			}
+		})
 	}
 }
 

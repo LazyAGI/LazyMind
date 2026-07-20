@@ -58,7 +58,7 @@ def resolve_remote_plugin(entry: Dict[str, Any]) -> tuple[str, 'PluginSpec']:
     if not final_dir.exists():
         tmp_dir = Path(tempfile.mkdtemp(prefix='plugin-', dir=str(cache_root)))
         try:
-            from lazymind.chat.integrations.remote_fs import RemoteFS
+            from lazymind.common.integrations.remote_fs import RemoteFS
             RemoteFS().materialize_dir(remote_root, str(tmp_dir), revision_id=revision_id)
             rows = []
             for file_path in sorted(p for p in tmp_dir.rglob('*') if p.is_file()):

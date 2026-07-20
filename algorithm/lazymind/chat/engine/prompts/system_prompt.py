@@ -7,9 +7,19 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
 
 from .guidance import (
+    ANALYSIS_GUIDANCE,
+    CLARIFICATION_GUIDANCE,
+    DECISION_PLANNING_GUIDANCE,
     DEFAULT_SYSTEM_PROMPT,
+    DELIVERABLE_GUIDANCE,
+    FRESH_RESEARCH_GUIDANCE,
+    LEARNING_GUIDANCE,
+    REQUEST_ANALYSIS_GUIDANCE,
     RESPONSE_LANGUAGE_GUIDANCE,
+    SKILL_RESTRAINT_GUIDANCE,
+    TRANSFORMATION_GUIDANCE,
 )
+from .task_profile import TaskProfile
 
 _DEFAULT_UI_LOCALE = 'zh-CN'
 _CJK_PATTERN = re.compile(r'[\u3400-\u9fff]')
@@ -210,6 +220,8 @@ def add_standard_system_sections(
     conversation_history: list[dict] | None = None,
     tool_prompt_appendices: dict[str, list[str]] | None = None,
     show_tool_status: bool = True,
+    task_profile: TaskProfile | None = None,
+    dynamic_prompt_modules: bool = False,
 ) -> PromptBuilder:
     builder.system(
         'platform_identity', '', DEFAULT_SYSTEM_PROMPT, 'platform.guidance', priority=10,
@@ -227,6 +239,92 @@ def add_standard_system_sections(
     builder.system(
         'environment', '', environment_prompt, 'request.environment', priority=30,
     )
+
+    if dynamic_prompt_modules and task_profile is not None:
+        outcomes = {task_profile.primary_outcome, *task_profile.secondary_outcomes}
+        builder.system(
+            'task_learning', '', LEARNING_GUIDANCE, 'platform.task.learning', priority=32,
+            skip_if='learn' not in outcomes,
+        ).system(
+            'task_fresh_research', '', FRESH_RESEARCH_GUIDANCE,
+            'platform.task.research', priority=33,
+            skip_if=not task_profile.research_required and task_profile.freshness != 'current',
+        ).system(
+            'task_decision_planning', '', DECISION_PLANNING_GUIDANCE,
+            'platform.task.decision', priority=34,
+            skip_if=not outcomes.intersection({'decide', 'plan'}),
+        ).system(
+            'task_analysis', '', ANALYSIS_GUIDANCE,
+            'platform.task.analysis', priority=34,
+            skip_if='analyze' not in outcomes,
+        ).system(
+            'task_transformation', '', TRANSFORMATION_GUIDANCE,
+            'platform.task.transformation', priority=34,
+            skip_if='transform' not in outcomes,
+        )
+        deliverables = [task_profile.deliverable_kind, *task_profile.secondary_deliverables][:2]
+        contracts = [DELIVERABLE_GUIDANCE[item] for item in deliverables if item in DELIVERABLE_GUIDANCE]
+        builder.system(
+            'task_deliverable', '# Deliverable contract', '\n'.join(contracts),
+            'platform.task.deliverable', priority=35,
+            skip_if=not contracts or (
+                task_profile.complexity == 'simple' and task_profile.deliverable_kind == 'direct_answer'
+            ),
+        ).system(
+            'task_skill_restraint', '', SKILL_RESTRAINT_GUIDANCE,
+            'platform.task.skills', priority=36,
+            skip_if=task_profile.skill_mode == 'explicit',
+        ).system(
+            'task_request_analysis', '', REQUEST_ANALYSIS_GUIDANCE,
+            'platform.task.request_analysis', priority=37,
+            skip_if=(
+                task_profile.request_assessment.status == 'ready'
+                and task_profile.complexity != 'compound'
+            ),
+        ).system(
+            'task_clarification', '', CLARIFICATION_GUIDANCE,
+            'platform.task.clarification', priority=38,
+            skip_if=task_profile.request_assessment.interaction_need != 'blocking',
+        )
+        assessment = task_profile.request_assessment
+        excluded = task_profile.excluded_resources
+        excluded_lines = [
+            *(f'- Skill: {value}' for value in excluded.skill_names),
+            *(f'- Knowledge base: {value}' for value in excluded.knowledge_base_ids),
+            *(f'- Plugin: {value}' for value in excluded.plugin_refs),
+        ]
+        if excluded_lines:
+            builder.runtime(
+                'task_resource_policy', 'Resource Usage Policy',
+                '\n'.join([
+                    'Do not use, invoke, cite, or rely on these resources in this turn, even if '
+                    'their content appears elsewhere in the assembled context:',
+                    *excluded_lines,
+                ]),
+                'runtime.task.resources', priority=4, authoritative=True, content_kind='instruction',
+            )
+        if assessment.status != 'ready':
+            issue_lines = [
+                f'- {issue.issue_type} ({issue.impact}): {issue.description} '
+                f'[evidence: {issue.evidence}]'
+                for issue in assessment.issues
+            ]
+            question_lines = [
+                f'- {question.question}'
+                + (f' Options: {", ".join(question.options)}.' if question.options else '')
+                + (f' Recommended: {question.recommended}.' if question.recommended else '')
+                for question in assessment.clarification_questions
+            ]
+            builder.runtime(
+                'task_request_assessment', 'Request Assessment',
+                '\n'.join([
+                    f'Status: {assessment.status}',
+                    f'Interaction need: {assessment.interaction_need}',
+                    *issue_lines,
+                    *question_lines,
+                ]),
+                'runtime.task.assessment', priority=5, authoritative=True, content_kind='state',
+            )
 
     if use_memory:
         if isinstance(user_preference, str) and user_preference.strip():

@@ -4,22 +4,26 @@ import lazyllm
 
 from lazymind.chat.engine.tools.infra import (
     GitHubSkillInstaller,
-    normalize_skill_category,
-    parse_skill_frontmatter,
-    resolve_skill_editor_identity,
-    rewrite_skill_identity,
-    SkillRemoteStore,
-    skill_identity_from_content,
     tool_error,
     tool_success,
-    validate_skill_content,
-    validate_skill_name,
 )
 from lazymind.chat.engine.tools.infra.skill_operations import (
     create_skill_file,
     delete_skill_file,
     edit_skill_file,
     patch_skill_file,
+)
+from lazymind.common.skill_document import (
+    SkillDocumentError,
+    parse_skill_document,
+    require_skill_name,
+    require_valid_skill_document,
+)
+from lazymind.common.skill_remote_store import SkillRemoteStore
+from lazymind.common.skill_storage_key import (
+    EXTERNAL_SKILL_CATEGORY,
+    INTERNAL_SKILL_CATEGORY,
+    parse_skill_key,
 )
 
 
@@ -58,7 +62,7 @@ class SkillManagementToolkit:
         self.store = store or SkillRemoteStore()
         self.installer = installer or GitHubSkillInstaller()
 
-    def install_skill(self, github_url: str, category: Optional[str] = None) -> Dict[str, Any]:
+    def install_skill(self, github_url: str) -> Dict[str, Any]:
         """Install one public GitHub skill package as a disabled reusable skill.
 
         Call this only when the user explicitly asks to install the linked
@@ -69,17 +73,17 @@ class SkillManagementToolkit:
 
         Args:
             github_url: Public GitHub repository root or /tree/<ref>/<skill-path> URL.
-            category: Destination skill category. Defaults to "external".
         """
-        lazyllm.LOG.info(f'[install_skill] called github_url={github_url!r} category={category!r}')
+        lazyllm.LOG.info(f'[install_skill] called github_url={github_url!r}')
         try:
-            package = self.installer.prepare(github_url, category)
+            package = self.installer.prepare(github_url)
         except Exception as exc:
             return tool_error('install_skill', str(exc))
 
-        skill_key = f'{package.category}/{package.name}'
+        category = EXTERNAL_SKILL_CATEGORY
+        skill_key = f'{category}/{package.name}'
         try:
-            if self.store.package_exists(package.category, package.name):
+            if self.store.package_exists(category, package.name):
                 return tool_error('install_skill', f'Skill {skill_key!r} already exists.')
             duplicate_key = self._find_installed_github_source(package.source.identity)
             if duplicate_key:
@@ -87,7 +91,7 @@ class SkillManagementToolkit:
                     'install_skill',
                     f'GitHub source is already installed as {duplicate_key!r}.',
                 )
-            self.store.install_package(package.category, package.name, package.files)
+            self.store.install_package(category, package.name, package.files)
         except Exception as exc:
             return _skill_editor_error('install_skill', 'Failed to install skill package', exc)
 
@@ -104,64 +108,59 @@ class SkillManagementToolkit:
     def _find_installed_github_source(self, source_identity: tuple[str, str]) -> Optional[str]:
         for package in self.store.list_packages():
             category = package['category']
+            if category != EXTERNAL_SKILL_CATEGORY:
+                continue
             name = package['name']
             try:
-                frontmatter, _ = parse_skill_frontmatter(self.store.read_skill_md(category, name))
-                github_url = str(frontmatter.get('github_url') or '').strip()
+                document = parse_skill_document(self.store.read_skill_md(category, name))
+                github_url = str(document.metadata.get('github_url') or '').strip()
                 if not github_url:
                     continue
                 existing_source = self.installer.resolve_source(github_url)
-            except ValueError as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 lazyllm.LOG.warning(
-                    '[install_skill] skip invalid existing github source '
-                    f'skill={category}/{name} error={exc}'
+                    '[install_skill] skip unreadable or invalid existing github source '
+                    f'skill={category}/{name} error_type={type(exc).__name__} error={exc}'
                 )
                 continue
             if existing_source.identity == source_identity:
                 return f'{category}/{name}'
         return None
 
-    def create_skill(self, name: str, category: Optional[str] = None, *, content: str) -> Dict[str, Any]:
+    def create_skill(self, name: str, *, content: str) -> Dict[str, Any]:
         """Create a new reusable skill from full SKILL.md content.
 
-        The SKILL.md YAML frontmatter must include name, category, and
-        description. Both name and category are path segments; category must be
-        a single segment such as "engineering" or "coding". The name argument
-        may be either a plain skill name or the full "category/name" key shown
-        in the skill list; when category is also provided, it must match that
-        key.
+        The SKILL.md YAML frontmatter must include name and description. The
+        package is always created under the internal category. Frontmatter
+        category, when present, is preserved as document content and does not
+        control storage.
 
         Args:
-            name: Skill name, or full "category/name" skill key.
-            category: Skill category directory used for category/name/SKILL.md. Optional when name is a full key.
+            name: Single-segment skill name.
             content: Full SKILL.md content, including YAML frontmatter.
         """
         lazyllm.LOG.info(
             '[create_skill] called '
-            f'name={name!r} category={category!r} content_len={len(content) if content else 0}'
+            f'name={name!r} content_len={len(content) if content else 0}'
         )
-        resolved = resolve_skill_editor_identity(name, category, 'create_skill')
-        if resolved.get('error'):
-            return tool_error('create_skill', resolved['error'])
-        normalized_category = resolved['category']
-        name = resolved['name']
-        lazyllm.LOG.info(f'[create_skill] lookup category={normalized_category!r} name={name!r}')
-
-        content_error = validate_skill_content(content or '')
-        if content_error:
-            return tool_error(
-                'create_skill',
-                content_error,
-                log_message=f'[create_skill] fail reason={content_error!r}',
-            )
-        content_category, content_name = skill_identity_from_content(content or '')
-        if content_category != normalized_category or content_name != name:
-            return tool_error(
-                'create_skill',
-                'SKILL.md frontmatter name/category must match the tool name/category for create.'
-            )
         try:
-            self.store.create(content_category, content_name, content or '')
+            name = require_skill_name(name)
+            document = require_valid_skill_document(content, expected_name=name)
+        except SkillDocumentError as exc:
+            return tool_error(
+                'create_skill',
+                str(exc),
+                log_message=f'[create_skill] fail reason={str(exc)!r}',
+            )
+        lazyllm.LOG.info(
+            f'[create_skill] lookup category={INTERNAL_SKILL_CATEGORY} name={name!r}'
+        )
+        try:
+            self.store.create(
+                INTERNAL_SKILL_CATEGORY,
+                str(document.metadata['name']),
+                content,
+            )
         except Exception as exc:
             return _skill_editor_error('create_skill', 'Failed to create skill package', exc)
         return tool_success('create_skill', {
@@ -173,19 +172,18 @@ class SkillManagementToolkit:
         self,
         tool_name: str,
         name: str,
-        category: Optional[str],
         operation: Callable[..., Dict[str, Any]],
         reason: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        resolved = self.store.resolve_existing_identity(name, category)
+        resolved = self.store.resolve_existing_identity(name)
         if resolved.get('error'):
             return tool_error(tool_name, resolved['error'])
         normalized_category = resolved['category']
         name = resolved['name']
         try:
             current_files = self.store.list_files(normalized_category, name)
-            result = operation(current_files, normalized_category, name, **kwargs)
+            result = operation(current_files, name, **kwargs)
             edited_files = result.pop('files')
             change_set = self.store.replace_files(normalized_category, name, current_files, edited_files)
         except ValueError as exc:
@@ -204,7 +202,6 @@ class SkillManagementToolkit:
     def edit_file(
         self,
         name: str,
-        category: Optional[str] = None,
         *,
         path: str,
         content: str,
@@ -213,19 +210,16 @@ class SkillManagementToolkit:
         """Replace an existing file inside a reusable skill package.
 
         Args:
-            name: Skill name, or full "category/name" skill key.
-            category: Skill category directory used for category/name/SKILL.md.
-                Optional when name is a full key or unique.
+            name: Unique skill name, or full "internal/name" or "external/name" skill key.
             path: Existing package file to replace. May be SKILL.md.
             content: Full replacement file content.
             reason: Short summary of why this file is being edited.
         """
-        lazyllm.LOG.info(f'[edit_file] called name={name!r} category={category!r} path={path!r}')
+        lazyllm.LOG.info(f'[edit_file] called name={name!r} path={path!r}')
 
         return self._run_file_operation(
             'edit_file',
             name,
-            category,
             edit_skill_file,
             reason,
             path=path,
@@ -235,7 +229,6 @@ class SkillManagementToolkit:
     def patch_file(
         self,
         name: str,
-        category: Optional[str] = None,
         *,
         path: str,
         old_text: str,
@@ -246,21 +239,18 @@ class SkillManagementToolkit:
         """Patch an existing file inside a reusable skill package.
 
         Args:
-            name: Skill name, or full "category/name" skill key.
-            category: Skill category directory used for category/name/SKILL.md.
-                Optional when name is a full key or unique.
+            name: Unique skill name, or full "internal/name" or "external/name" skill key.
             path: Existing package file to patch. Must be explicit; no default target is assumed.
             old_text: Text to find. It must identify a unique match unless replace_all is true.
             new_text: Replacement text. Use an empty string to delete matched text.
             replace_all: Replace every match instead of requiring uniqueness.
             reason: Short summary of why this file is being patched.
         """
-        lazyllm.LOG.info(f'[patch_file] called name={name!r} category={category!r} path={path!r}')
+        lazyllm.LOG.info(f'[patch_file] called name={name!r} path={path!r}')
 
         return self._run_file_operation(
             'patch_file',
             name,
-            category,
             patch_skill_file,
             reason,
             path=path,
@@ -272,7 +262,6 @@ class SkillManagementToolkit:
     def create_file(
         self,
         name: str,
-        category: Optional[str] = None,
         *,
         path: str,
         content: str,
@@ -291,19 +280,16 @@ class SkillManagementToolkit:
         templates under templates/.
 
         Args:
-            name: Skill name, or full "category/name" skill key.
-            category: Skill category directory used for category/name/SKILL.md.
-                Optional when name is a full key or unique.
+            name: Unique skill name, or full "internal/name" or "external/name" skill key.
             path: New supporting file path to create.
             content: File content.
             reason: Short summary of why this file is being created.
         """
-        lazyllm.LOG.info(f'[create_file] called name={name!r} category={category!r} path={path!r}')
+        lazyllm.LOG.info(f'[create_file] called name={name!r} path={path!r}')
 
         return self._run_file_operation(
             'create_file',
             name,
-            category,
             create_skill_file,
             reason,
             path=path,
@@ -313,7 +299,6 @@ class SkillManagementToolkit:
     def delete_file(
         self,
         name: str,
-        category: Optional[str] = None,
         *,
         path: str,
         reason: Optional[str] = None,
@@ -324,18 +309,15 @@ class SkillManagementToolkit:
         the whole skill package.
 
         Args:
-            name: Skill name, or full "category/name" skill key.
-            category: Skill category directory used for category/name/SKILL.md.
-                Optional when name is a full key or unique.
+            name: Unique skill name, or full "internal/name" or "external/name" skill key.
             path: Existing supporting file path to delete.
             reason: Short summary of why this file is being deleted.
         """
-        lazyllm.LOG.info(f'[delete_file] called name={name!r} category={category!r} path={path!r}')
+        lazyllm.LOG.info(f'[delete_file] called name={name!r} path={path!r}')
 
         return self._run_file_operation(
             'delete_file',
             name,
-            category,
             delete_skill_file,
             reason,
             path=path,
@@ -344,61 +326,52 @@ class SkillManagementToolkit:
     def rename_skill(
         self,
         name: str,
-        category: Optional[str] = None,
         *,
         new_name: str,
-        new_category: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Rename or move an existing reusable skill package.
+        """Rename an existing reusable skill package within its category.
 
-        This moves the package and rewrites SKILL.md frontmatter name/category.
-        Use this instead of edit_file or patch_file whenever the skill identity changes.
+        This moves the package within its existing storage category and rewrites
+        only the SKILL.md frontmatter name. The storage category is preserved:
+        an internal skill remains internal, and an external skill remains external.
 
         Args:
-            name: Current skill name, or full "category/name" skill key.
-            category: Current skill category. Optional when name is a full key or unique.
-            new_name: New skill name.
-            new_category: New skill category. If omitted, current category is kept.
+            name: Unique current skill name, or full "internal/name" or "external/name" skill key.
+            new_name: New single-segment skill name without an "internal/" or
+                "external/" prefix.
         """
         lazyllm.LOG.info(
             '[rename_skill] called '
-            f'name={name!r} category={category!r} new_name={new_name!r} new_category={new_category!r}'
+            f'name={name!r} new_name={new_name!r}'
         )
-        resolved = self.store.resolve_existing_identity(name, category)
+        resolved = self.store.resolve_existing_identity(name)
         if resolved.get('error'):
             return tool_error('rename_skill', resolved['error'])
         normalized_category = resolved['category']
         name = resolved['name']
         lazyllm.LOG.info(f'[rename_skill] lookup category={normalized_category!r} name={name!r}')
 
-        target_name = str(new_name or '').strip()
-        name_error = validate_skill_name(target_name)
-        if name_error:
-            return tool_error('rename_skill', f'new_name is invalid: {name_error}')
-        target_category = normalize_skill_category(new_category if new_category is not None else normalized_category)
-        if not target_category:
-            return tool_error(
-                'rename_skill',
-                f'new_category {new_category!r} is invalid; it must be a single ASCII-safe path segment.'
-            )
-        if target_category == normalized_category and target_name == name:
-            return tool_error('rename_skill', 'rename_skill requires a different new_name or new_category.')
+        try:
+            target_name = require_skill_name(new_name)
+        except SkillDocumentError as exc:
+            return tool_error('rename_skill', f'new_name is invalid: {exc}')
+        if target_name == name:
+            return tool_error('rename_skill', 'rename_skill requires a different new_name.')
 
         try:
             current_files = self.store.list_files(normalized_category, name)
             skill_content = current_files.get('SKILL.md') or ''
-            renamed_content = rewrite_skill_identity(skill_content, target_category, target_name)
+            document = require_valid_skill_document(skill_content)
+            renamed_content = document.with_metadata(name=target_name).render()
+            require_valid_skill_document(renamed_content, expected_name=target_name)
         except Exception as exc:
             return _skill_editor_error('rename_skill', 'Failed to prepare skill rename', exc)
-        content_error = validate_skill_content(renamed_content)
-        if content_error:
-            return tool_error('rename_skill', content_error)
 
         try:
             self.store.rename(
                 normalized_category,
                 name,
-                target_category,
+                normalized_category,
                 target_name,
                 skill_content=renamed_content,
             )
@@ -407,7 +380,7 @@ class SkillManagementToolkit:
 
         payload = {
             'old': {'category': normalized_category, 'name': name},
-            'new': {'category': target_category, 'name': target_name},
+            'new': {'category': normalized_category, 'name': target_name},
         }
         result = {
             'status': 'renamed',
@@ -419,7 +392,6 @@ class SkillManagementToolkit:
     def remove_skill(
         self,
         name: str,
-        category: Optional[str] = None,
         reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Remove an existing reusable skill package.
@@ -427,16 +399,14 @@ class SkillManagementToolkit:
         Use this when a skill is superseded or no longer correct.
 
         Args:
-            name: Skill name, or full "category/name" skill key.
-            category: Skill category directory. Optional when name is a full key or unique.
+            name: Unique full skill name.
             reason: Why the skill should be removed.
         """
-        lazyllm.LOG.info(f'[remove_skill] called name={name!r} category={category!r} reason={reason!r}')
-        resolved = self.store.resolve_existing_identity(name, category)
-        if resolved.get('error'):
-            return tool_error('remove_skill', resolved['error'])
-        normalized_category = resolved['category']
-        name = resolved['name']
+        lazyllm.LOG.info(f'[remove_skill] called name={name!r} reason={reason!r}')
+        try:
+            normalized_category, name = parse_skill_key(name)
+        except ValueError as exc:
+            return tool_error('remove_skill', str(exc))
         lazyllm.LOG.info(f'[remove_skill] lookup category={normalized_category!r} name={name!r}')
 
         try:

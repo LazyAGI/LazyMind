@@ -3,16 +3,19 @@ import { useTranslation } from "react-i18next";
 import CloudDocumentProviderPanel, {
   CloudDocumentModals,
 } from "../components/CloudDocumentProviderPanel";
+import { cloudAuthProviderOptions } from "../constants/cloudProviderOptions";
 import { useCloudDocumentProviders } from "../hooks/useCloudDocumentProviders";
 
 export default function CloudDocumentsPage() {
   const { t } = useTranslation();
   const vm = useCloudDocumentProviders();
-  const providerTotal = vm.canCreateLocalSource ? 3 : 2;
+  const providerTotal =
+    cloudAuthProviderOptions.length + (vm.canCreateLocalSource ? 1 : 0);
   const providerReadyCount =
     (vm.canCreateLocalSource && vm.localSourceCount > 0 ? 1 : 0) +
     (vm.isFeishuAuthValid ? 1 : 0) +
-    (vm.isNotionAuthValid ? 1 : 0);
+    (vm.isNotionAuthValid ? 1 : 0) +
+    (vm.isGoogleDriveAuthValid ? 1 : 0);
 
   return (
     <div className="model-provider-page-content model-provider-service-page model-provider-cloud-doc-hub">

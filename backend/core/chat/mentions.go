@@ -25,8 +25,67 @@ type chatMention struct {
 
 type resolvedChatMentions struct {
 	PluginRefs          []string
+	SkillNames          []string
+	KnowledgeBaseIDs    []string
 	ToolNames           []string
+	ExcludedToolNames   []string
+	ExcludedPluginRefs  []string
 	ConversationContext string
+	ResourceMentions    []map[string]string
+}
+
+var mentionDenyWords = []string{
+	"不要使用", "不要调用", "不要启用", "不要用", "不要", "别用", "别使用", "别调用",
+	"不想使用", "不想调用", "不想用", "不使用", "不用", "无需", "不能调用", "不能启用",
+	"不能用", "不能使用", "禁止使用", "禁止调用", "避免使用", "排除", "忽略", "跳过",
+	"do not use", "don't use", "dont use", "never use", "without", "exclude", "ignore", "avoid",
+}
+
+var mentionAllowWords = []string{
+	"可以使用", "可以用", "可使用", "可用", "请使用", "请用", "优先使用", "允许使用",
+	"使用", "调用", "启用", "can use", "may use", "please use", "use", "enable",
+}
+
+// mentionIsDenied only examines the local clause immediately before this mention.
+// Comparing the nearest positive and negative cue prevents a denial for @x from
+// leaking into a later "可以用 @y" clause.
+func mentionIsDenied(query string, mention chatMention) bool {
+	queryRunes := []rune(query)
+	position := -1
+	if mention.Start != nil && *mention.Start >= 0 && *mention.Start <= len(queryRunes) {
+		position = *mention.Start
+	}
+	if position < 0 && strings.TrimSpace(mention.DisplayName) != "" {
+		position = strings.Index(strings.ToLower(query), strings.ToLower(mention.DisplayName))
+		if position >= 0 {
+			position = len([]rune(query[:position]))
+		}
+	}
+	if position < 0 {
+		return false
+	}
+	start := position - 40
+	if start < 0 {
+		start = 0
+	}
+	prefix := strings.ToLower(string(queryRunes[start:position]))
+	for _, separator := range []string{"，", ",", "。", "；", ";", "！", "!", "？", "?", "\n", "但是", "不过", "然而", "但"} {
+		if index := strings.LastIndex(prefix, separator); index >= 0 {
+			prefix = prefix[index+len(separator):]
+		}
+	}
+	lastDeny, lastAllow := -1, -1
+	for _, word := range mentionDenyWords {
+		if index := strings.LastIndex(prefix, word); index >= 0 && index+len(word) > lastDeny {
+			lastDeny = index + len(word)
+		}
+	}
+	for _, word := range mentionAllowWords {
+		if index := strings.LastIndex(prefix, word); index >= 0 && index+len(word) > lastAllow {
+			lastAllow = index + len(word)
+		}
+	}
+	return lastDeny >= 0 && lastDeny >= lastAllow
 }
 
 func parseChatMentions(raw map[string]any) ([]chatMention, error) {
@@ -68,6 +127,7 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 	resolved := resolvedChatMentions{}
 	var datasetIDs, skillIDs, conversationIDs []string
 	for _, mention := range mentions {
+		denied := (mention.Type == "tool" || mention.Type == "plugin") && mentionIsDenied(query, mention)
 		switch mention.Type {
 		case "knowledge_base":
 			if !acl.Can(userID, acl.ResourceTypeDB, mention.ResourceID, acl.PermRead) {
@@ -78,12 +138,26 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 				return query, resolved, fmt.Errorf("knowledge base mention not found: %s", mention.ResourceID)
 			}
 			datasetIDs = append(datasetIDs, mention.ResourceID)
+			resolved.KnowledgeBaseIDs = append(resolved.KnowledgeBaseIDs, mention.ResourceID)
+			resolved.ResourceMentions = append(resolved.ResourceMentions, map[string]string{
+				"resource_type": "knowledge_base", "resource_ref": mention.ResourceID,
+				"display_name": mention.DisplayName,
+			})
 		case "skill":
 			var skill orm.SkillV2Skill
 			if err := db.WithContext(ctx).Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", mention.ResourceID, userID).Take(&skill).Error; err != nil || skill.HeadRevisionID == nil {
 				return query, resolved, fmt.Errorf("skill mention is not accessible or unpublished: %s", mention.ResourceID)
 			}
 			skillIDs = append(skillIDs, mention.ResourceID)
+			resolved.SkillNames = append(
+				resolved.SkillNames,
+				fmt.Sprintf("%s/%s", strings.TrimSpace(skill.Category), strings.TrimSpace(skill.SkillName)),
+			)
+			resolved.ResourceMentions = append(resolved.ResourceMentions, map[string]string{
+				"resource_type": "skill",
+				"resource_ref":  resolved.SkillNames[len(resolved.SkillNames)-1],
+				"display_name":  mention.DisplayName,
+			})
 		case "tool":
 			tools, toolErr := fetchChatTools(ctx, db, userID, "")
 			if toolErr != nil {
@@ -92,10 +166,22 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 			if _, ok := findToolGroup(tools.ToolGroups, mention.ResourceID); !ok {
 				return query, resolved, fmt.Errorf("tool mention is not accessible: %s", mention.ResourceID)
 			}
-			resolved.ToolNames = append(resolved.ToolNames, mention.ResourceID)
+			if denied {
+				resolved.ExcludedToolNames = append(resolved.ExcludedToolNames, mention.ResourceID)
+			} else {
+				resolved.ToolNames = append(resolved.ToolNames, mention.ResourceID)
+			}
 		case "plugin":
 			if strings.HasPrefix(mention.ResourceID, "builtin:") {
+				if denied {
+					resolved.ExcludedPluginRefs = append(resolved.ExcludedPluginRefs, mention.ResourceID)
+					continue
+				}
 				resolved.PluginRefs = append(resolved.PluginRefs, mention.ResourceID)
+				resolved.ResourceMentions = append(resolved.ResourceMentions, map[string]string{
+					"resource_type": "plugin", "resource_ref": mention.ResourceID,
+					"display_name": mention.DisplayName,
+				})
 				continue
 			}
 			var count int64
@@ -103,7 +189,15 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 				Where("plugin_ref = ? AND status = 'active' AND (owner_user_id = ? OR owner_user_id = '')", mention.ResourceID, userID).Count(&count).Error; err != nil || count == 0 {
 				return query, resolved, fmt.Errorf("plugin mention is not accessible: %s", mention.ResourceID)
 			}
+			if denied {
+				resolved.ExcludedPluginRefs = append(resolved.ExcludedPluginRefs, mention.ResourceID)
+				continue
+			}
 			resolved.PluginRefs = append(resolved.PluginRefs, mention.ResourceID)
+			resolved.ResourceMentions = append(resolved.ResourceMentions, map[string]string{
+				"resource_type": "plugin", "resource_ref": mention.ResourceID,
+				"display_name": mention.DisplayName,
+			})
 		case "conversation":
 			conversationIDs = append(conversationIDs, mention.ResourceID)
 		default:
@@ -130,6 +224,18 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 		resolved.ConversationContext = contextText
 	}
 	return query, resolved, nil
+}
+
+func applyExplicitResourceBindings(body map[string]any, mentions resolvedChatMentions) {
+	if len(mentions.SkillNames) == 0 && len(mentions.KnowledgeBaseIDs) == 0 && len(mentions.PluginRefs) == 0 {
+		return
+	}
+	body["explicit_resource_bindings"] = map[string]any{
+		"skill_names":        mentions.SkillNames,
+		"knowledge_base_ids": mentions.KnowledgeBaseIDs,
+		"plugin_refs":        mentions.PluginRefs,
+		"mentions":           mentions.ResourceMentions,
+	}
 }
 
 func mergeMentionedDatasets(raw map[string]any, ids []string) {
@@ -357,6 +463,7 @@ func applyPluginSelection(
 	userID string,
 	reqBody map[string]any,
 	mentionedRefs []string,
+	excludedRefs []string,
 ) error {
 	if len(mentionedRefs) > 1 {
 		return fmt.Errorf("at most one plugin mention is allowed per turn")
@@ -374,6 +481,17 @@ func applyPluginSelection(
 	if err != nil {
 		return fmt.Errorf("load plugin catalog: %w", err)
 	}
+	excluded := map[string]bool{}
+	for _, ref := range excludedRefs {
+		excluded[ref] = true
+	}
+	filteredCatalog := catalog[:0]
+	for _, item := range catalog {
+		if !excluded[fmt.Sprint(item["plugin_ref"])] {
+			filteredCatalog = append(filteredCatalog, item)
+		}
+	}
+	catalog = filteredCatalog
 	catalog, forcedBuiltins, err := mergeMentionedPlugins(
 		ctx, db, userID, mentionedRefs, catalog,
 	)
@@ -383,6 +501,16 @@ func applyPluginSelection(
 	disabledBuiltins, err := plugin.DisabledBuiltinPluginIDs(db, userID)
 	if err != nil {
 		return fmt.Errorf("load builtin plugin settings: %w", err)
+	}
+	for _, ref := range excludedRefs {
+		if strings.HasPrefix(ref, "builtin:") {
+			disabledBuiltins = append(disabledBuiltins, strings.TrimPrefix(ref, "builtin:"))
+		}
+	}
+	if pluginContext, ok := reqBody["plugin_context"].(map[string]any); ok {
+		if excluded[fmt.Sprint(pluginContext["plugin_ref"])] {
+			reqBody["plugin_context"] = map[string]any{}
+		}
 	}
 	reqBody["plugin_catalog"] = catalog
 	reqBody["disabled_builtin_plugins"] = applyMentionedTools(

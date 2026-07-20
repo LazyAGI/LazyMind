@@ -86,7 +86,9 @@ type CreateDatasetRequest struct {
 	Name           string       `json:"name"`
 	DisplayName    string       `json:"display_name,omitempty"`
 	CreatedBy      string       `json:"created_by"`
+	UserName       string       `json:"-"`
 	TenantID       string       `json:"tenant_id,omitempty"`
+	Tags           []string     `json:"tags,omitempty"`
 	Algo           *DatasetAlgo `json:"algo,omitempty"`
 }
 
@@ -106,6 +108,7 @@ type CreateBindingRootDocumentRequest struct {
 	ParentDocumentID string `json:"parent_document_id,omitempty"`
 	Name             string `json:"name"`
 	UserID           string `json:"user_id,omitempty"`
+	UserName         string `json:"-"`
 }
 
 type CreateBindingRootDocumentResponse struct {

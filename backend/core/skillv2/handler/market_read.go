@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
@@ -11,6 +12,37 @@ import (
 	"lazymind/core/common/orm"
 	skillservice "lazymind/core/skillv2/service"
 )
+
+func MarketTags(w http.ResponseWriter, r *http.Request) {
+	db, ok := requireDB(w)
+	if !ok {
+		return
+	}
+	var rows []struct {
+		Tags []byte `gorm:"column:tags"`
+	}
+	if err := db.WithContext(r.Context()).
+		Table("skill_market_items AS market_items").
+		Select("market_items.tags AS tags").
+		Joins("JOIN skills AS skills ON skills.id = market_items.source_skill_id AND skills.deleted_at IS NULL").
+		Where("market_items.status = ?", "published").
+		Scan(&rows).Error; err != nil {
+		replyServiceError(w, err)
+		return
+	}
+	set := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		for _, tag := range decodeTags(row.Tags) {
+			set[tag] = struct{}{}
+		}
+	}
+	tags := make([]string, 0, len(set))
+	for tag := range set {
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+	common.ReplyOK(w, map[string]any{"tags": tags})
+}
 
 func MarketList(w http.ResponseWriter, r *http.Request) {
 	db, ok := requireDB(w)
@@ -36,7 +68,7 @@ func MarketList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
-	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	tags := marketQueryTags(r)
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		source, err := newSkillService(db).GetSkill(r.Context(), skillservice.GetSkillRequest{SkillID: row.SourceSkillID})
@@ -47,7 +79,7 @@ func MarketList(w http.ResponseWriter, r *http.Request) {
 			replyServiceError(w, err)
 			return
 		}
-		if category != "" && source.Category != category {
+		if len(tags) > 0 && !hasAllTags(decodeTags(row.Tags), tags) {
 			continue
 		}
 		if keyword != "" && !strings.Contains(strings.ToLower(source.Name+" "+source.SkillName+" "+source.Description), keyword) {
@@ -70,6 +102,18 @@ func MarketList(w http.ResponseWriter, r *http.Request) {
 		end = total
 	}
 	common.ReplyOK(w, map[string]any{"items": items[start:end], "page": page, "page_size": pageSize, "total": total})
+}
+
+func marketQueryTags(r *http.Request) []string {
+	values := append([]string(nil), r.URL.Query()["tags"]...)
+	if len(values) == 0 {
+		values = append(values, r.URL.Query().Get("category"))
+	}
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, strings.Split(value, ",")...)
+	}
+	return compactStrings(parts)
 }
 
 func MarketGet(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +157,7 @@ func loadInstalledMarketSkills(ctx context.Context, db *gorm.DB, userID string) 
 		Table("skill_market_installs AS installs").
 		Select("installs.market_item_id, installs.skill_id").
 		Joins("JOIN skills AS skills ON skills.id = installs.skill_id AND skills.owner_user_id = installs.user_id AND skills.deleted_at IS NULL").
+		Joins("JOIN skill_market_items AS market_items ON market_items.id = installs.market_item_id AND market_items.source_skill_id <> installs.skill_id").
 		Where("installs.user_id = ?", userID).
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -131,6 +176,7 @@ func marketItemDTO(item orm.SkillMarketItem, source skillservice.SkillDetail, in
 		"market_item_id":     item.ID,
 		"source_skill_id":    item.SourceSkillID,
 		"status":             item.Status,
+		"tags":               decodeTags(item.Tags),
 		"installed":          installedSkillID != "",
 		"installed_skill_id": installedSkillID,
 		"icon":               item.Icon,

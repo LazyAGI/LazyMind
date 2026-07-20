@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -218,7 +219,9 @@ func (e *CheckpointScheduleEngine) EnqueueManualSync(ctx context.Context, req Ma
 		return SyncRunIntent{}, err
 	}
 	scopeType := req.ScopeType
-	if scopeType == "" {
+	if binding.Status == "DELETING" {
+		scopeType = connector.ScopeTypeCleanup
+	} else if scopeType == "" {
 		scopeType = connector.ScopeTypeFull
 	}
 	return e.enqueueBindingRun(ctx, binding, TriggerTypeManual, scopeType, req.ScopeRef, req.RequestID, e.clock().UTC(), nil)
@@ -237,10 +240,13 @@ func (e *CheckpointScheduleEngine) EnqueueDueSyncRuns(ctx context.Context, limit
 			return intents, err
 		}
 		trigger := TriggerTypeScheduled
-		if binding.SyncMode == SyncModeWatch {
+		scopeType := connector.ScopeTypeFull
+		if binding.Status == "DELETING" {
+			scopeType = connector.ScopeTypeCleanup
+		} else if binding.SyncMode == SyncModeWatch {
 			trigger = TriggerTypeReconcile
 		}
-		intent, err := e.enqueueBindingRun(ctx, binding, trigger, connector.ScopeTypeFull, nil, "", now, scheduledFireAt(trigger, checkpoint.NextSyncAt))
+		intent, err := e.enqueueBindingRun(ctx, binding, trigger, scopeType, nil, "", now, scheduledFireAt(trigger, checkpoint.NextSyncAt))
 		if err != nil {
 			return intents, err
 		}
@@ -278,7 +284,7 @@ func (e *CheckpointScheduleEngine) FinishRun(ctx context.Context, req FinishRunR
 	if err != nil {
 		return store.SyncRun{}, false, err
 	}
-	finish, err := e.buildFinish(binding, checkpoint, req)
+	finish, err := e.buildFinish(binding, checkpoint, run, req)
 	if err != nil {
 		return store.SyncRun{}, false, err
 	}
@@ -287,6 +293,13 @@ func (e *CheckpointScheduleEngine) FinishRun(ctx context.Context, req FinishRunR
 		return finished, ok, err
 	}
 	err = e.tasks.GeneratePendingTasks(ctx, finished.SourceID, finished.BindingID, finished.RunID)
+	if err != nil && finished.ScopeType == string(connector.ScopeTypeCleanup) {
+		retryAt := e.clock().UTC().Add(e.retryBackoff(1))
+		_, enqueueErr := e.enqueueBindingRun(ctx, binding, TriggerTypeReconcile, connector.ScopeTypeCleanup, nil, "", retryAt, nil)
+		if enqueueErr != nil {
+			return finished, ok, errors.Join(err, enqueueErr)
+		}
+	}
 	return finished, ok, err
 }
 
@@ -330,21 +343,23 @@ func (e *CheckpointScheduleEngine) syncRunID(binding store.Binding, requestID st
 	return "sync-run-" + hex.EncodeToString(sum[:12])
 }
 
-func (e *CheckpointScheduleEngine) buildFinish(binding store.Binding, checkpoint store.SyncCheckpoint, req FinishRunRequest) (store.SyncRunFinish, error) {
+func (e *CheckpointScheduleEngine) buildFinish(binding store.Binding, checkpoint store.SyncCheckpoint, run store.SyncRun, req FinishRunRequest) (store.SyncRunFinish, error) {
 	now := e.clock().UTC()
 	status := req.Status
 	if status == "" {
 		status = store.SyncRunStatusSucceeded
 	}
 	next := req.NextSyncAt
-	if status == store.SyncRunStatusSucceeded && next == nil {
+	if run.ScopeType == string(connector.ScopeTypeCleanup) {
+		next = nil
+	} else if status == store.SyncRunStatusSucceeded && next == nil {
 		var err error
 		next, err = nextSyncAt(binding, now)
 		if err != nil {
 			return store.SyncRunFinish{}, err
 		}
 	}
-	if status != store.SyncRunStatusSucceeded && next == nil {
+	if run.ScopeType != string(connector.ScopeTypeCleanup) && status != store.SyncRunStatusSucceeded && next == nil {
 		retryAt := now.Add(e.retryBackoff(checkpoint.RetryCount + 1))
 		next = &retryAt
 	}

@@ -104,6 +104,9 @@ export interface ContextUsageReport {
   estimated_ratio?: number;
   categories: ContextUsageCategory[];
   estimation_version: string;
+  preview_accuracy?: "deterministic" | "rule_only" | "llm_enhanced";
+  requires_llm?: boolean;
+  llm_reason?: string;
 }
 
 export function estimateContextUsage(payload: Record<string, unknown>) {

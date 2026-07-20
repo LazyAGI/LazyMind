@@ -40,7 +40,6 @@ def _load_rewrite_module():
     fake_tool_infra.parse_user_preference_frontmatter = (
         user_preference_validation.parse_user_preference_frontmatter
     )
-    fake_tool_infra.validate_skill_content = lambda *_args, **_kwargs: None
     fake_tool_infra.validate_user_preference_content = (
         user_preference_validation.validate_user_preference_content
     )
@@ -179,6 +178,37 @@ def test_generate_prompts_include_stale_content_governance():
         assert 'upsert' not in prompt
 
 
+def test_skill_prompt_does_not_require_frontmatter_category():
+    prompt = _PROMPT_BUILDERS['skill'](
+        content='---\nname: example\ndescription: Example skill.\n---\nUse it.\n',
+        user_instruct='Make the steps clearer.',
+    )
+
+    assert 'non-empty name and description fields' in prompt
+    assert 'name, category, and description' not in prompt
+
+
+def test_skill_rewrite_validation_ignores_frontmatter_category():
+    category_free = (
+        '---\n'
+        'name: category-free\n'
+        'description: Category-free skill.\n'
+        '---\n'
+        'Use it.\n'
+    )
+    arbitrary_category = (
+        '---\n'
+        'name: arbitrary-category\n'
+        'category: "任意/上游 category"\n'
+        'description: Arbitrary-category skill.\n'
+        '---\n'
+        'Use it too.\n'
+    )
+
+    assert _validate_generated_content('skill', category_free) == category_free
+    assert _validate_generated_content('skill', arbitrary_category) == arbitrary_category
+
+
 def test_polish_prompt_asks_model_to_rewrite_without_answering():
     prompt = _PROMPT_BUILDERS['polish'](
         content='怎么写一个RAG系统',
@@ -285,7 +315,10 @@ def test_user_preference_validation_requires_yaml_frontmatter():
         'agent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n\nbody',
         '---\nagent_persona: "x"\nresponse_style: "concise"\n---\nbody',
         '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\nextra: "x"\n---\nbody',
-        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\nwork_email: "me@example.com"\n---\nbody',
+        (
+            '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n'
+            'work_email: "me@example.com"\n---\nbody'
+        ),
         '---\nagent_persona: ["x"]\npreferred_name: ""\nresponse_style: "concise"\n---\nbody',
         f'---\nagent_persona: "{too_long}"\npreferred_name: ""\nresponse_style: ""\n---\nbody',
         f'---\nagent_persona: ""\npreferred_name: "{too_long}"\nresponse_style: ""\n---\nbody',

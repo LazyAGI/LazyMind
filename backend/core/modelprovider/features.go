@@ -66,6 +66,19 @@ type roleTypeInfo struct {
 // Key: role string, Value: roleTypeInfo
 var roleTypeCache sync.Map
 
+var runtimeRoleByModelType = map[string]string{
+	"stt":           "speech_to_text",
+	"text2image":    "image_generator",
+	"image_editing": "image_editor",
+}
+
+func runtimeRoleForModelType(modelType string) string {
+	if role, ok := runtimeRoleByModelType[modelType]; ok {
+		return role
+	}
+	return modelType
+}
+
 // fetchRoleTypeInfo calls /api/model/role_type and caches the result permanently.
 // The yaml config does not change at runtime so a successful result never expires.
 // On error the zero value is returned and nothing is cached so the next call retries.
@@ -88,10 +101,11 @@ func fetchRoleTypeInfo(ctx context.Context, role string) (roleTypeInfo, error) {
 // Results are permanently cached since the yaml does not change at runtime.
 // An error is returned as-is — the algorithm service being unreachable is a
 // deployment bug, not a condition to silently paper over with a fallback.
-func FetchRoleIsDynamic(ctx context.Context, role string) (bool, error) {
+func FetchRoleIsDynamic(ctx context.Context, modelType string) (bool, error) {
+	role := runtimeRoleForModelType(modelType)
 	info, err := fetchRoleTypeInfo(ctx, role)
 	if err != nil {
-		log.Logger.Error().Err(err).Str("role", role).
+		log.Logger.Error().Err(err).Str("model_type", modelType).Str("role", role).
 			Msg("role_type fetch failed: algorithm service unreachable")
 		return false, err
 	}

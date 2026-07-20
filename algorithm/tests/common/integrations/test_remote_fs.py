@@ -8,7 +8,7 @@ import lazyllm
 import pytest
 import requests
 
-from lazymind.chat.integrations.remote_fs import RemoteFS
+from lazymind.common.integrations.remote_fs import RemoteFS
 
 
 class FakeResponse:
@@ -174,11 +174,14 @@ def test_revision_id_is_forwarded_for_plugin_reads(captured_requests):
     assert fs.exists('remote://plugins/u_abc/my-plugin/plugin.yaml', revision_id='rev-3')
     assert calls[0]['params']['revision_id'] == 'rev-3'
     assert calls[1]['params']['revision_id'] == 'rev-3'
-    assert calls[0]['params'] == remote_params()
-    assert calls[0]['json'] == {
-        'from': 'skills/coding/pkg/references/old.md',
-        'to': 'skills/coding/pkg/references/new.md',
-    }
+    assert calls[0]['params'] == remote_params(
+        path='plugins/u_abc/my-plugin',
+        revision_id='rev-3',
+    )
+    assert calls[1]['params'] == remote_params(
+        path='plugins/u_abc/my-plugin/plugin.yaml',
+        revision_id='rev-3',
+    )
 
 
 def test_read_base64_decodes_json_content(captured_requests):

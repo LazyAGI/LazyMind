@@ -48,6 +48,13 @@ const coreBasePath = `${BASE_URL}/api/core`;
 
 const SKILL_MD_PATH = "SKILL.md";
 
+const createSkillOrganizeRequestId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `org_${crypto.randomUUID()}`;
+  }
+  return `org_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+};
+
 interface ApiEnvelope<T> {
   code?: number;
   message?: string;
@@ -873,7 +880,7 @@ export async function organizeSkills(
   const response = await skillsApi.apiCoreSkillOrganizePost(
     {
       skillOrganizeOpenAPIRequest: {
-        requestid: `org_${crypto.randomUUID()}`,
+        requestid: createSkillOrganizeRequestId(),
         skills,
       },
     },

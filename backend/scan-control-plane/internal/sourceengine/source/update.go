@@ -81,25 +81,24 @@ func (e *DefaultEngine) UpdateSource(ctx context.Context, callerID, sourceID str
 	if err != nil {
 		return UpdateSourceResponse{}, mapStoreError(err)
 	}
-	result.Bindings = bindingsToResponse(bindings)
+	result.Bindings = bindingsToResponse(activeBindings(bindings))
 
 	return result, nil
 }
 
 type bindingListChanges struct {
-	callerID               string
-	datasetID              string
-	tenantID               string
-	created                []string
-	updated                []string
-	removed                []string
-	createdBindings        []preparedBinding
-	updatedBindings        []store.BindingUpdateMutation
-	deletedBindings        []store.BindingDeleteMutation
-	startWatchers          []store.Binding
-	stopWatchers           []store.Binding
-	reloadWatchers         []store.Binding
-	oldFolderIDs           []string
+	callerID        string
+	datasetID       string
+	tenantID        string
+	created         []string
+	updated         []string
+	removed         []string
+	createdBindings []preparedBinding
+	updatedBindings []store.BindingUpdateMutation
+	deletedBindings []store.BindingDeleteMutation
+	startWatchers   []store.Binding
+	stopWatchers    []store.Binding
+	reloadWatchers  []store.Binding
 }
 
 func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string, src store.Source, inputs []BindingInput, now time.Time) (bindingListChanges, error) {
@@ -112,7 +111,7 @@ func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string,
 	changes := bindingListChanges{callerID: callerID, datasetID: src.DatasetID, tenantID: src.TenantID}
 	for _, input := range inputs {
 		if input.BindingID == "" {
-			prepared, err := e.prepareCreateBinding(ctx, src.SourceID, src.DatasetID, src.Name, callerID, src.TenantID, "", len(changes.createdBindings), input, now)
+			prepared, err := e.prepareCreateBinding(ctx, src.SourceID, src.DatasetID, src.Name, callerID, "", src.TenantID, "", len(changes.createdBindings), input, now)
 			if err != nil {
 				compensatePreparedCreates(ctx, e, changes.datasetID, changes.callerID, changes.createdBindings)
 				return bindingListChanges{}, err
@@ -130,6 +129,27 @@ func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string,
 			compensatePreparedCreates(ctx, e, changes.datasetID, changes.callerID, changes.createdBindings)
 			return bindingListChanges{}, NewError(ErrCodeBindingNotFound, "binding does not belong to source")
 		}
+		if targetChanged(current, input) {
+			createdInput := completeTargetInput(current, input)
+			createdInput.BindingID = ""
+			prepared, err := e.prepareCreateBinding(ctx, src.SourceID, src.DatasetID, src.Name, callerID, "", src.TenantID, "", len(changes.createdBindings), createdInput, now)
+			if err != nil {
+				compensatePreparedMutations(ctx, e, changes)
+				return bindingListChanges{}, err
+			}
+			changes.created = append(changes.created, prepared.binding.BindingID)
+			changes.createdBindings = append(changes.createdBindings, prepared)
+			changes.removed = append(changes.removed, current.BindingID)
+			changes.deletedBindings = append(changes.deletedBindings, store.BindingDeleteMutation{SourceID: current.SourceID, BindingID: current.BindingID, DeletedAt: now})
+			if localWatcherStoppable(current) {
+				changes.stopWatchers = append(changes.stopWatchers, current)
+			}
+			if localWatcherStartable(prepared.binding) {
+				changes.startWatchers = append(changes.startWatchers, prepared.binding)
+			}
+			seen[current.BindingID] = struct{}{}
+			continue
+		}
 		updated, checkpoint, cleanup, err := e.prepareUpdateBinding(ctx, callerID, src, current, input)
 		if err != nil {
 			compensatePreparedMutations(ctx, e, changes)
@@ -139,9 +159,6 @@ func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string,
 		changes.updated = append(changes.updated, input.BindingID)
 		changes.updatedBindings = append(changes.updatedBindings, store.BindingUpdateMutation{Binding: updated, Checkpoint: checkpoint, Cleanup: cleanup})
 		changes = appendWatcherTransition(changes, current, updated)
-		if cleanup.ClearIndexedState {
-			changes.oldFolderIDs = append(changes.oldFolderIDs, cleanup.OldCoreParentDocumentID)
-		}
 	}
 	for _, binding := range existing {
 		if binding.Status == BindingStatusDeleting {
@@ -155,7 +172,6 @@ func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string,
 		if localWatcherStoppable(binding) {
 			changes.stopWatchers = append(changes.stopWatchers, binding)
 		}
-		changes.oldFolderIDs = append(changes.oldFolderIDs, binding.CoreParentDocumentID)
 	}
 	if err := ensureFinalTargetsUnique(existing, changes); err != nil {
 		compensatePreparedMutations(ctx, e, changes)
@@ -174,9 +190,6 @@ func (c bindingListChanges) mutation(src store.Source, now time.Time) store.Sour
 
 func (e *DefaultEngine) runPostCommitBindingActions(ctx context.Context, changes bindingListChanges) ([]string, []JobError) {
 	var jobErrors []JobError
-	for _, folderID := range changes.oldFolderIDs {
-		jobErrors = append(jobErrors, e.deleteFolderAsWarning(ctx, changes.datasetID, folderID, changes.callerID)...)
-	}
 	src := store.Source{TenantID: changes.tenantID}
 	jobErrors = append(jobErrors, e.queueLocalWatcherStops(ctx, src, changes.stopWatchers)...)
 	for _, binding := range changes.reloadWatchers {
@@ -244,7 +257,6 @@ func (e *DefaultEngine) ensureSourceNameUnique(ctx context.Context, tenantID, so
 	}
 	return nil
 }
-
 
 func ensureFinalTargetsUnique(existing []store.Binding, changes bindingListChanges) error {
 	final := make([]store.Binding, 0, len(existing)+len(changes.createdBindings))

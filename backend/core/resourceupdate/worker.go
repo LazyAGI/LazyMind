@@ -95,7 +95,7 @@ func (w *Worker) RunOnce(ctx context.Context) (WorkerRunResult, error) {
 			logWorkerFinishedTask(task, outcome)
 			result.Skipped++
 		default:
-			if task.AttemptCount >= w.cfg.MaxAttempts {
+			if outcome.Permanent || task.AttemptCount >= w.cfg.MaxAttempts {
 				result.Failed++
 			} else {
 				result.Retried++

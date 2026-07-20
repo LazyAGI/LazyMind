@@ -1,5 +1,4 @@
-import { Button, Empty, Input, Pagination, Select, Tooltip } from "antd";
-import { AppstoreOutlined } from "@ant-design/icons";
+import { Button, Empty, Pagination, Tooltip } from "antd";
 import type { StructuredAsset } from "../../shared";
 import { getMarketSource } from "./skillMarketMockData";
 import { isMarketSkillInstalled } from "./skillHelpers";
@@ -10,15 +9,6 @@ interface SkillMarketViewProps {
   loading: boolean;
   skillAssets: StructuredAsset[];
   installedSkills: StructuredAsset[];
-  keyword: string;
-  onKeywordChange: (value: string) => void;
-  onSearch: (value: string) => void;
-  source: "all" | "builtin" | "admin";
-  onSourceChange: (value: "all" | "builtin" | "admin") => void;
-  category: string;
-  onCategoryChange: (value: string) => void;
-  categories: string[];
-  onReset: () => void;
   onInstall: (item: StructuredAsset) => void;
   onDetail: (item: StructuredAsset) => void;
   installingUid?: string;
@@ -35,15 +25,6 @@ export default function SkillMarketView({
   loading,
   skillAssets,
   installedSkills,
-  keyword,
-  onKeywordChange,
-  onSearch,
-  source,
-  onSourceChange,
-  category,
-  onCategoryChange,
-  categories,
-  onReset,
   onInstall,
   onDetail,
   installingUid,
@@ -54,54 +35,6 @@ export default function SkillMarketView({
 }: SkillMarketViewProps) {
   return (
     <div className="memory-skill-market">
-      <div className="memory-skill-filter-strip">
-        <div className="memory-skill-filter-controls">
-          <Input.Search
-            allowClear
-            value={keyword}
-            onChange={(event) => onKeywordChange(event.target.value)}
-            onSearch={onSearch}
-            placeholder={t("admin.memorySkillMarketSearchPlaceholder")}
-            className="memory-skill-market-search"
-          />
-          <Select
-            value={source}
-            className="memory-skill-market-source"
-            options={[
-              { value: "all", label: t("admin.memorySkillMarketSourceAll") },
-              { value: "builtin", label: t("admin.memorySkillMarketSourceBuiltin") },
-              { value: "admin", label: t("admin.memorySkillMarketSourceAdmin") },
-            ]}
-            onChange={onSourceChange}
-          />
-          <Button onClick={onReset}>{t("admin.memoryReset")}</Button>
-        </div>
-
-        <div className="memory-skill-filter-meta-row">
-          <div className="memory-skill-category-bar">
-            <button
-              type="button"
-              className={`memory-skill-category-pill ${category === "all" ? "is-active" : ""}`}
-              onClick={() => onCategoryChange("all")}
-            >
-              <AppstoreOutlined />
-              {t("admin.memorySkillCategoryAll")}
-            </button>
-            {categories.map((item) => (
-              <button
-                key={item}
-                type="button"
-                className={`memory-skill-category-pill ${category === item ? "is-active" : ""}`}
-                onClick={() => onCategoryChange(item)}
-              >
-                {renderSkillCategoryIcon(item)}
-                {item}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
       <div className="memory-skill-market-scroll">
         {loading ? (
           <div className="memory-skill-market-loading">{t("common.loading")}</div>

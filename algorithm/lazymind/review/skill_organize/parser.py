@@ -3,7 +3,10 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from lazymind.chat.engine.tools.infra.skill_validation import parse_skill_frontmatter
+from lazymind.common.skill_document import (
+    SkillDocumentError,
+    parse_skill_document,
+)
 from lazymind.review.skill_organize.schemas import SkillSummary, SourceSkill
 
 _HEADING_RE = re.compile(r'^(#{1,6})\s+(.+?)\s*$', re.M)
@@ -25,15 +28,19 @@ def parse_skill_summaries(skills: Iterable[SourceSkill]) -> list[SkillSummary]:
 
 
 def parse_skill_summary(skill: SourceSkill) -> SkillSummary:
-    frontmatter, body = parse_skill_frontmatter(skill.content)
-    frontmatter = frontmatter or {}
-    name = str(frontmatter.get('name') or skill.name).strip()
-    category = str(frontmatter.get('category') or skill.category).strip()
-    description = str(frontmatter.get('description') or '').strip()
+    try:
+        document = parse_skill_document(skill.content)
+        raw_description = document.metadata.get('description')
+        description = raw_description.strip() if isinstance(raw_description, str) else ''
+        body = document.body
+    except SkillDocumentError as exc:
+        description = ''
+        body = exc.body if exc.body is not None else skill.content
     core_steps = _extract_core_steps(body)
     return SkillSummary(
-        name=name,
-        category=category,
+        key=skill.key,
+        name=skill.name,
+        category=skill.category,
         description=description,
         core_steps=core_steps,
     )

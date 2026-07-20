@@ -411,6 +411,9 @@ components:
                     type: array
                 reasoning_content:
                     type: string
+                thinking_time_s:
+                    format: int64
+                    type: integer
                 seq:
                     type: integer
                 sources:

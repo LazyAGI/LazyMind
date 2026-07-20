@@ -3,7 +3,12 @@ from datetime import datetime, timedelta, timezone
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 
-from services.cloud_oauth_provider import CloudAccountProfile, CloudOAuthProvider, CloudTokenPayload
+from services.cloud_oauth_provider import (
+    CloudAccountProfile,
+    CloudOAuthProvider,
+    CloudProviderError,
+    CloudTokenPayload,
+)
 
 
 _FEISHU_OAUTH_AUTHORIZE_URL = 'https://accounts.feishu.cn/open-apis/authen/v1/authorize'
@@ -18,6 +23,35 @@ _DEFAULT_SCOPE = (
 )
 
 _REFRESH_BUFFER_SECONDS = 300
+_REAUTH_REQUIRED_CODES = {'20037', '20064', '20073'}
+_REAUTH_REQUIRED_MESSAGES = (
+    'invalid_grant',
+    'refresh token has expired',
+    'refresh_token has expired',
+    'refresh token expired',
+    'invalid refresh token',
+    'refresh token is invalid',
+    'refresh token has been revoked',
+    'refresh token revoked',
+    'refresh token has been used',
+)
+
+
+def _provider_response_error(operation: str, data: dict, *, refresh: bool = False) -> CloudProviderError:
+    code = str(data.get('code') or '').strip()
+    detail = data.get('error_description') or data.get('msg') or data
+    detail_text = str(detail)
+    normalized_detail = detail_text.lower()
+    requires_reauth = refresh and (
+        code in _REAUTH_REQUIRED_CODES
+        or any(marker in normalized_detail for marker in _REAUTH_REQUIRED_MESSAGES)
+    )
+    code_suffix = f' [{code}]' if code else ''
+    return CloudProviderError(
+        f'feishu {operation} failed{code_suffix}: {detail_text}',
+        provider_code=code,
+        requires_reauth=requires_reauth,
+    )
 
 
 def _post_json(url: str, payload: dict, timeout_seconds: int = 30) -> dict:
@@ -34,9 +68,13 @@ def _post_json(url: str, payload: dict, timeout_seconds: int = 30) -> dict:
             return json.loads(resp_body) if resp_body else {}
     except HTTPError as exc:
         detail = exc.read().decode('utf-8', errors='ignore')
-        raise RuntimeError(f'provider http error {exc.code}: {detail}') from exc
-    except URLError as exc:
-        raise RuntimeError(f'provider network error: {exc}') from exc
+        raise CloudProviderError(
+            f'provider http error {exc.code}: {detail}',
+            provider_code=str(exc.code),
+            retryable=exc.code == 408 or exc.code == 429 or exc.code >= 500,
+        ) from exc
+    except (URLError, TimeoutError) as exc:
+        raise CloudProviderError(f'provider network error: {exc}', retryable=True) from exc
 
 
 def _get_json(url: str, *, access_token: str, timeout_seconds: int = 30) -> dict:
@@ -51,9 +89,13 @@ def _get_json(url: str, *, access_token: str, timeout_seconds: int = 30) -> dict
             return json.loads(resp_body) if resp_body else {}
     except HTTPError as exc:
         detail = exc.read().decode('utf-8', errors='ignore')
-        raise RuntimeError(f'provider http error {exc.code}: {detail}') from exc
-    except URLError as exc:
-        raise RuntimeError(f'provider network error: {exc}') from exc
+        raise CloudProviderError(
+            f'provider http error {exc.code}: {detail}',
+            provider_code=str(exc.code),
+            retryable=exc.code == 408 or exc.code == 429 or exc.code >= 500,
+        ) from exc
+    except (URLError, TimeoutError) as exc:
+        raise CloudProviderError(f'provider network error: {exc}', retryable=True) from exc
 
 
 def _safe_expires_at(seconds: int | None) -> datetime | None:
@@ -103,8 +145,7 @@ class FeishuOAuthProvider(CloudOAuthProvider):
         }
         data = _post_json(_FEISHU_USER_TOKEN_URL, payload)
         if data.get('code', 0) != 0:
-            detail = data.get('error_description') or data.get('msg') or data
-            raise RuntimeError(f'feishu code exchange failed: {detail}')
+            raise _provider_response_error('code exchange', data)
         return CloudTokenPayload(
             access_token=(data.get('access_token') or '').strip(),
             expires_at=_safe_expires_at(int(data.get('expires_in') or 0)),
@@ -127,9 +168,7 @@ class FeishuOAuthProvider(CloudOAuthProvider):
         }
         data = _post_json(_FEISHU_USER_TOKEN_URL, payload)
         if data.get('code', 0) != 0:
-            raise RuntimeError(
-                f"feishu token refresh failed: {data.get('error_description') or data.get('msg') or data}"
-            )
+            raise _provider_response_error('token refresh', data, refresh=True)
         return CloudTokenPayload(
             access_token=(data.get('access_token') or '').strip(),
             expires_at=_safe_expires_at(int(data.get('expires_in') or 0)),

@@ -9,6 +9,7 @@ import (
 
 type Actor struct {
 	UserID        string
+	UserName      string
 	TenantID      string
 	Role          string
 	Authorization string
