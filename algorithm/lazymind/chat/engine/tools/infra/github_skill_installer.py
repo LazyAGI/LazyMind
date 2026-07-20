@@ -13,7 +13,6 @@ import requests
 import yaml  # type: ignore
 
 from .skill_validation import (
-    EXTERNAL_SKILL_CATEGORY,
     validate_skill_document,
     validate_skill_name,
 )
@@ -58,7 +57,6 @@ class GitHubSkillSource:
 class PreparedSkillPackage:
     source: GitHubSkillSource
     name: str
-    category: str
     description: str
     files: Dict[str, bytes]
 
@@ -324,7 +322,6 @@ class GitHubSkillInstaller:
         return PreparedSkillPackage(
             source=source,
             name=name,
-            category=EXTERNAL_SKILL_CATEGORY,
             description=description,
             files=normalized_files,
         )

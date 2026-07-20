@@ -540,11 +540,14 @@ def _apply_skill_review_record(record: SkillReviewResolution, store: SkillRemote
         }
 
     if record.type == 'patch':
-        existing_identity = store.resolve_existing_identity(record.skill_name)
+        existing_identity = store.resolve_existing_identity(record.target_skill_key)
         if existing_identity.get('error'):
             raise ValueError(str(existing_identity['error']))
         storage_category = str(existing_identity['category']).strip()
-        old_name = str(existing_identity.get('name') or record.skill_name).strip()
+        old_name = str(
+            existing_identity.get('name')
+            or record.target_skill_key.rsplit('/', 1)[-1]
+        ).strip()
         new_name = content_name or old_name
         if (
             new_name != old_name
@@ -561,12 +564,14 @@ def _apply_skill_review_record(record: SkillReviewResolution, store: SkillRemote
             replace_result = store.replace_files(storage_category, old_name, before, after)
             store_result = {'replace': replace_result}
         else:
-            create_result = store.create(storage_category, new_name, record.skill_content)
-            remove_result = store.remove(storage_category, old_name)
-            store_result = {
-                'create': create_result,
-                'remove': remove_result,
-            }
+            rename_result = store.rename(
+                storage_category,
+                old_name,
+                storage_category,
+                new_name,
+                skill_content=record.skill_content,
+            )
+            store_result = {'rename': rename_result}
         return {
             'id': record.id,
             'type': record.type,

@@ -42,12 +42,11 @@ def test_skill_file_operations_create_and_delete_supporting_files():
 
     create_result = create_skill_file(
         current_files,
-        'writing',
         'existing',
         'scripts/check.py',
         'print("ok")\n',
     )
-    delete_result = delete_skill_file(current_files, 'writing', 'existing', 'references/old.md')
+    delete_result = delete_skill_file(current_files, 'existing', 'references/old.md')
 
     assert create_result['status'] == 'created'
     assert create_result['touched_files'] == ['scripts/check.py']
@@ -72,8 +71,8 @@ def test_edit_skill_file_rejects_skill_identity_change():
     )
     renamed_content = existing_content.replace('name: existing', 'name: renamed')
 
-    with pytest.raises(ValueError, match='SKILL.md frontmatter name/category cannot be changed'):
-        edit_skill_file({'SKILL.md': existing_content}, 'writing', 'existing', 'SKILL.md', renamed_content)
+    with pytest.raises(ValueError, match='SKILL.md frontmatter name cannot be changed'):
+        edit_skill_file({'SKILL.md': existing_content}, 'existing', 'SKILL.md', renamed_content)
 
 
 def test_fuzzy_find_and_replace_exact_match():

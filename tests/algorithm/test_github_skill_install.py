@@ -77,7 +77,6 @@ class _PreparedInstaller:
         self.package = PreparedSkillPackage(
             source=self.source,
             name='example',
-            category='external',
             description='Example skill.',
             files={'SKILL.md': b'---\nname: example\ndescription: Example skill.\n---\nUse it.\n'},
         )

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+
+import yaml  # type: ignore
 
 _PATH_SEGMENT_RE = re.compile(r'^[A-Za-z0-9._-]+$')
 _FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n(.*)$', re.DOTALL)
@@ -9,6 +11,15 @@ _MAX_DESCRIPTION_LENGTH = 1024
 
 INTERNAL_SKILL_CATEGORY = 'internal'
 EXTERNAL_SKILL_CATEGORY = 'external'
+SkillStorageCategory = Literal['internal', 'external']
+SKILL_STORAGE_CATEGORIES: frozenset[SkillStorageCategory] = frozenset({
+    INTERNAL_SKILL_CATEGORY,
+    EXTERNAL_SKILL_CATEGORY,
+})
+_SKILL_STORAGE_CATEGORY_ERROR = (
+    f'Skill storage category must be {INTERNAL_SKILL_CATEGORY!r} or '
+    f'{EXTERNAL_SKILL_CATEGORY!r}.'
+)
 
 
 def validate_skill_name(name: str) -> Optional[str]:
@@ -24,15 +35,24 @@ def validate_skill_name(name: str) -> Optional[str]:
     return None
 
 
-def normalize_skill_category(category: Optional[str]) -> Optional[str]:
-    if category is None:
-        return ''
-    cleaned = str(category).strip().strip('/')
-    if not cleaned:
-        return ''
-    if cleaned in {'.', '..'} or not _PATH_SEGMENT_RE.match(cleaned):
-        return None
-    return cleaned
+def require_skill_storage_category(category: str) -> str:
+    normalized = str(category or '').strip()
+    if normalized not in SKILL_STORAGE_CATEGORIES:
+        raise ValueError(_SKILL_STORAGE_CATEGORY_ERROR)
+    return normalized
+
+
+def parse_skill_storage_key(value: str) -> tuple[str, str]:
+    raw = str(value or '').strip()
+    parts = raw.split('/')
+    if len(parts) != 2 or not all(parts):
+        raise ValueError(f"Skill key {raw!r} must be in 'category/name' form.")
+    category = require_skill_storage_category(parts[0])
+    name = parts[1]
+    name_error = validate_skill_name(name)
+    if name_error:
+        raise ValueError(f'Skill key {raw!r} has invalid name: {name_error}')
+    return category, name
 
 
 def parse_skill_frontmatter(content: str) -> tuple[dict[str, Any], str]:
@@ -42,8 +62,6 @@ def parse_skill_frontmatter(content: str) -> tuple[dict[str, Any], str]:
 
     yaml_text, body = match.group(1), match.group(2)
     try:
-        import yaml  # type: ignore
-
         parsed = yaml.safe_load(yaml_text)
         if isinstance(parsed, dict):
             return parsed, body
@@ -53,7 +71,24 @@ def parse_skill_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     return {}, body
 
 
-def _validate_skill_document(content: str, *, require_category: bool) -> Optional[str]:
+def skill_name_from_content(content: str) -> str:
+    frontmatter, _ = parse_skill_frontmatter(content)
+    return str(frontmatter.get('name') or '').strip()
+
+
+def rewrite_skill_name(content: str, name: str) -> str:
+    frontmatter, body = parse_skill_frontmatter(content)
+    if not frontmatter:
+        raise ValueError('SKILL.md must contain YAML frontmatter.')
+    frontmatter = dict(frontmatter)
+    frontmatter['name'] = name
+
+    yaml_text = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).strip()
+    return f'---\n{yaml_text}\n---\n{body}'
+
+
+def validate_skill_document(content: str) -> Optional[str]:
+    """Validate SKILL.md structure without interpreting frontmatter category."""
     if not content or not content.strip():
         return "action='create' requires a non-empty 'content' (full SKILL.md body)."
 
@@ -64,32 +99,13 @@ def _validate_skill_document(content: str, *, require_category: bool) -> Optiona
     description = str(frontmatter.get('description') or '').strip()
     if not name:
         return "Frontmatter must include non-empty 'name'."
-    if require_category:
-        category = str(frontmatter.get('category') or '').strip()
-        if not category:
-            return "Frontmatter must include non-empty 'category'."
     if not description:
         return "Frontmatter must include non-empty 'description'."
     name_error = validate_skill_name(name)
     if name_error:
         return name_error
-    if require_category and normalize_skill_category(category) is None:
-        return (
-            f'Frontmatter category {category!r} is invalid; only ASCII '
-            "letters, digits, '-', '_' and '.' are allowed."
-        )
     if len(description) > _MAX_DESCRIPTION_LENGTH:
         return f'Description exceeds {_MAX_DESCRIPTION_LENGTH} characters.'
     if not body.strip():
         return 'SKILL.md must have markdown content after frontmatter.'
     return None
-
-
-def validate_skill_document(content: str) -> Optional[str]:
-    """Validate SKILL.md structure without interpreting frontmatter category."""
-    return _validate_skill_document(content, require_category=False)
-
-
-def validate_skill_content(content: str) -> Optional[str]:
-    """Validate legacy category-bearing SKILL.md content."""
-    return _validate_skill_document(content, require_category=True)

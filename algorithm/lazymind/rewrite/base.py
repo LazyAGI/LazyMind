@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from lazyllm import AutoModel
 from lazymind.chat.engine.tools.infra import (
-    validate_skill_content,
+    validate_skill_document,
     validate_user_preference_content,
 )
 
@@ -128,7 +128,7 @@ def _validate_generated_content(task_type: RewriteTaskType, content: Any) -> str
         raise UnprocessableContentError("Generated field 'content' must be a string.")
 
     if task_type == 'skill':
-        validation_error = validate_skill_content(content)
+        validation_error = validate_skill_document(content)
         if validation_error:
             raise UnprocessableContentError(
                 f'Generated SKILL.md is invalid: {validation_error}'

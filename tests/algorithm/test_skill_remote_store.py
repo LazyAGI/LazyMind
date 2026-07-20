@@ -1,6 +1,15 @@
+import inspect
+from typing import get_args
+
 import pytest
 
 from lazymind.chat.engine.tools.infra.skill_remote_store import SkillRemoteStore
+from lazymind.chat.engine.tools.infra.skill_validation import (
+    SKILL_STORAGE_CATEGORIES,
+    SkillStorageCategory,
+    parse_skill_storage_key,
+    require_skill_storage_category,
+)
 
 
 class _RemoteFS:
@@ -43,6 +52,23 @@ def _store(fs):
     return store
 
 
+def test_skill_storage_category_interface_accepts_only_internal_and_external():
+    assert set(get_args(SkillStorageCategory)) == {'internal', 'external'}
+    assert SKILL_STORAGE_CATEGORIES == frozenset({'internal', 'external'})
+    assert require_skill_storage_category(' internal ') == 'internal'
+    assert require_skill_storage_category('external') == 'external'
+    assert parse_skill_storage_key('internal/example') == ('internal', 'example')
+
+    with pytest.raises(ValueError, match='internal.*external'):
+        require_skill_storage_category('research')
+    with pytest.raises(ValueError, match='category/name'):
+        parse_skill_storage_key('example')
+    with pytest.raises(ValueError, match='internal.*external'):
+        parse_skill_storage_key('research/example')
+    with pytest.raises(ValueError, match='invalid name'):
+        parse_skill_storage_key('external/invalid name')
+
+
 def test_storage_category_is_limited_to_internal_and_external():
     fs = _RemoteFS()
     store = _store(fs)
@@ -58,7 +84,7 @@ def test_storage_category_is_limited_to_internal_and_external():
         store.remove('system', 'example')
 
     assert fs.calls == []
-    assert 'internal' in store.resolve_existing_identity('example', 'research')['error']
+    assert list(inspect.signature(store.resolve_existing_identity).parameters) == ['name']
     assert 'external' in store.resolve_existing_identity('research/example')['error']
 
 

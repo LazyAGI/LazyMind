@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 
+import pytest
+
 
 _ALGO = Path(__file__).resolve().parents[3] / 'algorithm'
 
@@ -147,6 +149,10 @@ def _load_skill_review_modules():
             'lazymind.review.skill_review.schemas',
             'lazymind/review/skill_review/schemas.py',
         )
+        json_call = _load_module(
+            'lazymind.review.skill_review.json_call',
+            'lazymind/review/skill_review/json_call.py',
+        )
         prompt = _load_module(
             'lazymind.review.skill_review.prompt',
             'lazymind/review/skill_review/prompt.py',
@@ -159,15 +165,21 @@ def _load_skill_review_modules():
             'lazymind.review.skill_review.miner',
             'lazymind/review/skill_review/miner.py',
         )
+        resolution = _load_module(
+            'lazymind.review.skill_review.resolution',
+            'lazymind/review/skill_review/resolution.py',
+        )
         service = _load_module(
             'lazymind.review.service.skill_review',
             'lazymind/review/service/skill_review.py',
         )
         return SimpleNamespace(
             config=config,
+            json_call=json_call,
             miner=miner,
             prompt=prompt,
             reports=reports,
+            resolution=resolution,
             schemas=schemas,
             service=service,
             validation=validation,
@@ -199,12 +211,15 @@ class _FakeStore:
     def package_dir(self, category, name):
         return f'remote://skills/{category}/{name}'
 
-    def resolve_existing_identity(self, name, category=None):
-        self.calls.append(('resolve_existing_identity', name, category))
+    def resolve_existing_identity(self, name):
+        self.calls.append(('resolve_existing_identity', name))
+        if '/' in name:
+            category, skill_name = name.split('/', 1)
+            return {'category': category, 'name': skill_name}
         matches = [
             {'category': current_category, 'name': current_name}
             for current_category, current_name in self.packages
-            if current_name == name and (category is None or current_category == category)
+            if current_name == name
         ]
         return matches[0] if len(matches) == 1 else {'error': 'not found or ambiguous'}
 
@@ -222,9 +237,31 @@ class _FakeStore:
         self.packages[(category, name)] = {'SKILL.md': content}
         return {'action': 'create'}
 
+    def rename(self, old_category, old_name, new_category, new_name, *, skill_content):
+        self.calls.append((
+            'rename',
+            old_category,
+            old_name,
+            new_category,
+            new_name,
+            skill_content,
+        ))
+        old_key = (old_category, old_name)
+        new_key = (new_category, new_name)
+        if old_key not in self.packages:
+            raise FileNotFoundError(f'Skill package {old_category}/{old_name} does not exist.')
+        if new_key in self.packages:
+            raise FileExistsError(f'Skill package {new_category}/{new_name} already exists.')
+        files = self.packages.pop(old_key)
+        files['SKILL.md'] = skill_content
+        self.packages[new_key] = files
+        return {'action': 'rename'}
+
     def remove(self, category, name):
         self.calls.append(('remove', category, name))
-        self.packages.pop((category, name), None)
+        if (category, name) not in self.packages:
+            raise FileNotFoundError(f'Skill package {category}/{name} does not exist.')
+        self.packages.pop((category, name))
         return {'action': 'remove'}
 
 
@@ -267,7 +304,7 @@ def test_candidate_schema_normalization_and_prompt_do_not_generate_category():
     generation_prompt = modules.prompt.candidate_prompt(outline, guidelines)
     merge_prompt = modules.prompt.merge_skill_patch_prompt(
         candidate.model_dump(),
-        patch_skill_name='existing',
+        target_skill_key='internal/existing',
         existing_skill_content=_skill_content('existing', 'category: legacy\n'),
     )
 
@@ -279,14 +316,222 @@ def test_candidate_schema_normalization_and_prompt_do_not_generate_category():
     assert 'description/category' not in merge_prompt
 
 
-def test_category_independent_validation_keeps_strict_validator_for_organize():
+def test_candidate_llm_output_retries_until_complete_skill_document():
     modules = _load_skill_review_modules()
-    content = _skill_content('category-free')
-
-    assert modules.validation.validate_skill_document(content) is None
-    assert modules.validation.validate_skill_content(content) == (
-        "Frontmatter must include non-empty 'category'."
+    cluster = modules.schemas.TaskCluster(task_scope='Review generation.')
+    outline = modules.schemas.SkillOutline(
+        skill_name='review-generated',
+        applicable_scenario='Use for review generation.',
     )
+    valid_content = _skill_content('review-generated')
+    responses = iter([
+        {
+            'skill_name': 'review-generated',
+            'applicable_scenario': 'Use for review generation.',
+            'content': '## Procedure\n\nGenerate a reusable skill.\n',
+        },
+        {
+            'skill_name': 'review-generated',
+            'applicable_scenario': 'Use for review generation.',
+            'content': valid_content,
+        },
+    ])
+    calls = []
+
+    def llm(prompt, **kwargs):
+        calls.append((prompt, kwargs))
+        return next(responses)
+
+    result = modules.miner.build_candidate_skill(cluster, outline, llm)
+
+    assert len(calls) == 2
+    assert result.content == valid_content
+
+
+def test_candidate_llm_output_rejects_frontmatter_name_mismatch():
+    modules = _load_skill_review_modules()
+
+    with pytest.raises(ValueError, match='frontmatter name.*skill_name'):
+        modules.schemas.CandidateSkillLLMOutput(
+            skill_name='review-generated',
+            applicable_scenario='Use for review generation.',
+            content=_skill_content('different-name'),
+        )
+
+
+def test_candidate_model_rejects_incomplete_document():
+    modules = _load_skill_review_modules()
+    outline = modules.schemas.SkillOutline(
+        skill_name='review-generated',
+        applicable_scenario='Use for review generation.',
+    )
+
+    with pytest.raises(ValueError, match='YAML frontmatter'):
+        modules.schemas.CandidateSkill(
+            skill_name='review-generated',
+            applicable_scenario='Use for review generation.',
+            content='## Procedure\n\nGenerate a reusable skill.\n',
+            outline=outline,
+        )
+
+
+def test_candidate_llm_output_stops_after_invalid_retries():
+    modules = _load_skill_review_modules()
+    cluster = modules.schemas.TaskCluster(task_scope='Review generation.')
+    outline = modules.schemas.SkillOutline(
+        skill_name='review-generated',
+        applicable_scenario='Use for review generation.',
+    )
+    calls = []
+
+    def llm(prompt, **kwargs):
+        calls.append((prompt, kwargs))
+        return {
+            'skill_name': 'review-generated',
+            'applicable_scenario': 'Use for review generation.',
+            'content': '## Procedure\n\nGenerate a reusable skill.\n',
+        }
+
+    with pytest.raises(ValueError, match='failed after 3 attempts') as exc_info:
+        modules.miner.build_candidate_skill(cluster, outline, llm)
+
+    assert len(calls) == 3
+    assert 'YAML frontmatter' in str(exc_info.value)
+
+
+def test_review_resolution_selects_exact_skill_key_when_storage_names_match():
+    modules = _load_skill_review_modules()
+    outline = modules.schemas.SkillOutline(
+        skill_name='shared',
+        applicable_scenario='Use for shared review generation.',
+    )
+    candidate = modules.schemas.CandidateSkill(
+        skill_name='shared',
+        applicable_scenario='Use for shared review generation.',
+        content=_skill_content('shared'),
+        outline=outline,
+    )
+    contents = {
+        'internal/shared': _skill_content('shared'),
+        'external/shared': _skill_content('shared'),
+    }
+
+    class _SkillManager:
+        def __init__(self):
+            self.read_keys = []
+
+        def get_skill(self, key):
+            self.read_keys.append(key)
+            return {'status': 'ok', 'content': contents[key]}
+
+    manager = _SkillManager()
+    responses = iter([
+        {
+            'type': 'patch',
+            'patch_skill_key': 'external/shared',
+            'reason': 'The external skill is the exact workflow match.',
+        },
+        {
+            'summary': 'Clarified the workflow boundary.',
+            'skill_name': 'renamed-shared',
+            'skill_content': _skill_content('renamed-shared'),
+        },
+    ])
+    modules.resolution.call_json = lambda *_args, **_kwargs: next(responses)
+
+    result = modules.resolution.resolve_skill_action(
+        candidate,
+        object(),
+        skill_manager=manager,
+        skill_summaries=(
+            '- **internal/shared**\n'
+            '  - Name: shared\n'
+            '- **external/shared**\n'
+            '  - Name: shared\n'
+        ),
+    )
+
+    assert manager.read_keys == ['external/shared']
+    assert result.target_skill_key == 'external/shared'
+    assert result.skill_name == 'renamed-shared'
+
+
+def test_review_resolution_rejects_patch_key_when_summaries_have_no_storage_keys():
+    modules = _load_skill_review_modules()
+    outline = modules.schemas.SkillOutline(
+        skill_name='shared',
+        applicable_scenario='Use for shared review generation.',
+    )
+    candidate = modules.schemas.CandidateSkill(
+        skill_name='shared',
+        applicable_scenario='Use for shared review generation.',
+        content=_skill_content('shared'),
+        outline=outline,
+    )
+
+    class _SkillManager:
+        def __init__(self):
+            self.read_keys = []
+
+        def get_skill(self, key):
+            self.read_keys.append(key)
+            raise AssertionError('patch target must be rejected before reading')
+
+    manager = _SkillManager()
+    modules.resolution.call_json = lambda *_args, **_kwargs: {
+        'type': 'patch',
+        'patch_skill_key': 'external/shared',
+        'reason': 'Patch the external workflow.',
+    }
+
+    with pytest.raises(ValueError, match='not in global skill summaries'):
+        modules.resolution.resolve_skill_action(
+            candidate,
+            object(),
+            skill_manager=manager,
+            skill_summaries='# Skills\n\n- (none)',
+        )
+
+    assert manager.read_keys == []
+
+
+def test_review_resolution_validates_patch_storage_key_before_reading():
+    modules = _load_skill_review_modules()
+    outline = modules.schemas.SkillOutline(
+        skill_name='shared',
+        applicable_scenario='Use for shared review generation.',
+    )
+    candidate = modules.schemas.CandidateSkill(
+        skill_name='shared',
+        applicable_scenario='Use for shared review generation.',
+        content=_skill_content('shared'),
+        outline=outline,
+    )
+
+    class _SkillManager:
+        def __init__(self):
+            self.read_keys = []
+
+        def get_skill(self, key):
+            self.read_keys.append(key)
+            raise AssertionError('invalid storage key must be rejected before reading')
+
+    manager = _SkillManager()
+    modules.resolution.call_json = lambda *_args, **_kwargs: {
+        'type': 'patch',
+        'patch_skill_key': 'research/shared',
+        'reason': 'Patch the listed workflow.',
+    }
+
+    with pytest.raises(ValueError, match='Skill storage category must be'):
+        modules.resolution.resolve_skill_action(
+            candidate,
+            object(),
+            skill_manager=manager,
+            skill_summaries='- **research/shared**\n  - Name: shared',
+        )
+
+    assert manager.read_keys == []
 
 
 def test_review_new_skill_always_uses_internal_and_preserves_content():
@@ -316,14 +561,59 @@ def test_review_new_skill_always_uses_internal_and_preserves_content():
     assert ('create', 'internal', 'category-free', content_without_category) in store.calls
 
 
+def test_new_review_resolution_rejects_target_skill_key():
+    modules = _load_skill_review_modules()
+
+    with pytest.raises(ValueError, match='target_skill_key must be empty'):
+        modules.schemas.SkillReviewResolution(
+            id='new-with-target',
+            skill_name='generated',
+            target_skill_key='internal/existing',
+            type='new',
+            skill_content=_skill_content('generated'),
+        )
+
+
+def test_patch_review_resolution_requires_target_skill_key():
+    modules = _load_skill_review_modules()
+
+    with pytest.raises(ValueError, match='target_skill_key is required'):
+        modules.schemas.SkillReviewResolution(
+            id='patch-without-target',
+            skill_name='existing',
+            type='patch',
+            skill_content=_skill_content('existing'),
+        )
+
+
+def test_patch_review_resolution_rejects_non_storage_category_key():
+    modules = _load_skill_review_modules()
+
+    with pytest.raises(ValueError, match='Skill storage category must be'):
+        modules.schemas.SkillReviewResolution(
+            id='patch-with-invalid-target',
+            skill_name='existing',
+            target_skill_key='research/existing',
+            type='patch',
+            skill_content=_skill_content('existing'),
+        )
+
+
 def test_review_patch_ignores_frontmatter_category_and_keeps_storage_category():
     modules = _load_skill_review_modules()
     old_content = _skill_content('existing', 'category: original-content-value\n')
-    store = _FakeStore({('external', 'existing'): {'SKILL.md': old_content}})
+    store = _FakeStore({
+        ('internal', 'existing'): {'SKILL.md': old_content},
+        ('external', 'existing'): {
+            'SKILL.md': old_content,
+            'references/example.md': 'supporting file',
+        },
+    })
     patched_content = _skill_content('renamed', 'category: changed-content-value\n')
     record = modules.schemas.SkillReviewResolution(
         id='patch-1',
-        skill_name='existing',
+        skill_name='renamed',
+        target_skill_key='external/existing',
         type='patch',
         skill_content=patched_content,
     )
@@ -332,9 +622,29 @@ def test_review_patch_ignores_frontmatter_category_and_keeps_storage_category():
 
     assert result['old_category'] == 'external'
     assert result['category'] == 'external'
-    assert ('create', 'external', 'renamed', patched_content) in store.calls
-    assert ('remove', 'external', 'existing') in store.calls
+    assert ('resolve_existing_identity', 'external/existing') in store.calls
+    assert ('rename', 'external', 'existing', 'external', 'renamed', patched_content) in store.calls
+    assert ('internal', 'existing') in store.packages
+    assert store.packages[('external', 'renamed')]['references/example.md'] == 'supporting file'
     assert not any(call[0] == 'create' and call[1] == 'changed-content-value' for call in store.calls)
+
+
+def test_review_patch_rename_does_not_create_target_when_source_disappears_before_apply():
+    modules = _load_skill_review_modules()
+    store = _FakeStore()
+    record = modules.schemas.SkillReviewResolution(
+        id='patch-missing-source',
+        skill_name='renamed',
+        target_skill_key='external/missing',
+        type='patch',
+        skill_content=_skill_content('renamed'),
+    )
+
+    with pytest.raises(FileNotFoundError, match='external/missing does not exist'):
+        modules.service._apply_skill_review_record(record, store)
+
+    assert store.packages == {}
+    assert not any(call[0] == 'create' for call in store.calls)
 
 
 def test_review_patch_same_name_replaces_in_original_category_without_category_frontmatter():
@@ -345,6 +655,7 @@ def test_review_patch_same_name_replaces_in_original_category_without_category_f
     record = modules.schemas.SkillReviewResolution(
         id='patch-2',
         skill_name='existing',
+        target_skill_key='internal/existing',
         type='patch',
         skill_content=patched_content,
     )

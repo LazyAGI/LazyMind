@@ -8,17 +8,10 @@ from lazymind.config import config
 
 from .skill_paths import normalize_skill_package_path, relative_to_package
 from .skill_validation import (
-    EXTERNAL_SKILL_CATEGORY,
-    INTERNAL_SKILL_CATEGORY,
-    normalize_skill_category,
+    SKILL_STORAGE_CATEGORIES,
+    parse_skill_storage_key,
+    require_skill_storage_category,
     validate_skill_name,
-)
-
-
-_STORAGE_CATEGORIES = frozenset({INTERNAL_SKILL_CATEGORY, EXTERNAL_SKILL_CATEGORY})
-_STORAGE_CATEGORY_ERROR = (
-    f'Skill storage category must be {INTERNAL_SKILL_CATEGORY!r} or '
-    f'{EXTERNAL_SKILL_CATEGORY!r}.'
 )
 
 
@@ -43,7 +36,7 @@ class SkillRemoteStore:
                 continue
             category_path = str((category_entry or {}).get('name') or '').strip()
             category = _last_path_part(category_path)
-            if category not in _STORAGE_CATEGORIES:
+            if category not in SKILL_STORAGE_CATEGORIES:
                 continue
             for package_entry in self.fs.ls(category_path, detail=True):
                 if str((package_entry or {}).get('type') or 'file').strip() not in ('directory', 'dir'):
@@ -58,43 +51,21 @@ class SkillRemoteStore:
         with self.fs.open(path, 'r', encoding='utf-8', errors='replace') as fh:
             return fh.read()
 
-    def resolve_existing_identity(self, name: str, category: Optional[str] = None) -> Dict[str, str]:
+    def resolve_existing_identity(self, name: str) -> Dict[str, str]:
         raw_name = str(name or '').strip()
-        try:
-            normalized_category = _require_storage_category(category) if category is not None else None
-        except ValueError as exc:
-            return {'error': str(exc)}
-
         if '/' in raw_name:
-            parts = [part.strip() for part in raw_name.split('/')]
-            if len(parts) != 2 or not all(parts):
-                return {'error': f'Skill key {raw_name!r} must be in \'category/name\' form.'}
             try:
-                key_category = _require_storage_category(parts[0])
+                key_category, key_name = parse_skill_storage_key(raw_name)
             except ValueError as exc:
                 return {'error': str(exc)}
-            key_name = parts[1]
-            name_error = validate_skill_name(key_name)
-            if name_error:
-                return {'error': f'Skill key {raw_name!r} has invalid name: {name_error}'}
-            if normalized_category and normalized_category != key_category:
-                return {
-                    'error': (
-                        f'Skill key {raw_name!r} conflicts with category {category!r}; '
-                        'they must refer to the same category.'
-                    )
-                }
             return {'category': key_category, 'name': key_name}
 
         name_error = validate_skill_name(raw_name)
         if name_error:
             return {'error': name_error}
-        if normalized_category:
-            return {'category': normalized_category, 'name': raw_name}
-
         matches = self._find_packages_by_name(raw_name)
         if not matches:
-            return {'error': f'Skill {raw_name!r} was not found; provide category or full skill key.'}
+            return {'error': f'Skill {raw_name!r} was not found; provide the full skill key.'}
         if len(matches) > 1:
             first_match = matches[0]
             first_category = first_match['category']
@@ -273,13 +244,6 @@ def _last_path_part(path: str) -> str:
     return raw.rstrip('/').rsplit('/', 1)[-1] if raw else ''
 
 
-def _require_storage_category(category: Optional[str]) -> str:
-    normalized = normalize_skill_category(category)
-    if normalized not in _STORAGE_CATEGORIES:
-        raise ValueError(_STORAGE_CATEGORY_ERROR)
-    return normalized
-
-
 def _require_skill_name(name: str) -> str:
     error = validate_skill_name(name)
     if error:
@@ -287,5 +251,5 @@ def _require_skill_name(name: str) -> str:
     return str(name).strip()
 
 
-def _require_storage_identity(category: Optional[str], name: str) -> tuple[str, str]:
-    return _require_storage_category(category), _require_skill_name(name)
+def _require_storage_identity(category: str, name: str) -> tuple[str, str]:
+    return require_skill_storage_category(category), _require_skill_name(name)

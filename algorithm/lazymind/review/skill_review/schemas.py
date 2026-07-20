@@ -5,6 +5,12 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from lazymind.chat.engine.tools.infra.skill_validation import (
+    parse_skill_frontmatter,
+    parse_skill_storage_key,
+    validate_skill_document,
+)
+
 
 class SkillReviewRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -98,6 +104,19 @@ class SkillOutline(BaseModel):
     sop: List[SkillOutlineStep] = Field(default_factory=list)
 
 
+def _validate_candidate_document(skill_name: str, content: str) -> None:
+    content_error = validate_skill_document(content)
+    if content_error:
+        raise ValueError(content_error)
+    frontmatter, _ = parse_skill_frontmatter(content)
+    content_name = str(frontmatter.get('name') or '').strip()
+    if content_name != skill_name:
+        raise ValueError(
+            f'candidate SKILL.md frontmatter name {content_name!r} '
+            f'must match skill_name {skill_name!r}'
+        )
+
+
 class CandidateSkill(BaseModel):
     skill_name: str
     source_trajectories: List[str] = Field(default_factory=list)
@@ -106,16 +125,27 @@ class CandidateSkill(BaseModel):
     content: str
     outline: SkillOutline
 
+    @model_validator(mode='after')
+    def validate_content(self) -> 'CandidateSkill':
+        _validate_candidate_document(self.skill_name, self.content)
+        return self
+
 
 class CandidateSkillLLMOutput(BaseModel):
     skill_name: str
     applicable_scenario: str
     content: str
 
+    @model_validator(mode='after')
+    def validate_content(self) -> 'CandidateSkillLLMOutput':
+        _validate_candidate_document(self.skill_name, self.content)
+        return self
+
 
 class SkillReviewResolution(BaseModel):
     id: str = Field(..., min_length=1)
     skill_name: str = Field(..., min_length=1)
+    target_skill_key: str = ''
     type: Literal['new', 'patch']
     review_status: Literal['pending', 'accepted', 'rejected', 'expired'] = 'pending'
     userid: str = ''
@@ -123,6 +153,18 @@ class SkillReviewResolution(BaseModel):
     skill_content: str = ''
     summary: Optional[str] = None
     time: str = ''
+
+    @model_validator(mode='after')
+    def validate_target_skill_key(self) -> 'SkillReviewResolution':
+        self.target_skill_key = self.target_skill_key.strip()
+        if self.type == 'new' and self.target_skill_key:
+            raise ValueError('target_skill_key must be empty for new skill resolutions')
+        if self.type == 'patch' and not self.target_skill_key:
+            raise ValueError('target_skill_key is required for patch skill resolutions')
+        if self.type == 'patch':
+            category, name = parse_skill_storage_key(self.target_skill_key)
+            self.target_skill_key = f'{category}/{name}'
+        return self
 
 
 class UserSkillReviewResult(BaseModel):

@@ -27,13 +27,12 @@ def parse_skill_summaries(skills: Iterable[SourceSkill]) -> list[SkillSummary]:
 def parse_skill_summary(skill: SourceSkill) -> SkillSummary:
     frontmatter, body = parse_skill_frontmatter(skill.content)
     frontmatter = frontmatter or {}
-    name = str(frontmatter.get('name') or skill.name).strip()
-    category = str(frontmatter.get('category') or skill.category).strip()
     description = str(frontmatter.get('description') or '').strip()
     core_steps = _extract_core_steps(body)
     return SkillSummary(
-        name=name,
-        category=category,
+        key=skill.key,
+        name=skill.name,
+        category=skill.category,
         description=description,
         core_steps=core_steps,
     )
