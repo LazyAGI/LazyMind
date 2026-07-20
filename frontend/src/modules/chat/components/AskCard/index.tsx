@@ -135,6 +135,7 @@ export default function AskCard({
 }: AskCardProps) {
   const { t } = useTranslation();
   const otherOption = OTHER_OPTION;
+  const otherOptionLabel = t("chat.askCardOtherOption");
   const answerSeparator = t("chat.askCardAnswerSeparator");
   const { questions, title, description } = askPending;
   const total = questions.length;
@@ -306,7 +307,13 @@ export default function AskCard({
                     value={origVal}
                     className="ask-wizard__choice"
                   >
-                    <ChoiceLabel value={currentChoices[ci] ?? origVal} />
+                    <ChoiceLabel
+                      value={
+                        origVal === otherOption
+                          ? otherOptionLabel
+                          : (currentChoices[ci] ?? origVal)
+                      }
+                    />
                   </Radio>
                 ))}
               </Radio.Group>
@@ -351,7 +358,13 @@ export default function AskCard({
                     value={origVal}
                     className="ask-wizard__choice"
                   >
-                    <ChoiceLabel value={currentChoices[ci] ?? origVal} />
+                    <ChoiceLabel
+                      value={
+                        origVal === otherOption
+                          ? otherOptionLabel
+                          : (currentChoices[ci] ?? origVal)
+                      }
+                    />
                   </Checkbox>
                 ))}
               </Checkbox.Group>
