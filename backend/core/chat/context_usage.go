@@ -56,6 +56,9 @@ type ContextUsageResponse struct {
 	EstimatedRatio    *float64               `json:"estimated_ratio,omitempty"`
 	Categories        []ContextUsageCategory `json:"categories"`
 	EstimationVersion string                 `json:"estimation_version"`
+	PreviewAccuracy   string                 `json:"preview_accuracy,omitempty"`
+	RequiresLLM       bool                   `json:"requires_llm,omitempty"`
+	LLMReason         string                 `json:"llm_reason,omitempty"`
 }
 
 type ContextPromptResponse struct {
@@ -229,12 +232,16 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		return
 	}
 	resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, disabled)
+	resourceContext.DisabledTools = mergeDisabledToolNames(
+		resourceContext.DisabledTools, mentioned.ExcludedToolNames,
+	)
 	resourceContext.DisabledTools = applyMentionedTools(resourceContext.DisabledTools, mentioned.ToolNames)
 
 	reqBody := buildChatRequestBody(
 		r.Context(), db, convID, sessionID, query, histories, raw,
 		resourceContext, userID, currentSeq,
 	)
+	applyExplicitResourceBindings(reqBody, mentioned)
 	if mentioned.ConversationContext != "" {
 		history, _ := reqBody["history"].([]map[string]string)
 		reqBody["history"] = append(history, map[string]string{
@@ -272,6 +279,9 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 			reqBody[key] = value
 		}
 	}
+	if value, ok := raw["context_preview_allow_llm_routing"].(bool); ok {
+		reqBody["context_preview_allow_llm_routing"] = value
+	}
 	pluginMode := resolvePluginModeWithFallback(raw, reqBody)
 	pluginContext, _ := reqBody["plugin_context"].(map[string]any)
 	if pluginContext == nil {
@@ -296,7 +306,9 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		}
 	}
 	reqBody["plugin_context"] = pluginContext
-	if err := applyPluginSelection(r.Context(), db, userID, reqBody, mentioned.PluginRefs); err != nil {
+	if err := applyPluginSelection(
+		r.Context(), db, userID, reqBody, mentioned.PluginRefs, mentioned.ExcludedPluginRefs,
+	); err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}

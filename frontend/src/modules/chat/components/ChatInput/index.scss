@@ -720,7 +720,7 @@
 }
 
 .context-usage-popover {
-  width: 344px;
+  width: 368px;
 
   .context-usage-heading,
   .context-usage-summary,
@@ -731,6 +731,108 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
+  }
+
+  .context-usage-routing-state {
+    position: relative;
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 10px;
+    margin: 10px 0 12px;
+    padding: 12px;
+    overflow: hidden;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    transition: border-color 180ms ease, background-color 180ms ease;
+
+    .context-usage-routing-icon {
+      margin-top: 2px;
+      font-size: 18px;
+    }
+
+    .context-usage-routing-copy {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 3px;
+
+      strong {
+        color: #344158;
+        font-size: 13px;
+        line-height: 20px;
+      }
+
+      span {
+        color: #68768c;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      small {
+        margin-top: 1px;
+        color: #9a7541;
+        font-size: 11px;
+        line-height: 16px;
+      }
+    }
+
+    > .ant-btn {
+      grid-column: 2;
+      width: fit-content;
+      height: 28px;
+      margin-top: 4px;
+      padding-inline: 12px;
+      border-radius: 8px;
+      box-shadow: none;
+      font-size: 12px;
+    }
+
+    &.is-warning {
+      border-color: #f4d79b;
+      background: linear-gradient(135deg, #fffaf0 0%, #fffdf8 100%);
+
+      .context-usage-routing-icon {
+        color: #e7a21a;
+      }
+    }
+
+    &.is-loading {
+      padding-bottom: 16px;
+      border-color: #cdddf8;
+      background: linear-gradient(135deg, #f5f8ff 0%, #fafcff 100%);
+
+      .context-usage-routing-icon {
+        color: #3978df;
+      }
+    }
+
+    &.is-success {
+      border-color: #b9e29e;
+      background: linear-gradient(135deg, #f4fced 0%, #f9fff5 100%);
+
+      .context-usage-routing-icon {
+        color: #52b727;
+      }
+    }
+
+    .context-usage-routing-progress {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      height: 3px;
+      overflow: hidden;
+      background: #e4edfc;
+
+      i {
+        display: block;
+        width: 38%;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #8eb5f5, #3478e5, #8eb5f5);
+        animation: context-usage-routing-progress 1.25s ease-in-out infinite;
+      }
+    }
   }
 
   .context-usage-heading {
@@ -858,6 +960,16 @@
       color: #35435a;
       font-size: 12px;
     }
+  }
+}
+
+@keyframes context-usage-routing-progress {
+  0% {
+    transform: translateX(-105%);
+  }
+
+  100% {
+    transform: translateX(265%);
   }
 }
 

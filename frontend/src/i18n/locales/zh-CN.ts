@@ -396,6 +396,24 @@ const zhCN = {
       toolsModuleDesc: "集中管理文档解析、搜索引擎、学术检索、内置系统工具和 MCP 服务。",
       toolsCategoryTitle: "搜索引擎",
       toolsCategoryDesc: "集中管理 Bing、Google Custom Search、Bocha、Tavily 等网页搜索服务 Key。推荐优先配置 Tavily，接入简单，并提供每日免费额度。",
+      googleDriveTitle: "Google Drive 在线文档",
+      googleDriveDesc: "连接个人或共享 Google Drive，供聊天直接搜索和读取线上原始文档，不会导入知识库。",
+      googleDriveConnect: "连接 Google Drive",
+      googleDriveReconnect: "重新授权",
+      googleDriveDisconnect: "断开连接",
+      googleDriveConfigTitle: "配置 Google Drive OAuth",
+      googleDriveAuthorize: "保存并授权",
+      googleDriveConfigHint: "在 Google Cloud Console 启用 Drive API，并将以下地址完整加入 OAuth Web 客户端的授权重定向 URI：{{callbackUrl}}",
+      googleDriveSetupGuideAction: "接入教程",
+      googleDriveClientIdRequired: "请输入 OAuth Client ID",
+      googleDriveClientSecretRequired: "请输入 OAuth Client Secret",
+      googleDriveSecretConfigured: "已保存；留空沿用当前 Secret",
+      googleDriveOAuthWindowTitle: "Google Drive 授权",
+      googleDriveConnected: "Google Drive 已连接并启用聊天搜索",
+      googleDriveDisconnected: "Google Drive 连接已断开",
+      googleDriveConnectFailed: "Google Drive 连接失败",
+      googleDriveDisconnectFailed: "Google Drive 断开失败",
+      googleDriveAccountFallback: "Google Drive 账号",
       searchEngineSearchPlaceholder: "搜索搜索引擎",
       academicCategoryTitle: "学术检索",
       academicCategoryDesc: "集中管理 Sciverse 等科研论文检索服务，用于学术问答与论文调研。",
@@ -813,6 +831,14 @@ const zhCN = {
     contextUsageUpdate: "更新估算",
     contextUsageError: "暂时无法计算上下文用量。",
     contextUsageRetry: "重试",
+    contextUsageRuleOnlyWarning: "当前为规则预估",
+    contextUsageRuleOnlyReason: "该请求需要使用大模型进一步分析目标和资源约束。",
+    contextUsageLlmTokenHint: "模型分析会消耗少量 Token",
+    contextUsageUseLlm: "使用模型分析",
+    contextUsageLlmLoading: "正在使用模型重新分析…",
+    contextUsageLlmLoadingHint: "正在判断交付目标和资源约束，请稍候",
+    contextUsageLlmEnhanced: "已使用模型增强本次预估",
+    contextUsageLlmEnhancedHint: "目标和资源约束已重新计算",
     contextUsageChars: "{{count}} 字符",
     contextUsageExport: "导出完整提示词",
     contextUsageExportHint: "包含下一轮发送给 ChatAgent 的完整上下文",
@@ -1767,9 +1793,21 @@ const zhCN = {
     dataSourceTypeFeishuDesc: "需先设置 App ID / App Secret，再通过 OAuth 连接",
     dataSourceTypeNotion: "Notion",
     dataSourceTypeNotionDesc: "连接 Notion 页面或数据库，按授权范围同步并供 Chat 读取。",
+    dataSourceTypeGoogleDrive: "Google Drive",
+    dataSourceGoogleDriveSetupHint:
+      "授权 Google Drive 账号，用于 Chat 在线搜索，不会导入知识库。",
+    dataSourceGoogleDriveConnected: "已连接 {{account}}，用于 Chat 在线搜索。",
+    dataSourceGoogleDriveAccountFallback: "Google Drive 账号",
+    dataSourceGoogleDriveBackProviders: "返回数据源供应商",
+    dataSourceGoogleDrivePageTitle: "Google Drive 账号授权",
+    dataSourceGoogleDrivePageDesc:
+      "管理 Google Drive OAuth 凭据与账号连接，供 Chat 直接搜索线上原始文档。",
+    dataSourceGoogleDriveCallbackLabel: "当前 OAuth 回调地址",
+    dataSourceGoogleDriveHttpsHint:
+      "请将上方地址完整登记到 Google OAuth Web 客户端。生产部署使用 HTTPS；本地 localhost 或 127.0.0.1 可按 Google 本地开发规则使用 HTTP。",
     dataSourceTypeDatabase: "外部数据库",
     dataSourceTypeDatabaseDesc: "通过只读账号连接 MySQL 或 PostgreSQL，供聊天直接查询。",
-    dataSourceTypeStepIntro: "当前支持本地文件 / 本地目录、飞书和 Notion 数据源接入，请选择后进入连接配置。",
+    dataSourceTypeStepIntro: "当前支持本地文件 / 本地目录、飞书、Notion、Google Drive 和外部数据库接入，请选择后进入连接配置。",
     dataSourceAdminOnly: "管理员",
     dataSourceFeishuLockHint: "需先设置 App ID / App Secret，设置后才能选择飞书数据源",
     dataSourceFeishuAuthReadyHint: "凭据已设置但尚未授权成功，点击可修改 App ID / App Secret 后重新授权。",
@@ -2001,6 +2039,73 @@ const zhCN = {
         finishAlt: "系统内选择或输入飞书目标路径并完成授权",
       },
     },
+    dataSourceGoogleDriveSetupGuide: {
+      backTools: "返回 Google Drive 授权",
+      title: "云文档供应商 - Google Drive 在线文档",
+      subtitle:
+        "在 Google Cloud Console 创建 Google OAuth Web 客户端，然后在 LazyMind 中连接 Google Drive 账号，用于线上原始文档的搜索和读取。",
+      summaryAria: "Google Drive 接入流程概览",
+      summaryTitle: "准备流程",
+      openConsole: "打开 Google Cloud Console",
+      openDriveApi: "打开 Google Drive API",
+      openCredentials: "打开凭据页面",
+      openAudience: "打开 Google Auth Platform Audience",
+      callbackUrl: "授权重定向 URI：{{uri}}",
+      steps: {
+        openConsoleTitle: "创建或选择 Google Cloud 项目",
+        openConsoleDesc:
+          "登录 Google Cloud Console，创建一个新项目，或选择已有项目来保存 LazyMind 使用的 OAuth 配置。",
+        enableApiTitle: "启用 Google Drive API",
+        enableApiDesc:
+          "在 API 和服务中，为当前项目启用 Google Drive API。LazyMind 会调用 Google Drive 官方 API 完成 search、find 和 read。",
+        consentTitle: "配置 OAuth 同意屏幕",
+        consentDesc:
+          "进入 Google Auth Platform 的 Audience，确认当前项目和 OAuth 客户端所属项目一致，再配置应用受众和测试用户。",
+        consentUserType:
+          "个人 Google 账号请选择 External；如果是 Google Workspace 且只允许组织内成员使用，可以选择 Internal。",
+        consentTestUsers:
+          "如果应用处于 Testing 状态，在 Test users 中点击 Add users，添加实际登录 Google Drive 的邮箱并保存；等待约一分钟后再授权，否则 Google 会返回 access_denied。",
+        consentRetry:
+          "出现 access_denied 后不要刷新 Google 错误页；返回 LazyMind 的云文档页面，重新点击“连接 Google Drive”，生成新的 OAuth 请求。",
+        consentScopes:
+          "添加 Drive 只读权限范围：https://www.googleapis.com/auth/drive.readonly。",
+        credentialsTitle: "创建 OAuth Client ID",
+        credentialsDesc:
+          "进入 Credentials，点击 Create Credentials，选择 OAuth client ID。",
+        credentialsType:
+          "Application type 必须选择 Web application。",
+        credentialsName:
+          "建议命名为 LazyMind Google Drive，方便后续在 Google Cloud 和 LazyMind 中识别。",
+        redirectTitle: "添加 LazyMind 回调地址",
+        redirectDesc:
+          "在 Authorized redirect URIs 中添加 LazyMind 前端实际使用的 OAuth 回调地址，必须和浏览器打开的系统地址一致。",
+        redirectOriginHint:
+          "如果你用 127.0.0.1 或部署域名打开 LazyMind，而不是 localhost，请把回调地址中的 origin 替换成同一个浏览器 origin。",
+        redirectHttpsHint:
+          "生产域名应使用 HTTPS；本地开发可使用 Google Web OAuth 客户端中精确登记的 http://localhost 或 http://127.0.0.1 地址。协议、主机、端口和路径必须完全一致。",
+        copyCredentialsTitle: "复制 Client ID 和 Client Secret",
+        copyCredentialsDesc:
+          "Web 客户端创建完成后，复制 OAuth Client ID 和 Client Secret。Client Secret 需要保密。",
+        copyClientId:
+          "Client ID 对应 LazyMind 弹窗中的 OAuth Client ID 字段。",
+        copyClientSecret:
+          "Client Secret 对应 LazyMind 弹窗中的 OAuth Client Secret 字段。",
+        enterCredentialsTitle: "注册或登录 LazyMind 并填写凭据",
+        enterCredentialsDesc:
+          "打开 LazyMind；如果需要新账号，先注册，然后进入模型供应商的云文档页面并打开 Google Drive 授权页。",
+        enterCredentialsPath:
+          "注册地址：{{registerUrl}}；Google Drive 授权页：{{providerUrl}}。",
+        enterCredentialsSave:
+          "打开 Google Drive 在线文档，点击连接 Google Drive，粘贴 Client ID 和 Client Secret，然后点击保存并授权。",
+        finishTitle: "完成授权并在聊天中使用 Google Drive",
+        finishDesc:
+          "在弹出的 Google 授权窗口中完成授权。账号连接成功后，LazyMind 会为聊天启用 Google Drive 工具。",
+        finishChat:
+          "进入 Chat 后，可以让 LazyMind 按关键词搜索 Google Drive，或按文件名正则查找文件。",
+        finishNoIngestion:
+          "这里会直接搜索线上 Google Drive 原始库，不会把文件导入 LazyMind 知识库。",
+      },
+    },
     dataSourceNotionSetupGuide: {
       backCreateSource: "返回新建数据源",
       backManagement: "返回数据源管理",
@@ -2035,7 +2140,7 @@ const zhCN = {
         redirectDesc:
           "在 Integration 设置的「Redirect URIs」区域，添加 LazyMind 的 OAuth 回调地址。这个地址必须是系统实际使用的回调 URL，否则授权完成后会报错。",
         redirectProductionHint:
-          "如果是生产环境部署，请将 127.0.0.1 替换为实际的域名或 IP 地址。",
+          "生产环境请使用当前部署域名的 HTTPS 回调地址；本地开发使用页面上显示的 localhost 或 127.0.0.1 地址。Redirect URI 必须与当前浏览器 origin 及系统实际回调完全一致。",
         capabilitiesTitle: "配置 Integration 权限 (Capabilities)",
         capabilitiesDesc:
           "在 Integration 设置中，根据需要勾选以下能力：Read content（读取页面/数据库内容）、Read comments（读取评论）等。LazyMind 至少需要 Read content 权限才能读取 Notion 内容。",

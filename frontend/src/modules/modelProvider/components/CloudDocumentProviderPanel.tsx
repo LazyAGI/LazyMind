@@ -2,25 +2,31 @@ import { Alert, Form, Input, Modal, Skeleton, Tag } from "antd";
 import { ArrowRightOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import { FeishuCredentialHintAlertFromForm } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 import { formatValidFeishuAccountNames } from "@/modules/dataSource/utils/feishuAccount";
-import { cloudAuthProviderOptions } from "../constants/cloudProviderOptions";
+import { cloudAuthProviderOptions, cloudProviderOptions } from "../constants/cloudProviderOptions";
 import {
   CLOUD_DOCUMENTS_FEISHU_SETUP_PATH,
   CLOUD_DOCUMENTS_NOTION_SETUP_PATH,
 } from "../utils/cloudDocumentUrls";
 import type { CloudDocumentProvidersVm } from "../hooks/useCloudDocumentProviders";
 
-function getProviderTitle(type: "feishu" | "notion" | "local", t: CloudDocumentProvidersVm["t"]) {
+function getProviderTitle(
+  type: "feishu" | "notion" | "local" | "googledrive",
+  t: CloudDocumentProvidersVm["t"],
+) {
   if (type === "local") {
     return t("modelProvider.cloudDocuments.localTitle");
   }
   if (type === "feishu") {
     return t("modelProvider.cloudDocuments.feishuTitle");
   }
+  if (type === "googledrive") {
+    return t("modelProvider.external.googleDriveTitle");
+  }
   return t("modelProvider.cloudDocuments.notionTitle");
 }
 
 function getProviderDescription(
-  type: "feishu" | "notion",
+  type: "feishu" | "notion" | "local" | "googledrive",
   t: CloudDocumentProvidersVm["t"],
   vm: CloudDocumentProvidersVm,
 ) {
@@ -37,6 +43,13 @@ function getProviderDescription(
       return t("modelProvider.cloudDocuments.feishuLockHint");
     }
     return t("modelProvider.cloudDocuments.feishuAuthReadyHint");
+  }
+  if (type === "googledrive") {
+    return vm.googleDriveConnection
+      ? t("admin.dataSourceGoogleDriveConnected", {
+          account: vm.googleDriveConnection.accountName,
+        })
+      : t("modelProvider.external.googleDriveDesc");
   }
 
   if (vm.isNotionAuthValid) {
@@ -56,10 +69,12 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
     canCreateLocalSource,
     isFeishuAuthValid,
     isNotionAuthValid,
+    isGoogleDriveAuthValid,
     isFeishuSetupReady,
     isNotionSetupReady,
     handleManageFeishuAuth,
     handleManageLocalSource,
+    handleManageGoogleDrive,
     handleOpenNotionSetup,
   } = vm;
 
@@ -69,11 +84,13 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
         className="model-provider-cloud-doc-grid"
         aria-busy="true"
       >
-        {Array.from({ length: canCreateLocalSource ? 3 : 2 }, (_, index) => (
-          <div className="model-provider-cloud-doc-skeleton" key={index}>
-            <Skeleton active avatar={{ shape: "square", size: 44 }} paragraph={{ rows: 1 }} />
-          </div>
-        ))}
+        {cloudProviderOptions
+          .filter((item) => item.type !== "local" || canCreateLocalSource)
+          .map((item) => (
+            <div className="model-provider-cloud-doc-skeleton" key={item.type}>
+              <Skeleton active avatar={{ shape: "square", size: 44 }} paragraph={{ rows: 1 }} />
+            </div>
+          ))}
       </div>
     );
   }
@@ -106,9 +123,14 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
 
       {cloudAuthProviderOptions.map((item) => {
         const isFeishu = item.type === "feishu";
-        const isAuthValid = isFeishu ? isFeishuAuthValid : isNotionAuthValid;
+        const isGoogleDrive = item.type === "googledrive";
+        const isAuthValid = isFeishu
+          ? isFeishuAuthValid
+          : isGoogleDrive
+            ? isGoogleDriveAuthValid
+            : isNotionAuthValid;
         const isSetupReady = isFeishu ? isFeishuSetupReady : isNotionSetupReady;
-        const isProviderLocked = !isAuthValid && !isSetupReady;
+        const isProviderLocked = !isGoogleDrive && !isAuthValid && !isSetupReady;
         const authStatusText = isAuthValid
           ? t("modelProvider.cloudDocuments.authValid")
           : isProviderLocked
@@ -123,6 +145,10 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             onClick={() => {
               if (isFeishu) {
                 handleManageFeishuAuth();
+                return;
+              }
+              if (isGoogleDrive) {
+                handleManageGoogleDrive();
                 return;
               }
               handleOpenNotionSetup();
@@ -149,7 +175,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             </span>
             <div className="model-provider-cloud-doc-resource-copy">
               <h2>{getProviderTitle(item.type, t)}</h2>
-              <p>{getProviderDescription(isFeishu ? "feishu" : "notion", t, vm)}</p>
+              <p>{getProviderDescription(item.type, t, vm)}</p>
             </div>
             <Tag
               className="model-provider-cloud-doc-resource-status"

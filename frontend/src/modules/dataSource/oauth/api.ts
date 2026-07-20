@@ -95,7 +95,7 @@ export async function finishCloudDataSourceOAuth(
   state: string,
 ) {
   const pending = loadPendingCloudOAuthSession(provider, state);
-  if (!pending?.tenantId || !pending.connectionId || !pending.redirectUri) {
+  if (!pending?.connectionId || !pending.redirectUri) {
     throw new Error(i18n.t("admin.dataSourceOauthSessionMissing"));
   }
 

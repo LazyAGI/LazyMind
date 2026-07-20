@@ -264,6 +264,11 @@ func loadChatToolConfig(ctx context.Context, db *gorm.DB, userID string) (map[st
 	} else if len(searchConfig) > 0 {
 		toolConfig = mergeToolConfig(toolConfig, searchConfig)
 	}
+	if academicConfig, err := academicSearchToolConfigEntry(ctx, db, userID); err != nil {
+		fmt.Printf("[Core] [ACADEMIC_SEARCH_TOOL_CONFIG] failed to load academic search tool config for user %s: %v\n", userID, err)
+	} else if len(academicConfig) > 0 {
+		toolConfig = mergeToolConfig(toolConfig, academicConfig)
+	}
 	return toolConfig, nil
 }
 

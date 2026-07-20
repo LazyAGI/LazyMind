@@ -32,6 +32,8 @@ import {
 import type { FeishuDataSourceWizardDraft } from "@/modules/dataSource/common/feishuOAuth";
 import type { ManagementContext } from "./context";
 
+type SyncCloudDataSourceProvider = Extract<CloudDataSourceProvider, SourceType>;
+
 export function createWizardFlow(ctx: ManagementContext) {
   const {
     t,
@@ -86,7 +88,7 @@ export function createWizardFlow(ctx: ManagementContext) {
     ctx.applySourceType(type);
   };
 
-  const buildCloudCreateFormValues = (type: CloudDataSourceProvider) => ({
+  const buildCloudCreateFormValues = (type: SyncCloudDataSourceProvider) => ({
     syncMode: "scheduled" as const,
     scheduleWeekdays: DEFAULT_SCHEDULE_WEEKDAYS,
     scheduleTime: DEFAULT_SCHEDULE_TIME,
@@ -97,7 +99,7 @@ export function createWizardFlow(ctx: ManagementContext) {
     fileTypes: DEFAULT_DATA_SOURCE_FILE_TYPES,
   });
 
-  const startCloudAuthForCreate = (type: CloudDataSourceProvider) => {
+  const startCloudAuthForCreate = (type: SyncCloudDataSourceProvider) => {
     ctx.resetWizard();
     setWizardMode("create");
     setEditingId(null);
