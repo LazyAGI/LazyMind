@@ -40,9 +40,12 @@ function persistRunInBackgroundMode(enabled: boolean) {
 }
 
 function getInitialPluginSettings(
-  runInBackground: boolean,
+  _runInBackground: boolean,
 ): ConversationPluginSettings | null {
-  return runInBackground ? null : { enable_plugin: false };
+  // Do not override the user's chat defaults when creating a conversation.
+  // The backend defaults plugins to enabled/dynamic, while explicit changes
+  // made in ChatConfigModal are still captured in pendingPluginSettings.
+  return null;
 }
 
 const NewChatPage = () => {

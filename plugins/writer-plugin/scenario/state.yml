@@ -14,27 +14,6 @@ transitions:
     - to: generate_draft
 
   generate_draft:
-    - to: decide_draft_action
-
-  decide_draft_action:
-    - to: generate_patch
-      when: 用户要求继续修改当前草稿
-    - to: review_document
-      when: 用户接受当前草稿并希望进入审阅
-
-  generate_patch:
-    - to: decide_patch_action
-
-  decide_patch_action:
-    - to: apply_patch
-      when: 用户接受本次修改方案
-    - to: review_document
-      when: 用户不采用修改方案并希望直接进入审阅
-
-  apply_patch:
-    - to: review_document
-
-  review_document:
     - to: finalize_report
 
   finalize_report:
@@ -90,16 +69,16 @@ steps:
       - material: outline
       - material: writing_context_after_outline
     acceptance_criteria: |
-      Both artifacts present: outline, writing_context.
+      Both artifacts present: outline, writing_context_after_outline.
 
   plan_sections:
     label: Plan Sections
     prompt: |
       {{runtime_instruction}}
 
-      This step generates writing instructions for every top-level section in the outline in a single batch. Call get_artifact to retrieve writing_context_after_outline and outline, and pass writing_context_after_outline wherever the tool expects writing_context_path. When this is a replan after review, use the runtime instruction as the review feedback.
+      This step generates writing instructions for every top-level section in the outline in a single batch. Call get_artifact to retrieve writing_context_after_outline and outline, and pass writing_context_after_outline wherever the tool expects writing_context_path. When this step is rerun, use the runtime instruction as additional planning guidance.
 
-      Then call writer_generate_section_instructions(outline_path=<outline path>, writing_context_path=<writing_context_after_outline path>, review_report_path='') and persist the returned path with save_artifact(content_type='file', key='section_instructions').
+      Then call writer_generate_section_instructions(outline_path=<outline path>, writing_context_path=<writing_context_after_outline path>) and persist the returned path with save_artifact(content_type='file', key='section_instructions').
 
       If any of the above tool calls fails, do not perform any extra fallback — stop the step immediately. In particular, do not write content yourself to persist.
     tools:
@@ -150,137 +129,14 @@ steps:
       - material: draft_document
       - material: writing_context_after_draft
     acceptance_criteria: |
-      All three artifacts present: draft_sections, draft_document, writing_context.
-
-  decide_draft_action:
-    label: Decide Draft Action
-    route: choice
-    prompt: |
-      Inspect the original request and {{runtime_instruction}}. If the user explicitly asks
-      to revise the generated draft now, save_artifact(key='revision_requested',
-      content_type='text', value='true'). Otherwise do not save this optional material.
-      Do not modify the draft in this step.
-    inputs:
-      - material: draft_document
-        required: true
-    outputs:
-      - material: revision_requested
-        required: false
-    acceptance_criteria: |
-      Save revision_requested only when a revision was explicitly requested.
-
-  generate_patch:
-    label: Generate Patch
-    prompt: |
-      {{runtime_instruction}}
-
-      This step builds the revision artifacts for the user's revision request ("{{user_input}}").
-
-      Step 1: Call writer_build_revise_task(query="{{user_input}}") to get the revise_task path, then persist it with save_artifact(content_type='file', key='revise_task').
-
-      Step 2: Call get_artifact to retrieve draft_document and writing_context_after_draft. Call writer_generate_patch_set(revise_task_path=<revise_task path>, draft_document_path=<draft_document path>, writing_context_path=<writing_context_after_draft path>) to get the patch_set and doc_ir paths. Persist the patch_set and doc_ir; doc_ir is required by apply_patch.
-
-      Step 3: Call writer_validate_patch_set(patch_set_path=<patch_set path>, revise_task_path=<revise_task path>, writing_context_path=<writing_context_after_draft path>) to get the patch_set_review path and patch_set_review_summary text. Persist them separately.
-
-      If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
-    tools:
-      - writer_build_revise_task
-      - writer_generate_patch_set
-      - writer_validate_patch_set
-    inputs:
-      - material: draft_document
-        required: true
-      - material: writing_context_after_draft
-        required: true
-    outputs:
-      - material: revise_task
-      - material: doc_ir
-      - material: patch_set
-      - material: patch_set_review
-      - material: patch_set_review_summary
-    acceptance_criteria: |
-      All five artifacts present: revise_task, doc_ir, patch_set, patch_set_review, patch_set_review_summary.
-
-  decide_patch_action:
-    label: Decide Patch Action
-    route: choice
-    prompt: |
-      Inspect {{runtime_instruction}} and the patch review. If the user explicitly accepts
-      applying this patch, save_artifact(key='patch_accepted', content_type='text', value='true').
-      Otherwise do not save this optional material. Do not apply the patch in this step.
-    inputs:
-      - material: patch_set
-        required: true
-      - material: patch_set_review
-        required: true
-    outputs:
-      - material: patch_accepted
-        required: false
-    acceptance_criteria: |
-      Save patch_accepted only when applying the patch was explicitly approved.
-
-  apply_patch:
-    label: Apply Patch
-    prompt: |
-      {{runtime_instruction}}
-
-      This step applies the validated patch_set to the DocIR, converts the revised DocIR back into a draft, and updates the writing context.
-
-      Step 1: Call get_artifact to retrieve doc_ir, patch_set, and writing_context_after_draft. Call writer_apply_patch(doc_ir_path=<doc_ir path>, patch_set_path=<patch_set path>, writing_context_path=<writing_context_after_draft path>) to get the patch_result path and revised draft path. Persist them separately with save_artifact(content_type='file', key='patch_result') and save_artifact(content_type='file', key='revised_draft_document').
-
-      Step 2: Call writer_update_writing_context(content_artifact_path=<revised draft path>, writing_context_path=<writing_context_after_draft path>) to get the updated context path, then persist it with save_artifact(content_type='file', key='writing_context_after_revision').
-
-      If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
-    tools:
-      - writer_apply_patch
-      - writer_update_writing_context
-    inputs:
-      - material: doc_ir
-        required: true
-      - material: patch_set
-        required: true
-      - material: writing_context_after_draft
-        required: true
-    outputs:
-      - material: patch_result
-      - material: revised_draft_document
-      - material: writing_context_after_revision
-    acceptance_criteria: |
-      All three artifacts present: patch_result, revised_draft_document, writing_context_after_revision.
-
-  review_document:
-    label: Review Document
-    prompt: |
-      {{runtime_instruction}}
-
-      This step reviews the effective draft for consistency and quality. The input bindings select revised_draft_document over draft_document and writing_context_after_revision over writing_context_after_draft. Retrieve the selected files using their actual material IDs, then call writer_check_consistency(draft_path=<selected draft path>, writing_context_path=<selected context path>). Save review_report and review_summary separately.
-
-      When review_summary indicates the review passed, advance to finalize_report. When it indicates the review failed, you must rewind to plan_sections and replan. Do not advance to finalize_report if the review failed. The final message must state the verdict and next step as "Review {{PASSED|FAILED}}. {{review_summary}}. Next step {{next_step}}."
-
-      If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
-    tools:
-      - writer_check_consistency
-    inputs:
-      - material: revised_draft_document
-        required: true
-        alternatives:
-          - material: draft_document
-      - material: writing_context_after_revision
-        required: true
-        alternatives:
-          - material: writing_context_after_draft
-    outputs:
-      - material: review_report
-      - material: review_summary
-    acceptance_criteria: |
-      Both artifacts present: review_report, review_summary.
+      All three artifacts present: draft_sections, draft_document, writing_context_after_draft.
 
   finalize_report:
     label: Finalize Report
     prompt: |
       {{runtime_instruction}}
 
-      This step produces the final Markdown report after review. The input bindings select revised_draft_document over draft_document and writing_context_after_revision over writing_context_after_draft. Retrieve those selected files and review_report, then pass them to writer_generate_writing_output. The tool returns writing_output and writing_output_md.
+      This step renders the generated draft into the final structured output and Markdown file. Retrieve draft_document and writing_context_after_draft, then call writer_generate_writing_output(draft_path=<draft path>, writing_context_path=<context path>). The tool returns writing_output and writing_output_md. This workflow intentionally performs no separate audit or revision pass.
 
       Once the generation operations in this step are complete, call save_artifact(content_type='file', key='writing_output') and save_artifact(content_type='file', key='writing_output_md') for the two paths to persist them as the artifacts of the current step.
 
@@ -288,16 +144,10 @@ steps:
     tools:
       - writer_generate_writing_output
     inputs:
-      - material: revised_draft_document
+      - material: draft_document
         required: true
-        alternatives:
-          - material: draft_document
-      - material: review_report
+      - material: writing_context_after_draft
         required: true
-      - material: writing_context_after_revision
-        required: true
-        alternatives:
-          - material: writing_context_after_draft
     outputs:
       - material: writing_output
       - material: writing_output_md

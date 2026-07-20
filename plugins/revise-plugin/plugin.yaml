@@ -1,0 +1,152 @@
+id: revise-plugin
+name: Document Reviser
+description: >
+  Revise an existing Feishu document through a DocIR-first workflow. The plugin
+  reuses the user's chat-enabled Feishu OAuth connection, loads the document as
+  DocIR, builds revision context, generates and applies a PatchSet, lets the user review or edit
+  versioned IR artifacts, and writes the confirmed IR back to Feishu only at the
+  final explicit confirmation boundary.
+
+when_to_use: >
+  Use this plugin when the user provides a Feishu document link and asks to
+  modify, polish, rewrite, shorten, expand, or otherwise revise part of that
+  existing document. Do not use it to create a new document from scratch, to
+  summarize a document without changing it, or when no target Feishu document
+  has been provided. A new requirement received while revise_document is
+  waiting resumes that same step and creates a new candidate_ir artifact
+  revision; it does not create a state-graph cycle.
+
+tool_scripts:
+  - path: scripts/tools.py
+    functions:
+      - revise_load_document
+      - revise_build_context
+      - revise_generate_revision
+      - revise_write_back
+
+steps:
+  - id: load_document
+  - id: build_context
+  - id: revise_document
+  - id: write_back
+
+slots:
+  - id: source_ir
+    label: Source IR
+    type: file
+    cardinality: single
+  - id: working_ir
+    label: Working IR
+    type: file
+    cardinality: single
+  - id: remote_snapshot
+    label: Feishu Snapshot
+    type: file
+    cardinality: single
+  - id: revision_context
+    label: Revision Context
+    type: file
+    cardinality: single
+  - id: revise_task
+    label: Revision Task
+    type: file
+    cardinality: single
+  - id: locate_result
+    label: Located Blocks
+    type: file
+    cardinality: single
+  - id: modify_plan
+    label: Modification Plan
+    type: file
+    cardinality: single
+  - id: patch_set
+    label: Patch Set
+    type: file
+    cardinality: single
+  - id: patch_result
+    label: Patch Result
+    type: file
+    cardinality: single
+  - id: candidate_ir
+    label: Revised IR
+    type: file
+    cardinality: single
+  - id: revision_confirmed
+    label: Revision Confirmed
+    type: text
+    cardinality: single
+  - id: write_result
+    label: Feishu Write Result
+    type: file
+    cardinality: single
+  - id: synced_snapshot
+    label: Synced Feishu Snapshot
+    type: file
+    cardinality: single
+
+ui:
+  tabs:
+    - id: source
+      step_id: load_document
+      label: Source Document
+      layout: list
+      slots:
+        - id: source_ir
+        - id: working_ir
+        - id: remote_snapshot
+
+    - id: context
+      step_id: build_context
+      label: Revision Context
+      layout: list
+      slots:
+        - id: revision_context
+
+    - id: revision
+      step_id: revise_document
+      label: Revision
+      layout: list
+      slots:
+        - id: revise_task
+        - id: locate_result
+        - id: modify_plan
+        - id: patch_set
+        - id: patch_result
+        - id: candidate_ir
+        - id: revision_confirmed
+
+    - id: write_back
+      step_id: write_back
+      label: Write-back Result
+      layout: list
+      slots:
+        - id: write_result
+        - id: synced_snapshot
+
+i18n:
+  zh-CN:
+    name: 文档局部修改
+    steps:
+      load_document: {label: 读取飞书文档}
+      build_context: {label: 构建修改上下文}
+      revise_document: {label: 修改文档}
+      write_back: {label: 写回飞书}
+    tabs:
+      source: {label: 原始文档}
+      context: {label: 修改上下文}
+      revision: {label: 修改过程}
+      write_back: {label: 写回结果}
+    slots:
+      source_ir: {label: 原始 IR}
+      working_ir: {label: 工作 IR}
+      remote_snapshot: {label: 飞书快照}
+      revision_context: {label: 修改上下文}
+      revise_task: {label: 修改任务}
+      locate_result: {label: 定位结果}
+      modify_plan: {label: 修改计划}
+      patch_set: {label: 补丁集}
+      patch_result: {label: 补丁应用结果}
+      candidate_ir: {label: 修改后 IR}
+      revision_confirmed: {label: 用户已确认}
+      write_result: {label: 飞书写回结果}
+      synced_snapshot: {label: 已同步飞书快照}

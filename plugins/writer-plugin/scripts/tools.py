@@ -135,14 +135,12 @@ def writer_generate_outline(writing_task_path: str, writing_context_path: str) -
 def writer_generate_section_instructions(
     outline_path: str,
     writing_context_path: str,
-    review_report_path: str = '',
 ) -> str:
     """Generate section instructions and return the artifact file path."""
-    review_json = _read_json_string(review_report_path) if review_report_path else ''
     content = WriterToolkitBase().generate_section_instructions(
         outline_json=_read_json_string(outline_path),
         writing_context_json=_read_json_string(writing_context_path),
-        review_report_json=review_json,
+        review_report_json='',
     )
     return _save_json_artifact(
         'section_instructions',
@@ -214,34 +212,14 @@ def writer_update_writing_context(content_artifact_path: str, writing_context_pa
     return _save_json_artifact('writing_context', content, writer_schema('context.WritingContext'))
 
 
-def writer_check_consistency(draft_path: str, writing_context_path: str) -> dict:
-    """Review a draft document and return review_report path plus review_summary text."""
-    content = WriterToolkitBase().check_consistency(
-        draft_document_json=_read_json_string(draft_path),
-        writing_context_json=_read_json_string(writing_context_path),
-    )
-    payload = _json_loads(content, {})
-    review_report_path = save_artifact_json(
-        payload.get('review_report') or {},
-        str(_workspace_root() / 'review_report.json'),
-        schema_name=writer_schema('quality.ReviewReport'),
-        created_by='writer-plugin-wrapper',
-    )
-    return {
-        'review_report': review_report_path,
-        'review_summary': payload.get('review_summary') or '',
-    }
-
-
 def writer_generate_writing_output(
     draft_path: str,
-    review_report_path: str,
     writing_context_path: str,
 ) -> dict:
     """Generate final writing output and return structured/markdown artifact paths."""
     content = WriterToolkitBase().generate_writing_output(
         draft_document_json=_read_json_string(draft_path),
-        review_report_json=_read_json_string(review_report_path),
+        review_report_json='{}',
         writing_context_json=_read_json_string(writing_context_path),
     )
     payload = _json_loads(content, {})
@@ -256,97 +234,4 @@ def writer_generate_writing_output(
     return {
         'writing_output': output_path,
         'writing_output_md': str(markdown_path),
-    }
-
-
-def writer_build_revise_task(query: str) -> str:
-    """Build a revise-type WritingTask artifact and return its file path."""
-    content = WriterToolkitBase().build_revise_task(query=query)
-    return _save_json_artifact('revise_task', content, writer_schema('task.WritingTask'))
-
-
-def writer_generate_patch_set(
-    revise_task_path: str,
-    draft_document_path: str,
-    writing_context_path: str,
-) -> dict:
-    """Generate a patch set and return the patch_set and doc_ir artifact paths."""
-    group = WriterToolkitBase()
-    task_json = _read_json_string(revise_task_path)
-    context_json = _read_json_string(writing_context_path)
-
-    doc_ir_json = group.draft_to_doc_ir(
-        draft_document_json=_read_json_string(draft_document_path),
-    )
-    locate_result_json = group.locate_revision_target(
-        writing_task_json=task_json,
-        doc_ir_json=doc_ir_json,
-        writing_context_json=context_json,
-    )
-    modify_plan_json = group.generate_modify_plan(
-        writing_task_json=task_json,
-        doc_ir_json=doc_ir_json,
-        locate_result_json=locate_result_json,
-        writing_context_json=context_json,
-    )
-    patch_set_json = group.generate_patch_set(
-        doc_ir_json=doc_ir_json,
-        modify_plan_json=modify_plan_json,
-        writing_context_json=context_json,
-    )
-    return {
-        'patch_set': _save_json_artifact('patch_set', patch_set_json, writer_schema('revision.PatchSet')),
-        'doc_ir': _save_json_artifact('doc_ir', doc_ir_json, writer_schema('docir.DocIR')),
-    }
-
-
-def writer_validate_patch_set(
-    patch_set_path: str,
-    revise_task_path: str,
-    writing_context_path: str,
-) -> dict:
-    """Validate a patch set and return the patch_set_review path plus patch_set_review_summary text."""
-    content = WriterToolkitBase().validate_patch_set(
-        patch_set_json=_read_json_string(patch_set_path),
-        writing_context_json=_read_json_string(writing_context_path),
-        writing_task_json=_read_json_string(revise_task_path),
-    )
-    payload = _json_loads(content, {})
-    patch_set_review_path = save_artifact_json(
-        payload.get('patch_set_review') or {},
-        str(_workspace_root() / 'patch_set_review.json'),
-        schema_name=writer_schema('quality.AuditResult'),
-        created_by='writer-plugin-wrapper',
-    )
-    return {
-        'patch_set_review': patch_set_review_path,
-        'patch_set_review_summary': payload.get('patch_set_review_summary') or '',
-    }
-
-
-def writer_apply_patch(
-    doc_ir_path: str,
-    patch_set_path: str,
-    writing_context_path: str,
-) -> dict:
-    """Apply a patch set to the DocIR and return the patch_result and draft_document artifact paths."""
-    content = WriterToolkitBase().apply_patch(
-        doc_ir_json=_read_json_string(doc_ir_path),
-        patch_set_json=_read_json_string(patch_set_path),
-        writing_context_json=_read_json_string(writing_context_path),
-    )
-    payload = _json_loads(content, {})
-    root = _workspace_root()
-    patch_result_path = save_artifact_json(
-        payload.get('patch_result') or {},
-        str(root / 'patch_result.json'),
-        schema_name=writer_schema('revision.PatchResult'),
-        created_by='writer-plugin-wrapper',
-    )
-    draft_json = WriterToolkitBase().doc_ir_to_draft(
-        doc_ir_json=json.dumps(payload.get('revised_doc_ir') or {}, ensure_ascii=False),
-    )
-    return {
-        'patch_result': patch_result_path,
-        'draft_document': _save_json_artifact('draft_document', draft_json, writer_schema('writing.DraftDocument')),
     }

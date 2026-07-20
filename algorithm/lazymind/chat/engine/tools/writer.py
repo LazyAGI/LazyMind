@@ -12,6 +12,7 @@ from lazyllm import AutoModel
 from lazyllm.tools.writer.data_models import (
     InputResource,
     SectionInstruction,
+    TargetDocument,
     WritingTask,
 )
 from lazyllm.tools.writer.tools import (
@@ -167,8 +168,13 @@ class WriterToolkitBase:
         ).profile_resources(task=task_path, input_resources=input_resources)
         return _json_dumps(_primary_data(result))
 
-    def create_writing_context(self, writing_task_json: str, resource_profiles_json: str) -> str:
-        """Create writing context from task and resource profile JSON strings."""
+    def create_writing_context(
+        self,
+        writing_task_json: str,
+        resource_profiles_json: str = '[]',
+        doc_ir_json: str = '',
+    ) -> str:
+        """Create writing context from task, resource profiles, and optional DocIR."""
         root = _temp_root()
         task_path = _write_input_artifact(
             root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
@@ -177,10 +183,19 @@ class WriterToolkitBase:
             root, 'resource_profiles.json', _json_loads(resource_profiles_json, []),
             writer_schema('resource.ResourceProfile'),
         )
+        doc_ir_path = None
+        if doc_ir_json:
+            doc_ir_path = _write_input_artifact(
+                root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
+            )
         result = WriterContextTools(
             llm=None,
             artifact_store=str(root),
-        ).create_writing_context(task=task_path, resource_profiles=profiles_path)
+        ).create_writing_context(
+            task=task_path,
+            resource_profiles=profiles_path,
+            doc_ir=doc_ir_path,
+        )
         return _json_dumps(_primary_data(result))
 
     def generate_outline(self, writing_task_json: str, writing_context_json: str) -> str:
@@ -374,7 +389,7 @@ class WriterToolkitBase:
             'writing_output_md': markdown,
         })
 
-    def build_revise_task(self, query: str) -> str:
+    def build_revise_task(self, query: str, target_document_json: str = '') -> str:
         """Build a revise-type WritingTask from the user's revision request.
 
         Args:
@@ -383,7 +398,17 @@ class WriterToolkitBase:
         Returns:
             WritingTask (task_type='revise') as a JSON string.
         """
-        task = WritingTask(query=query, task_type='revise')
+        target_document = None
+        if target_document_json:
+            target_document = TargetDocument.model_validate(
+                _json_loads(target_document_json, {}),
+            )
+        task = WritingTask(
+            query=query,
+            task_type='revise',
+            scope='auto',
+            target_document=target_document,
+        )
         return _json_dumps(task.model_dump())
 
     def draft_to_doc_ir(self, draft_document_json: str) -> str:
@@ -547,6 +572,23 @@ class WriterToolkitBase:
             llm=None, artifact_store=str(root),
         ).doc_ir_to_draft(doc_ir=doc_ir_path)
         return _json_dumps(_primary_data(result))
+
+
+class WriterToolkitBase2:
+    """Reserved toolkit for the unified WriterDocument implementation.
+
+    V2 must follow WriterToolkitBase's actual adapter pattern: expose one explicit
+    method for every underlying LazyLLM writer-tool function, including its JSON
+    conversion and artifact-path handling. It must not collapse a workflow stage
+    into a single generic callback.
+
+    Concrete methods will be added only after the LazyLLM Writer IR tools and
+    their public signatures are stable. Keeping __public_apis__ empty prevents an
+    incomplete V2 adapter from being registered or replacing the current toolkit.
+    """
+
+    WRITER_IR_SCHEMA = f'{WRITER_DATA_MODEL_SCHEMA_PREFIX}.writer_ir.WriterDocument'
+    __public_apis__: list[str] = []
 
 
 class WriterCreateToolkit(WriterToolkitBase):

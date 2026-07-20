@@ -93,12 +93,25 @@ func dispatchPendingPluginRuns() {
 }
 
 // onArtifact is called by the subagent runner when any artifact is emitted.
-func onArtifact(ctx context.Context, db *gorm.DB, taskID, artifactKey string) {
+func onArtifact(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, artifactKey string) {
 	pctx := loadPluginChatContextFromDB(ctx, db, taskID)
 	if pctx == nil {
 		return
 	}
-	OnArtifactEvent(ctx, db, taskID, artifactKey, pctx)
+	rev := OnArtifactEvent(ctx, db, taskID, artifactKey, pctx)
+	if rev == nil || subagent.EventHooks == nil {
+		return
+	}
+	// Slot revision is now durable. Notify the conversation stream so the
+	// event-driven PluginPanel can refresh immediately without polling or waiting
+	// for the whole step to finish.
+	subagent.EventHooks.CallConversationEvent(context.Background(), stateStore, pctx.ConvID, "", "plugin_artifact_updated", map[string]any{
+		"session_id": pctx.SessionID,
+		"step_id":    pctx.StepID,
+		"slot_id":    rev.SlotID,
+		"slot":       rev.Slot,
+		"revision":   rev.Revision,
+	})
 }
 
 // onTerminalStatus is called by the subagent runner when a task reaches terminal status.

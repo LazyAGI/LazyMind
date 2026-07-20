@@ -221,6 +221,42 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     return tool_success('save_artifact', {'status': 'ok', 'message': msg})
 
 
+def save_artifacts(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Save multiple output artifacts in one tool call.
+
+    Use this when a domain tool returns several declared outputs. Each item accepts
+    the same fields as save_artifact: key, value, content_type, source_tool,
+    sort_order, and caption. Keeping the writes in one model turn prevents a step
+    with many outputs from exhausting the ReAct tool-turn budget.
+    """
+    if not isinstance(artifacts, list) or not artifacts:
+        return tool_error('save_artifacts', 'artifacts must be a non-empty list.')
+    if len(artifacts) > 50:
+        return tool_error('save_artifacts', 'At most 50 artifacts may be saved at once.')
+
+    results: List[Dict[str, Any]] = []
+    for index, item in enumerate(artifacts):
+        if not isinstance(item, dict):
+            return tool_error('save_artifacts', f'artifacts[{index}] must be an object.')
+        if 'key' not in item or 'value' not in item:
+            return tool_error(
+                'save_artifacts', f'artifacts[{index}] requires key and value.',
+            )
+        results.append(save_artifact(
+            key=str(item['key']),
+            value=item['value'],
+            content_type=str(item.get('content_type') or 'text'),
+            source_tool=item.get('source_tool'),
+            sort_order=item.get('sort_order'),
+            caption=item.get('caption'),
+        ))
+    return tool_success('save_artifacts', {
+        'status': 'ok',
+        'saved_count': len(results),
+        'results': results,
+    })
+
+
 def _write_artifact_draft(
     ctx: Any, key: str, original_type: str, actual_ct: str,
     built: Dict[str, Any], list_index: Optional[int],

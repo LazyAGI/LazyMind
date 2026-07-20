@@ -116,7 +116,6 @@ function IntentPopover({
 
 interface PluginPanelProps {
   conversationId: string;
-  pollIntervalMs?: number;
   /** Called when the user clicks Continue or Retry — simulates sending a user message. */
   onSendMessage?: (text: string) => void;
   /** Called when the user clicks the reference button on a slot item. */
@@ -941,7 +940,6 @@ const STATUS_KEY: Record<string, string> = {
 
 export function PluginPanel({
   conversationId,
-  pollIntervalMs = 3000,
   onSendMessage,
   onReference,
   onStop,
@@ -962,6 +960,7 @@ export function PluginPanel({
   // reset the user's current tab.
   const focusedTabByConversation = usePluginStore((s) => s.focusedTabByConversation);
   const persistedFocusedTab = conversationId ? focusedTabByConversation[conversationId] : undefined;
+  const manuallyFocusedSessionRef = useRef<string | undefined>(undefined);
   const [ui, setUI] = useState<PluginUI>({});
   const [dismissing, setDismissing] = useState(false);
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
@@ -1008,21 +1007,34 @@ export function PluginPanel({
     const tabs: TabDef[] = ui.tabs ?? [];
     if (!tabs.length || !persistedFocusedTab) return;
     const idx = tabs.findIndex((t) => t.id === persistedFocusedTab);
-    if (idx !== -1) setActiveTabIdx(idx);
-  }, [ui.tabs, persistedFocusedTab]);
+    if (idx !== -1) {
+      setActiveTabIdx(idx);
+      manuallyFocusedSessionRef.current = session?.session_id;
+    }
+  }, [ui.tabs, persistedFocusedTab, session?.session_id]);
 
+  // Follow the workflow automatically until the user explicitly chooses a tab.
+  // This makes each newly completed artifact visible as the current step advances.
   useEffect(() => {
-    if (!session || session.status !== 'active') return;
-    const id = setInterval(refresh, pollIntervalMs);
-    return () => clearInterval(id);
-  }, [session, refresh, pollIntervalMs]);
+    const tabs: TabDef[] = ui.tabs ?? [];
+    if (!session?.session_id || !tabs.length) return;
+    if (manuallyFocusedSessionRef.current === session.session_id) return;
+    const targetStep = session.current_step_id;
+    const idx = targetStep
+      ? tabs.findIndex((tab) => getTabStepId(tab) === targetStep)
+      : session.status === 'completed'
+        ? tabs.length - 1
+        : -1;
+    if (idx >= 0) setActiveTabIdx(idx);
+  }, [ui.tabs, session?.session_id, session?.current_step_id, session?.status]);
 
   // Track focused tab changes.
   const handleTabChange = useCallback((idx: number, tabId: string) => {
+    manuallyFocusedSessionRef.current = session?.session_id;
     setActiveTabIdx(idx);
     setFocusedTab(conversationId, tabId);
     setFocusedSortOrder(conversationId, undefined);
-  }, [conversationId, setFocusedTab, setFocusedSortOrder]);
+  }, [conversationId, session?.session_id, setFocusedTab, setFocusedSortOrder]);
 
   const handleFocusSortOrder = useCallback((sortOrder: number | undefined) => {
     setFocusedSortOrder(conversationId, sortOrder);

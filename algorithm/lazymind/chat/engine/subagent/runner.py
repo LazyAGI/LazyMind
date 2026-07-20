@@ -151,12 +151,14 @@ def _build_subagent_tools(
 ) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
 
-    Artifact and knowledge tools are always included. Attachment tools are included
-    as one group when the parent task carries attachment context, so the runtime tool
-    list and its system prompt stay consistent.
+    Artifact and knowledge tools are always included regardless of the explicit
+    tools list. Attachment tools are included as one group when the parent task
+    carries attachment context, so the runtime tool list and its system prompt stay
+    consistent.
     """
     base = [
         subagent_tools.save_artifact,
+        subagent_tools.save_artifacts,
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
         subagent_tools.list_knowledge_bases,
@@ -416,7 +418,8 @@ def _build_subagent_plan(
         output_lines.append(
             'Required output artifacts: '
             + ', '.join(required_keys)
-            + '. Call save_artifact for each required key before finishing.'
+            + '. Save every required key before finishing. When there are multiple outputs, '
+            'prefer one save_artifacts call instead of separate save_artifact calls.'
         )
     else:
         output_lines.append(

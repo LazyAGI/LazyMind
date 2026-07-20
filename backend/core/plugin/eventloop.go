@@ -898,13 +898,13 @@ func OnArtifactEvent(
 	db *gorm.DB,
 	taskID, slot string,
 	pctx *PluginChatContext,
-) {
+) *orm.PluginSlotRevision {
 	if pctx == nil {
-		return
+		return nil
 	}
 	slotID, cardinality := resolveSlotBinding(pctx.PluginID, slot)
 	if slotID == "" {
-		return
+		return nil
 	}
 	attempt := 1
 	step, _ := GetLatestStep(ctx, db, pctx.SessionID, pctx.StepID)
@@ -937,7 +937,7 @@ func OnArtifactEvent(
 		pctx.SessionID, slotID, slot, pctx.StepID, attempt, cardinality, listIndex)
 	if err != nil {
 		fmt.Printf("[Plugin] WriteSlotRevision failed: %v\n", err)
-		return
+		return nil
 	}
 
 	// Back-fill list_index into sub_agent_artifacts.value so that HideSlotItem
@@ -947,6 +947,7 @@ func OnArtifactEvent(
 	if cardinality == "list" && rev != nil && rev.ListIndex != nil {
 		backfillArtifactListIndex(ctx, db, taskID, slot, *rev.ListIndex)
 	}
+	return rev
 }
 
 // OnSubAgentDoneSnapshot back-fills artifact_seq on any AI slot revision that was
