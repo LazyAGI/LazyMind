@@ -1069,6 +1069,13 @@ func handleStreamChat(
 	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
 }
 
+func elapsedThinkingSeconds(elapsed time.Duration) int64 {
+	if elapsed <= 0 {
+		return 1
+	}
+	return int64((elapsed + time.Second - 1) / time.Second)
+}
+
 func streamSingleAnswer(
 	chatCtx, reqCtx context.Context,
 	w http.ResponseWriter,
@@ -1110,6 +1117,8 @@ func streamSingleAnswer(
 	var pendingConversationIntent *IntentUpdatedEvent
 	thinkStart := time.Now()
 	var thinkingDurationS int64
+	var thinkingActive bool
+	var sawToolResultPreview bool
 	progressRowCreated := target.IsRegeneration && target.Existing != nil
 	persistThinkingProgress := func() {
 		partialResult := fullResult
@@ -1250,14 +1259,32 @@ func streamSingleAnswer(
 			continue
 		}
 		if d.Heartbeat {
+			if thinkingActive {
+				nextDuration := elapsedThinkingSeconds(time.Since(thinkStart))
+				if nextDuration != thinkingDurationS {
+					thinkingDurationS = nextDuration
+					persistThinkingProgress()
+					thinkingChunk := &ChatChunkResponse{
+						ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
+						FinishReason: "FINISH_REASON_UNSPECIFIED", ThinkingDurationS: thinkingDurationS,
+					}
+					if reqCtx.Err() == nil {
+						writeSSEChunk(w, flusher, thinkingChunk)
+					}
+					if stateStore != nil {
+						_ = appendChatChunk(chatCtx, stateStore, convID, historyID, thinkingChunk)
+					}
+				}
+			}
 			continue
 		}
 		if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > toolCallTurns {
 			toolCallTurns = next
 		}
 		if d.ReasoningText != "" {
+			thinkingActive = true
 			pendingThink += d.ReasoningText
-			thinkingDurationS = int64(time.Since(thinkStart).Seconds())
+			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 			persistThinkingProgress()
 			thinkingChunk := &ChatChunkResponse{
 				ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
@@ -1271,7 +1298,18 @@ func streamSingleAnswer(
 			}
 			continue
 		}
+		hasToolPreview := strings.Contains(d.Text, "<tp") || strings.Contains(d.Text, "<trp")
+		if hasToolPreview {
+			thinkingActive = true
+			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
+			if strings.Contains(d.Text, "<trp") {
+				sawToolResultPreview = true
+			}
+		} else if sawToolResultPreview && d.Text != "" {
+			thinkingActive = false
+		}
 		if pendingThink != "" {
+			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 			fullResult += "<think>" + pendingThink + "</think>"
 			pendingThink = ""
 		}
@@ -1306,6 +1344,7 @@ func streamSingleAnswer(
 	now := time.Now()
 	retrievalResult := marshalRetrievalResult(sources)
 	if pendingThink != "" {
+		thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 		fullResult += "<think>" + pendingThink + "</think>"
 	}
 	// Persist ask_pending into ext so the ask card survives page reload.

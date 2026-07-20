@@ -465,6 +465,27 @@ func TestChatHistoryResponseIncludesThinkingDuration(t *testing.T) {
 	}
 }
 
+func TestElapsedThinkingSecondsRoundsUp(t *testing.T) {
+	tests := []struct {
+		name    string
+		elapsed time.Duration
+		want    int64
+	}{
+		{name: "initial reasoning chunk", elapsed: 0, want: 1},
+		{name: "sub-second reasoning", elapsed: 250 * time.Millisecond, want: 1},
+		{name: "exact second", elapsed: time.Second, want: 1},
+		{name: "partial next second", elapsed: time.Second + time.Millisecond, want: 2},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := elapsedThinkingSeconds(tc.elapsed); got != tc.want {
+				t.Fatalf("elapsedThinkingSeconds(%s) = %d, want %d", tc.elapsed, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
 	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail-datasets.db")
 	if err != nil {
