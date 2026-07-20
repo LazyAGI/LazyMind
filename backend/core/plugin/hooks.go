@@ -105,13 +105,54 @@ func onArtifact(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID
 	// Slot revision is now durable. Notify the conversation stream so the
 	// event-driven PluginPanel can refresh immediately without polling or waiting
 	// for the whole step to finish.
-	subagent.EventHooks.CallConversationEvent(context.Background(), stateStore, pctx.ConvID, "", "plugin_artifact_updated", map[string]any{
+	emitPluginArtifactUpdated(stateStore, pctx.ConvID, map[string]any{
 		"session_id": pctx.SessionID,
 		"step_id":    pctx.StepID,
 		"slot_id":    rev.SlotID,
 		"slot":       rev.Slot,
 		"revision":   rev.Revision,
 	})
+}
+
+// notifyPluginArtifactUpdated publishes a durable slot change made outside the
+// SubAgent artifact hook (for example a human edit, version selection, or rollback).
+// Event delivery is best-effort; the committed revision remains authoritative.
+func notifyPluginArtifactUpdated(
+	ctx context.Context,
+	db *gorm.DB,
+	sessionID, stepID, slotID, slot string,
+	revision int,
+	listIndex *int,
+	changeSource string,
+) {
+	if db == nil || subagent.EventHooks == nil {
+		return
+	}
+	session, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		return
+	}
+	payload := map[string]any{
+		"session_id":    sessionID,
+		"step_id":       stepID,
+		"slot_id":       slotID,
+		"slot":          slot,
+		"revision":      revision,
+		"change_source": changeSource,
+	}
+	if listIndex != nil {
+		payload["list_index"] = *listIndex
+	}
+	emitPluginArtifactUpdated(store.State(), session.ConversationID, payload)
+}
+
+func emitPluginArtifactUpdated(stateStore state.Store, conversationID string, payload map[string]any) {
+	if subagent.EventHooks == nil || conversationID == "" {
+		return
+	}
+	subagent.EventHooks.CallConversationEvent(
+		context.Background(), stateStore, conversationID, "", "plugin_artifact_updated", payload,
+	)
 }
 
 // onTerminalStatus is called by the subagent runner when a task reaches terminal status.

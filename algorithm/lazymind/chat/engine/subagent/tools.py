@@ -367,7 +367,10 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
     except Exception:
         plugin_session_id = ''
 
-    if plugin_session_id and sort_order is not None:
+    bound_rows = ctx.db.load_bound_slot_artifacts(ctx.task_id, key) if plugin_session_id else []
+    if bound_rows:
+        result = _get_bound_plugin_artifacts(ctx, key, bound_rows, sort_order)
+    elif plugin_session_id and sort_order is not None:
         result = _get_plugin_artifact_by_sort_order(ctx, key, plugin_session_id, sort_order)
     elif plugin_session_id and sort_order is None:
         result = _get_plugin_artifact_all(ctx, key, plugin_session_id)
@@ -401,11 +404,12 @@ def _resolve_artifact_text(
 
     Resolution priority:
     1. Draft file (reflects latest patch_artifact edits in this step).
-    2. Plugin session selected revision via load_slot_artifact_by_sort_order —
+    2. Exact revision frozen in the current plugin attempt's input binding.
+    3. Plugin session selected revision via load_slot_artifact_by_sort_order —
        this is the ONLY path that surfaces human-edited artifacts stored in
        plugin_human_artifacts; must be checked before sub_agent_artifacts.
-    3. Local in-memory cache (same step, sub_agent_artifacts).
-    4. DB sub_agent_artifacts (previous steps).
+    4. Local in-memory cache (same step, sub_agent_artifacts).
+    5. DB sub_agent_artifacts (previous steps).
 
     Returns (None, 'text') when no content is found.
     """
@@ -428,6 +432,19 @@ def _resolve_artifact_text(
 
     if plugin_session_id:
         so = sort_order if sort_order is not None else 1
+        bound_rows = ctx.db.load_bound_slot_artifacts(ctx.task_id, key)
+        if bound_rows:
+            row = bound_rows[so - 1] if 1 <= so <= len(bound_rows) else None
+            if row is None:
+                return None, 'text'
+            value, content_type = ctx.db.resolve_slot_revision_value(row)
+            if value is None:
+                return None, 'text'
+            original_type = 'json' if content_type == 'json' else 'text'
+            if content_type == 'file':
+                original_type = value.get('type', 'text')
+            return _extract_text_from_value(ctx, value, original_type), original_type
+
         row = ctx.db.load_slot_artifact_by_sort_order(plugin_session_id, key, so)
         if row is not None:
             value, content_type = ctx.db.resolve_slot_revision_value(row)
@@ -562,6 +579,44 @@ def _get_plugin_artifact_by_sort_order(
         'content_type': content_type,
         'artifacts': [{'slot': key, 'content_type': content_type, 'value': value, 'sort_order': sort_order}],
     })
+
+
+def _get_bound_plugin_artifacts(
+    ctx: Any,
+    key: str,
+    rows: list[Dict[str, Any]],
+    sort_order: Optional[int],
+) -> Dict[str, Any]:
+    """Resolve artifacts from the immutable input bindings of this attempt."""
+    selected_rows = rows
+    if sort_order is not None:
+        if sort_order < 1 or sort_order > len(rows):
+            return tool_success('get_artifact', {
+                'status': 'empty',
+                'message': f"No bound artifact found for key '{key}' at sort_order={sort_order}.",
+            })
+        selected_rows = [rows[sort_order - 1]]
+
+    artifacts = []
+    for position, row in enumerate(selected_rows, start=1):
+        value, content_type = ctx.db.resolve_slot_revision_value(row)
+        if value is None:
+            continue
+        artifact_sort_order = sort_order if sort_order is not None else position
+        artifacts.append({
+            'slot': key,
+            'content_type': content_type,
+            'value': value,
+            'sort_order': artifact_sort_order,
+            'revision': row.get('revision'),
+            '_from_attempt_binding': True,
+        })
+    if not artifacts:
+        return tool_success('get_artifact', {
+            'status': 'empty',
+            'message': f"Bound artifact key '{key}' could not be resolved.",
+        })
+    return tool_success('get_artifact', {'status': 'ok', 'key': key, 'artifacts': artifacts})
 
 
 def _get_plugin_artifact_all(ctx: Any, key: str, session_id: str) -> Dict[str, Any]:
