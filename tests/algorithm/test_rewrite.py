@@ -9,19 +9,6 @@ from fastapi.testclient import TestClient
 
 
 def _load_rewrite_module():
-    skill_validation_path = (
-        Path(__file__).resolve().parents[2]
-        / 'algorithm/lazymind/chat/engine/tools/infra/skill_validation.py'
-    )
-    skill_validation_spec = importlib.util.spec_from_file_location(
-        'test_skill_validation',
-        skill_validation_path,
-    )
-    assert skill_validation_spec is not None
-    assert skill_validation_spec.loader is not None
-    skill_validation = importlib.util.module_from_spec(skill_validation_spec)
-    skill_validation_spec.loader.exec_module(skill_validation)
-
     validation_path = (
         Path(__file__).resolve().parents[2]
         / 'algorithm/lazymind/chat/engine/tools/infra/user_preference_validation.py'
@@ -53,7 +40,6 @@ def _load_rewrite_module():
     fake_tool_infra.parse_user_preference_frontmatter = (
         user_preference_validation.parse_user_preference_frontmatter
     )
-    fake_tool_infra.validate_skill_document = skill_validation.validate_skill_document
     fake_tool_infra.validate_user_preference_content = (
         user_preference_validation.validate_user_preference_content
     )
@@ -329,7 +315,10 @@ def test_user_preference_validation_requires_yaml_frontmatter():
         'agent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n\nbody',
         '---\nagent_persona: "x"\nresponse_style: "concise"\n---\nbody',
         '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\nextra: "x"\n---\nbody',
-        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\nwork_email: "me@example.com"\n---\nbody',
+        (
+            '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n'
+            'work_email: "me@example.com"\n---\nbody'
+        ),
         '---\nagent_persona: ["x"]\npreferred_name: ""\nresponse_style: "concise"\n---\nbody',
         f'---\nagent_persona: "{too_long}"\npreferred_name: ""\nresponse_style: ""\n---\nbody',
         f'---\nagent_persona: ""\npreferred_name: "{too_long}"\nresponse_style: ""\n---\nbody',

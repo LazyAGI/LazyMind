@@ -3,16 +3,19 @@ from __future__ import annotations
 import mimetypes
 from typing import Dict, Mapping, Optional
 
-from lazymind.chat.integrations.remote_fs import RemoteFS
-from lazymind.config import config
-
-from .skill_paths import normalize_skill_package_path, relative_to_package
-from .skill_validation import (
+from lazymind.common.skill_document import (
+    require_skill_name,
+    require_valid_skill_document,
+)
+from lazymind.common.skill_storage_key import (
     SKILL_STORAGE_CATEGORIES,
+    parse_skill_key,
     parse_skill_storage_key,
     require_skill_storage_category,
-    validate_skill_name,
 )
+from lazymind.common.integrations.remote_fs import RemoteFS
+from lazymind.common.skill_paths import normalize_skill_package_path, relative_to_package
+from lazymind.config import config
 
 
 class SkillRemoteStore:
@@ -42,7 +45,7 @@ class SkillRemoteStore:
                 if str((package_entry or {}).get('type') or 'file').strip() not in ('directory', 'dir'):
                     continue
                 package_name = _last_path_part(str((package_entry or {}).get('name') or '').strip())
-                if package_name and validate_skill_name(package_name) is None:
+                if package_name and _is_valid_skill_name(package_name):
                     packages.append({'category': category, 'name': package_name})
         return sorted(packages, key=lambda item: (item['category'], item['name']))
 
@@ -60,9 +63,10 @@ class SkillRemoteStore:
                 return {'error': str(exc)}
             return {'category': key_category, 'name': key_name}
 
-        name_error = validate_skill_name(raw_name)
-        if name_error:
-            return {'error': name_error}
+        try:
+            raw_name = require_skill_name(raw_name)
+        except ValueError as exc:
+            return {'error': str(exc)}
         matches = self._find_packages_by_name(raw_name)
         if not matches:
             return {'error': f'Skill {raw_name!r} was not found; provide the full skill key.'}
@@ -111,6 +115,8 @@ class SkillRemoteStore:
         after_paths = set(after)
         deleted = sorted(before_paths - after_paths)
         written = sorted(path for path in after_paths if before.get(path) != after.get(path))
+        if 'SKILL.md' in written:
+            require_valid_skill_document(after['SKILL.md'], expected_name=normalized_name)
         for rel_path in deleted:
             self.fs.rm(f'{package_dir}/{normalize_skill_package_path(rel_path)}', recursive=False)
         for rel_path in written:
@@ -119,6 +125,7 @@ class SkillRemoteStore:
 
     def create(self, category: str, name: str, content: str) -> dict:
         normalized_category, normalized_name = _require_storage_identity(category, name)
+        require_valid_skill_document(content, expected_name=normalized_name)
         package_dir = f'{self.root}/{normalized_category}/{normalized_name}'
         if self.fs.exists(package_dir):
             raise FileExistsError(
@@ -145,6 +152,7 @@ class SkillRemoteStore:
             skill_content = skill_md.decode('utf-8')
         except UnicodeDecodeError as exc:
             raise ValueError('SKILL.md must be valid UTF-8.') from exc
+        require_valid_skill_document(skill_content, expected_name=normalized_name)
 
         if self.fs.exists(package_dir):
             raise FileExistsError(
@@ -192,6 +200,7 @@ class SkillRemoteStore:
     ) -> dict:
         normalized_old_category, normalized_old_name = _require_storage_identity(old_category, old_name)
         normalized_new_category, normalized_new_name = _require_storage_identity(new_category, new_name)
+        require_valid_skill_document(skill_content, expected_name=normalized_new_name)
         if normalized_old_category != normalized_new_category:
             raise ValueError('Skill packages cannot be moved across storage categories.')
         old_path = f'{self.root}/{normalized_old_category}/{normalized_old_name}'
@@ -219,7 +228,8 @@ class SkillRemoteStore:
         }
 
     def remove(self, category: str, name: str) -> dict:
-        normalized_category, normalized_name = _require_storage_identity(category, name)
+        key = f'{str(category or "").strip()}/{str(name or "").strip()}'
+        normalized_category, normalized_name = parse_skill_key(key)
         path = f'{self.root}/{normalized_category}/{normalized_name}'
         if not self.fs.exists(path):
             raise FileNotFoundError(
@@ -244,12 +254,13 @@ def _last_path_part(path: str) -> str:
     return raw.rstrip('/').rsplit('/', 1)[-1] if raw else ''
 
 
-def _require_skill_name(name: str) -> str:
-    error = validate_skill_name(name)
-    if error:
-        raise ValueError(error)
-    return str(name).strip()
+def _is_valid_skill_name(name: str) -> bool:
+    try:
+        require_skill_name(name)
+    except ValueError:
+        return False
+    return True
 
 
 def _require_storage_identity(category: str, name: str) -> tuple[str, str]:
-    return require_skill_storage_category(category), _require_skill_name(name)
+    return require_skill_storage_category(category), require_skill_name(name)

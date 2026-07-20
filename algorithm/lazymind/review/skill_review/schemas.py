@@ -5,11 +5,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from lazymind.chat.engine.tools.infra.skill_validation import (
-    parse_skill_frontmatter,
-    parse_skill_storage_key,
-    validate_skill_document,
-)
+from lazymind.common.skill_document import require_valid_skill_document
+from lazymind.common.skill_storage_key import parse_skill_storage_key
 
 
 class SkillReviewRequest(BaseModel):
@@ -105,16 +102,7 @@ class SkillOutline(BaseModel):
 
 
 def _validate_candidate_document(skill_name: str, content: str) -> None:
-    content_error = validate_skill_document(content)
-    if content_error:
-        raise ValueError(content_error)
-    frontmatter, _ = parse_skill_frontmatter(content)
-    content_name = str(frontmatter.get('name') or '').strip()
-    if content_name != skill_name:
-        raise ValueError(
-            f'candidate SKILL.md frontmatter name {content_name!r} '
-            f'must match skill_name {skill_name!r}'
-        )
+    require_valid_skill_document(content, expected_name=skill_name)
 
 
 class CandidateSkill(BaseModel):

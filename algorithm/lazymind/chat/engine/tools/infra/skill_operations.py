@@ -3,8 +3,11 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional
 
-from .skill_paths import normalize_skill_package_path
-from .skill_validation import skill_name_from_content, validate_skill_document
+from lazymind.common.skill_document import (
+    SkillDocumentError,
+    require_valid_skill_document,
+)
+from lazymind.common.skill_paths import normalize_skill_package_path
 
 
 _UNICODE_MAP = {
@@ -212,12 +215,14 @@ def _build_skill_file_change(
 
 
 def _validate_skill_identity_unchanged(name: str, content: str) -> None:
-    content_error = validate_skill_document(content)
-    if content_error:
-        raise ValueError(content_error)
-    edited_name = skill_name_from_content(content)
-    if edited_name != name:
-        raise ValueError('SKILL.md frontmatter name cannot be changed; use rename_skill.')
+    try:
+        require_valid_skill_document(content, expected_name=name)
+    except SkillDocumentError as exc:
+        if exc.code == 'name_mismatch':
+            raise ValueError(
+                'SKILL.md frontmatter name cannot be changed; use rename_skill.'
+            ) from exc
+        raise
 
 
 def _unicode_normalize(text: str) -> str:

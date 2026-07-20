@@ -47,10 +47,12 @@ def _load_skill_review_modules():
         'lazymind.chat.engine',
         'lazymind.chat.engine.tools',
         'lazymind.chat.engine.tools.infra',
-        'lazymind.chat.engine.tools.infra.skill_remote_store',
-        'lazymind.chat.engine.tools.infra.skill_validation',
-        'lazymind.chat.integrations',
-        'lazymind.chat.integrations.remote_fs',
+        'lazymind.common',
+        'lazymind.common.integrations',
+        'lazymind.common.integrations.remote_fs',
+        'lazymind.common.skill_document',
+        'lazymind.common.skill_remote_store',
+        'lazymind.common.skill_storage_key',
         'lazymind.config',
         'lazymind.model_config',
         'lazymind.review',
@@ -96,12 +98,13 @@ def _load_skill_review_modules():
         'lazymind.chat.engine': _package('lazymind.chat.engine'),
         'lazymind.chat.engine.tools': _package('lazymind.chat.engine.tools'),
         'lazymind.chat.engine.tools.infra': _package('lazymind.chat.engine.tools.infra'),
-        'lazymind.chat.engine.tools.infra.skill_remote_store': _module(
-            'lazymind.chat.engine.tools.infra.skill_remote_store', SkillRemoteStore=object
+        'lazymind.common': _package('lazymind.common'),
+        'lazymind.common.integrations': _package('lazymind.common.integrations'),
+        'lazymind.common.integrations.remote_fs': _module(
+            'lazymind.common.integrations.remote_fs', RemoteFS=object
         ),
-        'lazymind.chat.integrations': _package('lazymind.chat.integrations'),
-        'lazymind.chat.integrations.remote_fs': _module(
-            'lazymind.chat.integrations.remote_fs', RemoteFS=object
+        'lazymind.common.skill_remote_store': _module(
+            'lazymind.common.skill_remote_store', SkillRemoteStore=object
         ),
         'lazymind.config': _module(
             'lazymind.config',
@@ -137,9 +140,13 @@ def _load_skill_review_modules():
 
     try:
         sys.modules.update(fake_modules)
-        validation = _load_module(
-            'lazymind.chat.engine.tools.infra.skill_validation',
-            'lazymind/chat/engine/tools/infra/skill_validation.py',
+        _load_module(
+            'lazymind.common.skill_document',
+            'lazymind/common/skill_document.py',
+        )
+        _load_module(
+            'lazymind.common.skill_storage_key',
+            'lazymind/common/skill_storage_key.py',
         )
         config = _load_module(
             'lazymind.review.skill_review.config',
@@ -182,7 +189,6 @@ def _load_skill_review_modules():
             resolution=resolution,
             schemas=schemas,
             service=service,
-            validation=validation,
         )
     finally:
         for name, original in originals.items():

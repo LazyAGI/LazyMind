@@ -43,10 +43,10 @@ class FakeSkillStore:
             if skill_name == raw_name
         ]
         if not matches:
-            return {'error': f"Skill {raw_name!r} was not found; provide the full skill key."}
+            return {'error': f'Skill {raw_name!r} was not found; provide the full skill key.'}
         if len(matches) > 1:
-            first = f"{matches[0]['category']}/{matches[0]['name']}"
-            return {'error': f"Ambiguous skill name {raw_name!r}; use the full skill key such as {first!r}."}
+            first = '{}/{}'.format(matches[0]['category'], matches[0]['name'])
+            return {'error': f'Ambiguous skill name {raw_name!r}; use the full skill key such as {first!r}.'}
         return matches[0]
 
     def list_files(self, category, name):
@@ -361,6 +361,19 @@ def test_skill_editor_create_file_tools_remove_core_paths():
              'scripts/check.py': 'print("ok")\n',
          }),
     ]
+
+
+def test_skill_editor_removes_full_key_from_any_safe_category():
+    store = FakeSkillStore({
+        ('research3', 'web-research'): {'SKILL.md': '# Web Research\n'},
+    })
+    tool_group = skill_editor_mod.SkillManagementToolkit(store=store)
+
+    result = tool_group.remove_skill('research3/web-research')
+
+    assert result['success'] is True
+    assert result['tool'] == 'remove_skill'
+    assert store.calls == [('remove', 'research3', 'web-research')]
 
 
 def test_skill_editor_renames_package():

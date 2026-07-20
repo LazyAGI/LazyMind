@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from lazymind.chat.engine.tools.infra.skill_validation import (
+from lazymind.common.skill_storage_key import (
     SkillStorageCategory,
     parse_skill_storage_key,
 )

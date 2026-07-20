@@ -10,13 +10,10 @@ import lazyllm
 from lazyllm import AutoModel, LOG
 from lazyllm.tools.agent.skill_manager import SkillManager
 
-from lazymind.chat.engine.tools.infra.skill_remote_store import SkillRemoteStore
-from lazymind.chat.engine.tools.infra.skill_validation import (
-    INTERNAL_SKILL_CATEGORY,
-    parse_skill_frontmatter,
-    validate_skill_document,
-)
-from lazymind.chat.integrations.remote_fs import RemoteFS
+from lazymind.common.skill_document import require_valid_skill_document
+from lazymind.common.integrations.remote_fs import RemoteFS
+from lazymind.common.skill_remote_store import SkillRemoteStore
+from lazymind.common.skill_storage_key import INTERNAL_SKILL_CATEGORY
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 from lazymind.review.skill_review.config import DEFAULT_REPORT_DIR_NAME
@@ -521,12 +518,11 @@ def _apply_skill_review_records(
 
 
 def _apply_skill_review_record(record: SkillReviewResolution, store: SkillRemoteStore) -> dict[str, Any]:
-    content_error = validate_skill_document(record.skill_content)
-    if content_error:
-        raise ValueError(content_error)
-
-    frontmatter, _ = parse_skill_frontmatter(record.skill_content)
-    content_name = str(frontmatter.get('name') or '').strip()
+    document = require_valid_skill_document(
+        record.skill_content,
+        expected_name=record.skill_name,
+    )
+    content_name = str(document.metadata['name'])
 
     if record.type == 'new':
         name = content_name or record.skill_name

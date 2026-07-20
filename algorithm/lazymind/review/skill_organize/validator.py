@@ -3,11 +3,8 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from lazymind.chat.engine.tools.infra.skill_validation import (
-    parse_skill_frontmatter,
-    parse_skill_storage_key,
-    validate_skill_document,
-)
+from lazymind.common.skill_document import require_valid_skill_document
+from lazymind.common.skill_storage_key import parse_skill_storage_key
 from lazymind.review.skill_organize.config import MAX_SKILL_ORGANIZE_LIMIT
 from lazymind.review.skill_organize.schemas import (
     SkillFsDraft,
@@ -110,15 +107,10 @@ def validate_fs_draft(draft: SkillFsDraft, source_skills: list[SourceSkill]) -> 
         target_storage_category, target_name = parse_skill_storage_key(item.target_key)
         if source_category != target_storage_category:
             raise ValueError('upsert source_key and target_key must use the same storage category')
-        content_error = validate_skill_document(item.content)
-        if content_error:
-            raise ValueError(f'upsert skill {item.target_key!r} is invalid: {content_error}')
-        frontmatter, _ = parse_skill_frontmatter(item.content)
-        content_name = str(frontmatter.get('name') or '').strip()
-        if content_name != target_name:
-            raise ValueError(
-                f'upsert skill {item.target_key!r} frontmatter name must match target key'
-            )
+        try:
+            require_valid_skill_document(item.content, expected_name=target_name)
+        except ValueError as exc:
+            raise ValueError(f'upsert skill {item.target_key!r} is invalid: {exc}') from exc
 
 
 def _ensure_unique(values: list[str], label: str) -> None:

@@ -539,7 +539,7 @@ def test_apply_rejects_frontmatter_name_mismatch_before_writing():
         content='---\nname: wrong\ndescription: Wrong.\n---\nWrong.\n',
     )])
 
-    with pytest.raises(ValueError, match='frontmatter name must match'):
+    with pytest.raises(ValueError, match='frontmatter name .* must match expected name'):
         _apply_fs_draft(draft, store, [source])
 
     assert not any(

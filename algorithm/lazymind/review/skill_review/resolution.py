@@ -7,10 +7,8 @@ from uuid import uuid4
 
 from lazyllm import LOG, ThreadPoolExecutor
 
-from lazymind.chat.engine.tools.infra.skill_validation import (
-    parse_skill_frontmatter,
-    parse_skill_storage_key,
-)
+from lazymind.common.skill_document import require_valid_skill_document
+from lazymind.common.skill_storage_key import parse_skill_storage_key
 from lazymind.review.skill_review.config import DEFAULT_STAGE_WORKERS, STAGE_FILES, STAGE_RESOLUTION
 from lazymind.review.skill_review.json_call import call_json
 from lazymind.review.skill_review.reports import finish_stage_report, stage_error, start_stage, write_json_file
@@ -195,14 +193,7 @@ def _read_skill_content(skill_manager, skill_name: str) -> str:
 
 
 def _validate_patched_skill_name(skill_content: str, skill_name: str) -> None:
-    frontmatter, _ = parse_skill_frontmatter(skill_content)
-    content_name = str(frontmatter.get('name') or '').strip()
-    if not content_name:
-        raise ValueError('skill_content frontmatter must include name')
-    if content_name != skill_name:
-        raise ValueError(
-            f'skill_content frontmatter name {content_name!r} does not match skill_name {skill_name!r}'
-        )
+    require_valid_skill_document(skill_content, expected_name=skill_name)
 
 
 def _extract_skill_keys(skill_summaries: str) -> set[str]:

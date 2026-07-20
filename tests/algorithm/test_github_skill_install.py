@@ -7,8 +7,8 @@ from lazymind.chat.engine.tools.infra.github_skill_installer import (
     GitHubSkillSource,
     PreparedSkillPackage,
 )
-from lazymind.chat.engine.tools.infra.skill_remote_store import SkillRemoteStore
 from lazymind.chat.engine.tools.skill_editor import SkillManagementToolkit
+from lazymind.common.skill_remote_store import SkillRemoteStore
 
 
 class _Response:

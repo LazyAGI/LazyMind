@@ -3,23 +3,27 @@ from typing import Any, Callable, Dict, Optional
 import lazyllm
 
 from lazymind.chat.engine.tools.infra import (
-    EXTERNAL_SKILL_CATEGORY,
     GitHubSkillInstaller,
-    INTERNAL_SKILL_CATEGORY,
-    parse_skill_frontmatter,
-    rewrite_skill_name,
-    SkillRemoteStore,
-    skill_name_from_content,
     tool_error,
     tool_success,
-    validate_skill_document,
-    validate_skill_name,
 )
 from lazymind.chat.engine.tools.infra.skill_operations import (
     create_skill_file,
     delete_skill_file,
     edit_skill_file,
     patch_skill_file,
+)
+from lazymind.common.skill_document import (
+    SkillDocumentError,
+    parse_skill_document,
+    require_skill_name,
+    require_valid_skill_document,
+)
+from lazymind.common.skill_remote_store import SkillRemoteStore
+from lazymind.common.skill_storage_key import (
+    EXTERNAL_SKILL_CATEGORY,
+    INTERNAL_SKILL_CATEGORY,
+    parse_skill_key,
 )
 
 
@@ -108,8 +112,8 @@ class SkillManagementToolkit:
                 continue
             name = package['name']
             try:
-                frontmatter, _ = parse_skill_frontmatter(self.store.read_skill_md(category, name))
-                github_url = str(frontmatter.get('github_url') or '').strip()
+                document = parse_skill_document(self.store.read_skill_md(category, name))
+                github_url = str(document.metadata.get('github_url') or '').strip()
                 if not github_url:
                     continue
                 existing_source = self.installer.resolve_source(github_url)
@@ -139,29 +143,24 @@ class SkillManagementToolkit:
             '[create_skill] called '
             f'name={name!r} content_len={len(content) if content else 0}'
         )
-        name = str(name or '')
-        name_error = validate_skill_name(name)
-        if name_error:
-            return tool_error('create_skill', name_error)
+        try:
+            name = require_skill_name(name)
+            document = require_valid_skill_document(content, expected_name=name)
+        except SkillDocumentError as exc:
+            return tool_error(
+                'create_skill',
+                str(exc),
+                log_message=f'[create_skill] fail reason={str(exc)!r}',
+            )
         lazyllm.LOG.info(
             f'[create_skill] lookup category={INTERNAL_SKILL_CATEGORY} name={name!r}'
         )
-
-        content_error = validate_skill_document(content or '')
-        if content_error:
-            return tool_error(
-                'create_skill',
-                content_error,
-                log_message=f'[create_skill] fail reason={content_error!r}',
-            )
-        content_name = skill_name_from_content(content or '')
-        if content_name != name:
-            return tool_error(
-                'create_skill',
-                'SKILL.md frontmatter name must match the tool name for create.'
-            )
         try:
-            self.store.create(INTERNAL_SKILL_CATEGORY, content_name, content or '')
+            self.store.create(
+                INTERNAL_SKILL_CATEGORY,
+                str(document.metadata['name']),
+                content,
+            )
         except Exception as exc:
             return _skill_editor_error('create_skill', 'Failed to create skill package', exc)
         return tool_success('create_skill', {
@@ -352,22 +351,21 @@ class SkillManagementToolkit:
         name = resolved['name']
         lazyllm.LOG.info(f'[rename_skill] lookup category={normalized_category!r} name={name!r}')
 
-        target_name = str(new_name or '').strip()
-        name_error = validate_skill_name(target_name)
-        if name_error:
-            return tool_error('rename_skill', f'new_name is invalid: {name_error}')
+        try:
+            target_name = require_skill_name(new_name)
+        except SkillDocumentError as exc:
+            return tool_error('rename_skill', f'new_name is invalid: {exc}')
         if target_name == name:
             return tool_error('rename_skill', 'rename_skill requires a different new_name.')
 
         try:
             current_files = self.store.list_files(normalized_category, name)
             skill_content = current_files.get('SKILL.md') or ''
-            renamed_content = rewrite_skill_name(skill_content, target_name)
+            document = require_valid_skill_document(skill_content)
+            renamed_content = document.with_metadata(name=target_name).render()
+            require_valid_skill_document(renamed_content, expected_name=target_name)
         except Exception as exc:
             return _skill_editor_error('rename_skill', 'Failed to prepare skill rename', exc)
-        content_error = validate_skill_document(renamed_content)
-        if content_error:
-            return tool_error('rename_skill', content_error)
 
         try:
             self.store.rename(
@@ -401,15 +399,14 @@ class SkillManagementToolkit:
         Use this when a skill is superseded or no longer correct.
 
         Args:
-            name: Unique skill name, or full "internal/name" or "external/name" skill key.
+            name: Unique full skill name.
             reason: Why the skill should be removed.
         """
         lazyllm.LOG.info(f'[remove_skill] called name={name!r} reason={reason!r}')
-        resolved = self.store.resolve_existing_identity(name)
-        if resolved.get('error'):
-            return tool_error('remove_skill', resolved['error'])
-        normalized_category = resolved['category']
-        name = resolved['name']
+        try:
+            normalized_category, name = parse_skill_key(name)
+        except ValueError as exc:
+            return tool_error('remove_skill', str(exc))
         lazyllm.LOG.info(f'[remove_skill] lookup category={normalized_category!r} name={name!r}')
 
         try:
